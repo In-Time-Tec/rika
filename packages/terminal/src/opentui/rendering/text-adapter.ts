@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Predicate } from "effect"
 import { RGBA, StyledText, type TextChunk } from "@opentui/core"
 import {
   renderMarkdownLines as markdownLines,
@@ -16,29 +16,44 @@ type TerminalColorWithInts = {
   readonly toInts: () => [number, number, number, number]
 }
 
-const isTerminalColorWithInts = (value: object): value is TerminalColorWithInts =>
-  "toInts" in value && typeof value.toInts === "function"
+type TerminalObjectColor = Exclude<TerminalColor, string>
 
-const isIndexedTerminalColor = (value: object): value is { readonly _tag: "Indexed"; readonly index: number } =>
-  "_tag" in value && value._tag === "Indexed" && "index" in value && typeof value.index === "number"
+interface TerminalChunkOptions {
+  __isChunk: true
+  text: string
+  attributes: number
+  fg?: TerminalColor
+  bg?: TerminalColor
+  link?: { readonly url: string }
+}
+
+const isTerminalColorWithInts = (value: TerminalObjectColor): value is TerminalColorWithInts =>
+  Predicate.hasProperty(value, "toInts") && Predicate.isFunction(value.toInts)
+
+const isIndexedTerminalColor = (
+  value: TerminalObjectColor,
+): value is { readonly _tag: "Indexed"; readonly index: number } =>
+  Predicate.hasProperty(value, "_tag") &&
+  value._tag === "Indexed" &&
+  Predicate.hasProperty(value, "index") &&
+  Predicate.isNumber(value.index)
 
 const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefined => {
   if (value === undefined || value instanceof RGBA) return value
-  if (typeof value === "string") {
-    const indexes: Record<string, number> = {
-      black: 0,
-      red: 1,
-      green: 2,
-      yellow: 3,
-      blue: 4,
-      magenta: 5,
-      cyan: 6,
-      white: 7,
-      brightBlack: 8,
-    }
-    if (!value.startsWith("#")) return RGBA.fromIndex(indexes[value] ?? 7)
-    if (typeof RGBA.fromHex === "function") return RGBA.fromHex(value)
-    return RGBA.fromIndex(7)
+  if (Predicate.isString(value)) {
+    const indexes = new Map([
+      ["black", 0],
+      ["red", 1],
+      ["green", 2],
+      ["yellow", 3],
+      ["blue", 4],
+      ["magenta", 5],
+      ["cyan", 6],
+      ["white", 7],
+      ["brightBlack", 8],
+    ])
+    if (!value.startsWith("#")) return RGBA.fromIndex(indexes.get(value) ?? 7)
+    return RGBA.fromHex(value)
   }
   if (isTerminalColorWithInts(value)) {
     if (value.intent === "indexed" && value.slot !== undefined) return RGBA.fromIndex(value.slot)
@@ -49,34 +64,32 @@ const toOpenColorImpl = (value: TerminalColor | RGBA | undefined): RGBA | undefi
   if (isIndexedTerminalColor(value)) return RGBA.fromIndex(value.index)
   return RGBA.defaultBackground()
 }
-export const toOpenColor: {
-  (value: TerminalColor | RGBA): RGBA
-  (value: TerminalColor | RGBA | undefined): RGBA | undefined
-} = toOpenColorImpl as {
-  (value: TerminalColor | RGBA): RGBA
-  (value: TerminalColor | RGBA | undefined): RGBA | undefined
+export function toOpenColor(value: TerminalColor | RGBA): RGBA
+export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined
+export function toOpenColor(value: TerminalColor | RGBA | undefined): RGBA | undefined {
+  return toOpenColorImpl(value)
 }
 export const toOpenChunk = (chunk: TerminalTextChunk | TextChunk): TextChunk => {
   const fg = toOpenColor(chunk.fg),
     bg = toOpenColor(chunk.bg)
-  return {
+  const openChunk: TextChunk = {
     __isChunk: true,
     text: chunk.text,
-    ...(fg === undefined ? {} : { fg }),
-    ...(bg === undefined ? {} : { bg }),
-    ...(chunk.attributes === undefined ? {} : { attributes: chunk.attributes }),
-    ...(chunk.link === undefined ? {} : { link: chunk.link }),
   }
+  if (fg !== undefined) openChunk.fg = fg
+  if (bg !== undefined) openChunk.bg = bg
+  if (chunk.attributes !== undefined) openChunk.attributes = chunk.attributes
+  if (chunk.link !== undefined) openChunk.link = chunk.link
+  return openChunk
 }
 export const toOpenText = (text: TerminalStyledText): StyledText => new StyledText(text.chunks.map(toOpenChunk))
-const terminalChunk = (chunk: TextChunk): TerminalTextChunk => ({
-  __isChunk: true,
-  text: chunk.text,
-  attributes: chunk.attributes ?? 0,
-  ...(chunk.fg === undefined ? {} : { fg: chunk.fg }),
-  ...(chunk.bg === undefined ? {} : { bg: chunk.bg }),
-  ...(chunk.link === undefined ? {} : { link: chunk.link }),
-})
+const terminalChunk = (chunk: TextChunk): TerminalTextChunk => {
+  const terminal: TerminalChunkOptions = { __isChunk: true, text: chunk.text, attributes: chunk.attributes ?? 0 }
+  if (chunk.fg !== undefined) terminal.fg = chunk.fg
+  if (chunk.bg !== undefined) terminal.bg = chunk.bg
+  if (chunk.link !== undefined) terminal.link = chunk.link
+  return terminal
+}
 const renderMarkdownLinesImpl = (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   markdownLines(source, width).map((line) => line.map(toOpenChunk))
 
@@ -88,7 +101,7 @@ export const renderMarkdownLines: {
   (
     arg1?: Parameters<typeof renderMarkdownLinesImpl>[1],
   ): (arg0: Parameters<typeof renderMarkdownLinesImpl>[0]) => ReturnType<typeof renderMarkdownLinesImpl>
-} = Function.dual((args) => typeof args[0] === "string", renderMarkdownLinesImpl)
+} = Function.dual((args) => Predicate.isString(args[0]), renderMarkdownLinesImpl)
 const renderMarkdownStyledImpl = (source: string, width?: number): StyledText =>
   toOpenText(markdownStyled(source, width))
 
@@ -100,7 +113,7 @@ export const renderMarkdownStyled: {
   (
     arg1?: Parameters<typeof renderMarkdownStyledImpl>[1],
   ): (arg0: Parameters<typeof renderMarkdownStyledImpl>[0]) => ReturnType<typeof renderMarkdownStyledImpl>
-} = Function.dual((args) => typeof args[0] === "string", renderMarkdownStyledImpl)
+} = Function.dual((args) => Predicate.isString(args[0]), renderMarkdownStyledImpl)
 export const highlightShellCommand = (source: string): ReadonlyArray<ReadonlyArray<TextChunk>> =>
   highlightCommand(source).map((line) => line.map(toOpenChunk))
 const wrapStyledLineImpl = (line: ReadonlyArray<TextChunk>, width: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>

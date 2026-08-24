@@ -1,6 +1,6 @@
 id: effect-prefer-program-construction
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer Effect.fn and Effect.gen with yield*; use Effect.tryPromise only in a named adapter for a foreign Promise API.
 note: This is guidance, not a ban. Keep the JavaScript form when it is the unavoidable outer integration boundary.
 rule:

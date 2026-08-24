@@ -201,7 +201,9 @@ export const repositoryLayer = (options: {
           )
         : { version: 1 as const, services: [] }
       const services = yield* Ref.make(
-        new Map(loaded.services.map((service) => [service.serviceId, service as StoredService] as const)),
+        new Map(
+          loaded.services.map((service) => [service.serviceId, Schema.decodeSync(StoredService)(service)] as const),
+        ),
       )
       const persist = Effect.fn("RepositoryServices.Repository.persist")(function* (next: Map<string, StoredService>) {
         const temporary = `${filename}.tmp-${process.pid}`

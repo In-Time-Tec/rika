@@ -200,7 +200,7 @@ it.effect.skipIf(databaseUrl === undefined)("fences Turn claims and recovers pre
           pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-1'`),
         )
         expect(durable.rows[0]).toMatchObject({ status: "running" })
-        const executionLink = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutionGateway.ExecutionLink))(
+        const executionLink = yield* Schema.decodeEffect(Schema.fromJsonString(ExecutionGateway.ExecutionLink))(
           String(durable.rows[0].execution_link_json),
         )
         expect(executionLink).toEqual({

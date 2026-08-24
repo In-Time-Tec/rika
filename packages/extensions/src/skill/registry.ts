@@ -8,7 +8,7 @@ import {
 } from "./registry-model"
 import { SkillSource } from "tenetkit"
 import { SkillLoader } from "tenetkit/skills"
-import { Crypto, Effect, Encoding, FileSystem, Layer, Path, Schema } from "effect"
+import { Crypto, Effect, Encoding, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { SkillFileSystem } from "./file-system"
 
 export const layer = Layer.effect(
@@ -33,19 +33,19 @@ const contained = (path: Path.Path, root: string, candidate: string): boolean =>
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
 }
 
-const ManifestJson = Schema.fromJsonString(Schema.Unknown)
+const ManifestJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+const ManifestRika = Schema.Struct({
+  kind: Schema.optionalKey(Schema.String),
+  importName: Schema.optionalKey(Schema.String),
+})
 
 const importNameOf = Effect.fn("SkillRegistry.importNameOf")(function* (manifest: string) {
-  const parsed = yield* Schema.decodeUnknownEffect(ManifestJson)(manifest)
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
-  const document = parsed as Record<string, unknown>
-  const rika = document["rika"]
-  if (typeof rika !== "object" || rika === null || Array.isArray(rika)) return undefined
-  if ((rika as Record<string, unknown>)["kind"] !== "skill") return undefined
-  const declared = (rika as Record<string, unknown>)["importName"]
-  if (typeof declared === "string" && declared.length > 0) return declared
-  const name = document["name"]
-  return typeof name === "string" && name.length > 0 ? name : undefined
+  const parsed = yield* Schema.decodeEffect(ManifestJson)(manifest)
+  const rika = Option.getOrUndefined(Schema.decodeUnknownOption(ManifestRika)(parsed["rika"]))
+  if (rika?.kind !== "skill") return undefined
+  if (rika.importName !== undefined && rika.importName.length > 0) return rika.importName
+  const name = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.String)(parsed["name"]))
+  return name !== undefined && name.length > 0 ? name : undefined
 })
 
 const discoverImplementation = (
@@ -55,11 +55,11 @@ const discoverImplementation = (
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto
     const skillFileSystem = yield* SkillFileSystem
-    const loaderOptions = (root: string): SkillLoader.LoadOptions => ({
-      roots: [root],
-      cwd: "/",
-      ...(options.descriptionCap === undefined ? {} : { descriptionCap: options.descriptionCap }),
-    })
+    const loaderOptions = (root: string): SkillLoader.LoadOptions => {
+      let loadOptions: SkillLoader.LoadOptions = { roots: [root], cwd: "/" }
+      if (options.descriptionCap !== undefined) loadOptions = { ...loadOptions, descriptionCap: options.descriptionCap }
+      return loadOptions
+    }
     const global = yield* SkillLoader.make(loaderOptions(options.globalRoot)).pipe(
       Effect.mapError(failure.bind(undefined, "discover", options.globalRoot)),
     )

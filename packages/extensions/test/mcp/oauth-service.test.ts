@@ -174,7 +174,8 @@ describe("McpOAuth", () => {
     const store = Layer.succeed(
       OAuth.TokenStore,
       OAuth.TokenStore.of({
-        load: () => Effect.fail("unavailable") as never,
+        load: () =>
+          Effect.fail(OAuth.OAuthProviderError.make({ server: "test", operation: "status", message: "unavailable" })),
         save: () => Effect.void,
         remove: () => Effect.void,
       }),

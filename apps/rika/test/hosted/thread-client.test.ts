@@ -2,6 +2,9 @@ import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
 import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import { Sequence, ThreadEventCursor, ThreadId, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ThreadClient } from "../../src/hosted/contract"
 import { layer } from "../../src/hosted/thread-client"
@@ -40,10 +43,10 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                         _tag: "CommandAccepted",
                         requestId: message.requestId,
                         commandId: message.command.commandId,
-                        threadId: "thread-1" as never,
-                        threadVersion: "1" as never,
-                        cursor: "0" as never,
-                        result: { _tag: "ThreadCreated", threadId: "thread-1" as never },
+                        threadId: ThreadId.make("thread-1"),
+                        threadVersion: ThreadVersion.make("1"),
+                        cursor: ThreadEventCursor.make("0"),
+                        result: { _tag: "ThreadCreated", threadId: ThreadId.make("thread-1") },
                       },
                     }),
                   )
@@ -57,15 +60,15 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                         _tag: "ThreadAttached",
                         requestId: message.requestId,
                         threadId: message.command.threadId,
-                        snapshotThreadVersion: "1" as never,
-                        snapshotCursor: "0" as never,
-                        threadVersion: "1" as never,
-                        cursor: "0" as never,
+                        snapshotThreadVersion: ThreadVersion.make("1"),
+                        snapshotCursor: ThreadEventCursor.make("0"),
+                        threadVersion: ThreadVersion.make("1"),
+                        cursor: ThreadEventCursor.make("0"),
                         snapshot: {
                           executorKind: "runner",
                           view: {
                             thread: {
-                              id: "thread-1" as never,
+                              id: Thread.ThreadId.make("thread-1"),
                               workspace: "workspace-1",
                               title: "Thread",
                               labels: [],
@@ -104,9 +107,9 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                         _tag: "CommandAccepted",
                         requestId: message.requestId,
                         commandId: message.command.commandId,
-                        threadId: "thread-1" as never,
-                        threadVersion: "2" as never,
-                        cursor: "0" as never,
+                        threadId: ThreadId.make("thread-1"),
+                        threadVersion: ThreadVersion.make("2"),
+                        cursor: ThreadEventCursor.make("0"),
                         result:
                           message.command._tag === "SubmitPrompt"
                             ? {
@@ -124,15 +127,15 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                         payload: {
                           _tag: "ThreadEvent",
                           event: {
-                            threadId: "thread-1" as never,
-                            sequence: "1" as never,
-                            cursor: "1" as never,
-                            threadVersion: "2" as never,
+                            threadId: ThreadId.make("thread-1"),
+                            sequence: Sequence.make("1"),
+                            cursor: ThreadEventCursor.make("1"),
+                            threadVersion: ThreadVersion.make("2"),
                             createdAt: "2026-08-23T00:00:00.000Z",
                             event: {
                               _tag: "SubmissionAdmitted",
-                              threadId: "thread-1" as never,
-                              turnId: "turn-1" as never,
+                              threadId: Thread.ThreadId.make("thread-1"),
+                              turnId: Turn.TurnId.make("turn-1"),
                               status: "active",
                               submissionId: message.command.commandId,
                             },
@@ -149,7 +152,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                       payload: {
                         _tag: "PortalOpened",
                         requestId: message.requestId,
-                        threadId: "thread-1" as never,
+                        threadId: ThreadId.make("thread-1"),
                         port: message.command.port,
                         url: "https://3000-orb.example.test",
                       },
@@ -165,7 +168,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
       const threads = Context.get(context, ThreadClient)
       const ticket = {
         ticket: "single-use-ticket",
-        expiresAt: "2026-08-21T07:00:00.000Z" as never,
+        expiresAt: Timestamp.make("2026-08-21T07:00:00.000Z"),
         websocketUrl: `ws://127.0.0.1:${server.port}`,
         protocol: "rika.thread.v1" as const,
       }
@@ -263,18 +266,18 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
               message: (socket, value) => {
                 const message = decode(String(value))
                 const commandId = message.command._tag === "CreateThread" ? message.command.commandId : undefined
+                const rejection: Extract<ServerFrame["payload"], { readonly _tag: "CommandRejected" }> = {
+                  _tag: "CommandRejected",
+                  requestId: message.requestId,
+                  reason: "forbidden",
+                  currentCursor: ThreadEventCursor.make("0"),
+                  message: "owner denied",
+                  details: {},
+                }
                 socket.send(
                   encode({
                     protocolVersion: 1,
-                    payload: {
-                      _tag: "CommandRejected",
-                      requestId: message.requestId,
-                      ...(commandId === undefined ? {} : { commandId }),
-                      reason: "forbidden",
-                      currentCursor: "0" as never,
-                      message: "owner denied",
-                      details: {},
-                    },
+                    payload: commandId === undefined ? rejection : { ...rejection, commandId },
                   }),
                 )
               },
@@ -289,7 +292,7 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
         threads.create({
           ticket: {
             ticket: "single-use-ticket",
-            expiresAt: "2026-08-21T07:00:00.000Z" as never,
+            expiresAt: Timestamp.make("2026-08-21T07:00:00.000Z"),
             websocketUrl: `ws://127.0.0.1:${server.port}`,
             protocol: "rika.thread.v1",
           },

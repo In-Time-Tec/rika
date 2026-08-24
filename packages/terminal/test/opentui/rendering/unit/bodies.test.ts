@@ -43,15 +43,10 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
         expandedRowKeys: ["tool:long-running"],
       }
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
-            >
-          }
-        ).transcriptRecords
+      const records = () => {
+        const diagnostics = surface.transcriptDiagnostics()
+        return new Map(diagnostics.keys.map((key, index) => [key, { renderable: diagnostics.rows[index]! }]))
+      }
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())

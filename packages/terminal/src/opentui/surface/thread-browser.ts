@@ -166,17 +166,7 @@ export class ThreadBrowser {
     this.transcript.end()
   }
 
-  diagnostics(): {
-    readonly scrollTop: number
-    readonly scrollHeight: number
-    readonly viewportHeight: number
-    readonly scrollbarPosition: number
-    readonly scrollbarSize: number
-    readonly scrollbarViewportSize: number
-    readonly following: boolean
-    readonly rows: ReadonlyArray<TextRenderable>
-    readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
-  } {
+  diagnostics() {
     const transcript = this.transcript.diagnostics()
     return {
       scrollTop: this.transcript.scroll.scrollTop,

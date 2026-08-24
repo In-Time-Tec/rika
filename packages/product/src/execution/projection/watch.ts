@@ -119,7 +119,7 @@ export const watch = (input: {
       const revision = (projection?.units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1) ?? -1) + 1
       const units = [...(projection?.units ?? []), makeUnit(revision, inspection.status)]
       yield* transcripts.replaceUnits({ ...turn, status: inspection.status, updatedAt: now }, units)
-      return {
+      const change = {
         turnId: String(turnId),
         status: inspection.status,
         state: {
@@ -128,8 +128,10 @@ export const watch = (input: {
           steering: { steeringMessages: 0, followUpMessages: 0 },
         },
         units,
-        ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
       }
+      return projection?.projectorCheckpoint === undefined
+        ? change
+        : { ...change, checkpoint: projection.projectorCheckpoint }
     })
     const settleStalled = (silenceMs: number) =>
       settleFailure("Execution stopped reporting progress", (revision, status) =>
@@ -162,13 +164,12 @@ export const watch = (input: {
               progressed = true
               yield* notify(() => onChange?.(change))
             })
+          let watchInput: Parameters<typeof backend.watchTurn>[1] = { prompt: turn.prompt, pricing }
+          if (projection !== undefined) watchInput = { ...watchInput, units: projection.units }
+          if (projection?.projectorCheckpoint !== undefined)
+            watchInput = { ...watchInput, checkpoint: projection.projectorCheckpoint }
           yield* backend
-            .watchTurn(executionLink, {
-              prompt: turn.prompt,
-              pricing,
-              ...(projection === undefined ? {} : { units: projection.units }),
-              ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
-            })
+            .watchTurn(executionLink, watchInput)
             .pipe(
               Stream.timeout(stallSilenceMs),
               Stream.runForEach((event) => {
@@ -305,12 +306,12 @@ export const watch = (input: {
               ...projectedState,
               status: inspectedTerminalStatus ?? inspectedActiveStatus ?? projectedStatus,
             }
-      return {
+      const change = {
         turnId: String(turnId),
         status: state.status,
         state,
         units: stored?.units ?? [],
-        ...(checkpoint === undefined ? {} : { checkpoint }),
       }
+      return checkpoint === undefined ? change : { ...change, checkpoint }
     }
   })

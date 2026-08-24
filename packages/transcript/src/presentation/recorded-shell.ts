@@ -97,10 +97,10 @@ export const settleRecordedShellProjection: {
             presentation,
             detail: turn.command,
             output: turn.result.text,
-            process: {
-              truncated: turn.result.truncated,
-              ...(turn.result.exitCode === undefined ? {} : { exitCode: turn.result.exitCode }),
-            },
+            process: Object.assign(
+              { truncated: turn.result.truncated },
+              turn.result.exitCode === undefined ? undefined : { exitCode: turn.result.exitCode },
+            ),
             files: [],
           },
         },

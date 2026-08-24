@@ -263,24 +263,24 @@ test("switches mutually exclusively between the workspace file tree and changed 
   expect(model).toMatchObject({ workspaceFilesOpen: false, changedFilesOpen: false })
 })
 test("toggles every transcript detail as one reducer action", () => {
-  let model = {
+  let model: Model = {
     ...initial("/work"),
     blocks: [
       { _tag: "Reasoning", text: "why" },
       readCall("read", "src/a.ts", "complete"),
       { _tag: "Diff", path: "src/a.ts", patch: "+a" },
     ],
-  } as Model
+  }
   model = update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual(["block:Reasoning:0", "tool:read", "block:Diff:2"])
   model = update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual([])
 })
 test("toggles all error details with uppercase D only when the composer is empty", () => {
-  const base = {
+  const base: Model = {
     ...initial("/work"),
     blocks: [{ _tag: "Error", title: "Execution failed", detail: "Model unavailable" }],
-  } as Model
+  }
 
   const expanded = update(base, { _tag: "KeyPressed", key: key({ name: "d", sequence: "D", shift: true }) })
   expect(expanded.expandedRowKeys).toEqual(["block:Error:0"])
@@ -562,14 +562,14 @@ test("ignores queue dequeue and edit re-entry keys while editing with a cleared 
   expect(reentry.input).toBe("")
 })
 test("navigates transcript detail units with Tab and toggles the selected unit", () => {
-  let model = {
+  let model: Model = {
     ...initial("/work"),
     blocks: [
       { _tag: "Reasoning", text: "why" },
       readCall("1", "a", "complete"),
       { _tag: "Diff", path: "a", patch: "+a" },
     ],
-  } as Model
+  }
   model = update({ ...model, detailSelection: "block:Diff:2" }, { _tag: "DetailToggled", id: "block:Diff:2" })
   expect(model).toMatchObject({
     detailSelection: "block:Diff:2",

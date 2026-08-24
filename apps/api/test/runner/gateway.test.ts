@@ -24,6 +24,7 @@ import { makeRunnerGateway as makeRunnerGatewayService, type RunnerGateway } fro
 import type { RunnerExecutorAuthority } from "../../src/runner/executor"
 import type { BindingAuthority, Socket } from "../../src/executor/gateway"
 import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
+import * as CellAuthority from "@rika/kernel/test-cell-authority"
 
 const makeRunnerGateway = (authority: RunnerExecutorAuthority) => makeRunnerGatewayService(authority, testToolPolicy)
 
@@ -37,15 +38,16 @@ const bindingRequestDigest = (request: BindingRequest) =>
 const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
 const encodeWorkspaceCapabilities = Schema.encodeUnknownSync(Schema.fromJsonString(WorkspaceCapabilitySnapshot))
 const code = 'printf "restart"'
-const bindings = {
+const emptyCellContext = Effect.runSync(CellAuthority.capture())
+const bindings: BindingAuthority = {
   registry: HostBindingRegistry.HostBindingRegistry.of({
     descriptors: [],
     resolve: (input) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: input.module })),
     invoke: (input) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: input.module })),
   }),
-  context: Context.empty(),
+  context: emptyCellContext,
   manifest: { digest: "a".repeat(64), descriptors: [] },
-} as unknown as BindingAuthority
+}
 const sessionToken = "session-local-gateway"
 const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 const deviceId = "11111111-1111-4111-8111-111111111111"
@@ -155,7 +157,11 @@ const persistTerminal = (
       yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access: presented, frame }))
   })
 
-const socket = () => {
+const socket = (): Socket & {
+  failSend: boolean
+  readonly sent: Array<string>
+  readonly closed: Array<readonly [number | undefined, string | undefined]>
+} => {
   const sent: Array<string> = []
   const closed: Array<readonly [number | undefined, string | undefined]> = []
   return {
@@ -167,10 +173,6 @@ const socket = () => {
       if (this.failSend) throw new Error("test delivery stop")
     },
     close: (status?: number, reason?: string) => closed.push([status, reason]),
-  } as Socket & {
-    failSend: boolean
-    readonly sent: Array<string>
-    readonly closed: Array<readonly [number | undefined, string | undefined]>
   }
 }
 
@@ -691,11 +693,11 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
               ),
             ),
         })
-        const operationBindings = {
+        const operationBindings: BindingAuthority = {
           registry,
-          context: bindingContext,
+          context: Context.merge(bindingContext, emptyCellContext),
           manifest: { digest: "c".repeat(64), descriptors: registry.descriptors },
-        } as unknown as BindingAuthority
+        }
         yield* seed(pool, operationKey, { deadlineAt, state: "accepted" })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),

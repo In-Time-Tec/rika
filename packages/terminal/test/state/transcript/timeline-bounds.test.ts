@@ -1,12 +1,31 @@
 import { expect, test } from "vitest"
+import { Schema } from "effect"
 import { initial, type Model } from "../../../src/state/model"
-import type { TranscriptItem } from "../../../src/state/transcript/model"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "../../../src/state/transcript/timeline-bounds"
 import {
   transcriptVirtualIndex,
   itemPositionAtVirtualRow,
   virtualRowOfItemPosition,
 } from "../../../src/presentation/transcript/viewport/virtual-index"
+
+const TranscriptItems = Schema.Array(
+  Schema.Union([
+    Schema.TaggedStruct("Entry", {
+      index: Schema.Finite,
+      id: Schema.optional(Schema.String),
+      turnId: Schema.optional(Schema.String),
+      rootTurnId: Schema.optional(Schema.String),
+      parentId: Schema.optional(Schema.String),
+    }),
+    Schema.TaggedStruct("Block", {
+      index: Schema.Finite,
+      id: Schema.optional(Schema.String),
+      turnId: Schema.optional(Schema.String),
+      rootTurnId: Schema.optional(Schema.String),
+      parentId: Schema.optional(Schema.String),
+    }),
+  ]),
+)
 
 const entryModel = (count: number, text: (index: number) => string): Model => {
   const entries = Array.from({ length: count }, (_, index) => ({
@@ -98,12 +117,13 @@ test("trimTranscriptTimeline never splits a parent-child subtree at the boundary
     ],
   }
   const trimmed = trimTranscriptTimeline(model, 10)
-  const keptKeys = trimmed.items.map((item) => (item as TranscriptItem).id)
+  const keptItems = Schema.decodeUnknownSync(TranscriptItems)(trimmed.items)
+  const keptKeys = keptItems.map((item) => item.id)
   expect(keptKeys).toContain("tool-a")
   expect(keptKeys.filter((key) => key?.startsWith("child-"))).toHaveLength(8)
   expect(keptKeys.filter((key) => key?.startsWith("leading-"))).toHaveLength(1)
   expect(keptKeys).toHaveLength(10)
-  for (const item of trimmed.items as ReadonlyArray<TranscriptItem>)
+  for (const item of keptItems)
     if (item.parentId !== undefined) expect(keptKeys).toContain(item.parentId)
 })
 

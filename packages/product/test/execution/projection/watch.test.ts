@@ -24,19 +24,32 @@ const turn: Turn.AgentExecutionTurn = {
   updatedAt: 2,
 }
 
+const projection = (units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>) => ({
+  turn,
+  units,
+  checkpointGeneration: 0,
+  revision: 0,
+  state: {
+    status: "completed" as const,
+    usage: ExecutionProjection.emptyUsageState(),
+    steering: { steeringMessages: 0, followUpMessages: 0 },
+  },
+  projectionVersion: ExecutionProjection.projectionVersion,
+})
+
 it.effect("uses terminal execution authority after the progress watchdog expires", () =>
   Effect.gen(function* () {
     let units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit> = []
     let cancelled = false
-    const transcripts = {
+    const transcripts = TranscriptRepository.Service.of({
       get: () => Effect.as(Effect.void, undefined),
       replaceUnits: (_candidate: Turn.Turn, replacement: typeof units) =>
         Effect.sync(() => {
           units = replacement
-          return undefined as never
+          return projection(units)
         }),
-    } as unknown as TranscriptRepository.Interface
-    const backend = {
+    })
+    const backend = ExecutionGateway.Service.of({
       watchTurn: () => Stream.never,
       cancelTurn: () =>
         Effect.sync(() => {
@@ -45,14 +58,14 @@ it.effect("uses terminal execution authority after the progress watchdog expires
       inspectTurn: () =>
         Effect.sync(() =>
           cancelled
-            ? ({ status: "completed" as const, cursor: "completed" })
-            : ({ status: "running" as const, cursor: "running" }),
+            ? { status: "completed", cursor: "completed" }
+            : { status: "running", cursor: "running" },
         ),
-    } as unknown as ExecutionGateway.Interface
+    })
     const fiber = yield* Effect.forkChild(
       watch({
         turnId: turn.id,
-        turns: { get: () => Effect.succeed(turn) } as unknown as TurnRepository.Interface,
+        turns: TurnRepository.Service.of({ get: () => Effect.succeed(turn) }),
         transcripts,
         backend,
         stallSilenceMs: 1_000,
@@ -86,16 +99,16 @@ it.effect("does not settle a stalled turn when terminal inspection is unavailabl
     const fiber = yield* Effect.forkChild(
       watch({
         turnId: turn.id,
-        turns: { get: () => Effect.succeed(turn) } as unknown as TurnRepository.Interface,
-        transcripts: {
+        turns: TurnRepository.Service.of({ get: () => Effect.succeed(turn) }),
+        transcripts: TranscriptRepository.Service.of({
           get: () => Effect.void,
           replaceUnits: () =>
             Effect.sync(() => {
               replacements += 1
-              return undefined as never
+              return projection([])
             }),
-        } as unknown as TranscriptRepository.Interface,
-        backend: {
+        }),
+        backend: ExecutionGateway.Service.of({
           watchTurn: () => Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))),
           cancelTurn: () =>
             Effect.sync(() => {
@@ -104,10 +117,10 @@ it.effect("does not settle a stalled turn when terminal inspection is unavailabl
           inspectTurn: () =>
             Effect.sync(() =>
               cancellations === 0
-                ? ({ status: "running" as const, cursor: "running" })
-                : ({ status: "unavailable" as const }),
+                ? { status: "running", cursor: "running" }
+                : { status: "unavailable" },
             ),
-        } as unknown as ExecutionGateway.Interface,
+        }),
         stallSilenceMs: 1_000,
       }),
     )

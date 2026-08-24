@@ -73,7 +73,7 @@ const shortcutsContentImpl = (model: Model, innerWidth: number): StyledText => {
   const rows =
     innerWidth >= 70
       ? shortcutRows
-      : shortcutRows.flatMap((row) => row.map((pair) => [pair] as ReadonlyArray<readonly [string, string]>))
+      : shortcutRows.flatMap((row) => row.map((pair): ReadonlyArray<readonly [string, string]> => [pair]))
   for (const row of rows) {
     let column = 0
     row.forEach(([keys, description], index) => {
@@ -162,12 +162,12 @@ const paletteContentImpl = (
 
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
-const modeDescription: Readonly<Record<string, string>> = {
+const modeDescription = new Map<string, string>(Object.entries({
   low: "Fast, low-cost mode for small, well-defined tasks",
   medium: "Balanced default for everyday work",
   high: "Deep reasoning for hard tasks",
   ultra: "The most capable mode for hard, open-ended tasks",
-} as const
+}))
 
 export const paletteContent: {
   (
@@ -221,7 +221,7 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   }
   chunks.push(fg(colors.text)("\n"), ...labelChunks)
   if (compact) {
-    line(modeDescription[selected] ?? `${selected} mode`, (value) => fg(colors.muted)(value))
+    line(modeDescription.get(selected) ?? `${selected} mode`, (value) => fg(colors.muted)(value))
     return new StyledText(chunks)
   }
   line("")
@@ -233,7 +233,7 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   line("")
   line(" ".repeat(innerWidth))
   line("")
-  line(modeDescription[selected] ?? `${selected} mode`)
+  line(modeDescription.get(selected) ?? `${selected} mode`)
   line("")
   return new StyledText(chunks)
 }

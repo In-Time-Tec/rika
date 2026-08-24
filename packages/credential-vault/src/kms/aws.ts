@@ -1,7 +1,7 @@
 import { DecryptCommand, GenerateDataKeyCommand, KMSClient, type KMSClientConfig } from "@aws-sdk/client-kms"
 import { Effect, Layer } from "effect"
 import type { CredentialKmsEncryptionContext } from "../aad"
-import { KmsDataKey, KmsFailure, type KmsDataKeyShape } from "./data-key"
+import { KmsDataKey, KmsFailure, type KmsDataKeyContract } from "./data-key"
 import { scopedDataEncryptionKey } from "../secret-bytes"
 
 export interface AwsKmsOptions {
@@ -20,7 +20,7 @@ export const awsKmsLayer = (options: AwsKmsOptions) =>
         Effect.sync(() => new KMSClient(options.clientConfig ?? {})),
         (kms) => Effect.sync(() => kms.destroy()),
       )
-      const generateDataKey: KmsDataKeyShape["generateDataKey"] = Effect.fn("AwsKms.generateDataKey")(function* (
+      const generateDataKey: KmsDataKeyContract["generateDataKey"] = Effect.fn("AwsKms.generateDataKey")(function* (
         context: CredentialKmsEncryptionContext,
         use,
       ) {
@@ -49,7 +49,7 @@ export const awsKmsLayer = (options: AwsKmsOptions) =>
           }),
         )
       })
-      const decryptDataKey: KmsDataKeyShape["decryptDataKey"] = Effect.fn("AwsKms.decryptDataKey")(function* (
+      const decryptDataKey: KmsDataKeyContract["decryptDataKey"] = Effect.fn("AwsKms.decryptDataKey")(function* (
         wrapped: Uint8Array,
         context: CredentialKmsEncryptionContext,
         use,

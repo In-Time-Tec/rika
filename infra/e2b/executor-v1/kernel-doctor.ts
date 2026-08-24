@@ -33,7 +33,7 @@ const program = Effect.scoped(
       second.result.value !== "42"
     )
       return yield* Effect.die("kernel persistence check failed")
-    console.log("41,42")
+    yield* Effect.log("41,42")
   }),
 )
 

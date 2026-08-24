@@ -1,6 +1,7 @@
-import { Effect, Random } from "effect"
+import { Effect, Random, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
@@ -10,6 +11,10 @@ type QueueSnapshot = Effect.Success<ReturnType<Interface["readQueue"]>>
 type QueueClaim = Parameters<Interface["finishQueuedClaim"]>[0]
 type QueueClaimFinish = Effect.Success<ReturnType<Interface["finishQueuedClaim"]>>
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
+const QueueClaimTokenRow = Schema.Struct({ queue_claim_token: Schema.String })
+const ReservedCountRow = Schema.Struct({ count: Schema.FiniteFromString })
+const reservedCount = (row: SqlRow | undefined) =>
+  row === undefined ? Effect.succeed(0) : Schema.decodeUnknownEffect(ReservedCountRow)(row).pipe(Effect.map((value) => value.count))
 
 export const makeTurnSqlQueue = (
   sql: SqlClient,
@@ -72,7 +77,8 @@ export const makeTurnSqlQueue = (
           RETURNING *`
           if (rows[0] === undefined) return undefined
           const turn = yield* decodeAgent(rows[0])
-          return { turn, token: String((rows[0] as { queue_claim_token: unknown }).queue_claim_token) }
+          const claim = yield* Schema.decodeUnknownEffect(QueueClaimTokenRow)(rows[0])
+          return { turn, token: claim.queue_claim_token }
         }),
       )
       .pipe(Effect.mapError(repositoryError))
@@ -230,8 +236,7 @@ export const makeTurnSqlQueue = (
             return yield* QueueFull.make({
               threadId: current.threadId,
               capacity: queueCapacity,
-              count:
-                state.queued_count + Number((reservedRows[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
+              count: state.queued_count + (yield* reservedCount(reservedRows[0])),
             })
           }
           const updatedRows = yield* sql`UPDATE rika_turns SET status = 'queued', updated_at = ${now}

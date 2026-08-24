@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Fiber, Layer, Option, Redacted, Ref } from "effect"
+import { Context, Effect, Fiber, Layer, Option, Redacted, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   CredentialStore,
@@ -10,7 +10,7 @@ import {
   type PrivateJwk,
   type Profile,
 } from "../../src/hosted/contract"
-import { RunnerAdmission, type RunnerRegistration } from "../../src/runner/contract"
+import { RunnerAdmission, RunnerRegistration } from "../../src/runner/contract"
 import { liveAdmissionLayer } from "../../src/runner/service"
 
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
@@ -22,10 +22,10 @@ const profile: Profile = {
   project: "project-1",
 }
 const credential: Credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
-const registration: RunnerRegistration = {
-  deviceId: "device-1" as never,
-  checkoutFingerprint: "checkout-1" as never,
-  workspaceIdentity: "workspace-1" as never,
+const registration = Schema.decodeSync(RunnerRegistration)({
+  deviceId: "device-1",
+  checkoutFingerprint: "checkout-1",
+  workspaceIdentity: "workspace-1",
   repository: {
     identity: "repository-1",
     remoteUrl: "https://example.test/acme/repository.git",
@@ -34,7 +34,7 @@ const registration: RunnerRegistration = {
   kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
   capabilities: { cells: true, checkpoints: true, pty: true },
   remoteThreadCreation: "allowed",
-}
+})
 const unusedHttp: HttpInterface = {
   register: () => Effect.die("unused"),
   startDeviceAuthorization: () => Effect.die("unused"),

@@ -5,6 +5,8 @@ import { TestClock } from "effect/testing"
 import * as Socket from "effect/unstable/socket/Socket"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { ServerFrame } from "@rika/product/client-protocol"
+import { Timestamp } from "@rika/product/hosted-model"
+import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { HostedProductService } from "../../src/hosted/product"
 import type { Runtime as ExecutorRuntime } from "../../src/executor/service"
 import type { HttpDependencies } from "../../src/server/http"
@@ -29,6 +31,28 @@ const config: IdentityConfig = {
 const recovery: HttpDependencies["recovery"] = {
   inspect: () => Effect.die("unused"),
   resolve: () => Effect.die("unused"),
+}
+
+const unusedController: ControllerService = {
+  provision: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  kill: () => Effect.die("unused"),
+  portal: () => Effect.die("unused"),
+  hello: () => Effect.die("unused"),
+  reconnect: () => Effect.die("unused"),
+  validateAccess: () => Effect.die("unused"),
+  heartbeat: () => Effect.die("unused"),
+  checkpoint: () => Effect.die("unused"),
+  credential: () => Effect.die("unused"),
+  revokeCredential: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  ready: () => Effect.die("unused"),
+  loadSetupCache: () => Effect.die("unused"),
+  storeSetupCache: () => Effect.die("unused"),
+  activatePhase: () => Effect.die("unused"),
+  cleanupOrphans: Effect.die("unused"),
 }
 
 it.effect("stops accepting work but lets an in-flight request drain", () =>
@@ -66,7 +90,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       revokeAll: () => Effect.die("unused"),
     }
     const executor: ExecutorRuntime = {
-      controller: undefined as never,
+      controller: unusedController,
       gateway: {
         receive: () => Effect.void,
         disconnected: () => Effect.void,
@@ -107,7 +131,27 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       executor,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
-        status: Effect.succeed({} as never),
+        status: Effect.succeed({
+          poll: { _tag: "Starting" },
+          lastSuccessfulPollAt: undefined,
+          lastFailure: undefined,
+          active: 0,
+          capacity: 1,
+          oldestClaimAt: undefined,
+          pollAgeMillis: undefined,
+          lastSuccessfulPollAgeMillis: undefined,
+          oldestClaimAgeMillis: undefined,
+          lastFailureAgeMillis: undefined,
+          availableCapacity: 1,
+          execution: { worker: "execution" },
+          turn: { worker: "turn", active: 0, capacity: 1, oldestClaimAgeMillis: undefined },
+          projection: {
+            worker: "projection",
+            active: 0,
+            capacity: 1,
+            oldestActiveProjectionAgeMillis: undefined,
+          },
+        }),
       },
       production: false,
     }
@@ -197,7 +241,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       },
       toolPolicy: testToolPolicy,
       executor: {
-        controller: undefined as never,
+        controller: unusedController,
         gateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
@@ -231,7 +275,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       recovery,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
-        status: Effect.succeed({} as never),
+        status: Effect.die("unused"),
       },
       production: true,
     }
@@ -321,7 +365,10 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
               return Effect.succeed([
                 {
                   protocolVersion: 1 as const,
-                  payload: { _tag: "Heartbeat" as const, at: "2026-08-21T00:00:00.000Z" as never },
+                  payload: {
+                    _tag: "Heartbeat" as const,
+                    at: Timestamp.make("2026-08-21T00:00:00.000Z"),
+                  },
                 },
               ])
             },
@@ -331,7 +378,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         },
       },
       executor: {
-        controller: undefined as never,
+        controller: unusedController,
         gateway: {
           receive: () => Effect.void,
           disconnected: () => Effect.void,
@@ -365,7 +412,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
       recovery,
       execution: {
         check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
-        status: Effect.succeed({} as never),
+        status: Effect.die("unused"),
       },
       production: false,
     }
@@ -387,9 +434,9 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
               const response = yield* Deferred.make<string>()
               yield* socket
                 .runString((message) => Deferred.succeed(response, message), {
-                  onOpen: writer(
-                    '{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}',
-                  ).pipe(Effect.orDie),
+                  onOpen: writer('{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}').pipe(
+                    Effect.orDie,
+                  ),
                 })
                 .pipe(Effect.forkScoped)
               return yield* Deferred.await(response)
@@ -403,7 +450,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
     expect(received).toEqual({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })
-    expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
+    expect(yield* Schema.decodeEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
       protocolVersion: 1,
       payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
     })

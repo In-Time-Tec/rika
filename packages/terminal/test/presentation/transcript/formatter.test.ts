@@ -347,7 +347,7 @@ test("updates an existing streaming transcript header when it becomes expandable
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       let model: Model = {
         ...initial("/work", "high"),
-        blocks: [streamingShell("first", "first-output"), streamingShell("streaming")],
+        blocks: [streamingShell("first", "first-output"), streamingShell("streaming", undefined)],
         items: [
           { _tag: "Block", index: 0, id: "first", turnId: "turn-streaming" },
           { _tag: "Block", index: 1, id: "streaming", turnId: "turn-streaming" },
@@ -362,31 +362,20 @@ test("updates an existing streaming transcript header when it becomes expandable
         },
         resize: () => undefined,
       })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              {
-                readonly renderable: {
-                  readonly screenX: number
-                  readonly screenY: number
-                  readonly selectable: boolean
-                }
-              }
-            >
-          }
-        ).transcriptRecords
+      const records = () => {
+        const diagnostics = surface.transcriptDiagnostics()
+        return new Map(diagnostics.keys.map((key, index) => [key, diagnostics.rows[index]!]))
+      }
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
-        const before = records().get("tool-child:streaming:header")!.renderable
+        const before = records().get("tool-child:streaming:header")!
         expect(before.selectable).toBe(true)
 
         model = { ...model, blocks: [model.blocks[0]!, streamingShell("streaming", "late-output")] }
         surface.update(model)
         yield* openTui(() => setup.flush())
-        const after = records().get("tool-child:streaming:header")!.renderable
+        const after = records().get("tool-child:streaming:header")!
         expect(after).toBe(before)
         expect(after.selectable).toBe(false)
         yield* openTui(() => setup.mockMouse.click(after.screenX + 4, after.screenY))

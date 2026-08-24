@@ -1,7 +1,7 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import { StyledText, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../../state/model"
-import type { TranscriptBlock } from "../../../state/transcript/model"
 import type {
   NestedTranscriptUnit,
   ToolTranscriptUnit,
@@ -12,13 +12,18 @@ import type { PathTarget } from "../../../presentation/transcript/tool/detail-ty
 
 let transcriptIdentityCounter = 0
 const transcriptIdentityRevisions = new WeakMap<object, number>()
-const identityRevision = (value: unknown): number => {
-  if (typeof value !== "object" || value === null) return 0
+type TranscriptIdentity = Block | Model["entries"][number]
+const identityRevision = (value: TranscriptIdentity): number => {
   const current = transcriptIdentityRevisions.get(value)
   if (current !== undefined) return current
   transcriptIdentityCounter += 1
   transcriptIdentityRevisions.set(value, transcriptIdentityCounter)
   return transcriptIdentityCounter
+}
+const decodeBlock = Schema.decodeUnknownSync(Block)
+const blockAt = (model: Model, index: number): Block => {
+  const block = model.blocks[index]
+  return Schema.is(Block)(block) ? block : decodeBlock(block)
 }
 
 export const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
@@ -35,7 +40,7 @@ const transcriptUnitRevisionImpl = (
   const pushExpanded = (id: string) => bits.push(expandedSet.has(id) ? "1" : "0")
   const walkTool = (tool: ToolTranscriptUnit) => {
     for (const index of tool.blocks) {
-      const block = model.blocks[index] as TranscriptBlock
+      const block = blockAt(model, index)
       ids.push(identityRevision(block))
       if (block._tag === "ToolCall") {
         pushExpanded(`tool:${block.id}`)
@@ -43,14 +48,17 @@ const transcriptUnitRevisionImpl = (
         for (const file of block.files) pushExpanded(`file:${file.key}`)
       }
     }
-    for (const index of tool.diffs) ids.push(identityRevision(model.blocks[index]))
+    for (const index of tool.diffs) ids.push(identityRevision(blockAt(model, index)))
     for (const child of tool.children ?? []) walkNested(child)
     const response = tool.agentResponse === undefined ? undefined : agentResponseOutcome(tool.agentResponse)
-    if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
+    if (response?.kind === "answer") {
+      const entry = model.entries[response.entry]
+      if (entry !== undefined) ids.push(identityRevision(entry))
+    }
     else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
   const walkBlock = (index: number) => {
-    const block = model.blocks[index] as TranscriptBlock
+    const block = blockAt(model, index)
     ids.push(identityRevision(block))
     if (block._tag === "Compaction" && block.status === "complete")
       bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
@@ -63,20 +71,26 @@ const transcriptUnitRevisionImpl = (
     if (nested.kind === "cell") walkBlock(nested.block)
     else if (nested.kind === "subagent") {
       walkBlock(nested.block)
-      const block = model.blocks[nested.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
-      pushExpanded(`subagent:${block.id}`)
+      const block = blockAt(model, nested.block)
+      if (block._tag === "SubagentCard") pushExpanded(`subagent:${block.id}`)
       for (const child of nested.children) walkNested(child)
       walkAgentResponse(nested.agentResponse)
     } else walkTool(nested)
   }
   const walkAgentResponse = (state: AgentResponseState | undefined) => {
     const response = state === undefined ? undefined : agentResponseOutcome(state)
-    if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
+    if (response?.kind === "answer") {
+      const entry = model.entries[response.entry]
+      if (entry !== undefined) ids.push(identityRevision(entry))
+    }
     else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
   switch (unit.kind) {
     case "entry":
-      ids.push(identityRevision(model.entries[unit.entry]))
+      {
+        const entry = model.entries[unit.entry]
+        if (entry !== undefined) ids.push(identityRevision(entry))
+      }
       break
     case "tool":
       walkTool(unit)

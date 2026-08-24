@@ -93,7 +93,15 @@ const healthSignalCount = Metric.counter("rika_hosted_health_signals_total")
 const bestEffort = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<void, never, R> =>
   Effect.exit(Effect.suspend(() => effect)).pipe(Effect.asVoid)
 
-export const annotations = (correlation: Correlation): Record<string, string> => {
+export interface HostedAnnotations {
+  readonly [key: string]: string
+}
+
+interface TelemetryAttributes {
+  [key: string]: string | number
+}
+
+export const annotations = (correlation: Correlation): HostedAnnotations => {
   const values: Record<string, string> = {}
   const identifier = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/
   const add = (key: string, value: string | undefined) => {
@@ -111,12 +119,12 @@ export const annotations = (correlation: Correlation): Record<string, string> =>
 
 const record = (stage: Stage, outcome: Outcome, correlation: Correlation, durationMillis?: number) => {
   const dimensions = { stage, outcome }
-  const values = {
+  const values: TelemetryAttributes = {
     ...annotations(correlation),
     "rika.hosted.stage": stage,
     "rika.hosted.outcome": outcome,
-    ...(durationMillis === undefined ? {} : { "rika.duration.millis": durationMillis }),
   }
+  if (durationMillis !== undefined) values["rika.duration.millis"] = durationMillis
   return Metric.update(Metric.withAttributes(operationCount, dimensions), 1).pipe(
     Effect.andThen(
       durationMillis === undefined
@@ -185,14 +193,14 @@ export const modelObserved = Effect.fnUntraced(function* (
   const duration = Math.max(0, durationMillis)
   const inputTokens = usage?.inputTokens === undefined ? undefined : Math.max(0, usage.inputTokens)
   const outputTokens = usage?.outputTokens === undefined ? undefined : Math.max(0, usage.outputTokens)
-  const values = {
+  const values: TelemetryAttributes = {
     ...annotations(correlation),
     "rika.hosted.stage": "model_terminal",
     "rika.hosted.outcome": outcome,
     "rika.duration.millis": duration,
-    ...(inputTokens === undefined ? {} : { "rika.model.input_tokens": inputTokens }),
-    ...(outputTokens === undefined ? {} : { "rika.model.output_tokens": outputTokens }),
   }
+  if (inputTokens !== undefined) values["rika.model.input_tokens"] = inputTokens
+  if (outputTokens !== undefined) values["rika.model.output_tokens"] = outputTokens
   const update = (kind: "input" | "output", value: number | undefined) =>
     value === undefined ? Effect.void : Metric.update(Metric.withAttributes(modelTokens, { kind }), value)
   yield* bestEffort(
@@ -221,14 +229,12 @@ export const health = Effect.fnUntraced(function* (
   correlation: Correlation,
   measurement?: { readonly value: number; readonly threshold: number },
 ) {
-  const values = {
+  const values: TelemetryAttributes = {
     "rika.health.signal": signal,
-    ...(measurement === undefined
-      ? {}
-      : {
-          "rika.health.value": Math.max(0, measurement.value),
-          "rika.health.threshold": Math.max(0, measurement.threshold),
-        }),
+  }
+  if (measurement !== undefined) {
+    values["rika.health.value"] = Math.max(0, measurement.value)
+    values["rika.health.threshold"] = Math.max(0, measurement.threshold)
   }
   yield* Metric.update(Metric.withAttributes(healthSignalCount, { signal }), 1)
   yield* Effect.annotateCurrentSpan(values)

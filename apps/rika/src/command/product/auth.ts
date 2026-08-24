@@ -13,10 +13,11 @@ export const authCommand = Command.make("auth").pipe(
       },
       ({ server, noOpen }) => {
         const selectedServer = Option.getOrUndefined(server)
+        if (selectedServer === undefined) return dispatch({ _tag: "Auth", action: "login", noOpen })
         return dispatch({
           _tag: "Auth",
           action: "login",
-          ...(selectedServer === undefined ? {} : { server: selectedServer }),
+          server: selectedServer,
           noOpen,
         })
       },
@@ -25,15 +26,16 @@ export const authCommand = Command.make("auth").pipe(
       dispatch({ _tag: "Auth", action: "status", json }),
     ),
     Command.make("logout", { all: Flag.boolean("all").pipe(Flag.withDefault(false)) }, ({ all }) =>
-      dispatch({ _tag: "Auth", action: "logout", ...(all ? { all: true } : {}) }),
+      dispatch(all ? { _tag: "Auth", action: "logout", all: true } : { _tag: "Auth", action: "logout" }),
     ),
     Command.make("devices", {}, () => dispatch({ _tag: "Auth", action: "devices" })),
     Command.make("revoke-device", { device: Argument.string("device").pipe(Argument.optional) }, ({ device }) => {
       const selectedDevice = Option.getOrUndefined(device)
+      if (selectedDevice === undefined) return dispatch({ _tag: "Auth", action: "revoke-device" })
       return dispatch({
         _tag: "Auth",
         action: "revoke-device",
-        ...(selectedDevice === undefined ? {} : { device: selectedDevice }),
+        device: selectedDevice,
       })
     }),
   ]),

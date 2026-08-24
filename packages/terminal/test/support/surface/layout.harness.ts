@@ -1,4 +1,4 @@
-import { createTestRenderer } from "@opentui/core/testing"
+import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Effect, FileSystem, Path, Schema } from "effect"
@@ -15,7 +15,7 @@ export const visualMetadata = {
   terminal: { columns: 80, rows: 24, emulator: "OpenTUI test renderer", font: "cell-grid" },
   theme: { name: "Rika dark", background: "inherited", foreground: "#c9d1d9", surface: "#161b22" },
   native: { opentui: "0.4.3", bun: "1.3.14" },
-  masks: [] as Array<{ x: number; y: number; width: number; height: number }>,
+  masks: [],
   thresholds: { characterDifferences: 0, pixelChannelDelta: 0, differingPixelRatio: 0 },
   pixelModel:
     "deterministic cell raster from OpenTUI captured spans; character cells use foreground and blank cells use background",
@@ -29,26 +29,29 @@ const tool = (
   detail: string,
   status: Extract<TranscriptBlock, { _tag: "ToolCall" }>["status"],
   output?: string,
-): Extract<TranscriptBlock, { _tag: "ToolCall" }> => ({
-  _tag: "ToolCall",
-  id,
-  name,
-  input: detail,
-  status,
-  presentation:
-    name === "read" || name === "grep"
-      ? {
-          family: "explore",
-          action: name === "grep" ? "grep" : "read",
-          activeLabel: "Exploring",
-          completeLabel: "Explored",
-          counter: name === "grep" ? "search" : "file",
-        }
-      : { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
-  detail,
-  files: [],
-  ...(output === undefined ? {} : { output }),
-})
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> => {
+  const value: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall",
+    id,
+    name,
+    input: detail,
+    status,
+    presentation:
+      name === "read" || name === "grep"
+        ? {
+            family: "explore",
+            action: name === "grep" ? "grep" : "read",
+            activeLabel: "Exploring",
+            completeLabel: "Explored",
+            counter: name === "grep" ? "search" : "file",
+          }
+        : { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+    detail,
+    files: [],
+  }
+  if (output === undefined) return value
+  return { ...value, output }
+}
 const base = (): Model => initial("/workspace", "high")
 const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/workspace",
@@ -525,21 +528,7 @@ type Captured = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captu
 
 const channel = (value: number): number => Math.round(value <= 1 ? value * 255 : value)
 const stableFrame = (frame: string): string => frame.replaceAll(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, "⠿")
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const prettyJson = (value: unknown, depth = 0): string => {
-  if (value === null || typeof value !== "object") return encodeJson(value)
-  const indent = "  ".repeat(depth)
-  const nestedIndent = `${indent}  `
-  if (Array.isArray(value)) {
-    if (value.length === 0) return "[]"
-    return `[\n${value.map((item) => `${nestedIndent}${prettyJson(item, depth + 1)}`).join(",\n")}\n${indent}]`
-  }
-  const entries = Object.entries(value)
-  if (entries.length === 0) return "{}"
-  return `{\n${entries
-    .map(([key, item]) => `${nestedIndent}${encodeJson(key)}: ${prettyJson(item, depth + 1)}`)
-    .join(",\n")}\n${indent}}`
-}
+const prettyJson = (value: Schema.Json | Captured): string => JSON.stringify(value, undefined, 2)
 
 const screenshot = (capture: Captured, width: number, height: number): string => {
   const pixels: Array<string> = []
@@ -575,19 +564,13 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
         for (const [name, source, width, height] of all.filter((_, index) => index % lanes === lane)) {
           const rootBefore = new Set(setup.renderer.root.getChildren())
           const selectionListenersBefore = setup.renderer.listenerCount("selection")
-          /** A frozen clock pins animation phase so frames stay deterministic under concurrency. */
+          const clock = new ManualClock()
           const surface = new Surface(
             setup.renderer,
             { key: () => undefined, resize: () => undefined },
             {
               animate: false,
-              clock: {
-                now: () => 0,
-                setTimeout: () => 0 as unknown as ReturnType<typeof setTimeout>,
-                clearTimeout: () => {},
-                setInterval: () => 0 as unknown as ReturnType<typeof setTimeout>,
-                clearInterval: () => {},
-              },
+              clock,
             },
           )
           let cleanupError: Error | undefined
@@ -605,7 +588,10 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
                   `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
                 ),
                 fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
-                fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
+                fileSystem.writeFileString(
+                  path.join(directory, `${name}.styles.json`),
+                  `${prettyJson(styles)}\n`,
+                ),
               ],
               { concurrency: 3 },
             )

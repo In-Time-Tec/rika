@@ -27,7 +27,7 @@ export class TranscriptVirtualDocument {
     return itemPositionAtVirtualRow(this.index(model), row)
   }
 
-  metrics(input: TranscriptVirtualMetricsInput): { readonly scrollHeight: number; readonly rowsAbove: number } {
+  metrics(input: TranscriptVirtualMetricsInput) {
     const { model } = input
     if (model === undefined) return { scrollHeight: input.physicalScrollHeight, rowsAbove: 0 }
     if (

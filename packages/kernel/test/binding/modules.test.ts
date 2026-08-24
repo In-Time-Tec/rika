@@ -1,8 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { HostBindingRegistry } from "tenetkit/repl"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
-import { make as makeModules, moduleNames, type BindingRequirements } from "@rika/kernel/binding-modules"
+import { make as makeModules, moduleNames } from "@rika/kernel/binding-modules"
+import { operation as bindingOperation } from "@rika/kernel/nested-operation-envelope"
 
 const servers: ReadonlyArray<McpDiscovery.ConfiguredServer> = []
 
@@ -13,20 +14,26 @@ const modules = makeModules({
   servers,
 })
 
-interface Op {
-  readonly module: string
-  readonly operation: HostBindingRegistry.AnyOperation
-}
-
-const every: ReadonlyArray<Op> = modules.flatMap((module) =>
+const every = modules.flatMap((module) =>
   module.operations.map((operation) => ({
     module: module.name,
-    operation: operation as HostBindingRegistry.AnyOperation,
+    operation,
   })),
 )
 
-const codec = <S extends Schema.Constraint>(schema: S) =>
-  schema as unknown as Schema.Codec<unknown, unknown, never, never>
+const NoFailure = Schema.TaggedStruct("NoFailure", {})
+const mountModules = modules.map((module) => ({
+  name: module.name,
+  operations: module.operations.map((entry) =>
+    bindingOperation({
+      name: entry.name,
+      input: Schema.Unknown,
+      output: Schema.Void,
+      failure: NoFailure,
+      handle: () => Effect.void,
+    }),
+  ),
+}))
 
 describe("binding schema round trip", () => {
   it("mounts every module the bindings digest is computed over", () => {
@@ -51,25 +58,40 @@ describe("binding schema round trip", () => {
       expect(operation.input).toBeDefined()
       expect(operation.output).toBeDefined()
       expect(operation.failure).toBeDefined()
-      expect(typeof operation.handle).toBe("function")
+      expect(operation.handle).toBeDefined()
     }
   })
 
   it.effect("mounts the whole surface without a name conflict", () =>
-    Effect.map(
-      Effect.provideContext(HostBindingRegistry.make(modules), Context.empty() as Context.Context<BindingRequirements>),
-      (mounted) => {
-        expect(mounted.descriptors.map((descriptor) => descriptor.module)).toEqual([...moduleNames])
-      },
-    ),
+    Effect.gen(function* () {
+      const context = yield* Layer.build(HostBindingRegistry.layer(mountModules))
+      const mounted = Context.get(context, HostBindingRegistry.HostBindingRegistry)
+      expect(mounted.descriptors.map((descriptor) => descriptor.module)).toEqual([...moduleNames])
+    }).pipe(Effect.scoped),
   )
 
-  it("declares an input schema that decodes for every operation", () => {
-    for (const { module, operation } of every) {
-      const result = Schema.decodeUnknownExit(codec(operation.input))({})
-      expect(`${module}.${operation.name}:${result._tag}`).toMatch(/:(Success|Failure)$/)
-    }
-  })
+  it.effect("declares an input schema that decodes for every operation", () =>
+    Effect.gen(function* () {
+      for (const { module, operation: entry } of every) {
+        const mounted = yield* HostBindingRegistry.make([
+          {
+            name: module,
+            operations: [
+              bindingOperation({
+                name: entry.name,
+                input: entry.input,
+                output: Schema.Void,
+                failure: NoFailure,
+                handle: () => Effect.void,
+              }),
+            ],
+          },
+        ])
+        const result = yield* Effect.exit(mounted.invoke({ module, operation: entry.name, input: {} }))
+        expect(`${module}.${entry.name}:${result._tag}`).toMatch(/:(Success|Failure)$/)
+      }
+    }),
+  )
 
   it("declares a failure schema that is a discriminated tagged shape the cell can branch on", () => {
     for (const { module, operation } of every) {
@@ -78,8 +100,8 @@ describe("binding schema round trip", () => {
     }
   })
 
-  it("encodes and decodes every operation's declared output back to an equal value", () => {
-    const samples: Record<string, unknown> = {
+  it.effect("encodes and decodes every operation's declared output back to an equal value", () => {
+    const samples = {
       "workspace.search": { text: "a.ts:1:t", matches: [{ path: "a.ts", line: 1, text: "t" }], truncated: false },
       "workspace.read": { text: "t", truncated: false },
       "workspace.write": { text: "t", truncated: false, diff: "d" },
@@ -103,16 +125,53 @@ describe("binding schema round trip", () => {
       "mcp.servers": [{ name: "files", kind: "local", enabled: true }],
       "mcp.call": { content: { ok: true }, isError: false },
     }
-    for (const [key, value] of Object.entries(samples)) {
-      const found = every.find(({ module, operation }) => `${module}.${operation.name}` === key)
-      expect(`${key}:${found !== undefined}`).toBe(`${key}:true`)
-      const encoded = Schema.encodeUnknownSync(codec(found!.operation.output))(value)
-      expect({ key, value: Schema.decodeUnknownSync(codec(found!.operation.output))(encoded) }).toEqual({ key, value })
-    }
+    return Effect.gen(function* () {
+      for (const [key, value] of Object.entries(samples)) {
+        const found = every.find(({ module, operation }) => `${module}.${operation.name}` === key)
+        expect(`${key}:${found !== undefined}`).toBe(`${key}:true`)
+        if (found === undefined) throw new Error(`Missing operation ${key}`)
+        const mounted = yield* HostBindingRegistry.make([
+          {
+            name: found.module,
+            operations: [
+              bindingOperation({
+                name: found.operation.name,
+                input: Schema.Unknown,
+                output: found.operation.output,
+                failure: NoFailure,
+                handle: () => Effect.succeed(value),
+              }),
+            ],
+          },
+        ])
+        const response = yield* mounted.invoke({ module: found.module, operation: found.operation.name, input: {} })
+        expect({ key, value: response._tag === "Success" ? response.output : response.failure }).toEqual({ key, value })
+      }
+    })
   })
 
-  it("rejects an output that does not match the declared schema", () => {
-    const write = every.find(({ module, operation }) => module === "workspace" && operation.name === "write")!
-    expect(Schema.encodeUnknownExit(codec(write.operation.output))({ text: 7 })._tag).toBe("Failure")
-  })
+  it.effect("rejects an output that does not match the declared schema", () =>
+    Effect.gen(function* () {
+      const write = every.find(({ module, operation }) => module === "workspace" && operation.name === "write")
+      if (write === undefined) throw new Error("Missing workspace.write")
+      const mounted = yield* HostBindingRegistry.make([
+        {
+          name: write.module,
+          operations: [
+            bindingOperation({
+              name: write.operation.name,
+              input: Schema.Unknown,
+              output: write.operation.output,
+              failure: NoFailure,
+              handle: () => Effect.succeed({ text: 7 }),
+            }),
+          ],
+        },
+      ])
+      const result = yield* Effect.exit(
+        mounted.invoke({ module: write.module, operation: write.operation.name, input: {} }),
+      )
+      expect(result._tag).toBe("Failure")
+    }),
+  )
 })

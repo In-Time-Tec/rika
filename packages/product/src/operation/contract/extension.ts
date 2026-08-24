@@ -33,19 +33,19 @@ export const layer = (options: Options) => {
 }
 
 const Json = Schema.fromJsonString(Schema.Unknown)
-const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+const JsonObject = Schema.fromJsonString(Schema.JsonObject)
 const ExtensionRecords = Schema.Record(
   Schema.String,
   Schema.Struct({ enabled: Schema.Boolean, generation: Schema.Int }),
 )
 const encodeJson = Schema.encodeSync(Json)
-const encodePrettyJson = (value: unknown, depth = 0): string => {
+const encodePrettyJson = (value: Schema.Json, depth = 0): string => {
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]"
     const indentation = "  ".repeat(depth + 1)
     return `[\n${indentation}${value.map((item) => encodePrettyJson(item, depth + 1)).join(`,\n${indentation}`)}\n${"  ".repeat(depth)}]`
   }
-  if (typeof value === "object" && value !== null) {
+  if (Schema.is(Schema.JsonObject)(value)) {
     const entries = Object.entries(value).filter(([, item]) => item !== undefined)
     if (entries.length === 0) return "{}"
     const indentation = "  ".repeat(depth + 1)
@@ -63,7 +63,7 @@ const readDocument = (fileSystem: FileSystem.FileSystem, filename: string) =>
     Effect.mapError((cause) => (Schema.is(Error)(cause) ? cause : Error.make({ message: String(cause) }))),
   )
 
-const writeDocument = (fileSystem: FileSystem.FileSystem, path: Path.Path, filename: string, value: unknown) =>
+const writeDocument = (fileSystem: FileSystem.FileSystem, path: Path.Path, filename: string, value: Schema.Json) =>
   fileSystem.makeDirectory(path.dirname(filename), { recursive: true }).pipe(
     Effect.andThen(fileSystem.writeFileString(filename, `${encodePrettyJson(value)}\n`)),
     Effect.mapError((cause) => Error.make({ message: String(cause) })),
@@ -73,7 +73,7 @@ const writeDocumentAtomically = (
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
   filename: string,
-  value: unknown,
+  value: Schema.Json,
 ) =>
   fileSystem.makeDirectory(path.dirname(filename), { recursive: true }).pipe(
     Effect.andThen(
@@ -118,10 +118,11 @@ const readExtensionRecords = Effect.fn("ExtensionOperations.readExtensionRecords
   return extensions
 })
 
-const stringArray = (value: unknown, field: string) => {
+const stringArray = (value: Schema.Json | undefined, field: string) => {
   if (value === undefined) return Effect.succeed<ReadonlyArray<string>>([])
-  if (Array.isArray(value) && value.every((item) => typeof item === "string")) return Effect.succeed(value)
-  return Effect.fail(Error.make({ message: `Invalid ${field}: expected an array of strings` }))
+  return Schema.decodeUnknownEffect(Schema.Array(Schema.String))(value).pipe(
+    Effect.mapError(() => Error.make({ message: `Invalid ${field}: expected an array of strings` })),
+  )
 }
 
 const readMcpConfiguration = Effect.fn("ExtensionOperations.readMcpConfiguration")(function* (
@@ -129,13 +130,12 @@ const readMcpConfiguration = Effect.fn("ExtensionOperations.readMcpConfiguration
   filename: string,
 ) {
   const document = yield* readDocument(fileSystem, filename)
-  if (
-    Object.hasOwn(document, "servers") &&
-    (typeof document.servers !== "object" || document.servers === null || Array.isArray(document.servers))
-  )
-    return yield* Error.make({ message: "Invalid servers: expected an object" })
   const wrapped = Object.hasOwn(document, "servers")
-  const servers = { ...((wrapped ? document.servers : document) as Record<string, unknown>) }
+  const servers = wrapped
+    ? yield* Schema.decodeUnknownEffect(Schema.JsonObject)(document.servers).pipe(
+        Effect.mapError(() => Error.make({ message: "Invalid servers: expected an object" })),
+      )
+    : { ...document }
   const configured = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
     Effect.mapError((cause) => Error.make({ message: cause.message })),
   )
@@ -305,7 +305,7 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
           servers = { ...servers, [input.name]: definition }
         }
         if (input.action === "remove") {
-          delete servers[input.name]
+          servers = Object.fromEntries(Object.entries(servers).filter(([name]) => name !== input.name))
           disabled.delete(input.name)
         }
         if (input.action === "enable") disabled.delete(input.name)
@@ -313,11 +313,10 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
         yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
           Effect.mapError((cause) => Error.make({ message: cause.message })),
         )
-        yield* writeDocument(fileSystem, path, options.configPath, {
-          ...(wrapped ? document : {}),
-          servers,
-          disabled: [...disabled].toSorted(),
-        })
+        const nextDocument: Schema.JsonObject = wrapped
+          ? { ...document, servers, disabled: [...disabled].toSorted() }
+          : { servers, disabled: [...disabled].toSorted() }
+        yield* writeDocument(fileSystem, path, options.configPath, nextDocument)
         return
       }),
     )

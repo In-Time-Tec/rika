@@ -51,14 +51,16 @@ const interactiveCommand = (values: {
   const selectedMode = optionalValue(values.mode)
   const selectedWorkspace = optionalValue(values.workspace)
   const selectedThread = optionalValue(values.thread)
-  const input: ProductOperation.Input = {
-    _tag: "Interactive",
-    prompt: values.prompt,
-    ...(selectedMode === undefined ? {} : { mode: selectedMode }),
-    ...(selectedWorkspace === undefined ? {} : { workspace: selectedWorkspace }),
-    ...(selectedThread === undefined ? {} : { threadId: selectedThread }),
-    ephemeral: values.ephemeral,
-  }
+  const input: ProductOperation.Input = Object.assign(
+    {
+      _tag: "Interactive",
+      prompt: values.prompt,
+      ephemeral: values.ephemeral,
+    } satisfies ProductOperation.Input,
+    selectedMode === undefined ? undefined : { mode: selectedMode },
+    selectedWorkspace === undefined ? undefined : { workspace: selectedWorkspace },
+    selectedThread === undefined ? undefined : { threadId: selectedThread },
+  )
   if (selectedWorkspace === undefined) return dispatch(input)
   return FileSystem.FileSystem.pipe(
     Effect.flatMap((fileSystem) => Effect.result(fileSystem.stat(selectedWorkspace))),
@@ -107,10 +109,7 @@ export const command = Command.make(
       let remoteThreadCreation: "allowed" | "denied" | undefined
       if (values.allowRemoteThreadCreation) remoteThreadCreation = "allowed"
       else if (values.denyRemoteThreadCreation) remoteThreadCreation = "denied"
-      return RunnerCommand.dispatch({
-        ...(optionalValue(values.workspace) === undefined ? {} : { workspace: optionalValue(values.workspace) }),
-        ...(remoteThreadCreation === undefined ? {} : { remoteThreadCreation }),
-      })
+      return RunnerCommand.dispatch({ workspace: optionalValue(values.workspace), remoteThreadCreation })
     }
     if (values.execute) return executeRun(values)
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking)

@@ -7,6 +7,7 @@ import * as Settings from "@rika/configuration/configuration-settings"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Cause, ConfigProvider, Effect, Exit, Schema } from "effect"
 import * as Registration from "../src/registration"
 import { profileInstructions } from "../src/route"
@@ -100,7 +101,7 @@ it.effect("builds exact closed root and title executables with role-specific too
       ...route,
       compactionSummary: {
         ...route.compactionSummary,
-        registrationIdentity: "test-compaction-route" as (typeof route.compactionSummary)["registrationIdentity"],
+        registrationIdentity: modelRegistrationIdentity("test-compaction-route"),
       },
     }
     const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel })
@@ -170,8 +171,9 @@ it.effect("builds exact closed root and title executables with role-specific too
       reserveTokens: executionRoute.main.compaction.reserveTokens,
       strategyIdentity: executionRoute.compaction.strategy,
       summaryModel: configured.registrations.find(
-        ({ codec, payload }) =>
-          codec === "rika-model-route" && (payload as { readonly role?: string }).role === "compaction",
+        (registration) =>
+          registration.codec === "rika-model-route" &&
+          Schema.decodeUnknownSync(Registration.codecs.modelRoute.payload)(registration.payload).role === "compaction",
       )?.pin,
       summaryPromptIdentity: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
@@ -205,7 +207,7 @@ it.effect("builds exact closed root and title executables with role-specific too
     expect(
       configured.registrations
         .filter(({ codec }) => codec === "rika-tool")
-        .map(({ payload }) => (payload as { readonly name: string }).name),
+        .map(({ payload }) => Schema.decodeUnknownSync(Registration.codecs.tool.payload)(payload).name),
     ).toContain(CellTool.name)
     const advertised = new Set(
       agentEntries(configured).flatMap((entry) => entry.manifest.tools.map(({ name }) => name)),
@@ -231,7 +233,7 @@ it.effect("delegates persisted provider-option decoding to TenetKit", () =>
     const candidate = {
       ...route.main.candidates[0]!,
       model: "bedrock-test",
-      registrationIdentity: "bedrock-registration" as (typeof route.main.candidates)[number]["registrationIdentity"],
+      registrationIdentity: modelRegistrationIdentity("bedrock-registration"),
       providerConnection: {
         provider: "amazon-bedrock",
         protocol: "amazon-bedrock" as const,
@@ -270,7 +272,7 @@ it.effect("changes executable identity for candidate order and workspace", () =>
     const secondCandidate = {
       ...first.main.candidates[0]!,
       model: "test-fallback",
-      registrationIdentity: "test-fallback" as (typeof first.main.candidates)[number]["registrationIdentity"],
+      registrationIdentity: modelRegistrationIdentity("test-fallback"),
     }
     const ordered = { ...first, main: { ...first.main, candidates: [first.main.candidates[0]!, secondCandidate] } }
     const reversed = { ...ordered, main: { ...ordered.main, candidates: ordered.main.candidates.toReversed() } }
@@ -316,8 +318,7 @@ it.effect("resolves an openai candidate through its configured api key environme
         authentication: "api-key" as const,
         apiKeyEnvironment: "SWITCHBOARD_API_KEY",
       },
-      registrationIdentity:
-        "switchboard-registration" as (typeof route.main.candidates)[number]["registrationIdentity"],
+      registrationIdentity: modelRegistrationIdentity("switchboard-registration"),
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
@@ -350,8 +351,7 @@ it.effect("routes an OpenAI Chat Completions candidate through the released comp
         authentication: "api-key" as const,
         apiKeyEnvironment: "CHAT_COMPATIBLE_API_KEY",
       },
-      registrationIdentity:
-        "chat-compatible-registration" as (typeof route.main.candidates)[number]["registrationIdentity"],
+      registrationIdentity: modelRegistrationIdentity("chat-compatible-registration"),
       providerOptions: { max_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
@@ -382,8 +382,7 @@ it.effect("reports the missing api key environment variable by name instead of a
         authentication: "api-key" as const,
         apiKeyEnvironment: "SWITCHBOARD_API_KEY",
       },
-      registrationIdentity:
-        "switchboard-registration" as (typeof route.main.candidates)[number]["registrationIdentity"],
+      registrationIdentity: modelRegistrationIdentity("switchboard-registration"),
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
@@ -402,10 +401,10 @@ type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
 
 const distinct = (model: RouteModel, identity: string): RouteModel => ({
   ...model,
-  registrationIdentity: identity as RouteModel["registrationIdentity"],
+  registrationIdentity: modelRegistrationIdentity(identity),
   candidates: model.candidates.map((candidate) => ({
     ...candidate,
-    registrationIdentity: identity as (typeof candidate)["registrationIdentity"],
+    registrationIdentity: modelRegistrationIdentity(identity),
   })),
 })
 
@@ -587,7 +586,7 @@ it.effect("rejects a registration whose kernel profile payload no longer matches
         ? {
             ...registration,
             payload: {
-              ...(registration.payload as Record<string, unknown>),
+              ...Schema.decodeUnknownSync(Registration.codecs.kernelProfile.payload)(registration.payload),
               trustMode: "trusted-workspace",
             },
           }
@@ -819,7 +818,15 @@ it("documents flat child groups and refuses local work delegated to web-only Lib
   expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")
 })
 
-const budgetDimensions = ["modelCalls", "toolCalls", "totalTokens", "childRuns", "handoffs", "depth", "deadline"]
+const budgetDimensions = [
+  "modelCalls",
+  "toolCalls",
+  "totalTokens",
+  "childRuns",
+  "handoffs",
+  "depth",
+  "deadline",
+] as const
 
 it.effect(
   "resolves every live agent with an unlimited budget so the execution host can never substitute a ceiling",
@@ -833,13 +840,13 @@ it.effect(
         expect(configured.resolverEntries.length).toBeGreaterThan(0)
         for (const resolution of configured.resolverEntries) {
           if (!("agent" in resolution)) continue
-          const budget = resolution.agent.budget
-          expect(budget, `${resolution.agent.name} must carry an explicit budget the host cannot default`).toBeDefined()
+          const budget = resolution.agent.budget ?? {}
+          expect(
+            resolution.agent.budget,
+            `${resolution.agent.name} must carry an explicit budget the host cannot default`,
+          ).toBeDefined()
           for (const dimension of budgetDimensions)
-            expect(
-              (budget as Record<string, unknown>)[dimension],
-              `${resolution.agent.name} must not cap ${dimension}`,
-            ).toBeUndefined()
+            expect(budget[dimension], `${resolution.agent.name} must not cap ${dimension}`).toBeUndefined()
         }
       }),
     ),
@@ -860,7 +867,7 @@ it.effect(
           expect(entry.manifest.budget, `${profileNameOf(entry)} must pin an empty budget`).toEqual({})
           for (const dimension of budgetDimensions)
             expect(
-              (entry.manifest.budget as Record<string, unknown>)[dimension],
+              entry.manifest.budget[dimension],
               `${profileNameOf(entry)} must not cap ${dimension}`,
             ).toBeUndefined()
         }

@@ -189,7 +189,7 @@ it.effect("reports missing config and mixed doctor paths", () =>
 
 it.effect("fails doctor when the configured model route cannot be resolved", () =>
   Effect.gen(function* () {
-    const settings = {
+    const settings: SettingsDefaults.ConfigurationSettings = {
       ...SettingsDefaults.Defaults.defaults,
       modes: {
         ...SettingsDefaults.Defaults.defaults.modes,
@@ -198,7 +198,7 @@ it.effect("fails doctor when the configured model route cannot be resolved", () 
           main: { alias: "missing", effort: "medium" },
         },
       },
-    } as unknown as SettingsDefaults.ConfigurationSettings
+    }
     const layer = Layer.mergeAll(
       TestConsole.layer,
       Layer.succeed(

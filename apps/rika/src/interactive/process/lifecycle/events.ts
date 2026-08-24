@@ -6,22 +6,41 @@ import * as InteractiveController from "../../controller/service"
 import * as ThreadSelection from "../../controller/thread-selection"
 import type { InteractiveRuntimeContext } from "../runtime/context"
 
-type Runtime = Pick<InteractiveRuntimeContext, "loop" | "render"> & {
+type Runtime = Pick<InteractiveRuntimeContext, "render"> & {
+  readonly loop: Pick<
+    InteractiveRuntimeContext["loop"],
+    | "closed"
+    | "ctrlCMenuVisible"
+    | "model"
+    | "modelPreview"
+    | "requestedThreadId"
+    | "submittedSinceIdle"
+    | "threadView"
+  > & {
+    readonly renderer:
+      | {
+          readonly surface: {
+            readonly showCtrlCMenu: (visible: boolean) => void
+            readonly showToast: (message: string, color?: string) => void
+            readonly update: (model: InteractiveRuntimeContext["loop"]["model"], preserveAnchor?: boolean) => void
+          }
+        }
+      | undefined
+  }
   readonly refreshTerminalTitle: () => void
   readonly requestSelectionResync: (threadId: string) => void
 }
 
 export const makeEventRouter = (runtime: Runtime) => {
   const { loop, refreshTerminalTitle, render, requestSelectionResync } = runtime
+  const controllerState = (): InteractiveController.State => {
+    let state: InteractiveController.State = { model: loop.model }
+    if (loop.threadView !== undefined) state = { ...state, view: loop.threadView }
+    if (loop.modelPreview !== undefined) state = { ...state, modelPreview: loop.modelPreview }
+    return state
+  }
   const clearModelPreview = (turnId?: string) => {
-    const cleared = InteractiveController.clearPreview(
-      {
-        model: loop.model,
-        ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
-        ...(loop.modelPreview === undefined ? {} : { modelPreview: loop.modelPreview }),
-      },
-      turnId,
-    )
+    const cleared = InteractiveController.clearPreview(controllerState(), turnId)
     loop.model = cleared.model
     loop.threadView = cleared.view
     loop.modelPreview = cleared.modelPreview
@@ -48,14 +67,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         return
       const previousThreadId = loop.model.currentThreadId
       const previousThreadTitle = loop.model.currentThreadTitle
-      const controlled = InteractiveController.update(
-        {
-          model: loop.model,
-          ...(loop.threadView === undefined ? {} : { view: loop.threadView }),
-          ...(loop.modelPreview === undefined ? {} : { modelPreview: loop.modelPreview }),
-        },
-        event,
-      )
+      const controlled = InteractiveController.update(controllerState(), event)
       loop.model = controlled.state.model
       loop.threadView = controlled.state.view
       loop.modelPreview = controlled.state.modelPreview
@@ -78,42 +90,53 @@ export const makeEventRouter = (runtime: Runtime) => {
     }
     if (event._tag === "SubmissionAdmitted") {
       if (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-        loop.model = update(loop.model, {
-          _tag: "SubmissionAdmitted",
-          turnId: event.turnId,
-          status: event.status,
-          ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
-        })
+        loop.model =
+          event.submissionId === undefined
+            ? update(loop.model, { _tag: "SubmissionAdmitted", turnId: event.turnId, status: event.status })
+            : update(loop.model, {
+                _tag: "SubmissionAdmitted",
+                turnId: event.turnId,
+                status: event.status,
+                submissionId: event.submissionId,
+              })
     } else if (event._tag === "SubmissionRejected") {
-      loop.model = update(loop.model, {
-        _tag: "SubmissionRejected",
-        message: event.message,
-        ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
-      })
+      loop.model =
+        event.submissionId === undefined
+          ? update(loop.model, { _tag: "SubmissionRejected", message: event.message })
+          : update(loop.model, {
+              _tag: "SubmissionRejected",
+              message: event.message,
+              submissionId: event.submissionId,
+            })
     } else if (event._tag === "ThreadsListed") {
       loop.model = update(loop.model, {
         _tag: "ThreadsReplaced",
-        threads: event.threads.map((thread) => ({
-          id: thread.id,
-          title: thread.title,
-          workspace: thread.workspace,
-          pinned: thread.pinned,
-          archived: thread.archived,
-          status: thread.status,
-          unread: thread.unread,
-          lastActivityAt: thread.lastActivityAt,
-          ...(thread.editTotals === undefined ? {} : { editTotals: thread.editTotals }),
-        })),
+        threads: event.threads.map((thread) => {
+          const summary = {
+            id: thread.id,
+            title: thread.title,
+            workspace: thread.workspace,
+            pinned: thread.pinned,
+            archived: thread.archived,
+            status: thread.status,
+            unread: thread.unread,
+            lastActivityAt: thread.lastActivityAt,
+          }
+          return thread.editTotals === undefined ? summary : { ...summary, editTotals: thread.editTotals }
+        }),
       })
     } else if (event._tag === "ExecutionControlled") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       if (event.action === "cancelled") {
         clearModelPreview(event.turnId)
-        loop.model = update(loop.model, {
-          _tag: "ExecutionCancelled",
-          ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-          ...(event.agentResponseArrived === undefined ? {} : { agentResponseArrived: event.agentResponseArrived }),
-        })
+        if (event.turnId === undefined)
+          loop.model = event.agentResponseArrived === undefined
+            ? update(loop.model, { _tag: "ExecutionCancelled" })
+            : update(loop.model, { _tag: "ExecutionCancelled", agentResponseArrived: event.agentResponseArrived })
+        else
+          loop.model = event.agentResponseArrived === undefined
+            ? update(loop.model, { _tag: "ExecutionCancelled", turnId: event.turnId })
+            : update(loop.model, { _tag: "ExecutionCancelled", turnId: event.turnId, agentResponseArrived: event.agentResponseArrived })
       }
     } else if (event._tag === "ExecutionControlFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
@@ -124,11 +147,9 @@ export const makeEventRouter = (runtime: Runtime) => {
           message: event.failure.message,
         })
       if (event.action === "cancel")
-        loop.model = update(loop.model, {
-          _tag: "CancelFailed",
-          ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-          message: event.failure.message,
-        })
+        loop.model = event.turnId === undefined
+          ? update(loop.model, { _tag: "CancelFailed", message: event.failure.message })
+          : update(loop.model, { _tag: "CancelFailed", turnId: event.turnId, message: event.failure.message })
       if (event.action === "approve" || event.action === "deny")
         loop.renderer?.surface.showToast(
           `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.failure.message}`,
@@ -154,11 +175,9 @@ export const makeEventRouter = (runtime: Runtime) => {
     } else if (event._tag === "ExecutionFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       clearModelPreview(event.turnId)
-      loop.model = update(loop.model, {
-        _tag: "ExecutionFailed",
-        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-        failure: event.failure,
-      })
+      loop.model = event.turnId === undefined
+        ? update(loop.model, { _tag: "ExecutionFailed", failure: event.failure })
+        : update(loop.model, { _tag: "ExecutionFailed", turnId: event.turnId, failure: event.failure })
     } else if (event._tag === "QueueFull") {
       if (loop.model.currentThreadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = ThreadSelection.updateQueue(loop.model, event).model
@@ -171,10 +190,9 @@ export const makeEventRouter = (runtime: Runtime) => {
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "GoalChanged") {
       if (loop.model.currentThreadId !== event.threadId) return
-      loop.model = update(loop.model, {
-        _tag: "GoalChanged",
-        ...(event.goal === undefined ? {} : { goal: event.goal }),
-      })
+      loop.model = event.goal === undefined
+        ? update(loop.model, { _tag: "GoalChanged" })
+        : update(loop.model, { _tag: "GoalChanged", goal: event.goal })
     } else if (event._tag === "ThreadActivated") {
       loop.requestedThreadId = event.threadId
       loop.model = update(loop.model, { _tag: "ThreadActivated", threadId: event.threadId, title: event.title })

@@ -362,7 +362,7 @@ export const repositoryLayer = (options: {
           )
         : { version: 1 as const, records: [] }
       const records = yield* Ref.make(
-        new Map(loaded.records.map((record) => [record.ptyId, record as Record] as const)),
+        new Map(loaded.records.map((record) => [record.ptyId, Schema.decodeSync(StoredRecord)(record)] as const)),
       )
 
       const persist = Effect.fn("Pty.Repository.persist")(function* (next: Map<string, Record>) {

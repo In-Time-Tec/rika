@@ -1,14 +1,17 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Model } from "../../../state/model"
-import type { TranscriptBlock } from "../../../state/transcript/model"
+import { decodeTranscriptBlocks, type TranscriptBlock } from "../../../state/transcript/model"
 import { inputValue, toolKind } from "../../../presentation/transcript/tool/detail"
 import type { ToolKind } from "../../../presentation/transcript/tool/kinds"
 
 export const toolInputValue = inputValue
-const inputStringImpl = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
+const inputStringImpl = (
+  value: ReturnType<typeof inputValue>,
+  keys: ReadonlyArray<keyof ReturnType<typeof inputValue>>,
+): string | undefined => {
   for (const key of keys) {
     const candidate = value[key]
-    if (typeof candidate === "string" && candidate.length > 0) return candidate
+    if (Schema.is(Schema.String)(candidate) && candidate.length > 0) return candidate
   }
   return undefined
 }
@@ -58,9 +61,10 @@ export const exploreChildLabel = (unit: ToolUnit): string => {
 }
 const toolUnitsForImpl = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
   indices.map((index) => {
-    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+    const block = decodeTranscriptBlocks(model.blocks)[index]
+    if (block?._tag !== "ToolCall") return undefined
     return { kind: toolKind(block.name, undefined), block, index }
-  })
+  }).filter((unit): unit is ToolUnit => unit !== undefined)
 
 export const toolUnitsFor: {
   (

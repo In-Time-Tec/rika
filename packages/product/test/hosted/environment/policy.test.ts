@@ -23,22 +23,24 @@ const reference = (
   scope: EnvironmentReference["scope"],
   name: string,
   overrides: Partial<EnvironmentReference> = {},
-): EnvironmentReference => ({
-  id: EnvironmentReferenceId.make(`${scope}-${name}`),
-  ownerId: "owner-1",
-  ...(scope === "project" ? { projectId: "project-1" } : {}),
-  scope,
-  scopeId: `${scope}-1`,
-  name,
-  classification: "secret",
-  phases: ["setup", "runtime"],
-  revision: "1",
-  valueDigest: digest,
-  state: "active",
-  updatedByUserId: "user-1",
-  updatedAt: "2026-08-21T00:00:00.000Z",
-  ...overrides,
-})
+): EnvironmentReference => {
+  const base: EnvironmentReference = {
+    id: EnvironmentReferenceId.make(`${scope}-${name}`),
+    ownerId: "owner-1",
+    scope,
+    scopeId: `${scope}-1`,
+    name,
+    classification: "secret",
+    phases: ["setup", "runtime"],
+    revision: "1",
+    valueDigest: digest,
+    state: "active",
+    updatedByUserId: "user-1",
+    updatedAt: "2026-08-21T00:00:00.000Z",
+    ...overrides,
+  }
+  return scope === "project" ? { ...base, projectId: "project-1" } : base
+}
 
 describe("hosted environment policy", () => {
   it("applies organization, project, and personal precedence with organization override policy", () => {

@@ -114,7 +114,7 @@ export const layer = Layer.effect(
         url,
         privateJwk,
         jti,
-        ...(accessToken === undefined ? {} : { accessToken }),
+        accessToken,
       })
       return request.pipe(
         HttpClientRequest.setHeader("DPoP", value),
@@ -215,18 +215,20 @@ export const layer = Layer.effect(
                   return yield* responseError(response.status, "Device authorization")
                 }),
           ),
-          Effect.flatMap((wire) =>
-            Schema.decodeUnknownEffect(DeviceAuthorization)({
+          Effect.flatMap((wire) => {
+            const authorization = {
               deviceCode: wire.device_code,
               userCode: wire.user_code,
               verificationUri: wire.verification_uri,
-              ...(wire.verification_uri_complete === undefined
-                ? {}
-                : { verificationUriComplete: wire.verification_uri_complete }),
               expiresIn: wire.expires_in,
               interval: wire.interval ?? 5,
-            }).pipe(Effect.mapError(() => failure("protocol", "Device authorization returned invalid timing"))),
-          ),
+            }
+            return Schema.decodeEffect(DeviceAuthorization)(
+              wire.verification_uri_complete === undefined
+                ? authorization
+                : { ...authorization, verificationUriComplete: wire.verification_uri_complete },
+            ).pipe(Effect.mapError(() => failure("protocol", "Device authorization returned invalid timing")))
+          }),
           Effect.filterOrFail(
             (authorization) => authorization.expiresIn > 0 && authorization.interval > 0,
             () => failure("protocol", "Device authorization returned invalid timing"),
@@ -459,7 +461,7 @@ export const layer = Layer.effect(
           HttpClientRequest.put(url).pipe(
             HttpClientRequest.bodyJsonUnsafe({
               owner: ownerWire(owner),
-              ...(project === undefined ? {} : { project_id: project }),
+              project_id: project,
               scope,
               classification: "secret",
               phases,
@@ -479,7 +481,7 @@ export const layer = Layer.effect(
           HttpClientRequest.delete(url).pipe(
             HttpClientRequest.bodyJsonUnsafe({
               owner: ownerWire(owner),
-              ...(project === undefined ? {} : { project_id: project }),
+              project_id: project,
               scope,
             }),
           ),
@@ -497,7 +499,7 @@ export const layer = Layer.effect(
             HttpClientRequest.setHeader("idempotency-key", operationKey),
             HttpClientRequest.bodyJsonUnsafe({
               commit_sha: commitSha,
-              ...(targetBranch === undefined ? {} : { target_branch: targetBranch }),
+              target_branch: targetBranch,
               title,
               body,
             }),

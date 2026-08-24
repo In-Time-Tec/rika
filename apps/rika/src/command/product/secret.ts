@@ -14,25 +14,30 @@ const set = Command.make("set", { name: nameArgument, scope: scopeFlag, phase: p
         Effect.fail(
           CliError.UserError.make({ cause: "Missing secret value", userMessage: "A secret value is required" }),
         ),
-      onSome: (secret) =>
-        dispatch({
+      onSome: (secret) => {
+        const input: Parameters<typeof dispatch>[0] = {
           _tag: "Secret",
           action: "put",
           name,
           value: secret,
-          ...(Option.isSome(scope) ? { scope: scope.value } : {}),
-          ...(Option.isSome(phase) ? { phase: phase.value } : {}),
-        }),
+        }
+        if (Option.isSome(scope)) Object.assign(input, { scope: scope.value })
+        if (Option.isSome(phase)) Object.assign(input, { phase: phase.value })
+        return dispatch(input)
+      },
     }),
   ),
 )
 
 const revoke = Command.make("revoke", { name: nameArgument, scope: scopeFlag }, ({ name, scope }) =>
-  dispatch({
+  Option.match(scope, {
+    onNone: () => dispatch({ _tag: "Secret", action: "revoke", name }),
+    onSome: (selectedScope) => dispatch({
     _tag: "Secret",
     action: "revoke",
     name,
-    ...(Option.isSome(scope) ? { scope: scope.value } : {}),
+    scope: selectedScope,
+    }),
   }),
 )
 

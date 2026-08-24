@@ -10,12 +10,12 @@ import { cursorFor, pageSize } from "../memory/state"
 import { decode, decodeAgent } from "./row-codec"
 import { readTurn } from "./reader"
 import { listAgentTurns } from "./queries"
-import { makeTurnSqlQueue } from "./queue"
-import { makeTurnSqlAdmission } from "./admission"
-import { makeTurnSqlSteeringAdmission } from "./steering-admission"
-import { makeTurnSqlState } from "./state"
-import { makeTurnSqlSubmission } from "./submission"
-import { makeTurnSqlRecordedShell } from "./recorded-shell"
+import * as TurnSqlQueue from "./queue"
+import * as TurnSqlAdmission from "./admission"
+import * as TurnSqlSteeringAdmission from "./steering-admission"
+import * as TurnSqlState from "./state"
+import * as TurnSqlSubmission from "./submission"
+import * as TurnSqlRecordedShell from "./recorded-shell"
 
 export const layer = Layer.effect(
   Service,
@@ -23,12 +23,12 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient
     const get = Effect.fn("TurnRepository.get")((id: TurnId) => readTurn(sql, id))
     return Service.of({
-      ...makeTurnSqlSubmission(sql),
-      ...makeTurnSqlRecordedShell(sql),
-      ...makeTurnSqlQueue(sql),
-      ...makeTurnSqlAdmission(sql),
-      ...makeTurnSqlSteeringAdmission(sql),
-      ...makeTurnSqlState(sql),
+      ...TurnSqlSubmission.makeTurnSqlSubmission(sql),
+      ...TurnSqlRecordedShell.makeTurnSqlRecordedShell(sql),
+      ...TurnSqlQueue.makeTurnSqlQueue(sql),
+      ...TurnSqlAdmission.makeTurnSqlAdmission(sql),
+      ...TurnSqlSteeringAdmission.makeTurnSqlSteeringAdmission(sql),
+      ...TurnSqlState.makeTurnSqlState(sql),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId): Effect.fn.Return<
         ReadonlyArray<import("@rika/product/turn-record").Turn>,

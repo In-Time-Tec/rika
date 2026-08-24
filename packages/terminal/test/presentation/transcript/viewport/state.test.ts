@@ -4,22 +4,31 @@ import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
 import type { ViewportAnchor } from "../../../../src/presentation/transcript/viewport/state"
 import { initial, type Model } from "../../../../src/state/model"
+import { orderedTranscriptItems } from "../../../../src/presentation/transcript/row"
 import { _collapsedSubagentModel, openTui } from "../projection.fixture"
 
-interface ViewportProbe {
-  readonly transcriptPane: {
-    readonly home: () => void
-    readonly pageDown: () => void
+class ViewportProbeSurface extends Surface {
+  public get viewportMode() {
+    return this.transcriptViewport.mode
   }
-  readonly transcriptViewport: {
-    readonly mode: { readonly _tag: string; readonly anchor?: ViewportAnchor }
+  public get viewportAnchorUnitId(): string | undefined {
+    return this.transcriptViewport.mode._tag === "Anchored" ? this.transcriptViewport.mode.anchor.unitId : undefined
   }
-  captureViewportAnchor: () => ViewportAnchor | undefined
-  dispatchTranscriptViewport: (
-    event:
-      | { readonly _tag: "DetachCommanded"; readonly anchor: ViewportAnchor | undefined }
-      | { readonly _tag: "AnchorRebased"; readonly anchor: ViewportAnchor },
-  ) => void
+  public detachViewport(): void {
+    this.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: this.captureViewportAnchor() })
+  }
+  public rebaseViewport(anchor: ViewportAnchor): void {
+    this.dispatchTranscriptViewport({ _tag: "AnchorRebased", anchor })
+  }
+  public viewportAnchor(): ViewportAnchor | undefined {
+    return this.captureViewportAnchor()
+  }
+  public viewportHome(): void {
+    this.transcriptPane.home()
+  }
+  public viewportPageDown(): void {
+    this.transcriptPane.pageDown()
+  }
 }
 
 const framesUntilIdle = (recorder: TestRecorder, finalFrame: string) => {
@@ -125,7 +134,7 @@ const detailCases = [
 it.effect("publishes an expanded transcript as one settled frame", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
     const recorder = new TestRecorder(setup.renderer)
     try {
       const collapsed = _collapsedSubagentModel(4, 50)
@@ -177,17 +186,16 @@ it.effect.each(detailCases)("publishes expanded %s as one settled frame", ([_, e
 it.effect("publishes collapse, scroll clamp, anchor fallback, and scrollbar removal in one frame", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
     const recorder = new TestRecorder(setup.renderer)
     try {
       const collapsed = _collapsedSubagentModel(0, 50)
       surface.update({ ...collapsed, expandedRowKeys: ["tool:root-tool"] })
       yield* openTui(() => setup.flush())
       surface.transcriptScroll.scrollTop = 20
-      const probe = surface as unknown as ViewportProbe
-      probe.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: probe.captureViewportAnchor() })
+      surface.detachViewport()
       yield* openTui(() => setup.flush())
-      expect(probe.transcriptViewport.mode._tag).toBe("Anchored")
+      expect(surface.viewportMode._tag).toBe("Anchored")
 
       recorder.rec()
       surface.update(collapsed)
@@ -200,7 +208,7 @@ it.effect("publishes collapse, scroll clamp, anchor fallback, and scrollbar remo
       expect(finalFrame).not.toContain("cmd-")
       expect(surface.transcriptScroll.scrollTop).toBe(0)
       expect(surface.transcriptScrollbar.visible).toBe(false)
-      expect(probe.transcriptViewport.mode._tag).toBe("Following")
+      expect(surface.viewportMode._tag).toBe("Following")
     } finally {
       recorder.stop()
       surface.destroy()
@@ -212,27 +220,30 @@ it.effect("publishes collapse, scroll clamp, anchor fallback, and scrollbar remo
 it.effect("rebases an anchor removed by collapse to a surviving transcript row", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
     const recorder = new TestRecorder(setup.renderer)
     try {
       const source = _collapsedSubagentModel(80, 50)
-      const items = source.items as ReadonlyArray<{ readonly _tag: "Block" | "Entry" }>
+      const items = orderedTranscriptItems(source)
       const collapsed = {
         ...source,
-        items: [...items.filter((item) => item._tag === "Block"), ...items.filter((item) => item._tag === "Entry")],
+        items: [
+          ...items.filter((item) => item._tag === "Block"),
+          ...items.filter((item) => item._tag === "Entry"),
+        ],
       }
       surface.update({ ...collapsed, expandedRowKeys: ["tool:root-tool"] })
       yield* openTui(() => setup.flush())
-      const probe = surface as unknown as ViewportProbe
-      probe.transcriptPane.home()
+      surface.viewportHome()
       yield* openTui(() => setup.flush())
-      probe.transcriptPane.pageDown()
+      surface.viewportPageDown()
       yield* openTui(() => setup.flush())
-      const visibleAnchor = probe.captureViewportAnchor()
+      const visibleAnchor = surface.viewportAnchor()
       expect(visibleAnchor).toBeDefined()
-      probe.dispatchTranscriptViewport({ _tag: "AnchorRebased", anchor: visibleAnchor! })
+      if (visibleAnchor === undefined) throw new Error("Expected a visible transcript anchor")
+      surface.rebaseViewport(visibleAnchor)
       yield* openTui(() => setup.flush())
-      const removedAnchor = probe.transcriptViewport.mode.anchor?.unitId
+      const removedAnchor = surface.viewportAnchorUnitId
       expect(removedAnchor).toMatch(/^tool:child-/)
 
       recorder.rec()
@@ -241,10 +252,10 @@ it.effect("rebases an anchor removed by collapse to a surviving transcript row",
       recorder.stop()
 
       framesUntilIdle(recorder, setup.captureCharFrame())
-      expect(probe.transcriptViewport.mode._tag).toBe("Anchored")
-      const anchor = probe.transcriptViewport.mode.anchor
-      expect(anchor?.unitId).not.toBe(removedAnchor)
-      expect(surface.transcriptDiagnostics().keys).toContain(anchor?.unitId)
+      expect(surface.viewportMode._tag).toBe("Anchored")
+      const anchorUnitId = surface.viewportAnchorUnitId
+      expect(anchorUnitId).not.toBe(removedAnchor)
+      expect(surface.transcriptDiagnostics().keys).toContain(anchorUnitId)
     } finally {
       recorder.stop()
       surface.destroy()

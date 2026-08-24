@@ -83,11 +83,11 @@ export interface ResolveEnvironmentInput {
   readonly organizationPersonalOverrides: boolean
 }
 
-const scopeRank: Readonly<Record<EnvironmentScope, number>> = {
+const scopeRank = {
   organization: 1,
   project: 2,
   personal: 3,
-}
+} satisfies Readonly<Record<EnvironmentScope, number>>
 
 export const sourceMayReceiveSecrets = (input: {
   readonly source: SourceTrust
@@ -109,19 +109,22 @@ export const sourceMayReceiveSecrets = (input: {
 
 export const resolveEnvironmentReferences = (input: ResolveEnvironmentInput): ReadonlyArray<EnvironmentReference> => {
   const selected = new Map<string, EnvironmentReference>()
+  const mayReceiveSecrets = (reference: EnvironmentReference) =>
+    input.approval === undefined
+      ? sourceMayReceiveSecrets({ source: input.source, phase: input.phase, ownerId: reference.ownerId })
+      : sourceMayReceiveSecrets({
+          source: input.source,
+          phase: input.phase,
+          approval: input.approval,
+          ownerId: reference.ownerId,
+        })
   const candidates = [...input.candidates]
     .map(({ reference }) => reference)
     .filter(
       (reference) =>
         reference.state === "active" &&
         reference.phases.includes(input.phase) &&
-        (reference.classification === "plain" ||
-          sourceMayReceiveSecrets({
-            source: input.source,
-            phase: input.phase,
-            ...(input.approval === undefined ? {} : { approval: input.approval }),
-            ownerId: reference.ownerId,
-          })),
+        (reference.classification === "plain" || mayReceiveSecrets(reference)),
     )
     .sort(
       (left, right) =>
@@ -186,15 +189,15 @@ export const resolveEgressPolicy = (input: {
   readonly protectedHosts?: ReadonlySet<string>
 }): PhaseEgressPolicy | undefined => {
   const allow = input.approved.map((destination) =>
-    normalizeEgressDestination({
-      destination,
-      ...(input.protectedHosts === undefined ? {} : { protectedHosts: input.protectedHosts }),
-    }),
+    input.protectedHosts === undefined
+      ? normalizeEgressDestination({ destination })
+      : normalizeEgressDestination({ destination, protectedHosts: input.protectedHosts }),
   )
   if (allow.some((entry) => entry === undefined)) return undefined
+  const destinations = allow.flatMap((entry) => (entry === undefined ? [] : [entry]))
   return {
     phase: input.phase,
-    allow: [...new Set(allow as ReadonlyArray<string>)].sort(),
+    allow: [...new Set(destinations)].sort(),
   }
 }
 

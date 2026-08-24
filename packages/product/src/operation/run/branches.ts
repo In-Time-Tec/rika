@@ -34,7 +34,7 @@ export interface ProductOperationRunFactory extends ProductOperationRuntimeState
   ) => string
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly operationError: typeof import("../error").operationError
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly extensionOperations: typeof ExtensionOperations
   readonly configOperations: typeof import("../contract/configuration")
   readonly publishInteractiveActivity: (

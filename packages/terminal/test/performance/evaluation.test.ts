@@ -344,7 +344,7 @@ test("publishes the running-tool spinner frame while the selected agent is worki
       const clock = new ManualClock()
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
       const frames: Array<string | undefined> = []
-      const running = streamingShell("title-spinner")
+      const running = streamingShell("title-spinner", undefined)
       const working: Model = {
         ...initial("/work", "high"),
         width: 100,
@@ -362,14 +362,9 @@ test("publishes the running-tool spinner frame while the selected agent is worki
       )
       const header = () =>
         styledTextValue(
-          (
-            surface as unknown as {
-              readonly transcriptRecords: ReadonlyMap<
-                string,
-                { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
-              >
-            }
-          ).transcriptRecords.get("tool:title-spinner:header")!.renderable.content,
+          surface.transcriptDiagnostics().rows[
+            surface.transcriptDiagnostics().keys.indexOf("tool:title-spinner:header")
+          ]?.content ?? "",
         )
       try {
         surface.update(working)
@@ -422,14 +417,9 @@ test("does not animate a cancelled subagent again when a new turn starts", () =>
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
       const header = () =>
         styledTextValue(
-          (
-            surface as unknown as {
-              readonly transcriptRecords: ReadonlyMap<
-                string,
-                { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
-              >
-            }
-          ).transcriptRecords.get("tool:cancelled-parent:header")!.renderable.content,
+          surface.transcriptDiagnostics().rows[
+            surface.transcriptDiagnostics().keys.indexOf("tool:cancelled-parent:header")
+          ]?.content ?? "",
         )
       try {
         surface.update(cancelled)
@@ -469,7 +459,7 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
           id: "tool-call",
           cursor: "1",
           turnId: "turn",
-          block: streamingShell("tool-lull"),
+          block: streamingShell("tool-lull", undefined),
         },
       })
       model = update(model, {

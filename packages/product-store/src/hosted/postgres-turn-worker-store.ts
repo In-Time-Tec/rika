@@ -74,17 +74,19 @@ interface TurnRow {
 
 const decodeInput = (row: TurnRow) =>
   Effect.gen(function* () {
-    const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(row.executionRouteJson)
+    const executionRoute = yield* Schema.decodeEffect(ExecutionRouteJson)(row.executionRouteJson)
     const promptParts =
-      row.promptPartsJson === null ? undefined : yield* Schema.decodeUnknownEffect(PromptPartsJson)(row.promptPartsJson)
-    return yield* Schema.decodeUnknownEffect(ExecutionGateway.StartTurn)({
+      row.promptPartsJson === null ? undefined : yield* Schema.decodeEffect(PromptPartsJson)(row.promptPartsJson)
+    const input = {
       threadId: row.threadId,
       turnId: row.turnId,
       workspaceId: row.workspaceId,
       prompt: row.prompt,
       executionRoute,
-      ...(promptParts === undefined ? {} : { promptParts }),
-    })
+    }
+    return yield* Schema.decodeEffect(ExecutionGateway.StartTurn)(
+      promptParts === undefined ? input : { ...input, promptParts },
+    )
   }).pipe(Effect.mapError(failure))
 
 const claim = (
@@ -282,7 +284,7 @@ export const layer = Layer.effect(
             const existing = rows[0]
             if (existing === undefined) return yield* failure("Claimed Turn does not exist")
             if (existing.executionLinkJson !== null) {
-              const persisted = yield* Schema.decodeUnknownEffect(ExecutionLinkJson)(existing.executionLinkJson).pipe(
+              const persisted = yield* Schema.decodeEffect(ExecutionLinkJson)(existing.executionLinkJson).pipe(
                 Effect.mapError(failure),
               )
               if (!Schema.toEquivalence(ExecutionGateway.ExecutionLink)(persisted, link))

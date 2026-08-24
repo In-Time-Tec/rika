@@ -59,19 +59,18 @@ export const inspectRunnerCheckout = Effect.fn("RunnerCheckout.inspect")(functio
   const repositoryIdentity = digest([remoteUrl ?? repositoryPath])
   const checkoutFingerprint = digest([input.deviceId, checkoutPath, repositoryIdentity])
   const workspaceIdentity = `runner:${digest([input.deviceId, checkoutFingerprint])}`
+  const repository: RunnerRegistration["repository"] = { identity: repositoryIdentity }
+  if (remoteUrl !== undefined) Object.assign(repository, { remoteUrl })
+  if (headRevision !== undefined) Object.assign(repository, { headRevision })
+  if (branch !== undefined) Object.assign(repository, { branch })
   return {
     workspacePath: checkoutPath,
     registration: {
       deviceId: DeviceId.make(input.deviceId),
       checkoutFingerprint: CheckoutFingerprint.make(checkoutFingerprint),
-      repository: {
-        identity: repositoryIdentity,
-        ...(remoteUrl === undefined ? {} : { remoteUrl }),
-        ...(headRevision === undefined ? {} : { headRevision }),
-        ...(branch === undefined ? {} : { branch }),
-      },
+      repository,
       workspaceIdentity: WorkspaceId.make(workspaceIdentity),
-      kernel: { runtime: "bun", runtimeVersion: process.versions.bun, trustMode: "trusted-local" },
+      kernel: { runtime: "bun", runtimeVersion: process.versions.bun ?? "unknown", trustMode: "trusted-local" },
       capabilities: { cells: true, checkpoints: false, pty: false },
       remoteThreadCreation: input.remoteThreadCreation,
     },

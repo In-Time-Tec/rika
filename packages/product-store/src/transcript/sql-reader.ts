@@ -9,6 +9,40 @@ import type { TurnId } from "@rika/product/turn-record"
 import { decode } from "../turn/postgres/row-codec"
 
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
+const TurnRow = Schema.Struct({
+  id: Schema.String,
+  thread_id: Schema.String,
+  turn_kind: Schema.String,
+  prompt: Schema.String,
+  status: Schema.String,
+  execution_route_json: Schema.NullOr(Schema.String),
+  execution_link_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  prompt_parts_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  shell_command: Schema.NullOr(Schema.String),
+  shell_result_text: Schema.NullOr(Schema.String),
+  shell_result_truncated: Schema.NullOr(Schema.Finite),
+  shell_result_exit_code: Schema.NullOr(Schema.Finite),
+  author_json: Schema.String,
+  lineage_json: Schema.String,
+  created_at: Schema.Finite,
+  updated_at: Schema.Finite,
+})
+const ProjectionRow = Schema.Struct({
+  ...TurnRow.fields,
+  checkpoint_generation: Schema.Finite,
+  revision: Schema.Finite,
+  projection_version: Schema.Finite,
+  state_json: Schema.String,
+  projector_version: Schema.NullOr(Schema.Finite),
+  projector_cursor: Schema.NullOr(Schema.String),
+  projector_state: Schema.NullOr(Schema.String),
+})
+const UnitRow = Schema.Struct({
+  unit_key: Schema.String,
+  unit_order_key: Schema.String,
+  parent_id: Schema.NullOr(Schema.String),
+  unit_json: Schema.String,
+})
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
 
@@ -21,15 +55,16 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
     FROM rika_transcript_checkpoints c
     JOIN rika_turns t ON t.id = c.turn_id
     WHERE c.turn_id = ${turnId}`.pipe(Effect.mapError(error))
-  const row = rows[0] as Record<string, unknown> | undefined
-  if (row === undefined) return undefined
+  const rawRow = rows[0]
+  if (rawRow === undefined) return undefined
+  const row = yield* Schema.decodeUnknownEffect(ProjectionRow)(rawRow).pipe(Effect.mapError(error))
   const turn = yield* decode(row).pipe(Effect.mapError(error))
   const unitRows = yield* sql`SELECT unit_key, unit_order_key, parent_id, unit_json
     FROM rika_transcript_units WHERE turn_id = ${turnId} ORDER BY unit_order_key ASC`.pipe(Effect.mapError(error))
   const units = yield* Effect.forEach(unitRows, (raw) =>
     Effect.gen(function* () {
-      const unitRow = raw as Record<string, unknown>
-      const unit = yield* Schema.decodeUnknownEffect(UnitJson)(unitRow.unit_json).pipe(Effect.mapError(error))
+      const unitRow = yield* Schema.decodeUnknownEffect(UnitRow)(raw).pipe(Effect.mapError(error))
+      const unit = yield* Schema.decodeEffect(UnitJson)(unitRow.unit_json).pipe(Effect.mapError(error))
       if (
         unit.key !== unitRow.unit_key ||
         unit.turnId !== turnId ||
@@ -43,7 +78,7 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
       return unit
     }),
   )
-  const state = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutionProjection.ProjectionState))(
+  const state = yield* Schema.decodeEffect(Schema.fromJsonString(ExecutionProjection.ProjectionState))(
     row.state_json,
   ).pipe(Effect.mapError(error))
   const projectorValues = [row.projector_version, row.projector_cursor, row.projector_state]
@@ -57,13 +92,14 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
           state: String(row.projector_state),
         }
       : undefined
-  return {
+  const projection: Projection = {
     turn,
     units,
     checkpointGeneration: Number(row.checkpoint_generation),
     revision: Number(row.revision),
     state,
-    ...(projectorCheckpoint === undefined ? {} : { projectorCheckpoint }),
     projectionVersion: Number(row.projection_version),
   }
+  if (projectorCheckpoint !== undefined) Object.assign(projection, { projectorCheckpoint })
+  return projection
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import { NestedOperation, Prompt, Session } from "tenetkit"
 import * as ContextBinding from "@rika/kernel/context-binding"
 import { journal, mountModules } from "../../support/binding"
@@ -11,7 +11,7 @@ const message = (id: string, text: string): Session.Entry => ({
   message: Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text })] }),
 })
 
-const compaction = (id: string, summary: string): Session.Entry => ({
+const compaction = (id: string, summary: string): Session.CompactionEntry => ({
   _tag: "Compaction",
   id,
   parentId: null,
@@ -66,11 +66,11 @@ const sessionStore = (entries: ReadonlyArray<Session.Entry>): Recorder => {
       reserveEntryId: Effect.succeed("reserved"),
       append: (entry) => {
         appended.push(entry)
-        return Effect.succeed(entry as Session.Entry)
+        return Effect.succeed(message("appended", ""))
       },
       appendCheckpoint: (checkpoint) => {
         appended.push(checkpoint)
-        return Effect.succeed({ checkpoint, leafId: "leaf" } as never)
+        return Effect.succeed({ _tag: "Appended", checkpoint: compaction("checkpoint", checkpoint.summary ?? ""), leafId: "leaf" })
       },
       path: () => Effect.succeed(entries),
       setLeaf: () => Effect.void,
@@ -135,7 +135,9 @@ describe("context binding", () => {
       const response = yield* mounted.invoke({ module: "context", operation: "historyPage", input: { limit: 10 } })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success") {
-        const entries = (response.output as { readonly entries: ReadonlyArray<{ id: string }> }).entries
+        const { entries } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ entries: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+        )(response.output)
         expect(entries.map((entry) => entry.id)).toEqual(["1", "2", "3"])
       }
     }),
@@ -267,15 +269,17 @@ describe("context binding", () => {
                 }),
               ],
             }),
-          } as unknown as Session.Entry,
+          },
         ]),
       )
       const response = yield* mounted.invoke({ module: "context", operation: "historyPage", input: { limit: 5 } })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success") {
-        const first = (response.output as { readonly entries: ReadonlyArray<{ readonly text: string }> }).entries[0]!
-        expect(first.text).toContain("weighing the options")
-        expect(first.text).toContain("typescript")
+        const { entries } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ entries: Schema.Array(Schema.Struct({ text: Schema.String })) }),
+        )(response.output)
+        expect(entries[0]?.text).toContain("weighing the options")
+        expect(entries[0]?.text).toContain("typescript")
       }
     }),
   )

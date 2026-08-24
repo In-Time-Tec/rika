@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest"
 import type { Account, CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import { ClientTicketResponse } from "@rika/product/client-protocol"
 import * as HostedPostgres from "@rika/product-store/postgres-layer"
 import { ApiMessage, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
 import { Config, Context, Effect, FileSystem, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
@@ -41,7 +42,6 @@ import {
   ProfileStore,
   ThreadClient,
   type Credential,
-  type PrivateJwk,
 } from "../../src/hosted/contract"
 import { generate } from "../../src/hosted/dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
@@ -101,7 +101,7 @@ const webRequest = (request: HttpClientRequest.HttpClientRequest) => {
   return new Request(request.url, {
     method: request.method,
     headers: request.headers,
-    ...(body === undefined ? {} : { body }),
+    body,
   })
 }
 
@@ -156,7 +156,7 @@ it.layer(BunServices.layer)((test) => {
           }
           const socket: Socket = {
             send: (frame) => {
-              const message = Schema.decodeUnknownSync(Schema.fromJsonString(ApiMessage))(frame)
+              const message = Schema.decodeSync(Schema.fromJsonString(ApiMessage))(frame)
               if (message._tag === "ExecutorWelcome") helloAccepted += 1
               if (message._tag === "CellExecute") {
                 operations.push(message)
@@ -358,7 +358,14 @@ it.layer(BunServices.layer)((test) => {
             toolPolicy,
             threads: {
               issueTicket: () =>
-                Effect.succeed({ ticket: "thread-ticket", expiresAt: "2026-08-21T07:00:00.000Z" as never }),
+                Effect.succeed(
+                  Schema.decodeSync(ClientTicketResponse)({
+                    ticket: "thread-ticket",
+                    expiresAt: "2026-08-21T07:00:00.000Z",
+                    websocketUrl: "wss://api.example.test/api/v1/threads",
+                    protocol: "rika.thread.v1",
+                  }),
+                ),
               connect: () => Effect.die("The test Thread client handles the canonical command boundary"),
             },
             recovery: {
@@ -442,7 +449,7 @@ it.layer(BunServices.layer)((test) => {
                     Option.some(
                       credential ?? {
                         refreshToken: Redacted.make("refresh-token"),
-                        privateJwk: privateJwk as PrivateJwk,
+                        privateJwk,
                       },
                     ),
                   ),
@@ -470,16 +477,17 @@ it.layer(BunServices.layer)((test) => {
               ThreadClient,
               ThreadClient.of({
                 create: () => Effect.die("unused"),
-                submit: ({ threadId, request, commandId }) =>
-                  product
-                    .admitRun({
-                      principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
-                      threadId,
-                      operationKey: commandId,
-                      prompt: request.prompt.join("\n"),
-                      ...(request.mode === undefined ? {} : { mode: request.mode }),
-                    })
-                    .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message }))),
+                submit: ({ threadId, request, commandId }) => {
+                  const admission = {
+                    principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
+                    threadId,
+                    operationKey: commandId,
+                    prompt: request.prompt.join("\n"),
+                  }
+                  return product
+                    .admitRun(request.mode === undefined ? admission : { ...admission, mode: request.mode })
+                    .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message })))
+                },
                 ensureService: () => Effect.die("unused"),
                 stopService: () => Effect.die("unused"),
                 openPortal: () => Effect.die("unused"),
@@ -501,7 +509,7 @@ it.layer(BunServices.layer)((test) => {
                 HostedCommand.Service.of({ run: (input) => HostedCli.run(input).pipe(Effect.provide(services)) }),
               ),
             ),
-          ).pipe(Layer.provide(hostedDependencies)) as Layer.Layer<typeof HostedCommand.Service>
+          ).pipe(Layer.provide(hostedDependencies))
           const cli = yield* Layer.build(
             Layer.mergeAll(
               BunServices.layer,

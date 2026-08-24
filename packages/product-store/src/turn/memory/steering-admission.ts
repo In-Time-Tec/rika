@@ -30,21 +30,25 @@ type PrepareResult<A> =
 const cloneOutcome = (outcome: SteeringAdmission["outcome"]): SteeringAdmission["outcome"] => {
   if (outcome._tag === "Pending") return { _tag: "Pending" }
   if (outcome._tag === "Accepted") return { _tag: "Accepted", receipt: structuredClone(outcome.receipt) }
-  return {
-    _tag: "Rejected",
-    failure: SteeringFailure.make({ kind: outcome.failure.kind, message: outcome.failure.message }),
-    ...(outcome.queue === undefined ? {} : { queue: structuredClone(outcome.queue) }),
-  }
+  const failure = SteeringFailure.make({ kind: outcome.failure.kind, message: outcome.failure.message })
+  return outcome.queue === undefined
+    ? { _tag: "Rejected", failure }
+    : { _tag: "Rejected", failure, queue: structuredClone(outcome.queue) }
 }
 
-const cloneAdmission = (admission: SteeringAdmission): SteeringAdmission => ({
-  target: structuredClone(admission.target),
-  input: structuredClone(admission.input),
-  ...(admission.source === undefined ? {} : { source: clone(admission.source) }),
-  ...(admission.sourceWithdrawn === undefined ? {} : { sourceWithdrawn: admission.sourceWithdrawn }),
-  preparedAt: admission.preparedAt,
-  outcome: cloneOutcome(admission.outcome),
-})
+const cloneAdmission = (admission: SteeringAdmission): SteeringAdmission => {
+  const cloned = {
+    target: structuredClone(admission.target),
+    input: structuredClone(admission.input),
+    preparedAt: admission.preparedAt,
+    outcome: cloneOutcome(admission.outcome),
+  }
+  if (admission.source === undefined)
+    return admission.sourceWithdrawn === undefined ? cloned : { ...cloned, sourceWithdrawn: admission.sourceWithdrawn }
+  return admission.sourceWithdrawn === undefined
+    ? { ...cloned, source: clone(admission.source) }
+    : { ...cloned, source: clone(admission.source), sourceWithdrawn: admission.sourceWithdrawn }
+}
 
 const sameSource = (left: SteeringAdmission["source"], right: AgentExecutionTurn | undefined) =>
   left === undefined ? right === undefined : right !== undefined && left.id === right.id
@@ -87,14 +91,19 @@ const pendingAdmission = (
   source: AgentExecutionTurn | undefined,
   now: number,
   sourceWithdrawn = false,
-): SteeringAdmission => ({
-  target: structuredClone(target),
-  input: structuredClone(input),
-  ...(source === undefined ? {} : { source: clone(source) }),
-  ...(sourceWithdrawn ? { sourceWithdrawn: true } : {}),
-  preparedAt: now,
-  outcome: { _tag: "Pending" },
-})
+): SteeringAdmission => {
+  const outcome: SteeringAdmission["outcome"] = { _tag: "Pending" }
+  const admission = {
+    target: structuredClone(target),
+    input: structuredClone(input),
+    preparedAt: now,
+    outcome,
+  }
+  if (source === undefined) return sourceWithdrawn ? { ...admission, sourceWithdrawn: true } : admission
+  return sourceWithdrawn
+    ? { ...admission, source: clone(source), sourceWithdrawn: true }
+    : { ...admission, source: clone(source) }
+}
 
 export const makeTurnMemorySteeringAdmission = ({
   modifyState,
@@ -339,13 +348,14 @@ export const makeTurnMemorySteeringAdmission = ({
             nextState = withQueueState(state, turn.threadId, next)
           }
         }
+        const rejectedFailure = SteeringFailure.make({ kind: failure.kind, message: failure.message })
+        const outcome =
+          queue === undefined
+            ? { _tag: "Rejected" as const, failure: rejectedFailure }
+            : { _tag: "Rejected" as const, failure: rejectedFailure, queue }
         const rejected: SteeringAdmission = {
           ...admission,
-          outcome: {
-            _tag: "Rejected",
-            failure: SteeringFailure.make({ kind: failure.kind, message: failure.message }),
-            ...(queue === undefined ? {} : { queue }),
-          },
+          outcome,
         }
         return [
           { _tag: "Ok", value: cloneAdmission(rejected) },

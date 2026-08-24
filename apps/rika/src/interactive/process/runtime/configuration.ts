@@ -1,6 +1,6 @@
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Effect, FileSystem, Function, Schema } from "effect"
+import { Cause, Effect, FileSystem, Function, Option, Schema } from "effect"
 
 export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (filename: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -12,7 +12,7 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
         SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({ path: filename, message: String(error) }),
       ),
     )
-  const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
+  const value = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError((error) =>
       SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
         path: filename,
@@ -26,9 +26,8 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
 export const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
   if (failure instanceof Error) return failure.name
-  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
-    return failure._tag
-  return typeof failure
+  const tagged = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))(failure)
+  return Option.isSome(tagged) ? tagged.value._tag : "Unknown"
 }
 
 const withClientWorkspaceImpl = (input: ProductOperation.Input, workspace: string): ProductOperation.Input => {

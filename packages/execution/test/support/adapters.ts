@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { configure as configureRoute, type ConfigureOptions } from "../../src/route"
 import { layerMemory, remoteCells, type MemoryOptions } from "../../src/runtime"
 import * as RemoteCells from "../../src/remote-cells"
+import type { RunEvent } from "tenetkit/runtime"
 
 export const remoteCell = remoteCells({
   cells: RemoteCells.layer({
@@ -15,7 +16,9 @@ export const configure = (options: Omit<ConfigureOptions, "cell">): ReturnType<t
 
 export const memoryLayer = (options: Omit<MemoryOptions, "cells">) => layerMemory({ ...options, cells: remoteCell })
 
-export const successfulRemoteCell = (result: unknown) =>
+type ToolResult = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionCompleted" }>["result"]["result"]
+
+export const successfulRemoteCell = (result: ToolResult) =>
   remoteCells({
     cells: RemoteCells.layer({
       execute: () => Effect.succeed({ _tag: "Success", result }),

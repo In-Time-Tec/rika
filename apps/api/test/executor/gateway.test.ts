@@ -1,6 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
+import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import {
   ApiMessage,
@@ -23,6 +24,7 @@ import {
   type Socket,
 } from "../../src/executor/gateway"
 import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
+import * as CellAuthority from "@rika/kernel/test-cell-authority"
 
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
@@ -196,15 +198,25 @@ const makeGateway = (
     ),
   )
 
-const bindings = {
+const bindings: BindingAuthority = {
   registry: HostBindingRegistry.HostBindingRegistry.of({
     descriptors: [],
     resolve: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
     invoke: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
   }),
-  context: Context.empty(),
+  context: Effect.runSync(CellAuthority.capture()),
   manifest: { digest: "a".repeat(64), descriptors: [] },
-} as unknown as BindingAuthority
+}
+
+const bindingAuthority = (
+  registry: HostBindingRegistry.Interface,
+  context: Context.Context<never>,
+  digest: string,
+): BindingAuthority => ({
+  registry,
+  context: Effect.runSync(CellAuthority.capture(context)),
+  manifest: { digest, descriptors: registry.descriptors },
+})
 
 const fence = {
   target: "orb" as const,
@@ -240,7 +252,10 @@ const attribution = (operationKey: string) => ({
   attempt: cellIdentity.attempt,
 })
 
-const socket = () => {
+const socket = (): Socket & {
+  readonly sent: Array<string>
+  readonly closed: Array<readonly [number | undefined, string | undefined]>
+} => {
   const sent: Array<string> = []
   const closed: Array<readonly [number | undefined, string | undefined]> = []
   return {
@@ -248,9 +263,6 @@ const socket = () => {
     closed,
     send: (message: string) => sent.push(message),
     close: (code?: number, reason?: string) => closed.push([code, reason]),
-  } as Socket & {
-    readonly sent: Array<string>
-    readonly closed: Array<readonly [number | undefined, string | undefined]>
   }
 }
 
@@ -261,6 +273,7 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
     resume: () => Effect.die("unused"),
     pause: () => Effect.die("unused"),
     kill: () => Effect.die("unused"),
+    portal: () => Effect.die("unused"),
     hello: () =>
       Effect.succeed({
         version: 1,
@@ -291,7 +304,7 @@ const controller = (overrides: Partial<Controller> = {}): Controller =>
     activatePhase: () => Effect.die("unused"),
     cleanupOrphans: Effect.die("unused"),
     ...overrides,
-  }) as Controller
+  })
 
 const workspaceReady = (gateway: Gateway, target: ReturnType<typeof socket>, current = access) => {
   const retained = target.sent.length
@@ -1100,11 +1113,7 @@ describe("executor gateway", () => {
             ),
           ),
       })
-      const authority = {
-        registry,
-        context,
-        manifest: { digest: "c".repeat(64), descriptors: registry.descriptors },
-      } as unknown as BindingAuthority
+      const authority = bindingAuthority(registry, context, "c".repeat(64))
       const target = socket()
       let reconnectLease = 1
       const gateway = yield* makeGateway(
@@ -1349,11 +1358,7 @@ describe("executor gateway", () => {
             ),
           ),
       })
-      const authority = {
-        registry,
-        context,
-        manifest: { digest: "d".repeat(64), descriptors: registry.descriptors },
-      } as unknown as BindingAuthority
+      const authority = bindingAuthority(registry, context, "d".repeat(64))
       const target = socket()
       const gateway = yield* makeGateway(controller())
       yield* gateway.receive(
@@ -1435,8 +1440,13 @@ describe("executor gateway", () => {
             new Set([Logger.map(Logger.formatStructured, (record) => observability.push(record))]),
           ),
         )
-      const nestedRequests: Array<NestedOperation.Request> = []
+      const nestedRequests: Array<{
+        readonly kind: string
+        readonly replayPolicy: string
+        readonly approval: NestedOperation.Request["approval"]
+      }> = []
       const signal = yield* Effect.abortSignal
+      const machineContext = yield* Layer.build(MachineBindings.layer({ execute: () => Effect.die("unused") }))
       const context = Context.empty().pipe(
         Context.add(
           ToolContext.ToolContext,
@@ -1453,7 +1463,11 @@ describe("executor gateway", () => {
           NestedOperation.NestedOperations,
           NestedOperation.NestedOperations.of({
             run: (request) => {
-              nestedRequests.push(request as unknown as NestedOperation.Request)
+              nestedRequests.push({
+                kind: request.kind,
+                replayPolicy: request.replayPolicy,
+                approval: request.approval,
+              })
               return NestedOperation.NestedOperationSuspended.make({
                 token: "approval-token",
                 operationKey: "operation-bindings",
@@ -1463,15 +1477,10 @@ describe("executor gateway", () => {
             },
           }),
         ),
+        Context.merge(machineContext),
       )
-      const registry = yield* HostBindingRegistry.make([
-        WorkspaceBinding.module as HostBindingRegistry.Module<never>,
-      ]).pipe(Effect.provideContext(context))
-      const authority = {
-        registry,
-        context,
-        manifest: { digest: "b".repeat(64), descriptors: registry.descriptors },
-      } as unknown as BindingAuthority
+      const registry = yield* HostBindingRegistry.make([WorkspaceBinding.module]).pipe(Effect.provideContext(context))
+      const authority = bindingAuthority(registry, context, "b".repeat(64))
       const target = socket()
       const gateway = yield* makeGateway(controller())
       yield* gateway.receive(

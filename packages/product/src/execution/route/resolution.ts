@@ -2,6 +2,7 @@ import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { ModelRoute } from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import { Defaults, type ConfigurationSettings } from "@rika/configuration/configuration-settings"
+import { Schema } from "effect"
 import { dual } from "effect/Function"
 import { createHash } from "node:crypto"
 import { defaultCompactionSummaryPrompt } from "../compaction/prompt"
@@ -25,11 +26,10 @@ export interface RouteAuthentication {
   }
 }
 
-const canonical = (value: unknown): string => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
+const canonical = (value: Schema.Json): string => {
+  if (!Schema.is(Schema.JsonObject)(value) && !Array.isArray(value)) return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
-  return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([, entry]) => entry !== undefined)
+  return `{${Object.entries(value)
     .toSorted(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
     .join(",")}}`
@@ -76,66 +76,78 @@ const connectionSnapshot = (
       accountFingerprint: account.fingerprint,
     }
   }
-  return {
+  const snapshot = {
     provider: route.providerId,
     protocol: connection.protocol,
     baseUrl: connection.protocol === "amazon-bedrock" ? bedrockUrl(connection) : normalizedUrl(connection.baseUrl),
     authentication: connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined ? "api-key" : "none",
-    ...(connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined
-      ? { apiKeyEnvironment: connection.apiKeyEnv }
-      : {}),
-    ...(connection.protocol !== "amazon-bedrock" && connection.credentialIdentity !== undefined
-      ? { credentialIdentity: connection.credentialIdentity }
-      : {}),
+  } satisfies ProviderConnectionSnapshot
+  if (connection.protocol !== "amazon-bedrock" && connection.apiKeyEnv !== undefined) {
+    if (connection.credentialIdentity !== undefined)
+      return {
+        ...snapshot,
+        apiKeyEnvironment: connection.apiKeyEnv,
+        credentialIdentity: connection.credentialIdentity,
+      }
+    return { ...snapshot, apiKeyEnvironment: connection.apiKeyEnv }
   }
+  if (connection.protocol !== "amazon-bedrock" && connection.credentialIdentity !== undefined)
+    return { ...snapshot, credentialIdentity: connection.credentialIdentity }
+  return snapshot
 }
 
 const providerOptions = (
   route: ModelRouteResolution.ResolvedModelRoute,
   authentication: ProviderConnectionSnapshot["authentication"],
-): Readonly<Record<string, unknown>> => {
+): NonNullable<ExecutionRouteModelCandidateSnapshot["providerOptions"]> => {
+  let providerOptionValues
   switch (route.providerConnection.protocol) {
     case "openai-responses": {
       if (authentication === "account") {
         const { max_output_tokens: _, ...options } = route.options
-        return { ...options, store: false }
+        return Schema.decodeSync(Schema.JsonObject)({ ...options, store: false })
       }
-      return { ...route.options, max_output_tokens: route.maxOutputTokens }
+      providerOptionValues = { ...route.options, max_output_tokens: route.maxOutputTokens }
+      break
     }
     case "openai-chat-completions":
-      return { ...route.options, max_tokens: route.maxOutputTokens }
+      providerOptionValues = { ...route.options, max_tokens: route.maxOutputTokens }
+      break
     case "anthropic":
-      return { ...route.options, max_tokens: route.maxOutputTokens }
+      providerOptionValues = { ...route.options, max_tokens: route.maxOutputTokens }
+      break
     case "openrouter":
-      return { ...route.options, max_tokens: route.maxOutputTokens }
+      providerOptionValues = { ...route.options, max_tokens: route.maxOutputTokens }
+      break
     case "amazon-bedrock":
-      return { ...route.options, maxTokens: route.maxOutputTokens }
+      providerOptionValues = { ...route.options, maxTokens: route.maxOutputTokens }
+      break
   }
+  return Schema.decodeSync(Schema.JsonObject)(providerOptionValues)
 }
 
 const registrationIdentity = (
   route: ModelRouteResolution.ResolvedModelRoute,
   providerConnection: ProviderConnectionSnapshot,
-  options: Readonly<Record<string, unknown>>,
+  options: NonNullable<ExecutionRouteModelCandidateSnapshot["providerOptions"]>,
   candidateIndex?: number,
-) =>
-  modelRegistrationIdentity(
-    `rika:model:v1:${createHash("sha256")
-      .update(
-        canonical({
-          selection: route.selection,
-          candidates: route.candidates,
-          compaction: route.compaction,
-          effort: route.effort,
-          fast: route.fast,
-          options,
-          provider: route.providerId,
-          providerConnection,
-          ...(candidateIndex === undefined ? {} : { candidateIndex }),
-        }),
-      )
-      .digest("hex")}`,
+) => {
+  const identity = {
+    selection: route.selection,
+    candidates: route.candidates,
+    compaction: route.compaction,
+    effort: route.effort,
+    fast: route.fast,
+    options,
+    provider: route.providerId,
+    providerConnection,
+  }
+  const canonicalIdentity: Schema.JsonObject = Schema.decodeUnknownSync(Schema.JsonObject)(identity)
+  const identityValue = candidateIndex === undefined ? canonicalIdentity : { ...canonicalIdentity, candidateIndex }
+  return modelRegistrationIdentity(
+    `rika:model:v1:${createHash("sha256").update(canonical(identityValue)).digest("hex")}`,
   )
+}
 
 const snapshot = (
   route: ModelRouteResolution.ResolvedModelRoute,
@@ -144,14 +156,14 @@ const snapshot = (
 ): ExecutionRouteModelSnapshot => {
   const providerConnection = connectionSnapshot(route, authentication)
   const options = providerOptions(route, providerConnection.authentication)
-  const candidates = route.candidates.map(
+  const candidates: ExecutionRouteModelSnapshot["candidates"] = route.candidates.map(
     (model, index): ExecutionRouteModelCandidateSnapshot => ({
       model,
       providerConnection,
       registrationIdentity: registrationIdentity(route, providerConnection, options, index),
       providerOptions: options,
     }),
-  ) as ExecutionRouteModelSnapshot["candidates"]
+  )
   return {
     role,
     selection: route.selection,
@@ -197,7 +209,7 @@ export const resolve: {
     authentication?: RouteAuthentication,
   ): ExecutionRouteSnapshot
 } = dual(
-  (arguments_) => typeof arguments_[0] === "object",
+  (arguments_) => Schema.is(Schema.Struct({ providers: Schema.Unknown }))(arguments_[0]),
   (
     settings: ConfigurationSettings,
     mode: ModeId,
@@ -206,16 +218,37 @@ export const resolve: {
   ): ExecutionRouteSnapshot => {
     const main = snapshot(tunedModeRoute(settings, mode, "main", tuning), "main", authentication)
     const oracle = snapshot(tunedModeRoute(settings, mode, "oracle", tuning), "oracle", authentication)
-    const agents = Object.fromEntries(
-      ModelRouteResolution.agentIds.map((agent) => [
-        agent,
-        snapshot(ModelRouteResolution.resolveAgentRoute(settings, mode, agent, tuning), agent, authentication),
-      ]),
-    ) as NonNullable<ExecutionRouteSnapshot["agents"]>
-    return {
+    const agents: ExecutionRouteSnapshot["agents"] = {
+      librarian: snapshot(
+        ModelRouteResolution.resolveAgentRoute(settings, mode, "librarian", tuning),
+        "librarian",
+        authentication,
+      ),
+      painter: snapshot(
+        ModelRouteResolution.resolveAgentRoute(settings, mode, "painter", tuning),
+        "painter",
+        authentication,
+      ),
+      readThread: snapshot(
+        ModelRouteResolution.resolveAgentRoute(settings, mode, "readThread", tuning),
+        "readThread",
+        authentication,
+      ),
+      review: snapshot(
+        ModelRouteResolution.resolveAgentRoute(settings, mode, "review", tuning),
+        "review",
+        authentication,
+      ),
+      surgeon: snapshot(
+        ModelRouteResolution.resolveAgentRoute(settings, mode, "surgeon", tuning),
+        "surgeon",
+        authentication,
+      ),
+      task: snapshot(ModelRouteResolution.resolveAgentRoute(settings, mode, "task", tuning), "task", authentication),
+    }
+    const executionRoute = {
       version: 3,
       mode,
-      ...(tuning?.tokenBudget === undefined ? {} : { tokenBudget: tuning.tokenBudget }),
       subagents: settings.subagents,
       compaction: { strategy: "default", summaryPrompt: defaultCompactionSummaryPrompt },
       title: snapshot(ModelRouteResolution.resolveThreadTitleRoute(settings), "title", authentication),
@@ -227,6 +260,8 @@ export const resolve: {
       main,
       oracle,
       agents,
-    }
+    } satisfies ExecutionRouteSnapshot
+    if (tuning?.tokenBudget !== undefined) return { ...executionRoute, tokenBudget: tuning.tokenBudget }
+    return executionRoute
   },
 )

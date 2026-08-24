@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import Prism from "prismjs"
 import "prismjs/components/prism-typescript.js"
 import "prismjs/components/prism-jsx.js"
@@ -61,15 +61,16 @@ const tokenRole = (type: string): Role => {
 }
 
 type Run = { readonly text: string; readonly role: Role }
+const isString = Schema.is(Schema.String)
 
 const flatten = (tokens: ReadonlyArray<string | Prism.Token>, parent: Role, out: Array<Run>): void => {
   for (const token of tokens) {
-    if (typeof token === "string") {
+    if (isString(token)) {
       out.push({ text: token, role: parent })
       continue
     }
     const role = tokenRole(token.type) === "plain" ? parent : tokenRole(token.type)
-    if (typeof token.content === "string") out.push({ text: token.content, role })
+    if (isString(token.content)) out.push({ text: token.content, role })
     else if (Array.isArray(token.content)) flatten(token.content, role, out)
     else flatten([token.content], role, out)
   }
@@ -78,7 +79,7 @@ const flatten = (tokens: ReadonlyArray<string | Prism.Token>, parent: Role, out:
 const grammarFor = (lang: string | undefined): Prism.Grammar | undefined =>
   lang === undefined || lang.length === 0 ? undefined : Prism.languages[lang.toLowerCase()]
 
-const extensionLanguages: Record<string, string> = {
+const extensionLanguages = new Map<string, string>(Object.entries({
   ts: "typescript",
   mts: "typescript",
   cts: "typescript",
@@ -102,11 +103,11 @@ const extensionLanguages: Record<string, string> = {
   md: "markdown",
   html: "markup",
   css: "css",
-}
+}))
 
 export const languageForPath = (path: string): string | undefined => {
   const extension = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase()
-  return extension === undefined ? undefined : extensionLanguages[extension]
+  return extension === undefined ? undefined : extensionLanguages.get(extension)
 }
 
 const highlightCache = new Map<string, ReadonlyArray<ReadonlyArray<TerminalTextChunk>>>()

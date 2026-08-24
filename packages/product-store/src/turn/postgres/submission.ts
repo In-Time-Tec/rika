@@ -2,9 +2,13 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { QueueFull } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
+import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
 import { decodeAgent, decodeQueueState } from "./row-codec"
 import { turnRowJson } from "./row-json-codec"
 import { missing, repositoryError, submissionError } from "../memory/errors"
+const ReservedCountRow = Schema.Struct({ count: Schema.FiniteFromString })
+const reservedCount = (row: SqlRow | undefined) =>
+  row === undefined ? Effect.succeed(0) : Schema.decodeUnknownEffect(ReservedCountRow)(row).pipe(Effect.map((value) => value.count))
 export const makeTurnSqlSubmission = (sql: SqlClient): Pick<Interface, "createForSubmission" | "copy"> => ({
   createForSubmission: Effect.fn("TurnRepository.createForSubmission")(function* (input) {
     const promptParts =
@@ -52,8 +56,7 @@ export const makeTurnSqlSubmission = (sql: SqlClient): Pick<Interface, "createFo
             return yield* QueueFull.make({
               threadId: input.threadId,
               capacity: input.queueCapacity,
-              count:
-                state.queued_count + Number((reservedRows[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
+              count: state.queued_count + (yield* reservedCount(reservedRows[0])),
             })
           }
           const state = yield* decodeQueueState(queueRows[0])
@@ -113,8 +116,7 @@ export const makeTurnSqlSubmission = (sql: SqlClient): Pick<Interface, "createFo
             return yield* QueueFull.make({
               threadId: turn.threadId,
               capacity: queueCapacity,
-              count:
-                state.queued_count + Number((reservedRows[0] as { readonly count?: unknown } | undefined)?.count ?? 0),
+              count: state.queued_count + (yield* reservedCount(reservedRows[0])),
             })
           }
           const state = yield* decodeQueueState(queueRows[0])

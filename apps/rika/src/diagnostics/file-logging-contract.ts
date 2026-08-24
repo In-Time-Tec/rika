@@ -1,3 +1,5 @@
+import { Schema } from "effect"
+
 export const modelBackendKinds = ["provider", "test-script", "test-response"] as const
 
 export type ModelBackendKind = (typeof modelBackendKinds)[number]
@@ -88,16 +90,23 @@ export type FailureKind = (typeof failureKinds)[number]
 
 const failureKindSet: ReadonlySet<string> = new Set(failureKinds)
 
-export const isFailureKind = (value: unknown): value is FailureKind =>
-  typeof value === "string" && failureKindSet.has(value)
+export const isFailureKind = (value: string): value is FailureKind => failureKindSet.has(value)
 
 export const failure = (kind: FailureKind) => ({ "rika.failure.kind": kind })
 
-export const failureFrom = (value: unknown) => {
+type FailureValue = Error | { readonly _tag: string } | string | number | boolean | bigint | symbol | null | undefined
+
+const TaggedFailure = Schema.Struct({ _tag: Schema.String })
+
+export const failureFrom = (value: FailureValue) => {
   let candidate: string
   if (value instanceof Error) candidate = value.name
-  else if (value !== null && typeof value === "object" && "_tag" in value && typeof value._tag === "string")
-    candidate = value._tag
-  else candidate = typeof value
+  else if (Schema.is(TaggedFailure)(value)) candidate = value._tag
+  else if (Schema.is(Schema.String)(value)) candidate = "string"
+  else if (Schema.is(Schema.Finite)(value)) candidate = "number"
+  else if (Schema.is(Schema.Boolean)(value)) candidate = "boolean"
+  else if (Schema.is(Schema.Undefined)(value)) candidate = "undefined"
+  else if (Schema.is(Schema.Symbol)(value)) candidate = "symbol"
+  else candidate = "object"
   return isFailureKind(candidate) ? failure(candidate) : {}
 }

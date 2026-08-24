@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Effect, Stream } from "effect"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 
 const link = { runId: "opaque", turnId: "turn-1", threadId: "thread-1" }
 
@@ -45,7 +46,7 @@ it.effect("passes one opaque execution link through all gateway operations", () 
       turnId: "turn-1",
       workspaceId: "/workspace",
       prompt: "work",
-      executionRoute: {} as never,
+      executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
     })
     yield* gateway
       .watchTurn(started, {

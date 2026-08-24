@@ -4,7 +4,7 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "../../thread/repository/turn"
 import { clampThreadTitle } from "../../thread/query/title-policy"
 import { isReviewRouteMode, reviewIntent, reviewRouteMode } from "../review/policy"
-import { Cause, Clock, Console, Duration, Effect } from "effect"
+import { Cause, Clock, Console, Duration, Effect, Schema } from "effect"
 import type * as ExecutionProjection from "../../execution/projection/contract"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { turnFailure } from "../failure-message"
@@ -81,16 +81,19 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           thread.title === (clampThreadTitle(turn.prompt) || "New thread")
             ? ({ _tag: "GenerateThreadTitle", expectedTitle: thread.title } as const)
             : undefined
-        yield* dependencies.rootTurnOwner.startTurn({
+        const startBase = {
           threadId: turn.threadId,
           turnId: turn.id,
           workspaceId: thread.workspace,
           prompt: prepared.prompt,
           executionRoute: turn.executionRoute,
-          ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
-          ...(titleIntent === undefined ? {} : { titleIntent }),
-          ...(isReviewRouteMode(turn.executionRoute.mode) ? { reviewIntent: reviewIntent(turn.prompt) } : {}),
-        })
+        }
+        const startWithParts = prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
+        const startWithTitle = titleIntent === undefined ? startWithParts : { ...startWithParts, titleIntent }
+        const startInput = isReviewRouteMode(turn.executionRoute.mode)
+          ? { ...startWithTitle, reviewIntent: reviewIntent(turn.prompt) }
+          : startWithTitle
+        yield* dependencies.rootTurnOwner.startTurn(startInput)
         return yield* dependencies.rootTurnOwner.watchTurn(turn.id, applyChange)
       }).pipe(
         Effect.catch((error) =>
@@ -99,10 +102,13 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
             if (current?._tag === "AgentExecution" && current.executionLink !== undefined)
               return yield* Effect.failCause(Cause.fail(error))
             const failedAt = yield* Clock.currentTimeMillis
+            let failureKind = "object"
+            if (error instanceof Error) failureKind = error.name
+            else if (Schema.is(Schema.String)(error)) failureKind = "string"
             yield* Effect.logError("turn.failed").pipe(
               Effect.annotateLogs({
                 "rika.duration.ms": failedAt - startedAt,
-                "rika.failure.kind": error instanceof Error ? error.name : typeof error,
+                "rika.failure.kind": failureKind,
                 "rika.thread.id": String(thread.id),
                 "rika.turn.id": String(turn.id),
               }),
@@ -115,17 +121,29 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
       const result = execution
       const completedAt = yield* Clock.currentTimeMillis
       const settledFailure = turnFailure(result.units)
+      const failureLog =
+        settledFailure === undefined
+          ? Effect.logError("turn.failed").pipe(
+              Effect.annotateLogs({
+                "rika.duration.ms": completedAt - startedAt,
+                "rika.failure.kind": "OperationError",
+                "rika.thread.id": String(thread.id),
+                "rika.turn.id": String(turn.id),
+                "rika.turn.status": result.status,
+              }),
+            )
+          : Effect.logError("turn.failed").pipe(
+              Effect.annotateLogs({
+                "rika.duration.ms": completedAt - startedAt,
+                "rika.failure.kind": "OperationError",
+                "rika.failure.message": settledFailure,
+                "rika.thread.id": String(thread.id),
+                "rika.turn.id": String(turn.id),
+                "rika.turn.status": result.status,
+              }),
+            )
       yield* result.status === "failed"
-        ? Effect.logError("turn.failed").pipe(
-            Effect.annotateLogs({
-              "rika.duration.ms": completedAt - startedAt,
-              "rika.failure.kind": "OperationError",
-              ...(settledFailure === undefined ? {} : { "rika.failure.message": settledFailure }),
-              "rika.thread.id": String(thread.id),
-              "rika.turn.id": String(turn.id),
-              "rika.turn.status": result.status,
-            }),
-          )
+        ? failureLog
         : Effect.logInfo("turn.finished").pipe(
             Effect.annotateLogs({
               "rika.duration.ms": completedAt - startedAt,
@@ -229,15 +247,17 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           nextAt: (yield* Clock.currentTimeMillis) + Duration.toMillis(delay),
         })
         yield* Effect.sleep(delay)
-        const retried = yield* dependencies.createObservedSubmission(turns, {
+        const retryBase = {
           id: retryTurnId,
           threadId: thread.id,
           prompt: current.prompt,
-          ...(current.promptParts === undefined ? {} : { promptParts: current.promptParts }),
           executionRoute: current.executionRoute,
           queueCapacity: dependencies.pendingTurnCapacity,
           now: yield* Clock.currentTimeMillis,
-        })
+        }
+        const retrySubmission =
+          current.promptParts === undefined ? retryBase : { ...retryBase, promptParts: current.promptParts }
+        const retried = yield* dependencies.createObservedSubmission(turns, retrySubmission)
         const retryTurn = retried.turn
         if (retryTurn.status === "queued") return last
         if (!retried.claimed) return last

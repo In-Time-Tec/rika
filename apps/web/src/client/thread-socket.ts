@@ -22,6 +22,14 @@ const encodeJson = Schema.encodeSync(Json)
 const decodeFrame = Schema.decodeUnknownSync(Schema.fromJsonString(ServerFrame))
 type Payload = typeof ServerFrame.Type.payload
 type Attachment = Extract<Payload, { readonly _tag: "ThreadAttached" }>
+type ClientFrame = {
+  readonly protocolVersion: 1
+  readonly payload:
+    | { readonly _tag: "ClientDecodeFailed"; readonly message: string }
+    | { readonly _tag: "ClientReconnecting"; readonly threadId: string | undefined }
+    | { readonly _tag: "ClientReconnectFailed"; readonly threadId: string; readonly message: string }
+}
+type ThreadFrameDetail = ServerFrame | ClientFrame
 
 let socket: WebSocket | undefined
 let candidate: WebSocket | undefined
@@ -34,7 +42,7 @@ let generation = 0
 
 const failed = (message: string) => ThreadConnectionFailed.make({ message })
 const requestId = (kind: string) => `${kind}:${(sequence += 1)}`
-const emit = (detail: unknown) => window.dispatchEvent(new CustomEvent(frameEventName, { detail }))
+const emit = (detail: ThreadFrameDetail) => window.dispatchEvent(new CustomEvent(frameEventName, { detail }))
 const validateAttachment = (payload: Attachment, threadId: string): ThreadView.ThreadViewAccumulator | undefined => {
   if (
     String(payload.threadId) !== threadId ||

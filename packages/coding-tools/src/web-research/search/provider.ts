@@ -1,12 +1,55 @@
 import { Effect, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import * as Request from "./provider-contract"
 import * as Result from "./result"
 import type { ProviderOptions } from "./provider-options"
 
-const unknownJson = Schema.fromJsonString(Schema.Unknown)
-const decodeBody = (response: HttpClientResponse.HttpClientResponse) =>
-  response.text.pipe(Effect.flatMap(Schema.decodeEffect(unknownJson)))
+const OptionalString = Schema.optionalKey(Schema.NullOr(Schema.String))
+const SearchResultItem = Schema.Struct({
+  url: OptionalString,
+  html_url: OptionalString,
+  title: OptionalString,
+  name: OptionalString,
+  full_name: OptionalString,
+  publishedAt: OptionalString,
+  published_date: OptionalString,
+  publish_date: OptionalString,
+  created_at: OptionalString,
+})
+type SearchResultItem = typeof SearchResultItem.Type
+
+const ParallelItem = Schema.Struct({
+  ...SearchResultItem.fields,
+  excerpts: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+const ParallelPayload = Schema.Struct({ results: Schema.optionalKey(Schema.Array(ParallelItem)) })
+const ExaSearchItem = Schema.Struct({
+  ...SearchResultItem.fields,
+  highlights: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+const ExaSearchPayload = Schema.Struct({ results: Schema.optionalKey(Schema.Array(ExaSearchItem)) })
+const ExaContextPayload = Schema.Struct({ response: OptionalString, context: OptionalString, content: OptionalString })
+const FirecrawlItem = Schema.Struct({ ...SearchResultItem.fields, description: OptionalString })
+const FirecrawlPayload = Schema.Struct({
+  data: Schema.optionalKey(Schema.Struct({ web: Schema.optionalKey(Schema.Array(FirecrawlItem)) })),
+})
+const GithubTextMatch = Schema.Struct({
+  fragments: Schema.optionalKey(Schema.Array(Schema.String)),
+  fragment: OptionalString,
+})
+const GithubItem = Schema.Struct({
+  ...SearchResultItem.fields,
+  text_matches: Schema.optionalKey(Schema.Array(GithubTextMatch)),
+  body: OptionalString,
+  description: OptionalString,
+})
+const GithubPayload = Schema.Struct({ items: Schema.optionalKey(Schema.Array(GithubItem)) })
+
+const decodeParallelPayload = Schema.decodeEffect(Schema.fromJsonString(ParallelPayload))
+const decodeExaSearchPayload = Schema.decodeEffect(Schema.fromJsonString(ExaSearchPayload))
+const decodeExaContextPayload = Schema.decodeEffect(Schema.fromJsonString(ExaContextPayload))
+const decodeFirecrawlPayload = Schema.decodeEffect(Schema.fromJsonString(FirecrawlPayload))
+const decodeGithubPayload = Schema.decodeEffect(Schema.fromJsonString(GithubPayload))
 
 const failure = (provider: string, kind: Result.ProviderFailureKind, message: string) =>
   Result.ProviderFailure.make({ provider, kind, message })
@@ -16,11 +59,12 @@ const mapTransport = (provider: string, cause: unknown) => {
   return failure(provider, /timeout|timed out/i.test(message) ? "timeout" : "transport", message)
 }
 
-const execute = (
+const execute = <A, E>(
   client: HttpClient.HttpClient,
   provider: string,
   request: HttpClientRequest.HttpClientRequest,
-): Effect.Effect<unknown, Result.ProviderFailure> =>
+  decode: (text: string) => Effect.Effect<A, E>,
+): Effect.Effect<A, Result.ProviderFailure> =>
   Effect.gen(function* () {
     const response = yield* client.execute(request).pipe(Effect.mapError((cause) => mapTransport(provider, cause)))
     if (response.status < 200 || response.status >= 300) {
@@ -31,7 +75,8 @@ const execute = (
         return yield* failure(provider, "authentication", `HTTP ${response.status}`)
       return yield* failure(provider, "response", `HTTP ${response.status}`)
     }
-    return yield* decodeBody(response).pipe(
+    return yield* response.text.pipe(
+      Effect.flatMap(decode),
       Effect.mapError((cause) => failure(provider, "response", `Malformed response: ${String(cause)}`)),
     )
   })
@@ -41,25 +86,13 @@ const credential = (provider: string, name: string, apiKey: ProviderOptions["api
     ? Effect.fail(failure(provider, "authentication", `${name} is not configured`))
     : Effect.succeed(Redacted.value(apiKey))
 
-const object = (provider: string, value: unknown): Effect.Effect<Record<string, unknown>, Result.ProviderFailure> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? Effect.succeed(value as Record<string, unknown>)
-    : Effect.fail(failure(provider, "response", "Malformed response: expected an object"))
-
-const array = (value: unknown) => (Array.isArray(value) ? value : [])
-const text = (value: unknown) => (typeof value === "string" ? value : null)
-const excerpts = (value: unknown) => array(value).flatMap((item) => (typeof item === "string" ? [item] : []))
-const urlResult = (
-  item: Record<string, unknown>,
-  excerptValues: ReadonlyArray<string>,
-): Result.SearchResult | undefined => {
-  const url = text(item.url) ?? text(item.html_url)
-  if (url === null) return undefined
+const urlResult = (item: SearchResultItem, excerptValues: ReadonlyArray<string>): Result.SearchResult | undefined => {
+  const url = item.url ?? item.html_url
+  if (url === undefined || url === null) return undefined
   return {
     url,
-    title: text(item.title) ?? text(item.name) ?? text(item.full_name),
-    publishedAt:
-      text(item.publishedAt) ?? text(item.published_date) ?? text(item.publish_date) ?? text(item.created_at),
+    title: item.title ?? item.name ?? item.full_name ?? null,
+    publishedAt: item.publishedAt ?? item.published_date ?? item.publish_date ?? item.created_at ?? null,
     excerpts: excerptValues,
   }
 }
@@ -84,15 +117,13 @@ const makeParallel = (client: HttpClient.HttpClient, options: ProviderOptions): 
             max_chars_total: 40_000,
           }),
         ),
+        decodeParallelPayload,
       )
-      const root = yield* object("parallel", body)
-      if (!Array.isArray(root.results))
+      if (body.results === undefined)
         return yield* failure("parallel", "response", "Malformed response: results missing")
       return {
-        results: root.results.flatMap((value) => {
-          if (typeof value !== "object" || value === null) return []
-          const item = value as Record<string, unknown>
-          const result = urlResult(item, excerpts(item.excerpts))
+        results: body.results.flatMap((item) => {
+          const result = urlResult(item, item.excerpts ?? [])
           return result === undefined ? [] : [result]
         }),
       }
@@ -110,36 +141,35 @@ const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): Reque
     Effect.gen(function* () {
       const key = yield* credential("exa", "EXA_API_KEY", options.apiKey)
       const code = request.kind === "code"
-      const body = yield* execute(
-        client,
-        "exa",
-        HttpClientRequest.post(`${options.baseUrl ?? "https://api.exa.ai"}/${code ? "context" : "search"}`, {
+      const httpRequest = HttpClientRequest.post(
+        `${options.baseUrl ?? "https://api.exa.ai"}/${code ? "context" : "search"}`,
+        {
           headers: exaHeaders(key),
-        }).pipe(
-          HttpClientRequest.bodyJsonUnsafe(
-            code
-              ? { query: combinedQuery(request), tokensNum: "dynamic" }
-              : {
-                  query: combinedQuery(request),
-                  type: "fast",
-                  numResults: Math.min(10, Math.max(1, request.searchQueries.length * 3)),
-                  contents: { highlights: true },
-                },
-          ),
+        },
+      ).pipe(
+        HttpClientRequest.bodyJsonUnsafe(
+          code
+            ? { query: combinedQuery(request), tokensNum: "dynamic" }
+            : {
+                query: combinedQuery(request),
+                type: "fast",
+                numResults: Math.min(10, Math.max(1, request.searchQueries.length * 3)),
+                contents: { highlights: true },
+              },
         ),
       )
-      const root = yield* object("exa", body)
       if (code) {
-        const content = text(root.response) ?? text(root.context) ?? text(root.content)
-        if (content === null) return yield* failure("exa", "response", "Malformed response: formatted context missing")
+        const body = yield* execute(client, "exa", httpRequest, decodeExaContextPayload)
+        const content = body.response ?? body.context ?? body.content
+        if (content === undefined || content === null)
+          return yield* failure("exa", "response", "Malformed response: formatted context missing")
         return { content }
       }
-      if (!Array.isArray(root.results)) return yield* failure("exa", "response", "Malformed response: results missing")
+      const body = yield* execute(client, "exa", httpRequest, decodeExaSearchPayload)
+      if (body.results === undefined) return yield* failure("exa", "response", "Malformed response: results missing")
       return {
-        results: root.results.flatMap((value) => {
-          if (typeof value !== "object" || value === null) return []
-          const item = value as Record<string, unknown>
-          const result = urlResult(item, excerpts(item.highlights))
+        results: body.results.flatMap((item) => {
+          const result = urlResult(item, item.highlights ?? [])
           return result === undefined ? [] : [result]
         }),
       }
@@ -164,30 +194,30 @@ const makeFirecrawl = (client: HttpClient.HttpClient, options: ProviderOptions):
             limit: Math.min(10, Math.max(1, request.searchQueries.length * 2)),
           }),
         ),
+        decodeFirecrawlPayload,
       )
-      const root = yield* object("firecrawl", body)
-      const data = yield* object("firecrawl", root.data)
-      if (!Array.isArray(data.web))
+      if (body.data?.web === undefined)
         return yield* failure("firecrawl", "response", "Malformed response: data.web missing")
       return {
-        results: data.web.flatMap((value) => {
-          if (typeof value !== "object" || value === null) return []
-          const item = value as Record<string, unknown>
-          const description = text(item.description)
-          const result = urlResult(item, description === null ? [] : [description])
+        results: body.data.web.flatMap((item) => {
+          const result = urlResult(
+            item,
+            item.description === undefined || item.description === null ? [] : [item.description],
+          )
           return result === undefined ? [] : [result]
         }),
       }
     }),
 })
 
-const githubExcerpts = (item: Record<string, unknown>) => {
-  const matches = array(item.text_matches).flatMap((match) => {
-    if (typeof match !== "object" || match === null) return []
-    const record = match as Record<string, unknown>
-    return excerpts(record.fragments).concat(text(record.fragment) ?? [])
-  })
-  return matches.concat([item.body, item.description].flatMap((value) => (typeof value === "string" ? [value] : [])))
+const githubExcerpts = (item: typeof GithubItem.Type) => {
+  const matches = (item.text_matches ?? []).flatMap((match) =>
+    (match.fragments ?? []).concat(match.fragment === undefined || match.fragment === null ? [] : [match.fragment]),
+  )
+  return matches.concat(
+    item.body === undefined || item.body === null ? [] : [item.body],
+    item.description === undefined || item.description === null ? [] : [item.description],
+  )
 }
 
 const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
@@ -213,13 +243,11 @@ const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): Re
             },
           },
         ),
+        decodeGithubPayload,
       )
-      const root = yield* object("github", body)
-      if (!Array.isArray(root.items)) return yield* failure("github", "response", "Malformed response: items missing")
+      if (body.items === undefined) return yield* failure("github", "response", "Malformed response: items missing")
       return {
-        results: root.items.flatMap((value) => {
-          if (typeof value !== "object" || value === null) return []
-          const item = value as Record<string, unknown>
+        results: body.items.flatMap((item) => {
           const result = urlResult(item, githubExcerpts(item))
           return result === undefined ? [] : [result]
         }),

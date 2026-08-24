@@ -38,15 +38,17 @@ export const analyze: {
     checkpoint?: { readonly cursor: string; readonly digest: string },
   ): Analysis => {
     const availableTokens = Math.max(0, thresholds.contextWindow - thresholds.reserveTokens)
-    return {
+    const analysis = {
       contextTokens,
       contextWindow: thresholds.contextWindow,
       reserveTokens: thresholds.reserveTokens,
       availableTokens,
       utilization: thresholds.contextWindow === 0 ? 1 : contextTokens / thresholds.contextWindow,
       shouldCompact: contextTokens > availableTokens,
-      ...(checkpoint === undefined ? {} : { checkpointCursor: checkpoint.cursor, checkpointDigest: checkpoint.digest }),
     }
+    return checkpoint === undefined
+      ? analysis
+      : { ...analysis, checkpointCursor: checkpoint.cursor, checkpointDigest: checkpoint.digest }
   },
 )
 

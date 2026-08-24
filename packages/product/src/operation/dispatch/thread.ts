@@ -30,7 +30,7 @@ export interface Dependencies {
     id: string,
   ) => Effect.Effect<Thread.Thread, OperationError, never>
   readonly markdownExport: (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) => string
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly unavailable: (input: Input, message: string) => OperationUnavailable
 }
 
@@ -56,18 +56,22 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
         return
       }
       case "list": {
-        const threads = yield* repository.list({
-          ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-          ...(input.limit === undefined ? {} : { limit: input.limit }),
-        })
+        let threads: ReadonlyArray<Thread.Thread>
+        if (input.includeArchived === undefined)
+          threads = yield* repository.list(input.limit === undefined ? undefined : { limit: input.limit })
+        else
+          threads = yield* repository.list(
+            input.limit === undefined
+              ? { includeArchived: input.includeArchived }
+              : { includeArchived: input.includeArchived, limit: input.limit },
+          )
         yield* Console.log(dependencies.encodeJson(threads))
         return
       }
       case "search": {
-        const candidates = yield* repository.list({
-          ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-          limit: 100,
-        })
+        const searchInput =
+          input.includeArchived === undefined ? { limit: 100 } : { includeArchived: input.includeArchived, limit: 100 }
+        const candidates = yield* repository.list(searchInput)
         const terms = input.query.map((term: string) => term.toLowerCase())
         const matches = candidates
           .filter((thread) => {
@@ -95,7 +99,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             if (thread === undefined) return yield* operationError("No threads exist")
             selected = thread
           } else {
-            selected = yield* Effect.forEach(input.threadIds as ReadonlyArray<string>, (id) =>
+            selected = yield* Effect.forEach(input.threadIds, (id) =>
               dependencies.requireThread(repository, id),
             )
           }
@@ -174,6 +178,12 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
         const statuses = Object.fromEntries(
           statusNames.map((status) => [status, threadTurns.filter((turn) => turn.status === status).length]),
         )
+        let contextUsage = null
+        if (usage.context !== undefined)
+          contextUsage =
+            usageSummary.contextCapacity === undefined
+              ? { inputTokens: usage.context.inputTokens, pending: usage.contextPending }
+              : { inputTokens: usage.context.inputTokens, ...usageSummary.contextCapacity, pending: usage.contextPending }
         yield* Console.log(
           dependencies.encodeJson({
             threadId: thread.id,
@@ -182,14 +192,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             costUsd: usage.costNanoUsd === undefined ? null : usage.costNanoUsd / 1_000_000_000,
             tokens: usage.tokens ?? null,
             activeMillis: usage.active._tag === "Available" ? usage.active.accumulatedMillis : null,
-            context:
-              usage.context === undefined
-                ? null
-                : {
-                    inputTokens: usage.context.inputTokens,
-                    ...(usageSummary.contextCapacity === undefined ? {} : usageSummary.contextCapacity),
-                    pending: usage.contextPending,
-                  },
+            context: contextUsage,
             attempts: {
               priced: usage.pricedAttempts,
               unpriced: usage.unpricedAttempts,

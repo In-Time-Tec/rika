@@ -26,7 +26,13 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
 import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Redacted, Ref, Schema, Semaphore } from "effect"
-import { GatewayError, type BindingAuthority, type ExecutionOutcome, type ExecutorDataPlane } from "../executor/gateway"
+import {
+  GatewayError,
+  type BindingAuthority,
+  type ExecutionOutcome,
+  type ExecutorDataPlane,
+  type SocketFrame,
+} from "../executor/gateway"
 import { invokeAdmittedTool, type HostedToolPolicyService } from "../hosted/execution/tool-policy"
 import type { RunnerExecutorAuthority } from "./executor"
 import type { Socket } from "../executor/gateway"
@@ -132,6 +138,11 @@ const key = (assignmentId: string, operationKey: string, attempt: number) =>
 const machineKey = (assignmentId: string, operationKey: string, attempt: number, machineId: string) =>
   `${assignmentId}\u001f${operationKey}\u001f${attempt}\u001f${machineId}`
 const failure = (kind: GatewayError["kind"], message: string): GatewayError => GatewayError.make({ kind, message })
+const finalResult = (response: CellResponse, outcome: ExecutionOutcome, access?: AccessWire): FinalResult => {
+  const result: FinalResult = { response, outcome, eventPersisted: true }
+  if (access !== undefined) return { ...result, access }
+  return result
+}
 const same = (left: AccessWire, right: AccessWire) =>
   left.leaseEpoch === right.leaseEpoch &&
   left.sessionToken === right.sessionToken &&
@@ -618,20 +629,10 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
               return yield* failure("transport", "Persisted Runner terminal outcome is missing")
             if (!equivalentResponse(previous, input.response)) {
               if (input.state === "unknown" || current.state === "unknown")
-                return {
-                  ...(input.access === undefined ? {} : { access: input.access }),
-                  response: previous,
-                  outcome: current.terminalOutcome,
-                  eventPersisted: true as const,
-                }
+                return finalResult(previous, current.terminalOutcome, input.access)
               return yield* failure("fenced", "Runner operation already has a different terminal result")
             }
-            return {
-              ...(input.access === undefined ? {} : { access: input.access }),
-              response: previous,
-              outcome: current.terminalOutcome,
-              eventPersisted: true as const,
-            }
+            return finalResult(previous, current.terminalOutcome, input.access)
           }
           if (current.state !== "dispatched") return yield* failure("fenced", "Runner operation was not dispatched")
           if (
@@ -730,12 +731,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
             yield* store
               .appendEvent(event)
               .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner event")))
-          return {
-            ...(input.access === undefined ? {} : { access: input.access }),
-            response: resolvedResponse,
-            outcome: resolvedOutcome,
-            eventPersisted: true as const,
-          }
+          return finalResult(resolvedResponse, resolvedOutcome, input.access)
         }),
       )
       .pipe(Effect.catchTag("SqlError", () => Effect.fail(failure("transport", "Could not persist Runner result"))))
@@ -1107,7 +1103,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     )
   })
 
-  const receive = (socket: Socket, frame: unknown) =>
+  const receive = (socket: Socket, frame: SocketFrame) =>
     decode(frame).pipe(
       Effect.matchEffect({
         onFailure: () => Effect.sync(() => socket.close(1007, "malformed")),
@@ -1322,12 +1318,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
         if (row.terminalOutcome === null)
           return yield* failure("transport", "Persisted Runner terminal outcome is missing")
         const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-        return {
-          ...(session === undefined ? {} : { access: session.access }),
-          response,
-          outcome: row.terminalOutcome,
-          eventPersisted: true as const,
-        }
+        return finalResult(response, row.terminalOutcome, session?.access)
       }
       if ((yield* Clock.currentTimeMillis) >= DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))) {
         const timedOut = yield* timeoutAccepted(input)
@@ -1378,12 +1369,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
       if (durable.terminalOutcome === null)
         return yield* failure("transport", "Persisted Runner terminal outcome is missing")
       const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-      return {
-        ...(session === undefined ? {} : { access: session.access }),
-        response,
-        outcome: durable.terminalOutcome,
-        eventPersisted: true as const,
-      }
+      return finalResult(response, durable.terminalOutcome, session?.access)
     }
     if (durable.state === "dispatched") {
       const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))

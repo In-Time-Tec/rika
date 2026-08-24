@@ -13,10 +13,7 @@ import { LocalPathError } from "./error"
  * only pushed agents onto the unaudited shell path for the same work. `local-safety-policy` remains
  * the one gate that refuses a destructive invocation.
  */
-const walkFrom = (
-  options: Options,
-  absolute: string,
-): { readonly start: string; readonly segments: ReadonlyArray<string> } => {
+const walkFrom = (options: Options, absolute: string) => {
   const root = options.path.resolve(options.base)
   const relative = options.path.relative(root, absolute)
   const escapes = relative.length === 0 ? false : relative.startsWith("..") || options.path.isAbsolute(relative)

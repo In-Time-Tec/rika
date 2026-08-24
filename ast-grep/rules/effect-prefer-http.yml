@@ -1,6 +1,6 @@
 id: effect-prefer-http
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer effect/unstable/http HttpClient for outbound requests and HttpApi/HttpServer for inbound HTTP; keep fetch or host-server interop in an adapter.
 rule:
   any:

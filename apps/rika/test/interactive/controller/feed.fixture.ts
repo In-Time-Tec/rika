@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import * as InteractiveController from "../../../src/interactive/controller/service"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
@@ -24,7 +24,7 @@ type SemanticFixture = {
   readonly type: string
   readonly createdAt: number
   readonly text?: string
-  readonly data?: Readonly<Record<string, unknown>>
+  readonly data?: { readonly transient?: boolean }
 }
 const entriesImpl = (id: string, createdAt: number, events: ReadonlyArray<SemanticFixture> = []) => {
   const turn: Turn.AgentExecutionTurn = {
@@ -72,4 +72,4 @@ export const initialState = (): InteractiveController.State => ({
 export const entries: {
   (id: string, createdAt: number, events?: ReadonlyArray<SemanticFixture>): ReturnType<typeof entriesImpl>
   (createdAt: number, events?: ReadonlyArray<SemanticFixture>): (id: string) => ReturnType<typeof entriesImpl>
-} = Function.dual((args) => typeof args[0] === "string", entriesImpl)
+} = Function.dual((args) => Schema.is(Schema.String)(args[0]), entriesImpl)

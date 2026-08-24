@@ -5,6 +5,7 @@ import * as SocketClient from "effect/unstable/socket/Socket"
 import { TestClock } from "effect/testing"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import type { Runtime as ExecutorRuntime } from "../../src/executor/service"
+import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { Gateway, Socket } from "../../src/executor/gateway"
 import type { HostedProductService } from "../../src/hosted/product"
 import type { HttpDependencies } from "../../src/server/http"
@@ -25,6 +26,28 @@ const config: IdentityConfig = {
   resource: "http://127.0.0.1/api/v1",
   databaseUrl: Redacted.make("postgresql://unused"),
   databaseSsl: "disable",
+}
+
+const unusedController: ControllerService = {
+  provision: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  kill: () => Effect.die("unused"),
+  portal: () => Effect.die("unused"),
+  hello: () => Effect.die("unused"),
+  reconnect: () => Effect.die("unused"),
+  validateAccess: () => Effect.die("unused"),
+  heartbeat: () => Effect.die("unused"),
+  checkpoint: () => Effect.die("unused"),
+  credential: () => Effect.die("unused"),
+  revokeCredential: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  ready: () => Effect.die("unused"),
+  loadSetupCache: () => Effect.die("unused"),
+  storeSetupCache: () => Effect.die("unused"),
+  activatePhase: () => Effect.die("unused"),
+  cleanupOrphans: Effect.die("unused"),
 }
 
 const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void): HttpDependencies => {
@@ -59,7 +82,7 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     admitRun: () => Effect.die("unused"),
   }
   const executor: ExecutorRuntime = {
-    controller: undefined as never,
+    controller: unusedController,
     gateway,
     runnerGateway: {
       receive: gateway.receive,
@@ -87,7 +110,27 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     recovery: { inspect: () => Effect.die("unused"), resolve: () => Effect.die("unused") },
     execution: {
       check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
-      status: Effect.succeed({} as never),
+      status: Effect.succeed({
+        poll: { _tag: "Starting" },
+        lastSuccessfulPollAt: undefined,
+        lastFailure: undefined,
+        active: 0,
+        capacity: 1,
+        oldestClaimAt: undefined,
+        pollAgeMillis: undefined,
+        lastSuccessfulPollAgeMillis: undefined,
+        oldestClaimAgeMillis: undefined,
+        lastFailureAgeMillis: undefined,
+        availableCapacity: 1,
+        execution: { worker: "execution" },
+        turn: { worker: "turn", active: 0, capacity: 1, oldestClaimAgeMillis: undefined },
+        projection: {
+          worker: "projection",
+          active: 0,
+          capacity: 1,
+          oldestActiveProjectionAgeMillis: undefined,
+        },
+      }),
     },
     production: false,
   }
@@ -115,10 +158,9 @@ const connect = (url: string) => {
   )
 }
 
-const tag = (message: unknown) => {
-  const body = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer)
-  return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ _tag: Schema.optional(Schema.String) })))(body)
-    ._tag
+const tag = (message: string | Uint8Array<ArrayBufferLike>) => {
+  const body = Schema.is(Schema.String)(message) ? message : new TextDecoder().decode(message)
+  return Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ _tag: Schema.optional(Schema.String) })))(body)._tag
 }
 
 const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>

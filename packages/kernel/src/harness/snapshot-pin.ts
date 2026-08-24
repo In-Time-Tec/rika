@@ -1,6 +1,6 @@
 import { HarnessOverview, HarnessRegistration, HarnessSnapshot, HarnessState } from "tenetkit/harness"
 import type { AgentManifest } from "tenetkit"
-import { Effect, Function } from "effect"
+import { Effect, Function, Schema } from "effect"
 
 /** The capability name a pinned harness snapshot is registered under on every Rika Agent manifest. */
 export const capabilityName = "rika-harness-snapshot"
@@ -8,7 +8,7 @@ export const capabilityName = "rika-harness-snapshot"
 export interface Pinned {
   readonly id: string
   readonly capability: AgentManifest.NamedCapability
-  readonly payload: unknown
+  readonly payload: Schema.Json
   readonly overview: string
 }
 
@@ -25,7 +25,7 @@ export const pin = (state: HarnessState.HarnessState): Pinned => {
   return {
     id: registration.id,
     capability: registration.capability,
-    payload: registration.payload,
+    payload: Schema.decodeUnknownSync(Schema.Json)(registration.payload),
     overview: HarnessOverview.formatOverview(state),
   }
 }
@@ -33,12 +33,12 @@ export const pin = (state: HarnessState.HarnessState): Pinned => {
 /** Reconstruct the exact state one pinned snapshot identifies, or fail typed on drift. */
 export const reconstruct: {
   (
-    payload: unknown,
+    payload: Schema.Json,
   ): (
     id: string,
   ) => Effect.Effect<HarnessState.HarnessState, HarnessSnapshot.SnapshotInvalid | HarnessSnapshot.SnapshotMismatch>
   (
     id: string,
-    payload: unknown,
+    payload: Schema.Json,
   ): Effect.Effect<HarnessState.HarnessState, HarnessSnapshot.SnapshotInvalid | HarnessSnapshot.SnapshotMismatch>
-} = Function.dual(2, (id: string, payload: unknown) => HarnessSnapshot.decode(id, payload))
+} = Function.dual(2, (id: string, payload: Schema.Json) => HarnessSnapshot.decode(id, payload))

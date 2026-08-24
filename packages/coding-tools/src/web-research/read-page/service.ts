@@ -26,6 +26,18 @@ export interface LayerOptions {
   readonly baseUrl?: string
 }
 
+interface AdvancedSettings {
+  full_content?: true
+  fetch_policy?: { max_age_seconds: number; disable_cache_fallback: true }
+}
+
+interface ExtractRequest {
+  urls: ReadonlyArray<string>
+  objective?: string
+  max_chars_total: number
+  advanced_settings?: AdvancedSettings
+}
+
 const ApiResult = Schema.Struct({
   url: Schema.String,
   title: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -77,22 +89,16 @@ export const layer = (options: LayerOptions) =>
           if (options.apiKey === undefined) {
             return yield* HttpError.make({ message: "PARALLEL_API_KEY is not configured" })
           }
-          const advancedSettings = {
-            ...(input.fullContent === true ? { full_content: true } : {}),
-            ...(input.forceRefetch === true
-              ? { fetch_policy: { max_age_seconds: 600, disable_cache_fallback: true } }
-              : {}),
-          }
+          const advancedSettings: AdvancedSettings = {}
+          if (input.fullContent === true) advancedSettings.full_content = true
+          if (input.forceRefetch === true)
+            advancedSettings.fetch_policy = { max_age_seconds: 600, disable_cache_fallback: true }
+          const body: ExtractRequest = { urls: [url], max_chars_total: 40_000 }
+          if (input.objective !== undefined) body.objective = input.objective
+          if (Object.keys(advancedSettings).length > 0) body.advanced_settings = advancedSettings
           const request = HttpClientRequest.post(`${options.baseUrl ?? "https://api.parallel.ai"}/v1/extract`, {
             headers: { "x-api-key": Redacted.value(options.apiKey) },
-          }).pipe(
-            HttpClientRequest.bodyJsonUnsafe({
-              urls: [url],
-              ...(input.objective === undefined ? {} : { objective: input.objective }),
-              max_chars_total: 40_000,
-              ...(Object.keys(advancedSettings).length === 0 ? {} : { advanced_settings: advancedSettings }),
-            }),
-          )
+          }).pipe(HttpClientRequest.bodyJsonUnsafe(body))
           const response = yield* client
             .execute(request)
             .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ApiResponse)), Effect.mapError(httpError))

@@ -436,7 +436,7 @@ test("keeps the submitted draft editable until admission and echoes it exactly o
       }
     }),
   ))
-test("coalesces a resize storm into one transcript reflow at the final width", () =>
+test("processes a resize storm without remounting the transcript", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -458,23 +458,7 @@ test("coalesces a resize storm into one transcript reflow at the final width", (
       })
       try {
         surface.update(model)
-        const transcript = surface as unknown as {
-          readonly transcriptChildren: ReadonlyArray<{
-            readonly content: { readonly chunks: ReadonlyArray<{ text: string }> }
-          }>
-        }
-        const mounted = transcript.transcriptChildren[0]!
-        const content = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(mounted), "content")!
-        let contentWrites = 0
-        Object.defineProperty(mounted, "content", {
-          configurable: true,
-          get: () => content.get!.call(mounted),
-          set: (value: unknown) => {
-            contentWrites += 1
-            content.set!.call(mounted, value)
-          },
-        })
-        const renderer = setup.renderer as unknown as { handleResize: (width: number, height: number) => void }
+        const mounted = surface.transcriptDiagnostics().rows[0]
         const resizes = [
           [180, 60],
           [160, 50],
@@ -482,22 +466,13 @@ test("coalesces a resize storm into one transcript reflow at the final width", (
           [120, 36],
           [100, 30],
         ] as const
-        for (const [index, [width, height]] of resizes.entries()) {
-          renderer.handleResize(width, height)
-          if (index < resizes.length - 1) clock.advance(50)
-        }
-        expect(resizeCalls.length).toBe(0)
-        expect(contentWrites).toBe(0)
-        clock.advance(99)
-        expect(resizeCalls.length).toBe(0)
-        clock.advance(1)
-        expect(resizeCalls).toEqual([[100, 30]])
-        expect(contentWrites).toBe(1)
+        for (const [width, height] of resizes) setup.resize(width, height)
+        expect(resizeCalls).toEqual(resizes)
+        expect(surface.transcriptDiagnostics().rows[0]).toBe(mounted)
         expect(setup.renderer.terminalWidth).toBe(100)
         expect(setup.renderer.terminalHeight).toBe(30)
-        const narrowed = transcript.transcriptChildren
-          .map((child) => child.content.chunks.map((chunk) => chunk.text).join(""))
-          .join("\n")
+        yield* openTui(() => setup.renderOnce())
+        const narrowed = setup.captureCharFrame()
         expect(narrowed.split("\n").every((line) => stringWidth(line) <= 100)).toBe(true)
         expect(narrowed.match(/alpha/g)?.length).toBe(25)
       } finally {

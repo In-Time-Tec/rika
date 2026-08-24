@@ -17,7 +17,10 @@ const put = (action: "set" | "rotate") =>
   )
 
 const list = Command.make("list", { provider: providerArgument.pipe(Argument.optional) }, ({ provider: selected }) =>
-  dispatch({ _tag: "Credential", action: "list", ...(Option.isSome(selected) ? { provider: selected.value } : {}) }),
+  Option.match(selected, {
+    onNone: () => dispatch({ _tag: "Credential", action: "list" }),
+    onSome: (provider) => dispatch({ _tag: "Credential", action: "list", provider }),
+  }),
 )
 
 const revoke = Command.make("revoke", { provider: providerArgument }, ({ provider: selected }) =>

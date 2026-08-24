@@ -70,15 +70,18 @@ const syncCommand = Command.make(
     title: Flag.string("title").pipe(Flag.optional),
     body: Flag.string("body").pipe(Flag.optional),
   },
-  ({ threadId, commitSha, targetBranch, title, body }) =>
-    dispatchHosted({
+  ({ threadId, commitSha, targetBranch, title, body }) => {
+    const operation = {
       _tag: "ThreadSync",
       threadId,
       commitSha,
-      ...(Option.isSome(targetBranch) ? { targetBranch: targetBranch.value } : {}),
       title: Option.getOrElse(title, () => `Rika: synchronize ${commitSha.slice(0, 12)}`),
       body: Option.getOrElse(body, () => ""),
-    }),
+    } as const
+    return Option.isSome(targetBranch)
+      ? dispatchHosted({ ...operation, targetBranch: targetBranch.value })
+      : dispatchHosted(operation)
+  },
 ).pipe(Command.withDescription("Publish an approved Thread commit to its repository"))
 
 export const threadCommand = Command.make("thread").pipe(

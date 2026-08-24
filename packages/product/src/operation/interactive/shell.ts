@@ -18,7 +18,7 @@ import {
   type InteractiveSessionInput,
   type InteractiveRuntimeContext,
 } from "./session"
-import { makeFailure } from "../failure"
+import * as OperationFailure from "../failure"
 
 export const executionStartFailureMessage =
   "Rika could not start this message. Run rika diagnostics status if it keeps happening."
@@ -220,7 +220,10 @@ const runRecordedShellImpl = (
           recordedShellProjection(runningTurn).units,
         )
         emit(dispatch, shellStartedEvent(runningTurn, runningProjection))
-        const processExit = (yield* Effect.exit(
+        const processExit: Exit.Exit<
+          { readonly text: string; readonly truncated: boolean; readonly exitCode?: number },
+          unknown
+        > = yield* Effect.exit(
           restore(
             ensureTurnSummary(runningTurn).pipe(
               Effect.catchCause((cause) =>
@@ -237,7 +240,7 @@ const runRecordedShellImpl = (
               Effect.andThen(runShellCommand(tools, command)),
             ),
           ),
-        )) as Exit.Exit<{ readonly text: string; readonly truncated: boolean; readonly exitCode?: number }, unknown>
+        )
         const completedAt = yield* Clock.currentTimeMillis
         const interrupted = processExit._tag === "Failure" && Cause.hasInterrupts(processExit.cause)
         const terminalTurn: ThreadResult.TerminalRecordedShellTurn =
@@ -406,7 +409,7 @@ export const makeInteractiveShell = (
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
           threadId: thread.id,
-          failure: makeFailure("Shell runtime is unavailable"),
+          failure: OperationFailure.makeFailure("Shell runtime is unavailable"),
         })
         return
       }

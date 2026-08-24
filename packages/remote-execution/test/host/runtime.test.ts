@@ -31,7 +31,7 @@ describe("hosted phase environment", () => {
       const grants = yield* Ref.make(new Map())
       const applied = yield* Ref.make(new Map([["session-1", `sha256:${"a".repeat(64)}`]]))
       const access = yield* Semaphore.make(1)
-      const environment: Record<string, string> = { SETUP_TOKEN: "setup-value" }
+      const environment = { SETUP_TOKEN: "setup-value" }
       const restarts: Array<string> = []
       const executor = {
         admit: () => Effect.die("unused"),
@@ -350,9 +350,7 @@ describe("hosted phase environment", () => {
     ).pipe(
       Effect.provideServiceEffect(
         Crypto.Crypto,
-        Effect.scoped(Layer.build(BunCrypto.layer)).pipe(
-          Effect.map((context) => Context.get(context, Crypto.Crypto)),
-        ),
+        Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
       ),
     ),
   )

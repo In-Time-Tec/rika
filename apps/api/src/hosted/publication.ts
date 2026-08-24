@@ -78,17 +78,20 @@ export const layer = (options: { readonly product: HostedProductService; readonl
               return rejected("unavailable", "Publication authorization is unavailable")
             }),
           )
-        let approved = yield* repositories
-          .approvePublication({
+        const basePublication = {
             ownerId: authority.ownerId,
             threadId: input.threadId,
             actor: authority.actor,
             idempotencyKey: input.idempotencyKey,
             commitSha: input.commitSha,
-            ...(input.targetRef === undefined ? {} : { targetRef: input.targetRef }),
             title: input.title,
             body: input.body,
-          })
+        }
+        const publication: Parameters<typeof repositories.approvePublication>[0] = input.targetRef === undefined
+          ? basePublication
+          : { ...basePublication, targetRef: input.targetRef }
+        let approved = yield* repositories
+          .approvePublication(publication)
           .pipe(
             Effect.mapError((error) => {
               if (error.reason === "authorization") return rejected("forbidden", error.message)

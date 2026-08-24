@@ -177,17 +177,11 @@ test("thread preview starts at the real tail, scrolls independently to both edge
         expect(restoredTail.scrollTop).toBe(restoredTail.scrollHeight - restoredTail.viewportHeight)
         expect(restoredTail.scrollbarPosition).toBe(restoredTail.scrollbarSize - restoredTail.scrollbarViewportSize)
 
-        const browser = surface as unknown as {
-          readonly threadBrowser: { readonly transcript: TranscriptPane }
-        }
-        const scrollbar = browser.threadBrowser.transcript.scrollbar
+        const scrollbarX = tail.bounds.x + tail.bounds.width - 1
         yield* openTui(() =>
-          setup.mockMouse.scroll(
-            scrollbar.slider.screenX,
-            scrollbar.slider.screenY + Math.floor(scrollbar.slider.height / 2),
-            "up",
-            { delayMs: 0 },
-          ),
+          setup.mockMouse.scroll(scrollbarX, tail.bounds.y + Math.floor(tail.bounds.height / 2), "up", {
+            delayMs: 0,
+          }),
         )
         yield* openTui(() => setup.flush())
         expect(surface.threadPreviewDiagnostics().scrollTop).toBeLessThan(restoredTail.scrollTop)
@@ -207,22 +201,15 @@ test("one scrollbar jump reaches the oldest content beyond the mounted item wind
       try {
         surface.update(browserModel(notificationUnits(800), 110, 30))
         yield* openTui(() => setup.flush())
-        const browser = surface as unknown as {
-          readonly threadBrowser: { readonly transcript: TranscriptPane }
-        }
-        const scrollbar = browser.threadBrowser.transcript.scrollbar
-        yield* openTui(() => setup.mockMouse.click(scrollbar.slider.screenX, scrollbar.slider.screenY))
+        const ready = surface.threadPreviewDiagnostics()
+        const scrollbarX = ready.bounds.x + ready.bounds.width - 1
+        yield* openTui(() => setup.mockMouse.click(scrollbarX, ready.bounds.y))
         yield* openTui(() => setup.flush())
         expect(surface.threadPreviewDiagnostics().scrollbarPosition).toBe(0)
         expect(setup.captureCharFrame()).toContain("Historical prompt")
 
         yield* openTui(() =>
-          setup.mockMouse.drag(
-            scrollbar.slider.screenX,
-            scrollbar.slider.screenY,
-            scrollbar.slider.screenX,
-            scrollbar.slider.screenY + scrollbar.slider.height,
-          ),
+          setup.mockMouse.drag(scrollbarX, ready.bounds.y, scrollbarX, ready.bounds.y + ready.bounds.height),
         )
         yield* openTui(() => setup.flush())
         const tail = surface.threadPreviewDiagnostics()

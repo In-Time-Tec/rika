@@ -52,7 +52,7 @@ export const dropSubmittedDrafts: {
 const takeSubmittedDraftImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   turnId: string | undefined,
-): { readonly draft: SubmittedDraft | undefined; readonly rest: ReadonlyArray<SubmittedDraft> } => {
+) => {
   const index = drafts.findIndex((draft) => turnId === undefined || draft.turnId === turnId)
   if (index < 0) return { draft: undefined, rest: drafts }
   return { draft: drafts[index], rest: drafts.filter((_, position) => position !== index) }
@@ -71,7 +71,7 @@ export const takeSubmittedDraft: {
 const takeSubmittedDraftForImpl = (
   drafts: ReadonlyArray<SubmittedDraft>,
   reference: { readonly turnId?: string; readonly submissionId?: string },
-): { readonly draft: SubmittedDraft | undefined; readonly rest: ReadonlyArray<SubmittedDraft> } => {
+) => {
   const index = drafts.findIndex((draft) => {
     if (reference.submissionId !== undefined) return draft.submissionId === reference.submissionId
     if (reference.turnId !== undefined) return draft.turnId === reference.turnId

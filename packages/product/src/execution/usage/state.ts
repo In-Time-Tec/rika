@@ -50,34 +50,32 @@ export const aggregateUsage = (values: ReadonlyArray<UsageState>): UsageState =>
   if (values.length === 0) return emptyUsageState()
   const pricedAttempts = values.reduce((total, value) => total + value.pricedAttempts, 0)
   const costNanoUsd = addOptional(values.map((value) => value.costNanoUsd))
+  const tokens = sumTokenTotals(values.map((value) => value.tokens))
   const availableActive = values.flatMap((value) => (value.active._tag === "Available" ? [value.active] : []))
   const context = values.toReversed().find((value) => value.context !== undefined)?.context
-  return {
-    ...(pricedAttempts === 0 || costNanoUsd === undefined ? {} : { costNanoUsd }),
-    ...(sumTokenTotals(values.map((value) => value.tokens)) === undefined
-      ? {}
-      : { tokens: sumTokenTotals(values.map((value) => value.tokens))! }),
+  let active: UsageState["active"] = { _tag: "Unavailable" }
+  if (availableActive.length > 0) {
+    const accumulatedMillis = availableActive.reduce((total, value) => total + value.accumulatedMillis, 0)
+    const activeSince = availableActive.flatMap((value) =>
+      value.activeSince === undefined ? [] : [value.activeSince],
+    )
+    active =
+      activeSince.length === 0
+        ? { _tag: "Available", accumulatedMillis }
+        : { _tag: "Available", accumulatedMillis, activeSince: Math.min(...activeSince) }
+  }
+  let aggregate: UsageState = {
     pricedAttempts,
     unpricedAttempts: values.reduce((total, value) => total + value.unpricedAttempts, 0),
     includedAttempts: values.reduce((total, value) => total + (value.includedAttempts ?? 0), 0),
     countedAttempts: values.reduce((total, value) => total + value.countedAttempts, 0),
     uncountedAttempts: values.reduce((total, value) => total + value.uncountedAttempts, 0),
     sourceComplete: values.every((value) => value.sourceComplete),
-    ...(context === undefined ? {} : { context }),
     contextPending: values.at(-1)?.contextPending ?? false,
-    active:
-      availableActive.length === 0
-        ? { _tag: "Unavailable" }
-        : {
-            _tag: "Available",
-            accumulatedMillis: availableActive.reduce((total, value) => total + value.accumulatedMillis, 0),
-            ...(availableActive.some((value) => value.activeSince !== undefined)
-              ? {
-                  activeSince: Math.min(
-                    ...availableActive.flatMap((value) => (value.activeSince === undefined ? [] : [value.activeSince])),
-                  ),
-                }
-              : {}),
-          },
+    active,
   }
+  if (pricedAttempts > 0 && costNanoUsd !== undefined) aggregate = { ...aggregate, costNanoUsd }
+  if (tokens !== undefined) aggregate = { ...aggregate, tokens }
+  if (context !== undefined) aggregate = { ...aggregate, context }
+  return aggregate
 }

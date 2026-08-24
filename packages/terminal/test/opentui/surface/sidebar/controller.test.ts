@@ -2,7 +2,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
-import { initial, type Model } from "../../../../src/state/model"
+import { initial } from "../../../../src/state/model"
 import { ready } from "../../../../src/state/loadable"
 import { update } from "../../../../src/state/reducer/model"
 import {
@@ -36,7 +36,7 @@ test("loads the workspace file tree with Opt+T and keeps it separate from change
         surface.update(model)
         setup.mockInput.pressKey("t", { meta: true })
         yield* openTui(() => setup.flush())
-        expect((model as Model & { readonly workspaceFilesOpen: boolean }).workspaceFilesOpen).toBe(true)
+        expect(model.workspaceFilesOpen).toBe(true)
         expect(model.changedFilesOpen).toBe(false)
         const workspaceFrame = setup.captureCharFrame()
         expect(workspaceFrame).toContain("Files (3)")
@@ -45,7 +45,7 @@ test("loads the workspace file tree with Opt+T and keeps it separate from change
 
         setup.mockInput.pressKey("s", { meta: true })
         yield* openTui(() => setup.flush())
-        expect((model as Model & { readonly workspaceFilesOpen: boolean }).workspaceFilesOpen).toBe(false)
+        expect(model.workspaceFilesOpen).toBe(false)
         expect(model.changedFilesOpen).toBe(true)
         const changedFrame = setup.captureCharFrame()
         expect(changedFrame).toContain("Changed files (1)")

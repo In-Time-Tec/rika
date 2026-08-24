@@ -12,7 +12,7 @@ import { Effect } from "effect"
 import { operationError } from "../error"
 import type { ProductOperationExecutionStateInput } from "./execution-state"
 
-const untrustedData = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c")
+const untrustedData = <Value>(value: Value) => JSON.stringify(value).replaceAll("<", "\\u003c")
 const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) =>
   turns.map((turn) => turn.prompt).join("\\n")
 

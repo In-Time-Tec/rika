@@ -2,10 +2,13 @@ import { expect, test } from "vitest"
 import { Anthropic, OpenAi } from "tenetkit/ai"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
+import { Schema } from "effect"
 
 const decoders = { "openai-responses": OpenAi.decodeConfig, anthropic: Anthropic.decodeConfig } as const
 
 const efforts = ["low", "medium", "high", "xhigh", "max"] as const
+const AnthropicOptions = Schema.Struct({ output_config: Schema.Struct({ effort: Schema.String }) })
+const OpenAiOptions = Schema.Struct({ reasoning: Schema.Struct({ effort: Schema.String }) })
 
 const settingsFor = (alias: string, effort: (typeof efforts)[number]): Settings.ConfigurationSettings => ({
   ...Settings.Defaults.settingsDefaults,
@@ -23,10 +26,10 @@ const routedOptions = (alias: string, effort: (typeof efforts)[number]) =>
   ExecutionRouteResolution.resolve(settingsFor(alias, effort), "medium").main.candidates[0]!.providerOptions
 
 const anthropicEffort = (alias: string, effort: (typeof efforts)[number]) =>
-  (routedOptions(alias, effort) as { readonly output_config: { readonly effort: string } }).output_config.effort
+  Schema.decodeUnknownSync(AnthropicOptions)(routedOptions(alias, effort)).output_config.effort
 
 const openAiEffort = (alias: string, effort: (typeof efforts)[number]) =>
-  (routedOptions(alias, effort) as { readonly reasoning: { readonly effort: string } }).reasoning.effort
+  Schema.decodeUnknownSync(OpenAiOptions)(routedOptions(alias, effort)).reasoning.effort
 
 const aliasFor = (provider: string) =>
   Object.entries(Settings.Defaults.settingsDefaults.models).find(([, model]) => model.provider === provider)![0]
@@ -39,9 +42,10 @@ test("every routable effort builds provider request options the routed protocol 
       if (model.variants[effort] === undefined) continue
       const route = ExecutionRouteResolution.resolve(settingsFor(alias, effort), "medium")
       for (const candidate of route.main.candidates) {
-        const decode = decoders[candidate.providerConnection.protocol as keyof typeof decoders]
-        if (decode === undefined) continue
-        expect(() => decode(candidate.providerOptions)).not.toThrow()
+        if (candidate.providerConnection.protocol === "openai-responses")
+          expect(() => decoders["openai-responses"](candidate.providerOptions)).not.toThrow()
+        if (candidate.providerConnection.protocol === "anthropic")
+          expect(() => decoders.anthropic(candidate.providerOptions)).not.toThrow()
       }
     }
   }

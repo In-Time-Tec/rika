@@ -33,8 +33,8 @@ const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>
   statement.pipe(Effect.mapError(databaseError))
 const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
-const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(databaseError))
+const decode = <S extends Schema.Top>(schema: S) =>
+  <Value>(value: Value) => Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(databaseError))
 const jsonEquivalent = Schema.toEquivalence(JsonObject)
 const actorEquivalent = Schema.toEquivalence(ActorAttribution)
 const timestampSql = `to_char(%s AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
@@ -56,21 +56,22 @@ interface CommandRow {
 }
 
 const commandRow = Effect.fn("PostgresThreadProtocolStore.commandRow")(function* (row: CommandRow) {
-  return {
+  const command: ThreadProtocolCommand = {
     ownerId: OwnerId.make(row.ownerId),
     threadId: ThreadId.make(row.threadId),
     commandId: CommandId.make(row.commandId),
     idempotencyKey: IdempotencyKey.make(row.idempotencyKey),
     expectedThreadVersion: ThreadVersion.make(row.expectedThreadVersion),
     threadVersion: ThreadVersion.make(row.threadVersion),
-    actor: yield* decode(ActorAttribution, row.actor),
-    command: yield* decode(JsonObject, row.command),
+    actor: yield* decode(ActorAttribution)(row.actor),
+    command: yield* decode(JsonObject)(row.command),
     state: row.state,
-    ...(row.result === null ? {} : { result: yield* decode(JsonObject, row.result) }),
-    ...(row.cursor === null ? {} : { cursor: ThreadEventCursor.make(row.cursor) }),
     admittedAt: Timestamp.make(row.admittedAt),
-    ...(row.completedAt === null ? {} : { completedAt: Timestamp.make(row.completedAt) }),
-  } satisfies ThreadProtocolCommand
+  }
+  if (row.result !== null) Object.assign(command, { result: yield* decode(JsonObject)(row.result) })
+  if (row.cursor !== null) Object.assign(command, { cursor: ThreadEventCursor.make(row.cursor) })
+  if (row.completedAt !== null) Object.assign(command, { completedAt: Timestamp.make(row.completedAt) })
+  return command
 })
 
 const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreService, never, PgClient.PgClient> {
@@ -352,26 +353,26 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
               sequence: row.sequence,
               cursor: ThreadEventCursor.make(row.cursor),
               threadVersion: ThreadVersion.make(row.threadVersion),
-              event: yield* decode(InteractiveEventSchema, row.event),
+              event: yield* decode(InteractiveEventSchema)(row.event),
               createdAt: Timestamp.make(row.createdAt),
             })
-          return {
+          const replayResult: Effect.Success<ReturnType<ThreadProtocolStoreService["replay"]>> = {
             threadVersion: ThreadVersion.make(state.version),
             cursor: ThreadEventCursor.make(state.cursor),
-            ...(snapshotRow === undefined
-              ? {}
-              : {
-                  snapshot: {
-                    ownerId: input.ownerId,
-                    threadId: input.threadId,
-                    threadVersion: ThreadVersion.make(snapshotRow.threadVersion),
-                    cursor: ThreadEventCursor.make(snapshotRow.cursor),
-                    snapshot: yield* decode(HostedThreadSnapshot, snapshotRow.snapshot),
-                    createdAt: Timestamp.make(snapshotRow.createdAt),
-                  },
-                }),
             events,
           }
+          if (snapshotRow !== undefined)
+            Object.assign(replayResult, {
+              snapshot: {
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                threadVersion: ThreadVersion.make(snapshotRow.threadVersion),
+                cursor: ThreadEventCursor.make(snapshotRow.cursor),
+                snapshot: yield* decode(HostedThreadSnapshot)(snapshotRow.snapshot),
+                createdAt: Timestamp.make(snapshotRow.createdAt),
+              },
+            })
+          return replayResult
         }),
       )
     },

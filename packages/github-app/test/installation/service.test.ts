@@ -2,16 +2,25 @@ import * as AppJwt from "../../src/auth/jwt"
 import * as GitHubInstallation from "../../src/installation/service"
 import { installation, repository } from "../support/github.fixture"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { provide } from "../support/layer"
 
-const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
+const response = (
+  request: HttpClientRequest.HttpClientRequest,
+  body: Schema.Json | InstallationPayload,
+  status = 200,
+) =>
   HttpClientResponse.fromWeb(
     request,
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
   )
+
+interface InstallationPayload extends Omit<typeof installation, "app_id" | "suspended_at"> {
+  readonly app_id: number
+  readonly suspended_at: string | null
+}
 
 describe("GitHub installation service", () => {
   it.effect("verifies app ownership and reconciles every repository page with metadata-only inventory access", () => {
@@ -54,7 +63,7 @@ describe("GitHub installation service", () => {
   })
 
   it.effect("rejects installations owned by another app or suspended by GitHub", () => {
-    let payload: unknown = { ...installation, app_id: 999 }
+    let payload: InstallationPayload = { ...installation, app_id: 999 }
     const clientLayer = Layer.succeed(
       HttpClient.HttpClient,
       HttpClient.make((request) => Effect.succeed(response(request, payload))),

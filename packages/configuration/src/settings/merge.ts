@@ -1,33 +1,40 @@
 import { Function } from "effect"
-import { type PresetId, presets } from "../model-routing/model-preset"
+import { presets } from "../model-routing/model-preset"
 import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
 import type { ModelRoute } from "../model-routing/model-route"
-import type { ConfigurationSettings } from "./model"
+import type { ConfigurationEnvironment, ConfigurationSettings } from "./model"
 import { settingsDefaults } from "./defaults"
 import { ConfigurationSettingsFileError } from "./decoder"
-import type {
-  ConfigurationSettingsInput,
-  ModeInput,
-  ModelAliasInput,
-  RoleRouteInput,
-} from "./input"
+import type { ConfigurationSettingsInput, ModeInput, ModelAliasInput, RoleRouteInput } from "./input"
 
 const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined
 
 const aliasFromInput = (name: string, input: ModelAliasInput): ModelRoute.ModelAlias => {
   const presetId = input.preset
-  const preset = presetId === undefined ? undefined : presets[presetId as PresetId]
+  const preset = presetId === "openai" || presetId === "claude" ? presets[presetId] : undefined
+  const limits = input.limits ?? preset?.limits
+  if (limits === undefined)
+    throw ConfigurationSettingsFileError.make({
+      path: `modelAliases.${name}.limits`,
+      message: "Model limits are required.",
+    })
+  const efforts = input.efforts ?? preset?.variants(preset.efforts)
+  const variants: ModelRoute.ModelAlias["variants"] = Object.assign(
+    {},
+    efforts?.low === undefined ? undefined : { low: efforts.low },
+    efforts?.medium === undefined ? undefined : { medium: efforts.medium },
+    efforts?.high === undefined ? undefined : { high: efforts.high },
+    efforts?.xhigh === undefined ? undefined : { xhigh: efforts.xhigh },
+    efforts?.max === undefined ? undefined : { max: efforts.max },
+  )
   return {
     displayName: input.displayName ?? name,
     supportsMedia: input.supportsMedia ?? preset !== undefined,
     provider: input.provider,
     candidates: input.candidates,
-    limits: input.limits ?? preset!.limits,
-    variants:
-      input.efforts === undefined
-        ? (preset!.variants(preset!.efforts) as ModelRoute.ModelAlias["variants"])
-        : (input.efforts as ModelRoute.ModelAlias["variants"]),
+    limits,
+    variants,
   }
 }
 
@@ -50,6 +57,9 @@ const isBedrockOverride = (
   value !== undefined &&
   ("authMode" in value || "region" in value || "profile" in value || "endpoint" in value || "authRefresh" in value)
 
+const isHttpOverride = (value: ModelRoute.ProviderOverride | undefined): value is ModelRoute.HttpProviderOverride =>
+  value !== undefined && !isBedrockOverride(value)
+
 const roleRoute = (
   configured: ModelRoute.RoleRoute | undefined,
   override: RoleRouteInput | undefined,
@@ -61,36 +71,35 @@ const roleRoute = (
   }
   if ("alias" in override && override.alias !== undefined) {
     const fast = override.fast ?? configured?.fast
-    return {
-      alias: override.alias,
-      effort: override.effort ?? configured?.effort ?? "medium",
-      ...(fast === undefined ? {} : { fast }),
-    }
+    const effort = override.effort ?? configured?.effort ?? "medium"
+    return fast === undefined ? { alias: override.alias, effort } : { alias: override.alias, effort, fast }
   }
   const fast = override.fast ?? configured?.fast
-  return {
-    provider: override.provider,
-    model: override.model,
-    effort: override.effort ?? configured?.effort ?? "medium",
-    ...(fast === undefined ? {} : { fast }),
-  }
+  const effort = override.effort ?? configured?.effort ?? "medium"
+  return fast === undefined
+    ? { provider: override.provider, model: override.model, effort }
+    : { provider: override.provider, model: override.model, effort, fast }
 }
+
+const agentIds: ReadonlyArray<ModelRoute.AgentId> = ["librarian", "painter", "readThread", "review", "surgeon", "task"]
 
 const modes = (
   global: ConfigurationSettingsInput,
   workspace: ConfigurationSettingsInput,
 ): ConfigurationSettings["modes"] => {
   if (global.modes === undefined && workspace.modes === undefined) return settingsDefaults.modes
-  const merged = Object.create(null) as Record<string, ModelRoute.ModeConfig>
+  const merged: Record<string, ModelRoute.ModeConfig> = {}
   const merge = (input: Readonly<Record<string, ModeInput>> | undefined) => {
     for (const [name, mode] of Object.entries(input ?? {})) {
       const current = merged[name]
       const main = roleRoute(current?.main, mode.main, `modes.${name}.main`)
       const oracle = roleRoute(current?.oracle ?? main, mode.oracle, `modes.${name}.oracle`)
       const agents = { ...current?.agents }
-      for (const [agent, route] of Object.entries(mode.agents ?? {})) {
-        agents[agent as ModelRoute.AgentId] = roleRoute(
-          agents[agent as ModelRoute.AgentId] ?? (agent === "task" || agent === "surgeon" ? main : oracle),
+      for (const agent of agentIds) {
+        const route = mode.agents?.[agent]
+        if (route === undefined) continue
+        agents[agent] = roleRoute(
+          agents[agent] ?? (agent === "task" || agent === "surgeon" ? main : oracle),
           route,
           `modes.${name}.agents.${agent}`,
         )
@@ -142,17 +151,19 @@ export const mergeConfigurationSettings = ({
         globalBedrock === undefined && workspaceBedrock === undefined
           ? undefined
           : { ...globalBedrock, ...workspaceBedrock }
-      return {
+      const base: Pick<ModelRoute.AmazonBedrockProviderConnection, "protocol" | "authMode"> = {
         protocol: "amazon-bedrock",
         authMode: bedrock?.authMode === "bearer" ? "bearer" : "default",
-        ...(bedrock?.region === undefined ? {} : { region: bedrock.region }),
-        ...(bedrock?.profile === undefined ? {} : { profile: bedrock.profile }),
-        ...(bedrock?.endpoint === undefined ? {} : { endpoint: bedrock.endpoint }),
-        ...(bedrock?.authRefresh === undefined ? {} : { authRefresh: bedrock.authRefresh }),
       }
+      return Object.assign(
+        base,
+        bedrock?.region === undefined ? undefined : { region: bedrock.region },
+        bedrock?.profile === undefined ? undefined : { profile: bedrock.profile },
+        bedrock?.endpoint === undefined ? undefined : { endpoint: bedrock.endpoint },
+        bedrock?.authRefresh === undefined ? undefined : { authRefresh: bedrock.authRefresh },
+      )
     }
-    const httpOverride: ModelRoute.HttpProviderOverride | undefined =
-      override === undefined || isBedrockOverride(override) ? undefined : (override as ModelRoute.HttpProviderOverride)
+    const httpOverride: ModelRoute.HttpProviderOverride | undefined = isHttpOverride(override) ? override : undefined
     const baseUrl = httpOverride?.baseUrl ?? builtIn.baseUrl
     const streamingOnly =
       httpOverride?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
@@ -162,14 +173,13 @@ export const mergeConfigurationSettings = ({
     if (id === "openai" && httpOverride?.api !== undefined)
       protocol = httpOverride.api === "responses" ? "openai-responses" : "openai-chat-completions"
     if (httpOverride === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
-    return {
-      protocol,
-      baseUrl,
-      ...(httpOverride?.apiKeyEnv === undefined ? {} : { apiKeyEnv: httpOverride.apiKeyEnv }),
-      ...(credentialIdentity === undefined ? {} : { credentialIdentity }),
-      ...(streamingOnly === undefined ? {} : { streamingOnly }),
-      ...(promptCaching === undefined ? {} : { promptCaching }),
-    }
+    return Object.assign(
+      { protocol, baseUrl },
+      httpOverride.apiKeyEnv === undefined ? undefined : { apiKeyEnv: httpOverride.apiKeyEnv },
+      credentialIdentity === undefined ? undefined : { credentialIdentity },
+      streamingOnly === undefined ? undefined : { streamingOnly },
+      promptCaching === undefined ? undefined : { promptCaching },
+    )
   }
   const models: ConfigurationSettings["models"] =
     global.modelAliases === undefined && workspace.modelAliases === undefined
@@ -231,7 +241,7 @@ export const mergeConfigurationSettings = ({
 
 const withWebSearchConfigurationImpl = (
   settings: ConfigurationSettings,
-  credentials: Readonly<Record<string, unknown>>,
+  credentials: ConfigurationEnvironment["webSearchCredentials"],
 ): ConfigurationSettings => ({
   ...settings,
   webSearch: {
@@ -240,6 +250,11 @@ const withWebSearchConfigurationImpl = (
 })
 
 export const withWebSearchConfiguration: {
-  (settings: ConfigurationSettings, credentials: Readonly<Record<string, unknown>>): ConfigurationSettings
-  (credentials: Readonly<Record<string, unknown>>): (settings: ConfigurationSettings) => ConfigurationSettings
+  (
+    settings: ConfigurationSettings,
+    credentials: ConfigurationEnvironment["webSearchCredentials"],
+  ): ConfigurationSettings
+  (
+    credentials: ConfigurationEnvironment["webSearchCredentials"],
+  ): (settings: ConfigurationSettings) => ConfigurationSettings
 } = Function.dual(2, withWebSearchConfigurationImpl)

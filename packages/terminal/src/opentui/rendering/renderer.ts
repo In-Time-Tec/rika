@@ -1,5 +1,5 @@
 import { fg, RGBA, StyledText, type TextChunk } from "@opentui/core"
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Model } from "../../state/model"
 import { colors, TerminalColor } from "../../presentation/terminal/theme"
 import { toOpenColor } from "./text-adapter"
@@ -12,7 +12,7 @@ const terminalColors = Object.values(colors).filter((value): value is TerminalCo
 const restoreTerminalColor = (value: RGBA): TerminalColor | undefined => {
   if (value.intent === "indexed")
     return terminalColors.find((color) => color.intent === "indexed" && color.slot === value.slot)
-  if ("token" in value && typeof value.token === "string") {
+  if ("token" in value && Schema.is(Schema.String)(value.token)) {
     const slot = /^ansi-(\d+)$/.exec(value.token)?.[1]
     if (slot !== undefined)
       return terminalColors.find((color) => color.intent === "indexed" && color.slot === Number(slot))
@@ -47,7 +47,7 @@ export const buildTranscript: {
   (model: Model, spinnerFrame?: string): TranscriptBuild
   (spinnerFrame?: string): (model: Model) => TranscriptBuild
 } = Function.dual(
-  (args) => typeof args[0] !== "string",
+  (args) => !Schema.is(Schema.String)(args[0]),
   (model: Model, spinnerFrame = idleSpinnerFrame): TranscriptBuild => {
     const builder = transcriptUnitBuilder(model, spinnerFrame)
     const chunks: Array<TextChunk> = []

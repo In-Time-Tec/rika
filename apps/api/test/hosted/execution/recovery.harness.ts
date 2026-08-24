@@ -8,12 +8,14 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptStore from "@rika/product-store/postgres-transcript-repository"
 import {
   HostedTurnWorkerStore,
   type ClaimRequest,
   type HostedTurnWorkerStoreService,
   type TurnClaim,
 } from "@rika/product-store/postgres-turn-worker-store"
+import * as TurnStore from "@rika/product-store/postgres-turn-repository"
 import { Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { layer as projectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
@@ -29,6 +31,21 @@ const input: ExecutionGateway.StartTurn = {
   executionRoute: ExecutionRoute.testExecutionRoute(),
 }
 
+interface DurableRecoveryState {
+  readonly commands: Map<string, string>
+  readonly turns: Map<string, Turn.AgentExecutionTurn>
+  claim: TurnClaim | undefined
+  prepared: boolean
+  link: ExecutionGateway.ExecutionLink | undefined
+  readonly runs: Map<string, ExecutionGateway.ExecutionLink>
+  runtimeStartCalls: number
+  projection: Projection | undefined
+  readonly projectionCommits: Map<number, number>
+  terminalPersistenceAttempts: number
+  readonly operationReceipts: Map<string, "unknown">
+  operationDispatches: number
+}
+
 it.effect("converges across API, Turn worker, runtime, projection, and terminal-persistence replacement", () =>
   Effect.gen(function* () {
     const claimed = yield* Deferred.make<void>()
@@ -36,18 +53,18 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     const runningCommitted = yield* Deferred.make<void>()
     const terminalPersistenceEntered = yield* Deferred.make<void>()
     const terminalPersisted = yield* Deferred.make<void>()
-    const durable = {
+    const durable: DurableRecoveryState = {
       commands: new Map<string, string>(),
       turns: new Map<string, Turn.AgentExecutionTurn>(),
-      claim: undefined as TurnClaim | undefined,
+      claim: undefined,
       prepared: false,
-      link: undefined as ExecutionGateway.ExecutionLink | undefined,
+      link: undefined,
       runs: new Map<string, ExecutionGateway.ExecutionLink>(),
       runtimeStartCalls: 0,
-      projection: undefined as Projection | undefined,
+      projection: undefined,
       projectionCommits: new Map<number, number>(),
       terminalPersistenceAttempts: 0,
-      operationReceipts: new Map([["unknown-operation", "unknown" as const]]),
+      operationReceipts: new Map([["unknown-operation", "unknown"]]),
       operationDispatches: 1,
     }
     const admit = (operationKey: string) =>
@@ -101,7 +118,9 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
         Effect.sync(() => {
           if (durable.claim?.claimToken !== claim.claimToken) return false
           durable.prepared = true
-          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, status: "running" })
+          const turn = durable.turns.get(turnId)
+          if (turn === undefined) throw new Error("claimed Turn is unavailable")
+          durable.turns.set(turnId, { ...turn, status: "running" })
           return true
         }),
       renew: (claim, now, leaseMillis) =>
@@ -113,8 +132,10 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
       complete: (claim, link) =>
         Effect.sync(() => {
           if (durable.claim?.claimToken !== claim.claimToken) throw new Error("stale claim completed")
+          const turn = durable.turns.get(turnId)
+          if (turn === undefined) throw new Error("completed Turn is unavailable")
           durable.link = link
-          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, executionLink: link })
+          durable.turns.set(turnId, { ...turn, executionLink: link })
           durable.claim = undefined
         }),
       release: () =>
@@ -164,7 +185,9 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
       startTurn: () =>
         Effect.sync(() => {
           durable.runtimeStartCalls += 1
-          return durable.runs.get(turnId)!
+          const link = durable.runs.get(turnId)
+          if (link === undefined) throw new Error("recoverable execution link is unavailable")
+          return link
         }),
     })
     const completionScope = yield* Scope.make()
@@ -203,40 +226,50 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
     }
-    const turns = {
+    const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
+    const turns = TurnRepository.Service.of({
+      ...turnRepository,
       get: () => Effect.succeed(durable.turns.get(turnId)),
-      setStatus: (_id: Turn.TurnId, status: ExecutionProjection.Result["status"]) => {
+      setStatus: (_id, status) => {
         durable.terminalPersistenceAttempts += 1
         if (durable.terminalPersistenceAttempts === 1)
           return Deferred.succeed(terminalPersistenceEntered, undefined).pipe(Effect.andThen(Effect.never))
         return Effect.sync(() => {
-          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, status })
-        }).pipe(
-          Effect.tap(() => Deferred.succeed(terminalPersisted, undefined)),
-          Effect.as(durable.turns.get(turnId)!),
-        )
+          const turn = durable.turns.get(turnId)
+          if (turn === undefined) throw new Error("persisted Turn is unavailable")
+          durable.turns.set(turnId, { ...turn, status })
+          return { ...turn, status }
+        }).pipe(Effect.tap(() => Deferred.succeed(terminalPersisted, undefined)))
       },
-    } as unknown as TurnRepository.Interface
-    const transcripts = {
+    })
+    const transcriptRepository = Context.get(
+      yield* Layer.build(TranscriptStore.memoryLayer()),
+      TranscriptRepository.Service,
+    )
+    const transcripts = TranscriptRepository.Service.of({
+      ...transcriptRepository,
       listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
       get: () => Effect.succeed(durable.projection),
       commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
-        Effect.sync(() => {
+        Effect.sync<TranscriptRepository.WriteResult>(() => {
+          const turn = durable.turns.get(turnId)
+          if (turn === undefined) throw new Error("projected Turn is unavailable")
           durable.projectionCommits.set(change.revision, (durable.projectionCommits.get(change.revision) ?? 0) + 1)
-          durable.projection = {
-            turn: durable.turns.get(turnId)!,
+          const projection = {
+            turn,
             units: change._tag === "ProjectionSnapshot" ? change.units : (durable.projection?.units ?? []),
             checkpointGeneration: (durable.projection?.checkpointGeneration ?? 0) + 1,
             revision: change.revision,
             state: change.state,
-            ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
             projectionVersion: ExecutionProjection.projectionVersion,
           }
-          return "committed" as const
+          durable.projection =
+            change.checkpoint === undefined ? projection : { ...projection, projectorCheckpoint: change.checkpoint }
+          return "committed"
         }).pipe(
           Effect.tap(() => (change.revision === 0 ? Deferred.succeed(runningCommitted, undefined) : Effect.void)),
         ),
-    } as unknown as TranscriptRepository.Interface
+    })
     const buildProjectionWorker = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
       Layer.buildWithScope(
         projectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(

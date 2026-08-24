@@ -1,5 +1,5 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { Clock, Context, Crypto, DateTime, Effect, Layer, Schema } from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect"
 import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import {
@@ -75,7 +75,9 @@ const unavailable = () =>
 
 const forbidden = (message = "Resource is unavailable") => HostedProductError.make({ kind: "forbidden", message })
 
-const storeFailure = (error: unknown) => {
+type ProductOperationError = HostedProductError | StoreError | { readonly _tag: string }
+
+const storeFailure = (error: ProductOperationError) => {
   if (Schema.is(HostedProductError)(error)) return error
   if (!Schema.is(StoreError)(error)) return unavailable()
   let kind: NonNullable<HostedProductError["kind"]> = "unavailable"
@@ -426,29 +428,32 @@ export const layer = (options: {
                   (yield* sql`SELECT id FROM rika_hosted_workspaces WHERE id = ${workspaceId}`.pipe(
                     Effect.mapError(unavailable),
                   )).length > 0
-                if (!workspaceExists)
-                  yield* store.createWorkspace({
+                if (!workspaceExists) {
+                  const workspace = {
                     id: workspaceId,
                     ownerId: authority.owner.id,
-                    ...(projectId === undefined ? {} : { projectId }),
                     createdByUserId: authority.userId,
                     executorKind,
                     inheritProjectGrants: executorKind === "orb" && projectId !== undefined,
                     now: timestamp,
-                  })
+                  }
+                  if (projectId !== undefined) Object.assign(workspace, { projectId })
+                  yield* store.createWorkspace(workspace)
+                }
                 yield* sql`INSERT INTO rika_workspaces (owner_id, path, created_at)
                   VALUES (${authority.owner.id}, ${workspaceId}, ${currentTime})
                   ON CONFLICT (owner_id, path) DO NOTHING`.pipe(Effect.mapError(unavailable))
-                const thread = yield* store.createThread({
+                const threadInput = {
                   id: threadId,
                   ownerId: authority.owner.id,
-                  ...(projectId === undefined ? {} : { projectId }),
                   workspaceId,
                   createdByUserId: authority.userId,
                   executorKind,
                   inheritProjectGrants: executorKind === "orb" && projectId !== undefined,
                   now: timestamp,
-                })
+                }
+                if (projectId !== undefined) Object.assign(threadInput, { projectId })
+                const thread = yield* store.createThread(threadInput)
                 yield* sql`INSERT INTO rika_threads
                   (id, owner_id, workspace, title, created_at, updated_at)
                   VALUES (${thread.id}, ${authority.owner.id}, ${workspaceId}, 'New thread', ${currentTime}, ${currentTime})`.pipe(
@@ -588,16 +593,16 @@ export const layer = (options: {
           if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
           if (resolved.kind === "organization") {
             const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
-            yield* policy
-              .authorize(action, {
-                memberId: membershipId,
-                ...(resolved.createdByUserId === principal.userId ? { threadCreatorMemberId: membershipId } : {}),
-                executorKind: resolved.executorKind,
-                inheritProjectGrants: resolved.inheritProjectGrants,
-                ...(resolved.threadRole === null ? {} : { threadRole: resolved.threadRole }),
-                ...(resolved.projectRole === null ? {} : { projectRole: resolved.projectRole }),
-              })
-              .pipe(Effect.mapError(() => forbidden()))
+            const authorization = {
+              memberId: membershipId,
+              executorKind: resolved.executorKind,
+              inheritProjectGrants: resolved.inheritProjectGrants,
+            }
+            if (resolved.createdByUserId === principal.userId)
+              Object.assign(authorization, { threadCreatorMemberId: membershipId })
+            if (resolved.threadRole !== null) Object.assign(authorization, { threadRole: resolved.threadRole })
+            if (resolved.projectRole !== null) Object.assign(authorization, { projectRole: resolved.projectRole })
+            yield* policy.authorize(action, authorization).pipe(Effect.mapError(() => forbidden()))
           }
           const owner =
             resolved.kind === "personal"
@@ -672,10 +677,9 @@ export const layer = (options: {
           repositoryValue === null
             ? null
             : yield* Schema.decodeUnknownEffect(JsonObject)(repositoryValue).pipe(Effect.mapError(unavailable))
-        const branch =
-          repository !== null && typeof repository.branch === "string" && repository.branch.length > 0
-            ? repository.branch
-            : null
+        const decodedBranch =
+          repository === null ? Option.none() : Schema.decodeUnknownOption(Schema.NonEmptyString)(repository.branch)
+        const branch = Option.getOrNull(decodedBranch)
         return {
           repository,
           branch,
@@ -706,7 +710,7 @@ export const layer = (options: {
         const turnId = TurnId.make(yield* crypto.randomUUIDv4)
         const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
         const readinessProof = yield* options.promptAdmissionReadiness
-        const admitted = yield* store.admitPrompt({
+        const prompt = {
           ownerId: authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           commandId,
@@ -714,12 +718,13 @@ export const layer = (options: {
           turnId,
           actor: authority.actor,
           prompt: input.prompt,
-          ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
           executionRoute,
           admittedAt,
           queueCapacity: 32,
           readinessProof,
-        })
+        }
+        if (input.promptParts !== undefined) Object.assign(prompt, { promptParts: input.promptParts })
+        const admitted = yield* store.admitPrompt(prompt)
         return {
           commandId: String(admitted.command.commandId),
           turnId: String(admitted.turnId),

@@ -1,7 +1,7 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
-import type { TranscriptBlock } from "../../../state/transcript/model"
+import { decodeTranscriptBlocks, type TranscriptBlock } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
@@ -115,15 +115,17 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
             append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "    "))))
           else appendAll(styled)
         }
-        context.nestedRanges.push({
+        const nestedRange = {
           start,
           end: context.line(),
           headerEnd,
           unit: childId,
           expandable: childExpandable,
           animated: unit.block.status === "running",
-          ...(detail?.target === undefined ? {} : { targets: [detail.target] }),
-        })
+        }
+        context.nestedRanges.push(
+          detail?.target === undefined ? nestedRange : { ...nestedRange, targets: [detail.target] },
+        )
       }
   }
   const renderEditBody = (
@@ -152,7 +154,8 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       removed += file.deletions
     }
     for (const diffIndex of diffs) {
-      const diff = model.blocks[diffIndex] as Extract<TranscriptBlock, { _tag: "Diff" }>
+      const diff = decodeTranscriptBlocks(model.blocks)[diffIndex]
+      if (diff?._tag !== "Diff") continue
       const [a, r] = diffCounts(diff.patch)
       added += a
       removed += r
@@ -228,7 +231,8 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         }
       }
       for (const diffIndex of diffs) {
-        const diff = model.blocks[diffIndex] as Extract<TranscriptBlock, { _tag: "Diff" }>
+        const diff = decodeTranscriptBlocks(model.blocks)[diffIndex]
+        if (diff?._tag !== "Diff") continue
         append(fg(colors.text)("\n"))
         const start = context.line()
         appendAll(

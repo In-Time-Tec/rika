@@ -4,7 +4,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as RootTurnOwner from "../../thread/queue/root-owner"
 import { Context, Effect, Layer, Scope } from "effect"
 import { buildProductOperationDependencies } from "./dependencies"
-import { makeProductOperationAdmission } from "../dispatch/admission"
+import * as ProductOperationAdmission from "../dispatch/admission"
 import type { ProductLayerOptions } from "./options"
 
 export interface ProductOperationFoundationInput {
@@ -21,7 +21,7 @@ export const makeProductOperationFoundation = Effect.fn("ProductOperation.makeFo
     options,
     ownerScope,
   })
-  const { acquiredBackend, closeAdmissions } = yield* makeProductOperationAdmission({
+  const { acquiredBackend, closeAdmissions } = yield* ProductOperationAdmission.makeProductOperationAdmission({
     rawBackend: dependencies.rawBackend,
   })
   const dependencyContext = dependencies.dependencyContext

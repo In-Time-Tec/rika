@@ -24,7 +24,7 @@ import {
   Timestamp,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError, type StoreFailureReason, type StoreService } from "@rika/product/hosted-store"
-import { isAuthorized, type AuthorizationAction } from "@rika/product/hosted-authorization"
+import { isAuthorized, type AuthorizationAction, type AuthorizationSubject } from "@rika/product/hosted-authorization"
 import type { TurnId } from "@rika/product/turn-record"
 import { layer as assignmentLayer } from "./memory-assignments"
 
@@ -170,16 +170,14 @@ const make = Effect.gen(function* () {
       thread.executorKind === "orb" && thread.inheritProjectGrants && thread.projectId !== undefined
         ? current.projectGrants.get(projectGrantKey(thread.projectId, input.actor.membershipId))
         : undefined
-    return isAuthorized(
-      {
-        memberId: input.actor.membershipId,
-        executorKind: thread.executorKind,
-        inheritProjectGrants: thread.inheritProjectGrants,
-        ...(direct === undefined ? {} : { threadRole: direct.role }),
-        ...(inherited === undefined ? {} : { projectRole: inherited.role }),
-      },
-      action,
-    )
+    const authorization: AuthorizationSubject = {
+      memberId: input.actor.membershipId,
+      executorKind: thread.executorKind,
+      inheritProjectGrants: thread.inheritProjectGrants,
+    }
+    if (direct !== undefined) Object.assign(authorization, { threadRole: direct.role })
+    if (inherited !== undefined) Object.assign(authorization, { projectRole: inherited.role })
+    return isAuthorized(authorization, action)
   }
 
   return HostedStore.of({
@@ -247,12 +245,12 @@ const make = Effect.gen(function* () {
         const workspace: HostedWorkspace = {
           id: input.id,
           ownerId: input.ownerId,
-          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
           inheritProjectGrants: input.executorKind === "orb" ? (input.inheritProjectGrants ?? true) : false,
           createdAt: input.now,
         }
+        if (input.projectId !== undefined) Object.assign(workspace, { projectId: input.projectId })
         return succeed(workspace, {
           ...current,
           workspaces: replace(current.workspaces, input.id, workspace),
@@ -274,7 +272,6 @@ const make = Effect.gen(function* () {
         const thread: HostedThread = {
           id: input.id,
           ownerId: input.ownerId,
-          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           workspaceId: input.workspaceId,
           createdByUserId: input.createdByUserId,
           executorKind: input.executorKind,
@@ -282,6 +279,7 @@ const make = Effect.gen(function* () {
             input.executorKind === "orb" ? (input.inheritProjectGrants ?? workspace.inheritProjectGrants) : false,
           createdAt: input.now,
         }
+        if (input.projectId !== undefined) Object.assign(thread, { projectId: input.projectId })
         return succeed(thread, {
           ...current,
           threads: replace(current.threads, input.id, {
@@ -753,7 +751,6 @@ const make = Effect.gen(function* () {
         const reference: CredentialReference = {
           id: input.id,
           ownerId: input.ownerId,
-          ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
           provider: input.provider,
           purpose: input.purpose,
           externalReference: input.externalReference,
@@ -762,6 +759,7 @@ const make = Effect.gen(function* () {
           createdAt: previous?.createdAt ?? input.now,
           updatedAt: input.now,
         }
+        if (input.projectId !== undefined) Object.assign(reference, { projectId: input.projectId })
         return succeed(reference, {
           ...current,
           credentialReferences: replace(current.credentialReferences, input.id, reference),

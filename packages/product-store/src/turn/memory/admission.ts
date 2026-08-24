@@ -27,8 +27,8 @@ export const makeTurnMemoryAdmission = ({
 > => ({
   prepareExecutionAdmission: Effect.fn("TurnRepository.prepareExecutionAdmission")((input, now) =>
     Effect.gen(function* () {
-      const prepared = yield* Schema.decodeUnknownEffect(ExecutionGateway.StartTurn)(input)
-      const turnId = yield* Schema.decodeUnknownEffect(TurnId)(prepared.turnId)
+      const prepared = yield* Schema.decodeEffect(ExecutionGateway.StartTurn)(input)
+      const turnId = yield* Schema.decodeEffect(TurnId)(prepared.turnId)
       const result = yield* modifyState(
         (
           currentState,

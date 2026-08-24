@@ -48,17 +48,19 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
       if (context?._tag === "Available") {
         const value = ContextMeter.meter(context, { cells: contextCells })
         const streaming = model.busy && model.activity?._tag !== "Compacting"
+        const baseAnimation = {
+          cells: contextCells,
+          tick: model.contextAnimation.compactTick ?? model.animationTick,
+          streaming,
+          flashTicks: model.contextAnimation.flashTicks,
+        }
+        const animation: ContextMeter.AnimatedMeterOptions =
+          model.contextAnimation.compactFromPercent === undefined
+            ? baseAnimation
+            : { ...baseAnimation, compactFromPercent: model.contextAnimation.compactFromPercent }
         const glyphs =
           streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-            ? ContextMeter.animatedGlyphs(context, {
-                cells: contextCells,
-                tick: model.contextAnimation.compactTick ?? model.animationTick,
-                streaming,
-                ...(model.contextAnimation.compactFromPercent === undefined
-                  ? {}
-                  : { compactFromPercent: model.contextAnimation.compactFromPercent }),
-                ...(model.contextAnimation.flashTicks > 0 ? { flashTicks: model.contextAnimation.flashTicks } : {}),
-              })
+            ? ContextMeter.animatedGlyphs(context, animation)
             : value.glyphs
         const filled = value.glyphs.filter((glyph) => glyph === meterGlyphs.fill).length
         for (const [index, glyph] of glyphs.entries()) {

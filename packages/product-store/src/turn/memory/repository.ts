@@ -5,46 +5,51 @@ import { Effect, Layer } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { AgentExecutionTurn, Turn } from "@rika/product/turn-record"
 import { clone, cursorFor, pageSize } from "./state"
-import { makeTurnMemoryLifecycle } from "./lifecycle"
-import { makeTurnMemoryAdmission } from "./admission"
-import { makeTurnMemorySteeringAdmission } from "./steering-admission"
-import { makeTurnMemoryQueue } from "./queue"
-import { makeTurnMemoryState } from "./state-operations"
-import { makeTurnMemorySubmission } from "./submission"
+import * as Lifecycle from "./lifecycle"
+import * as Admission from "./admission"
+import * as SteeringAdmission from "./steering-admission"
+import * as Queue from "./queue"
+import * as StateOperations from "./state-operations"
+import * as Submission from "./submission"
 import { repositoryError } from "./errors"
-import { MemoryCoordinatorTypeId } from "./coordination"
+import { MemoryCoordination } from "./coordination"
 
 export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
   Effect.gen(function* () {
-    const { context, coordinator, get } = yield* makeTurnMemoryState(initial)
+    const { context, coordinator, get } = yield* StateOperations.makeTurnMemoryState(initial)
     const { readState } = context
-    const shellCoordinator = coordinator[MemoryCoordinatorTypeId]
-    return Service.of({
-      ...coordinator,
-      ...makeTurnMemorySubmission(context),
-      ...makeTurnMemoryQueue(context),
-      ...makeTurnMemoryAdmission(context),
-      ...makeTurnMemorySteeringAdmission(context),
-      ...makeTurnMemoryLifecycle(context),
+    const service = Service.of({
+      ...Submission.makeTurnMemorySubmission(context),
+      ...Queue.makeTurnMemoryQueue(context),
+      ...Admission.makeTurnMemoryAdmission(context),
+      ...SteeringAdmission.makeTurnMemorySteeringAdmission(context),
+      ...Lifecycle.makeTurnMemoryLifecycle(context),
       createRecordedShell: Effect.fn("TurnRepository.createRecordedShell")(function* (turn) {
-        const result = yield* shellCoordinator.writeRecordedShell(undefined, turn, () =>
+        const result = yield* coordinator.writeRecordedShell(undefined, turn, () =>
           Effect.succeed({ _tag: "Commit" as const, value: undefined }),
         )
         if (result._tag === "Stale") return yield* repositoryError(`Turn ${turn.id} already exists`)
-        return result.value.turn as typeof turn
+        if (!TurnResult.isRunningRecordedShell(result.value.turn))
+          return yield* repositoryError(`Turn ${turn.id} is not a running recorded shell`)
+        return result.value.turn
       }),
       settleRecordedShell: Effect.fn("TurnRepository.settleRecordedShell")(function* (expected, turn) {
-        const result = yield* shellCoordinator.writeRecordedShell(expected, turn, () =>
+        const result = yield* coordinator.writeRecordedShell(expected, turn, () =>
           Effect.succeed({ _tag: "Commit" as const, value: undefined }),
         )
-        return result._tag === "Stale" ? undefined : (result.value.turn as typeof turn)
+        if (result._tag === "Stale") return undefined
+        if (TurnResult.isRunningRecordedShell(result.value.turn))
+          return yield* repositoryError(`Turn ${turn.id} is not a terminal recorded shell`)
+        return result.value.turn
       }),
       copyRecordedShell: Effect.fn("TurnRepository.copyRecordedShell")(function* (turn) {
-        const result = yield* shellCoordinator.writeRecordedShell(undefined, turn, () =>
+        const result = yield* coordinator.writeRecordedShell(undefined, turn, () =>
           Effect.succeed({ _tag: "Commit" as const, value: undefined }),
         )
         if (result._tag === "Stale") return yield* repositoryError(`Turn ${turn.id} already exists`)
-        return result.value.turn as typeof turn
+        if (TurnResult.isRunningRecordedShell(result.value.turn))
+          return yield* repositoryError(`Turn ${turn.id} is not a terminal recorded shell`)
+        return result.value.turn
       }),
       get,
       list: Effect.fn("TurnRepository.list")(function* (threadId) {
@@ -101,6 +106,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
     })
+    MemoryCoordination.register(coordinator, service)
+    return service
   })
 
 export const memoryLayer = (initial: ReadonlyArray<Turn> = []) => Layer.effect(Service, makeMemory(initial))

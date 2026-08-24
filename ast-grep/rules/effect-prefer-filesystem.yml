@@ -1,6 +1,6 @@
 id: effect-prefer-filesystem
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer the FileSystem service for Effectful file operations; keep node:fs, Bun.file/write, or Deno file interop in a platform adapter.
 rule:
   any:

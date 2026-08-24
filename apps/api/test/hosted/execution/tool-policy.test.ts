@@ -83,7 +83,7 @@ describe("hosted tool policy", () => {
   it.effect("requires the exact durable approval even when an audit record claims approval", () => {
     let invoked = false
     let admission: ToolAdmissionContext | undefined
-    let nestedRequest: NestedOperation.Request | undefined
+    let nestedRequest: Pick<NestedOperation.Request, "kind" | "approval"> | undefined
     const policy = {
       ...testToolPolicy,
       begin: (input: Parameters<typeof testToolPolicy.begin>[0]) =>
@@ -106,7 +106,7 @@ describe("hosted tool policy", () => {
         NestedOperation.NestedOperations,
         NestedOperation.NestedOperations.of({
           run: (candidate) => {
-            nestedRequest = candidate as NestedOperation.Request
+            nestedRequest = candidate
             return NestedOperation.NestedOperationSuspended.make({
               token: "approval-token",
               operationKey: "operation-test",

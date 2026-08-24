@@ -149,15 +149,13 @@ it("projects oversized message-backed steering delivered by the runtime", () => 
     steeringSequence: 0,
     idempotencyKey: "message:child-settled:run-child",
     digest: "digest-message",
-    prompt: {
-      content: [
-        {
-          options: { tenetkit: { message: { from: "run:run-child", messageId: "child-settled:run-child" } } },
-          role: "user",
-          content: [{ type: "text", text: body }],
-        },
-      ],
-    } as never,
+    prompt: Prompt.make([
+      {
+        options: { tenetkit: { message: { from: "run:run-child", messageId: "child-settled:run-child" } } },
+        role: "user",
+        content: [{ type: "text", text: body }],
+      },
+    ]),
   })
   const admission = projector.apply(messageBacked)
   expect(admission.state.steering.pending).toEqual([

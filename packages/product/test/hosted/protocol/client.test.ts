@@ -21,12 +21,10 @@ import {
 } from "../../../src/hosted/model"
 import { ClientMessage, ServerFrame, protocolVersion } from "../../../src/hosted/protocol/client"
 
-const codec = <S extends Schema.Constraint>(schema: S) =>
-  schema as unknown as Schema.Codec<unknown, unknown, never, never>
-const roundTrip = (schema: Schema.Constraint, value: unknown) => {
-  const jsonCodec = Schema.fromJsonString(codec(schema))
+const roundTrip = <A, I>(schema: Schema.Codec<A, I, never, never>, value: A) => {
+  const jsonCodec = Schema.fromJsonString(schema)
   const encoded = Schema.encodeUnknownSync(jsonCodec)(value)
-  return Schema.decodeUnknownSync(jsonCodec)(encoded)
+  return Schema.decodeSync(jsonCodec)(encoded)
 }
 
 const userId = BetterAuthUserId.make("user")
@@ -54,7 +52,8 @@ const organizationActor = {
   clientId,
   deviceId,
 }
-const envelope = (command: unknown) => ({ protocolVersion, requestId, command })
+type ClientCommand = typeof ClientMessage.Type.command
+const envelope = (command: ClientCommand) => ({ protocolVersion, requestId, command })
 const admitted = { commandId, idempotencyKey, expectedThreadVersion }
 const mutation = { threadId, ...admitted }
 
@@ -126,7 +125,7 @@ describe("hosted Thread client protocol", () => {
       )
         continue
       const { threadId: _, ...withoutThread } = message.command
-      expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...message, command: withoutThread })).toThrow()
+      expect(() => Schema.decodeSync(ClientMessage)({ ...message, command: withoutThread })).toThrow()
     }
   })
 
@@ -140,24 +139,24 @@ describe("hosted Thread client protocol", () => {
       { ...base, command: { ...base.command, actor: personalActor } },
       { ...base, command: { ...base.command, membershipId } },
     ]) {
-      expect(() => Schema.decodeUnknownSync(ClientMessage)(forged)).toThrow()
+      expect(() => Schema.decodeSync(ClientMessage)(forged)).toThrow()
     }
-    expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
+    expect(() => Schema.decodeSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
     expect(() =>
-      Schema.decodeUnknownSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true })),
+      Schema.decodeSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true })),
     ).toThrow()
     expect(() =>
-      Schema.decodeUnknownSync(ClientMessage)(
+      Schema.decodeSync(ClientMessage)(
         envelope({ _tag: "CreateThread", ...admitted, owner: { kind: "personal" }, placement: "local" }),
       ),
     ).toThrow()
     expect(() =>
-      Schema.decodeUnknownSync(ClientMessage)(
+      Schema.decodeSync(ClientMessage)(
         envelope({ _tag: "CreateThread", ...admitted, owner: { kind: "personal" }, executorKind: "runner" }),
       ),
     ).toThrow()
     expect(() =>
-      Schema.decodeUnknownSync(ClientMessage)(
+      Schema.decodeSync(ClientMessage)(
         envelope({
           _tag: "CreateThread",
           ...mutation,
@@ -174,7 +173,7 @@ describe("hosted Thread client protocol", () => {
       executorKind: "orb" as const,
       view: {
         thread: {
-          id: threadId as never,
+          id: threadId satisfies never,
           workspace: "workspace",
           title: "Thread",
           labels: [],
@@ -280,12 +279,12 @@ describe("hosted Thread client protocol", () => {
 
 describe("credential reference metadata", () => {
   it("accepts non-secret metadata and rejects nested secret-bearing keys", () => {
-    expect(Schema.decodeUnknownSync(CredentialReferenceMetadata)({ region: "us-west-2", version: 3 })).toEqual({
+    expect(Schema.decodeSync(CredentialReferenceMetadata)({ region: "us-west-2", version: 3 })).toEqual({
       region: "us-west-2",
       version: 3,
     })
     expect(() =>
-      Schema.decodeUnknownSync(CredentialReferenceMetadata)({ provider: { accessToken: "secret material" } }),
+      Schema.decodeSync(CredentialReferenceMetadata)({ provider: { accessToken: "secret material" } }),
     ).toThrow("credential metadata must not contain secret material")
   })
 })

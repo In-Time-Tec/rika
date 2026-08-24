@@ -350,9 +350,7 @@ test("keeps the welcome mark renderable stable while typing", () =>
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
-        const transcriptChildren = () =>
-          (surface as unknown as { readonly transcriptChildren: ReadonlyArray<{ readonly content: unknown }> })
-            .transcriptChildren
+        const transcriptChildren = () => surface.transcriptDiagnostics().rows
         const before = transcriptChildren()[0]
         const beforeContent = before?.content
         expect(before).toBeDefined()
@@ -386,7 +384,6 @@ test("drags the sidebar left border to resize it through OpenTUI mouse routing",
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 30 }))
       const pointers: Array<string> = []
-      ;(setup.renderer as unknown as { realStdoutWrite?: undefined }).realStdoutWrite = undefined
       setup.renderer.setMousePointer = (style) => pointers.push(style)
       let model: Model = {
         ...initial("/work", "high"),

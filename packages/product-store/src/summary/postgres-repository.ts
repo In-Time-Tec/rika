@@ -43,10 +43,10 @@ const RepairRow = Schema.Struct({
   status: Schema.String,
 })
 
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
+const repositoryError = <Error>(error: Error) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 100, 1), 100)
 
-const decodeSummary = (row: unknown) =>
+const decodeSummary = <Row>(row: Row) =>
   Schema.decodeUnknownEffect(SummaryRow)(row).pipe(
     Effect.flatMap((value) =>
       Effect.gen(function* () {
@@ -58,8 +58,8 @@ const decodeSummary = (row: unknown) =>
                 removed: Math.max(0, value.removed),
               }
             : undefined
-        const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
-        return {
+        const id = yield* Schema.decodeEffect(ThreadId)(value.id)
+        const summary = ThreadSummary.make({
           id,
           workspace: value.workspace,
           title: value.title,
@@ -71,19 +71,20 @@ const decodeSummary = (row: unknown) =>
           }),
           unread: value.last_activity_at > (value.last_read_at ?? 0),
           lastActivityAt: value.last_activity_at,
-          ...(editTotals === undefined ? {} : { editTotals }),
-        } satisfies ThreadSummary
+        })
+        if (editTotals !== undefined) Object.assign(summary, { editTotals })
+        return summary
       }),
     ),
     Effect.mapError(repositoryError),
   )
 
-const decodeRepair = (row: unknown) =>
+const decodeRepair = <Row>(row: Row) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(RepairRow)(row)
     const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
-    const turnId = yield* Schema.decodeUnknownEffect(TurnId)(value.turn_id)
-    const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(value.thread_id)
+    const turnId = yield* Schema.decodeEffect(TurnId)(value.turn_id)
+    const threadId = yield* Schema.decodeEffect(ThreadId)(value.thread_id)
     return RepairCandidate.make({
       turnId,
       threadId,

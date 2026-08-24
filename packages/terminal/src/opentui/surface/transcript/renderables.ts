@@ -10,6 +10,8 @@ import {
   type TextChunk,
 } from "@opentui/core"
 import stringWidth from "string-width"
+import { Option, Schema } from "effect"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import {
   mountedTranscriptRowBudget,
   transcriptRenderableBandRows,
@@ -73,23 +75,20 @@ const buildTranscriptUnitBundles = (
       const key = start === 0 ? `${range.unit}:${section}` : `${range.unit}:${section}:${lineOffset + start}`
       const spinnerChunk =
         range.animated === true ? content.chunks.findIndex((chunk) => chunk.text === spinnerGlyph) : -1
-      const descriptor: TranscriptRenderableDescriptor = {
+      const baseDescriptor = {
         key,
         revision: `${revision}#${rangeIndex}${section === "header" ? "h" : "b"}:${lineOffset + start}`,
         content,
-        ...(section === "header" ? { selectable: !range.expandable } : {}),
-        ...(range.targets === undefined ? {} : { targets: range.targets }),
-        ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
-        ...(section === "header" && range.expandable
-          ? {
-              onMouseDown: (event: MouseEvent) => {
-                if (event.button !== 0) return
-                event.stopPropagation()
-                onToggle(range.unit)
-              },
-            }
-          : {}),
+        selectable: section === "header" ? !range.expandable : true,
+        targets: range.targets ?? [],
+        onMouseDown: (event: MouseEvent) => {
+          if (section !== "header" || !range.expandable || event.button !== 0) return
+          event.stopPropagation()
+          onToggle(range.unit)
+        },
       }
+      const descriptor: TranscriptRenderableDescriptor =
+        spinnerChunk < 0 ? baseDescriptor : { ...baseDescriptor, spinnerChunk }
       bundles.push({ key, rows: band.length, descriptors: [descriptor] })
     }
   }
@@ -271,12 +270,10 @@ const reconcileTranscriptRenderables = ({
       selectable: descriptor.selectable ?? true,
     })
     renderable.onMouseDown = (event) => handleMouseDown(renderable, event)
-    const record = {
-      key: descriptor.key,
-      revision: descriptor.revision,
-      renderable,
-      ...(descriptor.spinnerChunk === undefined ? {} : { spinnerChunk: descriptor.spinnerChunk }),
-    }
+    const record =
+      descriptor.spinnerChunk === undefined
+        ? { key: descriptor.key, revision: descriptor.revision, renderable }
+        : { key: descriptor.key, revision: descriptor.revision, renderable, spinnerChunk: descriptor.spinnerChunk }
     records.set(record.key, record)
     return record
   })
@@ -390,13 +387,13 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     let tentative: { readonly text: string; readonly tone: "answer" | "reasoning" } | undefined
     if (unitKey.startsWith("entry:tentative:") && unit.kind === "entry")
       tentative = { text: boundedModel.entries[unit.entry]?.text ?? "", tone: "answer" }
-    if (unitKey.startsWith("block:tentative:") && unit.kind === "reasoning")
+    if (unitKey.startsWith("block:tentative:") && unit.kind === "reasoning") {
+      const block = Option.getOrUndefined(Schema.decodeUnknownOption(Block)(boundedModel.blocks[unit.block]))
       tentative = {
-        text:
-          (boundedModel.blocks[unit.block] as { readonly _tag?: string; readonly text?: string } | undefined)?.text ??
-          "",
+        text: block?._tag === "Reasoning" ? block.text : "",
         tone: "reasoning",
       }
+    }
     let entry: TranscriptUnitCacheEntry
     if (cached !== undefined && cached.revision === revision) entry = cached
     else if (tentative === undefined)

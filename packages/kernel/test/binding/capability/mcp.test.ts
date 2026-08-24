@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { NestedOperation } from "tenetkit"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import * as McpBinding from "@rika/kernel/mcp-binding"
@@ -38,7 +38,7 @@ const runtime = (tools: ReadonlyArray<ReturnType<typeof tool>>, calls: Array<str
           return Effect.succeed({ ok: true })
         },
         aiTools: Effect.succeed([]),
-      } as never),
+      }),
   })
 
 const registry = (
@@ -80,7 +80,7 @@ describe("mcp binding", () => {
       const response = yield* mounted.invoke({ module: "mcp", operation: "tools", input: { server: "files" } })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success")
-        expect((response.output as ReadonlyArray<{ name: string }>).map((entry) => entry.name)).toEqual([
+        expect((yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))(response.output)).map((entry) => entry.name)).toEqual([
           "read",
           "write",
         ])

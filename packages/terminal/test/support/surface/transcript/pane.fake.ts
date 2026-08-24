@@ -1,7 +1,8 @@
-import { Function, Data, Effect } from "effect"
+import { Function, Data, Effect, Match } from "effect"
 
 import { initial, type Model } from "../../../../src/state/model"
 import { type ThreadItem } from "../../../../src/state/thread/model"
+import type { TranscriptBlock } from "../../../../src/state/transcript/model"
 import { update } from "../../../../src/state/reducer/model"
 
 export class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
@@ -22,34 +23,34 @@ export const _insertText: {
 } = Function.dual(2, _insertTextImpl)
 
 export const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
+  Match.value(value).pipe(
+    Match.when(Match.string, (text) => text),
+    Match.orElse((styled) => styled.chunks.map((chunk) => chunk.text).join("")),
+  )
 
-const _streamingShellImpl = (id: string, output?: string) => ({
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
-  files: [],
-})
+const _streamingShellImpl = (id: string, output: string | undefined): Extract<TranscriptBlock, { _tag: "ToolCall" }> => {
+  const block: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall" as const,
+    id,
+    name: "bash",
+    input: `{"command":"printf ${id}"}`,
+    status: "running" as const,
+    presentation: {
+      family: "shell" as const,
+      action: "shell",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
+    detail: `printf ${id}`,
+    files: [],
+  }
+  return output === undefined ? block : { ...block, output }
+}
 
 export const _streamingShell: {
-  (
-    arg0: Parameters<typeof _streamingShellImpl>[0],
-    arg1?: Parameters<typeof _streamingShellImpl>[1],
-  ): ReturnType<typeof _streamingShellImpl>
-  (
-    arg1?: Parameters<typeof _streamingShellImpl>[1],
-  ): (arg0: Parameters<typeof _streamingShellImpl>[0]) => ReturnType<typeof _streamingShellImpl>
-} = Function.dual((args) => typeof args[0] === "string", _streamingShellImpl)
+  (output: string | undefined): (id: string) => ReturnType<typeof _streamingShellImpl>
+  (id: string, output: string | undefined): ReturnType<typeof _streamingShellImpl>
+} = Function.dual(2, _streamingShellImpl)
 
 export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",
@@ -93,13 +94,11 @@ export const _giantSubagentModel = (childCount: number): Model => {
     files: [],
   }))
   const blocks = [rootBlock, ...childBlocks]
-  const items = blocks.map((block, index) => ({
-    _tag: "Block" as const,
-    index,
-    id: `block-${block.id}`,
-    turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
-  }))
+  const items = blocks.map((block, index) =>
+    index === 0
+      ? { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1" }
+      : { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1", parentId: "root-tool" },
+  )
   return {
     ...initial("/work", "high"),
     blocks,
@@ -153,13 +152,11 @@ const _collapsedSubagentModelImpl = (answerCount: number, childCount: number): M
       id: `answer-${index}`,
       turnId: "turn-1",
     })),
-    ...blocks.map((block, index) => ({
-      _tag: "Block" as const,
-      index,
-      id: `block-${block.id}`,
-      turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
-    })),
+    ...blocks.map((block, index) =>
+      index === 0
+        ? { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1" }
+        : { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1", parentId: "root-tool" },
+    ),
   ]
   return {
     ...initial("/work", "high"),

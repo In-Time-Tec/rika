@@ -1,4 +1,5 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
@@ -15,7 +16,6 @@ import {
   Fiber,
   FileSystem,
   Layer,
-  ManagedRuntime,
   Option,
   Path,
   Queue,
@@ -26,6 +26,7 @@ import {
   Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError } from "../protocol/binding-proxy"
 import { CellError, State as CellState, terminalOutcome, type State as CellStateValue } from "../protocol/cells"
@@ -105,8 +106,8 @@ export class HostError extends Schema.TaggedError<HostError>()("HostError", {
 }) {}
 
 const decodeApiMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ApiMessage))
-const decodeBootstrap = Schema.decodeUnknownEffect(ExecutorBootstrapWire)
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
+const encodeCellResponse = Schema.encodeSync(Schema.fromJsonString(CellResponseSchema))
 const decodeCellState = Schema.decodeUnknownEffect(Schema.fromJsonString(CellState))
 const encodeCellState = Schema.encodeEffect(Schema.fromJsonString(CellState))
 const decodeMachineState = Schema.decodeUnknownEffect(Schema.fromJsonString(MachineState))
@@ -151,17 +152,6 @@ const sandboxInstanceId = Effect.gen(function* () {
     Effect.catch(() => EffectConfig.string("E2B_SANDBOX_ID").pipe(EffectConfig.withDefault(""))),
   )
 })
-
-const stopServerAdapter = (server: ReturnType<typeof Bun.serve>) =>
-  Effect.raceFirst(
-    Effect.callback<void>((resume) => {
-      server.stop(false).then(
-        () => resume(Effect.void),
-        (error) => resume(Effect.die(error)),
-      )
-    }),
-    Effect.sleep("1 second").pipe(Effect.andThen(Effect.tryPromise(() => server.stop(true))), Effect.orDie),
-  )
 
 const required = (name: string) =>
   EffectConfig.nonEmptyString(name).pipe(Effect.mapError(() => HostError.make({ message: `${name} is required` })))
@@ -227,7 +217,7 @@ const configuration = (identity: Identity, bootstrapToken: Redacted.Redacted<str
     const wakeId = yield* crypto.randomUUIDv4.pipe(
       Effect.mapError(() => HostError.make({ message: "Could not create the workspace wake identity" })),
     )
-    return {
+    const config = {
       fence: {
         target: identity.target,
         assignmentId: identity.assignmentId,
@@ -242,8 +232,9 @@ const configuration = (identity: Identity, bootstrapToken: Redacted.Redacted<str
       workspaceId: identity.workspaceId,
       stateDirectory: identity.stateDirectory,
       wakeId,
-      ...(restoredSession === undefined ? {} : { restoredSession }),
-    } satisfies Config
+    }
+    const result: Config = restoredSession === undefined ? config : { ...config, restoredSession }
+    return result
   })
 
 export interface SessionStore {
@@ -644,21 +635,20 @@ const prepare = (
               }
             : undefined
         yield* reporter.started("checkout")
-        const outcome = yield* Effect.result(
-          prepareWorkspace({
-            stateDirectory: config.stateDirectory,
-            kernel,
-            assignment: assigned,
-            reporter,
-            credential,
-            revoke,
-            environment: executionEnvironment,
-            environmentDigest: identity.environmentDigest,
-            ...(restore === null ? {} : { restore }),
-            ...(setupCache === undefined ? {} : { setupCache }),
-            secretValues: redactedValues,
-          }),
-        )
+        const workspaceOptions = {
+          stateDirectory: config.stateDirectory,
+          kernel,
+          assignment: assigned,
+          reporter,
+          credential,
+          revoke,
+          environment: executionEnvironment,
+          environmentDigest: identity.environmentDigest,
+          secretValues: redactedValues,
+        }
+        const restoredOptions = restore === null ? workspaceOptions : { ...workspaceOptions, restore }
+        const preparedOptions = setupCache === undefined ? restoredOptions : { ...restoredOptions, setupCache }
+        const outcome = yield* Effect.result(prepareWorkspace(preparedOptions))
         if (outcome._tag === "Success") {
           yield* send({
             _tag: "WorkspacePreparationReady",
@@ -747,21 +737,11 @@ const executionKey = (operationKey: string, attempt: number) => `${operationKey}
 const redactText = (value: string, secrets: ReadonlyArray<string>) =>
   secrets.reduce((text, secret) => (secret.length === 0 ? text : text.split(secret).join("REDACTED")), value)
 
-const redactJson = (value: unknown, secrets: ReadonlyArray<string>): unknown => {
-  if (typeof value === "string") return redactText(value, secrets)
-  if (Array.isArray(value)) return value.map((entry) => redactJson(entry, secrets))
-  if (value !== null && typeof value === "object")
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [redactText(key, secrets), redactJson(entry, secrets)]),
-    )
-  return value
-}
-
 const redactResponse = (response: CellResponse, secrets: ReadonlyArray<string>) =>
-  Schema.decodeUnknownSync(CellResponseSchema)(redactJson(response, secrets))
+  Schema.decodeSync(Schema.fromJsonString(CellResponseSchema))(redactText(encodeCellResponse(response), secrets))
 
-const redactOutput = (value: unknown, secrets: ReadonlyArray<string>) => {
-  const text = redactText(typeof value === "string" ? value : JSON.stringify(value), secrets)
+const redactOutput = (value: string, secrets: ReadonlyArray<string>) => {
+  const text = redactText(value, secrets)
     .replace(/(token|password|secret|authorization)["']?\s*[:=]\s*["'][^"']+/gi, "$1=REDACTED")
     .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]+\b/g, "REDACTED")
   return { text: text.slice(0, 16_384), truncated: text.length > 16_384 }
@@ -885,7 +865,8 @@ const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
   }
   if (message.operationKey !== null) {
     if (message.phase !== "runtime") return yield* HostError.make({ message: "Operation environment phase is invalid" })
-    yield* Ref.update(grants, (current) => new Map(current).set(message.operationKey as string, message))
+    const operationKey = message.operationKey
+    yield* Ref.update(grants, (current) => new Map(current).set(operationKey, message))
     return
   }
   yield* environmentAccess.withPermits(1)(
@@ -1528,13 +1509,13 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.forkScoped,
   )
   yield* heartbeat
+  const attachCorrelation =
+    config.templateBuildId === null
+      ? { assignmentId: config.fence.assignmentId, sandboxId: config.fence.instanceId }
+      : { assignmentId: config.fence.assignmentId, sandboxId: config.fence.instanceId, buildId: config.templateBuildId }
   const checkout = yield* HostedObservability.observe(
     "attach",
-    {
-      assignmentId: config.fence.assignmentId,
-      sandboxId: config.fence.instanceId,
-      ...(config.templateBuildId === null ? {} : { buildId: config.templateBuildId }),
-    },
+    attachCorrelation,
     prepare(
       config,
       kernelProfileDigest,
@@ -1606,59 +1587,57 @@ const connect = Effect.fn("Host.connect")(function* (
   )
 })
 
-const receiveBootstrap = Effect.suspend(() => {
-  let consumed = false
-  const callbackRuntime = ManagedRuntime.make(BunServices.layer)
-  let server: ReturnType<typeof Bun.serve>
-  const receive = Effect.callback<Bootstrap, HostError>((resume) => {
-    server = Bun.serve({
-      hostname: "0.0.0.0",
-      port: 7070,
-      fetch: (request) => {
-        const path = new URL(request.url).pathname
-        if (path === "/health") return new Response("ready")
+const receiveBootstrap = Effect.scoped(
+  Effect.flatMap(Layer.build(BunServices.layer), (services) =>
+    Effect.gen(function* () {
+      let consumed = false
+      const completed = yield* Deferred.make<Bootstrap>()
+      const server = yield* BunHttpServer.make({ hostname: "0.0.0.0", port: 7070, idleTimeout: 1 })
+      const app = Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const path = new URL(request.url, "http://localhost").pathname
+        if (path === "/health") return HttpServerResponse.text("ready")
         if (path !== "/.rika/bootstrap" || request.method !== "POST" || consumed)
-          return new Response("not found", { status: 404 })
-        const handleBootstrapRequest = Effect.tryPromise({
-          try: () => request.json(),
-          catch: () => HostError.make({ message: "Bootstrap request body is invalid" }),
-        }).pipe(
-          Effect.flatMap((input) =>
-            Effect.all([
-              decodeBootstrap(input).pipe(Effect.option),
-              sandboxInstanceId,
-              EffectConfig.string("RIKA_EXECUTOR_STATE_DIRECTORY").pipe(
-                EffectConfig.withDefault(executorStateDirectory),
-              ),
-            ]),
-          ),
-          Effect.map(([bodyOption, instanceId, stateDirectory]) => {
-            const body = bodyOption._tag === "Some" ? bodyOption.value : undefined
-            if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
-              return new Response("invalid", { status: 400 })
-            if (consumed) return new Response("not found", { status: 404 })
-            consumed = true
-            const bootstrap = {
-              credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
-              identity: { ...body.identity, stateDirectory },
-              restore: body.restore,
-            }
-            const response = new Response("accepted", { status: 202 })
-            setImmediate(() => resume(Effect.succeed(bootstrap)))
-            return response
-          }),
-          Effect.orElseSucceed(() => new Response("invalid", { status: 400 })),
-        )
-        return callbackRuntime.runPromise(handleBootstrapRequest)
-      },
-    })
-  })
-  return receive.pipe(
-    Effect.ensuring(
-      Effect.suspend(() => stopServerAdapter(server)).pipe(Effect.ensuring(callbackRuntime.disposeEffect)),
-    ),
-  )
-})
+          return HttpServerResponse.text("not found", { status: 404 })
+        const [bodyOption, instanceId, stateDirectory] = yield* Effect.all([
+          HttpServerRequest.schemaBodyJson(ExecutorBootstrapWire).pipe(Effect.option),
+          sandboxInstanceId,
+          EffectConfig.string("RIKA_EXECUTOR_STATE_DIRECTORY").pipe(EffectConfig.withDefault(executorStateDirectory)),
+        ])
+        const body = Option.getOrUndefined(bodyOption)
+        if (body === undefined || instanceId.length === 0 || body.identity.instanceId !== instanceId)
+          return HttpServerResponse.text("invalid", { status: 400 })
+        if (consumed) return HttpServerResponse.text("not found", { status: 404 })
+        consumed = true
+        const bootstrap: Bootstrap = {
+          credential: Redacted.make(body.credential, { label: "executor-bootstrap" }),
+          identity: {
+            target: body.identity.target,
+            ownerId: body.identity.ownerId,
+            threadId: body.identity.threadId,
+            assignmentId: body.identity.assignmentId,
+            assignmentGeneration: body.identity.assignmentGeneration,
+            instanceId: body.identity.instanceId,
+            executorId: body.identity.executorId,
+            templateBuildId: body.identity.templateBuildId,
+            apiUrl: body.identity.apiUrl,
+            workspaceId: body.identity.workspaceId,
+            repository: body.identity.repository,
+            lifecycle: body.identity.lifecycle,
+            environmentDigest: body.identity.environmentDigest,
+            setupCache: body.identity.setupCache,
+            stateDirectory,
+          },
+          restore: body.restore,
+        }
+        yield* Deferred.succeed(completed, bootstrap)
+        return HttpServerResponse.text("accepted", { status: 202 })
+      }).pipe(Effect.orElseSucceed(() => HttpServerResponse.text("invalid", { status: 400 })))
+      yield* server.serve(app).pipe(Effect.forkScoped)
+      return yield* Deferred.await(completed)
+    }).pipe(Effect.provide(services)),
+  ),
+)
 
 export const testing = {
   admitCell,
@@ -1683,12 +1662,17 @@ const host = Effect.scoped(
     const persisted = yield* store.load
     const matchingSession =
       Option.isSome(persisted) && restores(environmentIdentity, persisted.value) ? persisted.value : undefined
-    if (Option.isSome(persisted) && matchingSession === undefined)
-      yield* HostedObservability.health("restore_failure", {
-        assignmentId: environmentIdentity.assignmentId,
-        sandboxId: environmentIdentity.instanceId,
-        ...(environmentIdentity.templateBuildId === null ? {} : { buildId: environmentIdentity.templateBuildId }),
-      })
+    if (Option.isSome(persisted) && matchingSession === undefined) {
+      const restoreCorrelation =
+        environmentIdentity.templateBuildId === null
+          ? { assignmentId: environmentIdentity.assignmentId, sandboxId: environmentIdentity.instanceId }
+          : {
+              assignmentId: environmentIdentity.assignmentId,
+              sandboxId: environmentIdentity.instanceId,
+              buildId: environmentIdentity.templateBuildId,
+            }
+      yield* HostedObservability.health("restore_failure", restoreCorrelation)
+    }
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
     const statePath = Effect.fn("Host.cellStatePath")(function* (operationKey: string) {
@@ -1829,7 +1813,7 @@ const host = Effect.scoped(
           services: capabilities.services,
         })
         const workspaceCapabilities = yield* inspectCapabilities
-        const runtime = runtimeLayer({
+        const runtimeOptions = {
           fence: config.fence,
           bootstrapToken: config.bootstrapToken,
           templateBuildId: config.templateBuildId,
@@ -1841,8 +1825,12 @@ const host = Effect.scoped(
           workspaceCapabilities,
           cursors: { command: 0, event: 0, pty: ptyCursor },
           latestCheckpointId: null,
-          ...(config.restoredSession === undefined ? {} : { restoredSession: config.restoredSession }),
-        })
+        }
+        const runtime = runtimeLayer(
+          config.restoredSession === undefined
+            ? runtimeOptions
+            : { ...runtimeOptions, restoredSession: config.restoredSession },
+        )
         const executionEnvironment: Record<string, string> = {}
         const runtimeContext = yield* Layer.build(runtime).pipe(
           Effect.mapError((error) => HostError.make({ message: error.message })),
@@ -1915,13 +1903,20 @@ const host = Effect.scoped(
           Effect.forever,
         )
       }).pipe(
-        Effect.tapError(() =>
-          HostedObservability.health(restoredSession === undefined ? "setup_failure" : "restore_failure", {
-            assignmentId: identity.assignmentId,
-            sandboxId: identity.instanceId,
-            ...(identity.templateBuildId === null ? {} : { buildId: identity.templateBuildId }),
-          }),
-        ),
+        Effect.tapError(() => {
+          const correlation =
+            identity.templateBuildId === null
+              ? { assignmentId: identity.assignmentId, sandboxId: identity.instanceId }
+              : {
+                  assignmentId: identity.assignmentId,
+                  sandboxId: identity.instanceId,
+                  buildId: identity.templateBuildId,
+                }
+          return HostedObservability.health(
+            restoredSession === undefined ? "setup_failure" : "restore_failure",
+            correlation,
+          )
+        }),
       )
     const monitor = (
       running: Fiber.Fiber<never, HostError>,

@@ -27,7 +27,6 @@ test("mounts entries appended below a detached transcript that fits the mount bu
       }))
       const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      const state = surface as unknown as { readonly transcriptWindowEnd: number }
       try {
         surface.update(base)
         yield* openTui(() => setup.flush())
@@ -56,7 +55,7 @@ test("mounts entries appended below a detached transcript that fits the mount bu
 
         // The appended entries mount below the viewport: the window tracks the tail
         // and the content grows, while the detached reading position stays put.
-        expect(state.transcriptWindowEnd).toBe(60)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(60)
         expect(surface.transcriptScroll.scrollHeight).toBeGreaterThan(heightBefore)
         expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(firstBefore)
       } finally {

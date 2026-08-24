@@ -5,14 +5,14 @@ import type * as Turn from "../turn/record"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Function, Option, Schema } from "effect"
 
-const record = (value: unknown): Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
+const DiffOutput = Schema.fromJsonString(Schema.Struct({ diff: Schema.optionalKey(Schema.String) }))
 
 const resultDiff = (output: string | undefined): string | undefined => {
   if (output === undefined) return undefined
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(output)
-  const diff = Option.isSome(decoded) ? record(decoded.value).diff : undefined
-  return typeof diff === "string" && diff.length > 0 ? diff : undefined
+  const decoded = Schema.decodeOption(DiffOutput)(output)
+  if (Option.isNone(decoded)) return undefined
+  const diff = decoded.value.diff
+  return diff !== undefined && diff.length > 0 ? diff : undefined
 }
 
 export const toolResultDiffs = (units: ReadonlyArray<Unit>): ReadonlyArray<string> =>

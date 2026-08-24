@@ -61,7 +61,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.overlayEditor.blur()
     this.pointerController.composerDrag = undefined
     this.pointerController.sidebarDrag = undefined
-    this.setPointerShape("default")
+    this.setPointerCursor("default")
     this.model = undefined
     this.renderer.root.onMouseDrag = undefined
     this.renderer.root.onMouseUp = undefined
@@ -85,9 +85,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       this.ctrlCMenuBox,
       this.ctrlCMenuTitle,
     ]) {
-      const target = renderable as typeof renderable & { destroyRecursively?: () => void; destroy?: () => void }
-      if (target.destroyRecursively !== undefined) target.destroyRecursively()
-      else target.destroy?.()
+      renderable.destroyRecursively()
     }
   }
 }

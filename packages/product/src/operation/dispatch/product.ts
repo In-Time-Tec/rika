@@ -8,9 +8,9 @@ import { Service } from "../contract/product-service"
 import type { Input } from "../contract/product"
 import { OperationError, operationError } from "../error"
 import type { Interface } from "../contract/product-service"
-import { makeProductOperationSchedule } from "../run/schedule"
-import { makeProductOperationRuntimeState } from "../runtime/state"
-import { makeProductOperationService } from "../run/service"
+import * as ProductOperationSchedule from "../run/schedule"
+import * as ProductOperationRuntimeState from "../runtime/state"
+import * as ProductOperationService from "../run/service"
 import type { ProductLayerOptions } from "../foundation/options"
 import type { InteractiveEvent } from "../interactive/session-event"
 
@@ -99,18 +99,17 @@ export const productLayer = <
           ? Effect.void
           : options.goals.get(threadId).pipe(
               Effect.map((goal) =>
-                publishInteractiveActivity(systemActivityOrigin, {
+                publishInteractiveActivity(systemActivityOrigin, goal === undefined ? {
                   _tag: "GoalChanged",
                   threadId,
-                  ...(goal === undefined
-                    ? {}
-                    : {
-                        goal: {
-                          objective: goal.objective,
-                          status: goal.status,
-                          startedAtMillis: goal.startedAtMillis,
-                        },
-                      }),
+                } : {
+                  _tag: "GoalChanged",
+                  threadId,
+                  goal: {
+                    objective: goal.objective,
+                    status: goal.status,
+                    startedAtMillis: goal.startedAtMillis,
+                  },
                 }),
               ),
               Effect.asVoid,
@@ -119,19 +118,22 @@ export const productLayer = <
       const publishTurnSettled = (turn: import("@rika/product/turn-record").Turn, responseArrived?: boolean) => {
         const status = turn.status
         if (status !== "completed" && status !== "failed" && status !== "cancelled") return Effect.void
-        return Effect.sync(() =>
-          publishInteractiveActivity(systemActivityOrigin, {
+        return Effect.sync(() => {
+          const event: Extract<InteractiveEvent, { readonly _tag: "TurnSettled" }> = {
             _tag: "TurnSettled",
             selectionEpoch: 0,
             activitySequence: 0,
             threadId: turn.threadId,
             turnId: turn.id,
             status,
-            ...(responseArrived === undefined ? {} : { agentResponseArrived: responseArrived }),
-          }),
-        ).pipe(Effect.andThen(publishGoal(String(turn.threadId))), Effect.asVoid)
+          }
+          publishInteractiveActivity(
+            systemActivityOrigin,
+            responseArrived === undefined ? event : { ...event, agentResponseArrived: responseArrived },
+          )
+        }).pipe(Effect.andThen(publishGoal(String(turn.threadId))), Effect.asVoid)
       }
-      const state = yield* makeProductOperationRuntimeState({
+      const state = yield* ProductOperationRuntimeState.makeProductOperationRuntimeState({
         options,
         ownerScope,
         publishInteractiveActivity,
@@ -145,7 +147,7 @@ export const productLayer = <
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,
       }).pipe(Effect.mapError((error) => operationError(String(error))))
-      const schedule = yield* makeProductOperationSchedule({
+      const schedule = yield* ProductOperationSchedule.makeProductOperationSchedule({
         options,
         ownerScope,
         makeInteractiveSession: state.makeInteractiveSession,
@@ -153,7 +155,7 @@ export const productLayer = <
         executionDependencies: state.executionDependencies,
       })
       yield* state.rootTurnOwner.install({ run: () => Effect.void })
-      return makeProductOperationService({
+      return ProductOperationService.makeProductOperationService({
         options,
         state,
         schedule,

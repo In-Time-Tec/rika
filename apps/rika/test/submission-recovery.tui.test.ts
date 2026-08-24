@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { expect, test } from "vitest"
-import * as TuiApp from "./tui-app"
-import { model } from "./tui-app-model"
+import * as TuiApp from "./support/tui-app.harness"
+import { model } from "./support/tui-model.fixture"
 
 const tuiTestTimeout = 90_000
 

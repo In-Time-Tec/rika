@@ -29,7 +29,7 @@ const _streamingShell = (id: string, output?: string) => ({
     completeLabel: "Ran",
   },
   detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
+  output,
   files: [],
 })
 
@@ -104,7 +104,7 @@ const _giantSubagentModel = (childCount: number): Model => {
     index,
     id: `block-${block.id}`,
     turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
+    parentId: index === 0 ? undefined : "root-tool",
   }))
   return {
     ...initial("/work", "high"),
@@ -164,7 +164,7 @@ const _collapsedSubagentModel = (answerCount: number, childCount: number): Model
       index,
       id: `block-${block.id}`,
       turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
+      parentId: index === 0 ? undefined : "root-tool",
     })),
   ]
   return {

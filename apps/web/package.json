@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "bun build ./src/main.ts --outdir dist/server --target bun --format esm && vite build",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/web/src apps/web/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings apps/web/src apps/web/test",
     "start": "bun ./src/main.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },

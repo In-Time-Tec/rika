@@ -1,6 +1,6 @@
 id: effect-prefer-logging
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — prefer Effect.logDebug/logInfo/logWarning/logError so logging stays structured and attached to the current Fiber.
 rule:
   any:

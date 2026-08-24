@@ -10,12 +10,12 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { OperationError, failureKind, operationError, operationFailureDetail } from "../../error"
 import { Function, Effect, Cause, Clock, Duration, Exit, Ref } from "effect"
 import { turnFailure } from "../../failure-message"
-import { makeFailure } from "../../failure"
+import * as OperationFailure from "../../failure"
 import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../../retry-policy"
 import { type ModeId } from "@rika/configuration/behavior-mode"
 import { type InteractiveEvent } from "../session-event"
 import { type InteractiveRuntimeContext } from "../session"
-import { type makeInteractiveQueue } from "./queue"
+import * as InteractiveQueue from "./queue"
 export const admitInteractiveTurn = (input: {
   readonly turns: TurnRepository.Interface
   readonly submission: TurnRepositoryContract.CreateInput
@@ -37,7 +37,8 @@ export const newThreadTitle: {
   (arg1: string): (arg0: string) => ReturnType<typeof newThreadTitleImpl>
   (arg0: string, arg1: string): ReturnType<typeof newThreadTitleImpl>
 } = Function.dual(2, newThreadTitleImpl)
-export type InteractiveSubmissionContext = InteractiveRuntimeContext & ReturnType<typeof makeInteractiveQueue>
+export type InteractiveSubmissionContext = InteractiveRuntimeContext &
+  ReturnType<typeof InteractiveQueue.makeInteractiveQueue>
 const emitEvent = (
   input: InteractiveRuntimeContext,
   dispatch: (event: InteractiveEvent) => void,
@@ -64,18 +65,19 @@ const admitInteractiveSubmissionImpl = (
   return Effect.gen(function* () {
     const turns = yield* TurnRepository.Service
     const executionRoute = yield* resolveExecutionRoute(mode, modelTuning, thread.workspace)
+    let submission: TurnRepositoryContract.CreateInput = {
+      id: yield* options.makeTurnId,
+      threadId: thread.id,
+      prompt,
+      executionRoute,
+      queueCapacity: pendingTurnCapacity,
+      now: yield* Clock.currentTimeMillis,
+    }
+    if (promptParts !== undefined) submission = { ...submission, promptParts }
     const observed = yield* turnMutationAdmission.withPermits(1)(
       admitInteractiveTurn({
         turns,
-        submission: {
-          id: yield* options.makeTurnId,
-          threadId: thread.id,
-          prompt,
-          ...(promptParts === undefined ? {} : { promptParts }),
-          executionRoute,
-          queueCapacity: pendingTurnCapacity,
-          now: yield* Clock.currentTimeMillis,
-        },
+        submission,
         claim: (turnId, status) =>
           rootTurnOwner.claim(turnId, status).pipe(Effect.mapError((error) => operationError(String(error), error))),
       }),
@@ -83,14 +85,15 @@ const admitInteractiveSubmissionImpl = (
     if (observed.turn.status !== "queued" && observed.claimed !== true)
       return yield* operationError(`Turn ${observed.turn.id} already has an execution observer`)
     yield* ensureTurnSummary(observed.turn)
-    emitEvent(input, dispatch, {
+    let event: Extract<InteractiveEvent, { readonly _tag: "SubmissionAdmitted" }> = {
       _tag: "SubmissionAdmitted",
       selectionEpoch: 0,
       threadId: thread.id,
       turnId: observed.turn.id,
       status: observed.turn.status === "queued" ? "queued" : "active",
-      ...(submissionId === undefined ? {} : { submissionId }),
-    })
+    }
+    if (submissionId !== undefined) event = { ...event, submissionId }
+    emitEvent(input, dispatch, event)
     return observed.turn
   })
 }
@@ -115,14 +118,6 @@ export const admitInteractiveSubmission: {
     arg7?: string,
   ): ReturnType<typeof admitInteractiveSubmissionImpl>
 } = Function.dual(8, admitInteractiveSubmissionImpl)
-type SettleInteractiveSubmissionResult =
-  | {
-      readonly _tag: "retry"
-      readonly attempt: number
-      readonly sourceTurnId: string
-      readonly message: string
-    }
-  | { readonly _tag: "settled" }
 interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
@@ -152,7 +147,7 @@ const settleInteractiveSubmissionImpl = (
           selectionEpoch: 0,
           threadId: thread.id,
           turnId: turn.id,
-          failure: makeFailure(Cause.squash(outcome.cause)),
+          failure: OperationFailure.makeFailure(Cause.squash(outcome.cause)),
         })
         yield* settleThread(thread, dispatch)
         return { _tag: "settled" }
@@ -184,7 +179,7 @@ const settleInteractiveSubmissionImpl = (
           selectionEpoch: 0,
           threadId: thread.id,
           turnId: turn.id,
-          failure: makeFailure(message),
+          failure: OperationFailure.makeFailure(message),
         })
       }
       yield* settleThread(thread, dispatch)
@@ -248,28 +243,30 @@ const executeInteractiveSubmissionImpl = (
             })
           const running = yield* setTurnStatus(current.id, "running", startedAt)
           if (running.status !== "running") return undefined
-          emitEvent(input, dispatch, {
+          let event: Extract<InteractiveEvent, { readonly _tag: "TurnStarted" }> = {
             _tag: "TurnStarted",
             selectionEpoch: 0,
             activitySequence: 0,
             threadId: thread.id,
             turn: running,
-            ...(submission === undefined ? {} : { submissionId: submission }),
-          })
+          }
+          if (submission !== undefined) event = { ...event, submissionId: submission }
+          emitEvent(input, dispatch, event)
           const turns = yield* TurnRepository.Service
           const titleIntent =
             (yield* turns.list(thread.id)).length === 1 && thread.title === input.temporaryThreadTitle(current.prompt)
               ? ({ _tag: "GenerateThreadTitle", expectedTitle: thread.title } as const)
               : undefined
-          yield* rootTurnOwner.startTurn({
+          let request: Parameters<typeof rootTurnOwner.startTurn>[0] = {
             threadId: thread.id,
             turnId: current.id,
             workspaceId: thread.workspace,
             prompt: prepared.prompt,
-            ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
             executionRoute: current.executionRoute,
-            ...(titleIntent === undefined ? {} : { titleIntent }),
-          })
+          }
+          if (prepared.promptParts !== undefined) request = { ...request, promptParts: prepared.promptParts }
+          if (titleIntent !== undefined) request = { ...request, titleIntent }
+          yield* rootTurnOwner.startTurn(request)
           return yield* rootTurnOwner.watchTurn(current.id, publish, publishPreview)
         }),
       )
@@ -281,18 +278,19 @@ const executeInteractiveSubmissionImpl = (
         retry: { attempt, sourceTurnId },
       })
       if (decision._tag !== "retry") return
-      const retryDecision = decision as Extract<SettleInteractiveSubmissionResult, { readonly _tag: "retry" }>
+      const retryDecision = decision
       const turns = yield* TurnRepository.Service
-      const retryTurn = yield* turns.createForSubmission({
+      let retrySubmission: TurnRepositoryContract.CreateInput = {
         id: yield* input.options.makeTurnId,
         threadId: thread.id,
         prompt: current.prompt,
-        ...(current.promptParts === undefined ? {} : { promptParts: current.promptParts }),
         executionRoute: current.executionRoute,
         lineage: { _tag: "Retried", sourceTurnId },
         queueCapacity: input.pendingTurnCapacity,
         now: yield* Clock.currentTimeMillis,
-      })
+      }
+      if (current.promptParts !== undefined) retrySubmission = { ...retrySubmission, promptParts: current.promptParts }
+      const retryTurn = yield* turns.createForSubmission(retrySubmission)
       const claimed = yield* input.rootTurnOwner
         .claim(retryTurn.id, retryTurn.status)
         .pipe(Effect.mapError((error) => operationError(operationFailureDetail(error), error)))
@@ -313,7 +311,7 @@ const executeInteractiveSubmissionImpl = (
         retryTurnId: retryTurn.id,
         attempt,
         budget: turnRetryBudget,
-        message: retryDecision.message,
+        message: retryDecision.message ?? "Execution failed",
         nextAt: (yield* Clock.currentTimeMillis) + Duration.toMillis(delay),
       })
       yield* Effect.sleep(delay)
@@ -416,7 +414,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
         dispatch,
         submissionId,
       )
-      const turn = admitted as Turn.Turn
+      const turn = admitted
       observerTurn = turn.status === "queued" ? undefined : turn
       if (created) yield* activateCreatedThread(thread, getCurrentSelectionEpoch(), dispatch, turn)
       if (turn.status === "queued") {
@@ -426,16 +424,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       }
       yield* Effect.uninterruptible(
         Effect.forkIn(
-          Effect.interruptible(
-            executeInteractiveSubmission(
-              input,
-              thread,
-              turn as Turn.AgentExecutionTurn,
-              modelTuning,
-              dispatch,
-              submissionId,
-            ),
-          ),
+          Effect.interruptible(executeInteractiveSubmission(input, thread, turn, modelTuning, dispatch, submissionId)),
           sessionScope,
         ).pipe(Effect.asVoid),
       )
@@ -452,12 +441,13 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
               dispatchFailure(dispatch, error, undefined, observerTurn.id)
               return
             }
-            emitEvent(input, dispatch, {
+            let event: Extract<InteractiveEvent, { readonly _tag: "SubmissionRejected" }> = {
               _tag: "SubmissionRejected",
               selectionEpoch: 0,
-              message: makeFailure(error).message,
-              ...(submissionId === undefined ? {} : { submissionId }),
-            })
+              message: OperationFailure.makeFailure(error).message,
+            }
+            if (submissionId !== undefined) event = { ...event, submissionId }
+            emitEvent(input, dispatch, event)
           }),
         ),
         Effect.ensuring(

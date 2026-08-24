@@ -1,8 +1,8 @@
 import "./provider.harness"
 import { describe, expect, it } from "@effect/vitest"
 import { ALL_TRAFFIC, type SandboxInfo, type SandboxOpts } from "e2b"
-import { Effect, Redacted, Schema } from "effect"
-import { makeWithSdk, type Sdk, SdkError, testing } from "../src/provider"
+import { DateTime, Effect, Redacted, Schema } from "effect"
+import { makeWithSdk, type Sdk, SdkError, type SdkHandle, testing } from "../src/provider"
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
@@ -40,15 +40,19 @@ const bootstrapIdentity = (sandboxId: string) => ({
   setupCache: false,
 })
 
-const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInfo =>
-  ({
-    sandboxId,
-    state,
-    templateId: request.templateId,
-    metadata: { "rika.managed": "e2b-executor", "rika.template-build-id": "7d0-build-receipt" },
-  }) as unknown as SandboxInfo
+const sandboxInfo = (sandboxId: string, state: "running" | "paused"): SandboxInfo => ({
+  sandboxId,
+  state,
+  templateId: request.templateId,
+  metadata: { "rika.managed": "e2b-executor", "rika.template-build-id": "7d0-build-receipt" },
+  startedAt: DateTime.toDate(DateTime.makeUnsafe(0)),
+  endAt: DateTime.toDate(DateTime.makeUnsafe(0)),
+  cpuCount: 2,
+  memoryMB: 512,
+  envdVersion: "test",
+})
 
-const attestationSdk = {
+const attestationSdk: Sdk = {
   buildStatus: () =>
     Effect.succeed({
       templateId: request.templateId,
@@ -57,6 +61,15 @@ const attestationSdk = {
     }),
   getInfo: (sandboxId: string) =>
     Effect.succeed({ ...sandboxInfo(sandboxId, "running"), templateId: request.templateId }),
+  create: () => Effect.succeed({ sandboxId: "sandbox" }),
+  connect: (sandboxId) => Effect.succeed({ sandboxId }),
+  host: (sandboxId, port) => Effect.succeed(`${port}-${sandboxId}.e2b.app`),
+  updateNetwork: () => Effect.void,
+  pause: () => Effect.succeed(true),
+  kill: () => Effect.succeed(true),
+  setTimeout: () => Effect.void,
+  list: () => ({ hasNext: false, nextItems: Effect.succeed([]) }),
+  bootstrap: () => Effect.void,
 }
 
 describe("Provider", () => {
@@ -67,7 +80,7 @@ describe("Provider", () => {
   it.effect("attests the E2B template build before and after creation while preserving its receipt", () => {
     let template = ""
     let createOptions: SandboxOpts | undefined
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       create: (templateBuildId: string, options: SandboxOpts) => {
         template = templateBuildId
@@ -75,7 +88,7 @@ describe("Provider", () => {
         return Effect.succeed({ sandboxId: "sandbox-e2b" })
       },
       kill: () => Effect.succeed(true),
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.create(request)).toEqual({ sandboxId: "sandbox-e2b", state: "running" })
@@ -109,7 +122,7 @@ describe("Provider", () => {
 
   it.effect("rejects an unknown immutable build before creating a sandbox", () => {
     let created = false
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       buildStatus: () =>
         Effect.succeed({ templateId: request.templateId, buildId: "different-build", status: "ready" as const }),
@@ -118,7 +131,7 @@ describe("Provider", () => {
         return Effect.succeed({ sandboxId: "unexpected" })
       },
       kill: () => Effect.succeed(true),
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(provider.create(request))
@@ -130,7 +143,7 @@ describe("Provider", () => {
   it.effect("kills a new sandbox when its immutable build no longer attests during creation", () => {
     let checks = 0
     const killed: Array<string> = []
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       buildStatus: () =>
         Effect.succeed({
@@ -143,7 +156,7 @@ describe("Provider", () => {
         killed.push(sandboxId)
         return Effect.succeed(true)
       },
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(provider.create(request))
@@ -154,7 +167,7 @@ describe("Provider", () => {
 
   it.effect("kills a new sandbox when E2B reports a different template identity", () => {
     const killed: Array<string> = []
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       create: () => Effect.succeed({ sandboxId: "wrong-template" }),
       getInfo: (sandboxId: string) =>
@@ -163,7 +176,7 @@ describe("Provider", () => {
         killed.push(sandboxId)
         return Effect.succeed(true)
       },
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(provider.create(request))
@@ -189,11 +202,13 @@ describe("Provider", () => {
         {
           now: Effect.succeed(1),
           sleep: () => Effect.void,
-          connect: () =>
-            Effect.succeed({
-              sandboxId: "sandbox",
-              ...(connects++ === 0 ? {} : { trafficAccessToken: "sandbox-traffic-secret" }),
-            }),
+          connect: () => {
+            const connected = connects++ !== 0
+            const handle: SdkHandle = connected
+              ? { sandboxId: "sandbox", trafficAccessToken: "sandbox-traffic-secret" }
+              : { sandboxId: "sandbox" }
+            return Effect.succeed(handle)
+          },
           fetch: (input, init) => {
             headers.push(init?.headers)
             if (init?.method === "POST") {
@@ -307,7 +322,7 @@ describe("Provider", () => {
   })
 
   it.effect("rejects inventory whose immutable build receipt does not attest", () => {
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       buildStatus: () =>
         Effect.succeed({ templateId: request.templateId, buildId: "different-build", status: "ready" as const }),
@@ -323,7 +338,7 @@ describe("Provider", () => {
           }),
         }
       },
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* Effect.flip(provider.inventory)).toMatchObject({
@@ -336,15 +351,15 @@ describe("Provider", () => {
   it.effect("paginates running and paused managed inventory", () => {
     const pages = [[sandboxInfo("running", "running")], [sandboxInfo("paused", "paused")]]
     let page = 0
-    const sdk = {
+    const sdk: Sdk = {
       ...attestationSdk,
       list: () => ({
         get hasNext() {
           return page < pages.length
         },
-        nextItems: Effect.sync(() => pages[page++]!),
+        nextItems: Effect.sync(() => pages[page++] ?? []),
       }),
-    } as unknown as Sdk
+    }
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.inventory).toEqual([

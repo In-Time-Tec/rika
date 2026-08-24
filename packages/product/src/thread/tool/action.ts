@@ -6,6 +6,8 @@ import * as ThreadQuery from "../query/service"
 import type { Selector } from "../query/input"
 import type { ReadSuccess } from "../query/result-delivery"
 
+type PublicSelection = (typeof ThreadContract.ReadThreadInput.Type)["selection"]
+
 const error = (tool: string, cause: { readonly _tag: string }) =>
   ThreadContract.ReadToolError.make({ tool, message: JSON.stringify(cause) })
 
@@ -19,36 +21,32 @@ const publicError = (tool: string, cause: { readonly _tag: string }) => ({
 
 const publicSelection = (selector: Selector) => {
   if (selector._tag === "overview") return { mode: "overview" as const }
-  if (selector._tag === "recent")
-    return {
-      mode: "recent" as const,
-      ...(selector.limit === undefined ? {} : { limit: selector.limit }),
-      ...(selector.before === undefined ? {} : { cursor: selector.before }),
-    }
-  if (selector._tag === "relevant")
-    return {
-      mode: "relevant" as const,
+  if (selector._tag === "recent") {
+    let selection: Extract<PublicSelection, { readonly mode: "recent" }> = { mode: "recent" }
+    if (selector.limit !== undefined) selection = { ...selection, limit: selector.limit }
+    if (selector.before !== undefined) selection = { ...selection, cursor: selector.before }
+    return selection
+  }
+  if (selector._tag === "relevant") {
+    let selection: Extract<PublicSelection, { readonly mode: "relevant" }> = {
+      mode: "relevant",
       query: selector.query,
-      ...(selector.limit === undefined ? {} : { limit: selector.limit }),
-      ...(selector.before === undefined ? {} : { cursor: selector.before }),
     }
+    if (selector.limit !== undefined) selection = { ...selection, limit: selector.limit }
+    if (selector.before !== undefined) selection = { ...selection, cursor: selector.before }
+    return selection
+  }
   if (selector._tag === "subtree") {
-    const cursor = (() => {
-      if (selector.offset !== undefined)
-        return {
-          cursor: {
-            offset: selector.offset,
-            ...(selector.before === undefined ? {} : { before: selector.before }),
-          },
-        }
-      if (selector.before !== undefined) return { cursor: { before: selector.before } }
-      return {}
-    })()
-    return {
+    let selection: Extract<PublicSelection, { readonly mode: "subtree" }> = {
       mode: "subtree" as const,
       subagentId: selector.subagentId,
-      ...cursor,
     }
+    if (selector.offset !== undefined) {
+      let cursor: NonNullable<typeof selection.cursor> = { offset: selector.offset }
+      if (selector.before !== undefined) cursor = { ...cursor, before: selector.before }
+      selection = { ...selection, cursor }
+    } else if (selector.before !== undefined) selection = { ...selection, cursor: { before: selector.before } }
+    return selection
   }
   return { mode: "overview" as const }
 }
@@ -74,55 +72,57 @@ export const handlerLayerForWorkspace = (workspace: string) =>
           ),
         read_thread_transcript: (input) =>
           factory.forWorkspace(workspace).pipe(
-            Effect.flatMap((query) =>
-              query
-                .read({
-                  threadId: input.threadId,
-                  ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-                  selector: (() => {
-                    const selection = input.selection
-                    if (selection.mode === "overview") return { _tag: "overview" as const }
-                    if (selection.mode === "subtree")
-                      return {
-                        _tag: "subtree" as const,
-                        subagentId: selection.subagentId,
-                        ...(selection.cursor?.before === undefined
-                          ? {}
-                          : {
-                              before: {
-                                ...selection.cursor.before,
-                                turnId: Turn.TurnId.make(selection.cursor.before.turnId),
-                              },
-                            }),
-                        ...(selection.cursor !== undefined && "offset" in selection.cursor
-                          ? { offset: selection.cursor.offset }
-                          : {}),
-                      }
-                    if (selection.mode === "recent")
-                      return {
-                        _tag: "recent" as const,
-                        ...(selection.limit === undefined ? {} : { limit: selection.limit }),
-                        ...(selection.cursor === undefined
-                          ? {}
-                          : { before: { ...selection.cursor, id: Turn.TurnId.make(selection.cursor.id) } }),
-                      }
-                    return {
-                      _tag: "relevant" as const,
-                      query: selection.query,
-                      ...(selection.limit === undefined ? {} : { limit: selection.limit }),
-                      ...(selection.cursor === undefined
-                        ? {}
-                        : { before: { ...selection.cursor, turnId: Turn.TurnId.make(selection.cursor.turnId) } }),
+            Effect.flatMap((query) => {
+              const selector = (() => {
+                const selection = input.selection
+                if (selection.mode === "overview") return { _tag: "overview" as const }
+                if (selection.mode === "subtree") {
+                  let value: Extract<Selector, { readonly _tag: "subtree" }> = {
+                    _tag: "subtree" as const,
+                    subagentId: selection.subagentId,
+                  }
+                  if (selection.cursor?.before !== undefined)
+                    value = {
+                      ...value,
+                      before: {
+                        ...selection.cursor.before,
+                        turnId: Turn.TurnId.make(selection.cursor.before.turnId),
+                      },
                     }
-                  })(),
-                })
-                .pipe(
-                  Effect.map((result) => ({
-                    text: JSON.stringify(publicReadResult(result)),
-                    truncated: result.truncated,
-                  })),
-                ),
-            ),
+                  if (selection.cursor !== undefined && "offset" in selection.cursor)
+                    value = { ...value, offset: selection.cursor.offset }
+                  return value
+                }
+                if (selection.mode === "recent") {
+                  let value: Extract<Selector, { readonly _tag: "recent" }> = {
+                    _tag: "recent" as const,
+                  }
+                  if (selection.limit !== undefined) value = { ...value, limit: selection.limit }
+                  if (selection.cursor !== undefined)
+                    value = { ...value, before: { ...selection.cursor, id: Turn.TurnId.make(selection.cursor.id) } }
+                  return value
+                }
+                let value: Extract<Selector, { readonly _tag: "relevant" }> = {
+                  _tag: "relevant" as const,
+                  query: selection.query,
+                }
+                if (selection.limit !== undefined) value = { ...value, limit: selection.limit }
+                if (selection.cursor !== undefined)
+                  value = {
+                    ...value,
+                    before: { ...selection.cursor, turnId: Turn.TurnId.make(selection.cursor.turnId) },
+                  }
+                return value
+              })()
+              let request: Parameters<typeof query.read>[0] = { threadId: input.threadId, selector }
+              if (input.includeArchived !== undefined) request = { ...request, includeArchived: input.includeArchived }
+              return query.read(request).pipe(
+                Effect.map((result) => ({
+                  text: JSON.stringify(publicReadResult(result)),
+                  truncated: result.truncated,
+                })),
+              )
+            }),
             Effect.mapError((cause) => error("read_thread_transcript", cause)),
           ),
       }

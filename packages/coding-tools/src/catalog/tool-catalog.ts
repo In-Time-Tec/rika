@@ -24,51 +24,70 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
   Effect.gen(function* () {
     const runtime = yield* RuntimeTools.Service
     return {
-      grep: ({ pattern, regex, path }) =>
-        runtime.run({ _tag: "Grep", pattern, regex, ...(path === undefined ? {} : { path }) }),
-      list: ({ path, depth }) =>
-        runtime.run({
-          _tag: "List",
-          ...(path === undefined ? {} : { path }),
-          ...(depth === undefined ? {} : { depth }),
-        }),
+      grep: ({ pattern, regex, path }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Grep" }> = {
+          _tag: "Grep",
+          pattern,
+          regex,
+        }
+        if (path !== undefined) request = { ...request, path }
+        return runtime.run(request)
+      },
+      list: ({ path, depth }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "List" }> = { _tag: "List" }
+        if (path !== undefined) request = { ...request, path }
+        if (depth !== undefined) request = { ...request, depth }
+        return runtime.run(request)
+      },
       read: ({ path, read_range }) =>
-        runtime.run({ _tag: "Read", path, ...(read_range === undefined ? {} : { readRange: read_range }) }),
+        runtime.run(read_range === undefined ? { _tag: "Read", path } : { _tag: "Read", path, readRange: read_range }),
       write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
-      edit: ({ path, old_str, new_str, replace_all }) =>
-        runtime.run({
+      edit: ({ path, old_str, new_str, replace_all }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Edit" }> = {
           _tag: "Edit",
           path,
           oldStr: old_str,
           newStr: new_str,
-          ...(replace_all === undefined ? {} : { replaceAll: replace_all }),
-        }),
-      bash: ({ command, workdir, timeout_ms }) =>
-        runtime.run({
+        }
+        if (replace_all !== undefined) request = { ...request, replaceAll: replace_all }
+        return runtime.run(request)
+      },
+      bash: ({ command, workdir, timeout_ms }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Bash" }> = {
           _tag: "Bash",
           command,
-          ...(workdir === undefined ? {} : { workdir }),
-          ...(timeout_ms === undefined ? {} : { timeoutMillis: timeout_ms }),
-        }),
+        }
+        if (workdir !== undefined) request = { ...request, workdir }
+        if (timeout_ms !== undefined) request = { ...request, timeoutMillis: timeout_ms }
+        return runtime.run(request)
+      },
       shell_command_status: ({ processId, waitMillis }) =>
-        runtime.run({ _tag: "ShellCommandStatus", processId, ...(waitMillis == null ? {} : { waitMillis }) }),
-      web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) =>
-        runtime.run({
+        runtime.run(
+          waitMillis == null
+            ? { _tag: "ShellCommandStatus", processId }
+            : { _tag: "ShellCommandStatus", processId, waitMillis },
+        ),
+      web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "WebSearch" }> = {
           _tag: "WebSearch",
           objective,
           searchQueries,
-          ...(kind === undefined ? {} : { kind }),
-          ...(strategy === undefined ? {} : { strategy }),
-          ...(githubSearchType === undefined ? {} : { githubSearchType }),
-        }),
-      read_web_page: ({ url, objective, fullContent, forceRefetch }) =>
-        runtime.run({
+        }
+        if (kind !== undefined) request = { ...request, kind }
+        if (strategy !== undefined) request = { ...request, strategy }
+        if (githubSearchType !== undefined) request = { ...request, githubSearchType }
+        return runtime.run(request)
+      },
+      read_web_page: ({ url, objective, fullContent, forceRefetch }) => {
+        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "ReadWebPage" }> = {
           _tag: "ReadWebPage",
           url,
-          ...(objective === undefined ? {} : { objective }),
-          ...(fullContent === undefined ? {} : { fullContent }),
-          ...(forceRefetch === undefined ? {} : { forceRefetch }),
-        }),
+        }
+        if (objective !== undefined) request = { ...request, objective }
+        if (fullContent !== undefined) request = { ...request, fullContent }
+        if (forceRefetch !== undefined) request = { ...request, forceRefetch }
+        return runtime.run(request)
+      },
       view_media: ({ path }) => runtime.run({ _tag: "ViewMedia", path }),
     }
   }),
@@ -145,13 +164,13 @@ const agentPresentation = (action: string, activeLabel: string, completeLabel: s
 
 const genericAgentNames = new Set(["", "child", "task", "subagent"])
 
-const agentPresentations: Readonly<Record<string, ToolPolicy.Presentation>> = {
+const agentPresentations = {
   task: agentPresentation("task", "Subagent working", "Subagent finished"),
   oracle: agentPresentation("oracle", "Oracle exploring", "Oracle has spoken"),
   librarian: agentPresentation("librarian", "Librarian researching", "Librarian researched"),
   surgeon: agentPresentation("surgeon", "Surgeon operating", "Surgeon closed up"),
   read_thread: { ...agentPresentation("read-thread", "Reading Thread", "Read Thread"), counter: "thread" },
-}
+} satisfies Readonly<Record<string, ToolPolicy.Presentation>>
 
 const agentToolName = (profile: string): string => {
   if (genericAgentNames.has(profile)) return "task"
@@ -173,7 +192,7 @@ const agentDisplay = (name: string): string => {
 const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
   const profile = agentProfile(name).toLowerCase()
   const toolName = agentToolName(profile)
-  const defined = agentPresentations[toolName]
+  const defined = Object.entries(agentPresentations).find(([presentationName]) => presentationName === toolName)?.[1]
   if (defined !== undefined) return defined
   const display = agentDisplay(name)
   return agentPresentation(profile, `${display} working`, `${display} finished`)

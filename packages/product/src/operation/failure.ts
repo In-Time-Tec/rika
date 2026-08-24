@@ -1,6 +1,6 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 import { FailureCategory } from "./failure-policy"
 import { OperationError } from "./error"
 import { StaleQueuedTurns } from "../thread/queue/pending-policy"
@@ -27,13 +27,21 @@ export const Failure = Schema.Struct({
 })
 export type Failure = typeof Failure.Type
 
-const failureTag = (error: unknown): string => {
-  if (error !== null && typeof error === "object" && "_tag" in error && typeof error._tag === "string")
-    return error._tag
-  return error instanceof Error ? error.name : typeof error
+const TaggedFailure = Schema.Struct({ _tag: Schema.String })
+
+const failureTag = <ErrorValue>(error: ErrorValue): string => {
+  if (Schema.is(TaggedFailure)(error)) return error._tag
+  if (error instanceof Error) return error.name
+  if (Schema.is(Schema.String)(error)) return "string"
+  if (Predicate.isNumber(error)) return "number"
+  if (Schema.is(Schema.Boolean)(error)) return "boolean"
+  if (Predicate.isSymbol(error)) return "symbol"
+  if (Schema.is(Schema.Undefined)(error)) return "undefined"
+  if (Predicate.isFunction(error)) return "function"
+  return "object"
 }
 
-const failureMessage = (error: unknown): string => {
+const failureMessage = <ErrorValue>(error: ErrorValue): string => {
   if (error instanceof Error && error.message.length > 0) return error.message
   const encoded = JSON.stringify(error)
   return encoded === undefined || encoded === "{}" ? String(error) : encoded
@@ -50,7 +58,7 @@ const gateways = [
   ExecutionGateway.InspectTurnFailure,
 ]
 
-export const makeFailure = (error: unknown): Failure => {
+export const makeFailure = <ErrorValue>(error: ErrorValue): Failure => {
   const tag = failureTag(error)
   const message = failureMessage(error)
 

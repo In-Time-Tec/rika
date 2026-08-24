@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Redacted, Schema } from "effect"
+import { Effect, Exit, Redacted, Schema } from "effect"
 import {
   CliDeviceDirectoryError,
   IdentityDirectoryError,
@@ -14,11 +14,16 @@ import { handleRequest, type HttpDependencies } from "../../src/server/http"
 import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 import { HostedProductError, type HostedProductService } from "../../src/hosted/product"
 import type { Runtime as Executor } from "../../src/executor/service"
+import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
+import type { Gateway } from "../../src/executor/gateway"
+import type { RunnerGateway } from "../../src/runner/gateway"
+import { Stream } from "effect"
 import { isRikaApiPath, makeRikaApiHandler } from "../../src/api"
 import type { HostedProviderCredentialsService } from "../../src/hosted/environment/provider-credentials"
 import type { HostedEnvironmentService } from "../../src/hosted/environment/runtime"
 import type { HostedPublicationService } from "../../src/hosted/publication"
 import { EnvironmentReferenceId } from "@rika/product/environment-policy"
+import { OrganizationId } from "@rika/product/hosted-model"
 
 const account: Account = {
   user: {
@@ -55,7 +60,7 @@ const runtime = (userId: string | undefined): IdentityRuntime => ({
 const devices: CliDeviceDirectory = {
   register: () => Effect.void,
   discard: () => Effect.void,
-  authenticate: () => Effect.void.pipe(Effect.as(undefined as string | undefined)),
+  authenticate: () => Effect.void.pipe(Effect.as<string | undefined>(undefined)),
   list: () => Effect.succeed([]),
   revoke: () => Effect.succeed(false),
   revokeAll: () => Effect.void,
@@ -80,10 +85,54 @@ const recovery: HttpDependencies["recovery"] = {
   resolve: () => Effect.die("unused"),
 }
 
+const unusedController: ControllerService = {
+  provision: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  kill: () => Effect.die("unused"),
+  portal: () => Effect.die("unused"),
+  hello: () => Effect.die("unused"),
+  reconnect: () => Effect.die("unused"),
+  validateAccess: () => Effect.die("unused"),
+  heartbeat: () => Effect.die("unused"),
+  checkpoint: () => Effect.die("unused"),
+  credential: () => Effect.die("unused"),
+  revokeCredential: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  ready: () => Effect.die("unused"),
+  loadSetupCache: () => Effect.die("unused"),
+  storeSetupCache: () => Effect.die("unused"),
+  activatePhase: () => Effect.die("unused"),
+  cleanupOrphans: Effect.die("unused"),
+}
+const unusedGateway: Gateway = {
+  receive: () => Effect.die("unused"),
+  disconnected: () => Effect.die("unused"),
+  active: () => Effect.die("unused"),
+  execute: () => Effect.die("unused"),
+  cancel: () => Effect.die("unused"),
+  machine: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  sendPty: () => Effect.die("unused"),
+  ptyEvents: () => Stream.empty,
+  retryPreparation: () => Effect.die("unused"),
+  quiesce: () => Effect.die("unused"),
+  pushBranch: () => Effect.die("unused"),
+}
+const unusedRunnerGateway: RunnerGateway = {
+  receive: () => Effect.die("unused"),
+  disconnected: () => Effect.die("unused"),
+  active: () => Effect.die("unused"),
+  execute: () => Effect.die("unused"),
+  cancel: () => Effect.die("unused"),
+  machine: () => Effect.die("unused"),
+}
+
 const executor: Executor = {
-  controller: undefined as never,
-  gateway: undefined as never,
-  runnerGateway: undefined as never,
+  controller: unusedController,
+  gateway: unusedGateway,
+  runnerGateway: unusedRunnerGateway,
   admitRunner: () => Effect.die("unused"),
   admitRun: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
@@ -151,6 +200,17 @@ const response = (path: string, deps = dependencies(), options?: RequestInit) =>
 }
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const ProjectsResponse = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      ownerId: Schema.String,
+      owner: Schema.Struct({ kind: Schema.String, organizationId: Schema.String }),
+      name: Schema.String,
+      slug: Schema.String,
+    }),
+  ),
+})
 
 const cliRegistrationBody = {
   reference_id: "cli-device:019d1a56-286d-7000-8000-000000000001",
@@ -617,7 +677,7 @@ describe("api HTTP", () => {
               {
                 id: "project-1",
                 ownerId: "owner-1",
-                owner: { _tag: "OrganizationOwner", organizationId: "organization-1" as never },
+                owner: { _tag: "OrganizationOwner", organizationId: OrganizationId.make("organization-1") },
                 name: "API",
                 role: "owner",
               },
@@ -626,9 +686,9 @@ describe("api HTTP", () => {
         },
       })
       expect(result.status).toBe(200)
-      const body = yield* Effect.tryPromise(() => result.json()).pipe(
-        Effect.map((value) => value as { readonly projects: unknown }),
-      )
+      const responseBody = yield* Effect.tryPromise(() => result.text())
+      const decoded = Schema.decodeExit(Schema.fromJsonString(ProjectsResponse))(responseBody)
+      const body = Exit.isSuccess(decoded) ? decoded.value : yield* Effect.die("Invalid Projects response")
       expect(body.projects).toEqual([
         {
           id: "project-1",
@@ -662,7 +722,7 @@ describe("api HTTP", () => {
               return Effect.succeed({
                 id: "project-2",
                 ownerId: "owner-1",
-                owner: { _tag: "OrganizationOwner", organizationId: "organization-1" as never },
+                owner: { _tag: "OrganizationOwner", organizationId: OrganizationId.make("organization-1") },
                 name: "Remote Platform",
                 role: "owner",
               })

@@ -57,15 +57,13 @@ const service = (
     const map = (server: string, operation: string) =>
       Effect.mapError((cause: unknown) => {
         let detail = `OAuth ${operation} failed`
-        if (typeof cause === "object" && cause !== null && "_tag" in cause) {
-          if (cause._tag === "tenetkit/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
-          else if (cause._tag === "tenetkit/mcp/OAuthDenied") detail = "OAuth authorization was denied"
-          else if (
-            cause._tag === "tenetkit/mcp/OAuthProviderError" &&
-            "operation" in cause &&
-            typeof cause.operation === "string"
-          )
-            detail = `OAuth ${cause.operation} failed`
+        const decoded = Schema.decodeUnknownOption(
+          Schema.Union([OAuth.OAuthExpired, OAuth.OAuthDenied, OAuth.OAuthProviderError]),
+        )(cause)
+        if (Option.isSome(decoded)) {
+          if (decoded.value._tag === "tenetkit/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
+          else if (decoded.value._tag === "tenetkit/mcp/OAuthDenied") detail = "OAuth authorization was denied"
+          else detail = `OAuth ${decoded.value.operation} failed`
         }
         return McpOAuthError.make({ server, operation, message: detail })
       })

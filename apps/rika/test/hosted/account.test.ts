@@ -15,6 +15,7 @@ import {
   Path,
   Redacted,
   Ref,
+  Schema,
 } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
@@ -38,6 +39,7 @@ import {
   Browser,
   CredentialStore,
   HostedError,
+  HostedThreadId,
   Http,
   ProfileStore,
   ThreadClient,
@@ -47,6 +49,7 @@ import {
   type PrivateJwk,
   type Profile,
 } from "../../src/hosted/contract"
+import { ClientTicketResponse } from "@rika/product/client-protocol"
 
 const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
 const memorySecretVault = (values: Map<string, string>): SecretVault => ({
@@ -663,12 +666,12 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
                 projects: [],
               }),
             issueThreadTicket: () =>
-              Effect.succeed({
+              Effect.succeed(Schema.decodeSync(ClientTicketResponse)({
                 ticket: "ticket-1",
-                expiresAt: "2026-08-21T06:00:00.000Z" as never,
+                expiresAt: "2026-08-21T06:00:00.000Z",
                 websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
                 protocol: "rika.thread.v1",
-              }),
+              })),
           }),
         ),
         Layer.succeed(
@@ -676,7 +679,7 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
           ThreadClient.of({
             create: ({ owner }) => {
               expect(owner).toEqual({ kind: "personal" })
-              return Ref.update(created, (value) => value + 1).pipe(Effect.as("thread-1" as never))
+              return Ref.update(created, (value) => value + 1).pipe(Effect.as(HostedThreadId.make("thread-1")))
             },
             submit: () => Effect.die("unused"),
             ensureService: () => Effect.die("unused"),

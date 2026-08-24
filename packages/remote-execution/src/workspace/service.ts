@@ -65,13 +65,13 @@ export interface KernelIdentity {
 }
 
 export interface Reporter {
-  readonly started: (phase: WorkspacePreparationPhase) => Effect.Effect<void, WorkspaceError>
+  readonly started: (phase: WorkspacePreparationPhase) => Effect.Effect<void, WorkspaceError, never>
   readonly output: (
     phase: WorkspacePreparationPhase,
     stream: "stdout" | "stderr",
     text: string,
     truncated: boolean,
-  ) => Effect.Effect<void, WorkspaceError>
+  ) => Effect.Effect<void, WorkspaceError, never>
 }
 
 export interface Options {
@@ -85,15 +85,15 @@ export interface Options {
   readonly kernel: KernelIdentity
   readonly assignment: Assignment
   readonly reporter: Reporter
-  readonly credential: (purpose: "git-read" | "github-read") => Effect.Effect<Credential, WorkspaceError>
-  readonly revoke: (purpose: "git-read" | "github-read") => Effect.Effect<void, WorkspaceError>
+  readonly credential: (purpose: "git-read" | "github-read") => Effect.Effect<Credential, WorkspaceError, never>
+  readonly revoke: (purpose: "git-read" | "github-read") => Effect.Effect<void, WorkspaceError, never>
   readonly environment?: Readonly<Record<string, string>>
   readonly environmentDigest?: string
   readonly restore?: { readonly checkpointId: string; readonly archive: EncodedArchive }
   readonly setupCache?: {
     readonly ownerId: string
-    readonly load: (key: SetupCacheKey) => Effect.Effect<EncodedArchive | null>
-    readonly store: (key: SetupCacheKey, archive: EncodedArchive) => Effect.Effect<void>
+    readonly load: (key: SetupCacheKey) => Effect.Effect<EncodedArchive | null, never, never>
+    readonly store: (key: SetupCacheKey, archive: EncodedArchive) => Effect.Effect<void, never, never>
   }
   readonly secretValues?: ReadonlySet<string>
 }
@@ -180,7 +180,7 @@ const commandAdapter = (
   command: ReadonlyArray<string>,
   cwd: string,
   environment: Record<string, string>,
-  output: (stream: "stdout" | "stderr", text: string) => Effect.Effect<void, WorkspaceError>,
+  output: (stream: "stdout" | "stderr", text: string) => Effect.Effect<void, WorkspaceError, never>,
 ) =>
   Effect.acquireRelease(
     Effect.gen(function* () {
@@ -449,17 +449,17 @@ const make = (options: Options) =>
     const activeCredentials = new Map<"git-read" | "github-read", Credential>()
     let credentialBroker: ReturnType<typeof credentialBrokerAdapter> | undefined
     let outputCount = 0
-    const digest = Effect.fn("Workspace.digest")(function* (value: string | Uint8Array) {
-      const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value
+    const digestBytes = Effect.fn("Workspace.digestBytes")(function* (bytes: Uint8Array) {
       return `sha256:${Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes).pipe(Effect.orDie))}`
     })
+    const digest = (value: string) => digestBytes(new TextEncoder().encode(value))
     const buildDigest = yield* digest(assignment.templateBuildId)
     const manifest = yield* Config.string("RIKA_IMAGE_MANIFEST").pipe(
       Config.withDefault("/opt/rika/tool-manifest.json"),
     )
     const environmentDigest = yield* fileSystem.exists(manifest).pipe(
       Effect.flatMap((exists) =>
-        exists ? fileSystem.readFile(manifest).pipe(Effect.flatMap(digest)) : digest("missing"),
+        exists ? fileSystem.readFile(manifest).pipe(Effect.flatMap(digestBytes)) : digest("missing"),
       ),
       Effect.mapError(() =>
         WorkspaceError.make({
@@ -750,7 +750,7 @@ const make = (options: Options) =>
           retryable: true,
         })
       const hookDigest = yield* fileSystem.readFile(path).pipe(
-        Effect.flatMap(digest),
+        Effect.flatMap(digestBytes),
         Effect.mapError(() =>
           WorkspaceError.make({ phase, message: `Could not read .agents/${name}`, retryable: true }),
         ),

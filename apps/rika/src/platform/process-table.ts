@@ -1,6 +1,6 @@
 import { Clock, Data, Effect, FileSystem, Function, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { clientRuntime, matchesClientProcess, type ProcessMeasurement } from "./performance"
+import { clientRuntime, matchesClientProcess, type ProcessMeasurement, type ProcessObservation } from "./performance"
 
 export interface PsRow {
   readonly pid: number
@@ -110,11 +110,13 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
   const directory = packaged ? path.dirname(process.execPath) : sourceDirectory
   const runtime = clientRuntime({ packaged, executable: process.execPath, sourceDirectory: directory })
   const executableBytes = yield* fileSystem.stat(runtime.evidencePath).pipe(Effect.map((info) => Number(info.size)))
-  if (process.platform !== "darwin")
-    return {
+  if (process.platform !== "darwin") {
+    const unsupported: ProcessObservation = {
       executableBytes,
       unsupportedReason: "Process-tree RSS and CPU sampling currently requires Darwin ps and script PTY semantics.",
     }
+    return unsupported
+  }
   const processMatchesClient = (row: PsRow) => matchesClientProcess({ command: row.command, runtime })
   const baselinePids = new Set((yield* readProcessRows).map((row) => row.pid))
   return yield* Effect.acquireUseRelease(
@@ -194,27 +196,25 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           rssMebibytes: processSubtreeRss(tree, row.pid) / 1024,
           cpuPercent: clientCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
         })
+        const base = { descendantCount: tree.length - 1, executableBytes }
+        if (clientRow === undefined)
+          return {
+            ...base,
+            unsupportedReason: "The isolated PTY did not expose the client process before sampling.",
+          } satisfies ProcessObservation
+        const measured: ProcessObservation = {
+          ...base,
+          client: client(clientRow),
+          sampleCount: totalCpu.length,
+          terminalColumns: 120,
+          terminalRows: 36,
+          startupToProcessPresenceMilliseconds,
+        }
+        if (!stableProcess) return measured
         return {
-          ...(clientRow === undefined ? {} : { client: client(clientRow) }),
-          descendantCount: tree.length - 1,
-          ...(clientRow === undefined
-            ? {}
-            : {
-                sampleCount: totalCpu.length,
-                terminalColumns: 120,
-                terminalRows: 36,
-                startupToProcessPresenceMilliseconds,
-                ...(stableProcess
-                  ? {
-                      idleCpuMeanPercent: totalCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
-                      idleCpuPeakPercent: Math.max(...totalCpu),
-                    }
-                  : {}),
-              }),
-          executableBytes,
-          ...(clientRow === undefined
-            ? { unsupportedReason: "The isolated PTY did not expose the client process before sampling." }
-            : {}),
+          ...measured,
+          idleCpuMeanPercent: totalCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
+          idleCpuPeakPercent: Math.max(...totalCpu),
         }
       }),
     ({ child, ownedPids }) =>

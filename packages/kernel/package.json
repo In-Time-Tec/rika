@@ -30,7 +30,8 @@
     "./machine-bindings": "./src/machine-bindings.ts",
     "./kernel-composition": "./src/kernel-composition.ts",
     "./kernel-profile-registration": "./src/kernel-profile-registration.ts",
-    "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts"
+    "./kernel-state-store-file-system": "./src/kernel-state-store-file-system.ts",
+    "./test-cell-authority": "./test/support/cell-authority.ts"
   },
   "dependencies": {
     "tenetkit": "catalog:",
@@ -52,7 +53,7 @@
     "domain": "kernel"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/kernel/src packages/kernel/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/kernel/src packages/kernel/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

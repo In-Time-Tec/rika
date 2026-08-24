@@ -75,14 +75,7 @@ it.effect("renders and targets every compact mode notch on a real 24x12 surface"
       "│ low  med  high ultra │",
       "│ Balanced default for │",
     ])
-    const palette = (
-      surface as unknown as {
-        readonly palette: {
-          readonly screenX: number
-          readonly screenY: number
-        }
-      }
-    ).palette
+    const palette = surface.palette
     for (const label of modeSelectorLabels(20, ["low", "medium", "high", "ultra"])) {
       setup.mockMouse.click(palette.screenX + label.start, palette.screenY + 1)
       setup.mockMouse.click(palette.screenX + label.end - 1, palette.screenY + 1)
@@ -110,26 +103,12 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
       ),
       (value) => Effect.sync(() => value.destroy()),
     )
-    const modeLabel = () =>
-      (
-        surface as unknown as {
-          readonly modeLabel: {
-            readonly content: { readonly chunks: ReadonlyArray<ReturnType<ReturnType<typeof fg>>> }
-          }
-        }
-      ).modeLabel.content.chunks
+    const modeLabel = () => surface.modeLabel.content.chunks
     setup.resize(32, 12)
     surface.update({ ...initial("/work", "high"), width: 32, height: 12, modePicker: { open: true, selected: 1 } })
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(text(modeLabel())).toContain(`${meterGlyphs.track.repeat(4)} ─ high`)
-    const palette = (
-      surface as unknown as {
-        readonly palette: {
-          readonly screenX: number
-          readonly screenY: number
-        }
-      }
-    ).palette
+    const palette = surface.palette
     setup.mockMouse.click(
       palette.screenX + modeSelectorLabels(28, ["low", "medium", "high", "ultra"])[2]!.start,
       palette.screenY + 1,
@@ -279,22 +258,10 @@ it.effect("owns and drains the completed-compaction rainbow cadence after settle
     surface.update(model)
     yield* Effect.tryPromise(() => setup.renderOnce())
     const rainbowColors = () => {
-      const records = (
-        surface as unknown as {
-          readonly transcriptRecords: ReadonlyMap<
-            string,
-            {
-              readonly renderable: {
-                readonly content: { readonly chunks: ReadonlyArray<{ text: string; fg: unknown }> }
-              }
-            }
-          >
-        }
-      ).transcriptRecords
-      const row = [...records.values()].find(({ renderable }) =>
-        text(renderable.content.chunks).includes("Auto-compacted"),
-      )
-      return row?.renderable.content.chunks.map((chunk) => String(chunk.fg)) ?? []
+      const row = surface
+        .transcriptDiagnostics()
+        .rows.find((renderable) => text(renderable.content.chunks).includes("Auto-compacted"))
+      return row?.content.chunks.map((chunk) => String(chunk.fg)) ?? []
     }
     const first = rainbowColors()
     clock.advance(100)
@@ -332,32 +299,21 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
     surface.update(model)
     yield* Effect.tryPromise(() => setup.renderOnce())
     const renderedWelcome = () =>
-      text(
-        (
-          surface as unknown as {
-            readonly welcomeController: {
-              readonly child: { readonly content: { readonly chunks: ReadonlyArray<{ readonly text: string }> } }
-            }
-          }
-        ).welcomeController.child.content.chunks,
-      )
+      text(welcomeContent(model.width, model.height, surface.animationDiagnostics().welcomePhase, model.mode).chunks)
     const first = renderedWelcome()
     clock.advance(100)
     const second = renderedWelcome()
     clock.advance(3_200)
-    const local = surface as unknown as {
-      readonly welcomeController: { readonly phase: number; readonly running: boolean }
-    }
-    expect(local.welcomeController.phase).toBe(33)
+    expect(surface.animationDiagnostics().welcomePhase).toBe(33)
     expect(globalTicks).toBe(0)
     expect(second).not.toBe(first)
     expect(renderedWelcome()).not.toBe(first)
     model = { ...model, entries: [{ role: "user", text: "hello" }] }
     surface.update(model)
-    const stoppedAt = local.welcomeController.phase
-    expect(local.welcomeController.running).toBe(false)
+    const stoppedAt = surface.animationDiagnostics().welcomePhase
+    expect(surface.animationDiagnostics().welcomeRunning).toBe(false)
     clock.advance(1_000)
-    expect(local.welcomeController.phase).toBe(stoppedAt)
+    expect(surface.animationDiagnostics().welcomePhase).toBe(stoppedAt)
     expect(globalTicks).toBe(0)
   }).pipe(Effect.scoped),
 )

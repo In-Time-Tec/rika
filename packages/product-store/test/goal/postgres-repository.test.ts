@@ -16,7 +16,8 @@ import { backend } from "../turn/postgres/repository.fixture"
 describe("Operation", () => {
   it.effect("runs thread metadata and tool catalog operations", () =>
     Effect.gen(function* () {
-      const ids = yield* Ref.make(["thread-a", "session-a"] as ReadonlyArray<string>)
+      const initialIds: ReadonlyArray<string> = ["thread-a", "session-a"]
+      const ids = yield* Ref.make(initialIds)
       const nextId = Effect.gen(function* () {
         const values = yield* Ref.get(ids)
         const value = values[0]
@@ -92,7 +93,7 @@ describe("Operation", () => {
         expect(catalogOutput[0]!.toLowerCase()).not.toContain(forbidden.toLowerCase())
         expect(catalogOutput[5]!.toLowerCase()).not.toContain(forbidden.toLowerCase())
       }
-      const listedJson = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[0]!)
+      const listedJson = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[0]!)
       const definitions = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCatalog.Definition))(listedJson)
       expect(definitions.length).toBeGreaterThan(0)
       expect(definitions.length).toBeLessThanOrEqual(64)
@@ -110,7 +111,7 @@ describe("Operation", () => {
             presentation.completeLabel.length > 0,
         ),
       ).toBe(true)
-      const shownJson = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[5]!)
+      const shownJson = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(catalogOutput[5]!)
       const shown = yield* Schema.decodeUnknownEffect(ToolCatalog.Definition)(shownJson)
       expect(shown).toEqual(definitions.find(({ name }) => name === "read"))
     }),

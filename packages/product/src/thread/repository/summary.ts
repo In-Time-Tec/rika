@@ -96,7 +96,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           }),
           { added: 0, modified: 0, removed: 0 },
         )
-        return ThreadSummary.make({
+        const summary = {
           id: thread.id,
           workspace: thread.workspace,
           title: thread.title,
@@ -105,8 +105,10 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           status: ThreadState.threadState(history.map((turn) => turn.status)),
           unread: lastActivityAt > (readValues.get(thread.id) ?? 0),
           lastActivityAt,
-          ...(history.length > 0 && currentProjected.length === history.length ? { editTotals: totals } : {}),
-        })
+        }
+        return history.length > 0 && currentProjected.length === history.length
+          ? ThreadSummary.make({ ...summary, editTotals: totals })
+          : ThreadSummary.make(summary)
       }),
     )
     return summaries
@@ -134,15 +136,18 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
       yield* Ref.update(activities, (current) =>
         (current.get(input.turnId)?.updatedAt ?? Number.NEGATIVE_INFINITY) > input.now
           ? current
-          : new Map(current).set(input.turnId, {
+          : new Map(current).set(input.turnId, (() => {
+              let activity: Activity = {
               turnId: input.turnId,
               threadId: input.threadId,
-              ...(input.projectedCursor === undefined ? {} : { projectedCursor: input.projectedCursor }),
               complete: input.complete,
               editTotals: structuredClone(input.editTotals),
-              ...(input.lastEventAt === undefined ? {} : { lastEventAt: input.lastEventAt }),
               updatedAt: input.now,
-            }),
+              }
+              if (input.projectedCursor !== undefined) activity = { ...activity, projectedCursor: input.projectedCursor }
+              if (input.lastEventAt !== undefined) activity = { ...activity, lastEventAt: input.lastEventAt }
+              return activity
+            })()),
       )
     }),
     markRead: Effect.fn("ThreadSummaryRepository.markRead")(function* (threadId, now) {

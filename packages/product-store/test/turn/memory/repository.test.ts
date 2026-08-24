@@ -41,11 +41,9 @@ it.effect("memory turns snapshot attachments and execution pins at the repositor
       executionRoute,
       now: 1,
     })
-    const mutableRoute = executionRoute.main.candidates[0] as { model: string }
-    const mutableCreatedParts = created.promptParts as Array<ExecutionRequest.PromptPart> | undefined
     promptParts[0] = { type: "text", text: "mutated" }
-    mutableRoute.model = "mutated"
-    mutableCreatedParts?.splice(0)
+    Object.defineProperty(executionRoute.main.candidates[0], "model", { value: "mutated" })
+    if (created.promptParts !== undefined) Object.defineProperty(created.promptParts, "length", { value: 0 })
 
     expect(yield* repository.get(created.id)).toMatchObject({
       promptParts: [

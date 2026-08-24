@@ -74,13 +74,14 @@ const make = Effect.gen(function* () {
       if (existing === undefined || existing.status === "complete")
         return yield* GoalNotActive.make({ threadId: input.threadId })
       const now = yield* Clock.currentTimeMillis
-      const goal: Goal = {
+      const status: Goal["status"] = "complete"
+      const completed = {
         ...existing,
-        status: "complete",
+        status,
         updatedAtMillis: now,
         completedAtMillis: now,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
       }
+      const goal: Goal = input.summary === undefined ? completed : { ...completed, summary: input.summary }
       yield* goals.replace(goal).pipe(Effect.mapError(unavailable(input.threadId)))
       return goal
     }),

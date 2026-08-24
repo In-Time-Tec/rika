@@ -55,7 +55,7 @@ const codingTools = Layer.effect(
         client.execute({ _tag: "CodingTool", request }).pipe(
           Effect.flatMap((outcome): Effect.Effect<CodingToolResult.Result, CodingToolRuntime.ToolError> => {
             if (outcome._tag === "Success" && outcome.value._tag === "CodingTool")
-              return Effect.succeed(outcome.value.result as CodingToolResult.Result)
+              return Effect.succeed(outcome.value.result)
             if (outcome._tag === "Failure" && Schema.is(CodingToolRuntime.ToolError)(outcome.failure))
               return Effect.fail(outcome.failure)
             return uncertain<CodingToolResult.Result>("machine coding-tool outcome is not safely observable")
@@ -97,7 +97,7 @@ const mcp = Layer.effect(
               return Effect.fail(outcome.failure)
             if (outcome._tag !== "Success" || outcome.value._tag !== "McpDiscovered")
               return uncertain<McpToolSource.Interface>("machine MCP discovery outcome is not safely observable")
-            const tools = outcome.value.tools as ReadonlyArray<McpToolSource.DiscoveredTool>
+            const tools = outcome.value.tools
             return Effect.succeed(
               McpToolSource.McpToolSource.of({
                 server: server.name,
@@ -107,7 +107,7 @@ const mcp = Layer.effect(
                     Effect.flatMap(
                       (result): Effect.Effect<McpToolSource.JsonValue, McpToolSource.McpToolCallFailed> => {
                         if (result._tag === "Success" && result.value._tag === "McpCalled")
-                          return Effect.succeed(result.value.content as McpToolSource.JsonValue)
+                          return Effect.succeed(result.value.content)
                         if (result._tag === "Failure" && Schema.is(McpRuntime.Diagnostic)(result.failure))
                           return Effect.fail(
                             McpToolSource.McpToolCallFailed.make({

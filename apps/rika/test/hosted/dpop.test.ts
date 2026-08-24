@@ -4,7 +4,7 @@ import { expect, it } from "@effect/vitest"
 import { generate, proof, publicJwk, thumbprint } from "../../src/hosted/dpop"
 
 const decoded = (value: string) =>
-  Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+  Schema.decodeSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
     Buffer.from(value, "base64url").toString("utf8"),
   )
 

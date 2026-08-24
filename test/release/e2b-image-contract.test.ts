@@ -60,9 +60,7 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
         expect(download).toContain("curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o")
       for (const item of manifest.aptPackages) expect(dockerfile).toContain(`${item.name}=${item.version}`)
       expect(
-        manifest.tools.every(
-          ({ expect: expectedOutput }) => typeof expectedOutput === "string" && expectedOutput.length > 0,
-        ),
+        manifest.tools.every(({ expect: expectedOutput }) => Schema.is(Schema.NonEmptyString)(expectedOutput)),
       ).toBe(true)
       expect(dockerfile).toContain("ARG NPM_TAR_VERSION=7.5.21")
       expect(dockerfile).toContain("/usr/local/lib/node_modules/npm/node_modules/tar")
@@ -169,7 +167,7 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
           "credentials:absent",
           "credentials:broker-ready",
         ]) {
-          expect(doctor).toContain(`check("${name}"`)
+          expect(doctor).toMatch(new RegExp(`check\\(\\s*"${name}"`))
           expect(smoke).toContain(`"${name}"`)
         }
         expect(doctor).toContain("unix: socketPath")
@@ -184,8 +182,8 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
         expect(smoke).toContain('user.stdout.trim() !== "rika-executor"')
         expect(smoke).toContain("env ${environmentCommand} rika executor doctor --json ||")
         expect(smoke).toContain('user: "rika-executor",\n            envs: environment')
-        expect(doctor).toContain("!output.includes(tool.expect)")
-        expect(doctor).toContain("output !== installed.version")
+        expect(doctor).toContain("tool.expect === undefined || output.includes(tool.expect)")
+        expect(doctor).toContain("output === installed.version")
       }),
   )
 

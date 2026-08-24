@@ -5,21 +5,21 @@ import { installLayout, publishInstall } from "./install"
 const releaseRepository = "In-Time-Tec/rika"
 const releaseTargets = ["darwin-arm64", "linux-arm64", "linux-x64"] as const
 type ReleaseTarget = (typeof releaseTargets)[number]
-const operatingSystemNames: Readonly<Record<string, string>> = { darwin: "darwin", linux: "linux" }
-const architectureNames: Readonly<Record<string, string>> = {
-  aarch64: "arm64",
-  amd64: "x64",
-  arm64: "arm64",
-  x64: "x64",
-  x86_64: "x64",
-}
+const operatingSystemNames = new Map(["darwin", "linux"].map((name) => [name, name]))
+const architectureNames = new Map([
+  ["aarch64", "arm64"],
+  ["amd64", "x64"],
+  ["arm64", "arm64"],
+  ["x64", "x64"],
+  ["x86_64", "x64"],
+])
 interface ReleaseHost {
   readonly platform: string
   readonly architecture: string
 }
 export const hostReleaseTarget = (host: ReleaseHost): ReleaseTarget | undefined => {
-  const operatingSystem = operatingSystemNames[host.platform.trim().toLowerCase()]
-  const processor = architectureNames[host.architecture.trim().toLowerCase()]
+  const operatingSystem = operatingSystemNames.get(host.platform.trim().toLowerCase())
+  const processor = architectureNames.get(host.architecture.trim().toLowerCase())
   if (operatingSystem === undefined || processor === undefined) return undefined
   return releaseTargets.find((target) => target === `${operatingSystem}-${processor}`)
 }

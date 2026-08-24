@@ -92,17 +92,13 @@ export const requireThreadAccess = Effect.fn("PostgresAuthority.requireThreadAcc
             AND membership_id = ${input.actor.membershipId}
           FOR KEY SHARE`)
       : []
-  if (
-    !isAuthorized(
-      {
-        memberId: input.actor.membershipId,
-        executorKind: thread.executorKind,
-        inheritProjectGrants: thread.inheritProjectGrants,
-        ...(direct[0] === undefined ? {} : { threadRole: direct[0].role }),
-        ...(inherited[0] === undefined ? {} : { projectRole: inherited[0].role }),
-      },
-      action,
-    )
-  )
+  const access = {
+    memberId: input.actor.membershipId,
+    executorKind: thread.executorKind,
+    inheritProjectGrants: thread.inheritProjectGrants,
+  }
+  const directAccess = direct[0] === undefined ? access : { ...access, threadRole: direct[0].role }
+  const authorizedAccess = inherited[0] === undefined ? directAccess : { ...directAccess, projectRole: inherited[0].role }
+  if (!isAuthorized(authorizedAccess, action))
     return yield* failure("Resource is unavailable")
 })

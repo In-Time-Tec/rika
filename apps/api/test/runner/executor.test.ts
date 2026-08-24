@@ -4,7 +4,7 @@ import { Controller, type Interface as ControllerService } from "@rika/e2b-execu
 import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
-import { BetterAuthUserId, OrganizationId, ThreadId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, DeviceId, OrganizationId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/postgres-layer"
 import type { Access, RunnerHelloWire } from "@rika/remote-execution/protocol"
@@ -46,6 +46,27 @@ const unusedHostedEnvironment: HostedEnvironmentService = {
   revokeSourceApproval: () => Effect.die("unused"),
   putEgress: () => Effect.die("unused"),
   usePhase: () => Effect.die("unused"),
+}
+const unusedController: ControllerService = {
+  provision: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  kill: () => Effect.die("unused"),
+  portal: () => Effect.die("unused"),
+  hello: () => Effect.die("unused"),
+  reconnect: () => Effect.die("unused"),
+  validateAccess: () => Effect.die("unused"),
+  heartbeat: () => Effect.die("unused"),
+  checkpoint: () => Effect.die("unused"),
+  credential: () => Effect.die("unused"),
+  revokeCredential: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  ready: () => Effect.die("unused"),
+  loadSetupCache: () => Effect.die("unused"),
+  storeSetupCache: () => Effect.die("unused"),
+  activatePhase: () => Effect.die("unused"),
+  cleanupOrphans: Effect.succeed([]),
 }
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
@@ -101,7 +122,7 @@ const localConnection = (
       principal: authenticated,
       checkoutFingerprint: fingerprint,
       registration: {
-        workspaceIdentity: `${checkoutFingerprint}-identity` as never,
+        workspaceIdentity: WorkspaceId.make(`${checkoutFingerprint}-identity`),
         repository: { identity: `repository-${checkoutFingerprint}`, branch: "main" },
         kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
         capabilities: { cells: true, checkpoints: false, pty: false },
@@ -112,7 +133,7 @@ const localConnection = (
       owner,
       executorKind: "runner",
       runnerTarget: {
-        deviceId: authenticated.deviceId as never,
+        deviceId: DeviceId.make(authenticated.deviceId),
         checkoutFingerprint: fingerprint,
       },
     })
@@ -160,7 +181,7 @@ const isolated = <A, E, R>(
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
           hostedRepositoriesTestLayer,
-          Layer.succeed(Controller, { cleanupOrphans: Effect.succeed([]) } as unknown as ControllerService),
+          Layer.succeed(Controller, unusedController),
           Layer.succeed(HostedEnvironment, unusedHostedEnvironment),
           Layer.succeed(HostedToolPolicy, testToolPolicy),
         )

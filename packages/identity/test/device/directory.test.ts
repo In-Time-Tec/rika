@@ -1,22 +1,21 @@
 import { Effect } from "effect"
-import { expect, it } from "@effect/vitest"
-import type { Pool } from "pg"
+import { expect, it, vi } from "@effect/vitest"
+import { Pool } from "pg"
 import { makePostgresCliDeviceDirectory } from "../../src/device/directory"
 
 it.effect("revokes every grant for only the authenticated user", () =>
   Effect.gen(function* () {
     const context = yield* Effect.context<never>()
     const queries: Array<{ readonly text: string; readonly values: ReadonlyArray<unknown> }> = []
-    const pool = {
-      query: (text: string, values: ReadonlyArray<unknown>) => {
-        queries.push({ text, values })
-        return Effect.runPromiseWith(context)(
-          Effect.succeed({
-            rows: text.includes("returning device_id") ? [{ device_id: "device-1" }] : [],
-          }),
-        )
-      },
-    } as unknown as Pool
+    const pool = new Pool()
+    vi.spyOn(pool, "query").mockImplementation((text: string, values: ReadonlyArray<unknown>) => {
+      queries.push({ text, values })
+      return Effect.runPromiseWith(context)(
+        Effect.succeed({
+          rows: text.includes("returning device_id") ? [{ device_id: "device-1" }] : [],
+        }),
+      )
+    })
     const directory = makePostgresCliDeviceDirectory(pool)
     yield* directory.revokeAll({ userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" })
     const revokeQuery = queries.at(-1)

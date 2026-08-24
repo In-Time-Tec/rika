@@ -64,7 +64,7 @@ describe("Operation", () => {
       expect(persisted).toEqual([thread])
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
       const streamed = output
-        .filter((line): line is string => typeof line === "string" && line.startsWith("{"))
+        .filter((line): line is string => Schema.is(Schema.String)(line) && line.startsWith("{"))
         .map((line) => decodeJson(line))
       expect(streamed).toMatchObject([
         {

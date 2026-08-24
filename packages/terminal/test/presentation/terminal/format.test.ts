@@ -12,17 +12,20 @@ const entries = (count: number) =>
     turnId: `turn-${index}`,
   }))
 
-interface Probe {
-  readonly transcriptScroll: { scrollTop: number; readonly scrollHeight: number }
-  handleTranscriptScroll: () => void
-  readonly transcriptWindowEnd: number
+class ProbeSurface extends Surface {
+  public get windowEnd(): number {
+    return this.transcriptWindowEnd
+  }
+  public scrollTranscript(): void {
+    this.handleTranscriptScroll()
+  }
 }
 
 test("paging is requested on approach, before the user reaches the top edge", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const surface = new ProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         const base: Model = {
           ...initial("/work", "medium"),
@@ -36,17 +39,16 @@ test("paging is requested on approach, before the user reaches the top edge", ()
         }
         surface.update(base)
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as Probe
-        const before = probe.transcriptWindowEnd
+        const before = surface.windowEnd
 
         // Park well short of the top edge. The old design only paged at scrollTop <= 1,
         // so the user hit an unmaterialized edge and the restore jumped.
-        probe.transcriptScroll.scrollTop = 20
-        probe.handleTranscriptScroll()
+        surface.transcriptScroll.scrollTop = 20
+        surface.scrollTranscript()
         yield* openTui(() => setup.flush())
 
-        expect(probe.transcriptScroll.scrollTop).toBeGreaterThan(1)
-        expect(probe.transcriptWindowEnd).not.toBe(before)
+        expect(surface.transcriptScroll.scrollTop).toBeGreaterThan(1)
+        expect(surface.windowEnd).not.toBe(before)
       } finally {
         surface.destroy()
       }
@@ -57,7 +59,7 @@ test("a scroll reversal within the overscan margin does not remount transcript r
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const surface = new ProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         const base: Model = {
           ...initial("/work", "medium"),
@@ -71,16 +73,15 @@ test("a scroll reversal within the overscan margin does not remount transcript r
         }
         surface.update(base)
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as Probe
         const identity = () => surface.transcriptDiagnostics().rows
 
         const mounted = [...identity()]
-        const start = probe.transcriptScroll.scrollTop
-        probe.transcriptScroll.scrollTop = Math.max(0, start - 5)
-        probe.handleTranscriptScroll()
+        const start = surface.transcriptScroll.scrollTop
+        surface.transcriptScroll.scrollTop = Math.max(0, start - 5)
+        surface.scrollTranscript()
         yield* openTui(() => setup.flush())
-        probe.transcriptScroll.scrollTop = start
-        probe.handleTranscriptScroll()
+        surface.transcriptScroll.scrollTop = start
+        surface.scrollTranscript()
         yield* openTui(() => setup.flush())
 
         const after = identity()

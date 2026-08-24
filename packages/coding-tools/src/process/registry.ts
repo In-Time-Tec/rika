@@ -123,9 +123,7 @@ export interface Interface {
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/coding-tools/process/registry/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/process/registry/Service") {}
 
 export const layer = Layer.effect(
   Service,
@@ -220,7 +218,7 @@ export const layer = Layer.effect(
             })
             const combined = `${output.stdout}${output.stderr}`
             const totalBytes = output.stdoutBytes + output.stderrBytes
-            const bounded = RuntimeFilesystem.boundedText<BoundedText>(
+            const bounded = RuntimeFilesystem.boundedText(
               combined,
               outputLimit,
               "page or narrow the command",
@@ -231,15 +229,15 @@ export const layer = Layer.effect(
               0,
               Number(((yield* Clock.currentTimeNanos) - entry.startedAtNanos) / 1_000_000n),
             )
-            const result = {
+            const base: Output = {
               processId,
               stdout: capacityTruncated ? bounded.text : output.stdout,
               stderr: capacityTruncated ? "" : output.stderr,
               running: Option.isNone(exit),
-              ...(Option.isSome(exit) ? { exitCode: exit.value } : {}),
               elapsedMillis,
               truncated: output.truncated || capacityTruncated,
             }
+            const result: Output = Option.isSome(exit) ? { ...base, exitCode: exit.value } : base
             if (Option.isSome(exit))
               yield* Ref.update(entries, (states) => retainTerminalOutput(states, processId, result))
             return result

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
-import { Redacted } from "effect"
+import { Context, Layer, Redacted } from "effect"
 
 export interface EncryptedSecret {
   readonly keyVersion: 1
@@ -12,6 +12,10 @@ export interface SecretCipher {
   readonly encrypt: (identity: string, value: Redacted.Redacted<string>) => EncryptedSecret
   readonly decrypt: (identity: string, value: EncryptedSecret) => Redacted.Redacted<string>
 }
+
+export class SecretCipherService extends Context.Service<SecretCipherService, SecretCipher>()(
+  "@rika/api/security/secret-cipher/SecretCipherService",
+) {}
 
 const additionalData = (domain: string, identity: string) => Buffer.from(`rika/${domain}/v1/${identity}`, "utf8")
 
@@ -43,3 +47,6 @@ export const makeSecretCipher = (input: {
     },
   }
 }
+
+export const layer = (input: Parameters<typeof makeSecretCipher>[0]) =>
+  Layer.succeed(SecretCipherService, makeSecretCipher(input))

@@ -11,6 +11,7 @@ const Failure = Schema.Union([GoalUnavailable, GoalAlreadyActive, GoalNotActive,
 
 const Empty = Schema.Struct({})
 const Current = Schema.Struct({ goal: Schema.optionalKey(Goal) })
+const GoalBudget = Schema.Struct({ tokens: Schema.optionalKey(Schema.Int), wallClockMillis: Schema.optionalKey(Schema.Int) })
 
 const CreateInput = Schema.Struct({
   objective: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
@@ -44,16 +45,20 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<GoalServ
       nested(
         { kind: "goal.create", payload: input, replayPolicy: "never" },
         Effect.flatMap(GoalService, (goals) =>
-          Effect.flatMap(threadId, (thread) =>
-            goals.create({
+          Effect.flatMap(threadId, (thread) => {
+            let budget: typeof GoalBudget.Type
+            if (input.tokenBudget === undefined)
+              budget = input.wallClockMillis === undefined ? {} : { wallClockMillis: input.wallClockMillis }
+            else
+              budget = input.wallClockMillis === undefined
+                ? { tokens: input.tokenBudget }
+                : { tokens: input.tokenBudget, wallClockMillis: input.wallClockMillis }
+            return goals.create({
               threadId: thread,
               objective: input.objective,
-              budget: {
-                ...(input.tokenBudget === undefined ? {} : { tokens: input.tokenBudget }),
-                ...(input.wallClockMillis === undefined ? {} : { wallClockMillis: input.wallClockMillis }),
-              },
-            }),
-          ),
+              budget,
+            })
+          }),
         ),
       ),
   }),
@@ -66,9 +71,12 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<GoalServ
       nested(
         { kind: "goal.complete", payload: input, replayPolicy: "never" },
         Effect.flatMap(GoalService, (goals) =>
-          Effect.flatMap(threadId, (thread) =>
-            goals.complete({ threadId: thread, ...(input.summary === undefined ? {} : { summary: input.summary }) }),
-          ),
+          Effect.flatMap(threadId, (thread) => {
+            const completion: Parameters<typeof goals.complete>[0] = input.summary === undefined
+              ? { threadId: thread }
+              : { threadId: thread, summary: input.summary }
+            return goals.complete(completion)
+          }),
         ),
       ),
   }),

@@ -16,14 +16,7 @@ export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
   protected renderTranscript(
     model: Model,
     preserveAnchor = false,
-  ): {
-    readonly sidebarWidth: number
-    readonly contentLeft: number
-    readonly contentWidth: number
-    readonly renderedInputHeight: number
-    readonly sidebarVisible: boolean
-    readonly threadSidebarVisible: boolean
-  } {
+  ) {
     this.model = model
     this.queueHint.bg = cutoutBackground(this.renderer)
     this.modeLabel.bg = cutoutBackground(this.renderer)

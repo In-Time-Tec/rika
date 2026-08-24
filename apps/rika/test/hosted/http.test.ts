@@ -1,12 +1,13 @@
-import { Context, Effect, Layer, Redacted } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { generate, publicJwk, thumbprint } from "../../src/hosted/dpop"
 import { Http } from "../../src/hosted/contract"
 import { layer } from "../../src/hosted/http"
+import { WorkspaceId } from "@rika/product/hosted-model"
 
-const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
+const response = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json, status = 200) =>
   HttpClientResponse.fromWeb(
     request,
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
@@ -159,7 +160,7 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
         origin,
         "checkout-1",
         {
-          workspaceIdentity: "workspace-1" as never,
+          workspaceIdentity: WorkspaceId.make("workspace-1"),
           repository: { identity: "repository-1" },
           kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
           capabilities: { cells: true, checkpoints: false, pty: false },

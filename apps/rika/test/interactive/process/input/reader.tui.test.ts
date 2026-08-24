@@ -143,10 +143,10 @@ test(
         yield* Effect.tryPromise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
+        yield* app.waitModelRequests(1)
         yield* Effect.tryPromise(() => app.type("Queued follow-up prompt."))
         app.pressKey("\u001b[13;3u")
         yield* app.waitFrame("Queued follow-up prompt.")
-        yield* app.waitModelRequests(1)
         app.pressKey("c", { ctrl: true })
         const promoted = yield* app.waitFrame("QUEUED_DONE")
         yield* app.settled

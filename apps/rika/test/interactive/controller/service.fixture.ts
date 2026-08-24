@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -47,10 +47,10 @@ const projectionEventImpl = (turn: Turn.Turn, text: string, transient = false) =
   type: "model.output.delta",
   createdAt: 3,
   text,
-  ...(transient ? { data: { transient: true } } : {}),
+  data: transient ? { transient: true } : undefined,
 })
 
 export const projectionEvent: {
   (turn: Turn.Turn, text: string, transient?: boolean): ReturnType<typeof projectionEventImpl>
   (text: string, transient?: boolean): (turn: Turn.Turn) => ReturnType<typeof projectionEventImpl>
-} = Function.dual((args) => typeof args[0] === "object", projectionEventImpl)
+} = Function.dual((args) => Schema.is(Turn.Turn)(args[0]), projectionEventImpl)

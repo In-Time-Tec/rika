@@ -7,7 +7,7 @@ import { UsageDisplay, UsageTime } from "./usage"
 import { defaultModeRouteMap, modeRouteMapSchema, type ModeRouteMap } from "./mode/route"
 import { ChangedFile as ChangedFileSchema } from "./changed-file"
 import type { ChangedFile } from "./changed-file"
-import type { ThreadItem } from "./thread/model"
+import { ThreadItem } from "./thread/model"
 import { QueueItem as QueueItemSchema } from "./queue/item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./message"
@@ -211,7 +211,7 @@ export const Model = Schema.Struct({
   height: Schema.Finite,
   scrollOffset: Schema.Finite,
   scrollFollow: Schema.Boolean,
-  threads: Schema.Array(Schema.Unknown),
+  threads: Schema.Array(ThreadItem),
   workspaceFilesOpen: Schema.Boolean,
   threadSidebar: ThreadSidebarStateSchema,
   queueSelection: Schema.optional(Schema.String),

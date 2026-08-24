@@ -12,7 +12,7 @@ export const loadModePreference = Effect.fn("ModePreference.load")(function* (
   const fileSystem = yield* FileSystem.FileSystem
   const read = yield* Effect.result(fileSystem.readFileString(filename(dataRoot)))
   if (read._tag === "Failure") return undefined
-  const decoded = yield* Effect.result(Schema.decodeUnknownEffect(PreferenceFile)(read.success))
+  const decoded = yield* Effect.result(Schema.decodeEffect(PreferenceFile)(read.success))
   if (decoded._tag === "Failure" || !modes.includes(decoded.success.mode)) return undefined
   return decoded.success.mode
 })

@@ -30,24 +30,17 @@ const ApplyInput = Schema.Struct({
 const run = (request: typeof CodingToolRuntime.Request.Type) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
-const applyOne = (replacement: typeof Replacement.Type) =>
-  Effect.map(
-    run({
-      _tag: "Edit",
-      path: replacement.path,
-      oldStr: replacement.oldStr,
-      newStr: replacement.newStr,
-      ...(replacement.replaceAll === undefined ? {} : { replaceAll: replacement.replaceAll }),
-    }),
-    (result) => ({
-      edit: {
-        path: replacement.path,
-        text: result.text,
-        ...(result.diff === undefined ? {} : { diff: result.diff }),
-      },
-      truncated: result.truncated,
-    }),
-  )
+const applyOne = (replacement: typeof Replacement.Type) => {
+  const request: typeof CodingToolRuntime.Request.Type = replacement.replaceAll === undefined
+    ? { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr }
+    : { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr, replaceAll: replacement.replaceAll }
+  return Effect.map(run(request), (result) => {
+    const edit: typeof AppliedEdit.Type = result.diff === undefined
+      ? { path: replacement.path, text: result.text }
+      : { path: replacement.path, text: result.text, diff: result.diff }
+    return { edit, truncated: result.truncated }
+  })
+}
 
 export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
   operation({

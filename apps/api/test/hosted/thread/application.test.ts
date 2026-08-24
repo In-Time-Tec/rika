@@ -7,7 +7,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { ServerFrame } from "@rika/product/client-protocol"
-import { OwnerId } from "@rika/product/hosted-model"
+import { OwnerId, ThreadEventCursor, ThreadId as HostedThreadId, ThreadVersion } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId } from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -122,13 +122,13 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           protocolVersion: 1,
           payload: {
             _tag: "ThreadSnapshot",
-            threadId: "read-only-thread" as never,
-            threadVersion: "0" as never,
-            cursor: "0" as never,
+            threadId: yield* Schema.decodeEffect(HostedThreadId)("read-only-thread"),
+            threadVersion: yield* Schema.decodeEffect(ThreadVersion)("0"),
+            cursor: yield* Schema.decodeEffect(ThreadEventCursor)("0"),
             snapshot,
           },
         })
-        expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))(encoded)).toMatchObject({
+        expect(yield* Schema.decodeEffect(Schema.fromJsonString(ServerFrame))(encoded)).toMatchObject({
           payload: { _tag: "ThreadSnapshot", snapshot },
         })
         const route = ExecutionRoute.testExecutionRoute()

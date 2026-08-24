@@ -1,18 +1,18 @@
 import type * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
+import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http, ProfileStore } from "./contract"
 import { authenticated, localLoginProfile } from "./account"
-import { makeHostedInteractiveSession } from "./interactive-session"
+import * as HostedInteractiveSession from "./interactive-session"
 import { preferencePath, prepareRunnerCheckout, type PreparedRunnerCheckout } from "../runner/service"
 import { RunnerAdmission } from "../runner/contract"
 import type { InteractiveTuiOptions } from "../interactive/process/lifecycle/loop"
 import { interactiveTui } from "../interactive/process/lifecycle/loop"
 
-const operationFailure = (error: unknown) =>
+const operationFailure = (error: Error | string) =>
   OperationUnavailable.make({
     operation: "Interactive",
     message: error instanceof Error ? error.message : String(error),
@@ -43,58 +43,78 @@ const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right
     }),
   )
 
-export const makeDeferredSession = (
-  ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>,
-): {
+interface DeferredSession {
   readonly session: InteractiveSession.InteractiveSession
   readonly attach: (session: InteractiveSession.InteractiveSession) => void
-} => {
+}
+
+const HostedInteractiveSessionFactory = Context.Reference<typeof HostedInteractiveSession.makeHostedInteractiveSession>(
+  "@rika/cli/hosted/interactive-controller/HostedInteractiveSessionFactory",
+  {
+    defaultValue: () => HostedInteractiveSession.makeHostedInteractiveSession,
+  },
+)
+
+export const makeDeferredSession = (
+  ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>,
+): DeferredSession => {
   let attached: InteractiveSession.InteractiveSession | undefined
-  const effects = new Set([
-    "cancel",
-    "quit",
-    "newThread",
-    "newOrbThread",
-    "pauseOrb",
-    "resumeOrb",
-    "enableRemoteThreadCreation",
-    "disableRemoteThreadCreation",
-    "archiveThread",
-    "archiveAndNewThread",
-    "reopenThread",
-  ])
-  const session = new Proxy({} as InteractiveSession.InteractiveSession, {
-    get: (_, property: keyof InteractiveSession.InteractiveSession) => {
-      if (property === "currentView" || property === "projectionCheckpoint")
-        return (...args: ReadonlyArray<unknown>) =>
-          attached === undefined
-            ? undefined
-            : (attached[property] as (...values: ReadonlyArray<unknown>) => unknown)(...args)
-      if (property === "events")
-        return (...args: ReadonlyArray<unknown>) =>
-          Deferred.await(ready).pipe(
-            Effect.flatMap((attachedSession) =>
-              (
-                attachedSession.events as (
-                  ...values: ReadonlyArray<unknown>
-                ) => Effect.Effect<void, OperationUnavailable>
-              )(...args),
-            ),
-          )
-      if (effects.has(property)) {
-        if (attached !== undefined) return attached[property]
-        return Effect.fail(operationFailure("Interactive session is still initializing"))
-      }
-      return (...args: ReadonlyArray<unknown>) =>
-        attached === undefined
-          ? Effect.fail(operationFailure("Interactive session is still initializing"))
-          : (attached[property] as (...values: ReadonlyArray<unknown>) => Effect.Effect<void>)(...args)
+  const unavailable = () => Effect.fail(operationFailure("Interactive session is still initializing"))
+  const session: InteractiveSession.InteractiveSession = {
+    events: (dispatch) => Deferred.await(ready).pipe(Effect.flatMap((real) => real.events(dispatch))),
+    currentView: () => attached?.currentView(),
+    projectionCheckpoint: (turnId) => attached?.projectionCheckpoint(turnId),
+    submit: (...args) => (attached === undefined ? unavailable() : attached.submit(...args)),
+    shell: (...args) => (attached === undefined ? unavailable() : attached.shell(...args)),
+    editQueued: (...args) => (attached === undefined ? unavailable() : attached.editQueued(...args)),
+    dequeue: (...args) => (attached === undefined ? unavailable() : attached.dequeue(...args)),
+    steerQueued: (...args) => (attached === undefined ? unavailable() : attached.steerQueued(...args)),
+    steer: (...args) => (attached === undefined ? unavailable() : attached.steer(...args)),
+    approveAuthorization: (...args) =>
+      attached === undefined ? unavailable() : attached.approveAuthorization(...args),
+    denyAuthorization: (...args) => attached === undefined ? unavailable() : attached.denyAuthorization(...args),
+    interruptAndSend: (...args) => attached === undefined ? unavailable() : attached.interruptAndSend(...args),
+    get cancel() {
+      return attached?.cancel ?? unavailable()
     },
-  })
+    get quit() {
+      return attached?.quit ?? unavailable()
+    },
+    get newThread() {
+      return attached?.newThread ?? unavailable()
+    },
+    get newOrbThread() {
+      return attached?.newOrbThread ?? unavailable()
+    },
+    get pauseOrb() {
+      return attached?.pauseOrb ?? unavailable()
+    },
+    get resumeOrb() {
+      return attached?.resumeOrb ?? unavailable()
+    },
+    get enableRemoteThreadCreation() {
+      return attached?.enableRemoteThreadCreation ?? unavailable()
+    },
+    get disableRemoteThreadCreation() {
+      return attached?.disableRemoteThreadCreation ?? unavailable()
+    },
+    get archiveThread() {
+      return attached?.archiveThread ?? unavailable()
+    },
+    get archiveAndNewThread() {
+      return attached?.archiveAndNewThread ?? unavailable()
+    },
+    selectThread: (...args) => (attached === undefined ? unavailable() : attached.selectThread(...args)),
+    readQueue: (...args) => (attached === undefined ? unavailable() : attached.readQueue(...args)),
+    previewThread: (...args) => (attached === undefined ? unavailable() : attached.previewThread(...args)),
+    get reopenThread() {
+      return attached?.reopenThread ?? unavailable()
+    },
+  }
   return { session, attach: (real) => (attached = real) }
 }
 
-const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends object>(
+const run = Effect.fn("HostedInteractiveController.run")(function* <E extends Error, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
     readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
@@ -139,25 +159,26 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     const threads = yield* ThreadClient
     const crypto = yield* Crypto.Crypto
     const credentials = yield* CredentialStore
+    const makeSession = yield* HostedInteractiveSessionFactory
     const createThread = (executorKind: "runner" | "orb"): Effect.Effect<string, HostedError> =>
       Effect.gen(function* () {
-        const prepared = executorKind === "runner" ? yield* prepare : undefined
         const commandId = yield* crypto.randomUUIDv4
         const ticket = yield* authenticated(profile, (session) => http.issueThreadTicket(profile.origin, session))
-        return yield* threads.create({
+        const request = {
           ticket,
           commandId,
           owner: profile.owner,
-          ...(profile.project === undefined ? {} : { project: profile.project }),
           executorKind,
-          ...(executorKind === "runner"
-            ? {
-                runnerTarget: {
-                  deviceId: prepared!.checkout.registration.deviceId,
-                  checkoutFingerprint: prepared!.checkout.registration.checkoutFingerprint,
-                },
-              }
-            : {}),
+        }
+        const requestWithProject = profile.project === undefined ? request : { ...request, project: profile.project }
+        if (executorKind === "orb") return yield* threads.create(requestWithProject)
+        const prepared = yield* prepare
+        return yield* threads.create({
+          ...requestWithProject,
+          runnerTarget: {
+            deviceId: prepared.checkout.registration.deviceId,
+            checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
+          },
         })
       }).pipe(
         Effect.provideService(Http, http),
@@ -189,7 +210,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
         ),
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))
-    const hosted = yield* makeHostedInteractiveSession({
+    const hosted = yield* makeSession({
       profile,
       threadId,
       createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
@@ -217,7 +238,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
   )
 })
 
-export const runHostedInteractive = Effect.fn("HostedInteractiveController.entry")(function* <E, R extends object>(
+export const runHostedInteractive = Effect.fn("HostedInteractiveController.entry")(function* <E extends Error, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
     readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>

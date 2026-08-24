@@ -22,13 +22,15 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<Artifact
     input: PutInput,
     output: Stored,
     failure: Failure,
-    handle: (input) =>
-      nested(
+    handle: (input) => {
+      const stored: typeof PutInput.Type = input.mediaType === undefined
+        ? { value: input.value }
+        : { value: input.value, mediaType: input.mediaType }
+      return nested(
         { kind: "artifacts.put", payload: input, replayPolicy: "provider-idempotent" },
-        Effect.flatMap(ArtifactStore, (store) =>
-          store.put({ value: input.value, ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }) }),
-        ),
-      ),
+        Effect.flatMap(ArtifactStore, (store) => store.put(stored)),
+      )
+    },
   }),
   operation({
     name: "get",

@@ -8,7 +8,33 @@ import type { ApplicationInit } from "foldkit/runtime"
 import { Subscription } from "foldkit"
 import { connectThread, frameEventName, openPortal, sendPrompt } from "./thread-socket"
 import * as Socket from "effect/unstable/socket/Socket"
-import { html, htmlScope } from "./html"
+import { htmlScope } from "./html"
+
+const ClientFrame = Schema.Struct({
+  protocolVersion: Schema.Literal(1),
+  payload: Schema.Union([
+    Schema.TaggedStruct("ClientDecodeFailed", { message: Schema.String }),
+    Schema.TaggedStruct("ClientReconnecting", { threadId: Schema.optionalKey(Schema.String) }),
+    Schema.TaggedStruct("ClientReconnectFailed", {
+      threadId: Schema.String,
+      message: Schema.optionalKey(Schema.String),
+    }),
+  ]),
+})
+const DisplayFrame = Schema.Struct({
+  protocolVersion: Schema.Literal(1),
+  payload: Schema.Struct({
+    _tag: Schema.String,
+    threadId: Schema.optionalKey(Schema.String),
+    threadVersion: Schema.optionalKey(Schema.String),
+    url: Schema.optionalKey(Schema.String),
+    event: Schema.optionalKey(
+      Schema.Struct({ threadId: Schema.optionalKey(Schema.String), threadVersion: Schema.optionalKey(Schema.String) }),
+    ),
+  }),
+})
+const BrowserFrame = Schema.Union([ClientFrame, DisplayFrame])
+type BrowserFrame = typeof BrowserFrame.Type
 
 export const ConnectionState = Schema.Literals(["disconnected", "connecting", "connected", "failed"])
 
@@ -35,7 +61,7 @@ export const ClickedOpenPortal = m("ClickedOpenPortal")
 export const ConnectedThread = m("ConnectedThread", {
   epoch: Schema.Int,
   threadId: Schema.String,
-  frame: Schema.Unknown,
+  frame: DisplayFrame,
 })
 export const FailedThreadConnection = m("FailedThreadConnection", {
   epoch: Schema.Int,
@@ -44,7 +70,7 @@ export const FailedThreadConnection = m("FailedThreadConnection", {
 export const FailedThreadAction = m("FailedThreadAction", { message: Schema.String })
 export const SentPrompt = m("SentPrompt")
 export const SentPortalRequest = m("SentPortalRequest")
-export const GotThreadFrame = m("GotThreadFrame", { frame: Schema.Unknown })
+export const GotThreadFrame = m("GotThreadFrame", { frame: BrowserFrame })
 
 export const Message = Schema.Union([
   ChangedThreadId,
@@ -121,7 +147,7 @@ export const init: ApplicationInit<Model, Message, void> = () => [
   [],
 ]
 
-const frameText = (frame: unknown): string => {
+const frameText = (frame: BrowserFrame): string => {
   try {
     return JSON.stringify(frame, null, 2)
   } catch {
@@ -129,23 +155,19 @@ const frameText = (frame: unknown): string => {
   }
 }
 
-const frameThread = (frame: unknown): string | undefined => {
-  const payload = (frame as { readonly payload?: Record<string, unknown> } | undefined)?.payload
-  if (payload === undefined) return undefined
-  if (payload._tag === "ThreadEvent") {
-    const event = payload.event as { readonly threadId?: unknown } | undefined
-    return typeof event?.threadId === "string" ? event.threadId : undefined
+const frameThread = (frame: BrowserFrame): string | undefined => {
+  const payload = frame.payload
+  if (payload._tag === "ThreadEvent" && payload.event !== undefined) {
+    return String(payload.event.threadId)
   }
-  return typeof payload.threadId === "string" ? payload.threadId : undefined
+  return "threadId" in payload && payload.threadId !== undefined ? String(payload.threadId) : undefined
 }
 
-const frameVersion = (frame: unknown): string | undefined => {
-  const payload = (frame as { readonly payload?: Record<string, unknown> } | undefined)?.payload
-  if (payload === undefined) return undefined
-  if (typeof payload.threadVersion === "string") return payload.threadVersion
-  if (payload._tag === "ThreadEvent") {
-    const event = payload.event as { readonly threadVersion?: unknown } | undefined
-    return typeof event?.threadVersion === "string" ? event.threadVersion : undefined
+const frameVersion = (frame: BrowserFrame): string | undefined => {
+  const payload = frame.payload
+  if ("threadVersion" in payload && payload.threadVersion !== undefined) return String(payload.threadVersion)
+  if (payload._tag === "ThreadEvent" && payload.event !== undefined) {
+    return String(payload.event.threadVersion)
   }
   return undefined
 }
@@ -217,9 +239,7 @@ const updateModel = (model: Model, message: Message): Update => {
     case "SentPortalRequest":
       return [model, []]
     case "GotThreadFrame": {
-      const frame = message.frame as {
-        readonly payload?: { readonly threadVersion?: unknown; readonly _tag?: unknown; readonly url?: unknown }
-      }
+      const frame = message.frame
       const scopedThread = frameThread(message.frame)
       if (scopedThread !== undefined && scopedThread !== model.attachedThreadId) return [model, []]
       const version = frameVersion(message.frame)
@@ -234,15 +254,12 @@ const updateModel = (model: Model, message: Message): Update => {
         connection = "failed"
         error = "Thread reconnection failed"
       }
-      const portalUrl =
-        frame.payload?._tag === "PortalOpened" && typeof frame.payload.url === "string"
-          ? frame.payload.url
-          : model.portalUrl
+      const portalUrl = frame.payload._tag === "PortalOpened" ? (frame.payload.url ?? model.portalUrl) : model.portalUrl
       return [
         {
           ...model,
           connection,
-          threadVersion: typeof version === "string" ? version : model.threadVersion,
+          threadVersion: version ?? model.threadVersion,
           portalUrl,
           frames: [...model.frames.slice(-199), frameText(message.frame)],
           error,
@@ -260,7 +277,7 @@ export const update: {
 
 export const subscriptions = Subscription.make<Model, Message>()(() => ({
   threadFrames: Subscription.persistent(
-    Subscription.fromEvent<CustomEvent<unknown>, CustomEvent<unknown>>({
+    Subscription.fromEvent<CustomEvent<BrowserFrame>, CustomEvent<BrowserFrame>>({
       target: window,
       type: frameEventName,
       toMessage: (event) => event,
@@ -273,8 +290,7 @@ export const view: {
 } = Function.dual(
   2,
   (model: Model, builder: HtmlBuilder<Message>): Document =>
-    htmlScope.with(builder, () => {
-      const h = html<Message>()
+    htmlScope.with(builder, (h) => {
       const connected = model.connection === "connected"
       return {
         title: model.threadId.length === 0 ? "Rika Threads" : `Rika · ${model.threadId}`,

@@ -23,7 +23,10 @@ it.layer(BunServices.layer)("worker process completeness", (test) => {
         const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>
           stream.pipe(
             Stream.decodeText(),
-            Stream.runFold(() => "", (output, chunk) => output + chunk),
+            Stream.runFold(
+              () => "",
+              (output, chunk) => output + chunk,
+            ),
           )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [child.exitCode, collect(child.stdout), collect(child.stderr)],
@@ -36,7 +39,7 @@ it.layer(BunServices.layer)("worker process completeness", (test) => {
         const reported = output.split("\n").find((line) => line.startsWith("VITEST RUN "))
         expect(reported).toBeDefined()
         expect(reported).not.toContain("VITEST RUN COMPLETE")
-        const counts = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Counts))(
+        const counts = yield* Schema.decodeEffect(Schema.fromJsonString(Counts))(
           reported!.slice(reported!.indexOf("{")),
         )
         expect(counts.files.completed).toBeLessThan(counts.files.expected)

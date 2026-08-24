@@ -1,5 +1,5 @@
 import type { ColorInput, TextChunk } from "@opentui/core"
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import { subagentPhrase } from "@rika/transcript/subagent-presentation"
 import { cellBodyText, cellCollapsedLine } from "@rika/transcript/cell-presentation"
 import stringWidth from "string-width"
@@ -12,7 +12,7 @@ import { renderDiff } from "../../presentation/tool/diff-renderer"
 import { fg, dim, bg, underline, StyledText } from "@opentui/core"
 import { boundedThreadSidebarWidth } from "../../state/layout/model"
 import { fileSidebarLayoutWidth } from "../../state/layout/model"
-import type { ThreadItem } from "../../state/thread/model"
+import { decodeThreadItems } from "../../state/thread/model"
 import { isThreadBusy } from "../../state/thread/predicate"
 import { toOpenColor } from "./text-adapter"
 
@@ -60,7 +60,7 @@ export const renderBlock: {
   (block: TranscriptBlock): string
   (block: TranscriptBlock, width?: number): string
 } = Function.dual(
-  (args) => args.length > 1 || typeof args[0] !== "number",
+  (args) => args.length > 1 || !Schema.is(Schema.Finite)(args[0]),
   (block: TranscriptBlock, width = 80): string => {
     const body = (text: string) => wrapBodyText(text, width, "  ")
     const head = (text: string) => {
@@ -138,10 +138,10 @@ export const renderSidebar: {
   (model: Model): StyledText
   (model: Model, spinnerFrame?: string): StyledText
 } = Function.dual(
-  (args) => args.length > 1 || typeof args[0] !== "string",
+  (args) => args.length > 1 || !Schema.is(Schema.String)(args[0]),
   (model, spinnerFrame = "⠭"): StyledText => {
     const chunks: Array<TextChunk> = []
-    const threads = model.threads as ReadonlyArray<ThreadItem>
+    const threads = decodeThreadItems(model.threads)
     const sidebarWidth = boundedThreadSidebarWidth(model.width)
     threads
       .slice(model.threadSidebar.scrollTop, model.threadSidebar.scrollTop + model.height)
@@ -293,7 +293,7 @@ export const renderChangedFiles: {
   (model: Model, innerWidth: number, hoveredRow?: number): StyledText
   (innerWidth: number, hoveredRow?: number): (model: Model) => StyledText
 } = Function.dual(
-  (args) => args.length > 1 && typeof args[0] !== "number",
+  (args) => args.length > 1 && !Schema.is(Schema.Finite)(args[0]),
   (model: Model, innerWidth: number, hoveredRow?: number) =>
     renderFileRows(
       fileTreeRows(

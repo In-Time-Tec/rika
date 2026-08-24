@@ -59,14 +59,10 @@ const failure = (
   installationId: number,
   message: string,
   status?: number,
-) =>
-  InstallationError.make({
-    reason,
-    operation,
-    installationId,
-    message,
-    ...(status === undefined ? {} : { status }),
-  })
+) => {
+  if (status === undefined) return InstallationError.make({ reason, operation, installationId, message })
+  return InstallationError.make({ reason, operation, installationId, message, status })
+}
 
 const responseReason = (status: number): InstallationError["reason"] => {
   if (status === 401 || status === 403) return "authentication"
@@ -96,7 +92,7 @@ export const installationLayer = (options: InstallationOptions) =>
         )
       })
       const verifyInstallation = Effect.fn("GitHubInstallation.verifyInstallation")(function* (installationId: number) {
-        const id = yield* Schema.decodeUnknownEffect(GitHub.PositiveInt)(installationId).pipe(
+        const id = yield* Schema.decodeEffect(GitHub.PositiveInt)(installationId).pipe(
           Effect.mapError(() => failure("input", "verify installation", installationId, "Installation ID is invalid")),
         )
         const authorization = yield* appAuthorization("verify installation", id)

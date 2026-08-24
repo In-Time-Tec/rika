@@ -1,11 +1,15 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
-import type { AccessWire, BindingRequest } from "@rika/remote-execution/protocol"
-import type { BindingOutcome, BindingResponse } from "@rika/remote-execution/protocol"
+import {
+  BindingResponse,
+  type AccessWire,
+  type BindingRequest,
+  type BindingOutcome,
+} from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
 import { ActorAttribution, BetterAuthUserId, OrganizationId, type HostedOwner } from "@rika/product/hosted-model"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
-import { Cause, Context, Crypto, Effect, Encoding, Layer, Option, Schema } from "effect"
+import { Cause, Context, Crypto, Effect, Encoding, Exit, Layer, Match, Option, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
 
 export const ToolSideEffect = Schema.Literals([
@@ -35,6 +39,7 @@ export const ToolPolicy = Schema.Struct({
 export type ToolPolicy = typeof ToolPolicy.Type
 
 const ToolCapabilitiesJson = Schema.fromJsonString(Schema.Array(Schema.NonEmptyString))
+const ProcessStartInput = Schema.Struct({ command: Schema.String })
 
 export const ToolAuditCheckpoint = Schema.Struct({
   version: Schema.Int,
@@ -157,10 +162,10 @@ export const policyFor = (request: Pick<BindingRequest, "module" | "operation" |
     if (request.operation === "status") return read(name)
     if (request.operation === "stop") return effect("terminal.control", "terminal", "exact", "never")
     if (request.operation === "start") {
-      const command =
-        typeof request.input === "object" && request.input !== null && "command" in request.input
-          ? String(request.input.command)
-          : ""
+      const command = Option.match(Schema.decodeUnknownOption(ProcessStartInput)(request.input), {
+        onNone: () => "",
+        onSome: (input) => input.command,
+      })
       const capabilities = commandCapabilities(command)
       let capability = "terminal.execute"
       let sideEffect: Exclude<ToolSideEffect, "none"> = "terminal"
@@ -227,21 +232,39 @@ export const policyFor = (request: Pick<BindingRequest, "module" | "operation" |
   throw HostedToolPolicyError.make({ kind: "unknown-tool", message: `Tool ${name} is not admitted by hosted policy` })
 }
 
-const canonical = (value: unknown): string => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, nested]) => `${JSON.stringify(key)}:${canonical(nested)}`)
-    .join(",")}}`
+const JsonRecord = Schema.Record(Schema.String, Schema.Json)
+const decodeBindingResponse: (
+  input: HostBindingRegistry.Response,
+) => Effect.Effect<BindingResponse, HostedToolPolicyError> = (input) => {
+  const decoded = Schema.decodeUnknownExit(BindingResponse)(input)
+  return Exit.isSuccess(decoded)
+    ? Effect.succeed(decoded.value)
+    : Effect.fail(HostedToolPolicyError.make({ kind: "unavailable", message: "Tool response is invalid" }))
 }
+const canonical = (value: Schema.Json): string =>
+  Match.value(value).pipe(
+    Match.when(Schema.is(Schema.Array(Schema.Json)), (items) => `[${items.map(canonical).join(",")}]`),
+    Match.when(
+      Schema.is(JsonRecord),
+      (record) =>
+        `{${Object.entries(record)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => `${JSON.stringify(key)}:${canonical(nested)}`)
+          .join(",")}}`,
+    ),
+    Match.orElse((scalar) => JSON.stringify(scalar)),
+  )
 
-const sha256 = Effect.fn("HostedToolPolicy.sha256")(function* (value: string) {
-  const crypto = yield* Crypto.Crypto
-  return Encoding.encodeHex(yield* crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(Effect.orDie))
-})
+const sha256: (value: string) => Effect.Effect<string, never, Crypto.Crypto> = Effect.fn("HostedToolPolicy.sha256")(
+  function* (value) {
+    const crypto = yield* Crypto.Crypto
+    return Encoding.encodeHex(yield* crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(Effect.orDie))
+  },
+)
 
-export const argumentsDigest = (input: BindingRequest["input"]) => sha256(canonical(input ?? null))
+export const argumentsDigest: (input: BindingRequest["input"]) => Effect.Effect<string, never, Crypto.Crypto> = (
+  input,
+) => sha256(canonical(input ?? null))
 
 const nestedFailure = (kind: string, failure: NestedOperation.Failure) => {
   if (failure._tag === "tenetkit/core/NestedOperationDivergence")
@@ -394,19 +417,21 @@ export const invokeAdmittedTool: (
   const exactRequest = toolAuthorizationRequest(context)
   const kind = `rika.tool.${context.module}.${context.operation}`
   const invocation = input.invoke.pipe(Effect.provideService(NestedOperation.NestedOperations, directNestedOperations))
-  const replayPolicy = policy.replayPolicy === "none" ? "pure" : policy.replayPolicy
-  const admitted = NestedOperation.run(
-    {
-      kind,
-      payload: exactRequest,
-      replayPolicy,
-      ...(policy.approval === "exact" ? { approval: { capability: policy.capability, request: exactRequest } } : {}),
-    },
-    invocation,
-  )
+  const replayPolicy: "pure" | "never" | "provider-idempotent" =
+    policy.replayPolicy === "none" ? "pure" : policy.replayPolicy
+  const operation =
+    policy.approval === "exact"
+      ? {
+          kind,
+          payload: exactRequest,
+          replayPolicy,
+          approval: { capability: policy.capability, request: exactRequest },
+        }
+      : { kind, payload: exactRequest, replayPolicy }
+  const admitted = NestedOperation.run(operation, invocation)
   const result = yield* Effect.exit(admitted)
   if (result._tag === "Success") {
-    const response = result.value as BindingResponse
+    const response = yield* decodeBindingResponse(result.value)
     yield* input.policyService.outcome({
       ...context,
       outcome: response._tag === "Failure" ? "failed" : "succeeded",
@@ -706,13 +731,20 @@ export const layer = Layer.effect(
     })
 
     const outcome: HostedToolPolicyService["outcome"] = Effect.fn("HostedToolPolicy.outcome")(function* (input) {
-      yield* insert({
-        context: input,
-        phase: "outcome",
-        ...(input.authorizationId === undefined ? {} : { authorizationId: input.authorizationId }),
-        decision: input.policy.approval === "exact" ? "pending" : "not-required",
-        outcome: input.outcome,
-      })
+      yield* input.authorizationId === undefined
+        ? insert({
+            context: input,
+            phase: "outcome",
+            decision: input.policy.approval === "exact" ? "pending" : "not-required",
+            outcome: input.outcome,
+          })
+        : insert({
+            context: input,
+            phase: "outcome",
+            authorizationId: input.authorizationId,
+            decision: input.policy.approval === "exact" ? "pending" : "not-required",
+            outcome: input.outcome,
+          })
     })
 
     const checkpoint = Effect.fn("HostedToolPolicy.checkpoint")(function* (
@@ -727,7 +759,7 @@ export const layer = Layer.effect(
 
     const recordDecision: HostedToolPolicyService["recordDecision"] = Effect.fn("HostedToolPolicy.recordDecision")(
       function* (input) {
-        const request = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ToolAuthorizationRequest))(
+        const request = yield* Schema.decodeEffect(Schema.fromJsonString(ToolAuthorizationRequest))(
           input.authorizationRequest,
         ).pipe(
           Effect.mapError(() =>

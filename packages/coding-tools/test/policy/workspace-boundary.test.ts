@@ -1,3 +1,5 @@
+import * as BunPath from "@effect/platform-bun/BunPath"
+import { Effect, Layer, Path } from "effect"
 import { describe, expect, it } from "vitest"
 import { pathContainedIn } from "../../src/policy/workspace-boundary"
 
@@ -9,17 +11,9 @@ import { pathContainedIn } from "../../src/policy/workspace-boundary"
  * results under the root it was asked about and cannot loop.
  */
 describe("workspace boundary predicate", () => {
-  const path = {
-    sep: "/",
-    relative: (from: string, to: string) => {
-      if (to === from) return ""
-      if (to.startsWith(`${from}/`)) return to.slice(from.length + 1)
-      if (from.startsWith(`${to}/`)) return `..${from.slice(to.length).replaceAll("/", "/..")}`
-      return to
-    },
-    isAbsolute: (value: string) => value.startsWith("/"),
-    resolve: (...parts: ReadonlyArray<string>) => parts.join("/").replaceAll("//", "/"),
-  } as Parameters<typeof pathContainedIn>[2]
+  const path = Effect.scoped(
+    Layer.build(BunPath.layer).pipe(Effect.flatMap((context) => Effect.provide(Path.Path, context))),
+  ).pipe(Effect.runSync)
 
   it("accepts paths inside the walked root", () => {
     expect(pathContainedIn("/workspace", "/workspace/src/app.ts", path)).toBe(true)

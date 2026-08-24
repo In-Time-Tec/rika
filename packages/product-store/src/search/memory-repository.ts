@@ -35,6 +35,11 @@ interface Document {
   readonly files: string
 }
 
+interface PromptGroups {
+  readonly human: Array<string>
+  readonly agent: Array<string>
+}
+
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
 const normalize = (value: string) => value.toLocaleLowerCase()
 const boundedLimit = (limit: number | undefined) =>
@@ -75,7 +80,7 @@ const includesAll = (text: string, values: ReadonlyArray<string>) => {
   return values.every((value) => candidate.includes(normalize(value)))
 }
 const makeDocument = (input: RebuildInput): Document => {
-  const prompts = { human: [] as Array<string>, agent: [] as Array<string> }
+  const prompts: PromptGroups = { human: [], agent: [] }
   for (const turn of input.turns) prompts[turn.author._tag === "Human" ? "human" : "agent"].push(turn.prompt)
   const rootAssistant: Array<string> = []
   const childAssistant = new Map<string, string>()

@@ -12,9 +12,7 @@ export interface Interface {
   ) => Effect.Effect<ReadonlyArray<Result.ProviderOutcome>, Errors.SelectionError | Errors.ExecutionError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/coding-tools/web-research/search/service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/web-research/search/service") {}
 
 const searchProvider = (provider: Provider.SearchProvider, request: Provider.SearchRequest) =>
   provider.search(request).pipe(

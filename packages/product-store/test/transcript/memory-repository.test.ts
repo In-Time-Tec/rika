@@ -58,7 +58,8 @@ describe("Operation thread actions", () => {
       ]
       const turns = yield* TurnRepository.makeMemory(
         statuses.map(
-          (status, index): Turn.AgentExecutionTurn => ({
+          (status, index): Turn.AgentExecutionTurn => {
+            const turn = {
             _tag: "AgentExecution",
             id: Turn.TurnId.make(status),
             threadId: alpha.id,
@@ -66,13 +67,14 @@ describe("Operation thread actions", () => {
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-            ...(status !== "queued" && !ExecutionStatus.isTerminalStatus(status)
-              ? { executionLink: { runId: `${status}-run`, turnId: status, threadId: alpha.id } }
-              : {}),
             status,
             createdAt: index + 1,
             updatedAt: index + 1,
-          }),
+            } satisfies Turn.AgentExecutionTurn
+            return status !== "queued" && !ExecutionStatus.isTerminalStatus(status)
+              ? { ...turn, executionLink: { runId: `${status}-run`, turnId: status, threadId: alpha.id } }
+              : turn
+          },
         ),
       )
       const layer = Layer.merge(
@@ -90,9 +92,9 @@ describe("Operation thread actions", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Service
         const routedOutput: Array<string> = []
-        const requestConsole = Object.assign(Object.create(globalThis.console), {
+        const requestConsole: Console.Console = Object.assign(Object.create(globalThis.console), {
           log: (...values: ReadonlyArray<unknown>) => routedOutput.push(values.map(String).join(" ")),
-        }) as Console.Console
+        })
         yield* operation
           .run({ _tag: "Thread", action: "list" })
           .pipe(Effect.provideService(Console.Console, requestConsole))

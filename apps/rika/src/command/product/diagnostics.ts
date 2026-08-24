@@ -33,7 +33,7 @@ const performanceCommand = Command.make("performance", {}, () =>
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
-    let runtime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
+    let runtime
     if (Option.isSome(testExecutable)) runtime = { executable: testExecutable.value, arguments: [] }
     else if (import.meta.path.startsWith("/$bunfs/"))
       runtime = { executable: path.join(path.dirname(process.execPath), ".rika-performance"), arguments: [] }

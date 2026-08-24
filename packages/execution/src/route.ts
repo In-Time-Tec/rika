@@ -19,7 +19,7 @@ import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
-import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import type { ProviderCredentialStoreService } from "@rika/product/provider-credential-store"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Clock, Context, DateTime, Effect, Function, Layer, Schema, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
@@ -87,7 +87,7 @@ export interface ConfigureOptions {
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: HarnessState.HarnessState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
-  readonly credentialStore?: ProviderCredentialStoreShape
+  readonly credentialStore?: ProviderCredentialStoreService
   readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
 }
 
@@ -109,7 +109,7 @@ export interface ResolverOptions {
     readonly harnessSnapshot: HarnessState.HarnessState
   }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
-  readonly credentialStore?: ProviderCredentialStoreShape
+  readonly credentialStore?: ProviderCredentialStoreService
   readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
 }
 
@@ -161,13 +161,13 @@ const applicationPin = (
   route: RouteSnapshot,
   workspace: string,
   executionIdentity: ConfigureOptions["executionIdentity"],
-) =>
-  Pins.makeCapability({
-    ...Registration.codecs.applicationContext.identity,
-    route,
-    workspace,
-    ...(executionIdentity === undefined ? {} : { executionIdentity }),
-  })
+) => {
+  const payload = Object.assign(
+    { ...Registration.codecs.applicationContext.identity, route, workspace },
+    executionIdentity === undefined ? undefined : { executionIdentity },
+  )
+  return Pins.makeCapability(payload)
+}
 
 const modelRegistryPin = (route: ModelSnapshot) =>
   Pins.makeCapability({
@@ -215,19 +215,7 @@ const routedModel = (
   openAiAccountAccess: ConfigureOptions["openAiAccountAccess"],
 ) =>
   Effect.gen(function* () {
-    const available =
-      override === undefined
-        ? yield* Effect.forEach(route.candidates, (candidate) =>
-            registrationsFrom(
-              Models.layer({
-                candidate,
-                ...(credentialStore === undefined ? {} : { credentialStore }),
-                ...(openAiAccountAccess === undefined ? {} : { openAiAccountAccess }),
-              }),
-            ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) }))),
-          ).pipe(Effect.map((groups) => groups.flat()))
-        : yield* registrationsFrom(override)
-    const candidates = route.candidates.map((candidate) => {
+    const registrationFor = (candidate: ModelSnapshot["candidates"][number]) => {
       const exact = available.find(
         (entry) =>
           entry.provider === candidate.providerConnection.provider &&
@@ -246,7 +234,27 @@ const routedModel = (
       return registration.registrationKey === candidate.registrationIdentity
         ? registration
         : { ...registration, registrationKey: candidate.registrationIdentity }
-    }) as [ModelRegistry.Registration, ...Array<ModelRegistry.Registration>]
+    }
+    const available =
+      override === undefined
+        ? yield* Effect.forEach(route.candidates, (candidate) =>
+            registrationsFrom(
+              Models.layer(
+                Object.assign(
+                  { candidate },
+                  credentialStore === undefined ? undefined : { credentialStore },
+                  openAiAccountAccess === undefined ? undefined : { openAiAccountAccess },
+                ),
+              ),
+            ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) }))),
+          ).pipe(Effect.map((groups) => groups.flat()))
+        : yield* registrationsFrom(override)
+    const [firstCandidate, ...remainingCandidates] = route.candidates
+    if (firstCandidate === undefined) throw new Error("Model route requires at least one candidate")
+    const candidates = [registrationFor(firstCandidate), ...remainingCandidates.map(registrationFor)] satisfies [
+      ModelRegistry.Registration,
+      ...Array<ModelRegistry.Registration>,
+    ]
     const routed = yield* ModelRoute.make({ candidates })
     return { ...routed, layer: ModelRegistry.layer([Effect.succeed(routed.registration)]) }
   })
@@ -277,19 +285,21 @@ const agentDefinition = (
     readonly services: ReadonlyArray<AgentManifest.NamedCapability>
   },
 ): AgentDefinition => {
-  const agent = Agent.withTools(
-    Agent.make({
-      name: `rika-${name.toLowerCase()}`,
-      instructions: agentInstructions,
-      ...(supplementalInstructions === undefined ? {} : { supplemental: supplementalInstructions }),
-      model: routed.selection,
-      toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
-      metadata: { productProfile: name },
-      budget: unlimitedBudget,
-    }),
-    tools,
-  )
-  const pinned = AgentManifest.fromLiveAgent(agent, {
+  const agentOptions = {
+    name: `rika-${name.toLowerCase()}`,
+    instructions: agentInstructions,
+    model: routed.selection,
+    toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
+    metadata: { productProfile: name },
+    budget: unlimitedBudget,
+  }
+  if (supplementalInstructions !== undefined) Object.assign(agentOptions, { supplemental: supplementalInstructions })
+  const agent = Agent.withTools(Agent.make(agentOptions), tools)
+  const policy = {
+    _tag: "Portable",
+    policy: agent.policy.snapshot!,
+  } satisfies AgentManifest.AgentManifest["policy"]
+  const manifestOptions = {
     model: modelPin(route),
     tools: toolPins(agent.toolkit),
     skills: capabilities.skills,
@@ -300,11 +310,12 @@ const agentDefinition = (
       ...(kernelProfilePin === undefined ? [] : [{ name: "rika-kernel-profile", pin: kernelProfilePin }]),
       ...capabilities.services,
     ],
-    policy: { _tag: "Portable", policy: agent.policy.snapshot! },
+    policy,
     budget: unlimitedBudget,
     children,
-    ...(compaction === undefined ? {} : { compaction }),
-  })
+  }
+  if (compaction !== undefined) Object.assign(manifestOptions, { compaction })
+  const pinned = AgentManifest.fromLiveAgent(agent, manifestOptions)
   return { agent: Agent.close(agent, environment), pinned }
 }
 
@@ -495,13 +506,20 @@ export const configure = (
       Surgeon: route.agents.surgeon,
       Task: route.agents.task,
     } as const
-    const routed = Object.fromEntries(
-      yield* Effect.forEach(Object.entries(routes), ([name, model]) =>
-        routedModel(model, options.modelServices, options.credentialStore, options.openAiAccountAccess).pipe(
-          Effect.map((value) => [name, value] as const),
-        ),
-      ),
-    ) as Record<keyof typeof routes, RoutedModel>
+    const routeModel = (model: ModelSnapshot) =>
+      routedModel(model, options.modelServices, options.credentialStore, options.openAiAccountAccess)
+    const routed = yield* Effect.all({
+      Root: routeModel(routes.Root),
+      Title: routeModel(routes.Title),
+      Compaction: routeModel(routes.Compaction),
+      Oracle: routeModel(routes.Oracle),
+      Librarian: routeModel(routes.Librarian),
+      Painter: routeModel(routes.Painter),
+      ReadThread: routeModel(routes.ReadThread),
+      Review: routeModel(routes.Review),
+      Surgeon: routeModel(routes.Surgeon),
+      Task: routeModel(routes.Task),
+    })
     const compactionIdentity: AgentManifest.CompactionIdentity = {
       service: compactionPin(route),
       summaryModel: modelPin(route.compactionSummary),
@@ -524,14 +542,16 @@ export const configure = (
       summaryPrompt: route.compaction.summaryPrompt,
       summaryModel: Layer.orDie(summaryModel),
     })
-    const kernelProfile = KernelProfileRegistration.make({
+    const kernelProfileOptions = {
       runtimeVersion: options.kernel.runtimeVersion,
       workspace: options.workspace,
       dataRoot: options.kernel.dataRoot,
-      ...(options.kernel.limits === undefined ? {} : { limits: options.kernel.limits }),
-      ...(options.kernel.trustMode === undefined ? {} : { trustMode: options.kernel.trustMode }),
-    })
-    const kernelProfilePin = yield* Schema.decodeUnknownEffect(Pins.CapabilityPin)(
+    }
+    if (options.kernel.limits !== undefined) Object.assign(kernelProfileOptions, { limits: options.kernel.limits })
+    if (options.kernel.trustMode !== undefined)
+      Object.assign(kernelProfileOptions, { trustMode: options.kernel.trustMode })
+    const kernelProfile = KernelProfileRegistration.make(kernelProfileOptions)
+    const kernelProfilePin = yield* Schema.decodeEffect(Pins.CapabilityPin)(
       KernelProfileRegistration.pin(kernelProfile),
     ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })))
     const skillPins = ExecutionPins.skills(options.skills ?? [])
@@ -615,9 +635,15 @@ export const configure = (
       undefined,
       { skills: [], services: [] },
     )
-    const childDefinitions = Object.fromEntries(
-      rootChildNames.map((name) => [name, childDefinitionFor(name)]),
-    ) as unknown as Readonly<Record<ChildProfileName, AgentDefinition>>
+    const childDefinitions = {
+      Oracle: childDefinitionFor("Oracle"),
+      Librarian: childDefinitionFor("Librarian"),
+      Painter: childDefinitionFor("Painter"),
+      ReadThread: childDefinitionFor("ReadThread"),
+      Review: childDefinitionFor("Review"),
+      Surgeon: childDefinitionFor("Surgeon"),
+      Task: childDefinitionFor("Task"),
+    } satisfies Readonly<Record<ChildProfileName, AgentDefinition>>
     const root = agentDefinition(
       route.main,
       routed.Root,
@@ -673,11 +699,17 @@ export const configure = (
     )
     registrationMap.set(
       contextPin,
-      Registration.make(Registration.codecs.applicationContext, contextPin, {
-        workspace: options.workspace,
-        ...(options.executionIdentity === undefined ? {} : { executionIdentity: options.executionIdentity }),
-        executionRoute: route,
-      }),
+      Registration.make(
+        Registration.codecs.applicationContext,
+        contextPin,
+        Object.assign(
+          {
+            workspace: options.workspace,
+            executionRoute: route,
+          },
+          options.executionIdentity === undefined ? undefined : { executionIdentity: options.executionIdentity },
+        ),
+      ),
     )
     registrationMap.set(
       kernelProfilePin,
@@ -765,19 +797,18 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Inter
         const cell = options.cell === undefined ? undefined : yield* resolveCellRoute(options.cell, context.workspace)
         const capabilities =
           options.capabilities === undefined ? undefined : yield* options.capabilities(context.workspace)
-        const configured = yield* configure({
-          executionRoute: context.executionRoute,
-          workspace: context.workspace,
-          ...(context.executionIdentity === undefined ? {} : { executionIdentity: context.executionIdentity }),
-          kernel: options.kernel,
-          ...(cell === undefined ? {} : { cell }),
-          ...(capabilities === undefined
-            ? {}
-            : { skills: capabilities.skills, harnessSnapshot: capabilities.harnessSnapshot }),
-          ...(options.credentialStore === undefined ? {} : { credentialStore: options.credentialStore }),
-          ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
-          ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
-        }).pipe(Effect.mapError(invalid))
+        const configureOptions = Object.assign(
+          { executionRoute: context.executionRoute, workspace: context.workspace, kernel: options.kernel },
+          context.executionIdentity === undefined ? undefined : { executionIdentity: context.executionIdentity },
+          cell === undefined ? undefined : { cell },
+          capabilities === undefined
+            ? undefined
+            : { skills: capabilities.skills, harnessSnapshot: capabilities.harnessSnapshot },
+          options.credentialStore === undefined ? undefined : { credentialStore: options.credentialStore },
+          options.openAiAccountAccess === undefined ? undefined : { openAiAccountAccess: options.openAiAccountAccess },
+          options.modelServices === undefined ? undefined : { modelServices: options.modelServices },
+        ) satisfies ConfigureOptions
+        const configured = yield* configure(configureOptions).pipe(Effect.mapError(invalid))
         yield* Registration.verify({
           expected: [...configured.registrations, ...configured.titleRegistrations],
           actual: input.registrations,

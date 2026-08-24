@@ -14,7 +14,7 @@ type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
   readonly rememberMode?: (mode: string) => Effect.Effect<void, never, BunServices.BunServices>
 }
 
-export const createInputHandlers = (context: InputContext): Partial<Parameters<typeof createTui>[0]> => {
+export const createInputHandlers = (context: InputContext): Parameters<typeof createTui>[0] => {
   let previewRequestId = 0
   const {
     loop,
@@ -206,17 +206,16 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
           ? nextSteeringRequestId()
           : undefined
       const previousRememberedMode = loop.model.rememberedMode
-      loop.model = update(loop.model, {
-        _tag: "KeyPressed",
-        key,
-        ...(steeringRequestId === undefined ? {} : { steeringRequestId }),
-      })
+      loop.model = update(
+        loop.model,
+        steeringRequestId === undefined ? { _tag: "KeyPressed", key } : { _tag: "KeyPressed", key, steeringRequestId },
+      )
       rememberCommittedMode(previousRememberedMode)
       if (submitting)
-        loop.model = update(loop.model, {
-          _tag: "Submitted",
-          ...(submissionId === undefined ? {} : { submissionId }),
-        })
+        loop.model = update(
+          loop.model,
+          submissionId === undefined ? { _tag: "Submitted" } : { _tag: "Submitted", submissionId },
+        )
       if (!wasChangedFilesOpen && loop.model.changedFilesOpen)
         loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
       const afterPreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
@@ -241,19 +240,18 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       }
       if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
         loop.submittedSinceIdle = true
-        execute(adapter, {
+        const action = {
           _tag: "Submit",
           prompt: submittedPrompt,
           parts,
           mode: loop.model.mode,
           tuning: { fastMode: loop.model.fastMode },
-          ...(submissionId === undefined ? {} : { submissionId }),
-        })
+        } satisfies Action
+        execute(adapter, submissionId === undefined ? action : { ...action, submissionId })
       }
       if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
         loop.submittedSinceIdle = false
-      const action = loop.model.pendingAction as Action | undefined
-      if (action !== undefined) consumePendingAction()
+      if (loop.model.pendingAction !== undefined) consumePendingAction()
     },
     resize: (width, height) => {
       loop.model = update(loop.model, { _tag: "Resized", width, height })
@@ -270,8 +268,7 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
     threadSidebarSelect: (index) => {
       loop.model = update(loop.model, { _tag: "ThreadSidebarSelectionConfirmed", index })
       loop.renderer?.surface.update(loop.model)
-      const action = loop.model.pendingAction as Action | undefined
-      if (action !== undefined) consumePendingAction()
+      if (loop.model.pendingAction !== undefined) consumePendingAction()
     },
   }
 }

@@ -1,6 +1,6 @@
 import { bold, fg } from "../markdown/styled-text-effects"
 import type { TerminalTextChunk } from "../markdown/styled-text"
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import { colors } from "../terminal/theme"
 import { wrapStyledChunks } from "../markdown/styled-text-wrapping"
 import type { ToolSummary } from "../transcript/tool/detail-types"
@@ -13,7 +13,7 @@ export const renderToolSummary: {
   (options?: ToolSummaryOptions): (summary: ToolSummary) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
   (summary: ToolSummary, options?: ToolSummaryOptions): ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
 } = Function.dual(
-  (args) => typeof args[0] === "object" && args[0] !== null && "primary" in args[0],
+  (args) => Schema.is(Schema.Struct({ primary: Schema.String }))(args[0]),
   (summary: ToolSummary, options: ToolSummaryOptions = {}): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const leading = options.leading ?? ""
     const chunks =

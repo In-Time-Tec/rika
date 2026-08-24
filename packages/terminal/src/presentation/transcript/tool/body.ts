@@ -1,6 +1,7 @@
 import type { TranscriptBlock } from "../../../state/transcript/model"
 import { isToolOutputDisplayed } from "../agent-response"
 import { inputValue } from "./detail"
+import { Schema } from "effect"
 
 export type ToolBody =
   | { readonly _tag: "None" }
@@ -21,7 +22,7 @@ export const toolBody = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>):
   if (block.presentation.action === "read") {
     const path = inputValue(block.input).path
     const first = numberedWindow.exec(output.split("\n")[0] ?? "")
-    if (typeof path === "string" && path.length > 0 && first !== null)
+    if (Schema.is(Schema.String)(path) && path.length > 0 && first !== null)
       return { _tag: "FileWindow", path, start: Number(first[1]), lines: output }
   }
   return { _tag: "Text", text: output }

@@ -1,4 +1,4 @@
-import { Context, Effect, Function, Layer, Option, Semaphore } from "effect"
+import { Effect, Function, Layer, Option, Semaphore } from "effect"
 import { deterministicCrypto } from "./openai-flow.fixture"
 import { Host, Http, Presenter, Store } from "./openai-service.fixture"
 import { layer } from "./openai-service.fake"
@@ -81,11 +81,7 @@ export const provideLayer: {
 } = Function.dual(
   2,
   <A, E, R, AOut, EOut, RIn>(effect: Effect.Effect<A, E, R>, provided: Layer.Layer<AOut, EOut, RIn>) =>
-    Effect.scoped(
-      Layer.build(provided).pipe(
-        Effect.flatMap((context) => effect.pipe(Effect.provide(context as unknown as Context.Context<R>))),
-      ),
-    ),
+    Effect.scoped(Effect.flatMap(Layer.build(provided), (context) => Effect.provide(effect, context))),
 )
 
 export const unusedHttp = Http.of({

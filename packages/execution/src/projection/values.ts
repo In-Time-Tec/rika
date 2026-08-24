@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Option, Schema } from "effect"
 export const projectorNames = {
   titleInvocationId: "rika.thread-title",
   runChild: "run_child",
@@ -14,10 +14,17 @@ const boundedImpl = (value: string, limit: number): string =>
 const boundedHeadImpl = (value: string, limit: number): string =>
   value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
 
-export const record = (value: unknown): Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
+const SerializedRecord = Schema.Record(Schema.String, Schema.Json)
 
-const stringImpl = (value: unknown, fallback = ""): string => (typeof value === "string" ? value : fallback)
+export const record = Function.flow(
+  Schema.decodeUnknownOption(SerializedRecord),
+  Option.getOrElse((): Readonly<Record<string, Schema.Json | undefined>> => ({})),
+)
+
+const decodeString = Schema.decodeUnknownOption(Schema.String)
+type SerializedValue = Parameters<typeof decodeString>[0]
+const stringImpl = (value: SerializedValue, fallback = ""): string =>
+  Option.getOrElse(decodeString(value), () => fallback)
 
 export const bounded: {
   (arg0: Parameters<typeof boundedImpl>[0], arg1: Parameters<typeof boundedImpl>[1]): ReturnType<typeof boundedImpl>
@@ -35,8 +42,8 @@ export const boundedHead: {
 } = Function.dual(2, boundedHeadImpl)
 
 export const string: {
-  (value: unknown, fallback: string): string
-  (fallback: string): (value: unknown) => string
+  (value: SerializedValue, fallback: string): string
+  (fallback: string): (value: SerializedValue) => string
 } = Function.dual(2, stringImpl)
 
-export const optionalString = (value: unknown): string => stringImpl(value, "")
+export const optionalString = (value: SerializedValue): string => stringImpl(value, "")

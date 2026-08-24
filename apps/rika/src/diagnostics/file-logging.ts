@@ -15,6 +15,7 @@ import {
   References,
   Semaphore,
   Scope,
+  Schema,
 } from "effect"
 import { openDiagnosticFile } from "../platform/diagnostic-file-host"
 
@@ -35,22 +36,19 @@ const processEvents: NodeJS.EventEmitter = process
 
 type DiagnosticAnnotation = string | number | boolean
 
-type AnnotationSchema = (value: unknown) => DiagnosticAnnotation | undefined
-
-const oneOf = <A extends string>(...values: ReadonlyArray<A>): AnnotationSchema => {
-  const accepted = new Set<string>(values)
-  return (value) => (typeof value === "string" && accepted.has(value) ? value : undefined)
+const annotation = <A extends DiagnosticAnnotation>(schema: Schema.Codec<A>) => {
+  const decode = Schema.decodeUnknownOption(schema)
+  return (value: DiagnosticAnnotation) => Option.getOrUndefined(decode(value))
 }
 
-const boundedNumber = (value: unknown): number | undefined =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+const oneOf = <A extends string>(...values: ReadonlyArray<A>) => annotation(Schema.Literals(values))
 
-const boolean = (value: unknown): boolean | undefined => (typeof value === "boolean" ? value : undefined)
+const boundedNumber = annotation(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
 
-const matching =
-  (pattern: RegExp, maximum = 256): AnnotationSchema =>
-  (value) =>
-    typeof value === "string" && value.length <= maximum && pattern.test(value) ? value : undefined
+const boolean = annotation(Schema.Boolean)
+
+const matching = (pattern: RegExp, maximum = 256) =>
+  annotation(Schema.String.check(Schema.isMaxLength(maximum), Schema.isPattern(pattern)))
 
 const uuid = matching(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, 36)
 const executionId = matching(
@@ -66,7 +64,7 @@ const hostedCorrelationId = matching(/^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/, 
 
 const knownFailureKinds = oneOf(...Diagnostic.failureKinds)
 
-const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
+const annotationSchemas = {
   "rika.duration.ms": boundedNumber,
   "rika.duration.millis": boundedNumber,
   "rika.event.cursor": eventCursor,
@@ -185,22 +183,29 @@ const annotationSchemas: Readonly<Record<string, AnnotationSchema>> = {
   "rika.tool.retry.delay.ms": boundedNumber,
   "rika.turn.id": hostedCorrelationId,
   "rika.version": matching(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 64),
-}
+} satisfies Readonly<Record<string, (value: DiagnosticAnnotation) => DiagnosticAnnotation | undefined>>
+const annotationSchemaMap = new Map<string, (value: DiagnosticAnnotation) => DiagnosticAnnotation | undefined>(
+  Object.entries(annotationSchemas),
+)
 
-const safeAnnotation = (key: string, value: unknown): DiagnosticAnnotation | undefined =>
-  annotationSchemas[key]?.(value)
+const safeAnnotation = (key: string, value: DiagnosticAnnotation): DiagnosticAnnotation | undefined =>
+  annotationSchemaMap.get(key)?.(value)
 
 const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
   const elements: ReadonlyArray<unknown> = Array.isArray(message) ? message : [message]
   const [candidate] = elements
-  const operation =
-    typeof candidate === "string" && /^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/.test(candidate) && candidate.length <= 100
-      ? candidate
-      : undefined
+  const operation = Option.getOrUndefined(
+    Schema.decodeUnknownOption(
+      Schema.String.check(Schema.isMaxLength(100), Schema.isPattern(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/)),
+    )(candidate),
+  )
   const current = fiber.getRef(References.CurrentLogAnnotations)
   const annotations: Record<string, string | number | boolean> = {}
   for (const [key, value] of Object.entries(current)) {
-    const safe = safeAnnotation(key, value)
+    const decoded = Option.getOrUndefined(
+      Schema.decodeUnknownOption(Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]))(value),
+    )
+    const safe = decoded === undefined ? undefined : safeAnnotation(key, decoded)
     if (safe !== undefined) annotations[key] = safe
   }
   return JSON.stringify({
@@ -255,7 +260,7 @@ const prepareDirectory = Effect.fn("Logging.prepareDirectory")(function* (dataRo
     if ((yield* Effect.result(fs.readLink(diagnostics)))._tag === "Success")
       return yield* Effect.die("Rika diagnostics path cannot be a symbolic link")
     const info = yield* fs.stat(diagnostics)
-    const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
+    const expectedUid = process.getuid?.()
     const uid = Option.getOrUndefined(info.uid)
     if (info.type !== "Directory" || (expectedUid !== undefined && uid !== expectedUid))
       return yield* Effect.die("Rika diagnostics path is not a directory owned by this user")
@@ -284,7 +289,7 @@ const prepareDirectory = Effect.fn("Logging.prepareDirectory")(function* (dataRo
 const availableLogFiles = Effect.fn("Logging.availableLogFiles")(function* (diagnostics: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
+  const expectedUid = process.getuid?.()
   const files: Array<{ readonly name: string; readonly size: bigint }> = []
   for (const name of (yield* fs.readDirectory(diagnostics)).filter(isLogFile)) {
     const filename = path.join(diagnostics, name)

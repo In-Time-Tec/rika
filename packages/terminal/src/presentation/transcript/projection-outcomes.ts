@@ -1,5 +1,5 @@
-import { Function } from "effect"
-import type { Block } from "@rika/transcript/transcript-presentation-model"
+import { Function, Schema } from "effect"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Model } from "../../state/model"
 import {
@@ -18,9 +18,15 @@ interface ExecutionOutcomeSource {
 export const outcomeShadow = new WeakMap<Block, { readonly outcome: ExecutionOutcome; readonly applied: Block }>()
 const outcomeBase = new WeakMap<Block, Block>()
 const outcomeSources = new WeakMap<object, ReadonlyMap<string, ExecutionOutcomeSource>>()
+const decodeBlocks = Schema.decodeUnknownSync(Schema.Array(Block))
+const ExecutionOutcomeSchema = Schema.Struct({
+  status: Schema.Literals(["cancelled", "complete", "failed"]),
+  reason: Schema.optionalKey(Schema.String),
+})
+const decodeOutcomes = Schema.decodeUnknownSync(Schema.Record(Schema.String, ExecutionOutcomeSchema))
 
 const applyExecutionOutcome = (model: Model, parentId: string, outcome: ExecutionOutcome): Model => {
-  const blocks = [...(model.blocks as ReadonlyArray<Block>)]
+  const blocks = [...decodeBlocks(model.blocks)]
   const index = blocks.findIndex(
     (block) =>
       (block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent") ||
@@ -39,11 +45,10 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
   if (outcome.status === "failed" && isDeliveredDelegationOutput(base.output)) return model
   const { output: _, ...withoutOutput } = base
   const keepsOutput = outcome.reason === undefined && isSucceededDelegationOutput(base.output)
-  const applied = {
-    ...(keepsOutput ? base : withoutOutput),
-    status: outcome.status,
-    ...(outcome.reason === undefined ? {} : { output: outcome.reason }),
-  }
+  const applied =
+    outcome.reason === undefined
+      ? { ...(keepsOutput ? base : withoutOutput), status: outcome.status }
+      : { ...withoutOutput, status: outcome.status, output: outcome.reason }
   blocks[index] = applied
   outcomeBase.set(applied, base)
   outcomeShadow.set(base, { outcome, applied })
@@ -51,7 +56,7 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
 }
 
 const restoreExecutionOutcome = (model: Model, parentId: string): Model => {
-  const blocks = model.blocks as ReadonlyArray<Block>
+  const blocks = decodeBlocks(model.blocks)
   const index = blocks.findIndex(
     (block) => block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent",
   )
@@ -88,16 +93,14 @@ const updateExecutionOutcomesImpl = (
   writtenToolIds: ReadonlySet<string>,
   parentId?: string,
 ): Model => {
-  const currentOutcomes = model.childExecutionOutcomes as Readonly<Record<string, ExecutionOutcome>>
+  const currentOutcomes = decodeOutcomes(model.childExecutionOutcomes)
   const currentSources = outcomeSources.get(model.childExecutionOutcomes) ?? new Map<string, ExecutionOutcomeSource>()
-  let sources = currentSources
+  const sources = new Map(currentSources)
   let sourcesChanged = false
   const changedOwners = new Set<string>()
   const writeSources = () => {
-    if (sourcesChanged) return sources as Map<string, ExecutionOutcomeSource>
-    sources = new Map(sources)
     sourcesChanged = true
-    return sources as Map<string, ExecutionOutcomeSource>
+    return sources
   }
   for (const key of removedKeys) {
     const previous = sources.get(key)

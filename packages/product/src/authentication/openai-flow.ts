@@ -38,7 +38,7 @@ const decodeJwt = <S extends Schema.Constraint>(token: string, schema: S) =>
     if (part === undefined) return yield* authError("protocol", "Token payload is malformed")
     const decoded = Encoding.decodeBase64UrlString(part)
     if (Result.isFailure(decoded)) return yield* authError("protocol", "Token payload is malformed")
-    return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(decoded.success).pipe(
+    return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(decoded.success).pipe(
       Effect.mapError(() => authError("protocol", "Token claims are incomplete")),
     )
   })
@@ -77,7 +77,7 @@ export namespace Flow {
   export const authorizationUrl: {
     (challenge: string, state: Redacted.Redacted<string>, redirect?: string): URL
     (state: Redacted.Redacted<string>, redirect?: string): (challenge: string) => URL
-  } = Function.dual((args) => typeof args[0] === "string", authorizationUrlImpl)
+  } = Function.dual((args) => Schema.is(Schema.String)(args[0]), authorizationUrlImpl)
 
   export const credentialFrom = (
     crypto: Crypto.Crypto,
@@ -126,7 +126,7 @@ export namespace Flow {
       } else {
         expiresAt = previous?.expiresAt ?? now + 8 * 86_400_000
       }
-      return {
+      return Contract.CredentialDisk.make({
         formatVersion: configuration.credentialFormatVersion,
         accessToken,
         idToken,
@@ -136,7 +136,7 @@ export namespace Flow {
         generation: `${fingerprint}.${Encoding.encodeBase64Url(yield* crypto.randomBytes(16))}`,
         expiresAt,
         refreshedAt: now,
-      } satisfies typeof Contract.CredentialDisk.Type
+      })
     }).pipe(
       Effect.mapError((error) =>
         Schema.is(Contract.AuthError)(error) ? error : authError("protocol", "Cryptographic operation failed"),

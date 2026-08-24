@@ -5,13 +5,10 @@ import {
   type ProductOperationExecutionStateInput,
 } from "./execution-state"
 import { queueMutationEvent } from "./support"
-import {
-  makeProductOperationInteractiveSession,
-  type ProductOperationInteractiveSessionFactory,
-} from "./session"
+import * as ProductOperationSession from "./session"
 
 export type ProductOperationRuntimeState = ProductOperationExecutionState & {
-  readonly makeInteractiveSession: ProductOperationInteractiveSessionFactory
+  readonly makeInteractiveSession: ProductOperationSession.ProductOperationInteractiveSessionFactory
 }
 
 export const makeProductOperationRuntimeState = (
@@ -19,6 +16,6 @@ export const makeProductOperationRuntimeState = (
 ): Effect.Effect<ProductOperationRuntimeState, Error, never> =>
   Effect.gen(function* () {
     const runtime = yield* buildProductOperationExecutionState({ ...input, queueMutationEvent })
-    const makeInteractiveSession = makeProductOperationInteractiveSession({ ...input, ...runtime })
+    const makeInteractiveSession = ProductOperationSession.makeProductOperationInteractiveSession({ ...input, ...runtime })
     return { ...runtime, makeInteractiveSession }
   })

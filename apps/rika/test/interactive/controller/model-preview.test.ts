@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Surface } from "@rika/terminal/opentui-surface"
 import * as InteractiveController from "../../../src/interactive/controller/service"
@@ -11,7 +11,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TerminalState from "@rika/terminal/terminal-state"
-import { formatActivity, type TranscriptItem } from "@rika/terminal/terminal-message"
+import { formatActivity } from "@rika/terminal/terminal-message"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
@@ -116,12 +116,19 @@ const loaded = () =>
   ).state
 const assistantText = (state: InteractiveController.State): string | undefined =>
   state.model.entries.findLast((entry) => entry.role === "assistant")?.text
+const ReasoningBlock = Schema.TaggedStruct("Reasoning", { text: Schema.String })
+const TranscriptItemProjection = Schema.Struct({
+  _tag: Schema.String,
+  id: Schema.optionalKey(Schema.String),
+  index: Schema.optionalKey(Schema.Finite),
+  parentId: Schema.optionalKey(Schema.String),
+})
+const transcriptItems = (state: InteractiveController.State) =>
+  state.model.items.flatMap((item) => Option.toArray(Schema.decodeUnknownOption(TranscriptItemProjection)(item)))
 const reasoningText = (state: InteractiveController.State): string | undefined =>
-  (state.model.blocks as ReadonlyArray<{ readonly _tag?: string; readonly text?: string }>).findLast(
-    (block) => block._tag === "Reasoning",
-  )?.text
+  state.model.blocks.flatMap((block) => Option.toArray(Schema.decodeUnknownOption(ReasoningBlock)(block))).at(-1)?.text
 const ids = (state: InteractiveController.State): ReadonlyArray<string> =>
-  (state.model.items as ReadonlyArray<TranscriptItem>).flatMap((item) => (item.id === undefined ? [] : [item.id]))
+  transcriptItems(state).flatMap((item) => (item.id === undefined ? [] : [item.id]))
 const runPreview = (state: InteractiveController.State, runId = "run") => state.modelPreview?.byRun.get(runId)
 
 const timelineUnit = (key: string, content: TranscriptUnit.Unit["content"], revision = 1): TranscriptUnit.Unit => ({
@@ -161,7 +168,7 @@ interface PatchOptions {
 const applyPatch = (state: InteractiveController.State, options: PatchOptions): InteractiveController.State => {
   const view = state.view!
   const entry = view.turn(String(turnId))!
-  const patch: ThreadView.ThreadViewPatch = {
+  const patchBase: Omit<ThreadView.ThreadViewPatch, "header"> = {
     threadId,
     baseRevision: view.revision,
     revision: view.revision + 1,
@@ -175,16 +182,19 @@ const applyPatch = (state: InteractiveController.State, options: PatchOptions): 
               _tag: "UpsertTurn",
               turn: {
                 ...entry.turn,
-                ...(options.status === undefined ? {} : { status: options.status }),
+                status: options.status ?? entry.turn.status,
                 updatedAt: entry.turn.updatedAt + 1,
               },
               projectionRevision: entry.projectionRevision + 1,
               usage: options.turnUsage ?? entry.usage,
             },
           ],
-    ...(options.threadUsage === undefined
-      ? {}
+  }
+  const patch: ThreadView.ThreadViewPatch =
+    options.threadUsage === undefined
+      ? patchBase
       : {
+          ...patchBase,
           header: {
             thread: view.thread,
             source: view.source,
@@ -193,8 +203,7 @@ const applyPatch = (state: InteractiveController.State, options: PatchOptions): 
             hasNewer: view.hasNewer,
             usage: { ...view.usage, state: options.threadUsage },
           },
-        }),
-  }
+        }
   return InteractiveController.update(state, { _tag: "ThreadViewPatch", patch }).state
 }
 
@@ -241,9 +250,9 @@ describe("tentative model preview overlay", () => {
 
     expect(state.modelPreview?.byRun.size).toBe(2)
     expect(
-      (state.model.items as ReadonlyArray<TranscriptItem>)
+      transcriptItems(state)
         .flatMap((item) => {
-          if (item._tag !== "Entry" || item.parentId === undefined) return []
+          if (item._tag !== "Entry" || item.parentId === undefined || item.index === undefined) return []
           const entry = state.model.entries[item.index]
           return entry?.role === "assistant" ? [{ text: entry.text, parentId: item.parentId }] : []
         })

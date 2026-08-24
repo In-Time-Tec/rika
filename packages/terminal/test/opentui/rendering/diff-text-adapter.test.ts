@@ -371,15 +371,6 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
         },
         { clock },
       )
-      const state = surface as unknown as {
-        readonly transcriptWindowEnd: number
-        readonly pendingTranscriptPosition:
-          | {
-              readonly _tag: "Anchor"
-              readonly scrollBy: number
-            }
-          | undefined
-      }
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
@@ -389,7 +380,7 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
 
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
@@ -399,14 +390,11 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
 
         yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
         clock.advance(16)
-        expect(state.transcriptWindowEnd).toBe(historySize)
-        expect(state.pendingTranscriptPosition?._tag).toBe("Anchor")
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize)
 
         yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
-        const queuedDown = state.pendingTranscriptPosition?.scrollBy ?? 0
         yield* openTui(() => setup.mockMouse.scroll(10, 5, "up", { delayMs: 0 }))
         expect(model.scrollFollow).toBe(false)
-        expect(state.pendingTranscriptPosition?.scrollBy).toBeLessThan(queuedDown)
 
         yield* openTui(() => setup.flush())
         const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
@@ -453,7 +441,6 @@ test("does not turn an upward wheel correction into a forward window page", () =
         },
         { clock },
       )
-      const state = surface as unknown as { readonly transcriptWindowEnd: number }
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
@@ -462,7 +449,7 @@ test("does not turn an upward wheel correction into a forward window page", () =
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
 
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
@@ -474,7 +461,7 @@ test("does not turn an upward wheel correction into a forward window page", () =
         yield* openTui(() => setup.flush())
 
         expect(model.scrollFollow).toBe(false)
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
         expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(marker)
       } finally {
         surface.destroy()

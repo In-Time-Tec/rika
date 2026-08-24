@@ -122,22 +122,29 @@ export const layer = Layer.effect(
       if (row.kind === "organization" && row.membershipId === null)
         return yield* HostedRecoveryError.make({ kind: "forbidden", message: "Recovery operation was rejected" })
       if (row.kind === "organization")
-        yield* policy
-          .authorize("thread:operate", {
+        {
+          const baseAuthorization = {
             memberId: BetterAuthMemberId.make(row.membershipId!),
-            ...(row.createdByUserId === principal.userId
-              ? { threadCreatorMemberId: BetterAuthMemberId.make(row.membershipId!) }
-              : {}),
             executorKind: row.executorKind,
             inheritProjectGrants: row.inheritProjectGrants,
-            ...(row.threadRole === null ? {} : { threadRole: row.threadRole }),
-            ...(row.projectRole === null ? {} : { projectRole: row.projectRole }),
-          })
+          }
+          const creatorAuthorization = row.createdByUserId === principal.userId
+            ? { ...baseAuthorization, threadCreatorMemberId: BetterAuthMemberId.make(row.membershipId!) }
+            : baseAuthorization
+          const threadAuthorization = row.threadRole === null
+            ? creatorAuthorization
+            : { ...creatorAuthorization, threadRole: row.threadRole }
+          const authorization: Parameters<typeof policy.authorize>[1] = row.projectRole === null
+            ? threadAuthorization
+            : { ...threadAuthorization, projectRole: row.projectRole }
+          yield* policy
+          .authorize("thread:operate", authorization)
           .pipe(
             Effect.mapError(() =>
               HostedRecoveryError.make({ kind: "forbidden", message: "Recovery operation was rejected" }),
             ),
           )
+        }
     })
 
     const operations = (threadId: string, runId: string) =>

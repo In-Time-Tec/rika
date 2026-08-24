@@ -3,6 +3,9 @@ export const cellSourceLimit = 65_536
 
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { partialInputRecord } from "@rika/product/execution-transcript-contract"
+import { Cell as TenetCell } from "tenetkit/repl"
+import type { RunEvent } from "tenetkit/runtime"
+import { Option, Schema } from "effect"
 import { type CellState, type Node } from "../model"
 import { bounded, boundedHead, optionalString, record, string } from "../values"
 import { eventNotice, nestedOperationNotice, restartNotification } from "../recovery"
@@ -12,6 +15,8 @@ type Cell = Extract<Block, { readonly _tag: "Cell" }>
 type CellNotice = Cell["notices"][number]
 type ImageAttachment = Extract<Block, { readonly _tag: "ImageAttachment" }>
 type CellFile = Cell["files"][number]
+type ToolProgressData = Extract<RunEvent.RunEvent, { readonly _tag: "ToolProgress" }>["data"]
+type ToolResult = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionCompleted" }>["result"]["result"]
 
 export const cellToolName = "typescript"
 export const maxCellNotices = 32
@@ -46,20 +51,12 @@ const lineCounts = (patch: string) => {
   return { additions, deletions }
 }
 
-const nonNegative = (value: unknown): number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0
-
-const epochOf = (value: unknown, fallback: number): number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback
-
-const truncationTotals = (value: unknown): { readonly droppedBytes: number; readonly droppedEvents: number } => {
-  if (!Array.isArray(value)) return { droppedBytes: 0, droppedEvents: 0 }
+const truncationTotals = (value: ReadonlyArray<TenetCell.Truncation>) => {
   let droppedBytes = 0
   let droppedEvents = 0
   for (const entry of value) {
-    const channel = record(entry)
-    droppedBytes += nonNegative(channel.droppedBytes)
-    droppedEvents += nonNegative(channel.droppedEvents)
+    droppedBytes += entry.droppedBytes
+    droppedEvents += entry.droppedEvents
   }
   return { droppedBytes, droppedEvents }
 }
@@ -69,8 +66,8 @@ export interface CellProjection {
   readonly cellBlock: (node: Node, rawId: string) => Cell | undefined
   readonly openCell: (node: Node, rawId: string, source: string) => void
   readonly appendCellSource: (node: Node, rawId: string, delta: string) => void
-  readonly progressCell: (node: Node, rawId: string, data: unknown) => void
-  readonly completeCell: (node: Node, rawId: string, result: unknown, isFailure: boolean) => void
+  readonly progressCell: (node: Node, rawId: string, data: ToolProgressData) => void
+  readonly completeCell: (node: Node, rawId: string, result: ToolResult, isFailure: boolean) => void
   readonly settleRunningCells: (node: Node, status: "complete" | "failed" | "cancelled") => void
 }
 
@@ -165,19 +162,22 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   const appendNotice = (block: Cell, appended: CellNotice | undefined): Cell =>
     appended === undefined ? block : { ...block, notices: [...block.notices, appended].slice(-maxCellNotices) }
 
-  const imageAttachment = (event: Readonly<Record<string, unknown>>): ImageAttachment => ({
+  const imageAttachment = (event: Extract<TenetCell.CellEvent, { readonly _tag: "Display" }>): ImageAttachment => ({
     _tag: "ImageAttachment",
     name: string(event.name, "attachment"),
-    mediaType: optionalString(event.mediaType),
-    bytes: optionalString(event.data).length,
+    mediaType: event.mediaType,
+    bytes: event.data.length,
   })
 
-  const diffFile = (blockId: string, event: Readonly<Record<string, unknown>>): CellFile | undefined => {
-    const patch = optionalString(event.data)
+  const diffFile = (
+    blockId: string,
+    event: Extract<TenetCell.CellEvent, { readonly _tag: "Display" }>,
+  ): CellFile | undefined => {
+    const patch = event.data
     if (patch.length === 0) return undefined
     return {
-      key: `${blockId}:${nonNegative(event.sequence)}`,
-      path: string(event.name, "workspace"),
+      key: `${blockId}:${event.sequence}`,
+      path: event.name ?? "workspace",
       kind: /^--- \/dev\/null$/m.test(patch) ? "add" : "update",
       patch: bounded(patch, cellTextLimit),
       ...lineCounts(patch),
@@ -186,16 +186,26 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     }
   }
 
-  const progressCell = (node: Node, rawId: string, data: unknown) => {
+  const progressCell = (node: Node, rawId: string, data: ToolProgressData) => {
     const block = cellBlock(node, rawId)
     if (block === undefined) return
-    const event = record(data)
-    const nested = nestedOperationNotice(event)
+    const raw = record(data)
+    const nested = nestedOperationNotice(raw)
     if (nested !== undefined) {
       write(node, rawId, appendNotice(block, nested))
       return
     }
-    let next = appendNotice({ ...block, epoch: epochOf(event.epoch, block.epoch) }, eventNotice(event))
+    const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
+    if (Option.isNone(decoded)) {
+      if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return
+      const cellNotice = eventNotice(raw)
+      const epoch = Schema.decodeUnknownOption(Schema.Int)(raw.epoch)
+      const next = appendNotice({ ...block, epoch: Option.isSome(epoch) ? epoch.value : block.epoch }, cellNotice)
+      write(node, rawId, next)
+      return
+    }
+    const event = decoded.value
+    let next = appendNotice({ ...block, epoch: "epoch" in event ? event.epoch : block.epoch }, eventNotice(event))
     switch (event._tag) {
       case "Stdout":
         next = {
@@ -223,8 +233,8 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
           ...next,
           output: {
             ...next.output,
-            droppedBytes: next.output.droppedBytes + nonNegative(event.droppedBytes),
-            droppedEvents: next.output.droppedEvents + nonNegative(event.droppedEvents),
+            droppedBytes: next.output.droppedBytes + event.droppedBytes,
+            droppedEvents: next.output.droppedEvents + event.droppedEvents,
           },
         }
         break
@@ -232,7 +242,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
         const mediaType = optionalString(event.mediaType)
         if (mediaType.startsWith("image/"))
           put(
-            unit(node, localId("cell-artifact", node.publicId, rawId, nonNegative(event.sequence)), {
+            unit(node, localId("cell-artifact", node.publicId, rawId, event.sequence), {
               _tag: "Block",
               block: imageAttachment(event),
             }),
@@ -251,34 +261,37 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     if (restarted !== undefined) notice(node, "kernel", restarted.title, restarted.detail, `${rawId}:${next.epoch}`)
   }
 
-  const completeCell = (node: Node, rawId: string, result: unknown, isFailure: boolean) => {
+  const completeCell = (node: Node, rawId: string, result: ToolResult, isFailure: boolean) => {
     const block = cellBlock(node, rawId)
     if (block === undefined) return
-    const value = record(result)
-    const totals = truncationTotals(value.truncation)
-    const duration =
-      typeof value.durationMillis === "number" && Number.isFinite(value.durationMillis)
-        ? { durationMillis: value.durationMillis }
-        : {}
     if (!isFailure) {
+      const decoded = Schema.decodeUnknownOption(TenetCell.CellResult)(result)
+      if (Option.isNone(decoded)) return
+      const success = decoded.value
+      const totals = truncationTotals(success.truncation)
       write(node, rawId, {
         ...block,
         status: "complete",
-        result: bounded(optionalString(value.value), cellTextLimit),
+        result: bounded(success.value, cellTextLimit),
         output: {
-          stdout: bounded(optionalString(value.stdout), cellTextLimit),
-          stderr: bounded(optionalString(value.stderr), cellTextLimit),
+          stdout: bounded(success.stdout, cellTextLimit),
+          stderr: bounded(success.stderr, cellTextLimit),
           ...totals,
         },
-        epoch: epochOf(value.epoch, block.epoch),
-        ...duration,
+        epoch: success.epoch,
+        durationMillis: success.durationMillis,
       })
       return
     }
-    const outcome = failureOutcome(result)
-    const stdout = optionalString(value.stdout)
-    const stderr = optionalString(value.stderr)
-    write(node, rawId, {
+    const decoded = Schema.decodeUnknownOption(TenetCell.CellFailure)(result)
+    if (Option.isNone(decoded)) return
+    const failure = decoded.value
+    const outcome = failureOutcome(failure)
+    const executionFailure = failure._tag === "tenetkit/repl/CellExecutionFailed" ? failure : undefined
+    const totals = truncationTotals(executionFailure?.truncation ?? [])
+    const stdout = executionFailure?.stdout ?? ""
+    const stderr = executionFailure?.stderr ?? ""
+    const failed: Cell = {
       ...block,
       status: outcome.status,
       output: {
@@ -287,10 +300,11 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
         droppedBytes: Math.max(block.output.droppedBytes, totals.droppedBytes),
         droppedEvents: Math.max(block.output.droppedEvents, totals.droppedEvents),
       },
-      epoch: epochOf(value.epoch, block.epoch),
-      ...duration,
-      ...(outcome.error === undefined ? {} : { error: outcome.error }),
-    })
+      epoch: "epoch" in failure ? failure.epoch : block.epoch,
+    }
+    if (executionFailure !== undefined) Object.assign(failed, { durationMillis: executionFailure.durationMillis })
+    if (outcome.error !== undefined) Object.assign(failed, { error: outcome.error })
+    write(node, rawId, failed)
     if (outcome.diagnostic !== undefined)
       error(node, "cell", outcome.diagnostic.title, outcome.diagnostic.detail, rawId)
   }

@@ -165,7 +165,8 @@ describe("workspace binding", () => {
         input: { path: "/etc/passwd", content: "x" },
       })
       expect(response._tag).toBe("Failure")
-      if (response._tag === "Failure") expect((response.failure as { readonly _tag: string })._tag).toBe("ToolError")
+      if (response._tag === "Failure")
+        expect((yield* Schema.decodeUnknownEffect(Schema.Struct({ _tag: Schema.String }))(response.failure))._tag).toBe("ToolError")
     }),
   )
 

@@ -1,6 +1,6 @@
 import { RunSchema, layerPostgres as upstreamLayer } from "@tenetkit/pg"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import { Cause, Clock, Context, Effect, Function, Layer, Schema, Scope } from "effect"
+import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   Errors,
@@ -81,14 +81,14 @@ export class Readiness extends Context.Service<Readiness, ReadinessInterface>()(
 
 const invalidOptions = () => InvalidOptions.make({ message: "PostgreSQL API options are invalid" })
 
-export const validateOptions = Effect.fn("Postgres.validateOptions")(function* (input: unknown) {
-  return yield* Schema.decodeUnknownEffect(Options, { onExcessProperty: "error" })(input).pipe(
-    Effect.mapError(invalidOptions),
-  )
+export const validateOptions = Effect.fn("Postgres.validateOptions")(function* (input: typeof Options.Encoded) {
+  return yield* Schema.decodeEffect(Options, { onExcessProperty: "error" })(input).pipe(Effect.mapError(invalidOptions))
 })
 
-export const validateWorkerOptions = Effect.fn("Postgres.validateWorkerOptions")(function* (input: unknown) {
-  return yield* Schema.decodeUnknownEffect(WorkerOptions, { onExcessProperty: "error" })(input).pipe(
+export const validateWorkerOptions = Effect.fn("Postgres.validateWorkerOptions")(function* (
+  input: typeof WorkerOptions.Encoded,
+) {
+  return yield* Schema.decodeEffect(WorkerOptions, { onExcessProperty: "error" })(input).pipe(
     Effect.mapError(invalidOptions),
   )
 })
@@ -102,34 +102,52 @@ export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.WorkerOpt
   onClaim: observeClaim,
 })
 
-export const observeClaim = (claim: {
+const ClaimMetadata = Schema.Struct({
+  threadId: Schema.optionalKey(Schema.String),
+  turnId: Schema.optionalKey(Schema.String),
+})
+
+interface ClaimAttributes {
+  readonly runId: string
+  threadId?: string
+  turnId?: string
+}
+
+interface ObservedClaim {
   readonly run: {
     readonly runId: string
-    readonly message?: { readonly metadata?: Readonly<Record<string, unknown>> }
+    readonly message: { readonly metadata: object }
   }
-}) => {
-  const metadata: Readonly<Record<string, unknown>> = claim.run.message?.metadata ?? {}
-  return HostedObservability.event("run_claim", "success", {
+}
+
+export const observeClaim = (claim: ObservedClaim) => {
+  const metadata = Schema.decodeOption(ClaimMetadata)(claim.run.message.metadata).pipe(
+    Option.getOrElse(() => ClaimMetadata.make({})),
+  )
+  const attributes: ClaimAttributes = {
     runId: claim.run.runId,
-    ...(typeof metadata.threadId === "string" ? { threadId: metadata.threadId } : {}),
-    ...(typeof metadata.turnId === "string" ? { turnId: metadata.turnId } : {}),
-  })
+  }
+  if (metadata.threadId !== undefined) attributes.threadId = metadata.threadId
+  if (metadata.turnId !== undefined) attributes.turnId = metadata.turnId
+  return HostedObservability.event("run_claim", "success", attributes)
 }
 
 export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
-  return yield* Effect.scoped(
+  const applied: Effect.Effect<undefined, SchemaError> = Effect.scoped(
     Layer.build(RunSchema.layerClient(input.url)).pipe(
       Effect.flatMap((context) => RunSchema.apply(input.source).pipe(Effect.provide(context))),
     ),
-  ) as Effect.Effect<undefined, SchemaError>
+  )
+  return yield* applied
 })
 
 export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: Pick<Options, "url" | "source">) {
-  return yield* Effect.scoped(
+  const checked: Effect.Effect<undefined, SchemaError> = Effect.scoped(
     Layer.build(RunSchema.layerClient(input.url)).pipe(
       Effect.flatMap((context) => RunSchema.check(input.source).pipe(Effect.provide(context))),
     ),
-  ) as Effect.Effect<undefined, SchemaError>
+  )
+  return yield* checked
 })
 
 export const workerLayer = (
@@ -151,11 +169,8 @@ export const workerLayer = (
           const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
           yield* Effect.forkScoped(runtimeWorker.run)
         })
-        const loop: Layer.Layer<
-          never,
-          never,
-          RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
-        > = Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
+        const loop: Layer.Layer<never, never, RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore> =
+          Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
         return Layer.merge(worker, loop)
       }),
     ),
@@ -176,22 +191,24 @@ const age = (now: number, at: number | undefined) => (at === undefined ? undefin
 export const workerDiagnostics: {
   (now: number): (status: RuntimeWorker.WorkerStatus) => WorkerDiagnostics
   (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics
-} = Function.dual(2, (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
-  ...status,
-  pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
-  lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
-  oldestClaimAgeMillis: age(now, status.oldestClaimAt),
-  lastFailureAgeMillis: age(now, status.lastFailure?.at),
-  availableCapacity: Math.max(0, status.capacity - status.active),
-}))
+} = Function.dual(
+  2,
+  (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
+    ...status,
+    pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
+    lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
+    oldestClaimAgeMillis: age(now, status.oldestClaimAt),
+    lastFailureAgeMillis: age(now, status.lastFailure?.at),
+    availableCapacity: Math.max(0, status.capacity - status.active),
+  }),
+)
 
 export const checkWorkerReadiness: {
-  (now: number, pollIntervalMillis: number): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
   (
-    status: RuntimeWorker.WorkerStatus,
     now: number,
     pollIntervalMillis: number,
-  ): Effect.Effect<void, WorkerUnavailable>
+  ): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
+  (status: RuntimeWorker.WorkerStatus, now: number, pollIntervalMillis: number): Effect.Effect<void, WorkerUnavailable>
 } = Function.dual(
   3,
   (
@@ -200,7 +217,9 @@ export const checkWorkerReadiness: {
     pollIntervalMillis: number,
   ): Effect.Effect<void, WorkerUnavailable> => {
     if (status.poll._tag === "Starting")
-      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }))
+      return Effect.fail(
+        WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }),
+      )
     if (status.poll._tag === "Failed")
       return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll failed" }))
     if (now - status.poll.at > pollIntervalMillis * 4)
@@ -246,17 +265,19 @@ export const layer = (
   Layer.unwrap(
     validateOptions(options.postgres).pipe(
       Effect.map((postgres) => {
-        const postgresLayerOptions = {
+        const postgresLayerOptionsBase = {
           url: postgres.url,
           source: postgres.source,
           maxConnections: postgres.maxConnections,
           resolver: options.resolver,
           addresses: [],
-          ...(options.subscriberQueueCapacity === undefined
-            ? {}
-            : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
-          ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
         }
+        const withQueue =
+          options.subscriberQueueCapacity === undefined
+            ? postgresLayerOptionsBase
+            : { ...postgresLayerOptionsBase, subscriberQueueCapacity: options.subscriberQueueCapacity }
+        const postgresLayerOptions =
+          options.scheduler === undefined ? withQueue : { ...withQueue, scheduler: options.scheduler }
         const runtime = upstreamLayer(postgresLayerOptions).pipe(
           Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
         )

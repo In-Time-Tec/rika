@@ -65,7 +65,7 @@ export const applyQueueDelta: {
   (model: Model, threadId: string, revision: number, change: QueueChange, queuedCount?: number): QueueDeltaResult
   (threadId: string, revision: number, change: QueueChange, queuedCount?: number): (model: Model) => QueueDeltaResult
 } = Function.dual(
-  (args) => typeof args[0] !== "string",
+  (args) => args.length >= 4,
   (model: Model, threadId: string, revision: number, change: QueueChange, queuedCount?: number) => {
     if (model.currentThreadId !== undefined && model.currentThreadId !== threadId) return { model, resync: false }
     if (model.queueThreadId !== threadId || model.queueRevision === undefined) return { model, resync: true }

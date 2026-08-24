@@ -3,10 +3,11 @@ import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import type * as TurnQueuePromotion from "../../../src/thread/repository/turn-queue"
-import type * as RootTurnOwner from "../../../src/thread/queue/root-owner"
+import * as RootTurnOwner from "../../../src/thread/queue/root-owner"
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Context, Effect, Exit } from "effect"
 import { OperationError } from "../../../src/operation/error"
@@ -19,6 +20,11 @@ import { run as runNoninteractive } from "../../../src/operation/dispatch/nonint
 import type { Dependencies as NoninteractiveDependencies } from "../../../src/operation/dispatch/noninteractive-contract"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../../src/thread/queue/pending-policy"
 import type { InteractiveEvent } from "../../../src/operation/interactive/session-event"
+
+class InteractiveSubmissionService extends Context.Service<
+  InteractiveSubmissionService,
+  InteractiveSubmissionContext
+>()("@rika/product/test/operation/runtime/execution.test/InteractiveSubmissionService") {}
 
 const thread: Thread.Thread = {
   id: Thread.ThreadId.make("linked-settlement-thread"),
@@ -70,9 +76,7 @@ describe("linked Turn settlement authority", () => {
     Effect.gen(function* () {
       const admitted = turn("interactive")
       const persisted = { ...admitted, executionLink: executionLink(admitted) }
-      const turns = TurnRepository.Service.of({
-        get: () => Effect.succeed(persisted),
-      } as TurnRepository.Interface)
+      const turns = TurnRepository.Service.of({ get: () => Effect.succeed(persisted) })
 
       for (const outcome of [
         Exit.fail(ExecutionGateway.WatchTurnFailure.make({ message: "watch failed" })),
@@ -81,16 +85,17 @@ describe("linked Turn settlement authority", () => {
         const statusWrites = new Array<string>()
         const events = new Array<InteractiveEvent>()
         let settlements = 0
+        const submissions = InteractiveSubmissionService.of({
+          setTurnStatus: (_id, status) =>
+            Effect.sync(() => {
+              statusWrites.push(status)
+              return { ...persisted, status }
+            }),
+          settleThread: () => Effect.sync(() => (settlements += 1)),
+          emit: (_dispatch, event) => events.push(event),
+        })
         const result = yield* settleInteractiveSubmission(
-          {
-            setTurnStatus: (_id, status) =>
-              Effect.sync(() => {
-                statusWrites.push(status)
-                return { ...persisted, status }
-              }),
-            settleThread: () => Effect.sync(() => (settlements += 1)),
-            emit: (_dispatch, event) => events.push(event),
-          } as unknown as InteractiveSubmissionContext,
+          submissions,
           {
             thread,
             turn: admitted,
@@ -117,7 +122,7 @@ describe("linked Turn settlement authority", () => {
       let nextClaim = 0
       let released = 0
 
-      const turns = {
+      const turns = TurnRepository.Service.of({
         readQueue: () =>
           Effect.succeed({
             threadId: thread.id,
@@ -136,8 +141,13 @@ describe("linked Turn settlement authority", () => {
               queue: queueChange(claim.turn, nextClaim, queued.length - nextClaim),
             }
           }),
-      } as TurnRepository.Interface
+      })
       const owner = {
+        ...(yield* RootTurnOwner.make(
+          turns,
+          TranscriptRepository.Service.of({}),
+          ExecutionGateway.Service.of({}),
+        )),
         startTurn: (input: ExecutionGateway.StartTurn) =>
           Effect.sync(() => {
             const current = persisted.get(input.turnId)!
@@ -146,13 +156,13 @@ describe("linked Turn settlement authority", () => {
             return link
           }),
         watchTurn: () => Effect.fail(ExecutionGateway.WatchTurnFailure.make({ message: "local watch failed" })),
-      } as RootTurnOwner.Interface
+      }
 
       const claimed = yield* promotePendingTurns({
         thread,
         dispatch: () => undefined,
         turns,
-        backend: {} as ExecutionGateway.Interface,
+        backend: ExecutionGateway.Service.of({}),
         pendingCapacity: 2,
         prepareExecution: (value) => Effect.succeed({ prompt: value.prompt, promptParts: undefined, messages: [] }),
         owner,
@@ -205,7 +215,7 @@ describe("linked Turn settlement authority", () => {
       const queued = turn("defective-promotion", "queued")
       const claim = { turn: queued, token: "defective-claim" }
       let released = 0
-      const turns = {
+      const turns = TurnRepository.Service.of({
         readQueue: () => Effect.succeed({ threadId: thread.id, revision: 0, queuedCount: 1, turns: [queued] }),
         releaseQueuedClaim: (candidate: TurnQueuePromotion.QueueClaim) =>
           Effect.sync(() => {
@@ -213,17 +223,21 @@ describe("linked Turn settlement authority", () => {
             released += 1
             return true
           }),
-      } as unknown as TurnRepository.Interface
+      })
 
       const result = yield* Effect.exit(
         promotePendingTurns({
           thread,
           dispatch: () => undefined,
           turns,
-          backend: {} as ExecutionGateway.Interface,
+          backend: ExecutionGateway.Service.of({}),
           pendingCapacity: 1,
           prepareExecution: () => Effect.die("promotion defect"),
-          owner: {} as RootTurnOwner.Interface,
+          owner: yield* RootTurnOwner.make(
+            turns,
+            TranscriptRepository.Service.of({}),
+            ExecutionGateway.Service.of({}),
+          ),
           notifyThreadSummaries: Effect.void,
           notifyTurnChanged: () => Effect.void,
           setTurnStatus: () => Effect.die("unused"),
@@ -258,14 +272,12 @@ describe("linked Turn settlement authority", () => {
           }),
         get: () => Effect.succeed(persisted),
         list: () => Effect.succeed([persisted]),
-      } as TurnRepository.Interface)
-      const threads = ThreadRepository.Service.of({
-        get: () => Effect.succeed(thread),
-      } as ThreadRepository.Interface)
+      })
+      const threads = ThreadRepository.Service.of({ get: () => Effect.succeed(thread) })
       const executionDependencies = Context.empty().pipe(
         Context.add(ThreadRepository.Service, threads),
         Context.add(TurnRepository.Service, turns),
-      ) as NoninteractiveDependencies["executionDependencies"]
+      )
       const failure = ExecutionGateway.WatchTurnFailure.make({ message: "local watcher failed" })
       const dependencies: NoninteractiveDependencies = {
         defaultWorkspace: thread.workspace,
@@ -287,6 +299,11 @@ describe("linked Turn settlement authority", () => {
           }),
         publishInteractiveActivity: (_origin, event) => event,
         rootTurnOwner: {
+          ...(yield* RootTurnOwner.make(
+            turns,
+            TranscriptRepository.Service.of({}),
+            ExecutionGateway.Service.of({}),
+          )),
           startTurn: () =>
             Effect.sync(() => {
               starts += 1
@@ -295,11 +312,11 @@ describe("linked Turn settlement authority", () => {
               return link
             }),
           watchTurn: () => Effect.fail(failure),
-        } as RootTurnOwner.Interface,
+        },
         prepareExecution: (value) => Effect.succeed({ prompt: value.prompt, promptParts: undefined, messages: [] }),
         claimQueuedTurn: () => Effect.void,
         releaseTurnObserver: () => Effect.sync(() => (releases += 1)),
-        queueMutationEvent: () => Effect.die("queue is empty") as never,
+        queueMutationEvent: () => Effect.die("queue is empty"),
         executionDependencies,
         staleQueuedTurnsError,
         queuedTurnPromoteMaxAgeMs,

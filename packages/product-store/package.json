@@ -62,7 +62,7 @@
     "domain": "product-store"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/product-store/src packages/product-store/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/product-store/src packages/product-store/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

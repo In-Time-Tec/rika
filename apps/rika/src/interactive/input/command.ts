@@ -1,5 +1,6 @@
 import type { Mode } from "@rika/terminal/terminal-state"
 import { promptParts, type Action } from "@rika/terminal/terminal-session"
+import { Schema } from "effect"
 
 const initialSubmitActionImpl = (
   prompt: ReadonlyArray<string>,
@@ -10,10 +11,14 @@ const initialSubmitActionImpl = (
   return { _tag: "Submit", prompt: value, parts: promptParts(value), mode }
 }
 
-export const initialSubmitAction: {
-  (mode: Mode): (prompt: ReadonlyArray<string>) => ReturnType<typeof initialSubmitActionImpl>
-  (prompt: ReadonlyArray<string>, mode: Mode): ReturnType<typeof initialSubmitActionImpl>
-} = ((first: ReadonlyArray<string> | Mode, second?: Mode | ReadonlyArray<string>) => {
-  if (Array.isArray(first)) return initialSubmitActionImpl(first, second as Mode)
-  return (prompt: ReadonlyArray<string>) => initialSubmitActionImpl(prompt, first as Mode)
-}) as typeof initialSubmitAction
+export function initialSubmitAction(
+  mode: Mode,
+): (prompt: ReadonlyArray<string>) => ReturnType<typeof initialSubmitActionImpl>
+export function initialSubmitAction(
+  prompt: ReadonlyArray<string>,
+  mode: Mode,
+): ReturnType<typeof initialSubmitActionImpl>
+export function initialSubmitAction(first: ReadonlyArray<string> | Mode, second?: Mode) {
+  if (!Schema.is(Schema.String)(first)) return second === undefined ? undefined : initialSubmitActionImpl(first, second)
+  return (prompt: ReadonlyArray<string>) => initialSubmitActionImpl(prompt, first)
+}

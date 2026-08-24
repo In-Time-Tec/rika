@@ -2,7 +2,7 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider"
 import { betterAuth, type BetterAuthPlugin } from "better-auth"
 import { jwt, organization } from "better-auth/plugins"
-import { Effect, Redacted, Schema } from "effect"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { runPromise } from "effect/Effect"
 import type { Pool } from "pg"
 import type { IdentityConfig } from "../config"
@@ -24,6 +24,20 @@ export interface IdentityRuntime {
   readonly protectedResourceMetadata: Effect.Effect<object, IdentityRuntimeError>
 }
 
+export class IdentityRuntimeService extends Context.Service<IdentityRuntimeService, IdentityRuntime>()(
+  "@rika/identity/auth/runtime/IdentityRuntimeService",
+) {}
+
+const AccessTokenPayload = Schema.Struct({
+  sub: Schema.NonEmptyString,
+  client_id: Schema.optionalKey(Schema.String),
+  cnf: Schema.optionalKey(Schema.Struct({ jkt: Schema.optionalKey(Schema.String) })),
+})
+
+const BetterAuthPluginSchema = Schema.declare((input): input is BetterAuthPlugin =>
+  Schema.is(Schema.Struct({ id: Schema.String }))(input),
+)
+
 const snakeCase = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
 
 const snakeCaseFields = (fields: ReadonlyArray<string>) =>
@@ -35,7 +49,7 @@ export const identityOAuthResourceContract = (config: Pick<IdentityConfig, "base
   jwksUrl: `${config.baseUrl}/api/auth/jwks`,
 })
 
-const snakeCasePlugin = (plugin: BetterAuthPlugin): BetterAuthPlugin => {
+const snakeCasePlugin = <Plugin extends { readonly schema?: BetterAuthPlugin["schema"] }>(plugin: Plugin) => {
   if (plugin.schema === undefined) return plugin
   return {
     ...plugin,
@@ -65,38 +79,40 @@ export const makeBetterAuthIdentityRuntime = (input: {
   const { config, mail, pool } = input
   const oauthResource = identityOAuthResourceContract(config)
   const sendMail = (message: Parameters<MailSender["send"]>[0]) => runPromise(mail.send(message))
-  const provider = oauthProvider({
-    loginPage: "/login",
-    consentPage: "/consent",
-    signup: { page: "/signup" },
-    scopes: ["openid", "profile", "email", "offline_access", "account"],
-    grantTypes: ["authorization_code", "refresh_token"],
-    allowDynamicClientRegistration: true,
-    allowUnauthenticatedClientRegistration: true,
-    clientRegistrationDefaultScopes: ["openid", "profile", "email", "offline_access", "account"],
-    resources: [
-      {
-        identifier: config.resource,
-        allowedScopes: ["account"],
-        accessTokenTtl: 900,
-        dpopBoundAccessTokensRequired: true,
+  const provider = Schema.decodeUnknownSync(BetterAuthPluginSchema)(
+    oauthProvider({
+      loginPage: "/login",
+      consentPage: "/consent",
+      signup: { page: "/signup" },
+      scopes: ["openid", "profile", "email", "offline_access", "account"],
+      grantTypes: ["authorization_code", "refresh_token"],
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+      clientRegistrationDefaultScopes: ["openid", "profile", "email", "offline_access", "account"],
+      resources: [
+        {
+          identifier: config.resource,
+          allowedScopes: ["account"],
+          accessTokenTtl: 900,
+          dpopBoundAccessTokensRequired: true,
+        },
+      ],
+      clientRegistrationDefaultResources: [config.resource],
+      clientRegistrationAllowedResources: [config.resource],
+      enforcePerClientResources: true,
+      accessTokenExpiresIn: 900,
+      refreshTokenExpiresIn: 2_592_000,
+      refreshTokenReuseInterval: 10,
+      rateLimit: {
+        register: { window: 60, max: 5 },
       },
-    ],
-    clientRegistrationDefaultResources: [config.resource],
-    clientRegistrationAllowedResources: [config.resource],
-    enforcePerClientResources: true,
-    accessTokenExpiresIn: 900,
-    refreshTokenExpiresIn: 2_592_000,
-    refreshTokenReuseInterval: 10,
-    rateLimit: {
-      register: { window: 60, max: 5 },
-    },
-    prefix: {
-      opaqueAccessToken: "rika_at_",
-      refreshToken: "rika_rt_",
-      clientSecret: "rika_cs_",
-    },
-  }) as unknown as BetterAuthPlugin
+      prefix: {
+        opaqueAccessToken: "rika_at_",
+        refreshToken: "rika_rt_",
+        clientSecret: "rika_cs_",
+      },
+    }),
+  )
   const auth = betterAuth({
     appName: "Rika",
     baseURL: config.baseUrl,
@@ -196,22 +212,14 @@ export const makeBetterAuthIdentityRuntime = (input: {
             }),
           catch: () => IdentityRuntimeError.make({ kind: "invalid" }),
         }).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(AccessTokenPayload)),
           Effect.map((payload) => {
-            if (typeof payload.sub !== "string" || payload.sub.length === 0) throw new TypeError("missing subject")
-            const clientId = typeof payload.client_id === "string" ? payload.client_id : undefined
-            const confirmation = payload.cnf
-            const dpopJkt =
-              typeof confirmation === "object" &&
-              confirmation !== null &&
-              "jkt" in confirmation &&
-              typeof confirmation.jkt === "string"
-                ? confirmation.jkt
-                : undefined
-            return {
-              userId: payload.sub,
-              ...(clientId === undefined ? {} : { clientId }),
-              ...(dpopJkt === undefined ? {} : { dpopJkt }),
+            if (payload.client_id !== undefined && payload.cnf?.jkt !== undefined) {
+              return { userId: payload.sub, clientId: payload.client_id, dpopJkt: payload.cnf.jkt }
             }
+            if (payload.client_id !== undefined) return { userId: payload.sub, clientId: payload.client_id }
+            if (payload.cnf?.jkt !== undefined) return { userId: payload.sub, dpopJkt: payload.cnf.jkt }
+            return { userId: payload.sub }
           }),
           Effect.mapError(() => IdentityRuntimeError.make({ kind: "invalid" })),
         )
@@ -233,3 +241,6 @@ export const makeBetterAuthIdentityRuntime = (input: {
     }),
   }
 }
+
+export const identityRuntimeLayer = (input: Parameters<typeof makeBetterAuthIdentityRuntime>[0]) =>
+  Layer.succeed(IdentityRuntimeService, makeBetterAuthIdentityRuntime(input))

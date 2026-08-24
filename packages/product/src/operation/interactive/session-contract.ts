@@ -6,7 +6,8 @@ import type { Context, Deferred, Effect, PlatformError, PubSub, Semaphore } from
 import type { OperationUnavailable } from "../contract/product"
 import type { InteractiveEvent as ClientEvent } from "./event"
 import type { InteractiveEvent } from "./session-event"
-import type { InteractiveSessionState, makeInteractiveSessionComposition } from "./session-state"
+import type { InteractiveSessionState } from "./session-state"
+import type * as InteractiveSessionStateRuntime from "./session-state"
 import type { InteractiveOperationFeed } from "./view/feed"
 
 export interface InteractiveSession {
@@ -195,7 +196,7 @@ export interface InteractiveSessionInput {
   readonly dependencyContext: InteractiveDependencyContext
   readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly isTerminalStatus: (status: ExecutionStatusStatus) => boolean
   readonly executionStartFailureMessage: string
   readonly dispatchThreadSummaries: (
@@ -222,9 +223,9 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly supervisionInitialized: Deferred.Deferred<void, InteractiveSupervisionError>
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure
-    readonly admit: ReturnType<typeof makeInteractiveSessionComposition>["admit"]
-    readonly admitLocal: ReturnType<typeof makeInteractiveSessionComposition>["admitLocal"]
-    readonly attachFeed: ReturnType<typeof makeInteractiveSessionComposition>["attachFeed"]
+    readonly admit: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["admit"]
+    readonly admitLocal: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["admitLocal"]
+    readonly attachFeed: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["attachFeed"]
   }
 
 export type InteractiveSupervisionError =

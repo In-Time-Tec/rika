@@ -5,7 +5,7 @@ export class ProviderCredentialStoreError extends Schema.TaggedError<ProviderCre
   { kind: Schema.Literals(["corrupt", "io", "missing", "unsafe"]), message: Schema.String },
 ) {}
 
-export interface ProviderCredentialStoreShape {
+export interface ProviderCredentialStoreService {
   readonly load: (
     identity: string,
   ) => Effect.Effect<Option.Option<Redacted.Redacted<string>>, ProviderCredentialStoreError>
@@ -16,6 +16,6 @@ export interface ProviderCredentialStoreShape {
   readonly remove: (identity: string) => Effect.Effect<boolean, ProviderCredentialStoreError>
 }
 
-export class ProviderCredentialStore extends Context.Service<ProviderCredentialStore, ProviderCredentialStoreShape>()(
+export class ProviderCredentialStore extends Context.Service<ProviderCredentialStore, ProviderCredentialStoreService>()(
   "@rika/product/authentication/credential-store/ProviderCredentialStore",
 ) {}

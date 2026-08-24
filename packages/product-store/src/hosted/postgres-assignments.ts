@@ -81,7 +81,7 @@ const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, AssignmentError
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
 const metadataEquivalent = Schema.toEquivalence(JsonObject)
 
-const lifecycle = (row: AssignmentRow): unknown => {
+const lifecycle = (row: AssignmentRow) => {
   switch (row.lifecycle) {
     case "pending":
       return { _tag: "Pending" }

@@ -177,9 +177,9 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
               }),
             )
             const output = (yield* run([...containerCommand!, "logs", doctorContainer])).stdout
-            const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(DoctorResult))(output)
+            const result = yield* Schema.decodeEffect(Schema.fromJsonString(DoctorResult))(output)
             const manifestBytes = yield* fileSystem.readFile(new URL("tool-manifest.json", imageRoot).pathname)
-            const manifest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ToolManifest))(
+            const manifest = yield* Schema.decodeEffect(Schema.fromJsonString(ToolManifest))(
               new TextDecoder().decode(manifestBytes),
             )
             expect(result.ok).toBe(true)

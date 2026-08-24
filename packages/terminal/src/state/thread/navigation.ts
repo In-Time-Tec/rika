@@ -1,6 +1,7 @@
 import { Function } from "effect"
 import type { Model } from "../model"
 import type { ThreadItem } from "./model"
+import { decodeThreadItems } from "./model"
 import { readyOr } from "../loadable"
 
 export const filteredFiles = (model: Model): ReadonlyArray<string> => {
@@ -15,7 +16,7 @@ export const filteredFiles = (model: Model): ReadonlyArray<string> => {
 }
 export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => {
   const query = model.threadSwitcher.query.toLowerCase()
-  return (model.threads as ReadonlyArray<ThreadItem>).filter((thread) =>
+  return decodeThreadItems(model.threads).filter((thread) =>
     `${thread.title} ${thread.workspace ?? ""} ${thread.id}`.toLowerCase().includes(query),
   )
 }

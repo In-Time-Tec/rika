@@ -6,12 +6,13 @@ export class DigestError extends Schema.TaggedError<DigestError>()("@rika/extens
 }) {}
 
 const canonical = (value: Json): string => {
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
-  return `{${Object.entries(value)
-    .toSorted(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(",")}}`
+  if (Schema.is(Schema.JsonObject)(value))
+    return `{${Object.entries(value)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+      .join(",")}}`
+  return JSON.stringify(value)
 }
 
 export const value = Effect.fn("PluginDigest.value")(function* (input: string) {

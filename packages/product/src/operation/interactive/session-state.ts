@@ -1,13 +1,18 @@
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Effect, Fiber, Scope, Semaphore, Function, Schema, Ref } from "effect"
+import { Effect, Fiber, Scope, Semaphore, Function, Predicate, Schema, Ref } from "effect"
 import { OperationUnavailable } from "../contract/product"
 import { type InteractiveEvent } from "./session-event"
-import { makeFailure } from "../failure"
+import * as OperationFailure from "../failure"
 import { OperationError } from "../error"
-import { makeInteractiveOperationFeed, type InteractiveOperationFeed, type SelectionLoad } from "./view/feed"
-import { makeInteractiveSelectionProjection, type SelectionEpochState } from "./view/selection"
+import * as InteractiveFeed from "./view/feed"
+import * as InteractiveSelection from "./view/selection"
+
+type InteractiveOperationFeed = InteractiveFeed.InteractiveOperationFeed
+type SelectionLoad = InteractiveFeed.SelectionLoad
+type SelectionEpochState = InteractiveSelection.SelectionEpochState
+type InteractiveFailureCause = Parameters<typeof OperationFailure.makeFailure>[0]
 
 export const selectionInitialTurnWindow = 6
 export const selectionInitialEntryWindow = 120
@@ -52,7 +57,7 @@ export const makeInteractiveSessionComposition = (input: {
 
 const dispatchInteractiveFailureImpl = (
   dispatch: (event: InteractiveEvent) => void,
-  error: unknown,
+  error: InteractiveFailureCause,
   threadId?: Thread.ThreadId,
   turnId?: Turn.TurnId,
 ) => {
@@ -64,34 +69,30 @@ const dispatchInteractiveFailureImpl = (
       capacity: error.capacity,
       count: error.count,
     })
-  const failure = makeFailure(error)
-  Effect.logError("interactive.failure.dispatched").pipe(
-    Effect.annotateLogs({
-      "rika.failure.tag": failure.tag,
-      "rika.failure.actor": failure.actor,
-      "rika.failure.retry": failure.retry,
-      ...(threadId === undefined ? {} : { "rika.thread.id": String(threadId) }),
-      ...(turnId === undefined ? {} : { "rika.turn.id": String(turnId) }),
-    }),
-    Effect.runSync,
-  )
-  return dispatch({
+  const failure = OperationFailure.makeFailure(error)
+  let event: Extract<InteractiveEvent, { readonly _tag: "ExecutionFailed" }> = {
     _tag: "ExecutionFailed",
     selectionEpoch: 0,
-    ...(threadId === undefined ? {} : { threadId }),
-    ...(turnId === undefined ? {} : { turnId }),
     failure,
-  })
+  }
+  if (threadId !== undefined) event = { ...event, threadId }
+  if (turnId !== undefined) event = { ...event, turnId }
+  return dispatch(event)
 }
 
 export const dispatchInteractiveFailure: {
   (
-    error: unknown,
+    error: InteractiveFailureCause,
     threadId?: Thread.ThreadId,
     turnId?: Turn.TurnId,
   ): (dispatch: (event: InteractiveEvent) => void) => void
-  (dispatch: (event: InteractiveEvent) => void, error: unknown, threadId?: Thread.ThreadId, turnId?: Turn.TurnId): void
-} = Function.dual((args) => typeof args[0] === "function", dispatchInteractiveFailureImpl)
+  (
+    dispatch: (event: InteractiveEvent) => void,
+    error: InteractiveFailureCause,
+    threadId?: Thread.ThreadId,
+    turnId?: Turn.TurnId,
+  ): void
+} = Function.dual((args) => Predicate.isFunction(args[0]), dispatchInteractiveFailureImpl)
 
 export interface InteractiveSessionState {
   readonly operationFeed: InteractiveOperationFeed
@@ -187,7 +188,7 @@ export const makeInteractiveSessionState = (
     const selectionAdmission = yield* Semaphore.make(1)
     const lifecycleAdmission = yield* Semaphore.make(1)
     const sessionScope = yield* Scope.make()
-    const operationFeed = yield* makeInteractiveOperationFeed({
+    const operationFeed = yield* InteractiveFeed.makeInteractiveOperationFeed({
       sessionId,
       sessionScope,
       publishActivity: publishInteractiveActivity,
@@ -229,7 +230,7 @@ export const makeInteractiveSessionState = (
       selectionLoadFiber = undefined
       return fiber === undefined ? Effect.void : Fiber.interrupt(fiber)
     })
-    const projection = makeInteractiveSelectionProjection({
+    const projection = InteractiveSelection.makeInteractiveSelectionProjection({
       activitySequence,
       interactiveThread,
       setActiveSelectionState: (value: SelectionEpochState) => (activeSelectionState = value),

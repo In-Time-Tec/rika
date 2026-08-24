@@ -61,7 +61,7 @@ describe("hosted cell executor", () => {
         expect(failure._tag).toBe("DomainFailure")
         if (failure._tag === "DomainFailure") expect(failure.failure._tag).toBe("tenetkit/repl/CellExecutionFailed")
 
-        expect(failure._tag === "DomainFailure" && typeof failure.failure).toBe("object")
+        expect(failure._tag === "DomainFailure" && failure.failure._tag).toBe("tenetkit/repl/CellExecutionFailed")
 
         const running = yield* Effect.forkChild(
           executor.execute({

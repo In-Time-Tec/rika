@@ -125,26 +125,8 @@ test("renders a subagent tool tree and expands each child independently", () =>
         },
         resize: () => undefined,
       })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              {
-                readonly renderable: {
-                  readonly content: {
-                    readonly chunks: ReadonlyArray<{
-                      readonly text: string
-                      readonly fg?: { readonly equals: (other: unknown) => boolean }
-                    }>
-                  }
-                  readonly screenX: number
-                  readonly screenY: number
-                }
-              }
-            >
-          }
-        ).transcriptRecords
+      const transcriptRow = (text: string) =>
+        surface.transcriptDiagnostics().rows.find((row) => styledTextValue(row.content).includes(text))!
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
@@ -160,10 +142,10 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(collapsed).not.toContain("**")
         expect(collapsed).not.toContain("read child output")
         expect(collapsed).not.toContain("shell child output")
-        const oracleChunks = records().get("tool:oracle-parent:header")!.renderable.content.chunks
+        const oracleChunks = transcriptRow("Oracle has spoken").content.chunks
         expect(oracleChunks.find((chunk) => chunk.text.includes("Oracle"))!.fg?.equals(colors.text)).toBe(true)
         expect(oracleChunks.find((chunk) => chunk.text === " has spoken")!.fg?.equals(colors.muted)).toBe(true)
-        const readChunks = records().get("tool:child-read:header")!.renderable.content.chunks
+        const readChunks = transcriptRow("Read src/a.ts L2-4").content.chunks
         expect(readChunks.find((chunk) => chunk.text.includes("Read"))!.fg?.equals(colors.text)).toBe(true)
         expect(readChunks.find((chunk) => chunk.text === " src/a.ts L2-4")!.fg?.equals(colors.muted)).toBe(true)
         const collapsedLines = collapsed.split("\n")
@@ -176,7 +158,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
           collapsedLines[shellRow]!.indexOf("$ bun test"),
         )
 
-        const agent = records().get("tool:child-agent:header")!.renderable
+        const agent = transcriptRow("Subagent finished")
         const agentLines = styledTextValue(agent.content).split("\n")
         expect(agentLines).toHaveLength(1)
         const markerLine = agentLines[0]!
@@ -186,7 +168,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:child-agent")
 
-        const agentBody = records().get("tool:child-agent:body")!.renderable
+        const agentBody = transcriptRow("Read-only explore")
         yield* openTui(() =>
           setup.mockMouse.drag(agentBody.screenX, agentBody.screenY, agentBody.screenX + 24, agentBody.screenY),
         )
@@ -202,7 +184,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         surface.update(model)
         yield* openTui(() => setup.flush())
 
-        const read = records().get("tool:child-read:header")!.renderable
+        const read = transcriptRow("Read src/a.ts L2-4")
         yield* openTui(() => setup.mockMouse.click(read.screenX + 4, read.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:child-read")
@@ -213,13 +195,13 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(opened).toEqual([{ path: "src/a.ts", line: 3, column: 1 }])
         expect(model.expandedRowKeys).toContain("tool:child-read")
 
-        const shell = records().get("tool:child-shell:header")!.renderable
+        const shell = transcriptRow("$ bun test")
         yield* openTui(() => setup.mockMouse.click(shell.screenX + 4, shell.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:child-shell")
         expect(setup.captureCharFrame()).toContain("shell child output")
 
-        const expandedRead = records().get("tool:child-read:header")!.renderable
+        const expandedRead = transcriptRow("Read src/a.ts L2-4")
         yield* openTui(() => setup.mockMouse.click(expandedRead.screenX + 4, expandedRead.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).not.toContain("tool:child-read")
@@ -236,7 +218,6 @@ test("drags the composer top border through OpenTUI mouse routing", () =>
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       const pointers: Array<string> = []
-      ;(setup.renderer as unknown as { realStdoutWrite?: undefined }).realStdoutWrite = undefined
       setup.renderer.setMousePointer = (style) => pointers.push(style)
       let model = initial("/work", "high")
       const surface = new Surface(setup.renderer, {

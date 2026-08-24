@@ -58,31 +58,33 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
     startSelection,
     resume,
   } = context
+  const inputContext = {
+    loop,
+    session,
+    run,
+    nextSteeringRequestId,
+    fork,
+    renderTimer,
+    previewTimer,
+    close,
+    refreshTerminalTitle,
+    openPath,
+    editComposer,
+    recoverSession,
+    render,
+    consumePendingAction,
+    loadChangedFiles,
+    adapter,
+    startSelection,
+  }
+  const inputHandlers = createInputHandlers(
+    options.rememberMode === undefined ? inputContext : { ...inputContext, rememberMode: options.rememberMode },
+  )
+  const tuiOptions =
+    options.makeRenderer === undefined ? inputHandlers : { ...inputHandlers, makeRenderer: options.makeRenderer }
   return fork(
     settleTuiInitialization(
-      createTui({
-        ...(options.makeRenderer === undefined ? {} : { makeRenderer: options.makeRenderer }),
-        ...(createInputHandlers({
-          loop,
-          session,
-          run,
-          nextSteeringRequestId,
-          fork,
-          renderTimer,
-          previewTimer,
-          close,
-          refreshTerminalTitle,
-          openPath,
-          editComposer,
-          recoverSession,
-          render,
-          consumePendingAction,
-          loadChangedFiles,
-          adapter,
-          startSelection,
-          ...(options.rememberMode === undefined ? {} : { rememberMode: options.rememberMode }),
-        }) as Parameters<typeof createTui>[0]),
-      }),
+      createTui(tuiOptions),
       () => loop.closed,
       (created) => Effect.sync(() => created.releaseTerminal()),
     ).pipe(
@@ -138,7 +140,8 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           )
           const startInitialSelection = () => {
             if (input.threadId === undefined) return Effect.void
-            return Effect.sync(() => startSelection(() => session.selectThread(input.threadId!))).pipe(
+            const threadId = input.threadId
+            return Effect.sync(() => startSelection(() => session.selectThread(threadId))).pipe(
               Effect.flatMap(Fiber.join),
             )
           }
@@ -147,19 +150,17 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
             Stream.runHead,
             Effect.asVoid,
           )
+          const initialAction = initialSubmitAction(input.prompt, loop.model.mode)
           run(
             startInitialSelection().pipe(
               Effect.andThen(awaitConnected),
               Effect.andThen(
-                initialSubmitAction(input.prompt, loop.model.mode) === undefined
+                initialAction === undefined
                   ? Effect.void
                   : Effect.sync(() => {
                       const submission = nextSubmissionId(loop.submissionSequence)
                       loop.submissionSequence = submission.sequence
-                      execute(adapter, {
-                        ...initialSubmitAction(input.prompt, loop.model.mode)!,
-                        submissionId: submission.id,
-                      })
+                      execute(adapter, { ...initialAction, submissionId: submission.id })
                     }),
               ),
             ),
@@ -186,5 +187,5 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
       ),
       Effect.asVoid,
     ),
-  ) as Fiber.Fiber<void, never>
+  )
 }

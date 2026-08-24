@@ -17,7 +17,8 @@ export const makeTurnSqlState = (
         Effect.gen(function* () {
           const before = yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution'`
           if (before[0] === undefined) return yield* missing(id)
-          const wasQueued = String((before[0] as { status?: unknown }).status) === "queued"
+          const existing = yield* decodeAgent(before[0])
+          const wasQueued = existing.status === "queued"
           if (wasQueued)
             return yield* RepositoryError.make({
               message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,

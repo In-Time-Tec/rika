@@ -117,7 +117,11 @@ describe("FoldKit Thread client story", () => {
         frame: { protocolVersion: 1, payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "4" } },
       }),
     )
-    expect(duringCandidate).toMatchObject({ connection: "connecting", attachedThreadId: "thread-b", threadVersion: "4" })
+    expect(duringCandidate).toMatchObject({
+      connection: "connecting",
+      attachedThreadId: "thread-b",
+      threadVersion: "4",
+    })
     const [restored] = update(duringCandidate, FailedThreadConnection({ epoch: 3, message: "C mismatch" }))
     expect(restored).toMatchObject({ connection: "connected", attachedThreadId: "thread-b", error: "C mismatch" })
     const [drafted] = update(restored, ChangedDraft({ value: "still A" }))
@@ -149,7 +153,9 @@ describe("FoldKit Thread client story", () => {
     expect(recovering).toMatchObject({ connection: "connecting", attachedThreadId: "thread-a", threadVersion: "8" })
     const [failed] = update(
       recovering,
-      GotThreadFrame({ frame: { protocolVersion: 1, payload: { _tag: "ClientReconnectFailed", threadId: "thread-a" } } }),
+      GotThreadFrame({
+        frame: { protocolVersion: 1, payload: { _tag: "ClientReconnectFailed", threadId: "thread-a" } },
+      }),
     )
     expect(failed).toMatchObject({ connection: "failed", attachedThreadId: "thread-a", threadVersion: "8" })
   })

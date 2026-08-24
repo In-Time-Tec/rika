@@ -1,6 +1,6 @@
 id: effect-prefer-socket
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer effect/unstable/socket Socket with Scope-managed lifetime; keep WebSocket or raw network interop in a transport adapter.
 rule:
   any:

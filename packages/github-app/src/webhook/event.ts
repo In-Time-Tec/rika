@@ -72,21 +72,21 @@ export const decodeWebhookEvent = Effect.fn("GitHubWebhookEvent.decode")(functio
     case "installation":
       return {
         _tag: eventName,
-        payload: yield* Schema.decodeUnknownEffect(Schema.fromJsonString(InstallationEvent))(body).pipe(
+        payload: yield* Schema.decodeEffect(Schema.fromJsonString(InstallationEvent))(body).pipe(
           Effect.mapError(() => invalidEvent(eventName)),
         ),
       } satisfies WebhookEvent
     case "installation_repositories":
       return {
         _tag: eventName,
-        payload: yield* Schema.decodeUnknownEffect(Schema.fromJsonString(InstallationRepositoriesEvent))(body).pipe(
+        payload: yield* Schema.decodeEffect(Schema.fromJsonString(InstallationRepositoriesEvent))(body).pipe(
           Effect.mapError(() => invalidEvent(eventName)),
         ),
       } satisfies WebhookEvent
     case "repository":
       return {
         _tag: eventName,
-        payload: yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RepositoryEvent))(body).pipe(
+        payload: yield* Schema.decodeEffect(Schema.fromJsonString(RepositoryEvent))(body).pipe(
           Effect.mapError(() => invalidEvent(eventName)),
         ),
       } satisfies WebhookEvent

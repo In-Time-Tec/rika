@@ -8,17 +8,59 @@ import * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
-import { update } from "@rika/terminal/terminal-state-reducer"
 import type { ThreadItem } from "@rika/terminal/terminal-state"
-import { Crypto, Deferred, Effect, Exit, Fiber, FiberHandle, FiberSet, Scope, Stream, SubscriptionRef } from "effect"
+import { update } from "@rika/terminal/terminal-state-reducer"
+import {
+  Context,
+  Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  FiberHandle,
+  FiberSet,
+  Layer,
+  Schema,
+  Scope,
+  Stream,
+  SubscriptionRef,
+} from "effect"
 import process, { stdin, stdout } from "node:process"
 import { terminalTitleSequence } from "../program"
-import { makeEventRouter } from "./events"
-import { makeProcessRuntime } from "../runtime/service"
+import * as ProcessEvents from "./events"
+import * as ProcessRuntime from "../runtime/service"
 import { initializeRenderer } from "./setup"
 import type { InteractiveLoop } from "../runtime/context"
 import type { TuiLifecycle } from "./interrupt"
 import { provideLayerScoped } from "../runtime/layer"
+
+class EventRouter extends Context.Service<EventRouter, { readonly make: typeof ProcessEvents.makeEventRouter }>()(
+  "@rika/cli/interactive/process/lifecycle/loop/EventRouter",
+) {}
+
+class Runtime extends Context.Service<Runtime, { readonly make: typeof ProcessRuntime.makeProcessRuntime }>()(
+  "@rika/cli/interactive/process/lifecycle/loop/Runtime",
+) {}
+
+const processServices = Layer.merge(
+  Layer.succeed(EventRouter, EventRouter.of({ make: ProcessEvents.makeEventRouter })),
+  Layer.succeed(Runtime, Runtime.of({ make: ProcessRuntime.makeProcessRuntime })),
+)
+
+const ThreadItems = Schema.Array(
+  Schema.Struct({
+    id: Schema.String,
+    title: Schema.String,
+    workspace: Schema.String,
+    pinned: Schema.Boolean,
+    archived: Schema.Boolean,
+    status: Schema.Literals(["idle", "error", "queued", "running"]),
+    unread: Schema.Boolean,
+    lastActivityAt: Schema.Finite,
+    editTotals: Schema.optionalKey(
+      Schema.Struct({ added: Schema.Finite, modified: Schema.Finite, removed: Schema.Finite }),
+    ),
+  }),
+)
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
@@ -50,6 +92,8 @@ export const interactiveTui =
         Effect.provideService(Scope.Scope, appScope),
       )
       const lifecycle = yield* SubscriptionRef.make<TuiLifecycle>({ _tag: "Running" })
+      const eventRouter = yield* EventRouter
+      const processRuntime = yield* Runtime
       const resolvedModeConfiguration = options.modeConfiguration?.()
       const rememberedMode = resolvedModeConfiguration?.rememberedMode
       const configuredRememberedMode =
@@ -71,16 +115,16 @@ export const interactiveTui =
           threadView: undefined,
           modelPreview: undefined,
           requestedThreadId: input.threadId,
-          workingFrame: undefined as string | undefined,
-          renderer: undefined as Effect.Success<ReturnType<typeof createTui>> | undefined,
-          initialization: undefined as Fiber.Fiber<void, never> | undefined,
+          workingFrame: undefined,
+          renderer: undefined,
+          initialization: undefined,
           closed: false,
           replayTurns: new Map<string, Turn.Turn>(),
           projectionRevisions: new Map<string, number>(),
           appliedDeltas: new Set<string>(),
           activitySequence: 0,
           submissionSequence: 0,
-          selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,
+          selectionFiber: undefined,
           selectionGeneration: 0,
           renderSuppressed: false,
           selectionResyncs: new Set<string>(),
@@ -90,7 +134,7 @@ export const interactiveTui =
           submittedSinceIdle: false,
           terminalPauseCount: 0,
           pendingJobControlPause: false,
-          releaseJobControlPause: undefined as (() => boolean) | undefined,
+          releaseJobControlPause: undefined,
           openingPath: false,
           ctrlCMenuVisible: false,
         }
@@ -99,9 +143,8 @@ export const interactiveTui =
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => stdout.write(sequence))
         const refreshTerminalTitle = () => {
           const threadId = loop.model.currentThreadId
-          const title =
-            loop.model.currentThreadTitle ??
-            (loop.model.threads as ReadonlyArray<ThreadItem>).find((thread) => thread.id === threadId)?.title
+          const threads: ReadonlyArray<ThreadItem> = Schema.decodeSync(ThreadItems)(loop.model.threads)
+          const title = loop.model.currentThreadTitle ?? threads.find((thread) => thread.id === threadId)?.title
           if (title !== undefined)
             writeTerminalTitle(
               terminalTitleSequence(title, loop.model.workspace, loop.model.busy ? loop.workingFrame : undefined),
@@ -136,7 +179,7 @@ export const interactiveTui =
             ),
           )
         }
-        const runtime = makeProcessRuntime({
+        const runtime = processRuntime.make({
           loop,
           fork,
           renderTimer,
@@ -161,7 +204,7 @@ export const interactiveTui =
           consumePendingAction,
           requestSelectionResync,
         } = runtime
-        const { dispatch } = makeEventRouter({
+        const { dispatch } = eventRouter.make({
           loop,
           refreshTerminalTitle,
           render,
@@ -208,4 +251,4 @@ export const interactiveTui =
         })
         return teardown(false)
       }).pipe(Effect.ensuring(Scope.close(appScope, Exit.void)))
-    }).pipe(provideLayerScoped(BunCrypto.layer))
+    }).pipe(provideLayerScoped(Layer.merge(BunCrypto.layer, processServices)))

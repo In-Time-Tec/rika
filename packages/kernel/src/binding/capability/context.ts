@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { Prompt, Session, SessionHistory, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
 import { operation } from "../envelope"
@@ -40,6 +40,35 @@ const Current = Schema.Struct({
   trustMode: Schema.String,
 })
 
+interface CurrentValue {
+  threadId: string
+  turnId?: string
+  runId?: string
+  epoch?: string
+  workspace: string
+  trustMode: string
+}
+
+interface PageValue {
+  entries: Array<typeof Entry.Type>
+  hasBefore: boolean
+  hasAfter: boolean
+  firstEntryId?: string
+  lastEntryId?: string
+  unknownCursors?: ReadonlyArray<string>
+}
+
+interface HistoryPageInput {
+  limit: number
+  before?: string
+  after?: string
+}
+
+interface CheckpointValue {
+  id: string
+  summary?: string
+}
+
 const PageInput = Schema.Struct({
   limit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1_000)),
   before: Schema.optionalKey(Schema.String),
@@ -53,7 +82,7 @@ const SearchInput = Schema.Struct({
 
 const textOfMessage = (message: Prompt.Message): string => {
   const content = message.content
-  return typeof content === "string"
+  return Predicate.isString(content)
     ? content
     : content
         .flatMap((part) => {
@@ -113,14 +142,17 @@ export const make = (options: {
       output: Current,
       failure: ContextUnavailable,
       handle: () =>
-        Effect.map(ToolContext.ToolContext, (context) => ({
-          threadId: context.sessionId,
-          ...(context.toolCallId === undefined ? {} : { turnId: context.toolCallId }),
-          ...(context.runId === undefined ? {} : { runId: context.runId }),
-          ...(context.operationKey === undefined ? {} : { epoch: context.operationKey }),
-          workspace: options.workspace,
-          trustMode: options.trustMode,
-        })),
+        Effect.map(ToolContext.ToolContext, (context) => {
+          const current: CurrentValue = {
+            threadId: context.sessionId,
+            workspace: options.workspace,
+            trustMode: options.trustMode,
+          }
+          if (context.toolCallId !== undefined) current.turnId = context.toolCallId
+          if (context.runId !== undefined) current.runId = context.runId
+          if (context.operationKey !== undefined) current.epoch = context.operationKey
+          return current
+        }),
     }),
     operation({
       name: "historyPage",
@@ -129,19 +161,19 @@ export const make = (options: {
       failure: ContextUnavailable,
       handle: (input) =>
         Effect.map(path, (entries) => {
-          const page = SessionHistory.pageHistory(entries, {
-            limit: input.limit,
-            ...(input.before === undefined ? {} : { before: input.before }),
-            ...(input.after === undefined ? {} : { after: input.after }),
-          })
-          return {
+          const pageInput: HistoryPageInput = { limit: input.limit }
+          if (input.before !== undefined) pageInput.before = input.before
+          if (input.after !== undefined) pageInput.after = input.after
+          const page = SessionHistory.pageHistory(entries, pageInput)
+          const result: PageValue = {
             entries: page.entries.map(projected),
             hasBefore: page.hasBefore,
             hasAfter: page.hasAfter,
-            ...(page.firstEntryId === undefined ? {} : { firstEntryId: page.firstEntryId }),
-            ...(page.lastEntryId === undefined ? {} : { lastEntryId: page.lastEntryId }),
-            ...(page.unknownCursors === undefined ? {} : { unknownCursors: page.unknownCursors }),
           }
+          if (page.firstEntryId !== undefined) result.firstEntryId = page.firstEntryId
+          if (page.lastEntryId !== undefined) result.lastEntryId = page.lastEntryId
+          if (page.unknownCursors !== undefined) result.unknownCursors = page.unknownCursors
+          return result
         }),
     }),
     operation({
@@ -163,10 +195,11 @@ export const make = (options: {
       failure: ContextUnavailable,
       handle: () =>
         Effect.map(path, (entries) =>
-          SessionHistory.compactionCheckpoints(entries).map((checkpoint) => ({
-            id: checkpoint.id,
-            ...(checkpoint.summary === undefined ? {} : { summary: checkpoint.summary }),
-          })),
+          SessionHistory.compactionCheckpoints(entries).map((checkpoint) => {
+            const result: CheckpointValue = { id: checkpoint.id }
+            if (checkpoint.summary !== undefined) result.summary = checkpoint.summary
+            return result
+          }),
         ),
     }),
   ],

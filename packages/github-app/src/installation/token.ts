@@ -59,8 +59,10 @@ interface CacheEntry {
   readonly usableUntilMillis: number
 }
 
-const failure = (reason: InstallationTokenError["reason"], operation: string, message: string, status?: number) =>
-  InstallationTokenError.make({ reason, operation, message, ...(status === undefined ? {} : { status }) })
+const failure = (reason: InstallationTokenError["reason"], operation: string, message: string, status?: number) => {
+  if (status === undefined) return InstallationTokenError.make({ reason, operation, message })
+  return InstallationTokenError.make({ reason, operation, message, status })
+}
 
 const canonicalPermissions = (permissions: GitHub.Permissions) =>
   Object.entries(permissions).sort(([left], [right]) => left.localeCompare(right))
@@ -115,7 +117,7 @@ export const installationTokenLayer = (options: InstallationTokenOptions = {}) =
       const admission = yield* Semaphore.make(1)
       const cache = new Map<string, CacheEntry>()
       const mint = Effect.fn("GitHubInstallationToken.mint")(function* (untrustedRequest: RepositoryTokenRequest) {
-        const request = yield* Schema.decodeUnknownEffect(RepositoryTokenRequest)(untrustedRequest).pipe(
+        const request = yield* Schema.decodeEffect(RepositoryTokenRequest)(untrustedRequest).pipe(
           Effect.mapError(() => failure("input", "mint repository token", "Repository token scope is invalid")),
         )
         const repositoryIds = canonicalRepositoryIds(request.repositoryIds)

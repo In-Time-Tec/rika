@@ -42,29 +42,28 @@ const Turn = Schema.Union([
 const Script = Schema.NonEmptyArray(Turn)
 
 const steps = Effect.fn("ScriptedModel.steps")(function* (json: string) {
-  const script = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Script))(json)
+  const script = yield* Schema.decodeEffect(Schema.fromJsonString(Script))(json)
   return script.map((turn) => {
-    const options: TestModel.StepOptions = {
-      ...(turn.delayMs === undefined ? {} : { delay: turn.delayMs }),
-      ...(turn.streamPartDelayMs === undefined ? {} : { streamPartDelay: `${turn.streamPartDelayMs} millis` }),
-      ...(turn.usage === undefined
-        ? {}
-        : {
-            usage: AiResponse.Usage.make({
-              inputTokens: {
-                uncached: turn.usage.inputTokens,
-                total: turn.usage.inputTokens,
-                cacheRead: undefined,
-                cacheWrite: undefined,
-              },
-              outputTokens: {
-                total: turn.usage.outputTokens,
-                text: turn.usage.outputTokens,
-                reasoning: undefined,
-              },
-            }),
-          }),
-    }
+    const options: TestModel.StepOptions = {}
+    if (turn.delayMs !== undefined) Object.assign(options, { delay: turn.delayMs })
+    if (turn.streamPartDelayMs !== undefined)
+      Object.assign(options, { streamPartDelay: `${turn.streamPartDelayMs} millis` })
+    if (turn.usage !== undefined)
+      Object.assign(options, {
+        usage: AiResponse.Usage.make({
+          inputTokens: {
+            uncached: turn.usage.inputTokens,
+            total: turn.usage.inputTokens,
+            cacheRead: undefined,
+            cacheWrite: undefined,
+          },
+          outputTokens: {
+            total: turn.usage.outputTokens,
+            text: turn.usage.outputTokens,
+            reasoning: undefined,
+          },
+        }),
+      })
     if ("object" in turn) return TestModel.object(turn.object, options)
     if ("failure" in turn)
       return TestModel.failure(

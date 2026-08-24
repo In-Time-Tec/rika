@@ -12,7 +12,6 @@ import { panelLoading, compactWorkspace, statusContent } from "./content"
 import { queueContentWidth, wrappedRowCount } from "../../state/layout/composer"
 import { displayInput } from "../../state/composer/model"
 import { readyOr } from "../../state/loadable"
-import type { QueueItem } from "../../state/queue/item"
 import {
   fittingQueueHint,
   queueEditingHint,
@@ -34,7 +33,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     sidebarVisible: boolean,
     threadSidebarVisible: boolean,
   ): void {
-    const queue = model.queue as ReadonlyArray<QueueItem>
+    const queue = model.queue
     const queuedTurnIds = new Set(queue.map((item) => item.id))
     const localSteeringByTurnId = new Map(
       model.steeringRequests.flatMap((request) =>

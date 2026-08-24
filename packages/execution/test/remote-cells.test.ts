@@ -2,11 +2,12 @@ import { expect, it } from "@effect/vitest"
 import { ToolContext, ToolExecutor } from "tenetkit"
 import { Cell, CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Response } from "effect/unstable/ai"
 import { configure } from "../src/route"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as RemoteCells from "../src/remote-cells"
+import * as CellAuthority from "@rika/kernel/test-cell-authority"
 
 const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 const executionIdentity = { threadId: "thread-1", turnId: "turn-1" } as const
@@ -61,6 +62,11 @@ const cellContext = (sessionId: string) =>
     }),
   )
 
+const withCellAuthority = <A, E, R>(effect: Effect.Effect<A, E, R>, sessionId: string) =>
+  Effect.flatMap(cellContext(sessionId), (toolContext) =>
+    Effect.flatMap(CellAuthority.context(toolContext), (authority) => Effect.provideContext(effect, authority)),
+  )
+
 it.effect("routes an admitted cell call through the kernel pool the host supplied", () =>
   Effect.gen(function* () {
     const executed: Array<string> = []
@@ -83,9 +89,7 @@ it.effect("routes an admitted cell call through the kernel pool the host supplie
     const environment = executorFor(configured, "rika-root")
     const context = yield* Layer.build(environment)
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
-    const outcome = yield* executor
-      .execute(request("1 + 1", "session-a"))
-      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a")))
+    const outcome = yield* withCellAuthority(executor.execute(request("1 + 1", "session-a")), "session-a")
     expect(outcome._tag).toBe("Success")
     expect(executed).toEqual(["1 + 1"])
   }).pipe(Effect.scoped),
@@ -112,10 +116,7 @@ it.effect("keeps the pool alive for a second cell rather than releasing it with 
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
-    const run = (code: string) =>
-      executor
-        .execute(request(code, "session-a"))
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a")))
+    const run = (code: string) => withCellAuthority(executor.execute(request(code, "session-a")), "session-a")
     // A pool owned by the first cell's scope is released when that cell ends, and the closed map
     // answers the next cell with an interrupt rather than a worker, so the second cell never runs.
     const first = yield* run("1 + 1")
@@ -148,9 +149,7 @@ it.effect("uses the per-call tool context of each cell rather than one bound at 
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
     for (const sessionId of ["session-a", "session-b"]) {
-      yield* executor
-        .execute(request("work", sessionId))
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext(sessionId)))
+      yield* withCellAuthority(executor.execute(request("work", sessionId)), sessionId)
     }
     expect(sessions).toEqual(["session-a", "session-b"])
   }).pipe(Effect.scoped),
@@ -177,9 +176,7 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
-    const outcome = yield* executor
-      .execute(request("1", "session-a"))
-      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a")))
+    const outcome = yield* withCellAuthority(executor.execute(request("1", "session-a")), "session-a")
     expect(outcome).toMatchObject({ _tag: "Success", result: { value: "2" } })
     expect(dispatched).toEqual([
       expect.objectContaining({
@@ -217,9 +214,7 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
     const failure = yield* Effect.flip(
-      executor
-        .execute(request("1", "session-invalid"))
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-invalid"))),
+      withCellAuthority(executor.execute(request("1", "session-invalid")), "session-invalid"),
     )
     expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
     if (failure._tag === "tenetkit/core/FrameworkFailure") {
@@ -251,9 +246,7 @@ it.effect("does not blindly retry a remote cell whose outcome is unknown", () =>
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
     const failure = yield* Effect.flip(
-      executor
-        .execute(request("1 + 1", "session-unknown"))
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-unknown"))),
+      withCellAuthority(executor.execute(request("1 + 1", "session-unknown")), "session-unknown"),
     )
     expect(failure).toMatchObject({
       _tag: "tenetkit/core/FrameworkFailure",
@@ -293,9 +286,7 @@ it.effect("accepts the same deduplicated remote result after recovered dispatch"
     })
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
-    const execute = executor
-      .execute(request("6 * 7", "session-recovered"))
-      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-recovered")))
+    const execute = withCellAuthority(executor.execute(request("6 * 7", "session-recovered")), "session-recovered")
     const first = yield* execute
     const recovered = yield* execute
     expect(recovered).toEqual(first)
@@ -324,16 +315,17 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
       providerExecuted: false,
     })
     const failure = yield* Effect.flip(
-      executor
-        .execute({
+      withCellAuthority(
+        executor.execute({
           call,
           toolCallBatch: { calls: [call] },
           turn: 0,
           toolCallIndex: 0,
           agentName: "rika-root",
           sessionId: "session-a",
-        })
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-a"))),
+        }),
+        "session-a",
+      ),
     )
     expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
     if (failure._tag === "tenetkit/core/FrameworkFailure") expect(failure.tool).toBe("bash")
@@ -378,9 +370,7 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
     const context = yield* Layer.build(executorFor(configured, "rika-root"))
     const executor = Context.get(context, ToolExecutor.ToolExecutor)
     const run = (code: string) =>
-      executor
-        .execute(request(code, "session-deadline"))
-        .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-deadline")))
+      withCellAuthority(executor.execute(request(code, "session-deadline")), "session-deadline")
     const failed = yield* run("await new Promise(() => {})")
     expect(failed).toMatchObject({
       _tag: "DomainFailure",
@@ -390,10 +380,10 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
       },
     })
     if (failed._tag === "DomainFailure") {
-      const failure = failed.failure as Cell.CellFailure
-      if (failure._tag === "tenetkit/repl/CellExecutionFailed") {
-        expect(failure.message).toContain("cell exceeded the 120s deadline")
-        expect(failure.message).toContain("rika.processes.start")
+      const failure = Schema.decodeUnknownOption(Cell.CellFailure)(failed.failure)
+      if (Option.isSome(failure) && failure.value._tag === "tenetkit/repl/CellExecutionFailed") {
+        expect(failure.value.message).toContain("cell exceeded the 120s deadline")
+        expect(failure.value.message).toContain("rika.processes.start")
       }
     }
     expect(yield* run("1 + 1")).toMatchObject({ _tag: "Success" })

@@ -1,6 +1,6 @@
 id: effect-prefer-promise-composition
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer Effect.all, Effect.forEach, Effect.race, or typed Effect recovery; bridge a foreign Promise with Effect.tryPromise at an adapter.
 note: Promise interop can remain at a named outer boundary, but internal APIs should expose Effect rather than Promise.
 rule:

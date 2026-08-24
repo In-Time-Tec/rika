@@ -59,12 +59,15 @@ const run = (request: typeof CodingToolRuntime.Request.Type) =>
 
 const read = (result: CodingToolResult.Result) => ({ text: result.text, truncated: result.truncated })
 
-const searched = (result: CodingToolResult.Result) => ({
-  text: result.text,
-  matches: result.matches ?? [],
-  ...(result.matchesTruncation === undefined ? {} : { matchesTruncation: result.matchesTruncation }),
-  truncated: result.truncated,
-})
+const searched = (result: CodingToolResult.Result) => {
+  let value: typeof Searched.Type = {
+    text: result.text,
+    matches: result.matches ?? [],
+    truncated: result.truncated,
+  }
+  if (result.matchesTruncation !== undefined) value = { ...value, matchesTruncation: result.matchesTruncation }
+  return value
+}
 
 const listed = (result: CodingToolResult.Result) => ({
   text: result.text,
@@ -72,11 +75,10 @@ const listed = (result: CodingToolResult.Result) => ({
   truncated: result.truncated,
 })
 
-const edited = (result: CodingToolResult.Result) => ({
-  text: result.text,
-  truncated: result.truncated,
-  ...(result.diff === undefined ? {} : { diff: result.diff }),
-})
+const edited = (result: CodingToolResult.Result) => {
+  const value: typeof Edited.Type = { text: result.text, truncated: result.truncated }
+  return result.diff === undefined ? value : { ...value, diff: result.diff }
+}
 
 export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
   operation({
@@ -86,12 +88,11 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     failure: Failure,
     handle: (input) =>
       Effect.map(
-        run({
-          _tag: "Grep",
-          pattern: input.pattern,
-          regex: input.regex ?? false,
-          ...(input.path === undefined ? {} : { path: input.path }),
-        }),
+        run(
+          input.path === undefined
+            ? { _tag: "Grep", pattern: input.pattern, regex: input.regex ?? false }
+            : { _tag: "Grep", pattern: input.pattern, regex: input.regex ?? false, path: input.path },
+        ),
         searched,
       ),
   }),
@@ -100,15 +101,12 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     input: ListInput,
     output: Listed,
     failure: Failure,
-    handle: (input) =>
-      Effect.map(
-        run({
-          _tag: "List",
-          ...(input.path === undefined ? {} : { path: input.path }),
-          ...(input.depth === undefined ? {} : { depth: input.depth }),
-        }),
-        listed,
-      ),
+    handle: (input) => {
+      let request: typeof CodingToolRuntime.Request.Type = { _tag: "List" }
+      if (input.path !== undefined) request = { ...request, path: input.path }
+      if (input.depth !== undefined) request = { ...request, depth: input.depth }
+      return Effect.map(run(request), listed)
+    },
   }),
   operation({
     name: "read",
@@ -117,7 +115,11 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     failure: Failure,
     handle: (input) =>
       Effect.map(
-        run({ _tag: "Read", path: input.path, ...(input.range === undefined ? {} : { readRange: input.range }) }),
+        run(
+          input.range === undefined
+            ? { _tag: "Read", path: input.path }
+            : { _tag: "Read", path: input.path, readRange: input.range },
+        ),
         read,
       ),
   }),
@@ -151,13 +153,17 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
           approval: { capability: "workspace.replace", request: { path: input.path } },
         },
         Effect.map(
-          run({
-            _tag: "Edit",
-            path: input.path,
-            oldStr: input.oldStr,
-            newStr: input.newStr,
-            ...(input.replaceAll === undefined ? {} : { replaceAll: input.replaceAll }),
-          }),
+          run(
+            input.replaceAll === undefined
+              ? { _tag: "Edit", path: input.path, oldStr: input.oldStr, newStr: input.newStr }
+              : {
+                  _tag: "Edit",
+                  path: input.path,
+                  oldStr: input.oldStr,
+                  newStr: input.newStr,
+                  replaceAll: input.replaceAll,
+                },
+          ),
           edited,
         ),
       ),

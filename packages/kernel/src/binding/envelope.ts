@@ -13,6 +13,13 @@ export const NestedOperationFailed = Schema.Struct({
 })
 export type NestedOperationFailed = typeof NestedOperationFailed.Type
 
+const NestedOperationFailure = Schema.Union([
+  NestedOperation.NestedOperationDivergence,
+  NestedOperation.NestedOperationUnknown,
+  NestedOperation.NestedOperationDenied,
+  NestedOperation.NestedOperationSuspended,
+])
+
 const failed = (kind: string, failure: NestedOperation.Failure): NestedOperationFailed => {
   if (failure._tag === "tenetkit/core/NestedOperationDivergence")
     return NestedOperationFailed.make({
@@ -65,23 +72,8 @@ export const nested: {
     request: Crossing,
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | NestedOperationFailed, R | Requirements> =>
-    NestedOperation.run(
-      {
-        kind: request.kind,
-        payload: request.payload,
-        replayPolicy: request.replayPolicy,
-        ...(request.approval === undefined ? {} : { approval: request.approval }),
-      },
-      effect,
-    ).pipe(
-      Effect.mapError((error) =>
-        typeof error === "object" &&
-        error !== null &&
-        "_tag" in error &&
-        String(error._tag).startsWith("tenetkit/core/")
-          ? failed(request.kind, error as NestedOperation.Failure)
-          : (error as E),
-      ),
+    NestedOperation.run(request, effect).pipe(
+      Effect.catchIf(Schema.is(NestedOperationFailure), (failure) => Effect.fail(failed(request.kind, failure))),
     ),
 )
 
@@ -98,4 +90,13 @@ export const operation = <
   readonly handle: (
     input: Input["Type"],
   ) => Effect.Effect<Output["Type"], Failure["Type"] & HostBindingRegistry.Tagged, R>
-}): HostBindingRegistry.AnyOperation<R> => definition as unknown as HostBindingRegistry.AnyOperation<R>
+}): HostBindingRegistry.AnyOperation<R> => ({
+  name: definition.name,
+  input: definition.input,
+  output: definition.output,
+  failure: definition.failure,
+  handle: (input) =>
+    Schema.is(definition.input)(input)
+      ? definition.handle(input)
+      : Effect.die(new Error(`Host binding ${definition.name} received invalid decoded input`)),
+})

@@ -6,7 +6,7 @@ import { TestConsole } from "effect/testing"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { hostLayer, httpLayer } from "../../../src/provider/openai/auth-adapter"
 
-const response = (request: HttpClientRequest.HttpClientRequest, status: number, body: unknown) =>
+const response = (request: HttpClientRequest.HttpClientRequest, status: number, body: Schema.Json) =>
   HttpClientResponse.fromWeb(
     request,
     new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {

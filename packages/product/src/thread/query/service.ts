@@ -77,12 +77,12 @@ const message = (
       const rendered = message(candidate, all, textLimit)
       return rendered === undefined ? [] : [rendered]
     })
-  return {
+  const rendered: Message = {
     role: "child",
     text: safeText(link.text, textLimit),
     subagentId: link.subagentId,
-    ...(children.length === 0 ? {} : { children }),
   }
+  return children.length === 0 ? rendered : { ...rendered, children }
 }
 const item = (
   turn: TurnQueueState.PageResult["turns"][number],
@@ -184,13 +184,9 @@ const makeForWorkspace = (workspace: string) =>
       if (input.query.trim().length === 0) return yield* QueryError.make({ message: "query must be non-empty" })
       const limit = yield* bounded("limit", input.limit, 10, 50)
       yield* rebuildWorkspaceSearch().pipe(Effect.mapError(mapError))
+      const searchInput = { workspace, query: input.query, limit }
       const page = yield* searches
-        .search({
-          workspace,
-          query: input.query,
-          limit,
-          ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-        })
+        .search(input.includeArchived === undefined ? searchInput : { ...searchInput, includeArchived: input.includeArchived })
         .pipe(Effect.mapError(mapError))
       const results = yield* Effect.forEach(
         page.results,
@@ -347,7 +343,7 @@ const makeForWorkspace = (workspace: string) =>
             ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
             : []
         return encodeBounded(
-          { ...base, ...(page.oldestCursor === undefined ? {} : { nextCursor: page.oldestCursor }) },
+          page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
           candidates,
           omissions,
         )
@@ -365,7 +361,7 @@ const makeForWorkspace = (workspace: string) =>
           ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
           : []
       return encodeBounded(
-        { ...base, ...(page.oldestCursor === undefined ? {} : { nextCursor: page.oldestCursor }) },
+        page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
         candidates,
         omissions,
       )

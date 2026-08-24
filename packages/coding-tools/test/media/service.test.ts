@@ -3,7 +3,7 @@ import { AnalysisInput } from "../../src/media/contract"
 import { MediaAnalyzer, analyzerTestLayer, analyzerUnavailableLayer } from "@rika/coding-tools/media-view-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, PlatformError } from "effect"
 import * as MediaView from "@rika/coding-tools/media-view-service"
 import { provide } from "../support/layer"
 
@@ -116,7 +116,23 @@ describe("MediaView", () => {
       expect(
         (yield* attempt({
           exists: () => Effect.succeed(true),
-          stat: () => Effect.succeed({ type: "File", size: FileSystem.Size(1) } as FileSystem.File.Info),
+          stat: () =>
+            Effect.succeed({
+              type: "File",
+              mtime: Option.none(),
+              atime: Option.none(),
+              birthtime: Option.none(),
+              dev: 0,
+              ino: Option.none(),
+              mode: 0,
+              nlink: Option.none(),
+              uid: Option.none(),
+              gid: Option.none(),
+              rdev: Option.none(),
+              size: FileSystem.Size(1),
+              blksize: Option.none(),
+              blocks: Option.none(),
+            }),
           readFile: () => Effect.fail(error("readFile")),
         }))._tag,
       ).toBe("MediaMissingError")

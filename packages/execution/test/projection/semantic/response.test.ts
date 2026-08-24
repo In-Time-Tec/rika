@@ -17,7 +17,7 @@ const semanticResponse = (fragments: ReadonlyArray<ProviderFragment>) => [
     type: "tool-call" as const,
     id: "read-call",
     name: "read",
-    params: Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+    params: Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(
       fragments.map((fragment) => fragment.params).join(""),
     ),
     providerExecuted: false,
@@ -34,7 +34,7 @@ const distributed = (text: string, count: number): ReadonlyArray<string> => {
 const projectFragments = (fragments: ReadonlyArray<ProviderFragment>) => {
   resetEventPosition()
   const projector = TreeProjector.make("turn-chunk-invariant", "project this")
-  projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never))
+  projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
   const commits = [
     projector.apply(modelResponseContent("raw-root-run", "model-operation", semanticResponse(fragments))),
   ]
@@ -45,7 +45,7 @@ describe("TenetKit semantic response projection", () => {
   it.effect("hydrates compact committed and interrupted responses through the Runtime API", () =>
     Effect.gen(function* () {
       const tags: Array<string> = []
-      const response = yield* Schema.decodeUnknownEffect(RunEvent.CompletedModelResponse)({
+      const response = yield* Schema.decodeEffect(RunEvent.CompletedModelResponse)({
         content: [{ type: "text", text: "retained output", metadata: {} }],
       })
       const resolveModelResponse: Runtime.Interface["resolveModelResponse"] = (event) =>
@@ -53,17 +53,28 @@ describe("TenetKit semantic response projection", () => {
           tags.push(event._tag)
           return response
         })
-      const compact = (tag: "ModelResponseCommitted" | "ModelResponseInterrupted"): RunTree.TreeEvent =>
-        ({
-          rootRunId: "raw-root-run",
-          runId: "raw-root-run",
-          event: {
-            _tag: tag,
-            operationKey: `operation:${tag}`,
-            ...(tag === "ModelResponseInterrupted" ? { reason: "cancel" } : {}),
-          },
-          cursor: `cursor:${tag}`,
-        }) as RunTree.TreeEvent
+      const compact = (tag: "ModelResponseCommitted" | "ModelResponseInterrupted"): RunTree.TreeEvent => {
+        const projected =
+          tag === "ModelResponseInterrupted"
+            ? treeEvent("raw-root-run", {
+                _tag: tag,
+                operationKey: `operation:${tag}`,
+                modelCallId: `call:${tag}`,
+                modelAttemptId: `attempt:${tag}`,
+                attempt: 0,
+                digest: `digest:${tag}`,
+                reason: "cancel",
+              })
+            : treeEvent("raw-root-run", {
+                _tag: tag,
+                operationKey: `operation:${tag}`,
+                modelCallId: `call:${tag}`,
+                modelAttemptId: `attempt:${tag}`,
+                attempt: 0,
+                digest: `digest:${tag}`,
+              })
+        return { ...projected, event: RunEvent.RunEvent.make(projected.event) }
+      }
 
       const committed = yield* resolveSemanticTreeEvent(compact("ModelResponseCommitted"), resolveModelResponse)
       const interrupted = yield* resolveSemanticTreeEvent(compact("ModelResponseInterrupted"), resolveModelResponse)
@@ -71,7 +82,7 @@ describe("TenetKit semantic response projection", () => {
       expect(committed.event).toMatchObject({ _tag: "ModelResponseCommitted", response })
       expect(interrupted.event).toMatchObject({ _tag: "ModelResponseInterrupted", response })
       const projector = TreeProjector.make("turn-interrupted", "interrupt")
-      projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never))
+      projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
       const patch = projector.apply(interrupted)
       expect(patch.upsert).toContainEqual(
         expect.objectContaining({ content: { _tag: "Entry", role: "assistant", text: "retained output" } }),
@@ -102,7 +113,7 @@ describe("TenetKit semantic response projection", () => {
   it("preserves normalized content ordering across text, tools, files, and sources", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-content", "content")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never))
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     const patch = projector.apply(
       modelResponseContent("raw-root-run", "content-response", [
         { type: "reasoning", text: "reason", metadata: {} },
@@ -136,7 +147,7 @@ describe("TenetKit semantic response projection", () => {
   it("rebuilds the same units from a semantic response archive", () => {
     resetEventPosition()
     const events = [
-      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never),
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
       modelResponseContent("raw-root-run", "archived-response", [
         { type: "reasoning", text: "inspect first", metadata: {} },
         { type: "text", text: "answer", metadata: {} },
@@ -150,18 +161,9 @@ describe("TenetKit semantic response projection", () => {
         },
       ]),
       treeEvent("raw-root-run", {
-        _tag: "ToolExecutionStarted",
-        turn: 0,
-        call: {
-          type: "tool-call",
-          id: "read-call",
-          name: "read",
-          params: { path: "src/a.ts" },
-          providerExecuted: false,
-          metadata: {},
-        },
-      } as never),
-      treeEvent("raw-root-run", { _tag: "RunCompleted", result: { text: "answer" } } as never),
+        _tag: "RunCompleted",
+        result: { text: "answer", turns: 0, session: { sessionId: "raw-root-run:session", leafId: null } },
+      }),
     ]
     const live = TreeProjector.make("turn-archive", "archive this")
     const livePatch = live.applyAll(events)
@@ -187,9 +189,12 @@ describe("TenetKit semantic response projection", () => {
   it("serializes one checkpoint for a bounded semantic replay page", () => {
     resetEventPosition()
     const events = [
-      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 } as never),
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
       modelResponseContent("raw-root-run", "response", [{ type: "text", text: "done", metadata: {} }]),
-      treeEvent("raw-root-run", { _tag: "RunCompleted", result: { text: "done" } } as never),
+      treeEvent("raw-root-run", {
+        _tag: "RunCompleted",
+        result: { text: "done", turns: 0, session: { sessionId: "raw-root-run:session", leafId: null } },
+      }),
     ]
     const projector = TreeProjector.make("turn-replay-page", "replay")
     const stringify = vi.spyOn(JSON, "stringify")

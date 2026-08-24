@@ -4,7 +4,7 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
-import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, DeviceId, OrganizationId, WorkspaceId } from "@rika/product/hosted-model"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { FileSystem, Config, Effect, Layer, Random, Redacted, Ref, Schema } from "effect"
@@ -309,22 +309,24 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
       const fingerprint = CheckoutFingerprint.make("local-checkout")
       yield* user(pool, authenticated.userId)
       const product = yield* HostedProduct
+      const workspaceIdentity = yield* Schema.decodeEffect(WorkspaceId)("local-workspace")
       yield* product.registerRunner({
         principal: authenticated,
         checkoutFingerprint: fingerprint,
         registration: {
-          workspaceIdentity: "local-workspace" as never,
+          workspaceIdentity,
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
           kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
           capabilities: { cells: true, checkpoints: false, pty: false },
         },
       })
+      const deviceId = yield* Schema.decodeEffect(DeviceId)(authenticated.deviceId)
       const createLocal = () =>
         product.createConnection({
           principal: authenticated,
           owner: personal(authenticated.userId),
           executorKind: "runner",
-          runnerTarget: { deviceId: authenticated.deviceId as never, checkoutFingerprint: fingerprint },
+          runnerTarget: { deviceId, checkoutFingerprint: fingerprint },
         })
       const staleThread = yield* createLocal()
       const staleRun = yield* product.admitRun({

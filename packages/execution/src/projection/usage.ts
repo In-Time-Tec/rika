@@ -112,39 +112,30 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     readonly attemptTotal?: number | undefined
   }) => {
     const current = usageState.tokens
+    const total = add(current?.total, value.attemptTotal)
+    const inputTotal = add(current?.input.total, value.inputTotal)
+    const inputUncached = add(current?.input.uncached, value.inputUncached)
+    const inputCacheRead = add(current?.input.cacheRead, value.inputCacheRead)
+    const inputCacheWrite = add(current?.input.cacheWrite, value.inputCacheWrite)
+    const outputTotal = add(current?.output.total, value.outputTotal)
+    const outputText = add(current?.output.text, value.outputText)
+    const outputReasoning = add(current?.output.reasoning, value.outputReasoning)
+    const failedProviderTotal = add(current?.failedProviderTotal, value.failedProviderTotal)
+    const input: Projection.TokenTotals["input"] = {}
+    const output: Projection.TokenTotals["output"] = {}
+    if (inputTotal !== undefined) Object.assign(input, { total: inputTotal })
+    if (inputUncached !== undefined) Object.assign(input, { uncached: inputUncached })
+    if (inputCacheRead !== undefined) Object.assign(input, { cacheRead: inputCacheRead })
+    if (inputCacheWrite !== undefined) Object.assign(input, { cacheWrite: inputCacheWrite })
+    if (outputTotal !== undefined) Object.assign(output, { total: outputTotal })
+    if (outputText !== undefined) Object.assign(output, { text: outputText })
+    if (outputReasoning !== undefined) Object.assign(output, { reasoning: outputReasoning })
     const next: Projection.TokenTotals = {
-      ...(add(current?.total, value.attemptTotal) === undefined
-        ? {}
-        : { total: add(current?.total, value.attemptTotal)! }),
-      input: {
-        ...(add(current?.input.total, value.inputTotal) === undefined
-          ? {}
-          : { total: add(current?.input.total, value.inputTotal)! }),
-        ...(add(current?.input.uncached, value.inputUncached) === undefined
-          ? {}
-          : { uncached: add(current?.input.uncached, value.inputUncached)! }),
-        ...(add(current?.input.cacheRead, value.inputCacheRead) === undefined
-          ? {}
-          : { cacheRead: add(current?.input.cacheRead, value.inputCacheRead)! }),
-        ...(add(current?.input.cacheWrite, value.inputCacheWrite) === undefined
-          ? {}
-          : { cacheWrite: add(current?.input.cacheWrite, value.inputCacheWrite)! }),
-      },
-      output: {
-        ...(add(current?.output.total, value.outputTotal) === undefined
-          ? {}
-          : { total: add(current?.output.total, value.outputTotal)! }),
-        ...(add(current?.output.text, value.outputText) === undefined
-          ? {}
-          : { text: add(current?.output.text, value.outputText)! }),
-        ...(add(current?.output.reasoning, value.outputReasoning) === undefined
-          ? {}
-          : { reasoning: add(current?.output.reasoning, value.outputReasoning)! }),
-      },
-      ...(add(current?.failedProviderTotal, value.failedProviderTotal) === undefined
-        ? {}
-        : { failedProviderTotal: add(current?.failedProviderTotal, value.failedProviderTotal)! }),
+      input,
+      output,
     }
+    if (total !== undefined) Object.assign(next, { total })
+    if (failedProviderTotal !== undefined) Object.assign(next, { failedProviderTotal })
     if (JSON.stringify(next) !== JSON.stringify({ input: {}, output: {} })) usageState = { ...usageState, tokens: next }
   }
 
@@ -177,17 +168,20 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
         ? undefined
         : input.inputTotal + input.outputTotal)
     addTokenTotals({ ...input, attemptTotal })
-    let pricingPatch: Record<string, number>
-    if (pricing === "included") pricingPatch = { includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
-    else if (input.costNanoUsd === undefined) pricingPatch = { unpricedAttempts: usageState.unpricedAttempts + 1 }
-    else
-      pricingPatch = {
-        costNanoUsd: add(usageState.costNanoUsd, input.costNanoUsd)!,
-        pricedAttempts: usageState.pricedAttempts + 1,
-      }
+    if (pricing === "included") usageState = { ...usageState, includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
+    else if (input.costNanoUsd === undefined)
+      usageState = { ...usageState, unpricedAttempts: usageState.unpricedAttempts + 1 }
+    else {
+      const costNanoUsd = add(usageState.costNanoUsd, input.costNanoUsd)
+      if (costNanoUsd !== undefined)
+        usageState = {
+          ...usageState,
+          costNanoUsd,
+          pricedAttempts: usageState.pricedAttempts + 1,
+        }
+    }
     usageState = {
       ...usageState,
-      ...pricingPatch,
       ...(attemptTotal === undefined
         ? { uncountedAttempts: usageState.uncountedAttempts + 1 }
         : { countedAttempts: usageState.countedAttempts + 1 }),
@@ -225,14 +219,12 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     settledAttemptKeys,
     modelCalls,
     usage: () => usageState,
-    activeTime: () =>
-      activeAvailable
-        ? {
-            _tag: "Available",
-            accumulatedMillis: activeAccumulatedMillis,
-            ...(activeSince === undefined ? {} : { activeSince }),
-          }
-        : { _tag: "Unavailable" },
+    activeTime: () => {
+      if (!activeAvailable) return { _tag: "Unavailable" }
+      const activeTime: Projection.ActiveTime = { _tag: "Available", accumulatedMillis: activeAccumulatedMillis }
+      if (activeSince !== undefined) Object.assign(activeTime, { activeSince })
+      return activeTime
+    },
     contextPending: () => pendingContextOrdinal !== undefined,
     nextRequestOrdinal: () => {
       requestOrdinal += 1
@@ -248,19 +240,22 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     deactivate,
     recordAttempt,
     settleOpenAttempts,
-    persist: () => ({
-      usageState: structuredClone(usageState),
-      requestOrdinal,
-      ...(pendingContextOrdinal === undefined ? {} : { pendingContextOrdinal }),
-      attemptStarts: [...attemptStarts],
-      settledAttemptKeys: [...settledAttemptKeys],
-      modelCalls: [...modelCalls],
-      activeAvailable,
-      activeDepth,
-      activeAccumulatedMillis,
-      ...(activeSince === undefined ? {} : { activeSince }),
-      ...(lastLifecycleAt === undefined ? {} : { lastLifecycleAt }),
-    }),
+    persist: () => {
+      const persisted: PersistedUsage = {
+        usageState: structuredClone(usageState),
+        requestOrdinal,
+        attemptStarts: [...attemptStarts],
+        settledAttemptKeys: [...settledAttemptKeys],
+        modelCalls: [...modelCalls],
+        activeAvailable,
+        activeDepth,
+        activeAccumulatedMillis,
+      }
+      if (pendingContextOrdinal !== undefined) Object.assign(persisted, { pendingContextOrdinal })
+      if (activeSince !== undefined) Object.assign(persisted, { activeSince })
+      if (lastLifecycleAt !== undefined) Object.assign(persisted, { lastLifecycleAt })
+      return persisted
+    },
     restore: (persisted) => {
       usageState = structuredClone(persisted.usageState)
       requestOrdinal = persisted.requestOrdinal

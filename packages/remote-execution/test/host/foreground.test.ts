@@ -3,50 +3,80 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Clock, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../../src/host/foreground"
-import type { AccessWire } from "../../src/protocol/messages"
+import {
+  ApiMessage,
+  RunnerMessage,
+  type AccessWire,
+  type ApiMessage as ApiMessageValue,
+  type CellLifecycleFrame,
+  type RunnerMessage as RunnerMessageValue,
+} from "../../src/protocol/messages"
 import { provideLayer } from "../support/layer"
+
+const hasTag =
+  <Tag extends RunnerMessageValue["_tag"]>(tag: Tag) =>
+  (message: RunnerMessageValue): message is Extract<RunnerMessageValue, { readonly _tag: Tag }> =>
+    message._tag === tag
+
+type CellLifecycleMessage = Extract<RunnerMessageValue, { readonly _tag: "CellLifecycle" }>
+
+const hasFrameTag =
+  <Tag extends CellLifecycleFrame["_tag"]>(tag: Tag) =>
+  (
+    message: CellLifecycleMessage,
+  ): message is CellLifecycleMessage & { readonly frame: Extract<CellLifecycleFrame, { readonly _tag: Tag }> } =>
+    message.frame._tag === tag
 
 class FakeWebSocket {
   static current: FakeWebSocket | undefined
   static readonly instances: Array<FakeWebSocket> = []
-  static onSend: ((socket: FakeWebSocket, message: unknown) => void) | undefined
+  static onSend: ((socket: FakeWebSocket, message: RunnerMessageValue) => void) | undefined
   readonly readyState = 1
-  readonly sent: Array<unknown> = []
+  readonly sent: Array<RunnerMessageValue> = []
   closed = false
-  private readonly listeners = new Map<string, Set<(event: any) => void>>()
+  private readonly listeners = new Map<string, Set<EventListener>>()
 
   constructor(_url: string) {
     FakeWebSocket.current = this
     FakeWebSocket.instances.push(this)
   }
 
-  addEventListener(type: string, listener: (event: any) => void) {
+  addEventListener(type: string, listener: EventListener) {
     const current = this.listeners.get(type) ?? new Set()
     current.add(listener)
     this.listeners.set(type, current)
   }
 
-  removeEventListener(type: string, listener: (event: any) => void) {
+  removeEventListener(type: string, listener: EventListener) {
     this.listeners.get(type)?.delete(listener)
   }
 
   send(value: string) {
-    const message = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(value)
+    const message = Schema.decodeSync(Schema.fromJsonString(RunnerMessage))(value)
     this.sent.push(message)
     FakeWebSocket.onSend?.(this, message)
   }
 
   close() {
     this.closed = true
-    this.emit("close", { code: 1000, reason: "test complete" })
+    this.emit("close", new CloseEvent("close", { code: 1000, reason: "test complete" }))
   }
 
-  emit(type: string, event: unknown) {
+  emit(type: string, event: Event) {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 
-  message(value: unknown) {
-    this.emit("message", { data: Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(value) })
+  message(value: ApiMessageValue) {
+    const data = Schema.encodeSync(Schema.fromJsonString(ApiMessage))(value)
+    this.emit("message", new MessageEvent<string>("message", { data }))
+  }
+
+  messages<Tag extends RunnerMessageValue["_tag"]>(tag: Tag) {
+    return this.sent.filter(hasTag(tag))
+  }
+
+  frames<Tag extends CellLifecycleFrame["_tag"]>(tag: Tag) {
+    return this.messages("CellLifecycle").filter(hasFrameTag(tag))
   }
 }
 
@@ -68,12 +98,9 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTi
 const terminal = (socket: FakeWebSocket, operationKey: string, occurrence = 0) =>
   eventually(
     () =>
-      socket.sent.filter(
-        (message: any) =>
-          message._tag === "CellLifecycle" &&
-          message.frame._tag === "Terminal" &&
-          message.frame.attribution.operationKey === operationKey,
-      )[occurrence] as any,
+      socket.frames("Terminal").filter((message) => message.frame.attribution.operationKey === operationKey)[
+        occurrence
+      ],
   )
 
 const acknowledgeTerminal = (socket: FakeWebSocket, access: AccessWire, operationKey: string, occurrence = 0) =>
@@ -94,12 +121,21 @@ const bindings = {
   descriptors: [],
 } as const
 
+const CellFailureWire = Schema.Struct({
+  kind: Schema.Literals(["cancelled", "timeout", "workspace"]),
+  message: Schema.String,
+})
+
+const CellSuccessValue = Schema.TaggedStruct("Success", {
+  result: Schema.Struct({ value: Schema.Json }),
+})
+
 describe.sequential("foreground Runner", () => {
   it.effect("uses only a local admission and replays cell results in memory", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
-        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
         return original
       }),
       () =>
@@ -136,9 +172,7 @@ describe.sequential("foreground Runner", () => {
               }).pipe(Effect.provide(foregroundContext)),
             )
             const socket = yield* eventually(() => FakeWebSocket.current)
-            const hello = yield* eventually(
-              () => socket.sent.find((message: any) => message._tag === "RunnerHello") as any,
-            )
+            const hello = yield* eventually(() => socket.messages("RunnerHello")[0])
             expect(hello).toEqual({
               _tag: "RunnerHello",
               hello: {
@@ -161,7 +195,7 @@ describe.sequential("foreground Runner", () => {
                 assignmentGeneration: 1,
                 instanceId: "device-1",
                 executorId: "executor-1",
-                processIncarnation: (hello as any).hello.processIncarnation,
+                processIncarnation: hello.hello.processIncarnation,
               },
               leaseEpoch: 1,
               sessionToken: "session-1",
@@ -199,11 +233,8 @@ describe.sequential("foreground Runner", () => {
               },
             })
             yield* acknowledgeTerminal(socket, access, "operation-mismatch")
-            const mismatch = yield* eventually(
-              () =>
-                socket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-mismatch",
-                ) as any,
+            const mismatch = yield* eventually(() =>
+              socket.messages("LocalCellResult").find((message) => message.operationKey === "operation-mismatch"),
             )
             expect(mismatch.response).toEqual({
               _tag: "DomainFailure",
@@ -229,19 +260,16 @@ describe.sequential("foreground Runner", () => {
             }
             socket.message({ _tag: "CellExecute", request })
             yield* acknowledgeTerminal(socket, access, "operation-1")
-            const first = yield* eventually(
-              () =>
-                socket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-1",
-                ) as any,
+            const first = yield* eventually(() =>
+              socket.messages("LocalCellResult").find((message) => message.operationKey === "operation-1"),
             )
             expect(first.response._tag).toBe("Success")
             socket.message({ _tag: "CellExecute", request })
             yield* acknowledgeTerminal(socket, access, "operation-1", 1)
             const results = yield* eventually(() => {
-              const values = socket.sent.filter(
-                (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-1",
-              )
+              const values = socket
+                .messages("LocalCellResult")
+                .filter((message) => message.operationKey === "operation-1")
               return values.length === 2 ? values : undefined
             })
             expect(results).toEqual([
@@ -260,16 +288,14 @@ describe.sequential("foreground Runner", () => {
                 response: first.response,
               },
             ])
-            const lifecycleReplays = socket.sent
-              .filter(
-                (message: any) =>
-                  message._tag === "CellLifecycle" && message.frame.attribution.operationKey === "operation-1",
-              )
-              .map((message: any) => message.frame)
-            const terminalIndex = lifecycleReplays.findIndex((frame: any) => frame._tag === "Terminal")
+            const lifecycleReplays = socket
+              .messages("CellLifecycle")
+              .filter((message) => message.frame.attribution.operationKey === "operation-1")
+              .map((message) => message.frame)
+            const terminalIndex = lifecycleReplays.findIndex((frame) => frame._tag === "Terminal")
             const firstLifecycle = lifecycleReplays.slice(0, terminalIndex + 1)
-            expect(firstLifecycle.map((frame: any) => frame.cursor)).toEqual(
-              firstLifecycle.map((_: unknown, index: number) => index + 1),
+            expect(firstLifecycle.map((frame) => frame.cursor)).toEqual(
+              firstLifecycle.map((_frame, index) => index + 1),
             )
             expect(lifecycleReplays.slice(terminalIndex + 1)).toEqual(firstLifecycle)
             const outputRequest = {
@@ -280,14 +306,8 @@ describe.sequential("foreground Runner", () => {
             }
             socket.message({ _tag: "CellExecute", request: outputRequest })
             yield* acknowledgeTerminal(socket, access, "operation-output")
-            const output = yield* eventually(
-              () =>
-                socket.sent.find(
-                  (message: any) =>
-                    message._tag === "CellLifecycle" &&
-                    message.frame._tag === "Output" &&
-                    message.frame.attribution.operationKey === "operation-output",
-                ) as any,
+            const output = yield* eventually(() =>
+              socket.frames("Output").find((message) => message.frame.attribution.operationKey === "operation-output"),
             )
             expect(output.frame.text).not.toContain("sensitive")
             expect(output.frame.text.length).toBeLessThanOrEqual(16_384)
@@ -299,7 +319,7 @@ describe.sequential("foreground Runner", () => {
               toolCallId: "call-cancel",
               code: "await new Promise<void>(() => {})",
             }
-            FakeWebSocket.onSend = (origin, message: any) => {
+            FakeWebSocket.onSend = (origin, message) => {
               if (
                 message._tag !== "CellLifecycle" ||
                 message.frame._tag !== "Accepted" ||
@@ -322,12 +342,10 @@ describe.sequential("foreground Runner", () => {
             })
             expect(cancelled.frame.outcome).toBe("cancelled")
             expect(
-              socket.sent
-                .filter(
-                  (message: any) =>
-                    message._tag === "CellLifecycle" && message.frame.attribution.operationKey === "operation-cancel",
-                )
-                .map((message: any) => message.frame._tag),
+              socket
+                .messages("CellLifecycle")
+                .filter((message) => message.frame.attribution.operationKey === "operation-cancel")
+                .map((message) => message.frame._tag),
             ).toEqual(["Accepted", "Started", "Terminal"])
             const deadlineRequest = {
               ...request,
@@ -338,14 +356,10 @@ describe.sequential("foreground Runner", () => {
               deadlineAt: DateTime.formatIso(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 100)),
             }
             socket.message({ _tag: "CellExecute", request: deadlineRequest })
-            yield* eventually(
-              () =>
-                socket.sent.find(
-                  (message: any) =>
-                    message._tag === "CellLifecycle" &&
-                    message.frame._tag === "Started" &&
-                    message.frame.attribution.operationKey === "operation-deadline",
-                ) as any,
+            yield* eventually(() =>
+              socket
+                .frames("Started")
+                .find((message) => message.frame.attribution.operationKey === "operation-deadline"),
             )
             yield* TestClock.adjust("100 millis")
             yield* Deferred.await(terminalPersistenceStarted)
@@ -357,12 +371,9 @@ describe.sequential("foreground Runner", () => {
             })
             yield* Effect.yieldNow
             expect(
-              socket.sent.filter(
-                (message: any) =>
-                  message._tag === "CellLifecycle" &&
-                  message.frame._tag === "Terminal" &&
-                  message.frame.attribution.operationKey === "operation-deadline",
-              ),
+              socket
+                .frames("Terminal")
+                .filter((message) => message.frame.attribution.operationKey === "operation-deadline"),
             ).toEqual([])
             yield* Deferred.succeed(releaseTerminalPersistence, undefined)
             const timedOut = yield* acknowledgeTerminal(socket, access, "operation-deadline")
@@ -372,24 +383,23 @@ describe.sequential("foreground Runner", () => {
             })
             expect(timedOut.frame.outcome).toBe("failed")
             expect(
-              socket.sent.filter(
-                (message: any) =>
-                  message._tag === "CellLifecycle" &&
-                  message.frame._tag === "Terminal" &&
-                  message.frame.attribution.operationKey === "operation-deadline",
-              ),
+              socket
+                .frames("Terminal")
+                .filter((message) => message.frame.attribution.operationKey === "operation-deadline"),
             ).toHaveLength(1)
             socket.message({ _tag: "CellExecute", request: deadlineRequest })
             const replayedTimeout = yield* acknowledgeTerminal(socket, access, "operation-deadline", 1)
             expect(replayedTimeout.frame.response).toEqual(timedOut.frame.response)
             expect(
-              socket.sent.filter(
-                (message: any) =>
-                  message._tag === "CellLifecycle" &&
-                  message.frame._tag === "Terminal" &&
-                  message.frame.attribution.operationKey === "operation-deadline" &&
-                  message.frame.response.failure?.kind === "cancelled",
-              ),
+              socket
+                .frames("Terminal")
+                .filter(
+                  (message) =>
+                    message.frame.attribution.operationKey === "operation-deadline" &&
+                    message.frame.response._tag === "DomainFailure" &&
+                    Schema.is(CellFailureWire)(message.frame.response.failure) &&
+                    message.frame.response.failure.kind === "cancelled",
+                ),
             ).toEqual([])
             expect(yield* fileSystem.readDirectory(workspacePath)).toEqual([])
             yield* Fiber.interrupt(runner)
@@ -398,7 +408,7 @@ describe.sequential("foreground Runner", () => {
         ).pipe(provideLayer(BunFileSystem.layer)),
       (original) =>
         Effect.sync(() => {
-          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
           FakeWebSocket.onSend = undefined
@@ -410,7 +420,7 @@ describe.sequential("foreground Runner", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
-        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
         return original
       }),
       () =>
@@ -432,9 +442,7 @@ describe.sequential("foreground Runner", () => {
               }).pipe(Effect.provide(foregroundContext)),
             )
             const socket = yield* eventually(() => FakeWebSocket.instances[0])
-            const hello = yield* eventually(
-              () => socket.sent.find((message: any) => message._tag === "RunnerHello") as any,
-            )
+            const hello = yield* eventually(() => socket.messages("RunnerHello")[0])
             const access: AccessWire = {
               version: 1,
               fence: {
@@ -473,7 +481,7 @@ describe.sequential("foreground Runner", () => {
               toolCallId: "call-1",
               code: "globalThis.__rikaReconnectIdentity = (globalThis.__rikaReconnectIdentity ?? 0) + 1",
               attempt: 0,
-              replayPolicy: "pure",
+              replayPolicy: "pure" as const,
               admittedAt: null,
               deadlineAt: "2999-01-01T00:00:00.000Z",
               bindings,
@@ -481,15 +489,14 @@ describe.sequential("foreground Runner", () => {
             socket.message({ _tag: "CellExecute", request: reconnectRequest })
             const initialTerminal = yield* terminal(socket, "operation-reconnect")
             expect(initialTerminal.frame.response).toMatchObject({ _tag: "Success" })
+            const initialResponse = yield* Schema.decodeUnknownEffect(CellSuccessValue)(initialTerminal.frame.response)
             socket.close()
             for (let index = 0; index < 10; index += 1) {
               yield* Effect.yieldNow
               yield* TestClock.adjust("250 millis")
             }
             const reconnectedSocket = yield* eventually(() => FakeWebSocket.instances[1])
-            const reconnect = yield* eventually(
-              () => reconnectedSocket.sent.find((message: any) => message._tag === "ExecutorReconnect") as any,
-            )
+            const reconnect = yield* eventually(() => reconnectedSocket.messages("ExecutorReconnect")[0])
             expect(reconnect.access.fence).toEqual(access.fence)
             const renewed: AccessWire = { ...access, leaseEpoch: 2 }
             reconnectedSocket.message({
@@ -511,12 +518,10 @@ describe.sequential("foreground Runner", () => {
               afterCursor: 0,
             })
             yield* acknowledgeTerminal(reconnectedSocket, renewed, "operation-reconnect")
-            const resent = yield* eventually(
-              () =>
-                reconnectedSocket.sent.find(
-                  (message: any) =>
-                    message._tag === "LocalCellResult" && message.operationKey === "operation-reconnect",
-                ) as any,
+            const resent = yield* eventually(() =>
+              reconnectedSocket
+                .messages("LocalCellResult")
+                .find((message) => message.operationKey === "operation-reconnect"),
             )
             expect(resent.access).toEqual(renewed)
             reconnectedSocket.message({
@@ -536,23 +541,21 @@ describe.sequential("foreground Runner", () => {
               },
             })
             yield* acknowledgeTerminal(reconnectedSocket, renewed, "operation-after-reconnect")
-            const afterReconnect = yield* eventually(
-              () =>
-                reconnectedSocket.sent.find(
-                  (message: any) =>
-                    message._tag === "LocalCellResult" && message.operationKey === "operation-after-reconnect",
-                ) as any,
+            const afterReconnect = yield* eventually(() =>
+              reconnectedSocket
+                .messages("LocalCellResult")
+                .find((message) => message.operationKey === "operation-after-reconnect"),
             )
             expect(afterReconnect.response).toMatchObject({
               _tag: "Success",
-              result: { value: initialTerminal.frame.response.result.value },
+              result: { value: initialResponse.result.value },
             })
             yield* Fiber.interrupt(runner)
           }),
         ),
       (original) =>
         Effect.sync(() => {
-          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
         }),
@@ -563,7 +566,7 @@ describe.sequential("foreground Runner", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
-        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
         return original
       }),
       () =>
@@ -634,9 +637,7 @@ describe.sequential("foreground Runner", () => {
               }).pipe(Effect.provide(foregroundContext)),
             )
             const socket = yield* eventually(() => FakeWebSocket.instances[0])
-            const reconnect = yield* eventually(
-              () => socket.sent.find((message: any) => message._tag === "ExecutorReconnect") as any,
-            )
+            const reconnect = yield* eventually(() => socket.messages("ExecutorReconnect")[0])
             expect(reconnect.access).toEqual(access)
             const renewed = { ...access, leaseEpoch: 2 }
             socket.message({
@@ -663,11 +664,8 @@ describe.sequential("foreground Runner", () => {
               failure: { kind: "cancelled", message: "Cell operation cancelled" },
             })
             expect(cancelled.frame.outcome).toBe("cancelled")
-            const result = yield* eventually(
-              () =>
-                socket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-resume",
-                ) as any,
+            const result = yield* eventually(() =>
+              socket.messages("LocalCellResult").find((message) => message.operationKey === "operation-resume"),
             )
             expect(result.response).toEqual({
               _tag: "DomainFailure",
@@ -698,7 +696,7 @@ describe.sequential("foreground Runner", () => {
         ),
       (original) =>
         Effect.sync(() => {
-          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
           FakeWebSocket.onSend = undefined
@@ -710,7 +708,7 @@ describe.sequential("foreground Runner", () => {
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
-        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
         return original
       }),
       () =>
@@ -740,9 +738,7 @@ describe.sequential("foreground Runner", () => {
               }).pipe(Effect.provide(foregroundContext)),
             )
             const firstSocket = yield* eventually(() => FakeWebSocket.instances[0])
-            const hello = yield* eventually(
-              () => firstSocket.sent.find((message: any) => message._tag === "RunnerHello") as any,
-            )
+            const hello = yield* eventually(() => firstSocket.messages("RunnerHello")[0])
             const access: AccessWire = {
               version: 1,
               fence: {
@@ -790,11 +786,8 @@ describe.sequential("foreground Runner", () => {
               },
             })
             const firstTerminal = yield* acknowledgeTerminal(firstSocket, access, "operation-goodbye")
-            const completed = yield* eventually(
-              () =>
-                firstSocket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-goodbye",
-                ) as any,
+            const completed = yield* eventually(() =>
+              firstSocket.messages("LocalCellResult").find((message) => message.operationKey === "operation-goodbye"),
             )
             const pending = yield* eventually(() =>
               latestSnapshot !== undefined &&
@@ -817,7 +810,7 @@ describe.sequential("foreground Runner", () => {
               yield* TestClock.adjust("250 millis")
             }
             const reconnectedSocket = yield* eventually(() => FakeWebSocket.instances[1])
-            yield* eventually(() => reconnectedSocket.sent.find((message: any) => message._tag === "ExecutorReconnect"))
+            yield* eventually(() => reconnectedSocket.messages("ExecutorReconnect")[0])
             reconnectedSocket.message({
               _tag: "ExecutorReconnected",
               welcome: {
@@ -837,11 +830,10 @@ describe.sequential("foreground Runner", () => {
               afterCursor: 0,
             })
             yield* acknowledgeTerminal(reconnectedSocket, access, "operation-goodbye")
-            yield* eventually(
-              () =>
-                reconnectedSocket.sent.find(
-                  (message: any) => message._tag === "LocalCellResult" && message.operationKey === "operation-goodbye",
-                ) as any,
+            yield* eventually(() =>
+              reconnectedSocket
+                .messages("LocalCellResult")
+                .find((message) => message.operationKey === "operation-goodbye"),
             )
             expect(latestSnapshot?.receipts).toEqual([
               expect.objectContaining({
@@ -866,16 +858,14 @@ describe.sequential("foreground Runner", () => {
             yield* Fiber.interrupt(runner)
             expect(
               yield* eventually(() =>
-                reconnectedSocket.sent.find((message: any) => message._tag === "RunnerGoodbye") === undefined
-                  ? undefined
-                  : true,
+                reconnectedSocket.messages("RunnerGoodbye")[0] === undefined ? undefined : true,
               ),
             ).toBe(true)
           }),
         ),
       (original) =>
         Effect.sync(() => {
-          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
         }),

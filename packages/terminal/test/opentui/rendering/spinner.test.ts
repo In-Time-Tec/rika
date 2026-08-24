@@ -35,7 +35,7 @@ const withSurface = <A>(model: Model, use: (probe: AnimationProbe) => A) =>
     )
     try {
       surface.update(model)
-      const renderer = setup.renderer as unknown as { requestRender: () => void }
+      const renderer = setup.renderer
       const request = renderer.requestRender.bind(renderer)
       let renders = 0
       renderer.requestRender = () => {

@@ -4,12 +4,15 @@ export { Service, RepositoryError } from "@rika/product/transcript-repository"
 export type { Interface } from "@rika/product/transcript-repository"
 import { Effect, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
+import { ThreadId } from "@rika/product/thread-record"
+import { TurnId } from "@rika/product/turn-record"
 import { readTranscriptProjection } from "./sql-reader"
-import { makeTranscriptSqlPage } from "./sql-page"
+import * as TranscriptSqlPage from "./sql-page"
 import { transcriptSqlWrites } from "./sql-writes"
 
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
+const RecoveryRow = Schema.Struct({ thread_id: ThreadId, turn_id: TurnId })
 
 export const layer = Layer.effect(
   Service,
@@ -29,14 +32,16 @@ export const layer = Layer.effect(
             WHERE c.turn_id = t.id AND c.projection_version > ${projectionVersion}
           )
         ORDER BY t.created_at ASC, t.id ASC`.pipe(Effect.mapError(error))
-          return rows.map((raw) => {
-            const row = raw as Record<string, unknown>
-            return { threadId: String(row.thread_id) as never, turnId: String(row.turn_id) as never }
-          })
+          return yield* Effect.forEach(rows, (row) =>
+            Schema.decodeUnknownEffect(RecoveryRow)(row).pipe(
+              Effect.map(({ thread_id, turn_id }) => ({ threadId: thread_id, turnId: turn_id })),
+              Effect.mapError(error),
+            ),
+          )
         },
       ),
       ...transcriptSqlWrites.make(sql, get),
-      ...makeTranscriptSqlPage(sql),
+      ...TranscriptSqlPage.makeTranscriptSqlPage(sql),
     })
   }),
 )

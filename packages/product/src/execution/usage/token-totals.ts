@@ -42,19 +42,17 @@ export const sumTokenTotals = (values: ReadonlyArray<TokenTotals | undefined>): 
   const outputText = addOptional(values.map((value) => value?.output.text))
   const outputReasoning = addOptional(values.map((value) => value?.output.reasoning))
   const failedProviderTotal = addOptional(values.map((value) => value?.failedProviderTotal))
-  return {
-    ...(total === undefined ? {} : { total }),
-    input: {
-      ...(inputTotal === undefined ? {} : { total: inputTotal }),
-      ...(inputUncached === undefined ? {} : { uncached: inputUncached }),
-      ...(inputCacheRead === undefined ? {} : { cacheRead: inputCacheRead }),
-      ...(inputCacheWrite === undefined ? {} : { cacheWrite: inputCacheWrite }),
-    },
-    output: {
-      ...(outputTotal === undefined ? {} : { total: outputTotal }),
-      ...(outputText === undefined ? {} : { text: outputText }),
-      ...(outputReasoning === undefined ? {} : { reasoning: outputReasoning }),
-    },
-    ...(failedProviderTotal === undefined ? {} : { failedProviderTotal }),
-  }
+  let input: InputTokenTotals = {}
+  if (inputTotal !== undefined) input = { ...input, total: inputTotal }
+  if (inputUncached !== undefined) input = { ...input, uncached: inputUncached }
+  if (inputCacheRead !== undefined) input = { ...input, cacheRead: inputCacheRead }
+  if (inputCacheWrite !== undefined) input = { ...input, cacheWrite: inputCacheWrite }
+  let output: OutputTokenTotals = {}
+  if (outputTotal !== undefined) output = { ...output, total: outputTotal }
+  if (outputText !== undefined) output = { ...output, text: outputText }
+  if (outputReasoning !== undefined) output = { ...output, reasoning: outputReasoning }
+  let totals: TokenTotals = { input, output }
+  if (total !== undefined) totals = { ...totals, total }
+  if (failedProviderTotal !== undefined) totals = { ...totals, failedProviderTotal }
+  return totals
 }

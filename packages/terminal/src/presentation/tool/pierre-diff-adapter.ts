@@ -7,7 +7,7 @@ import { colors } from "../terminal/theme"
 
 const strip = (line: string | undefined): string => (line ?? "").replace(/\r?\n$/, "")
 
-const hunkStarts = (spec: string): { readonly oldStart: number; readonly newStart: number } => {
+const hunkStarts = (spec: string) => {
   const match = /-(\d+)(?:,\d+)? \+(\d+)/.exec(spec)
   return { oldStart: Number(match?.[1] ?? 1), newStart: Number(match?.[2] ?? 1) }
 }
@@ -58,7 +58,10 @@ export const renderPierreDiff: {
   const cached = pierreCache.get(key)
   if (cached !== undefined) return cached === null ? undefined : new TerminalStyledText([...cached])
   const chunks = renderPierreDiffChunks(patch, options)
-  if (pierreCache.size >= pierreCacheLimit) pierreCache.delete(pierreCache.keys().next().value!)
+  if (pierreCache.size >= pierreCacheLimit) {
+    const oldest = pierreCache.keys().next().value
+    if (oldest !== undefined) pierreCache.delete(oldest)
+  }
   pierreCache.set(key, chunks)
   return chunks === null ? undefined : new TerminalStyledText([...chunks])
 })
@@ -75,40 +78,40 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
   if (!Array.isArray(parsed) || parsed.length === 0) return null
   const rows: Array<Row> = []
   let hasContent = false
-  for (const result of parsed as ReadonlyArray<{ files?: ReadonlyArray<Record<string, any>> }>)
-    for (const file of result.files ?? []) {
-      const additions: ReadonlyArray<string> = file.additionLines ?? []
-      const deletions: ReadonlyArray<string> = file.deletionLines ?? []
-      const lang = languageForPath(String(file.name ?? ""))
-      for (const hunk of (file.hunks ?? []) as ReadonlyArray<Record<string, any>>) {
-        const { oldStart, newStart } = hunkStarts(String(hunk.hunkSpecs ?? ""))
+  for (const result of parsed)
+    for (const file of result.files) {
+      const additions = file.additionLines
+      const deletions = file.deletionLines
+      const lang = languageForPath(file.name)
+      for (const hunk of file.hunks) {
+        const { oldStart, newStart } = hunkStarts(hunk.hunkSpecs ?? "")
         if (newStart > 1 || rows.length > 0) rows.push({ ellipsis: true })
-        for (const group of (hunk.hunkContent ?? []) as ReadonlyArray<Record<string, any>>) {
+        for (const group of hunk.hunkContent) {
           if (group.type === "context") {
-            for (let index = 0; index < Number(group.lines ?? 0); index += 1) {
+            for (let index = 0; index < group.lines; index += 1) {
               rows.push({
-                number: newStart + Number(group.additionLineIndex ?? 0) + index,
+                number: newStart + group.additionLineIndex + index,
                 marker: " ",
-                content: strip(additions[Number(group.additionLineIndex ?? 0) + index]),
+                content: strip(additions[group.additionLineIndex + index]),
                 lang,
               })
               hasContent = true
             }
           } else {
-            for (let index = 0; index < Number(group.deletions ?? 0); index += 1) {
+            for (let index = 0; index < group.deletions; index += 1) {
               rows.push({
-                number: oldStart + Number(group.deletionLineIndex ?? 0) + index,
+                number: oldStart + group.deletionLineIndex + index,
                 marker: "-",
-                content: strip(deletions[Number(group.deletionLineIndex ?? 0) + index]),
+                content: strip(deletions[group.deletionLineIndex + index]),
                 lang,
               })
               hasContent = true
             }
-            for (let index = 0; index < Number(group.additions ?? 0); index += 1) {
+            for (let index = 0; index < group.additions; index += 1) {
               rows.push({
-                number: newStart + Number(group.additionLineIndex ?? 0) + index,
+                number: newStart + group.additionLineIndex + index,
                 marker: "+",
-                content: strip(additions[Number(group.additionLineIndex ?? 0) + index]),
+                content: strip(additions[group.additionLineIndex + index]),
                 lang,
               })
               hasContent = true

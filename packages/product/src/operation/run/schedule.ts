@@ -29,7 +29,7 @@ export const makeProductOperationSchedule = (
     const repairSummariesOnce = yield* Effect.cached(
       input.repairThreadSummaries.pipe(
         Effect.provide(input.executionDependencies),
-        Effect.catch((error: unknown) =>
+        Effect.catch((error) =>
           Effect.logError("thread-summary.repair.failed").pipe(Effect.annotateLogs("rika.failure.kind", String(error))),
         ),
       ),

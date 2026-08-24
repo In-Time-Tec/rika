@@ -1,4 +1,4 @@
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Schema } from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Schema } from "effect"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
@@ -79,8 +79,7 @@ const storeFailure = (error: StoreError) => {
     kind = error.reason
   return HostedThreadProtocolError.make({ kind, message: error.message })
 }
-const operationFailure = (error: unknown) =>
-  unavailable(Schema.is(HostedThreadApplicationError)(error) ? error.message : String(error))
+const operationFailure = (error: HostedThreadApplicationError) => unavailable(error.message)
 const frame = (payload: ServerFrame["payload"]): ServerFrame => ({ protocolVersion, payload })
 
 const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): ServerFrame["payload"] => {
@@ -101,7 +100,10 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
           : "unavailable",
       currentThreadVersion: command.threadVersion,
       currentCursor: command.cursor ?? zeroCursor,
-      message: typeof command.result.message === "string" ? command.result.message : "Command failed",
+      message: Option.getOrElse(
+        Schema.decodeUnknownOption(Schema.String)(command.result.message),
+        () => "Command failed",
+      ),
       details: {},
     }
   }
@@ -130,40 +132,55 @@ type InteractiveMutatingCommand = Exclude<
 >
 
 const productCommand = (command: InteractiveMutatingCommand) => {
-  let value: unknown
+  const decode = Schema.decodeUnknownEffect(InteractiveCommand)
   switch (command._tag) {
-    case "Steer":
-      value = {
-        _tag: "Steer",
-        text: command.text,
-        requestId: command.commandId,
-        ...(command.targetTurnId === undefined ? {} : { turnId: command.targetTurnId }),
-      }
-      break
+    case "Steer": {
+      const value =
+        command.targetTurnId === undefined
+          ? { _tag: "Steer", text: command.text, requestId: command.commandId }
+          : { _tag: "Steer", text: command.text, requestId: command.commandId, turnId: command.targetTurnId }
+      return decode(value).pipe(
+        Effect.mapError(() =>
+          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
+        ),
+      )
+    }
     case "InterruptAndSend":
-      value = { _tag: "InterruptAndSend", prompt: command.text }
-      break
+      return decode({ _tag: "InterruptAndSend", prompt: command.text }).pipe(
+        Effect.mapError(() =>
+          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
+        ),
+      )
     case "Cancel":
-      value = { _tag: "Cancel" }
-      break
+      return decode({ _tag: "Cancel" }).pipe(
+        Effect.mapError(() =>
+          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
+        ),
+      )
     case "Approve":
-      value = {
+      return decode({
         _tag: "ApproveAuthorization",
         turnId: command.turnId,
         authorizationId: command.authorizationId,
         checkpoint: command.checkpoint,
-      }
-      break
+      }).pipe(
+        Effect.mapError(() =>
+          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
+        ),
+      )
     case "Deny":
-      value = {
+      return decode({
         _tag: "DenyAuthorization",
         turnId: command.turnId,
         authorizationId: command.authorizationId,
         checkpoint: command.checkpoint,
-      }
-      break
+      }).pipe(
+        Effect.mapError(() =>
+          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
+        ),
+      )
   }
-  return Schema.decodeUnknownEffect(InteractiveCommand)(value).pipe(
+  return decode(command).pipe(
     Effect.mapError(() =>
       HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
     ),
@@ -274,20 +291,26 @@ export const layer = Layer.effect(
               Effect.orElseSucceed(() => undefined),
             )
           }
-          return [
-            frame({
-              _tag: "CommandRejected",
-              requestId: message.requestId,
-              ...(commandId === undefined ? {} : { commandId }),
-              ...(threadId === undefined ? {} : { threadId }),
-              reason: error.kind,
-              ...(current === undefined
-                ? {}
-                : { currentThreadVersion: current.threadVersion, currentCursor: current.cursor }),
-              message: error.message,
-              details: {},
-            }),
-          ]
+          const rejected: Extract<ServerFrame["payload"], { readonly _tag: "CommandRejected" }> =
+            current === undefined
+              ? {
+                  _tag: "CommandRejected",
+                  requestId: message.requestId,
+                  reason: error.kind,
+                  message: error.message,
+                  details: {},
+                }
+              : {
+                  _tag: "CommandRejected",
+                  requestId: message.requestId,
+                  reason: error.kind,
+                  currentThreadVersion: current.threadVersion,
+                  currentCursor: current.cursor,
+                  message: error.message,
+                  details: {},
+                }
+          const identified = commandId === undefined ? rejected : { ...rejected, commandId }
+          return [frame(threadId === undefined ? identified : { ...identified, threadId })]
         })
 
         const receiveUnsafe = Effect.fn("HostedThreadProtocol.receive")(function* (
@@ -303,15 +326,20 @@ export const layer = Layer.effect(
                     _tag: "OrganizationOwner" as const,
                     organizationId: OrganizationId.make(command.owner.organizationId),
                   }
+            const connectionInput = {
+              principal,
+              owner,
+              executorKind: command.executorKind,
+              threadId: command.commandId,
+            }
+            const projectInput =
+              command.projectId === undefined ? connectionInput : { ...connectionInput, projectId: command.projectId }
             const created = yield* product
-              .createConnection({
-                principal,
-                owner,
-                ...(command.projectId === undefined ? {} : { projectId: command.projectId }),
-                executorKind: command.executorKind,
-                ...(command.runnerTarget === undefined ? {} : { runnerTarget: command.runnerTarget }),
-                threadId: command.commandId,
-              })
+              .createConnection(
+                command.runnerTarget === undefined
+                  ? projectInput
+                  : { ...projectInput, runnerTarget: command.runnerTarget },
+              )
               .pipe(Effect.mapError(productFailure))
             const threadId = ThreadId.make(created.threadId)
             const authority = yield* product
@@ -347,16 +375,20 @@ export const layer = Layer.effect(
               const createdSnapshot = yield* operations
                 .snapshot(authority.ownerId, ProductThreadId.make(threadId))
                 .pipe(Effect.result)
+              const completion = {
+                ownerId: authority.ownerId,
+                threadId,
+                commandId: command.commandId,
+                result: { _tag: "ThreadCreated", threadId },
+                events: [],
+                completedAt: receivedAt,
+              }
               completed = yield* store
-                .completeCommand({
-                  ownerId: authority.ownerId,
-                  threadId,
-                  commandId: command.commandId,
-                  result: { _tag: "ThreadCreated", threadId },
-                  events: [],
-                  ...(createdSnapshot._tag === "Success" ? { snapshot: createdSnapshot.success } : {}),
-                  completedAt: receivedAt,
-                })
+                .completeCommand(
+                  createdSnapshot._tag === "Success"
+                    ? { ...completion, snapshot: createdSnapshot.success }
+                    : completion,
+                )
                 .pipe(Effect.mapError(storeFailure))
             }
             return [frame(commandResult(completed, message.requestId))]
@@ -698,24 +730,20 @@ export const layer = Layer.effect(
 
           const applied = yield* Effect.gen(function* () {
             if (command._tag === "SubmitPrompt") {
+              const promptParts = command.attachments?.map((attachment) =>
+                attachment.filename === undefined
+                  ? { type: "image" as const, mediaType: attachment.mediaType, data: attachment.data }
+                  : {
+                      type: "image" as const,
+                      mediaType: attachment.mediaType,
+                      data: attachment.data,
+                      filename: attachment.filename,
+                    },
+              )
+              const admissionInput = { principal, threadId, operationKey: command.commandId, prompt: command.text }
+              const partsInput = promptParts === undefined ? admissionInput : { ...admissionInput, promptParts }
               const admitted = yield* product
-                .admitRun({
-                  principal,
-                  threadId,
-                  operationKey: command.commandId,
-                  prompt: command.text,
-                  ...(command.attachments === undefined
-                    ? {}
-                    : {
-                        promptParts: command.attachments.map((attachment) => ({
-                          type: "image" as const,
-                          mediaType: attachment.mediaType,
-                          data: attachment.data,
-                          ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
-                        })),
-                      }),
-                  ...(command.mode === undefined ? {} : { mode: command.mode }),
-                })
+                .admitRun(command.mode === undefined ? partsInput : { ...partsInput, mode: command.mode })
                 .pipe(Effect.mapError(productFailure))
               return {
                 result: { _tag: "PromptAdmitted" as const, status: admitted.status },
@@ -754,7 +782,8 @@ export const layer = Layer.effect(
                   }),
                 ),
               )
-              return { result: { _tag: "Applied" } as const, events: [] as ReadonlyArray<InteractiveEvent> }
+              const events: ReadonlyArray<InteractiveEvent> = []
+              return { result: { _tag: "Applied" } as const, events }
             }
             if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
               const result = yield* workspace
@@ -777,7 +806,8 @@ export const layer = Layer.effect(
                   kind: repositoryServiceFailureKind(result.reason),
                   message: result.message,
                 })
-              return { result: { _tag: "Applied" } as const, events: [] as ReadonlyArray<InteractiveEvent> }
+              const events: ReadonlyArray<InteractiveEvent> = []
+              return { result: { _tag: "Applied" } as const, events }
             }
             if (command._tag === "Approve" || command._tag === "Deny") {
               const snapshot = yield* operations
@@ -867,12 +897,13 @@ export const layer = Layer.effect(
                   if (batch.failure !== undefined)
                     result = { _tag: "Rejected" as const, reason: "unavailable", message: batch.failure.message }
                   else if (controlFailure === undefined)
-                    result = {
-                      _tag: "Applied" as const,
-                      ...(authorization === undefined
-                        ? {}
-                        : { authorization: { ...authorization, result: { _tag: "Delivered" as const } } }),
-                    }
+                    result =
+                      authorization === undefined
+                        ? { _tag: "Applied" as const }
+                        : {
+                            _tag: "Applied" as const,
+                            authorization: { ...authorization, result: { _tag: "Delivered" as const } },
+                          }
                   else
                     result = {
                       _tag: "Rejected" as const,
@@ -907,7 +938,7 @@ export const layer = Layer.effect(
                       reason: Schema.is(HostedThreadApplicationError)(error) ? "unavailable" : error.kind,
                       message: error.message,
                     },
-                    events: [] as ReadonlyArray<InteractiveEvent>,
+                    events: new Array<InteractiveEvent>(),
                   }),
             ),
           )

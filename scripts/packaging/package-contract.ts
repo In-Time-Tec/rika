@@ -8,9 +8,9 @@ export const targets = {
 
 export type PackageTarget = keyof typeof targets
 
-export const targetNames = Object.keys(targets) as ReadonlyArray<PackageTarget>
-
 export const isPackageTarget = (value: string): value is PackageTarget => Object.hasOwn(targets, value)
+
+export const targetNames = Object.keys(targets).filter(isPackageTarget)
 
 export const archiveName: {
   (version: string, target: PackageTarget): string

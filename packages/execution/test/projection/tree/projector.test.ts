@@ -1,9 +1,11 @@
 import type { SemanticTreeEvent } from "../../../src/projection/semantic/event"
 import { describe, expect, it } from "@effect/vitest"
+import { RunEvent } from "tenetkit/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import type { CheckpointInstrumentation } from "../../../src/projection/tree/projector-recovery"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Schema } from "effect"
+import { Prompt, Response } from "effect/unstable/ai"
 import {
   assistantOf,
   block,
@@ -12,6 +14,21 @@ import {
   resetEventPosition,
   treeEvent,
 } from "../../support/projector-event.fixture"
+
+const CheckpointState = Schema.Struct({
+  nodes: Schema.Array(
+    Schema.Struct({
+      cells: Schema.Array(Schema.Tuple([Schema.String, Schema.Unknown])),
+    }),
+  ),
+  runningCompactions: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+type RunEventInput = {
+  [Tag in RunEvent.RunEvent["_tag"]]: Partial<Extract<RunEvent.RunEvent, { readonly _tag: Tag }>> & {
+    readonly _tag: Tag
+  }
+}[RunEvent.RunEvent["_tag"]]
+const runEvent = (event: RunEventInput): RunEventInput => event
 
 describe("TenetKit tree projector", () => {
   it("preserves a multi-chunk user prompt exactly across restart", () => {
@@ -40,7 +57,7 @@ describe("TenetKit tree projector", () => {
     const assistantText = "assistant-".repeat(7_000)
     const reasoningText = "reasoning-".repeat(7_000)
     projector.apply(modelResponse("raw-root-run", { type: "text", text: assistantText, metadata: {} }))
-    projector.apply(modelResponse("raw-root-run", { type: "reasoning", text: reasoningText, metadata: {} } as never))
+    projector.apply(modelResponse("raw-root-run", { type: "reasoning", text: reasoningText, metadata: {} }))
     const ordered = projector.snapshot().units.toSorted((left, right) => compareUnitOrder(left.order, right.order))
     const assistant = ordered
       .filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
@@ -65,13 +82,16 @@ describe("TenetKit tree projector", () => {
     const projector = TreeProjector.make("turn-honest-bounds", "bounds")
     const large = "x".repeat(20_000)
     const linked = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ChildLinked",
-        childRunId: "raw-large-child",
-        invocationId: "large-child",
-        selection: "Review",
-        prompt: large,
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ChildLinked",
+          childRunId: "raw-large-child",
+          invocationId: "large-child",
+          selection: "Review",
+          prompt: Prompt.make(large),
+        }),
+      ),
     )
     expect(block(linked, "SubagentCard")).toEqual({
       _tag: "Block",
@@ -89,7 +109,7 @@ describe("TenetKit tree projector", () => {
             request: { approvalId: "large-approval", operation: "write", capability: "workspace", input: large },
           },
         },
-      } as never),
+      }),
     )
     expect(block(waiting, "AuthorizationCard")).toEqual({
       _tag: "Block",
@@ -139,29 +159,30 @@ describe("TenetKit tree projector", () => {
       }),
     )
     const bash = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionCompleted",
-        turn: 0,
-        call: {
-          type: "tool-call",
-          id: "bash-call",
-          name: "bash",
-          params: { command: "bun test" },
-          providerExecuted: false,
-          metadata: {},
-        },
-        result: {
-          type: "tool-result",
-          id: "bash-call",
-          name: "bash",
-          result: { running: false, processId: "p1", exitCode: 0, stdout: "ok" },
-          encodedResult: {},
-          isFailure: false,
-          providerExecuted: false,
-          preliminary: false,
-          metadata: {},
-        },
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolExecutionCompleted",
+          turn: 0,
+          call: Response.makePart("tool-call", {
+            id: "bash-call",
+            name: "bash",
+            params: { command: "bun test" },
+            providerExecuted: false,
+            metadata: {},
+          }),
+          result: Response.makePart("tool-result", {
+            id: "bash-call",
+            name: "bash",
+            result: { running: false, processId: "p1", exitCode: 0, stdout: "ok" },
+            encodedResult: {},
+            isFailure: false,
+            providerExecuted: false,
+            preliminary: false,
+            metadata: {},
+          }),
+        }),
+      ),
     )
     expect(block(bash, "ToolCall")).toEqual({
       _tag: "Block",
@@ -186,45 +207,55 @@ describe("TenetKit tree projector", () => {
     }
     const live = TreeProjector.make("turn-cell-resume", "run a cell")
     live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    live.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call } as never))
+    live.apply(
+      treeEvent(
+        "raw-root-run",
+        runEvent({ _tag: "ToolExecutionStarted", turn: 0, call: Response.makePart("tool-call", call) }),
+      ),
+    )
     const patch = live.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolProgress",
-        turn: 0,
-        toolCallId: "cell-resume",
-        message: "Stdout",
-        data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolProgress",
+          turn: 0,
+          toolCallId: "cell-resume",
+          message: "Stdout",
+          data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
+        }),
+      ),
     )
     const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
     expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
     const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
       projector.apply(
-        treeEvent("raw-root-run", {
-          _tag: "ToolExecutionCompleted",
-          turn: 0,
-          call,
-          result: {
-            type: "tool-result",
-            id: "cell-resume",
-            name: "typescript",
-            result: {
-              cellId: "cell-resume",
-              epoch: 1,
-              sequence: 2,
-              value: "42",
-              stdout: "partial output",
-              stderr: "",
-              durationMillis: 8,
-              truncation: [],
-            },
-            encodedResult: {},
-            isFailure: false,
-            providerExecuted: false,
-            preliminary: false,
-            metadata: {},
-          },
-        } as never),
+        treeEvent(
+          "raw-root-run",
+          runEvent({
+            _tag: "ToolExecutionCompleted",
+            turn: 0,
+            call: Response.makePart("tool-call", call),
+            result: Response.makePart("tool-result", {
+              id: "cell-resume",
+              name: "typescript",
+              result: {
+                cellId: "cell-resume",
+                epoch: 1,
+                sequence: 2,
+                value: "42",
+                stdout: "partial output",
+                stderr: "",
+                durationMillis: 8,
+                truncation: [],
+              },
+              encodedResult: {},
+              isFailure: false,
+              providerExecuted: false,
+              preliminary: false,
+              metadata: {},
+            }),
+          }),
+        ),
       )
     resetEventPosition()
     const livePosition = completion(live)
@@ -254,48 +285,58 @@ describe("TenetKit tree projector", () => {
     const projector = TreeProjector.make("turn-cell-retention", "retain")
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: cellCall("done", "1") } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolExecutionStarted",
+          turn: 0,
+          call: Response.makePart("tool-call", cellCall("done", "1")),
+        }),
+      ),
     )
     projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionCompleted",
-        turn: 0,
-        call: cellCall("done", "1"),
-        result: {
-          type: "tool-result",
-          id: "done",
-          name: "typescript",
-          result: {
-            cellId: "done",
-            epoch: 0,
-            sequence: 1,
-            value: "1",
-            stdout: "",
-            stderr: "",
-            durationMillis: 1,
-            truncation: [],
-          },
-          encodedResult: {},
-          isFailure: false,
-          providerExecuted: false,
-          preliminary: false,
-          metadata: {},
-        },
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolExecutionCompleted",
+          turn: 0,
+          call: Response.makePart("tool-call", cellCall("done", "1")),
+          result: Response.makePart("tool-result", {
+            id: "done",
+            name: "typescript",
+            result: {
+              cellId: "done",
+              epoch: 0,
+              sequence: 1,
+              value: "1",
+              stdout: "",
+              stderr: "",
+              durationMillis: 1,
+              truncation: [],
+            },
+            encodedResult: {},
+            isFailure: false,
+            providerExecuted: false,
+            preliminary: false,
+            metadata: {},
+          }),
+        }),
+      ),
     )
     const patch = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionStarted",
-        turn: 0,
-        call: cellCall("live", "await forever()"),
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolExecutionStarted",
+          turn: 0,
+          call: Response.makePart("tool-call", cellCall("live", "await forever()")),
+        }),
+      ),
     )
-    const persisted = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(patch.checkpoint.state) as {
-      readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
-    }
+    const persisted = Schema.decodeSync(Schema.fromJsonString(CheckpointState))(patch.checkpoint.state)
     expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["live"])
     const resumed = TreeProjector.make("turn-cell-retention", "retain", patch.checkpoint, projector.snapshot().units)
-    const settled = resumed.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "restarted" } as never))
+    const settled = resumed.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "restarted" }))
     expect(
       settled.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")?.content,
     ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "cancelled" }) })
@@ -308,7 +349,13 @@ describe("TenetKit tree projector", () => {
     const committed = first.apply(modelResponse("raw-root-run", { type: "text", text: "hello", metadata: {} }))
     const resumed = TreeProjector.make("turn-resume", "continue", committed.checkpoint, first.snapshot().units)
     const completed = resumed.apply(
-      treeEvent("raw-root-run", { _tag: "RunCompleted", result: { text: "hello" } } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "RunCompleted",
+          result: { text: "hello", turns: 1, session: { sessionId: "session", leafId: null } },
+        }),
+      ),
     )
     expect(completed.baseRevision).toBe(committed.revision)
     expect(
@@ -400,13 +447,16 @@ describe("TenetKit tree projector", () => {
     for (let index = 0; index < 64; index += 1) {
       const child = `raw-active-${index}`
       latest = apply(
-        treeEvent("raw-root-run", {
-          _tag: "ChildLinked",
-          childRunId: child,
-          invocationId: `active-${index}`,
-          selection: "Review",
-          prompt: large,
-        } as never),
+        treeEvent(
+          "raw-root-run",
+          runEvent({
+            _tag: "ChildLinked",
+            childRunId: child,
+            invocationId: `active-${index}`,
+            selection: "Review",
+            prompt: Prompt.make(large),
+          }),
+        ),
       )
       latest = apply(
         modelResponse(
@@ -456,13 +506,16 @@ describe("TenetKit tree projector", () => {
       ["right", "raw-right"],
     ] as const)
       projector.apply(
-        treeEvent("raw-root-run", {
-          _tag: "ChildLinked",
-          childRunId,
-          invocationId,
-          selection: "Review",
-          prompt: "authorize",
-        } as never),
+        treeEvent(
+          "raw-root-run",
+          runEvent({
+            _tag: "ChildLinked",
+            childRunId,
+            invocationId,
+            selection: "Review",
+            prompt: Prompt.make("authorize"),
+          }),
+        ),
       )
     const changes = ["raw-left", "raw-right"].map((runId) =>
       projector.apply(
@@ -479,7 +532,7 @@ describe("TenetKit tree projector", () => {
                 request: { approvalId: "same-approval", operation: "write", capability: "workspace", input: {} },
               },
             },
-          } as never,
+          },
           { parentRunId: "raw-root-run" },
         ),
       ),
@@ -530,21 +583,35 @@ describe("TenetKit tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make(`turn-${status}`, "authorize")
     projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "RunWaiting",
-        wait: {
-          waitId: "ask-token",
-          reason: {
-            _tag: "Approval",
-            request: { approvalId: "ask-token", operation: "write", capability: "workspace", input: {} },
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "RunWaiting",
+          wait: {
+            waitId: "ask-token",
+            status: "open",
+            openedAt: occurredAt(1),
+            reason: {
+              _tag: "Approval",
+              request: { approvalId: "ask-token", operation: "write", capability: "workspace", input: {} },
+            },
           },
-        },
-      } as never),
+        }),
+      ),
     )
     const settled = projector.apply(
       eventTag === "RunCancelled"
         ? treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "stopped" })
-        : treeEvent("raw-root-run", { _tag: "RunFailed", error: new Error("failed") } as never),
+        : treeEvent(
+            "raw-root-run",
+            runEvent({
+              _tag: "RunFailed",
+              error: Schema.decodeSync(RunEvent.RunFailure)({
+                _tag: "tenetkit/runtime/AgentExecutionFailure",
+                message: "failed",
+              }),
+            }),
+          ),
     )
     expect(block(settled, "AuthorizationCard")).toEqual({
       _tag: "Block",
@@ -556,19 +623,21 @@ describe("TenetKit tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-ask", "ask")
     const requested = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ApprovalRequested",
-        turn: 0,
-        call: {
-          type: "tool-call",
-          id: "different-tool-call",
-          name: "write",
-          params: {},
-          providerExecuted: false,
-          metadata: {},
-        },
-        request: { approvalId: "ask-token", operation: "write", capability: "workspace", input: { path: "a.ts" } },
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ApprovalRequested",
+          turn: 0,
+          call: Response.makePart("tool-call", {
+            id: "different-tool-call",
+            name: "write",
+            params: {},
+            providerExecuted: false,
+            metadata: {},
+          }),
+          request: { approvalId: "ask-token", operation: "write", capability: "workspace", input: { path: "a.ts" } },
+        }),
+      ),
     )
     const requestedCard = requested.upsert.find(
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "AuthorizationCard",
@@ -695,10 +764,13 @@ describe("TenetKit tree projector", () => {
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "RunWaiting",
-        wait: { waitId: "wait-1", reason: { _tag: "Operation" } },
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "RunWaiting",
+          wait: { waitId: "wait-1", status: "open", openedAt: occurredAt(1), reason: { _tag: "ToolWait" } },
+        }),
+      ),
     )
     expect(projector.snapshot().state.status).toBe("waiting")
 
@@ -713,10 +785,16 @@ describe("TenetKit tree projector", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-failed", "say hi")
     const settled = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "RunFailed",
-        error: new Error("OpenAiClient.createResponseStream: InvalidKey: Verify your API key is correct"),
-      } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "RunFailed",
+          error: Schema.decodeSync(RunEvent.RunFailure)({
+            _tag: "tenetkit/runtime/AgentExecutionFailure",
+            message: "OpenAiClient.createResponseStream: InvalidKey: Verify your API key is correct",
+          }),
+        }),
+      ),
     )
     const failure = settled.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")
     expect(failure?.executionOutcome).toEqual({
@@ -753,10 +831,17 @@ describe("TenetKit tree projector", () => {
       providerExecuted: false,
       metadata: {},
     }
-    projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 1_000, call } as never))
     projector.apply(
-      treeEvent("raw-root-run", { _tag: "CompactionStarted", compactionId: "active-compaction" } as never),
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ToolExecutionStarted",
+          turn: 1_000,
+          call: Response.makePart("tool-call", call),
+        }),
+      ),
     )
+    projector.apply(treeEvent("raw-root-run", { _tag: "CompactionStarted", compactionId: "active-compaction" }))
     visits.clear()
     const active = projector.apply(
       treeEvent("raw-root-run", {
@@ -764,17 +849,14 @@ describe("TenetKit tree projector", () => {
         turn: 1_000,
         toolCallId: "active-cell",
         data: { _tag: "Stdout", cellId: "active-cell", sequence: 0, text: "one" },
-      } as never),
+      }),
     )
     expect(active.revision).toBeGreaterThan(2_000)
     expect(active.upsert).toEqual([
       expect.objectContaining({ content: { _tag: "Block", block: expect.objectContaining({ _tag: "Cell" }) } }),
     ])
     expect(Object.fromEntries(visits)).toEqual({ node: 1, cell: 1, compaction: 1 })
-    const persisted = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(active.checkpoint.state) as {
-      readonly nodes: ReadonlyArray<{ readonly cells: ReadonlyArray<readonly [string, unknown]> }>
-      readonly runningCompactions: ReadonlyArray<string>
-    }
+    const persisted = Schema.decodeSync(Schema.fromJsonString(CheckpointState))(active.checkpoint.state)
     expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toEqual(["active-cell"])
     expect(persisted.runningCompactions).toHaveLength(1)
 
@@ -789,7 +871,7 @@ describe("TenetKit tree projector", () => {
       turn: 1_000,
       toolCallId: "active-cell",
       data: { _tag: "Stdout", cellId: "active-cell", sequence: 1, text: "two" },
-    } as never)
+    })
     const livePatch = projector.apply(next)
     const resumedPatch = resumed.apply(next)
     expect(resumedPatch).toEqual(livePatch)

@@ -230,11 +230,9 @@ describe("interactive ThreadView feed", () => {
       activeTurn: { ...turn, status: "accepted" },
     })
     expect(selected[0]).toMatchObject({ _tag: "ThreadViewSnapshot" })
-    const snapshot = (
-      selected[0] as {
-        readonly snapshot: { readonly turns: ReadonlyArray<{ readonly units: ReadonlyArray<unknown> }> }
-      }
-    ).snapshot
+    const selectedEvent = selected[0]
+    if (selectedEvent?._tag !== "ThreadViewSnapshot") return
+    const snapshot = selectedEvent.snapshot
     const units = snapshot.turns.flatMap((entry) => entry.units)
     expect(units).toContainEqual({
       key: "turn:turn:user",
@@ -799,14 +797,16 @@ describe("interactive ThreadView feed", () => {
 
   it("keeps the full ancestry-closed timeline of a large snapshot without evicting whole Turns", () => {
     const feed = makeThreadViewFeed(() => 1)
-    const makeUnit = (key: string, sequence: number, parentId?: string) => ({
-      key,
-      turnId: String(turnId),
-      order: [{ sequence, part: 0, key }],
-      revision: 1,
-      ...(parentId === undefined ? {} : { parentId }),
-      content: { _tag: "Entry" as const, role: "assistant" as const, text: key },
-    })
+    const makeUnit = (key: string, sequence: number, parentId?: string) => {
+      const base = {
+        key,
+        turnId: String(turnId),
+        order: [{ sequence, part: 0, key }],
+        revision: 1,
+        content: { _tag: "Entry" as const, role: "assistant" as const, text: key },
+      }
+      return parentId === undefined ? base : { ...base, parentId }
+    }
     const cardUnit = (key: string, sequence: number, name: string) => ({
       key,
       turnId: String(turnId),

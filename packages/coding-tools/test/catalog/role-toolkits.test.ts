@@ -1,7 +1,8 @@
 import * as Toolkits from "@rika/coding-tools/agent-role-toolkits"
 import { expect, test } from "vitest"
+import type { Tool } from "tenetkit"
 
-const names = (toolkit: { readonly tools: Readonly<Record<string, unknown>> }) => Object.keys(toolkit.tools).toSorted()
+const names = (toolkit: { readonly tools: Readonly<Record<string, Tool.Any>> }) => Object.keys(toolkit.tools).toSorted()
 
 test("pins each product role to its minimum coding toolkit", () => {
   expect(names(Toolkits.root)).toEqual(

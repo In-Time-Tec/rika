@@ -22,6 +22,7 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as ThreadView from "@rika/product/thread-view"
+import * as Turn from "@rika/product/turn-record"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
 import { authenticated } from "./account"
 import { connect } from "./thread-client"
@@ -115,7 +116,7 @@ const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
     prepared: { attachment, snapshotCursor, terminalCursor, view: view.success.snapshot() },
   }
 }
-const unavailable = (operation: string, error: unknown) =>
+const unavailable = (operation: string, error: Error) =>
   OperationUnavailable.make({
     operation,
     message: error instanceof Error ? error.message : String(error),
@@ -381,22 +382,34 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const statusState = (
     payload: Extract<Payload, { readonly _tag: "ExecutorStatus" | "WorkspaceStatus" }>,
   ): InteractiveConnection.Activity | undefined => {
-    const status = payload.status.state
-    if (typeof status !== "string") return undefined
-    const states: Record<string, InteractiveConnection.Activity> = {
-      waiting: "executor-waiting",
-      connecting: "executor-connecting",
-      connected: "executor-connected",
-      preparing: "workspace-preparing",
-      setup: "workspace-setup",
-      resuming: "workspace-resuming",
-      leased: "lease-active",
-      retrying: "retrying",
-      approval: "approval-required",
-      unknown: "unknown-operation",
-      terminal: "terminal",
+    const status = Schema.decodeUnknownOption(Schema.String)(payload.status.state)
+    if (Option.isNone(status)) return undefined
+    switch (status.value) {
+      case "waiting":
+        return "executor-waiting"
+      case "connecting":
+        return "executor-connecting"
+      case "connected":
+        return "executor-connected"
+      case "preparing":
+        return "workspace-preparing"
+      case "setup":
+        return "workspace-setup"
+      case "resuming":
+        return "workspace-resuming"
+      case "leased":
+        return "lease-active"
+      case "retrying":
+        return "retrying"
+      case "approval":
+        return "approval-required"
+      case "unknown":
+        return "unknown-operation"
+      case "terminal":
+        return "terminal"
+      default:
+        return undefined
     }
-    return states[status]
   }
   const authority = () => (selection._tag === "Attached" ? selection.projection : selection.authority)
   const replaceAuthority = (expected: Projection, replacement: Projection) => {
@@ -683,8 +696,15 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                 if (pending !== undefined && invalid !== undefined) yield* pending.fail(invalid)
                 return outcome._tag === "Failure" ? yield* Effect.failCause(outcome.cause) : yield* invalid!
               }
-              const prepared = (validation as Extract<AttachmentValidation, { readonly _tag: "Valid" }>).prepared
-              const committedPlan = plan as Extract<ReturnType<typeof planAttachment>, { readonly _tag: "Valid" }>
+              if (
+                validation === undefined ||
+                validation._tag === "Invalid" ||
+                plan === undefined ||
+                plan._tag === "Invalid"
+              )
+                return yield* failure("Hosted Thread attachment validation did not complete")
+              const prepared = validation.prepared
+              const committedPlan = plan
               preparedCandidate = committedPlan.candidate
               if (currentAuthority === undefined || !replaceAuthority(currentAuthority, preparedCandidate))
                 return yield* failure("Thread selection was superseded")
@@ -934,30 +954,27 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     submit: (prompt, mode, parts, _tuning, submissionId) =>
       Effect.gen(function* () {
         const commandId = submissionId ?? (yield* nextCommandId("submit"))
-        yield* mutate("InteractiveSession.submit", commandId, (threadId, version) => ({
-          _tag: "SubmitPrompt",
-          threadId,
-          commandId: CommandId.make(commandId),
-          idempotencyKey: IdempotencyKey.make(commandId),
-          expectedThreadVersion: ThreadVersion.make(version),
-          text: prompt,
-          ...(mode === undefined ? {} : { mode }),
-          ...(parts === undefined
-            ? {}
-            : {
-                attachments: parts.flatMap((part) =>
-                  part.type === "image"
-                    ? [
-                        {
-                          mediaType: part.mediaType,
-                          data: part.data,
-                          ...(part.filename === undefined ? {} : { filename: part.filename }),
-                        },
-                      ]
-                    : [],
-                ),
-              }),
-        }))
+        yield* mutate("InteractiveSession.submit", commandId, (threadId, version) => {
+          const attachments = parts?.flatMap((part) =>
+            part.type === "image"
+              ? [
+                  part.filename === undefined
+                    ? { mediaType: part.mediaType, data: part.data }
+                    : { mediaType: part.mediaType, data: part.data, filename: part.filename },
+                ]
+              : [],
+          )
+          const command: Extract<MutatingThreadCommand, { readonly _tag: "SubmitPrompt" }> = {
+            _tag: "SubmitPrompt",
+            threadId,
+            commandId: CommandId.make(commandId),
+            idempotencyKey: IdempotencyKey.make(commandId),
+            expectedThreadVersion: ThreadVersion.make(version),
+            text: prompt,
+          }
+          const withMode = mode === undefined ? command : { ...command, mode }
+          return attachments === undefined ? withMode : { ...withMode, attachments }
+        })
       }),
     shell: () => unsupported("InteractiveSession.shell"),
     editQueued: () => unsupported("InteractiveSession.editQueued"),
@@ -970,18 +987,20 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         idempotencyKey: IdempotencyKey.make(requestId),
         expectedThreadVersion: ThreadVersion.make(version),
         text,
-        targetTurnId: turnId as never,
+        targetTurnId: Turn.TurnId.make(turnId),
       })),
     steer: (text, requestId, turnId) =>
-      mutate("InteractiveSession.steer", requestId, (threadId, version) => ({
-        _tag: "Steer",
-        threadId,
-        commandId: CommandId.make(requestId),
-        idempotencyKey: IdempotencyKey.make(requestId),
-        expectedThreadVersion: ThreadVersion.make(version),
-        text,
-        ...(turnId === undefined ? {} : { targetTurnId: turnId as never }),
-      })),
+      mutate("InteractiveSession.steer", requestId, (threadId, version) => {
+        const command: Extract<MutatingThreadCommand, { readonly _tag: "Steer" }> = {
+          _tag: "Steer",
+          threadId,
+          commandId: CommandId.make(requestId),
+          idempotencyKey: IdempotencyKey.make(requestId),
+          expectedThreadVersion: ThreadVersion.make(version),
+          text,
+        }
+        return turnId === undefined ? command : { ...command, targetTurnId: Turn.TurnId.make(turnId) }
+      }),
     approveAuthorization: (turnId, authorizationId) => {
       const pending = authority()?.authorizations.get(`${turnId}:${authorizationId}`)
       if (pending === undefined) return unsupported("InteractiveSession.approveAuthorization")

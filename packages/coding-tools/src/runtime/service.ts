@@ -1,4 +1,4 @@
-import { Context, Effect, Function, Layer, Schema } from "effect"
+import { Context, Effect, Function, Layer, PlatformError, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import * as Inputs from "./inputs"
 import * as WorkspaceIndex from "../workspace/search/file-search"
@@ -6,12 +6,7 @@ import * as WebSearchErrors from "../web-research/search/errors"
 import * as ReadWebPageService from "../web-research/read-page/service"
 import * as ProcessRegistry from "../process/registry"
 import { RuntimeFilesystem } from "./filesystem"
-import {
-  runtimeLayer,
-  RuntimeOperationError,
-  type FailureDetails,
-  type RuntimeLayerDependencies,
-} from "./layer"
+import { runtimeLayer, RuntimeOperationError, type FailureDetails, type RuntimeLayerDependencies } from "./layer"
 
 import * as ToolPolicy from "../policy/coding-tools"
 import * as CodingToolResult from "./result/value"
@@ -52,9 +47,7 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<Result, ToolError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/coding-tools/runtime/service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/runtime/service") {}
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
   Inputs.Inputs.Grep.registration,
@@ -126,7 +119,7 @@ const boundResult = (request: Request, result: Result): Result => {
 
   const recovery = outputRecovery(request)
   if (result.matches !== undefined) {
-    const boundedText = RuntimeFilesystem.boundedText<Result>(result.text, Math.floor(limit / 2), recovery)
+    const boundedText = RuntimeFilesystem.boundedText(result.text, Math.floor(limit / 2), recovery)
     const markerBudget = RuntimeFilesystem.byteLength(
       `[structured matches truncated: kept ${result.matches.length} of ${result.matches.length} — ${recovery}]\n`,
     )
@@ -144,13 +137,14 @@ const boundResult = (request: Request, result: Result): Result => {
       matchesTruncation === undefined
         ? ""
         : `\n[structured matches truncated: kept ${matchesTruncation.kept} of ${matchesTruncation.total} — ${recovery}]`
-    return {
+    const boundedResult: Result = {
       ...result,
       text: `${boundedText.text}${marker}`,
       matches,
-      ...(matchesTruncation === undefined ? {} : { matchesTruncation }),
       truncated: true,
     }
+    if (matchesTruncation !== undefined) Object.assign(boundedResult, { matchesTruncation })
+    return boundedResult
   }
   const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
   let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)
@@ -181,15 +175,16 @@ const boundResult = (request: Request, result: Result): Result => {
           path: trim(result.artifact.path)!,
           mimeType: trim(result.artifact.mimeType)!,
         }
-  return {
+  const boundedResult: Result = {
     ...result,
     text,
-    ...(stdout === undefined ? {} : { stdout }),
-    ...(stderr === undefined ? {} : { stderr }),
-    ...(diff === undefined ? {} : { diff }),
-    ...(artifact === undefined ? {} : { artifact }),
     truncated: true,
   }
+  if (stdout !== undefined) Object.assign(boundedResult, { stdout })
+  if (stderr !== undefined) Object.assign(boundedResult, { stderr })
+  if (diff !== undefined) Object.assign(boundedResult, { diff })
+  if (artifact !== undefined) Object.assign(boundedResult, { artifact })
+  return boundedResult
 }
 
 const runtimeError = (details: FailureDetails) => new RuntimeOperationError(details)
@@ -205,11 +200,6 @@ const searchMessage = (operation: string, message: string): string => {
   if (operation === "initialize") return "The workspace search tools are unavailable"
   return missingRipgrep(message) ? message : `Workspace search could not complete ${operation}`
 }
-
-const tagOf = (cause: unknown) =>
-  cause !== null && typeof cause === "object" && "_tag" in cause && typeof cause._tag === "string"
-    ? cause._tag
-    : undefined
 
 const operationError = (cause: unknown): RuntimeOperationError => {
   if (cause instanceof RuntimeOperationError) return cause
@@ -307,11 +297,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
           ? "Confirm the workspace path is readable and that ripgrep (rg) is installed"
           : "Retry once later or use a narrower direct file operation",
     })
-  if (
-    tagOf(cause) === "PlatformError" &&
-    "reason" in (cause as object) &&
-    tagOf((cause as { reason: unknown }).reason) === "PermissionDenied"
-  )
+  if (cause instanceof PlatformError.PlatformError && cause.reason._tag === "PermissionDenied")
     return runtimeError({
       category: "access_denied",
       message: "The operating system denied access for this operation",

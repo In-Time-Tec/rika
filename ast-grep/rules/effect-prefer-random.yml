@@ -1,6 +1,6 @@
 id: effect-prefer-random
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — prefer Random for deterministic randomness or the Crypto service for secure bytes and UUIDs.
 rule:
   any:

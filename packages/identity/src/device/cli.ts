@@ -35,20 +35,21 @@ export interface CliClientRegistrationRevocationUnsupported {
 export const cliInstallRegistrationRequest = (input: {
   readonly config: Pick<IdentityConfig, "baseUrl" | "resource">
   readonly softwareVersion?: string
-}): CliInstallRegistrationRequest => ({
-  endpoint: `${input.config.baseUrl}/api/auth/oauth2/register`,
-  body: {
+}): CliInstallRegistrationRequest => {
+  const body = {
     client_name: "Rika CLI",
     application_type: "native",
     token_endpoint_auth_method: "none",
     grant_types: [DEVICE_CODE_GRANT_TYPE, "refresh_token"],
     scope: "openid profile email offline_access account",
     software_id: "rika-cli",
-    ...(input.softwareVersion === undefined ? {} : { software_version: input.softwareVersion }),
     dpop_bound_access_tokens: true,
     resources: [input.config.resource],
-  },
-})
+  } satisfies Omit<CliInstallRegistrationRequest["body"], "software_version">
+  const endpoint = `${input.config.baseUrl}/api/auth/oauth2/register`
+  if (input.softwareVersion === undefined) return { endpoint, body }
+  return { endpoint, body: { ...body, software_version: input.softwareVersion } }
+}
 
 export const cliTokenRevocationRequest = (input: {
   readonly config: Pick<IdentityConfig, "baseUrl">

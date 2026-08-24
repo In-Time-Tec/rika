@@ -4,7 +4,7 @@ import { HostedError, PrivateJwk, type PublicJwk } from "./contract"
 
 const failure = (message: string) => HostedError.make({ kind: "host", message })
 const encoded = (value: string | Uint8Array) =>
-  Buffer.from(typeof value === "string" ? new TextEncoder().encode(value) : value).toString("base64url")
+  Buffer.from(value).toString("base64url")
 const Header = Schema.Struct({ typ: Schema.Literal("dpop+jwt"), alg: Schema.Literal("ES256"), jwk: Schema.Unknown })
 const Payload = Schema.Struct({
   htu: Schema.String,
@@ -71,14 +71,10 @@ export const proof = Effect.fn("HostedDpop.proof")(function* (input: {
           catch: () => failure("Could not bind the DPoP proof to its access token"),
         })
   const ath = accessHash === undefined ? undefined : encoded(new Uint8Array(accessHash))
+  const claims = { htu: input.url, htm: input.method.toUpperCase(), iat: Math.floor(now / 1000), jti: input.jti }
+  if (ath !== undefined) Object.assign(claims, { ath })
   const payload = encoded(
-    encodePayload({
-      htu: input.url,
-      htm: input.method.toUpperCase(),
-      iat: Math.floor(now / 1000),
-      jti: input.jti,
-      ...(ath === undefined ? {} : { ath }),
-    }),
+    encodePayload(claims),
   )
   const signingInput = `${header}.${payload}`
   const key = yield* Effect.tryPromise({

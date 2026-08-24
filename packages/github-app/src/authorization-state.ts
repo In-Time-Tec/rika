@@ -110,7 +110,7 @@ export const stateValidationLayer = Layer.effect(
     const validateSetup = Effect.fn("GitHubStateValidation.validateSetup")(function* (
       untrustedCandidate: SetupCandidate,
     ) {
-      const candidate = yield* Schema.decodeUnknownEffect(SetupCandidate)(untrustedCandidate).pipe(
+      const candidate = yield* Schema.decodeEffect(SetupCandidate)(untrustedCandidate).pipe(
         Effect.mapError(() => mismatch("candidate", "setup", "GitHub setup candidate is invalid")),
       )
       const intent = yield* states.consumeSetup(candidate.state)
@@ -135,7 +135,7 @@ export const stateValidationLayer = Layer.effect(
     const validateUserAuthorization = Effect.fn("GitHubStateValidation.validateUserAuthorization")(function* (
       untrustedCandidate: UserAuthorizationCandidate,
     ) {
-      const candidate = yield* Schema.decodeUnknownEffect(UserAuthorizationCandidate)(untrustedCandidate).pipe(
+      const candidate = yield* Schema.decodeEffect(UserAuthorizationCandidate)(untrustedCandidate).pipe(
         Effect.mapError(() => mismatch("candidate", "user_authorization", "GitHub authorization candidate is invalid")),
       )
       const intent = yield* states.consumeUserAuthorization(candidate.state)

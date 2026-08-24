@@ -69,12 +69,12 @@ describe("ThreadQuery", () => {
   it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
     Effect.gen(function* () {
       const transcripts = yield* Fixtures.TranscriptRepository.Service
-      const card = (id: string, sequence: number, parentId?: string): Fixtures.TranscriptUnit.Unit => ({
+      const card = (id: string, sequence: number, parentId?: string): Fixtures.TranscriptUnit.Unit => {
+        const unit = {
         key: `subagent:${id}`,
         turnId: storedTurn.id,
         order: Fixtures.TranscriptOrdering.unitOrder(`subagent:${id}`, sequence),
         revision: sequence,
-        ...(parentId === undefined ? {} : { parentId }),
         content: {
           _tag: "Block",
           block: {
@@ -88,7 +88,9 @@ describe("ThreadQuery", () => {
             activity: [],
           },
         },
-      })
+        } satisfies Fixtures.TranscriptUnit.Unit
+        return parentId === undefined ? unit : { ...unit, parentId }
+      }
       const answer = (id: string, sequence: number): Fixtures.TranscriptUnit.Unit => ({
         key: `assistant:${id}`,
         turnId: storedTurn.id,
@@ -107,28 +109,25 @@ describe("ThreadQuery", () => {
 
       const query = yield* ThreadQuery.Service
       type Selection = NonNullable<(typeof Fixtures.ThreadRead.ThreadContract.ReadThreadInput.Type)["selection"]>
+      const selector = (selection: Selection) => {
+        if (selection.mode !== "subtree") return { _tag: "overview" as const }
+        if (selection.cursor === undefined) return { _tag: "subtree" as const, subagentId: selection.subagentId }
+        if ("before" in selection.cursor)
+          return {
+            _tag: "subtree" as const,
+            subagentId: selection.subagentId,
+            before: {
+              ...selection.cursor.before,
+              turnId: Fixtures.Turn.TurnId.make(selection.cursor.before.turnId),
+            },
+          }
+        return { _tag: "subtree" as const, subagentId: selection.subagentId, offset: selection.cursor.offset }
+      }
       const read = (selection: Selection) =>
         query
           .read({
             threadId: storedThread.id,
-            selector:
-              selection.mode === "subtree"
-                ? {
-                    _tag: "subtree",
-                    subagentId: selection.subagentId,
-                    ...(selection.cursor === undefined || !("before" in selection.cursor)
-                      ? {}
-                      : {
-                          before: {
-                            ...selection.cursor.before,
-                            turnId: Fixtures.Turn.TurnId.make(selection.cursor.before.turnId),
-                          },
-                        }),
-                    ...(selection.cursor !== undefined && "offset" in selection.cursor
-                      ? { offset: selection.cursor.offset }
-                      : {}),
-                  }
-                : { _tag: "overview" },
+            selector: selector(selection),
           })
           .pipe(Effect.map(ThreadToolHandlers.publicReadResult))
       const pages = [yield* read({ mode: "subtree", subagentId: "root-agent" })]
@@ -138,7 +137,7 @@ describe("ThreadQuery", () => {
         const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(continuation)
         expect(continuations.has(encoded)).toBe(false)
         continuations.add(encoded)
-        const next = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
+        const next = yield* Schema.decodeEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
           threadId: storedThread.id,
           selection: continuation,
         })

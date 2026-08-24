@@ -53,11 +53,11 @@ const sourceFor = (
           turnId: newest.turn.id,
           orderKey: encodeUnitOrder(newestUnit.order),
         })
-  return {
-    projectionVersion,
-    ...(oldestCursor === undefined ? {} : { oldestCursor }),
-    ...(newestCursor === undefined ? {} : { newestCursor }),
-  }
+  if (oldestCursor === undefined)
+    return newestCursor === undefined ? { projectionVersion } : { projectionVersion, newestCursor }
+  return newestCursor === undefined
+    ? { projectionVersion, oldestCursor }
+    : { projectionVersion, oldestCursor, newestCursor }
 }
 const trackedProjectionLimit = 64
 const snapshotFromSelection = (
@@ -109,21 +109,27 @@ const snapshotFromSelection = (
   }
   const groupedTurns = [...grouped.values()]
   const turns = orderedTurns(groupedTurns)
+  let sourceBounds
+  if (event.oldestCursor === undefined)
+    sourceBounds = event.newestCursor === undefined ? {} : { newestCursor: event.newestCursor }
+  else
+    sourceBounds =
+      event.newestCursor === undefined
+        ? { oldestCursor: event.oldestCursor }
+        : { oldestCursor: event.oldestCursor, newestCursor: event.newestCursor }
+  const usage =
+    event.usage.contextCapacity === undefined
+      ? { state: event.usage.usage }
+      : { state: event.usage.usage, contextCapacity: event.usage.contextCapacity }
   return {
     thread: event.thread,
     revision,
-    source: sourceFor(turns, ExecutionProjection.projectionVersion, {
-      ...(event.oldestCursor === undefined ? {} : { oldestCursor: event.oldestCursor }),
-      ...(event.newestCursor === undefined ? {} : { newestCursor: event.newestCursor }),
-    }),
+    source: sourceFor(turns, ExecutionProjection.projectionVersion, sourceBounds),
     turns,
     pending: pending(event.queue),
     hasOlder: event.hasOlder,
     hasNewer: event.hasNewer ?? false,
-    usage: {
-      state: event.usage.usage,
-      ...(event.usage.contextCapacity === undefined ? {} : { contextCapacity: event.usage.contextCapacity }),
-    },
+    usage,
   }
 }
 const resync = (

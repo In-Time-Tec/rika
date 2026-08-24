@@ -57,7 +57,7 @@ export const _windowUnitToolCall: {
 
 const agentToolBlockImpl = (
   status: "running" | "complete" | "failed" | "cancelled",
-  detail = "Investigate the crash",
+  detail: string | undefined,
 ) => ({
   _tag: "ToolCall" as const,
   id: "agent",
@@ -70,19 +70,14 @@ const agentToolBlockImpl = (
     activeLabel: "Subagent working",
     completeLabel: "Subagent finished",
   },
-  detail,
+  detail: detail ?? "Investigate the crash",
   files: [],
 })
 
 export const agentToolBlock: {
-  (
-    arg0: Parameters<typeof agentToolBlockImpl>[0],
-    arg1?: Parameters<typeof agentToolBlockImpl>[1],
-  ): ReturnType<typeof agentToolBlockImpl>
-  (
-    arg1?: Parameters<typeof agentToolBlockImpl>[1],
-  ): (arg0: Parameters<typeof agentToolBlockImpl>[0]) => ReturnType<typeof agentToolBlockImpl>
-} = Function.dual((args) => typeof args[0] === "string", agentToolBlockImpl)
+  (detail: string | undefined): (status: Parameters<typeof agentToolBlockImpl>[0]) => ReturnType<typeof agentToolBlockImpl>
+  (status: Parameters<typeof agentToolBlockImpl>[0], detail: string | undefined): ReturnType<typeof agentToolBlockImpl>
+} = Function.dual(2, agentToolBlockImpl)
 
 export const _handlers = (): Handlers => ({ key: vi.fn(), resize: vi.fn() })
 

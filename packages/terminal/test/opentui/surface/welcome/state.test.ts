@@ -118,14 +118,10 @@ test("moves the bounded transcript window forward by one measured page", () =>
         setup.mockInput.pressKey("\x1b[6~")
         yield* openTui(() => setup.flush())
         const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
-        const state = surface as unknown as {
-          readonly transcriptWindowEnd: number
-          readonly transcriptAnchorScrollBy: number
-        }
-        expect(state.transcriptWindowEnd).toBe(historySize)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize)
         expect(firstAfter).toBeGreaterThan(firstBefore)
         expect(firstAfter).toBeLessThan(firstBefore + 50)
-        expect(state.transcriptAnchorScrollBy).toBe(0)
+        expect(surface.transcriptDiagnostics().following).toBe(false)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

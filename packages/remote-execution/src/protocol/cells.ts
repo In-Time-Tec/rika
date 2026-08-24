@@ -86,15 +86,11 @@ const cancelled: CellResponseValue = {
   failure: { kind: "cancelled", message: "Cell operation cancelled" },
 }
 
+const CancellationFailure = Schema.Struct({ kind: Schema.Literal("cancelled") })
+
 export const terminalOutcome = (response: CellResponseValue): "completed" | "cancelled" | "failed" => {
   if (response._tag === "Success") return "completed"
-  if (
-    response._tag === "DomainFailure" &&
-    typeof response.failure === "object" &&
-    response.failure !== null &&
-    "kind" in response.failure &&
-    response.failure.kind === "cancelled"
-  )
+  if (response._tag === "DomainFailure" && Schema.is(CancellationFailure)(response.failure))
     return "cancelled"
   return "failed"
 }

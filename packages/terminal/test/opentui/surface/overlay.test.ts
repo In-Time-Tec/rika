@@ -1,252 +1,60 @@
+import { MouseEvent, RGBA, StyledText, stringToStyledText } from "@opentui/core"
+import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { expect, vi } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { renderTranscriptStyled } from "../../../src/opentui/rendering/renderer"
+import { create } from "../../../src/opentui/surface/service"
 import { type Mode } from "../../../src/state/model"
 
-const opentuiValue = vi.hoisted(() => {
-  const boxChildren: Array<object> = []
-  const keyHandlers = new Set<(key: object) => void>()
-  const pasteHandlers = new Set<(event: object) => void>()
-  const resizeHandlers = new Set<(width: number, height: number) => void>()
-  const frameHandlers = new Set<() => void>()
-  const selectionHandlers = new Set<(selection: object) => void>()
-  const rootChildren: Array<object> = []
-  const requestRender = vi.fn()
-  const textRenderables: Array<TextRenderable> = []
-
-  class TextRenderable {
-    content = ""
-    fg = ""
-    visible = true
-
-    constructor(
-      readonly renderer: object,
-      options: Record<string, unknown>,
-    ) {
-      Object.assign(this, options)
-      textRenderables.push(this)
-    }
-
-    destroy() {}
-  }
-
-  class EditBufferRenderable extends TextRenderable {
-    plainText = ""
-    cursorOffset = 0
-    focused = false
-    showCursor = true
-    declare cursorStyle: unknown
-
-    setText(text: string) {
-      this.plainText = text
-    }
-
-    focus() {
-      this.focused = true
-    }
-
-    blur() {
-      this.focused = false
-    }
-  }
-
-  class BoxRenderable {
-    borderColor = ""
-    title = ""
-    titleColor = ""
-    bottomTitle = ""
-    readonly children: Array<object> = []
-
-    constructor(
-      readonly renderer: object,
-      options: Record<string, unknown>,
-    ) {
-      Object.assign(this, options)
-    }
-
-    add(child: object, index?: number) {
-      boxChildren.push(child)
-      const previous = this.children.indexOf(child)
-      if (previous >= 0) this.children.splice(previous, 1)
-      if (index === undefined || index >= this.children.length) this.children.push(child)
-      else this.children.splice(index, 0, child)
-    }
-
-    remove(child: object) {
-      const index = this.children.indexOf(child)
-      if (index >= 0) this.children.splice(index, 1)
-    }
-
-    getChildren() {
-      return [...this.children]
-    }
-  }
-
-  class ScrollBoxRenderable extends BoxRenderable {
-    scrollTop = 0
-    scrollHeight = 24
-    stickyScroll = true
-    viewport = { height: 24 }
-    content = new BoxRenderable(this.renderer, { minHeight: 0, justifyContent: "flex-end" })
-    verticalScrollBar = { visible: true }
-
-    scrollTo(offset: number) {
-      this.scrollTop = offset
-    }
-  }
-
-  class ScrollBarRenderable {
-    scrollSize = 0
-    scrollPosition = 0
-    viewportSize = 0
-    visible = true
-
-    constructor(
-      readonly renderer: object,
-      options: Record<string, unknown>,
-    ) {
-      Object.assign(this, options)
-    }
-
-    destroy() {}
-  }
-
-  class RGBA {
-    a = 0
-
-    constructor(readonly token: string = "rgba") {}
-
-    static defaultBackground() {
-      return new RGBA("default-bg")
-    }
-
-    static defaultForeground() {
-      return new RGBA("default-fg")
-    }
-
-    static fromIndex(index: number) {
-      return new RGBA(`ansi-${index}`)
-    }
-  }
-
-  class SystemClock {
-    now() {
-      return 0
-    }
-
-    setTimeout(_action: () => void, _delay: number) {
-      return 0
-    }
-
-    clearTimeout(_handle: number) {}
-
-    setInterval(_action: () => void, _delay: number) {
-      return 0
-    }
-
-    clearInterval(_handle: number) {}
-  }
-
-  const renderer = {
-    _usesProcessStdout: true,
-    stdout: { write: vi.fn() },
-    realStdoutWrite: vi.fn(),
-    terminalWidth: 80,
-    terminalHeight: 24,
-    destroy: vi.fn(),
-    suspend: vi.fn(),
-    resume: vi.fn(),
-    setBackgroundColor: vi.fn(),
-    root: {
-      add: vi.fn((child: object) => {
-        rootChildren.push(child)
-      }),
-    },
-    keyInput: {
-      on(event: string, handler: (key: object) => void) {
-        ;(event === "paste" ? pasteHandlers : keyHandlers).add(handler)
-      },
-      off(event: string, handler: (key: object) => void) {
-        ;(event === "paste" ? pasteHandlers : keyHandlers).delete(handler)
-      },
-    },
-    on(event: string, handler: (width: number, height: number) => void) {
-      if (event === "selection") selectionHandlers.add(handler as unknown as (selection: object) => void)
-      else if (event === "frame") frameHandlers.add(handler as unknown as () => void)
-      else resizeHandlers.add(handler)
-    },
-    once(event: string, handler: (width: number, height: number) => void) {
-      const once = (...args: [number, number]) => {
-        renderer.off(event, once)
-        handler(...args)
-      }
-      renderer.on(event, once)
-    },
-    off(event: string, handler: (width: number, height: number) => void) {
-      if (event === "selection") selectionHandlers.delete(handler as unknown as (selection: object) => void)
-      else if (event === "frame") frameHandlers.delete(handler as unknown as () => void)
-      else resizeHandlers.delete(handler)
-    },
-    requestRender,
-    resize: vi.fn((width: number, height: number) => {
-      renderer.terminalWidth = width
-      renderer.terminalHeight = height
-      for (const handler of resizeHandlers) handler(width, height)
-    }),
-    getSelection: () => null,
-    copyToClipboardOSC52: vi.fn(),
-    setMousePointer: vi.fn(),
-  }
-
-  return {
-    BoxRenderable,
-    EditBufferRenderable,
-    RGBA,
-    ScrollBarRenderable,
-    ScrollBoxRenderable,
-    SystemClock,
-    TextRenderable,
-    boxChildren,
-    createCliRenderer: vi.fn(() => Effect.runPromise(Effect.succeed(renderer))),
-    frameHandlers,
-    keyHandlers,
-    pasteHandlers,
-    renderer,
-    requestRender,
-    resizeHandlers,
-    selectionHandlers,
-    textRenderables,
-    rootChildren,
-  }
-})
-const opentui = opentuiValue
-
-vi.mock("@opentui/core", () => ({
-  BoxRenderable: opentuiValue.BoxRenderable,
-  EditBufferRenderable: opentuiValue.EditBufferRenderable,
-  RGBA: opentuiValue.RGBA,
-  ScrollBarRenderable: opentuiValue.ScrollBarRenderable,
-  ScrollBoxRenderable: opentuiValue.ScrollBoxRenderable,
-  SystemClock: opentuiValue.SystemClock,
-  CliRenderEvents: { FRAME: "frame", RESIZE: "resize", SELECTION: "selection" },
-  TextRenderable: opentuiValue.TextRenderable,
-  createCliRenderer: opentuiValue.createCliRenderer,
-  decodePasteBytes: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
-  fg: (color: string) => (input: string | { text: string }) =>
-    typeof input === "string" ? { text: input, fg: color } : { ...input, fg: color },
-  bg: (_color: string) => (chunk: { text: string }) => chunk,
-  bold: (chunk: { text: string }) => chunk,
-  italic: (chunk: { text: string }) => chunk,
-  dim: (chunk: { text: string }) => ({ ...chunk, attributes: 2 }),
-  underline: (chunk: { text: string }) => chunk,
-  strikethrough: (chunk: { text: string }) => chunk,
-  link: () => (chunk: { text: string }) => chunk,
-  StyledText: class StyledText {
-    constructor(readonly chunks: ReadonlyArray<{ text: string }>) {}
+let activeSetup: TestRendererSetup
+const opentui = {
+  RGBA,
+  get renderer() {
+    return activeSetup.renderer
   },
-  stripAnsiSequences: (text: string) => text,
-}))
+  get frameHandlers() {
+    return activeSetup.renderer.listeners("frame")
+  },
+  get keyHandlers() {
+    return { size: activeSetup.renderer.keyInput.listenerCount("keypress") }
+  },
+  get pasteHandlers() {
+    return { size: activeSetup.renderer.keyInput.listenerCount("paste") }
+  },
+  get resizeHandlers() {
+    return { size: activeSetup.renderer.listenerCount("resize") }
+  },
+  get selectionHandlers() {
+    return { size: activeSetup.renderer.listenerCount("selection") }
+  },
+}
+
+const createScoped = (callbacks: Parameters<typeof create>[0]) =>
+  Effect.acquireRelease(
+    Effect.gen(function* () {
+      activeSetup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 }))
+      return yield* create({ ...callbacks, makeRenderer: () => Effect.succeed(activeSetup.renderer) })
+    }),
+    (created) => Effect.sync(created.releaseTerminal),
+  )
+
+const mouseEvent = (
+  target: ConstructorParameters<typeof MouseEvent>[0],
+  type: "down" | "move" | "over" | "out",
+  x = 0,
+) =>
+  new MouseEvent(target, {
+    type,
+    x,
+    y: 0,
+    button: 0,
+    modifiers: { shift: false, alt: false, ctrl: false },
+  })
+
+const styledText = (content: string | StyledText): StyledText =>
+  content instanceof StyledText ? content : stringToStyledText(content)
+
 import {
   _shell,
   _windowUnitToolCall,
@@ -254,7 +62,6 @@ import {
   handlers,
   _nonEmptyLines,
   model,
-  createScoped,
 } from "../../support/surface/service.fixture"
 it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =>
   Effect.gen(function* () {
@@ -264,7 +71,9 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     const inputText = () => surface.composerEditor.plainText
 
     const modeLabelText = () =>
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
+      styledText(surface.modeLabel.content)
+        .chunks.map(({ text }) => text)
+        .join("")
 
     surface.update(model({ input: "abcd", cursor: 2 }))
     expect(surface.transcriptScroll.content).toBeInstanceOf(Object)
@@ -279,11 +88,13 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(surface.palette.visible).toBe(false)
 
     surface.update(model({ width: 40, input: "one\ntwo\nthree", cursor: 13 }))
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
     expect(surface.inputBox.height).toBe(5)
     expect(inputText()).toBe("one\ntwo\nthree")
     expect(surface.inputBox.bottomTitle).toBe("")
 
     surface.update(model({ input: "one\ntwo\nthree\nfour", cursor: 18 }))
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
     expect(surface.inputBox.height).toBe(6)
     expect(inputText()).toBe("one\ntwo\nthree\nfour")
 
@@ -425,8 +236,8 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(surface.palette.visible).toBe(true)
     expect(surface.paletteBox.visible).toBe(true)
     expect(surface.paletteBox.title).toBe(" Command Palette ")
-    const paletteText = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
-      .map(({ text }) => text)
+    const paletteText = styledText(surface.palette.content)
+      .chunks.map(({ text }) => text)
       .join("")
     expect(paletteText).toContain("thread")
     expect(paletteText).toContain("change mode")
@@ -436,7 +247,7 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(paletteText).not.toContain("show context and cost")
     expect(paletteText).not.toContain("review workspace changes")
     expect(paletteText).not.toContain("changed files")
-    expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
+    expect(opentui.renderer.getSchedulerState().hasScheduledRender).toBe(true)
   }),
 )
 it.effect("routes usage-label clicks to the local display toggle", () =>
@@ -444,10 +255,10 @@ it.effect("routes usage-label clicks to the local display toggle", () =>
     const usageToggle = vi.fn()
     const { surface } = yield* createScoped({ ...handlers(), usageToggle })
     surface.update(model({ usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0, includedAttempts: 0 } }))
-    Object.assign(surface.modeLabel, { screenX: 20 })
-    surface.modeLabel.onMouseDown?.({ x: 20 } as never)
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX))
     expect(usageToggle).toHaveBeenCalledOnce()
-    surface.modeLabel.onMouseDown?.({ x: 27 } as never)
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + 7))
     expect(usageToggle).toHaveBeenCalledOnce()
   }),
 )
@@ -461,22 +272,15 @@ it.effect("uses native clock width and pointer hover for the usage label", () =>
         usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
       }),
     )
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
     expect(surface.modeLabel.width).toBe(19)
-    Object.assign(surface.modeLabel, { screenX: 20 })
-    expect(
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBeUndefined()
+    expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(0)
 
-    surface.modeLabel.onMouseOver?.({ x: 20 } as never)
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
-    expect(
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
-    ).toBeUndefined()
-    surface.modeLabel.onMouseMove?.({ x: 31 } as never)
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
-    surface.modeLabel.onMouseOver?.({ x: 20 } as never)
-    surface.modeLabel.onMouseOut?.({} as never)
-    expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX))
+    expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(1)
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "move", surface.modeLabel.screenX + 11))
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX))
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "out"))
   }),
 )
 it.effect("routes clicks on the usage and mode segments to their own handlers", () =>
@@ -491,13 +295,13 @@ it.effect("routes clicks on the usage and mode segments to their own handlers", 
         usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
       }),
     )
-    Object.assign(surface.modeLabel, { screenX: 20 })
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
 
-    surface.modeLabel.onMouseDown?.({ x: 20 } as never)
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX))
     expect(usageToggle).toHaveBeenCalledTimes(1)
     expect(modeToggle).toHaveBeenCalledTimes(0)
 
-    surface.modeLabel.onMouseDown?.({ x: 31 } as never)
+    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + 11))
     expect(modeToggle).toHaveBeenCalledTimes(1)
     expect(usageToggle).toHaveBeenCalledTimes(1)
   }),

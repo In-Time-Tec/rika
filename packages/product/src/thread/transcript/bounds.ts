@@ -7,21 +7,37 @@ export const transcriptPageEncoder = new TextEncoder()
 export const maximumTranscriptPageBytes = 32 * 1024 * 1024
 export const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
 
+interface JsonEncoder {
+  <Value>(value: Value): string
+}
+
+interface BoundedTurnEntries {
+  readonly entries: ReadonlyArray<TranscriptPage.Entry>
+  readonly contiguousFrom: number
+}
+
+interface BoundedTranscriptEntries {
+  readonly entries: ReadonlyArray<TranscriptPage.Entry>
+  readonly partialCursor?: TranscriptPage.PageCursor
+  readonly truncated: boolean
+  readonly oversizedEntry: boolean
+}
+
 const sameTranscriptCursorImpl = (
   left: TranscriptPage.PageCursor | undefined,
   right: TranscriptPage.PageCursor | undefined,
-  encodeJson: (value: unknown) => string,
+  encodeJson: JsonEncoder,
 ) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
 
 export const sameTranscriptCursor: {
   (
     arg1: TranscriptPage.PageCursor | undefined,
-    arg2: (value: unknown) => string,
+    arg2: JsonEncoder,
   ): (arg0: TranscriptPage.PageCursor | undefined) => ReturnType<typeof sameTranscriptCursorImpl>
   (
     arg0: TranscriptPage.PageCursor | undefined,
     arg1: TranscriptPage.PageCursor | undefined,
-    arg2: (value: unknown) => string,
+    arg2: JsonEncoder,
   ): ReturnType<typeof sameTranscriptCursorImpl>
 } = Function.dual(3, sameTranscriptCursorImpl)
 
@@ -44,7 +60,7 @@ export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean 
 const boundTurnEntriesImpl = (
   entries: ReadonlyArray<TranscriptPage.Entry>,
   detail: number,
-): { readonly entries: ReadonlyArray<TranscriptPage.Entry>; readonly contiguousFrom: number } => {
+): BoundedTurnEntries => {
   if (detail >= entries.length) return { entries, contiguousFrom: 0 }
   const semantic = entries.filter(isSemanticTranscriptEntry).length
   const selection = selectTranscriptWindow({
@@ -54,13 +70,11 @@ const boundTurnEntriesImpl = (
     focus: "newest",
     retain: isSemanticTranscriptEntry,
   })
+  const contiguousStart = selection.contiguousStart
   const contiguousFrom =
-    selection.contiguousStart === undefined
+    contiguousStart === undefined
       ? entries.length
-      : Math.max(
-          0,
-          entries.findIndex((entry) => entry.unit.key === selection.contiguousStart!.unit.key),
-        )
+      : Math.max(0, entries.findIndex((entry) => entry.unit.key === contiguousStart.unit.key))
   return { entries: selection.values, contiguousFrom }
 }
 
@@ -71,13 +85,8 @@ export const boundTurnEntries: {
 
 const boundTranscriptEntriesImpl = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
-  encodeJson: (value: unknown) => string,
-): {
-  readonly entries: ReadonlyArray<TranscriptPage.Entry>
-  readonly partialCursor?: TranscriptPage.PageCursor
-  readonly truncated: boolean
-  readonly oversizedEntry: boolean
-} => {
+  encodeJson: JsonEncoder,
+): BoundedTranscriptEntries => {
   let entries = sourceEntries
   let boundedStart = entries.length
   let boundedBytes = 0
@@ -98,11 +107,11 @@ const boundTranscriptEntriesImpl = (
 
 export const boundTranscriptEntries: {
   (
-    arg1: (value: unknown) => string,
+    arg1: JsonEncoder,
   ): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTranscriptEntriesImpl>
   (
     arg0: ReadonlyArray<TranscriptPage.Entry>,
-    arg1: (value: unknown) => string,
+    arg1: JsonEncoder,
   ): ReturnType<typeof boundTranscriptEntriesImpl>
 } = Function.dual(2, boundTranscriptEntriesImpl)
 
@@ -110,13 +119,8 @@ const boundPartialTranscriptEntries = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
   initialStart: number,
   initialBytes: number,
-  encodeJson: (value: unknown) => string,
-): {
-  readonly entries: ReadonlyArray<TranscriptPage.Entry>
-  readonly partialCursor?: TranscriptPage.PageCursor
-  readonly truncated: true
-  readonly oversizedEntry: false
-} => {
+  encodeJson: JsonEncoder,
+): BoundedTranscriptEntries => {
   let entries = sourceEntries
   let boundedStart = initialStart
   let boundedBytes = initialBytes
@@ -129,12 +133,14 @@ const boundPartialTranscriptEntries = (
     const userBoundary =
       newest === undefined ? -1 : entries.findIndex((entry) => entry.unit.key === `turn:${newest.turn.id}:user`)
     if (userBoundary >= 0) {
-      const userEntry = entries[userBoundary]!
+      const userEntry = entries[userBoundary]
+      if (userEntry === undefined) return { entries: entries.slice(boundedStart), truncated: true, oversizedEntry: false }
       const semanticIndexes = new Set([userBoundary])
       let semanticBytes = transcriptPageEncoder.encode(encodeJson(userEntry)).byteLength
       for (let index = entries.length - 1; index >= 0; index -= 1) {
         if (index === userBoundary) continue
-        const entry = entries[index]!
+        const entry = entries[index]
+        if (entry === undefined) continue
         if (!isSemanticTranscriptEntry(entry)) continue
         const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
         if (semanticBytes + entryBytes > maximumTranscriptPayloadBytes) continue
@@ -156,5 +162,7 @@ const boundPartialTranscriptEntries = (
       entries = entries.filter((_, index) => semanticIndexes.has(index) || index >= boundedStart)
     } else entries = entries.slice(boundedStart)
   } else entries = entries.slice(turnBoundary)
-  return { entries, ...(partialCursor === undefined ? {} : { partialCursor }), truncated: true, oversizedEntry: false }
+  return partialCursor === undefined
+    ? { entries, truncated: true, oversizedEntry: false }
+    : { entries, partialCursor, truncated: true, oversizedEntry: false }
 }

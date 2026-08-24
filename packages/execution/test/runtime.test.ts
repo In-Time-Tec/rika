@@ -6,6 +6,11 @@ import { ModelRegistry } from "tenetkit"
 import { OpenRouter } from "tenetkit/ai"
 
 const captured: Array<{ readonly url: string; readonly body: string }> = []
+const ChatRequest = Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ role: Schema.String })),
+  input: Schema.optionalKey(Schema.Unknown),
+  previous_response_id: Schema.optionalKey(Schema.Unknown),
+})
 
 let reply = 0
 const cannedResponse = () => {
@@ -30,8 +35,10 @@ const cannedResponse = () => {
 const mockHttp = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make((request) => {
-    const body = request.body as { readonly _tag: string; readonly body: Uint8Array } | undefined
-    const text = body !== undefined && body._tag === "Uint8Array" ? new TextDecoder().decode(body.body) : ""
+    const body = Schema.decodeUnknownOption(Schema.TaggedStruct("Uint8Array", { body: Schema.Uint8Array }))(
+      request.body,
+    )
+    const text = body._tag === "Some" ? new TextDecoder().decode(body.value.body) : ""
     captured.push({ url: request.url, body: text })
     return Effect.succeed(
       HttpClientResponse.fromWeb(
@@ -72,11 +79,7 @@ describe("OpenRouter provider conversation continuity", () => {
           expect(captured.length).toBe(1)
           const second = captured[0]!
           expect(second.url).toBe("https://openrouter.ai/api/v1/chat/completions")
-          const body = (yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(second.body)) as {
-            readonly messages: ReadonlyArray<{ readonly role: string }>
-            readonly input?: unknown
-            readonly previous_response_id?: unknown
-          }
+          const body = yield* Schema.decodeEffect(Schema.fromJsonString(ChatRequest))(second.body)
           expect(body.input).toBeUndefined()
           expect(body.previous_response_id).toBeUndefined()
           expect(body.messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"])

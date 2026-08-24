@@ -2,13 +2,11 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
-import {
-  ClientMessage,
-  ServerFrame,
-  type HostedThreadSnapshot,
-  type ThreadProtocolEvent,
-} from "@rika/product/client-protocol"
+import { ClientMessage, HostedThreadSnapshot, ServerFrame, type ThreadProtocolEvent } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as HostedModel from "@rika/product/hosted-model"
+import * as ThreadRecord from "@rika/product/thread-record"
+import * as TurnRecord from "@rika/product/turn-record"
 import { Deferred, Effect, Fiber, Layer, Logger, Metric, Option, Redacted, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -25,6 +23,7 @@ import { makeHostedInteractiveSession } from "../../src/hosted/interactive-sessi
 
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(ClientMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
+const makeHostedThreadSnapshot = Schema.decodeUnknownSync(HostedThreadSnapshot)
 type ThreadAttached = Extract<ServerFrame["payload"], { readonly _tag: "ThreadAttached" }>
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
@@ -37,30 +36,31 @@ const snapshot = (
   updatedAt = 1,
   executorKind: "runner" | "orb" = "runner",
   threadId = "thread-1",
-): HostedThreadSnapshot => ({
-  executorKind,
-  view: {
-    thread: {
-      id: threadId as never,
-      workspace: "workspace-1",
-      title: "Thread",
-      labels: [],
-      pinned: false,
-      archived: false,
-      lineage: { _tag: "Original" },
-      createdAt: 1,
-      updatedAt,
+): HostedThreadSnapshot =>
+  makeHostedThreadSnapshot({
+    executorKind,
+    view: {
+      thread: {
+        id: ThreadRecord.ThreadId.make(threadId),
+        workspace: "workspace-1",
+        title: "Thread",
+        labels: [],
+        pinned: false,
+        archived: false,
+        lineage: { _tag: "Original" },
+        createdAt: 1,
+        updatedAt,
+      },
+      revision: 0,
+      source: { projectionVersion: ExecutionProjection.projectionVersion },
+      turns: [],
+      pending: [],
+      hasOlder: false,
+      hasNewer: false,
+      usage: { state: ExecutionProjection.emptyUsageState() },
     },
-    revision: 0,
-    source: { projectionVersion: ExecutionProjection.projectionVersion },
-    turns: [],
-    pending: [],
-    hasOlder: false,
-    hasNewer: false,
-    usage: { state: ExecutionProjection.emptyUsageState() },
-  },
-  pendingAuthorizations: [],
-})
+    pendingAuthorizations: [],
+  })
 
 const authorizationCheckpoint = {
   version: ExecutionProjection.projectionVersion,
@@ -94,8 +94,8 @@ const authorizationSnapshot = (status: "pending" | "approved", commandReady: boo
       {
         turn: {
           kind: "agent" as const,
-          id: "turn-authorization" as never,
-          threadId: "thread-1" as never,
+          id: TurnRecord.TurnId.make("turn-authorization"),
+          threadId: ThreadRecord.ThreadId.make("thread-1"),
           prompt: "Update the README",
           status: "waiting" as const,
           author: { _tag: "Human" as const },
@@ -137,8 +137,8 @@ const authorizationSnapshot = (status: "pending" | "approved", commandReady: boo
     pendingAuthorizations: commandReady
       ? [
           {
-            threadId: "thread-1" as never,
-            turnId: "turn-authorization" as never,
+            threadId: HostedModel.ThreadId.make("thread-1"),
+            turnId: TurnRecord.TurnId.make("turn-authorization"),
             authorizationId: "authorization-1",
             operation: "write",
             capability: "workspace",
@@ -163,12 +163,14 @@ const attachment = (input: {
   readonly participants?: ThreadAttached["participants"]
 }): ThreadAttached => ({
   _tag: "ThreadAttached",
-  requestId: input.requestId as never,
-  threadId: input.threadId as never,
-  snapshotThreadVersion: (input.snapshotThreadVersion ?? input.threadVersion) as never,
-  snapshotCursor: (input.snapshotCursor ?? ((input.events?.length ?? 0) === 0 ? input.cursor : "0")) as never,
-  threadVersion: input.threadVersion as never,
-  cursor: input.cursor as never,
+  requestId: HostedModel.RequestId.make(input.requestId),
+  threadId: HostedModel.ThreadId.make(input.threadId),
+  snapshotThreadVersion: HostedModel.ThreadVersion.make(input.snapshotThreadVersion ?? input.threadVersion),
+  snapshotCursor: HostedModel.ThreadEventCursor.make(
+    input.snapshotCursor ?? ((input.events?.length ?? 0) === 0 ? input.cursor : "0"),
+  ),
+  threadVersion: HostedModel.ThreadVersion.make(input.threadVersion),
+  cursor: HostedModel.ThreadEventCursor.make(input.cursor),
   snapshot: input.snapshot,
   events: input.events ?? [],
   participants: input.participants ?? [],
@@ -298,12 +300,12 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         let version = "1"
         let cursor = "1"
         const threadEvent: ThreadProtocolEvent = {
-          threadId: "thread-1" as never,
-          sequence: "1" as never,
-          cursor: "1" as never,
-          threadVersion: "1" as never,
+          threadId: HostedModel.ThreadId.make("thread-1"),
+          sequence: HostedModel.Sequence.make("1"),
+          cursor: HostedModel.ThreadEventCursor.make("1"),
+          threadVersion: HostedModel.ThreadVersion.make("1"),
           event: { _tag: "ExecutionControlled", action: "cancelled" },
-          createdAt: "2026-08-21T00:00:00.000Z" as never,
+          createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
         }
         const lateAuthorization = authorizationSnapshot("pending", true)
         const lateAuthorizationSnapshot: HostedThreadSnapshot = {
@@ -324,617 +326,635 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
               send: (value: string) => runSync(write(value)),
               close: () => runSync(write(new Socket.CloseEvent())),
             }
-            yield* upgraded.runString(
-              (value) =>
-                Effect.sync(() => {
-                  const message = decode(value)
-                  commands.push(message.command)
-                  if (message.command._tag === "AttachThread") {
-                    afterCursors.push(String(message.command.afterCursor))
-                    const connection = sockets.get(socket)
-                    const attachedThreadId = message.command.threadId
-                  const attachedThread = String(attachedThreadId)
-                  attachments.set(socket, attachedThread)
-                  attachmentLog.push({ connection: connection!, threadId: attachedThread })
-                  if (thread2RestoreExpected && attachedThread === "thread-2")
-                    Deferred.doneUnsafe(thread2Restored, Effect.void)
-                  if (postDefectThread2RestoreExpected && attachedThread === "thread-2")
-                    Deferred.doneUnsafe(postDefectThread2Restored, Effect.void)
-                  if (queuedRecoveryExpected && attachedThread === "thread-2")
-                    Deferred.doneUnsafe(queuedRecovered, Effect.void)
-                  if (malformedRecoveryExpected && attachedThread === "thread-2")
-                    Deferred.doneUnsafe(malformedRecovered, Effect.void)
-                  if (attachedThread === "thread-defect") {
-                    defectAttaches += 1
-                    if (defectRecoveryExpected && defectAttaches > 2) Deferred.doneUnsafe(defectRecovered, Effect.void)
-                  }
-                  if (failureReconnectExpected && connection !== undefined && attachedThread === "thread-2")
-                    failureReplacementObserved = true
-                  if (attachedThread === "thread-failing") {
-                    Deferred.doneUnsafe(failingAttached, Effect.void)
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "CommandRejected",
-                          requestId: message.requestId,
-                          threadId: message.command.threadId,
-                          reason: "unavailable",
-                          message: "selection unavailable",
-                          details: {},
-                        },
-                      }),
-                    )
-                    return
-                  }
-                  if (attachedThread === "thread-malformed") {
-                    Deferred.doneUnsafe(malformedAttached, Effect.void)
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: attachment({
-                          requestId: message.requestId,
-                          threadId: attachedThread,
-                          threadVersion: "10",
-                          cursor: "10",
-                          snapshotThreadVersion: "10",
-                          snapshotCursor: "9",
-                          snapshot: snapshot(10, "runner", attachedThread),
-                          events: [
-                            {
-                              threadId: attachedThread as never,
-                              sequence: "10" as never,
-                              cursor: "10" as never,
-                              threadVersion: "10" as never,
-                              event: {
-                                _tag: "ThreadViewPatch",
-                                patch: {
-                                  threadId: attachedThread as never,
-                                  baseRevision: 99,
-                                  revision: 100,
-                                  upsert: [],
-                                  remove: [],
-                                  turnChanges: [],
-                                },
-                              },
-                              createdAt: "2026-08-21T00:00:00.000Z" as never,
-                            },
-                          ],
-                        }),
-                      }),
-                    )
-                    return
-                  }
-                  if (attachedThread === "thread-slow") {
-                    sendSlowFrames = () => {
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: attachment({
-                            requestId: message.requestId,
-                            threadId: attachedThread,
-                            threadVersion: "7" as never,
-                            cursor: "7" as never,
-                            snapshot: snapshot(7, "orb", "thread-slow"),
-                          }),
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "WorkspaceStatus",
-                            threadId: "thread-slow" as never,
-                            status: { state: "resuming" },
-                          },
-                        }),
-                      )
-                    }
-                    Deferred.doneUnsafe(slowAttached, Effect.void)
-                    return
-                  }
-                  if (attachedThread === "thread-superseded") {
-                    releaseSuperseded = () =>
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: attachment({
-                            requestId: message.requestId,
-                            threadId: attachedThread,
-                            threadVersion: "8" as never,
-                            cursor: "8" as never,
-                            snapshot: snapshot(8, "runner", "thread-superseded"),
-                          }),
-                        }),
-                      )
-                    Deferred.doneUnsafe(supersededAttached, Effect.void)
-                    return
-                  }
-                  if (attachedThread === "thread-queued") {
-                    releaseQueued = () =>
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: attachment({
-                            requestId: message.requestId,
-                            threadId: attachedThread,
-                            threadVersion: "9" as never,
-                            cursor: "9" as never,
-                            snapshot: snapshot(9, "runner", "thread-queued"),
-                          }),
-                        }),
-                      )
-                    Deferred.doneUnsafe(queuedAttached, Effect.void)
-                    return
-                  }
-                  if (attachedThread === "thread-gated") {
-                    gatedAttaches += 1
-                    sendLateRetainedFrames = () => {
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadSnapshot",
-                            threadId: "thread-2" as never,
-                            threadVersion: "99" as never,
-                            cursor: "99" as never,
-                            snapshot: snapshot(99, "runner", "thread-2"),
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadEvent",
-                            event: {
-                              threadId: "thread-2" as never,
-                              sequence: "99" as never,
-                              cursor: "99" as never,
-                              threadVersion: "99" as never,
-                              event: { _tag: "ExecutionControlled", action: "cancelled" },
-                              createdAt: "2026-08-21T00:00:00.000Z" as never,
-                            },
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ExecutorStatus",
-                            threadId: "thread-2" as never,
-                            status: { state: "terminal" },
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: { _tag: "PresenceSnapshot", threadId: "thread-2" as never, participants: [] },
-                        }),
-                      )
-                    }
-                    const sendGated = (threadVersion = "6", attachedCursor = "6") =>
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: attachment({
-                            requestId: message.requestId,
-                            threadId: attachedThread,
-                            threadVersion: threadVersion as never,
-                            cursor: attachedCursor as never,
-                            snapshot: snapshot(6, "runner", "thread-gated"),
-                          }),
-                        }),
-                      )
-                    if (gatedAttaches === 2) {
-                      sendRefreshEvent = () =>
+            yield* upgraded
+              .runString(
+                (value) =>
+                  Effect.sync(() => {
+                    const message = decode(value)
+                    commands.push(message.command)
+                    if (message.command._tag === "AttachThread") {
+                      afterCursors.push(String(message.command.afterCursor))
+                      const connection = sockets.get(socket)
+                      const attachedThreadId = message.command.threadId
+                      const attachedThread = String(attachedThreadId)
+                      attachments.set(socket, attachedThread)
+                      attachmentLog.push({ connection: connection!, threadId: attachedThread })
+                      if (thread2RestoreExpected && attachedThread === "thread-2")
+                        Deferred.doneUnsafe(thread2Restored, Effect.void)
+                      if (postDefectThread2RestoreExpected && attachedThread === "thread-2")
+                        Deferred.doneUnsafe(postDefectThread2Restored, Effect.void)
+                      if (queuedRecoveryExpected && attachedThread === "thread-2")
+                        Deferred.doneUnsafe(queuedRecovered, Effect.void)
+                      if (malformedRecoveryExpected && attachedThread === "thread-2")
+                        Deferred.doneUnsafe(malformedRecovered, Effect.void)
+                      if (attachedThread === "thread-defect") {
+                        defectAttaches += 1
+                        if (defectRecoveryExpected && defectAttaches > 2)
+                          Deferred.doneUnsafe(defectRecovered, Effect.void)
+                      }
+                      if (failureReconnectExpected && connection !== undefined && attachedThread === "thread-2")
+                        failureReplacementObserved = true
+                      if (attachedThread === "thread-failing") {
+                        Deferred.doneUnsafe(failingAttached, Effect.void)
                         socket.send(
                           encode({
                             protocolVersion: 1,
                             payload: {
-                              _tag: "ThreadEvent",
-                              event: {
-                                threadId: attachedThread as never,
-                                sequence: "7" as never,
-                                cursor: "7" as never,
-                                threadVersion: "7" as never,
-                                event: { _tag: "ThreadTitled", threadId: attachedThread, title: "Gated seven" },
-                                createdAt: "2026-08-21T00:00:00.000Z" as never,
-                              },
+                              _tag: "CommandRejected",
+                              requestId: message.requestId,
+                              threadId: message.command.threadId,
+                              reason: "unavailable",
+                              message: "selection unavailable",
+                              details: {},
                             },
                           }),
                         )
-                      releaseStaleRefresh = sendGated
-                      Deferred.doneUnsafe(staleRefreshAttached, Effect.void)
-                    } else if (gatedAttaches > 2) {
-                      sendGated("7", "7")
-                      Deferred.doneUnsafe(staleRefreshRecovered, Effect.void)
-                    } else if (gatedReleased) sendGated()
-                    else {
-                      releaseGated = () => {
-                        gatedReleased = true
-                        sendGated()
+                        return
                       }
-                      Deferred.doneUnsafe(gatedAttached, Effect.void)
-                    }
-                    return
-                  }
-                  if (attachedThread === "thread-defect") {
-                    if (defectAttaches === 1) {
-                      Deferred.doneUnsafe(defectInitialAttached, Effect.void)
+                      if (attachedThread === "thread-malformed") {
+                        Deferred.doneUnsafe(malformedAttached, Effect.void)
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: attachment({
+                              requestId: message.requestId,
+                              threadId: attachedThread,
+                              threadVersion: "10",
+                              cursor: "10",
+                              snapshotThreadVersion: "10",
+                              snapshotCursor: "9",
+                              snapshot: snapshot(10, "runner", attachedThread),
+                              events: [
+                                {
+                                  threadId: HostedModel.ThreadId.make(attachedThread),
+                                  sequence: HostedModel.Sequence.make("10"),
+                                  cursor: HostedModel.ThreadEventCursor.make("10"),
+                                  threadVersion: HostedModel.ThreadVersion.make("10"),
+                                  event: {
+                                    _tag: "ThreadViewPatch",
+                                    patch: {
+                                      threadId: ThreadRecord.ThreadId.make(attachedThread),
+                                      baseRevision: 99,
+                                      revision: 100,
+                                      upsert: [],
+                                      remove: [],
+                                      turnChanges: [],
+                                    },
+                                  },
+                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
+                                },
+                              ],
+                            }),
+                          }),
+                        )
+                        return
+                      }
+                      if (attachedThread === "thread-slow") {
+                        sendSlowFrames = () => {
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: attachment({
+                                requestId: message.requestId,
+                                threadId: attachedThread,
+                                threadVersion: HostedModel.ThreadVersion.make("7"),
+                                cursor: HostedModel.ThreadEventCursor.make("7"),
+                                snapshot: snapshot(7, "orb", "thread-slow"),
+                              }),
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "WorkspaceStatus",
+                                threadId: HostedModel.ThreadId.make("thread-slow"),
+                                status: { state: "resuming" },
+                              },
+                            }),
+                          )
+                        }
+                        Deferred.doneUnsafe(slowAttached, Effect.void)
+                        return
+                      }
+                      if (attachedThread === "thread-superseded") {
+                        releaseSuperseded = () =>
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: attachment({
+                                requestId: message.requestId,
+                                threadId: attachedThread,
+                                threadVersion: HostedModel.ThreadVersion.make("8"),
+                                cursor: HostedModel.ThreadEventCursor.make("8"),
+                                snapshot: snapshot(8, "runner", "thread-superseded"),
+                              }),
+                            }),
+                          )
+                        Deferred.doneUnsafe(supersededAttached, Effect.void)
+                        return
+                      }
+                      if (attachedThread === "thread-queued") {
+                        releaseQueued = () =>
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: attachment({
+                                requestId: message.requestId,
+                                threadId: attachedThread,
+                                threadVersion: HostedModel.ThreadVersion.make("9"),
+                                cursor: HostedModel.ThreadEventCursor.make("9"),
+                                snapshot: snapshot(9, "runner", "thread-queued"),
+                              }),
+                            }),
+                          )
+                        Deferred.doneUnsafe(queuedAttached, Effect.void)
+                        return
+                      }
+                      if (attachedThread === "thread-gated") {
+                        gatedAttaches += 1
+                        sendLateRetainedFrames = () => {
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadSnapshot",
+                                threadId: HostedModel.ThreadId.make("thread-2"),
+                                threadVersion: HostedModel.ThreadVersion.make("99"),
+                                cursor: HostedModel.ThreadEventCursor.make("99"),
+                                snapshot: snapshot(99, "runner", "thread-2"),
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadEvent",
+                                event: {
+                                  threadId: HostedModel.ThreadId.make("thread-2"),
+                                  sequence: HostedModel.Sequence.make("99"),
+                                  cursor: HostedModel.ThreadEventCursor.make("99"),
+                                  threadVersion: HostedModel.ThreadVersion.make("99"),
+                                  event: { _tag: "ExecutionControlled", action: "cancelled" },
+                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
+                                },
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ExecutorStatus",
+                                threadId: HostedModel.ThreadId.make("thread-2"),
+                                status: { state: "terminal" },
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "PresenceSnapshot",
+                                threadId: HostedModel.ThreadId.make("thread-2"),
+                                participants: [],
+                              },
+                            }),
+                          )
+                        }
+                        const sendGated = (threadVersion = "6", attachedCursor = "6") =>
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: attachment({
+                                requestId: message.requestId,
+                                threadId: attachedThread,
+                                threadVersion: HostedModel.ThreadVersion.make(threadVersion),
+                                cursor: HostedModel.ThreadEventCursor.make(attachedCursor),
+                                snapshot: snapshot(6, "runner", "thread-gated"),
+                              }),
+                            }),
+                          )
+                        if (gatedAttaches === 2) {
+                          sendRefreshEvent = () =>
+                            socket.send(
+                              encode({
+                                protocolVersion: 1,
+                                payload: {
+                                  _tag: "ThreadEvent",
+                                  event: {
+                                    threadId: HostedModel.ThreadId.make(attachedThread),
+                                    sequence: HostedModel.Sequence.make("7"),
+                                    cursor: HostedModel.ThreadEventCursor.make("7"),
+                                    threadVersion: HostedModel.ThreadVersion.make("7"),
+                                    event: { _tag: "ThreadTitled", threadId: attachedThread, title: "Gated seven" },
+                                    createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
+                                  },
+                                },
+                              }),
+                            )
+                          releaseStaleRefresh = sendGated
+                          Deferred.doneUnsafe(staleRefreshAttached, Effect.void)
+                        } else if (gatedAttaches > 2) {
+                          sendGated("7", "7")
+                          Deferred.doneUnsafe(staleRefreshRecovered, Effect.void)
+                        } else if (gatedReleased) sendGated()
+                        else {
+                          releaseGated = () => {
+                            gatedReleased = true
+                            sendGated()
+                          }
+                          Deferred.doneUnsafe(gatedAttached, Effect.void)
+                        }
+                        return
+                      }
+                      if (attachedThread === "thread-defect") {
+                        if (defectAttaches === 1) {
+                          Deferred.doneUnsafe(defectInitialAttached, Effect.void)
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: attachment({
+                                requestId: message.requestId,
+                                threadId: attachedThread,
+                                threadVersion: "1",
+                                cursor: "1",
+                                snapshot: snapshot(1, "runner", attachedThread),
+                              }),
+                            }),
+                          )
+                          return
+                        }
+                        const defectSnapshot = snapshot(2, "orb", attachedThread)
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: attachment({
+                              requestId: message.requestId,
+                              threadId: attachedThread,
+                              threadVersion: "2",
+                              cursor: "2",
+                              snapshot: {
+                                ...defectSnapshot,
+                                pendingAuthorizations: [
+                                  {
+                                    threadId: HostedModel.ThreadId.make(attachedThread),
+                                    turnId: TurnRecord.TurnId.make("turn-defect"),
+                                    authorizationId: "authorization-defect",
+                                    operation: "write",
+                                    capability: "workspace",
+                                    input: "{}",
+                                    inputTruncated: false,
+                                    checkpoint: authorizationCheckpoint,
+                                  },
+                                ],
+                              },
+                              participants: [
+                                {
+                                  actor: {
+                                    _tag: "PersonalActor",
+                                    owner: {
+                                      _tag: "PersonalOwner",
+                                      userId: HostedModel.BetterAuthUserId.make("defect-user"),
+                                    },
+                                    userId: HostedModel.BetterAuthUserId.make("defect-user"),
+                                    clientId: HostedModel.ClientId.make("defect-client"),
+                                    deviceId: HostedModel.DeviceId.make("defect-device"),
+                                  },
+                                  status: "controlling",
+                                },
+                              ],
+                            }),
+                          }),
+                        )
+                        return
+                      }
                       socket.send(
                         encode({
                           protocolVersion: 1,
                           payload: attachment({
                             requestId: message.requestId,
                             threadId: attachedThread,
-                            threadVersion: "1",
-                            cursor: "1",
-                            snapshot: snapshot(1, "runner", attachedThread),
+                            threadVersion: HostedModel.ThreadVersion.make(version),
+                            cursor: HostedModel.ThreadEventCursor.make(
+                              attachedThread === "thread-3" && thread3Attaches > 0 ? "2" : cursor,
+                            ),
+                            snapshot: snapshot(
+                              Number(version),
+                              attachedThread === "thread-2" ? "orb" : "runner",
+                              attachedThread,
+                            ),
+                            events: connection === 1 ? [threadEvent] : [],
+                            participants:
+                              connection === 1
+                                ? [
+                                    {
+                                      actor: {
+                                        _tag: "PersonalActor",
+                                        owner: {
+                                          _tag: "PersonalOwner",
+                                          userId: HostedModel.BetterAuthUserId.make("initial-user"),
+                                        },
+                                        userId: HostedModel.BetterAuthUserId.make("initial-user"),
+                                        clientId: HostedModel.ClientId.make("initial-client"),
+                                        deviceId: HostedModel.DeviceId.make("initial-device"),
+                                      },
+                                      status: "controlling",
+                                    },
+                                  ]
+                                : [],
                           }),
                         }),
                       )
-                      return
-                    }
-                    const defectSnapshot = snapshot(2, "orb", attachedThread)
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: attachment({
-                          requestId: message.requestId,
-                          threadId: attachedThread,
-                          threadVersion: "2",
-                          cursor: "2",
-                          snapshot: {
-                            ...defectSnapshot,
-                            pendingAuthorizations: [
-                              {
-                                threadId: attachedThread as never,
-                                turnId: "turn-defect" as never,
-                                authorizationId: "authorization-defect",
-                                operation: "write",
-                                capability: "workspace",
-                                input: "{}",
-                                inputTruncated: false,
-                                checkpoint: authorizationCheckpoint,
+                      if (queuedRecoveryExpected && attachedThread === "thread-2")
+                        sendQueuedRecoveryStatus = () =>
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "WorkspaceStatus",
+                                threadId: HostedModel.ThreadId.make("thread-2"),
+                                status: { state: "resuming" },
                               },
-                            ],
-                          },
-                          participants: [
-                            {
-                              actor: {
-                                _tag: "PersonalActor",
-                                owner: { _tag: "PersonalOwner", userId: "defect-user" as never },
-                                userId: "defect-user" as never,
-                                clientId: "defect-client" as never,
-                                deviceId: "defect-device" as never,
-                              },
-                              status: "controlling",
-                            },
-                          ],
-                        }),
-                      }),
-                    )
-                    return
-                  }
-                  socket.send(
-                    encode({
-                      protocolVersion: 1,
-                      payload: attachment({
-                        requestId: message.requestId,
-                        threadId: attachedThread,
-                        threadVersion: version as never,
-                        cursor: (attachedThread === "thread-3" && thread3Attaches > 0 ? "2" : cursor) as never,
-                        snapshot: snapshot(
-                          Number(version),
-                          attachedThread === "thread-2" ? "orb" : "runner",
-                          attachedThread,
-                        ),
-                        events: connection === 1 ? [threadEvent] : [],
-                        participants:
-                          connection === 1
-                            ? [
-                                {
-                                  actor: {
-                                    _tag: "PersonalActor",
-                                    owner: { _tag: "PersonalOwner", userId: "initial-user" as never },
-                                    userId: "initial-user" as never,
-                                    clientId: "initial-client" as never,
-                                    deviceId: "initial-device" as never,
-                                  },
-                                  status: "controlling",
-                                },
-                              ]
-                            : [],
-                      }),
-                    }),
-                  )
-                  if (queuedRecoveryExpected && attachedThread === "thread-2")
-                    sendQueuedRecoveryStatus = () =>
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "WorkspaceStatus",
-                            threadId: "thread-2" as never,
-                            status: { state: "resuming" },
-                          },
-                        }),
-                      )
-                  if (attachedThread === "thread-3") {
-                    thread3Attaches += 1
-                    let attached: Deferred.Deferred<void>
-                    if (thread3Attaches === 1) attached = thread3Attached
-                    else if (thread3Attaches === 2) attached = thread3Replayed
-                    else attached = mismatchReattached
-                    Deferred.doneUnsafe(attached, Effect.void)
-                    if (thread3Attaches === 1)
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadEvent",
-                            event: {
-                              threadId: "thread-3" as never,
-                              sequence: "2" as never,
-                              cursor: "2" as never,
-                              threadVersion: "2" as never,
-                              createdAt: "2026-08-21T00:00:00.000Z" as never,
-                              event: { _tag: "ThreadTitled", threadId: "thread-3", title: "Three" },
-                            },
-                          },
-                        }),
-                      )
-                    sendThread3Setup = () =>
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "WorkspaceStatus",
-                            threadId: "thread-3" as never,
-                            status: { state: "setup" },
-                          },
-                        }),
-                      )
-                  }
-                  if (attachedThread === "thread-newer") Deferred.doneUnsafe(newerAttached, Effect.void)
-                  if (connection === 1) {
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "ExecutorStatus",
-                          threadId: "thread-1" as never,
-                          status: { state: "waiting" },
-                        },
-                      }),
-                    )
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "WorkspaceStatus",
-                          threadId: "thread-1" as never,
-                          status: { state: "setup" },
-                        },
-                      }),
-                    )
-                  } else if (connection === 2) {
-                    Deferred.doneUnsafe(reattached, Effect.void)
-                    if (attachedThread === "thread-2") {
-                      disconnectOrb = () => socket.close()
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadSnapshot",
-                            threadId: "thread-1" as never,
-                            threadVersion: "99" as never,
-                            cursor: "2" as never,
-                            snapshot: lateAuthorizationSnapshot,
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadEvent",
-                            event: {
-                              ...threadEvent,
-                              sequence: "3" as never,
-                              cursor: "3" as never,
-                              threadVersion: "99" as never,
-                            },
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadEvent",
-                            event: {
-                              threadId: "thread-1" as never,
-                              sequence: "4" as never,
-                              cursor: "4" as never,
-                              threadVersion: "99" as never,
-                              event: {
-                                _tag: "ThreadViewSnapshot",
-                                snapshot: {
-                                  ...lateAuthorizationSnapshot.view,
-                                  thread: { ...lateAuthorizationSnapshot.view.thread, updatedAt: 100 },
+                            }),
+                          )
+                      if (attachedThread === "thread-3") {
+                        thread3Attaches += 1
+                        let attached: Deferred.Deferred<void>
+                        if (thread3Attaches === 1) attached = thread3Attached
+                        else if (thread3Attaches === 2) attached = thread3Replayed
+                        else attached = mismatchReattached
+                        Deferred.doneUnsafe(attached, Effect.void)
+                        if (thread3Attaches === 1)
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadEvent",
+                                event: {
+                                  threadId: HostedModel.ThreadId.make("thread-3"),
+                                  sequence: HostedModel.Sequence.make("2"),
+                                  cursor: HostedModel.ThreadEventCursor.make("2"),
+                                  threadVersion: HostedModel.ThreadVersion.make("2"),
+                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
+                                  event: { _tag: "ThreadTitled", threadId: "thread-3", title: "Three" },
                                 },
                               },
-                              createdAt: "2026-08-21T00:00:00.000Z" as never,
-                            },
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "PresenceSnapshot",
-                            threadId: "thread-1" as never,
-                            participants: [
-                              {
-                                actor: {
-                                  _tag: "PersonalActor",
-                                  owner: { _tag: "PersonalOwner", userId: "late-user" as never },
-                                  userId: "late-user" as never,
-                                  clientId: "late-client" as never,
-                                  deviceId: "late-device" as never,
-                                },
-                                status: "controlling",
+                            }),
+                          )
+                        sendThread3Setup = () =>
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "WorkspaceStatus",
+                                threadId: HostedModel.ThreadId.make("thread-3"),
+                                status: { state: "setup" },
                               },
-                            ],
-                          },
-                        }),
-                      )
-                      sendOrbSetup = () =>
+                            }),
+                          )
+                      }
+                      if (attachedThread === "thread-newer") Deferred.doneUnsafe(newerAttached, Effect.void)
+                      if (connection === 1) {
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: {
+                              _tag: "ExecutorStatus",
+                              threadId: HostedModel.ThreadId.make("thread-1"),
+                              status: { state: "waiting" },
+                            },
+                          }),
+                        )
                         socket.send(
                           encode({
                             protocolVersion: 1,
                             payload: {
                               _tag: "WorkspaceStatus",
-                              threadId: "thread-2" as never,
+                              threadId: HostedModel.ThreadId.make("thread-1"),
                               status: { state: "setup" },
                             },
                           }),
                         )
+                      } else if (connection === 2) {
+                        Deferred.doneUnsafe(reattached, Effect.void)
+                        if (attachedThread === "thread-2") {
+                          disconnectOrb = () => socket.close()
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadSnapshot",
+                                threadId: HostedModel.ThreadId.make("thread-1"),
+                                threadVersion: HostedModel.ThreadVersion.make("99"),
+                                cursor: HostedModel.ThreadEventCursor.make("2"),
+                                snapshot: lateAuthorizationSnapshot,
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadEvent",
+                                event: {
+                                  ...threadEvent,
+                                  sequence: HostedModel.Sequence.make("3"),
+                                  cursor: HostedModel.ThreadEventCursor.make("3"),
+                                  threadVersion: HostedModel.ThreadVersion.make("99"),
+                                },
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "ThreadEvent",
+                                event: {
+                                  threadId: HostedModel.ThreadId.make("thread-1"),
+                                  sequence: HostedModel.Sequence.make("4"),
+                                  cursor: HostedModel.ThreadEventCursor.make("4"),
+                                  threadVersion: HostedModel.ThreadVersion.make("99"),
+                                  event: {
+                                    _tag: "ThreadViewSnapshot",
+                                    snapshot: {
+                                      ...lateAuthorizationSnapshot.view,
+                                      thread: { ...lateAuthorizationSnapshot.view.thread, updatedAt: 100 },
+                                    },
+                                  },
+                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
+                                },
+                              },
+                            }),
+                          )
+                          socket.send(
+                            encode({
+                              protocolVersion: 1,
+                              payload: {
+                                _tag: "PresenceSnapshot",
+                                threadId: HostedModel.ThreadId.make("thread-1"),
+                                participants: [
+                                  {
+                                    actor: {
+                                      _tag: "PersonalActor",
+                                      owner: {
+                                        _tag: "PersonalOwner",
+                                        userId: HostedModel.BetterAuthUserId.make("late-user"),
+                                      },
+                                      userId: HostedModel.BetterAuthUserId.make("late-user"),
+                                      clientId: HostedModel.ClientId.make("late-client"),
+                                      deviceId: HostedModel.DeviceId.make("late-device"),
+                                    },
+                                    status: "controlling",
+                                  },
+                                ],
+                              },
+                            }),
+                          )
+                          sendOrbSetup = () =>
+                            socket.send(
+                              encode({
+                                protocolVersion: 1,
+                                payload: {
+                                  _tag: "WorkspaceStatus",
+                                  threadId: HostedModel.ThreadId.make("thread-2"),
+                                  status: { state: "setup" },
+                                },
+                              }),
+                            )
+                        }
+                      } else if (secondControllerExpected) Deferred.doneUnsafe(secondAttached, Effect.void)
+                      return
                     }
-                  } else if (secondControllerExpected) Deferred.doneUnsafe(secondAttached, Effect.void)
-                  return
-                }
-                if (message.command._tag === "AcknowledgeCursor") {
-                  acknowledgements.push({
-                    connection: sockets.get(socket)!,
-                    threadId: String(message.command.threadId),
-                    cursor: String(message.command.cursor),
-                  })
-                  socket.send(
-                    encode({
-                      protocolVersion: 1,
-                      payload: {
-                        _tag: "CommandAccepted",
-                        requestId: message.requestId,
-                        threadId: message.command.threadId,
-                        threadVersion: version as never,
-                        cursor: cursor as never,
-                        result: { _tag: "Applied" },
-                      },
-                    }),
-                  )
-                  if (sockets.get(socket) === 1 && message.command.cursor === "1") socket.close()
-                  return
-                }
-                if (message.command._tag === "SubmitPrompt") {
-                  const commandThread = String(message.command.threadId)
-                  mutationThreads.push(commandThread)
-                  mutationVersions.push(String(message.command.expectedThreadVersion))
-                  version = "2"
-                  const mismatch = message.command.commandId === "submission-mismatch" && !mismatchSent
-                  if (mismatch) mismatchSent = true
-                  socket.send(
-                    encode({
-                      protocolVersion: 1,
-                      payload: {
-                        _tag: "CommandAccepted",
-                        requestId: message.requestId,
-                        commandId: message.command.commandId,
-                        threadId: (mismatch ? "thread-wrong" : message.command.threadId) as never,
-                        threadVersion: "2" as never,
-                        cursor: cursor as never,
-                        result: { _tag: "Applied" },
-                      },
-                    }),
-                  )
-                  if (mismatch) return
-                  if (commandThread === "thread-1") {
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "ThreadSnapshot",
-                          threadId: "thread-1" as never,
-                          threadVersion: "2" as never,
-                          cursor: cursor as never,
-                          snapshot: snapshot(2),
-                        },
-                      }),
-                    )
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "ThreadSnapshot",
-                          threadId: "thread-1" as never,
-                          threadVersion: "2" as never,
-                          cursor: cursor as never,
-                          snapshot: authorizationSnapshot("pending", false),
-                        },
-                      }),
-                    )
-                    socket.send(
-                      encode({
-                        protocolVersion: 1,
-                        payload: {
-                          _tag: "ThreadSnapshot",
-                          threadId: "thread-1" as never,
-                          threadVersion: "2" as never,
-                          cursor: cursor as never,
-                          snapshot: authorizationSnapshot("pending", true),
-                        },
-                      }),
-                    )
-                  }
-                  return
-                }
-                if (message.command._tag === "Approve") {
-                  socket.send(
-                    encode({
-                      protocolVersion: 1,
-                      payload: {
-                        _tag: "CommandAccepted",
-                        requestId: message.requestId,
-                        commandId: message.command.commandId,
-                        threadId: message.command.threadId,
-                        threadVersion: "2" as never,
-                        cursor: cursor as never,
-                        result: { _tag: "Applied" },
-                      },
-                    }),
-                  )
-                  socket.send(
-                    encode({
-                      protocolVersion: 1,
-                      payload: {
-                        _tag: "ThreadSnapshot",
-                        threadId: message.command.threadId,
-                        threadVersion: "2" as never,
-                        cursor: cursor as never,
-                        snapshot: authorizationSnapshot("approved", false),
-                      },
-                    }),
-                  )
-                }
-                }),
-              {
-                onOpen: Effect.sync(() => {
-                  opened += 1
-                  sockets.set(socket, opened)
-                }),
-              },
-            ).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  if (sockets.get(socket) === 1) Deferred.doneUnsafe(firstClosed, Effect.void)
-                }),
-              ),
-            )
+                    if (message.command._tag === "AcknowledgeCursor") {
+                      acknowledgements.push({
+                        connection: sockets.get(socket)!,
+                        threadId: String(message.command.threadId),
+                        cursor: String(message.command.cursor),
+                      })
+                      socket.send(
+                        encode({
+                          protocolVersion: 1,
+                          payload: {
+                            _tag: "CommandAccepted",
+                            requestId: message.requestId,
+                            threadId: message.command.threadId,
+                            threadVersion: HostedModel.ThreadVersion.make(version),
+                            cursor: HostedModel.ThreadEventCursor.make(cursor),
+                            result: { _tag: "Applied" },
+                          },
+                        }),
+                      )
+                      if (sockets.get(socket) === 1 && message.command.cursor === "1") socket.close()
+                      return
+                    }
+                    if (message.command._tag === "SubmitPrompt") {
+                      const commandThread = String(message.command.threadId)
+                      mutationThreads.push(commandThread)
+                      mutationVersions.push(String(message.command.expectedThreadVersion))
+                      version = "2"
+                      const mismatch = message.command.commandId === "submission-mismatch" && !mismatchSent
+                      if (mismatch) mismatchSent = true
+                      socket.send(
+                        encode({
+                          protocolVersion: 1,
+                          payload: {
+                            _tag: "CommandAccepted",
+                            requestId: message.requestId,
+                            commandId: message.command.commandId,
+                            threadId: HostedModel.ThreadId.make(mismatch ? "thread-wrong" : message.command.threadId),
+                            threadVersion: HostedModel.ThreadVersion.make("2"),
+                            cursor: HostedModel.ThreadEventCursor.make(cursor),
+                            result: { _tag: "Applied" },
+                          },
+                        }),
+                      )
+                      if (mismatch) return
+                      if (commandThread === "thread-1") {
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: {
+                              _tag: "ThreadSnapshot",
+                              threadId: HostedModel.ThreadId.make("thread-1"),
+                              threadVersion: HostedModel.ThreadVersion.make("2"),
+                              cursor: HostedModel.ThreadEventCursor.make(cursor),
+                              snapshot: snapshot(2),
+                            },
+                          }),
+                        )
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: {
+                              _tag: "ThreadSnapshot",
+                              threadId: HostedModel.ThreadId.make("thread-1"),
+                              threadVersion: HostedModel.ThreadVersion.make("2"),
+                              cursor: HostedModel.ThreadEventCursor.make(cursor),
+                              snapshot: authorizationSnapshot("pending", false),
+                            },
+                          }),
+                        )
+                        socket.send(
+                          encode({
+                            protocolVersion: 1,
+                            payload: {
+                              _tag: "ThreadSnapshot",
+                              threadId: HostedModel.ThreadId.make("thread-1"),
+                              threadVersion: HostedModel.ThreadVersion.make("2"),
+                              cursor: HostedModel.ThreadEventCursor.make(cursor),
+                              snapshot: authorizationSnapshot("pending", true),
+                            },
+                          }),
+                        )
+                      }
+                      return
+                    }
+                    if (message.command._tag === "Approve") {
+                      socket.send(
+                        encode({
+                          protocolVersion: 1,
+                          payload: {
+                            _tag: "CommandAccepted",
+                            requestId: message.requestId,
+                            commandId: message.command.commandId,
+                            threadId: message.command.threadId,
+                            threadVersion: HostedModel.ThreadVersion.make("2"),
+                            cursor: HostedModel.ThreadEventCursor.make(cursor),
+                            result: { _tag: "Applied" },
+                          },
+                        }),
+                      )
+                      socket.send(
+                        encode({
+                          protocolVersion: 1,
+                          payload: {
+                            _tag: "ThreadSnapshot",
+                            threadId: message.command.threadId,
+                            threadVersion: HostedModel.ThreadVersion.make("2"),
+                            cursor: HostedModel.ThreadEventCursor.make(cursor),
+                            snapshot: authorizationSnapshot("approved", false),
+                          },
+                        }),
+                      )
+                    }
+                  }),
+                {
+                  onOpen: Effect.sync(() => {
+                    opened += 1
+                    sockets.set(socket, opened)
+                  }),
+                },
+              )
+              .pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    if (sockets.get(socket) === 1) Deferred.doneUnsafe(firstClosed, Effect.void)
+                  }),
+                ),
+              )
             return HttpServerResponse.empty()
           }),
         )
@@ -961,7 +981,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
               issueThreadTicket: () =>
                 Effect.succeed({
                   ticket: `ticket-${opened + 1}`,
-                  expiresAt: "2026-08-21T01:00:00.000Z" as never,
+                  expiresAt: HostedModel.Timestamp.make("2026-08-21T01:00:00.000Z"),
                   websocketUrl: `ws://127.0.0.1:${server.address._tag === "TcpAddress" ? server.address.port : 0}`,
                   protocol: "rika.thread.v1",
                 }),
@@ -1082,7 +1102,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         })
         expect(first.session.projectionCheckpoint("turn-authorization")).toEqual(authorizationCheckpoint)
         yield* first.session.approveAuthorization(
-          "turn-authorization" as never,
+          TurnRecord.TurnId.make("turn-authorization"),
           "authorization-1",
           authorizationCheckpoint,
         )
@@ -1422,7 +1442,7 @@ it.effect("replays without gaps across reconnect and attaches a second controlle
         record.message === "hosted.target_resolution.failure",
     )
     const milestoneThreadIds = threadMilestones.map((record) => record.annotations["rika.thread.id"])
-    expect(milestoneThreadIds.every((threadId) => typeof threadId === "string")).toBe(true)
+    expect(milestoneThreadIds.every(Schema.is(Schema.String))).toBe(true)
     expect(milestoneThreadIds).toEqual(
       expect.arrayContaining(["thread-1", "thread-2", "thread-3", "thread-queued", "thread-malformed"]),
     )

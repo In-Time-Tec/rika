@@ -123,7 +123,7 @@ describe("OpenAI token credentials", () => {
       exchange: () =>
         Effect.succeed({
           access_token: expiryJwt(1_900_000_000),
-          id_token: jwt("account-secret", "user-secret", 1_800_000_000),
+          id_token: jwt.make("account-secret", "user-secret", 1_800_000_000),
           refresh_token: "refresh-secret",
         }),
     })
@@ -135,7 +135,7 @@ describe("OpenAI token credentials", () => {
 
   it.effect("validates token response shape without weakening initial exchange requirements", () =>
     Effect.gen(function* () {
-      expect(yield* Schema.decodeUnknownEffect(TokenResponse)({})).toEqual({})
+      expect(yield* Schema.decodeEffect(TokenResponse)({})).toEqual({})
     }),
   )
 })

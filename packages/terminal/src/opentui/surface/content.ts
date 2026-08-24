@@ -2,7 +2,6 @@ import { Function } from "effect"
 import { dim, fg, bold, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model, Mode } from "../../state/model"
-import type { ThreadItem } from "../../state/thread/model"
 import { isLoading } from "../../state/loadable"
 import { activeTimeIcon } from "../../state/activity/time"
 import { colors, modeColor, spacing } from "../../presentation/terminal/theme"
@@ -114,10 +113,7 @@ export const animationActive = (model: Model): boolean =>
   model.modeCommit !== undefined ||
   model.contextAnimation.flashTicks > 0 ||
   model.contextAnimation.compactTick !== undefined ||
-  (model.threadSidebar.open &&
-    (model.threads as ReadonlyArray<ThreadItem>).some(
-      (thread) => thread.status !== "idle" && thread.status !== "error",
-    ))
+  (model.threadSidebar.open && model.threads.some((thread) => thread.status !== "idle" && thread.status !== "error"))
 
 /**
  * Gates the goal timer's EXISTENCE. `model.goal !== undefined` would pin the timer on forever after

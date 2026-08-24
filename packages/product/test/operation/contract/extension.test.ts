@@ -7,7 +7,15 @@ import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as ExtensionOperations from "../../../src/operation/contract/extension"
 import { provideLayer } from "../../support/product-layer"
 
-const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
+const McpDocument = Schema.Struct({ servers: Schema.Record(Schema.String, Schema.Unknown) })
+const ExtensionDocument = Schema.Struct({
+  extensions: Schema.Record(
+    Schema.String,
+    Schema.Struct({ enabled: Schema.Boolean, generation: Schema.Finite }),
+  ),
+})
+const decodeMcpDocument = Schema.decodeSync(Schema.fromJsonString(McpDocument))
+const decodeExtensionDocument = Schema.decodeSync(Schema.fromJsonString(ExtensionDocument))
 
 describe("ExtensionOperations", () => {
   const oauthLayer = Layer.succeed(
@@ -231,9 +239,7 @@ describe("ExtensionOperations", () => {
           yield* run({ _tag: "Mcp", action: "remove", name: "direct" })
           yield* run({ _tag: "Mcp", action: "remove", name: "disabled" })
           yield* run({ _tag: "Mcp", action: "add", name: "__proto__", command: ["runner"] })
-          const specialName = decodeJson(yield* fs.readFileString(options.configPath)) as {
-            readonly servers: Readonly<Record<string, unknown>>
-          }
+          const specialName = decodeMcpDocument(yield* fs.readFileString(options.configPath))
           expect(Object.hasOwn(specialName.servers, "__proto__")).toBe(true)
           yield* run({ _tag: "Mcp", action: "remove", name: "__proto__" })
 
@@ -269,9 +275,7 @@ describe("ExtensionOperations", () => {
             ),
           { concurrency: "unbounded", discard: true },
         )
-        const document = decodeJson(yield* fs.readFileString(options.configPath)) as {
-          readonly servers: Readonly<Record<string, unknown>>
-        }
+        const document = decodeMcpDocument(yield* fs.readFileString(options.configPath))
         expect(Object.keys(document.servers).toSorted()).toEqual(names.toSorted())
       }).pipe(provideLayer(Layer.merge(BunServices.layer, SkillRegistry.layer.pipe(Layer.provide(BunServices.layer))))),
     ),
@@ -327,7 +331,7 @@ describe("ExtensionOperations", () => {
         yield* run("rollback", "alpha")
         yield* run("rollback", "beta")
         yield* run("rollback", "beta")
-        expect(decodeJson(yield* fs.readFileString(options.generationsPath))).toEqual({
+        expect(decodeExtensionDocument(yield* fs.readFileString(options.generationsPath))).toEqual({
           extensions: {
             alpha: { enabled: true, generation: 2 },
             beta: { enabled: false, generation: 1 },
@@ -393,9 +397,7 @@ describe("ExtensionOperations", () => {
             ),
           { concurrency: "unbounded" },
         )
-        const stored = decodeJson(yield* fs.readFileString(options.generationsPath)) as {
-          extensions: Record<string, { enabled: boolean; generation: number }>
-        }
+        const stored = decodeExtensionDocument(yield* fs.readFileString(options.generationsPath))
         expect(Object.keys(stored.extensions).toSorted()).toEqual(names.toSorted())
         expect(Object.values(stored.extensions).every(({ enabled, generation }) => enabled && generation === 1)).toBe(
           true,

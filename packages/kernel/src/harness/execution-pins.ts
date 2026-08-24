@@ -1,5 +1,6 @@
 import { Pins, type AgentManifest } from "tenetkit"
 import { HarnessSnapshot, HarnessState } from "tenetkit/harness"
+import { Schema } from "effect"
 
 /**
  * One registration record a durable host must supply for every Execution of the manifest that pins
@@ -10,7 +11,7 @@ export interface Registration {
   readonly pin: string
   readonly codec: string
   readonly version: string
-  readonly payload: unknown
+  readonly payload: Schema.Json
 }
 
 export interface Pinned {
@@ -40,11 +41,11 @@ const SKILL_VERSION = "1"
 export const skills = (pins: ReadonlyArray<SkillPin>): Pinned => {
   const entries = pins
     .map((skill) => {
-      const payload = {
-        name: skill.name,
-        digest: skill.digest,
-        ...(skill.importName === undefined ? {} : { importName: skill.importName }),
-      }
+      const payload = Schema.decodeSync(Schema.Json)(
+        skill.importName === undefined
+          ? { name: skill.name, digest: skill.digest }
+          : { name: skill.name, digest: skill.digest, importName: skill.importName },
+      )
       return {
         capability: {
           name: skill.name,
@@ -76,7 +77,7 @@ export const harnessCapabilityName = "rika-harness-snapshot"
  * `SnapshotMismatch` rather than drifting.
  */
 export const harness = (state: HarnessState.HarnessState): Pinned => {
-  const payload = HarnessSnapshot.encode(state)
+  const payload = Schema.decodeUnknownSync(Schema.Json)(HarnessSnapshot.encode(state))
   const capability = {
     name: harnessCapabilityName,
     pin: Pins.makeCapability({ codec: HarnessSnapshot.CODEC, version: HarnessSnapshot.VERSION, payload }),

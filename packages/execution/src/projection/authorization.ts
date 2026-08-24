@@ -1,4 +1,6 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
+import type { RunEvent } from "tenetkit/runtime"
+import { Schema } from "effect"
 import { type Node } from "./model"
 import { type AuthorizationState, type ProjectorCore } from "./persistence"
 import { bounded } from "./values"
@@ -7,12 +9,7 @@ export interface AuthorizationProjection {
   readonly putAuthorization: (
     node: Node,
     waitId: string,
-    request: {
-      readonly approvalId: string
-      readonly operation: string
-      readonly capability: string
-      readonly input: unknown
-    },
+    request: Extract<RunEvent.RunEvent, { readonly _tag: "ApprovalRequested" }>["request"],
   ) => void
   readonly resolveAuthorization: (
     node: Node,
@@ -38,12 +35,7 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
   const putAuthorization = (
     node: Node,
     waitId: string,
-    request: {
-      readonly approvalId: string
-      readonly operation: string
-      readonly capability: string
-      readonly input: unknown
-    },
+    request: Extract<RunEvent.RunEvent, { readonly _tag: "ApprovalRequested" }>["request"],
   ) => {
     if (node.hidden) return
     const authorizationId = localId("authorization", node.publicId, request.approvalId)
@@ -58,7 +50,7 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
     recover(authorizationKey, key)
     const fullInput = (() => {
       try {
-        return typeof request.input === "string" ? request.input : (JSON.stringify(request.input) ?? "")
+        return Schema.is(Schema.String)(request.input) ? request.input : (JSON.stringify(request.input) ?? "")
       } catch {
         return String(request.input)
       }

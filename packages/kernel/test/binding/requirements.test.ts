@@ -20,20 +20,20 @@ const registry = HostBindingRegistry.make([
         input: Schema.Struct({}),
         output: Schema.Struct({ count: Schema.Finite }),
         failure: Schema.Never,
-        handle: () => Effect.succeed({ count: "many" } as never),
+        handle: () => Effect.succeed(Schema.decodeSync(Schema.Struct({ count: Schema.String }))({ count: "many" })),
       },
       {
         name: "failure",
         input: Schema.Struct({}),
         output: Schema.Never,
         failure: Failure,
-        handle: () => Effect.fail({ _tag: "Failure", retry: "later" } as never),
+        handle: () => Effect.fail(Schema.decodeSync(Schema.Struct({ _tag: Schema.tag("Failure"), retry: Schema.String }))({ _tag: "Failure", retry: "later" })),
       },
     ],
   },
 ])
 
-const schemaFailure = (operation: string, input: unknown) =>
+const schemaFailure = (operation: string, input: Schema.Json) =>
   Effect.gen(function* () {
     const mounted = yield* registry
     return yield* Effect.flip(mounted.invoke({ module: "fixture", operation, input }))

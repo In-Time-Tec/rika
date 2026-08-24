@@ -102,6 +102,6 @@ export class WorkspacePreparations extends Context.Service<WorkspacePreparations
 ) {}
 
 export const boundedPreparationOutput = (text: string) => ({
-  text: text.slice(0, 16_384) as typeof Output.Type,
+  text: Output.make(text.slice(0, 16_384)),
   truncated: text.length > 16_384,
 })

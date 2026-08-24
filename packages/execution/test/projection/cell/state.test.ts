@@ -1,44 +1,59 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { Block } from "@rika/product/execution-transcript-contract"
+import { Response } from "tenetkit"
+import { Cell as TenetCell } from "tenetkit/repl"
+import type { RunEvent } from "tenetkit/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 type Change = ReturnType<ReturnType<typeof TreeProjector.make>["apply"]>
+type ToolProgressData = NonNullable<Extract<RunEvent.RunEvent, { readonly _tag: "ToolProgress" }>["data"]>
+type ToolResult = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionCompleted" }>["result"]["result"]
+type RunEventInput<Tag extends RunEvent.RunEvent["_tag"]> = Partial<
+  Extract<RunEvent.RunEvent, { readonly _tag: Tag }>
+> & { readonly _tag: Tag }
 
 const cellOf = (change: Change): Cell | undefined => {
   const content = block(change, "Cell")
   return content?._tag === "Block" && content.block._tag === "Cell" ? content.block : undefined
 }
 
-const call = (id: string, code: string) => ({
-  type: "tool-call" as const,
-  id,
-  name: "typescript",
-  params: { code },
-  providerExecuted: false,
-  metadata: {},
-})
+const call = (id: string, code: string) =>
+  Response.toolCallPart({
+    id,
+    name: "typescript",
+    params: { code },
+    providerExecuted: false,
+    metadata: {},
+  })
 
-const started = (id: string, code: string) =>
-  treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: call(id, code) } as never)
+const started = (id: string, code: string) => {
+  const event: RunEventInput<"ToolExecutionStarted"> = {
+    _tag: "ToolExecutionStarted",
+    turn: 0,
+    call: call(id, code),
+  }
+  return treeEvent("raw-root-run", event)
+}
 
-const progress = (id: string, data: Record<string, unknown>) =>
-  treeEvent("raw-root-run", {
+const progress = (id: string, data: ToolProgressData) => {
+  const event: RunEventInput<"ToolProgress"> = {
     _tag: "ToolProgress",
     turn: 0,
     toolCallId: id,
     message: String(data._tag),
     data,
-  } as never)
+  }
+  return treeEvent("raw-root-run", event)
+}
 
-const completed = (id: string, code: string, result: unknown, isFailure: boolean) =>
-  treeEvent("raw-root-run", {
+const completed = (id: string, code: string, result: ToolResult, isFailure: boolean) => {
+  const event: RunEventInput<"ToolExecutionCompleted"> = {
     _tag: "ToolExecutionCompleted",
     turn: 0,
     call: call(id, code),
-    result: {
-      type: "tool-result",
+    result: Response.toolResultPart({
       id,
       name: "typescript",
       result,
@@ -47,8 +62,10 @@ const completed = (id: string, code: string, result: unknown, isFailure: boolean
       providerExecuted: false,
       preliminary: false,
       metadata: {},
-    },
-  } as never)
+    }),
+  }
+  return treeEvent("raw-root-run", event)
+}
 
 describe("TenetKit cell projection", () => {
   it("opens a running cell with summary, visual, and line counts from the call source", () => {
@@ -132,7 +149,7 @@ describe("TenetKit cell projection", () => {
         completed(
           "cell-4",
           "throw new Error('boom')",
-          {
+          TenetCell.CellExecutionFailed.make({
             _tag: "tenetkit/repl/CellExecutionFailed",
             cellId: "cell-4",
             epoch: 1,
@@ -144,7 +161,7 @@ describe("TenetKit cell projection", () => {
             stderr: "trace",
             durationMillis: 12,
             truncation: [],
-          },
+          }),
           true,
         ),
       ),
@@ -263,9 +280,24 @@ describe("TenetKit cell projection", () => {
     // digest is unactionable and the state that matters is carried by the
     // restored/lost/restarted notices, which are asserted separately.
     const change = projector.apply(
-      progress("cell-8", { _tag: "KernelStarting", cellId: "cell-8", sequence: 0, epoch: 1 }),
+      progress("cell-8", {
+        _tag: "KernelStarting",
+        cellId: "cell-8",
+        sequence: 0,
+        sessionId: "session",
+        epoch: 1,
+      }),
     )
-    projector.apply(progress("cell-8", { _tag: "KernelReady", cellId: "cell-8", sequence: 1, epoch: 1 }))
+    projector.apply(
+      progress("cell-8", {
+        _tag: "KernelReady",
+        cellId: "cell-8",
+        sequence: 1,
+        sessionId: "session",
+        epoch: 1,
+        profileDigest: "profile",
+      }),
+    )
     projector.apply(completed("cell-8", "const keep = 1", { value: "1", stdout: "", stderr: "" }, false))
     expect(cellOf(change)?.notices).toEqual([{ kind: "starting", detail: "Starting the kernel." }])
     expect(cellOf(change)?.epoch).toBe(1)
@@ -405,7 +437,7 @@ describe("TenetKit cell projection", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-cancel", "cancel")
     projector.apply(started("cell-13", "await forever()"))
-    const change = projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "interrupted" } as never))
+    const change = projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "interrupted" }))
     expect(cellOf(change)).toMatchObject({ status: "cancelled" })
   })
 

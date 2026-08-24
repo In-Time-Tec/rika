@@ -32,7 +32,7 @@ export const resolveSemanticTreeEvent: {
   const event = input.event
   return event._tag === "ModelResponseCommitted" || event._tag === "ModelResponseInterrupted"
     ? resolveModelResponse(event).pipe(
-        Effect.map((response) => ({ ...input, event: { ...event, response } }) as SemanticTreeEvent),
+        Effect.map((response): SemanticTreeEvent => ({ ...input, event: { ...event, response } })),
       )
-    : Effect.succeed(input as SemanticTreeEvent)
+    : Effect.succeed({ ...input, event })
 })

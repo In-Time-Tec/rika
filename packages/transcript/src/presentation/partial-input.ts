@@ -3,16 +3,16 @@ import { Option, Schema } from "effect"
 const isWhitespace = (character: string): boolean =>
   character === " " || character === "\n" || character === "\r" || character === "\t"
 
-const escapes: Record<string, string> = {
-  '"': '"',
-  "\\": "\\",
-  "/": "/",
-  b: "\b",
-  f: "\f",
-  n: "\n",
-  r: "\r",
-  t: "\t",
-}
+const escapes = new Map([
+  ['"', '"'],
+  ["\\", "\\"],
+  ["/", "/"],
+  ["b", "\b"],
+  ["f", "\f"],
+  ["n", "\n"],
+  ["r", "\r"],
+  ["t", "\t"],
+])
 
 interface Reader {
   readonly input: string
@@ -45,7 +45,7 @@ const readString = (reader: Reader): Fragment<string> => {
         cursor += 6
         continue
       }
-      const replacement = escapes[escaped]
+      const replacement = escapes.get(escaped)
       if (replacement === undefined) break
       value += replacement
       cursor += 2
@@ -58,7 +58,7 @@ const readString = (reader: Reader): Fragment<string> => {
   return { value, complete: false }
 }
 
-const scalar = (raw: string): unknown => {
+const scalar = (raw: string): Schema.Json | undefined => {
   if (raw === "true") return true
   if (raw === "false") return false
   if (raw === "null") return null
@@ -66,9 +66,9 @@ const scalar = (raw: string): unknown => {
   return /^-?\d/.test(raw) && Number.isFinite(numeric) ? numeric : undefined
 }
 
-const Json = Schema.fromJsonString(Schema.Unknown)
+const Json = Schema.fromJsonString(Schema.Json)
 
-const readNested = (reader: Reader): Fragment<unknown> | undefined => {
+const readNested = (reader: Reader): Fragment<Schema.Json> | undefined => {
   const { input } = reader
   const length = input.length
   const start = reader.cursor
@@ -84,7 +84,7 @@ const readNested = (reader: Reader): Fragment<unknown> | undefined => {
       depth -= 1
       if (depth === 0) {
         reader.cursor += 1
-        const decoded = Schema.decodeUnknownOption(Json)(input.slice(start, reader.cursor))
+        const decoded = Schema.decodeOption(Json)(input.slice(start, reader.cursor))
         return Option.isSome(decoded) ? { value: decoded.value, complete: true } : undefined
       }
     }
@@ -93,7 +93,7 @@ const readNested = (reader: Reader): Fragment<unknown> | undefined => {
   return undefined
 }
 
-const readValue = (reader: Reader): Fragment<unknown> | undefined => {
+const readValue = (reader: Reader): Fragment<Schema.Json> | undefined => {
   const character = reader.input[reader.cursor]
   if (character === undefined) return undefined
   if (character === '"') return readString(reader)
@@ -115,9 +115,13 @@ const skipWhitespace = (reader: Reader): void => {
   while (reader.cursor < reader.input.length && isWhitespace(reader.input[reader.cursor]!)) reader.cursor += 1
 }
 
-export const partialInputRecord = (input: string): Record<string, unknown> => {
+interface PartialInputRecord {
+  [key: string]: Schema.Json
+}
+
+export const partialInputRecord = (input: string): PartialInputRecord => {
   const reader: Reader = { input, cursor: 0 }
-  const result: Record<string, unknown> = {}
+  const result: PartialInputRecord = {}
   skipWhitespace(reader)
   if (input[reader.cursor] !== "{") return result
   reader.cursor += 1

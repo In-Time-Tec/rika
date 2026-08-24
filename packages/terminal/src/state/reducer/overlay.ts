@@ -1,4 +1,6 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
+import { Block } from "@rika/transcript/transcript-presentation-model"
+import { UnitOrder } from "@rika/transcript/transcript-unit"
 import type { Message } from "../message"
 import type { Model } from "../model"
 import type { TranscriptBlock, TranscriptItem } from "../transcript/model"
@@ -8,6 +10,28 @@ import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from 
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../submission"
 import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/row"
 import { context } from "./model"
+
+const TranscriptItemSchema = Schema.Union([
+  Schema.TaggedStruct("Entry", {
+    index: Schema.Finite,
+    id: Schema.optionalKey(Schema.String),
+    turnId: Schema.optionalKey(Schema.String),
+    rootTurnId: Schema.optionalKey(Schema.String),
+    parentId: Schema.optionalKey(Schema.String),
+    order: Schema.optionalKey(UnitOrder),
+  }),
+  Schema.TaggedStruct("Block", {
+    index: Schema.Finite,
+    id: Schema.optionalKey(Schema.String),
+    turnId: Schema.optionalKey(Schema.String),
+    rootTurnId: Schema.optionalKey(Schema.String),
+    parentId: Schema.optionalKey(Schema.String),
+    order: Schema.optionalKey(UnitOrder),
+  }),
+])
+const isTranscriptBlock = Schema.is(Block)
+const isTranscriptItem = Schema.is(TranscriptItemSchema)
+type SubmissionReference = { submissionId?: string; turnId?: string }
 
 const dropProvisionalQueueItem = (model: Model, submissionId: string | undefined) => {
   if (submissionId === undefined) return { queue: model.queue, queueSelection: model.queueSelection }
@@ -35,25 +59,27 @@ const reduceOverlayImpl = (
     case "ConnectionStateChanged":
       return { ...model, connection: message.state }
     case "ReasoningStreamed": {
-      const blocks = [...model.blocks] as Array<TranscriptBlock>
-      const lastItem = model.items.at(-1) as TranscriptItem | undefined
+      const blocks = model.blocks.filter(isTranscriptBlock)
+      const candidate = model.items.at(-1)
+      const lastItem = isTranscriptItem(candidate) ? candidate : undefined
       const last = lastItem?._tag === "Block" ? blocks[lastItem.index] : undefined
       if (last?._tag === "Reasoning" && lastItem?._tag === "Block")
         blocks[lastItem.index] = { ...last, text: last.text + message.text }
       else {
         blocks.push({ _tag: "Reasoning", text: message.text })
-        return {
+        const streamed = {
           ...model,
           blocks,
           items: [...model.items, { _tag: "Block", index: model.blocks.length }],
-          ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text, undefined) } : {}),
         }
+        return model.busy
+          ? { ...streamed, activity: streamActivity(model.activity, "Thinking", message.text, undefined) }
+          : streamed
       }
-      return {
-        ...model,
-        blocks,
-        ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text, undefined) } : {}),
-      }
+      const streamed = { ...model, blocks }
+      return model.busy
+        ? { ...streamed, activity: streamActivity(model.activity, "Thinking", message.text, undefined) }
+        : streamed
     }
     case "ReasoningToggled": {
       const unit = transcriptUnits(model).find(
@@ -70,22 +96,24 @@ const reduceOverlayImpl = (
       return { ...model, pendingAction: undefined }
     case "AssistantStreamed": {
       const entries = [...model.entries]
-      const lastItem = (model.items as ReadonlyArray<TranscriptItem>).findLast(
+      const lastItem = model.items.filter(isTranscriptItem).findLast(
         (item) => message.turnId === undefined || item.turnId === message.turnId,
-      ) as TranscriptItem | undefined
+      )
       const index =
         lastItem?._tag === "Entry" &&
         entries[lastItem.index]?.role === "assistant" &&
         (message.turnId !== undefined || model.activity?._tag === "Streaming")
           ? lastItem.index
           : -1
-      if (index >= 0) entries[index] = { ...entries[index]!, text: entries[index]!.text + message.text }
-      else
-        entries.push({
-          role: "assistant",
-          text: message.text,
-          ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-        })
+      const stored = entries[index]
+      if (stored !== undefined) entries[index] = { ...stored, text: stored.text + message.text }
+      else {
+        const entry: Model["entries"][number] = { role: "assistant", text: message.text }
+        entries.push(message.turnId === undefined ? entry : { ...entry, turnId: message.turnId })
+      }
+      const item: TranscriptItem = { _tag: "Entry", index: entries.length - 1 }
+      const identified = message.id === undefined ? item : { ...item, id: message.id }
+      const turned = message.turnId === undefined ? identified : { ...identified, turnId: message.turnId }
       return {
         ...model,
         entries,
@@ -94,12 +122,7 @@ const reduceOverlayImpl = (
             ? model.items
             : [
                 ...model.items,
-                {
-                  _tag: "Entry",
-                  index: entries.length - 1,
-                  ...(message.id === undefined ? {} : { id: message.id }),
-                  ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-                } as const,
+                turned,
               ],
         busy: true,
         activity: streamActivity(model.activity, "Streaming", message.text, undefined),
@@ -107,22 +130,27 @@ const reduceOverlayImpl = (
     }
     case "AssistantCompleted": {
       const entries = [...model.entries]
-      const lastItem = (model.items as ReadonlyArray<TranscriptItem>).findLast(
+      const lastItem = model.items.filter(isTranscriptItem).findLast(
         (item) => message.turnId === undefined || item.turnId === message.turnId,
-      ) as TranscriptItem | undefined
+      )
       const index =
         lastItem?._tag === "Entry" &&
         entries[lastItem.index]?.role === "assistant" &&
         (message.turnId !== undefined || model.activity?._tag === "Streaming")
           ? lastItem.index
           : -1
-      if (index >= 0) entries[index] = { ...entries[index]!, text: message.text }
-      else
-        entries.push({
-          role: "assistant",
-          text: message.text,
-          ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
-        })
+      const stored = entries[index]
+      if (stored !== undefined) entries[index] = { ...stored, text: message.text }
+      else {
+        const entry: Model["entries"][number] = { role: "assistant", text: message.text }
+        entries.push(message.turnId === undefined ? entry : { ...entry, turnId: message.turnId })
+      }
+      const entryTag: "Entry" = "Entry"
+      const item =
+        message.turnId === undefined
+          ? { _tag: entryTag, index: entries.length - 1 }
+          : { _tag: entryTag, index: entries.length - 1, turnId: message.turnId }
+      const identified = message.id === undefined ? item : { ...item, id: message.id }
       return {
         ...model,
         entries,
@@ -131,12 +159,7 @@ const reduceOverlayImpl = (
             ? model.items
             : [
                 ...model.items,
-                {
-                  _tag: "Entry",
-                  index: entries.length - 1,
-                  ...(message.id === undefined ? {} : { id: message.id }),
-                  turnId: message.turnId,
-                },
+                identified,
               ],
         busy: model.busy,
         activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Waiting" } : undefined,
@@ -165,24 +188,16 @@ const reduceOverlayImpl = (
         model.submittedDrafts,
         message.submissionId === undefined ? {} : { submissionId: message.submissionId },
       )
-      const reference = {
-        ...(taken.draft?.submissionId === undefined ? {} : { submissionId: taken.draft.submissionId }),
-        ...(taken.draft?.turnId === undefined ? {} : { turnId: taken.draft.turnId }),
-      }
+      const reference: SubmissionReference = {}
+      if (taken.draft?.submissionId !== undefined) reference.submissionId = taken.draft.submissionId
+      if (taken.draft?.turnId !== undefined) reference.turnId = taken.draft.turnId
       const restore = taken.draft !== undefined && model.input.length === 0
       const settled = settleProvisionalUserEntry(model, reference, restore)
       const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId ?? message.submissionId)
       const remainsBusy = model.activeTurnId !== undefined || taken.rest.length > 0
-      return {
+      const rejected = {
         ...settled,
         ...queue,
-        ...(restore
-          ? {
-              input: taken.draft!.input,
-              cursor: taken.draft!.cursor,
-              pastedText: taken.draft!.attachments,
-            }
-          : {}),
         submittedDrafts: taken.rest,
         blocks: [
           ...settled.blocks,
@@ -193,6 +208,8 @@ const reduceOverlayImpl = (
         busy: remainsBusy,
         activity: settledActivity(model.activeTurnId, model.activity, taken.rest.length),
       }
+      if (!restore || taken.draft === undefined) return rejected
+      return { ...rejected, input: taken.draft.input, cursor: taken.draft.cursor, pastedText: taken.draft.attachments }
     }
     case "TurnRetryScheduled": {
       if (model.activeTurnId !== message.turnId && model.activeTurnId !== undefined) return model
@@ -213,33 +230,24 @@ const reduceOverlayImpl = (
       const taken = takeSubmittedDraftFor(model.submittedDrafts, turnId === undefined ? {} : { turnId })
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId && taken.draft === undefined)
         return model
-      const reference = {
-        ...(taken.draft?.submissionId === undefined ? {} : { submissionId: taken.draft.submissionId }),
-        ...(turnId === undefined ? {} : { turnId }),
-      }
+      const reference: SubmissionReference = {}
+      if (taken.draft?.submissionId !== undefined) reference.submissionId = taken.draft.submissionId
+      if (turnId !== undefined) reference.turnId = turnId
       const beforeStart = taken.draft !== undefined && hasProvisionalUserEntry(model, reference)
       const restore = beforeStart && model.input.length === 0
       const settled = beforeStart ? settleProvisionalUserEntry(model, reference, restore) : model
       const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId)
-      const alreadyPresented = (settled.items as ReadonlyArray<TranscriptItem>).some(
-        (item) =>
-          item._tag === "Block" &&
-          (turnId === undefined || item.turnId === turnId) &&
-          (settled.blocks[item.index] as TranscriptBlock | undefined)?._tag === "Error",
-      )
+      const alreadyPresented = settled.items.filter(isTranscriptItem).some((item) => {
+        if (item._tag !== "Block" || (turnId !== undefined && item.turnId !== turnId)) return false
+        const block = settled.blocks[item.index]
+        return isTranscriptBlock(block) && block._tag === "Error"
+      })
       const settlesActive = message.turnId === undefined || model.activeTurnId === message.turnId
       const activeTurnId = settlesActive ? undefined : model.activeTurnId
       const remainsBusy = activeTurnId !== undefined || taken.rest.length > 0
-      return {
+      const failed = {
         ...settled,
         ...queue,
-        ...(restore
-          ? {
-              input: taken.draft!.input,
-              cursor: taken.draft!.cursor,
-              pastedText: taken.draft!.attachments,
-            }
-          : {}),
         blocks: alreadyPresented ? settled.blocks : [...settled.blocks, errorBlock(message.failure)],
         items: alreadyPresented ? settled.items : [...settled.items, { _tag: "Block", index: settled.blocks.length }],
         submittedDrafts: taken.draft === undefined ? dropSubmittedDrafts(model.submittedDrafts, turnId) : taken.rest,
@@ -248,6 +256,8 @@ const reduceOverlayImpl = (
         activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
         activeTurnId,
       }
+      if (!restore || taken.draft === undefined) return failed
+      return { ...failed, input: taken.draft.input, cursor: taken.draft.cursor, pastedText: taken.draft.attachments }
     }
     case "ExecutionCancelled": {
       const turnId = message.turnId ?? model.activeTurnId
@@ -256,27 +266,28 @@ const reduceOverlayImpl = (
         message.agentResponseArrived === false || (message.turnId === undefined && model.activeTurnId === undefined)
       if (reversibleBeforeAdmission && taken.draft !== undefined) {
         const draft = taken.draft
-        const reference = {
-          ...(draft.submissionId === undefined ? {} : { submissionId: draft.submissionId }),
-          ...(turnId === undefined ? {} : { turnId }),
-        }
+        const reference: SubmissionReference = {}
+        if (draft.submissionId !== undefined) reference.submissionId = draft.submissionId
+        if (turnId !== undefined) reference.turnId = turnId
         const restore = model.input.length === 0
         const settled = settleProvisionalUserEntry(model, reference, restore)
         const queue = dropProvisionalQueueItem(settled, draft.submissionId)
         const cancelsActive = model.activeTurnId === turnId
         const activeTurnId = cancelsActive ? undefined : model.activeTurnId
         const remainsBusy = activeTurnId !== undefined || taken.rest.length > 0
-        return {
+        const cancelled = {
           ...settled,
           ...queue,
-          ...(restore ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments } : {}),
           submittedDrafts: taken.rest,
-          blocks: cancelTranscriptBlocks(settled.blocks as ReadonlyArray<TranscriptBlock>),
+          blocks: cancelTranscriptBlocks(settled.blocks.filter(isTranscriptBlock)),
           cancelPending: cancelsActive ? false : model.cancelPending,
           busy: remainsBusy,
           activity: settledActivity(activeTurnId, model.activity, taken.rest.length),
           activeTurnId,
         }
+        return restore
+          ? { ...cancelled, input: draft.input, cursor: draft.cursor, pastedText: draft.attachments }
+          : cancelled
       }
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       if (!model.busy) return model
@@ -284,7 +295,7 @@ const reduceOverlayImpl = (
         ...model,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, turnId),
         cancelPending: false,
-        blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
+        blocks: cancelTranscriptBlocks(model.blocks.filter(isTranscriptBlock)),
         busy: false,
         activity: undefined,
         activeTurnId: undefined,
@@ -411,8 +422,8 @@ const errorBlock = (failure: {
   readonly category: string
   readonly message: string
   readonly retryable: boolean
-}) => ({
-  _tag: "Error" as const,
+}): TranscriptBlock => ({
+  _tag: "Error",
   title: errorTitle(failure),
   detail: failure.message,
   category: failure.category,

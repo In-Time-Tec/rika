@@ -2,6 +2,7 @@ import { Input } from "./product"
 export { Input }
 export type ConfigurationOperation = Input
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import type * as ModelRoute from "@rika/configuration/model-route"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import { Console, Context, Effect, Layer, Schema } from "effect"
 
@@ -23,7 +24,21 @@ export interface Options {
   readonly workspaceConfigPath: string
 }
 
-const json = (value: unknown) => Console.log(JSON.stringify(value, null, 2))
+interface BedrockDetails {
+  readonly authMode: "bearer" | "default"
+  readonly authRefresh: string
+  readonly region?: string
+  readonly profile?: string
+  readonly endpoint?: string
+}
+
+interface HttpProviderDetails {
+  readonly protocol: ModelRoute.ModelRoute.HttpProtocol
+  readonly baseUrl: string
+  readonly apiKeyEnv?: string
+}
+
+const json = <Value>(value: Value) => Console.log(JSON.stringify(value, null, 2))
 
 export const run = Effect.fn("ConfigOperations.run")(function* (
   input:
@@ -38,22 +53,21 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   const config = yield* configService.effective
   const route = ModelRouteResolution.resolveModelRoute(config.settings, config.settings.defaultMode)
   const providers = Object.fromEntries(
-    Object.entries(config.settings.providers).map(([id, provider]) => [
-      id,
-      provider.protocol === "amazon-bedrock"
-        ? {
-            ...(provider.region === undefined ? {} : { region: provider.region }),
-            ...(provider.profile === undefined ? {} : { profile: provider.profile }),
-            ...(provider.endpoint === undefined ? {} : { endpoint: provider.endpoint }),
-            authMode: provider.authMode,
-            authRefresh: provider.authRefresh === undefined ? "not-configured" : "configured",
-          }
-        : {
-            protocol: provider.protocol,
-            baseUrl: provider.baseUrl,
-            ...(provider.apiKeyEnv === undefined ? {} : { apiKeyEnv: provider.apiKeyEnv }),
-          },
-    ]),
+    Object.entries(config.settings.providers).map(([id, provider]) => {
+      if (provider.protocol === "amazon-bedrock") {
+        let details: BedrockDetails = {
+          authMode: provider.authMode,
+          authRefresh: provider.authRefresh === undefined ? "not-configured" : "configured",
+        }
+        if (provider.region !== undefined) details = { ...details, region: provider.region }
+        if (provider.profile !== undefined) details = { ...details, profile: provider.profile }
+        if (provider.endpoint !== undefined) details = { ...details, endpoint: provider.endpoint }
+        return [id, details]
+      }
+      let details: HttpProviderDetails = { protocol: provider.protocol, baseUrl: provider.baseUrl }
+      if (provider.apiKeyEnv !== undefined) details = { ...details, apiKeyEnv: provider.apiKeyEnv }
+      return [id, details]
+    }),
   )
   const apiKeyStatus = (apiKeyEnv: string | undefined) => {
     if (apiKeyEnv === undefined) return "not-configured"

@@ -4,10 +4,8 @@ import type { Interface as TranscriptRepository } from "@rika/product/transcript
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 
-const settledStatuses = new Set(["completed", "failed", "cancelled", "waiting"])
-
 const projectionStatus = (status: AgentExecutionTurn["status"]): ExecutionProjection.ProjectionState["status"] =>
-  settledStatuses.has(status) ? (status as ExecutionProjection.ProjectionState["status"]) : "running"
+  status === "completed" || status === "failed" || status === "cancelled" || status === "waiting" ? status : "running"
 
 const storeProjectionImpl = (
   repository: TranscriptRepository,

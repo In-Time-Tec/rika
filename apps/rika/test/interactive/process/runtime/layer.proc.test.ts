@@ -29,11 +29,11 @@ layer(BunServices.layer)("composed kernel", (it) => {
           goalRepositoryLayer: GoalRepository.memoryLayer,
           queryFactory: Layer.succeed(
             ThreadQuery.Factory,
-            ThreadQuery.Factory.of({ forWorkspace: () => Effect.never } as never),
+            ThreadQuery.Factory.of({ forWorkspace: () => Effect.never }),
           ),
           toolRuntimeLayer: Layer.succeed(
             CodingToolRuntime.Service,
-            CodingToolRuntime.Service.of({ run: () => Effect.never } as never),
+            CodingToolRuntime.Service.of({ run: () => Effect.never }),
           ),
         }),
       )

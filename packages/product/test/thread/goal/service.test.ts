@@ -16,7 +16,7 @@ const goalChanged = {
 
 describe("the Goal indicator is fed live server state", () => {
   it("encodes and decodes over the interactive wire", () => {
-    const decoded = Schema.decodeUnknownSync(InteractiveEventSchema)(
+    const decoded = Schema.decodeSync(InteractiveEventSchema)(
       Schema.encodeSync(InteractiveEventSchema)(goalChanged),
     )
     expect(decoded).toEqual(goalChanged)
@@ -24,7 +24,7 @@ describe("the Goal indicator is fed live server state", () => {
 
   it("carries the cleared goal as an absent field rather than a sentinel", () => {
     const cleared = { _tag: "GoalChanged" as const, threadId: "thread-a" }
-    const decoded = Schema.decodeUnknownSync(InteractiveEventSchema)(Schema.encodeSync(InteractiveEventSchema)(cleared))
+    const decoded = Schema.decodeSync(InteractiveEventSchema)(Schema.encodeSync(InteractiveEventSchema)(cleared))
     expect(decoded).toEqual(cleared)
     expect("goal" in decoded).toBe(false)
   })

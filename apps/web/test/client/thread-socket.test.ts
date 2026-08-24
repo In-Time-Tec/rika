@@ -5,30 +5,55 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import { connectThread as connectThreadEffect, frameEventName, sendPrompt } from "../../src/client/thread-socket"
 
-class TestWebSocket extends EventTarget {
+declare global {
+  interface WindowEventMap {
+    readonly "rika:thread-frame": CustomEvent<ServerFrame>
+  }
+}
+
+interface ServerFrameInput {
+  readonly protocolVersion: number
+  readonly payload: object
+}
+
+class TestWebSocket extends EventTarget implements WebSocket {
   static readonly CONNECTING = 0
   static readonly OPEN = 1
   static readonly CLOSING = 2
   static readonly CLOSED = 3
   static instances: Array<TestWebSocket> = []
 
-  readonly sent: Array<unknown> = []
-  readyState = TestWebSocket.CONNECTING
+  readonly sent: Array<ClientMessage> = []
+  readonly binaryType: BinaryType = "blob"
+  readonly bufferedAmount = 0
+  readonly extensions = ""
+  readonly protocol = ""
+  readonly CONNECTING = TestWebSocket.CONNECTING
+  readonly OPEN = TestWebSocket.OPEN
+  readonly CLOSING = TestWebSocket.CLOSING
+  readonly CLOSED = TestWebSocket.CLOSED
+  onclose: WebSocket["onclose"] = null
+  onerror: WebSocket["onerror"] = null
+  onmessage: WebSocket["onmessage"] = null
+  onopen: WebSocket["onopen"] = null
+  readyState: WebSocket["readyState"] = TestWebSocket.CONNECTING
   closeCode: number | undefined
   closeReason: string | undefined
 
   constructor(
     readonly url: string,
-    readonly protocols: ReadonlyArray<string>,
+    readonly protocols: string | ReadonlyArray<string>,
   ) {
     super()
     TestWebSocket.instances.push(this)
   }
 
-  send(value: string) {
-    this.sent.push(Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(value))
+  send(value: string | ArrayBufferLike | Blob | ArrayBufferView) {
+    const json = Schema.decodeUnknownSync(Schema.String)(value)
+    this.sent.push(Schema.decodeSync(Schema.fromJsonString(ClientMessage))(json))
   }
 
   close(code?: number, reason?: string) {
@@ -39,8 +64,10 @@ class TestWebSocket extends EventTarget {
     this.dispatchEvent(new Event("close"))
   }
 
-  receive(frame: unknown) {
-    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(frame) }))
+  receive(frame: ServerFrameInput) {
+    this.dispatchEvent(
+      new MessageEvent("message", { data: JSON.stringify(Schema.decodeUnknownSync(ServerFrame)(frame)) }),
+    )
   }
 
   receiveRaw(data: string) {
@@ -80,7 +107,7 @@ const attach = (
   cursor = "0",
   threadVersion = "1",
 ) => {
-  const request = connection.sent[0] as { readonly requestId: string }
+  const request = Schema.decodeUnknownSync(ClientMessage)(connection.sent[0])
   connection.receive({
     protocolVersion: 1,
     payload: {
@@ -130,7 +157,10 @@ const connectThread = (threadId: string) =>
     Effect.provideService(
       Socket.WebSocketConstructor,
       (url, protocols) =>
-        new TestWebSocket(url, typeof protocols === "string" ? [protocols] : (protocols ?? [])) as unknown as WebSocket,
+        new TestWebSocket(
+          String(url),
+          Schema.decodeSync(Schema.Union([Schema.String, Schema.Array(Schema.String)]))(protocols ?? []),
+        ),
     ),
   )
 
@@ -163,7 +193,7 @@ afterEach(() => {
 it.effect("keeps A active while B attaches, then makes late A frames and close inert after the atomic swap", () =>
   Effect.gen(function* () {
     const frames: Array<unknown> = []
-    const receive = (event: Event) => frames.push((event as CustomEvent).detail)
+    const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
     window.addEventListener(frameEventName, receive)
     try {
       const connectingA = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -225,7 +255,7 @@ it.effect("leaves committed A and its prompt route usable when B is mismatched o
 
     const rejected = yield* Effect.forkChild(Effect.result(connectThread("thread-rejected")))
     const rejectedSocket = yield* nextConnection(2)
-    const request = rejectedSocket.sent[0] as { readonly requestId: string }
+    const request = yield* Schema.decodeUnknownEffect(ClientMessage)(rejectedSocket.sent[0])
     rejectedSocket.receive({
       protocolVersion: 1,
       payload: {
@@ -311,7 +341,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const frames: Array<any> = []
-      const receive = (event: Event) => frames.push((event as CustomEvent).detail)
+      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-recovery")))
@@ -323,7 +353,7 @@ it.effect(
 
         const replacement = yield* nextConnection(1)
         expect(replacement.sent[0]).toMatchObject({ command: { _tag: "AttachThread", afterCursor: "5" } })
-        const request = replacement.sent[0] as { readonly requestId: string }
+        const request = yield* Schema.decodeUnknownEffect(ClientMessage)(replacement.sent[0])
         replacement.receive({
           protocolVersion: 1,
           payload: {
@@ -359,7 +389,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const frames: Array<any> = []
-      const receive = (event: Event) => frames.push((event as CustomEvent).detail)
+      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -377,7 +407,7 @@ it.effect(
         expect(replacement.sent[0]).toMatchObject({
           command: { _tag: "AttachThread", threadId: "thread-a", afterCursor: "5" },
         })
-        const request = replacement.sent[0] as { readonly requestId: string }
+        const request = yield* Schema.decodeUnknownEffect(ClientMessage)(replacement.sent[0])
         replacement.receive({
           protocolVersion: 1,
           payload: {
@@ -413,7 +443,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const frames: Array<any> = []
-      const receive = (event: Event) => frames.push((event as CustomEvent).detail)
+      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -458,7 +488,7 @@ it.effect("preserves selected identity after failed automatic recovery and allow
     yield* Fiber.join(connecting)
     first.close()
     const failed = yield* nextConnection(1)
-    const failedRequest = failed.sent[0] as { readonly requestId: string }
+    const failedRequest = yield* Schema.decodeUnknownEffect(ClientMessage)(failed.sent[0])
     failed.receive({
       protocolVersion: 1,
       payload: {
@@ -483,7 +513,7 @@ it.effect("preserves selected identity after failed automatic recovery and allow
 it.effect("quarantines semantic view gaps and nested foreign snapshot identities before emitting them", () =>
   Effect.gen(function* () {
     const frames: Array<unknown> = []
-    const receive = (event: Event) => frames.push((event as CustomEvent).detail)
+    const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
     window.addEventListener(frameEventName, receive)
     try {
       const connectingView = yield* Effect.forkChild(Effect.result(connectThread("thread-view")))

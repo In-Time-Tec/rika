@@ -3,8 +3,10 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { it } from "@effect/vitest"
 import type * as InteractiveSession from "@rika/product/interactive-session"
+import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as ThreadView from "@rika/product/thread-view"
 import { OperationUnavailable } from "@rika/product/product-operation"
-import { Deferred, Effect, Fiber, Layer, Option, Redacted, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "vitest"
 import { CredentialStore, ProfileStore, type PrivateJwk, type Profile } from "../../src/hosted/contract"
@@ -222,13 +224,37 @@ it.effect("deferred commands fail while unavailable and synchronous projections 
     const unavailable = yield* Effect.flip(deferred.session.submit("early"))
     expect(unavailable).toBeInstanceOf(OperationUnavailable)
     expect(deferred.session.currentView()).toBeUndefined()
-    const view = { thread: { id: "thread-attached" } }
-    const checkpoint = { sequence: 7 }
-    const real = {
+    const view = yield* Schema.decodeEffect(ThreadView.ThreadViewSnapshot)({
+      thread: {
+        id: "thread-attached",
+        workspace: "/workspace",
+        title: "Attached",
+        labels: [],
+        pinned: false,
+        archived: false,
+        lineage: { _tag: "Original" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      revision: 0,
+      source: { projectionVersion: ExecutionProjection.projectionVersion },
+      turns: [],
+      pending: [],
+      hasOlder: false,
+      hasNewer: false,
+      usage: { state: ExecutionProjection.emptyUsageState() },
+    })
+    const checkpoint = yield* Schema.decodeEffect(ExecutionProjection.Checkpoint)({
+      version: 4,
+      cursor: "7",
+      state: "{}",
+    })
+    const real: InteractiveSession.InteractiveSession = {
+      ...deferred.session,
       currentView: () => view,
       projectionCheckpoint: () => checkpoint,
       submit: () => Effect.void,
-    } as unknown as InteractiveSession.InteractiveSession
+    }
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
     expect(deferred.session.currentView()).toBe(view)
@@ -242,11 +268,12 @@ it.effect("direct Effect members delegate after attachment", () =>
     const ready = yield* Deferred.make<InteractiveSession.InteractiveSession, OperationUnavailable>()
     const deferred = makeDeferredSession(ready)
     const called: Array<string> = []
-    const real = {
+    const real: InteractiveSession.InteractiveSession = {
+      ...deferred.session,
       quit: Effect.sync(() => called.push("quit")),
       cancel: Effect.sync(() => called.push("cancel")),
       newThread: Effect.sync(() => called.push("newThread")),
-    } as unknown as InteractiveSession.InteractiveSession
+    }
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
     yield* deferred.session.quit
@@ -264,9 +291,10 @@ it.effect("events waits before attachment, delegates after attachment, and fails
     const waiting = yield* deferred.session.events(() => undefined).pipe(Effect.forkChild)
     yield* Effect.yieldNow
     expect(yield* Deferred.poll(delegated)).toEqual(Option.none())
-    const real = {
+    const real: InteractiveSession.InteractiveSession = {
+      ...deferred.session,
       events: () => Deferred.succeed(delegated, undefined),
-    } as unknown as InteractiveSession.InteractiveSession
+    }
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
     yield* Fiber.join(waiting)

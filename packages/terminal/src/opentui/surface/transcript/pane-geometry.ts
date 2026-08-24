@@ -5,6 +5,7 @@ import {
   type CliRenderer,
   type MouseEvent,
 } from "@opentui/core"
+import { Effect as EffectRuntime } from "effect"
 import { topmostVisibleAnchor } from "../../../presentation/transcript/viewport/anchor-geometry"
 import {
   mountedTranscriptRowBudget,
@@ -18,6 +19,11 @@ import type {
   TranscriptAnchorTarget,
   TranscriptRenderableRecord,
 } from "./types"
+
+interface TranscriptAnchorRestoration {
+  readonly scrollTop: number
+  readonly target: TranscriptAnchorTarget | undefined
+}
 
 export class TranscriptPaneFrame {
   private pending = false
@@ -33,7 +39,7 @@ export class TranscriptPaneFrame {
   readonly prepare: Parameters<NonNullable<CliRenderer["setFrameCallback"]>>[0] = (_deltaTime) => {
     this.pending = false
     this.settle()
-    return Promise.resolve()
+    return EffectRuntime.runPromise(EffectRuntime.void)
   }
 
   request(): void {
@@ -70,8 +76,7 @@ export class TranscriptScrollBoxRenderable extends ScrollBoxRenderable {
 export class TranscriptScrollBarRenderable extends ScrollBarRenderable {
   setWheelHandler(handler: ((event: MouseEvent) => void) | undefined): void {
     this.onMouseScroll = handler
-    const slider = Reflect.get(this, "slider") as ScrollBarRenderable["slider"] | undefined
-    if (slider !== undefined) slider.onMouseScroll = handler
+    this.slider.onMouseScroll = handler
   }
 }
 
@@ -161,7 +166,7 @@ export class TranscriptPaneGeometry {
   ): ViewportAnchor | undefined {
     const anchor = this.captureAnchor(records, renderedScrollTop, rowByKey)
     if (anchor !== undefined) return { unitId: anchor.key, offset: anchor.screenY }
-    const first = records.values().next().value as TranscriptRenderableRecord | undefined
+    const first = [...records.values()][0]
     return first === undefined ? undefined : { unitId: first.key, offset: 0 }
   }
 
@@ -169,7 +174,7 @@ export class TranscriptPaneGeometry {
     anchor: TranscriptAnchor | undefined,
     records: ReadonlyMap<string, TranscriptRenderableRecord>,
     rowByKey: ReadonlyMap<string, number>,
-  ): { readonly scrollTop: number; readonly target: TranscriptAnchorTarget | undefined } {
+  ): TranscriptAnchorRestoration {
     const target =
       anchor === undefined
         ? undefined

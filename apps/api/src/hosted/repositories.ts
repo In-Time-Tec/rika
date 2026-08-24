@@ -40,6 +40,11 @@ interface CredentialRequestBase {
   readonly repositoryId: string
 }
 
+type InstallationPermissions =
+  | { readonly contents: "read" }
+  | { readonly contents: "read"; readonly issues: "read"; readonly pull_requests: "read" }
+  | { readonly contents: "write" }
+
 export type CredentialRequest = CredentialRequestBase &
   (
     | { readonly purpose: "git-read" | "github-read" }
@@ -64,6 +69,8 @@ export interface PullRequestReceipt {
   readonly commitSha: string
   readonly targetRef: string
 }
+
+export type PublicationResult = Readonly<Record<string, Schema.Json>>
 
 export type PublicationState = "approved" | "pushing" | "pushed" | "completed" | "failed" | "unknown"
 
@@ -130,12 +137,12 @@ export interface HostedRepositoriesService {
   }) => Effect.Effect<ApprovedPublication, HostedRepositoryError>
   readonly recordPush: (
     publication: ApprovedPublication,
-    result: object,
+    result: PublicationResult,
     state: "pushed" | "failed" | "unknown",
   ) => Effect.Effect<ApprovedPublication, HostedRepositoryError>
   readonly recordPullRequest: (
     publication: ApprovedPublication,
-    result: object,
+    result: PublicationResult,
     succeeded: boolean,
   ) => Effect.Effect<ApprovedPublication, HostedRepositoryError>
   readonly revokePublicationCredential: (publicationId: string) => Effect.Effect<void, HostedRepositoryError>
@@ -193,9 +200,11 @@ function failure(reason: HostedRepositoryError["reason"], message: string) {
   return HostedRepositoryError.make({ reason, message })
 }
 const mapGitHubError = () => failure("github", "GitHub repository authorization failed")
-const canonicalJson = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
-  if (value !== null && typeof value === "object")
+type CanonicalValue = Schema.Json | ActorAttribution
+
+const canonicalJson = (value: CanonicalValue): string => {
+  if (Schema.is(Schema.Array(Schema.Json))(value)) return `[${value.map(canonicalJson).join(",")}]`
+  if (Schema.is(Schema.Record(Schema.String, Schema.Json))(value))
     return `{${Object.entries(value)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
@@ -225,7 +234,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
         ),
       )
 
-      const authorizationDigest = Effect.fn("HostedRepositories.authorizationDigest")(function* (value: object) {
+      const authorizationDigest = Effect.fn("HostedRepositories.authorizationDigest")(function* (value: Schema.Json) {
         const bytes = yield* crypto
           .digest(
             "SHA-256",
@@ -345,7 +354,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
       })
 
       interface PublicationCredentialRow {
-        readonly actor: object
+        readonly actor: Schema.Json
         readonly ownerId: string
         readonly threadId: string
         readonly projectId: string
@@ -367,7 +376,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
       interface PublicationRow {
         readonly id: string
         readonly idempotencyKey: string
-        readonly actor: object
+        readonly actor: Schema.Json
         readonly ownerId: string
         readonly threadId: string
         readonly projectId: string
@@ -675,7 +684,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
             publicationId = input.publicationId
             publication = yield* claimBranchPush(input)
           }
-          let permissions: Record<string, "read" | "write"> = { contents: "read" }
+          let permissions: InstallationPermissions = { contents: "read" }
           if (input.purpose === "github-read") permissions = { contents: "read", issues: "read", pull_requests: "read" }
           if (input.purpose === "branch-push") permissions = { contents: "write" }
           const next = yield* mint(binding, permissions, input.purpose === "branch-push").pipe(

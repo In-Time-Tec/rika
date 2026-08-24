@@ -16,7 +16,9 @@ const streamFlags = {
 }
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
 type RunOperation = Extract<ProductOperation.Input, { readonly _tag: "Run" }>
-const JsonLine = Schema.fromJsonString(Schema.Unknown)
+const Json = Schema.fromJsonString(Schema.Unknown)
+const JsonLine = Schema.Union([Schema.String, Schema.Struct({ prompt: Schema.String })])
+type MutableRunOperation = { -readonly [K in keyof RunOperation]: RunOperation[K] }
 
 const runInput = (values: {
   readonly mode: Option.Option<ModeId>
@@ -31,17 +33,18 @@ const runInput = (values: {
   const selectedMode = optionalValue(values.mode)
   const selectedWorkspace = optionalValue(values.workspace)
   const selectedThread = optionalValue(values.thread)
-  return {
+  const input: MutableRunOperation = {
     _tag: "Run",
     prompt: values.prompt,
-    ...(selectedMode === undefined ? {} : { mode: selectedMode }),
-    ...(selectedWorkspace === undefined ? {} : { workspace: selectedWorkspace }),
-    ...(selectedThread === undefined ? {} : { threadId: selectedThread }),
     ephemeral: values.ephemeral,
     streamJson: values.streamJson,
     streamJsonInput: values.streamJsonInput,
     streamJsonThinking: values.streamJsonThinking,
   }
+  if (selectedMode !== undefined) input.mode = selectedMode
+  if (selectedWorkspace !== undefined) input.workspace = selectedWorkspace
+  if (selectedThread !== undefined) input.threadId = selectedThread
+  return input
 }
 
 const validateRunInput = (input: RunOperation) => {
@@ -69,16 +72,15 @@ const validateRunInput = (input: RunOperation) => {
 export const parseJsonLines = (input: string): ReadonlyArray<string> =>
   input.split("\n").flatMap((line, index) => {
     if (line.trim().length === 0) return []
-    const decoded = Schema.decodeUnknownOption(JsonLine)(line)
-    if (Option.isNone(decoded))
+    const json = Schema.decodeOption(Json)(line)
+    if (Option.isNone(json))
       throw ProductOperation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
-    const value = decoded.value
-    if (typeof value === "string") return [value]
-    if (typeof value === "object" && value !== null && "prompt" in value && typeof value.prompt === "string")
-      return [value.prompt]
-    throw ProductOperation.InvalidInput.make({
-      message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
-    })
+    const decoded = Schema.decodeUnknownOption(JsonLine)(json.value)
+    if (Option.isNone(decoded))
+      throw ProductOperation.InvalidInput.make({
+        message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
+      })
+    return [Schema.is(Schema.String)(decoded.value) ? decoded.value : decoded.value.prompt]
   })
 
 export function readStreamInput(
@@ -137,15 +139,14 @@ export function readStreamInput(
   )
 }
 
-const dispatchRun = (input: RunOperation) =>
-  dispatchHosted({
+const dispatchRun = (input: RunOperation) => {
+  const request = input.mode === undefined ? { prompt: input.prompt } : { prompt: input.prompt, mode: input.mode }
+  return dispatchHosted({
     _tag: "RemoteRun",
     threadId: input.threadId!,
-    request: {
-      prompt: input.prompt,
-      ...(input.mode === undefined ? {} : { mode: input.mode }),
-    },
+    request,
   })
+}
 
 export const executeRun = (values: Parameters<typeof runInput>[0]) =>
   validateRunInput(runInput(values)).pipe(

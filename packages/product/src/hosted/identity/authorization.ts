@@ -34,14 +34,14 @@ export class AuthorizationDenied extends Schema.TaggedError<AuthorizationDenied>
   memberId: BetterAuthMemberId,
 }) {}
 
-const rank: Readonly<Record<GrantRole, number>> = {
+const rank = {
   viewer: 1,
   controller: 2,
   operator: 3,
   owner: 4,
-}
+} satisfies Readonly<Record<GrantRole, number>>
 
-const required: Readonly<Record<AuthorizationAction, number>> = {
+const required = {
   "project:view": rank.viewer,
   "project:update": rank.operator,
   "project:grant": rank.owner,
@@ -56,7 +56,7 @@ const required: Readonly<Record<AuthorizationAction, number>> = {
   "workspace:file:view": rank.viewer,
   "workspace:browser:control": rank.controller,
   "workspace:service:control": rank.controller,
-}
+} satisfies Readonly<Record<AuthorizationAction, number>>
 
 const effectiveThreadRank = (subject: AuthorizationSubject) => {
   if (subject.threadCreatorMemberId === subject.memberId) return rank.owner

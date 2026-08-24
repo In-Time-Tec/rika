@@ -79,8 +79,17 @@ const RollbackInput = Schema.Struct({
  */
 const applyOptions = { maxRefinements: 200 } as const
 
-const rejected = (reason: string, message: string, target?: string) =>
-  HarnessRejected.make({ reason, message, ...(target === undefined ? {} : { target }) })
+interface RejectionDetails {
+  reason: string
+  message: string
+  target?: string
+}
+
+const rejected = (reason: string, message: string, target?: string) => {
+  const details: RejectionDetails = { reason, message }
+  if (target !== undefined) details.target = target
+  return HarnessRejected.make(details)
+}
 
 const kinds = { memory: "memory", skill: "skill", subagent: "subagent", promptNote: "prompt" } as const
 type AuthoredKind = keyof typeof kinds
@@ -134,13 +143,15 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
   }) =>
     Effect.gen(function* () {
       const at = yield* instant
-      const proposal = yield* Authorship.authorProposal({
+      const authored = {
         id: `refine-${at.replaceAll(/[:.TZ-]/g, "")}`,
         at,
         baseSnapshot: input.baseSnapshot,
-        ...(input.rationale === undefined ? {} : { rationale: input.rationale }),
         edits: input.edits,
-      }).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
+      }
+      const proposal = yield* Authorship.authorProposal(
+        input.rationale === undefined ? authored : { ...authored, rationale: input.rationale },
+      ).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
       const state = yield* load(input.scope)
       const result = Refinement.applyProposal(state, proposal, applyOptions)
       if (Result.isFailure(result))
@@ -182,15 +193,7 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
           apply({
             scope: input.scope,
             baseSnapshot: input.baseSnapshot,
-            edits: [
-              {
-                _tag: "Update",
-                kind: kinds[kind],
-                id: input.id,
-                value: valueOf(input),
-                ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
-              },
-            ],
+            edits: [updateEdit(kind, input)],
           }),
         ),
     })
@@ -207,14 +210,7 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
           apply({
             scope: input.scope,
             baseSnapshot: input.baseSnapshot,
-            edits: [
-              {
-                _tag: "Delete",
-                kind: kinds[kind],
-                id: input.id,
-                ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
-              },
-            ],
+            edits: [deleteEdit(kind, input)],
           }),
         ),
     })
@@ -308,20 +304,40 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
   }
 }
 
+interface AuthoredValue {
+  title: string
+  content: string
+  path?: string
+  reference?: string
+  arguments?: Record<string, Schema.Json>
+  metadata?: Record<string, Schema.Json>
+  source?: string
+}
+
 const valueOf = (input: {
   readonly title: string
   readonly content: string
   readonly path?: string
   readonly reference?: string
-  readonly arguments?: Record<string, unknown>
-  readonly metadata?: Record<string, unknown>
+  readonly arguments?: Record<string, Schema.Json>
+  readonly metadata?: Record<string, Schema.Json>
   readonly source?: string
-}) => ({
-  title: input.title,
-  content: input.content,
-  ...(input.path === undefined ? {} : { path: input.path }),
-  ...(input.reference === undefined ? {} : { reference: input.reference }),
-  ...(input.arguments === undefined ? {} : { arguments: input.arguments }),
-  ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-  ...(input.source === undefined ? {} : { source: input.source }),
-})
+}) => {
+  const value: AuthoredValue = { title: input.title, content: input.content }
+  if (input.path !== undefined) value.path = input.path
+  if (input.reference !== undefined) value.reference = input.reference
+  if (input.arguments !== undefined) value.arguments = input.arguments
+  if (input.metadata !== undefined) value.metadata = input.metadata
+  if (input.source !== undefined) value.source = input.source
+  return value
+}
+
+const updateEdit = (kind: AuthoredKind, input: typeof UpdateInput.Type) => {
+  const edit = { _tag: "Update" as const, kind: kinds[kind], id: input.id, value: valueOf(input) }
+  return input.baseVersion === undefined ? edit : { ...edit, baseVersion: input.baseVersion }
+}
+
+const deleteEdit = (kind: AuthoredKind, input: typeof DeleteInput.Type) => {
+  const edit = { _tag: "Delete" as const, kind: kinds[kind], id: input.id }
+  return input.baseVersion === undefined ? edit : { ...edit, baseVersion: input.baseVersion }
+}

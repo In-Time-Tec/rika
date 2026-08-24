@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Executable } from "./registry-model"
 
 export interface Input {
@@ -61,7 +61,4 @@ const formatImplementation = (input: Input, options?: Options): string => {
 export const format: {
   (options?: Options): (input: Input) => string
   (input: Input, options?: Options): string
-} = Function.dual(
-  (args) => typeof args[0] === "object" && args[0] !== null && "listings" in args[0],
-  formatImplementation,
-)
+} = Function.dual((args) => Schema.is(Schema.Struct({ listings: Schema.Unknown }))(args[0]), formatImplementation)

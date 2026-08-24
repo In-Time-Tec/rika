@@ -8,16 +8,16 @@ export class ApiConfigError extends Schema.TaggedError<ApiConfigError>()("ApiCon
   message: Schema.String,
 }) {}
 
-const failure = (dependency: ApiConfigError["dependency"], error: unknown) =>
+const failure = (dependency: ApiConfigError["dependency"], error: Error) =>
   ApiConfigError.make({
     dependency,
-    message: error instanceof Error ? error.message : String(error),
+    message: error.message,
   })
 
 export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: RuntimeEnvironment) {
   const environment = yield* Effect.try({
     try: () => runtimeEnvironment(input),
-    catch: (error) => failure("runtime", error),
+    catch: () => failure("runtime", new Error("Runtime environment is invalid")),
   })
   const identity = yield* loadIdentityConfig(environment).pipe(
     Effect.mapError((error) => failure(error.message.startsWith("DATABASE_") ? "database" : "identity", error)),

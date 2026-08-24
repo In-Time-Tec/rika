@@ -59,10 +59,11 @@ export const turnRecord = (turn: Turn.Turn): ThreadViewTurnRecord => {
     updatedAt: turn.updatedAt,
   }
   if (turn._tag === "AgentExecution") return { ...fields, kind: "agent" }
-  return {
+  const kind: ThreadViewTurnRecord["kind"] = "shell"
+  const shell = {
     ...fields,
-    kind: "shell",
+    kind,
     command: turn.command,
-    ...(turn.status === "running" ? {} : { result: turn.result }),
   }
+  return turn.status === "running" ? shell : { ...shell, result: turn.result }
 }

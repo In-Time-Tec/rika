@@ -8,14 +8,8 @@ import * as ThreadActivity from "../../../src/thread/query/activity"
 const turnId = Turn.TurnId.make("turn-a")
 const threadId = Thread.ThreadId.make("thread-a")
 
-const toolUnit = (key: string, output: string | undefined): Unit => ({
-  key,
-  turnId,
-  order: unitOrder(key, 0),
-  revision: 0,
-  content: {
-    _tag: "Block",
-    block: {
+const toolUnit = (key: string, output: string | undefined): Unit => {
+  const block = {
       _tag: "ToolCall",
       id: key,
       name: "edit",
@@ -24,10 +18,15 @@ const toolUnit = (key: string, output: string | undefined): Unit => ({
       presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
       detail: "src/a.ts",
       files: [],
-      ...(output === undefined ? {} : { output }),
-    },
-  },
-})
+    } satisfies Extract<Unit["content"], { _tag: "Block" }>["block"]
+  return {
+    key,
+    turnId,
+    order: unitOrder(key, 0),
+    revision: 0,
+    content: { _tag: "Block", block: output === undefined ? block : { ...block, output } },
+  }
+}
 
 const assistantUnit = (text: string): Unit => ({
   key: `assistant:${text}`,

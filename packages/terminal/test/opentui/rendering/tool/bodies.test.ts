@@ -354,7 +354,6 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
         turnId: `turn-${index}`,
       }))
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      const state = surface as unknown as { readonly transcriptWindowEnd: number }
       try {
         surface.update({ ...initial("/work", "high"), entries, items, scrollFollow: false })
         yield* openTui(() => setup.flush())
@@ -365,7 +364,7 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
         yield* openTui(() => setup.flush())
         setup.mockInput.pressKey("\x1b[5~")
         setup.mockInput.pressKey("\x1b[5~")
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
         yield* openTui(() => setup.flush())
         const firstAfterRepeatedUp = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         expect(firstAfterRepeatedUp).toBeGreaterThan(300)
@@ -374,14 +373,14 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(historySize - 200)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 200)
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
         yield* openTui(() => setup.flush())
         const firstBeforeRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         setup.mockInput.pressKey("\x1b[6~")
         setup.mockInput.pressKey("\x1b[6~")
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
         yield* openTui(() => setup.flush())
         const firstAfterRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         expect(firstAfterRepeatedDown).toBeGreaterThan(firstBeforeRepeatedDown)

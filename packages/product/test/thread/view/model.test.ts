@@ -41,8 +41,8 @@ const pageCursor = (createdAt: number) => ({ createdAt, turnId: "turn", orderKey
 const usageState = () => ExecutionProjection.emptyUsageState()
 const usage = () => ({ state: usageState() })
 
-const decodeSnapshot = (input: unknown) => Schema.decodeUnknownSync(ThreadView.ThreadViewSnapshot)(input)
-const decodePatch = (input: unknown) => Schema.decodeUnknownSync(ThreadView.ThreadViewPatch)(input)
+const decodeSnapshot = <Input>(input: Input) => Schema.decodeUnknownSync(ThreadView.ThreadViewSnapshot)(input)
+const decodePatch = <Input>(input: Input) => Schema.decodeUnknownSync(ThreadView.ThreadViewPatch)(input)
 
 const snapshot = () =>
   decodeSnapshot({
@@ -73,7 +73,7 @@ const apply = (
   return Result.isFailure(applied) ? applied : Result.succeed(hydrated.success.snapshot())
 }
 
-const patch = (changes: Record<string, unknown> = {}) =>
+const patch = <Changes>(changes?: Changes) =>
   decodePatch({
     threadId: "thread",
     baseRevision: 4,
@@ -88,7 +88,7 @@ describe("ThreadView contract", () => {
   it("round-trips a bounded read model without execution transport vocabulary", () => {
     const value = snapshot()
     const encoded = Schema.encodeSync(ThreadView.ThreadViewSnapshot)(value)
-    expect(Schema.decodeUnknownSync(ThreadView.ThreadViewSnapshot)(encoded)).toEqual(value)
+    expect(Schema.decodeSync(ThreadView.ThreadViewSnapshot)(encoded)).toEqual(value)
     expect(JSON.stringify(encoded)).not.toMatch(
       /selectionEpoch|executionId|executionLink|executionRoute|runId|streamId|origin|eventType/,
     )
@@ -261,16 +261,24 @@ describe("ThreadView contract", () => {
     const units = Array.from({ length: 10_000 }, (_, index) => {
       const value = unit("turn", `unit:${index}`, index)
       return new Proxy(value, {
-        get(target, property, receiver) {
+        get(target, property) {
           reads += 1
-          return Reflect.get(target, property, receiver)
+          if (property === "key") return target.key
+          if (property === "turnId") return target.turnId
+          if (property === "order") return target.order
+          if (property === "revision") return target.revision
+          if (property === "content") return target.content
+          return undefined
         },
       })
     })
-    const current = {
-      ...snapshot(),
-      turns: [{ ...snapshot().turns[0]!, units }],
-    } as ThreadView.ThreadViewSnapshot
+    const baseSnapshot = snapshot()
+    const [firstTurn, ...remainingTurns] = baseSnapshot.turns
+    if (firstTurn === undefined) return
+    const current: ThreadView.ThreadViewSnapshot = {
+      ...baseSnapshot,
+      turns: [{ ...firstTurn, units }, ...remainingTurns],
+    }
     const hydrated = ThreadView.fromSnapshot(current)
     expect(hydrated._tag).toBe("Success")
     if (hydrated._tag !== "Success") return
@@ -316,7 +324,7 @@ describe("ThreadView contract", () => {
   it("round-trips every closed apply error through its schema", () => {
     const failures = [
       ThreadView.ResyncRequired.make({
-        threadId: Schema.decodeUnknownSync(ThreadView.ThreadViewSnapshot)(snapshot()).thread.id,
+        threadId: Schema.decodeSync(ThreadView.ThreadViewSnapshot)(snapshot()).thread.id,
         expectedRevision: 5,
         receivedBaseRevision: 6,
         currentRevision: 4,
@@ -334,7 +342,7 @@ describe("ThreadView contract", () => {
     ]
     for (const failure of failures) {
       const encoded = Schema.encodeSync(ThreadView.ThreadViewApplyError)(failure)
-      expect(Schema.decodeUnknownSync(ThreadView.ThreadViewApplyError)(encoded)).toEqual(failure)
+      expect(Schema.decodeSync(ThreadView.ThreadViewApplyError)(encoded)).toEqual(failure)
     }
   })
 })

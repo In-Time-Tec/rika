@@ -1,3 +1,4 @@
+import { StyledText } from "@opentui/core"
 import { Function, Data, Effect } from "effect"
 
 import { initial, type Model } from "../../../src/state/model"
@@ -21,10 +22,11 @@ export const _insertText: {
   ): ReturnType<typeof _insertTextImpl>
 } = Function.dual(2, _insertTextImpl)
 
-export const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
+export const styledTextValue = (value: StyledText | string) =>
+  value instanceof StyledText ? value.chunks.map((chunk) => chunk.text).join("") : value
 
-const streamingShellImpl = (id: string, output?: string) => ({
+const streamingShellImpl = (id: string, output: string | undefined) => {
+  const block = {
   _tag: "ToolCall" as const,
   id,
   name: "bash",
@@ -37,19 +39,14 @@ const streamingShellImpl = (id: string, output?: string) => ({
     completeLabel: "Ran",
   },
   detail: `printf ${id}`,
-  ...(output === undefined ? {} : { output }),
   files: [],
-})
-
+  }
+  return output === undefined ? block : { ...block, output }
+}
 export const streamingShell: {
-  (
-    arg0: Parameters<typeof streamingShellImpl>[0],
-    arg1?: Parameters<typeof streamingShellImpl>[1],
-  ): ReturnType<typeof streamingShellImpl>
-  (
-    arg1?: Parameters<typeof streamingShellImpl>[1],
-  ): (arg0: Parameters<typeof streamingShellImpl>[0]) => ReturnType<typeof streamingShellImpl>
-} = Function.dual((args) => typeof args[0] === "string", streamingShellImpl)
+  (output: string | undefined): (id: string) => ReturnType<typeof streamingShellImpl>
+  (id: string, output: string | undefined): ReturnType<typeof streamingShellImpl>
+} = Function.dual(2, streamingShellImpl)
 
 export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",
@@ -98,7 +95,7 @@ export const _giantSubagentModel = (childCount: number): Model => {
     index,
     id: `block-${block.id}`,
     turnId: "turn-1",
-    ...(index === 0 ? {} : { parentId: "root-tool" }),
+    parentId: index === 0 ? undefined : "root-tool",
   }))
   return {
     ...initial("/work", "high"),
@@ -158,7 +155,7 @@ const _collapsedSubagentModelImpl = (answerCount: number, childCount: number): M
       index,
       id: `block-${block.id}`,
       turnId: "turn-1",
-      ...(index === 0 ? {} : { parentId: "root-tool" }),
+      parentId: index === 0 ? undefined : "root-tool",
     })),
   ]
   return {

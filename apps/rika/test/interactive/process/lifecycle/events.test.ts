@@ -9,17 +9,21 @@ const router = () => {
   const loop = {
     closed: false,
     model: { ...initial("/workspace", "medium"), currentThreadId: "thread" },
-    renderer: { surface: { showToast } },
+    renderer: {
+      surface: { showToast, showCtrlCMenu: () => undefined, update: () => undefined },
+    },
     submittedSinceIdle: false,
+    threadView: undefined,
+    modelPreview: undefined,
+    requestedThreadId: undefined,
+    ctrlCMenuVisible: false,
   }
   const eventRouter = makeEventRouter({
     loop,
-    fork: () => undefined,
-    session: {},
     render: () => undefined,
     refreshTerminalTitle: () => undefined,
     requestSelectionResync: () => undefined,
-  } as never)
+  })
   return { ...eventRouter, showToast }
 }
 

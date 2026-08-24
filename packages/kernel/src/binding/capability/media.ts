@@ -28,11 +28,10 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
         { kind: "media.attach", payload: input, replayPolicy: "provider-idempotent" },
         Effect.map(
           Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run({ _tag: "ViewMedia", path: input.path })),
-          (result) => ({
-            text: result.text,
-            truncated: result.truncated,
-            ...(result.artifact === undefined ? {} : { artifact: result.artifact }),
-          }),
+          (result) =>
+            result.artifact === undefined
+              ? { text: result.text, truncated: result.truncated }
+              : { text: result.text, truncated: result.truncated, artifact: result.artifact },
         ),
       ),
   }),

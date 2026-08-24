@@ -107,7 +107,7 @@ const requestJson = Effect.fn("ProxyTopology.requestJson")(function* (
       : HttpClientRequest.get(`${base}${path}`)
   const response = yield* client.execute(request)
   expect(response.status).toBe(200)
-  return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
+  return yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(
     yield* response.text,
   )
 })

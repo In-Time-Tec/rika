@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { formatActivity, runningToolsActivity } from "../../../src/state/activity/model"
-import type { Model } from "../../../src/state/model"
+import { initial, type Model } from "../../../src/state/model"
+import type { TranscriptItem } from "../../../src/state/transcript/model"
 
 const cell = (id: string, status: string) => ({
   _tag: "Cell",
@@ -26,17 +27,17 @@ const card = (id: string, status: string) => ({
   activity: [],
 })
 
-const model = (blocks: ReadonlyArray<unknown>, items: ReadonlyArray<unknown>): Model =>
-  ({ blocks, entries: [], items, width: 100, expandedRowKeys: [] }) as unknown as Model
+type ActivityBlock = ReturnType<typeof cell> | ReturnType<typeof card>
 
-const block = (index: number, id: string, parentId?: string) => ({
-  _tag: "Block",
-  index,
-  id,
-  ...(parentId === undefined ? {} : { parentId }),
-})
+const model = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<TranscriptItem>): Model =>
+  ({ ...initial("/work"), blocks: [...blocks], entries: [], items: [...items], width: 100, expandedRowKeys: [] })
 
-const activityOf = (blocks: ReadonlyArray<unknown>, items: ReadonlyArray<unknown>) =>
+const block = (index: number, id: string, parentId?: string) =>
+  parentId === undefined
+    ? ({ _tag: "Block", index, id } satisfies TranscriptItem)
+    : ({ _tag: "Block", index, id, parentId } satisfies TranscriptItem)
+
+const activityOf = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<TranscriptItem>) =>
   formatActivity(runningToolsActivity(model(blocks, items)))
 
 describe("running subagent activity", () => {

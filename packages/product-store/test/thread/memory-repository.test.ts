@@ -29,8 +29,8 @@ const sessionLayer = (
   sessions: Ref.Ref<ReadonlyArray<InteractiveSession>>,
   repository: ThreadRepository.Interface,
   threadSummaryRepositoryLayer?: Layer.Layer<ThreadSummaryRepository.Service>,
-) =>
-  productLayer({
+) => {
+  const options = {
     executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
     turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -39,8 +39,11 @@ const sessionLayer = (
     makeThreadId: Effect.succeed(Thread.ThreadId.make("new-thread")),
     makeTurnId: Effect.succeed(Turn.TurnId.make("unused-turn")),
     interactive: holdSession(sessions),
-    ...(threadSummaryRepositoryLayer === undefined ? {} : { threadSummaryRepositoryLayer }),
-  })
+  }
+  return productLayer(
+    threadSummaryRepositoryLayer === undefined ? options : { ...options, threadSummaryRepositoryLayer },
+  )
+}
 
 describe("interactive session thread archiving", () => {
   it.effect("archives the selection and activates a new thread", () =>

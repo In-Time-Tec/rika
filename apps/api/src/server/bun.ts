@@ -2,9 +2,10 @@ import { Deferred, Effect, Exit, FiberSet, Queue, Schema, Scope } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import type { Gateway, Socket } from "../executor/gateway"
-import { isRikaApiPath, makeRikaApiHandler } from "../api"
+import * as Api from "../api"
 import { threadWebSocketAudience, type HostedThreadConnection } from "../hosted/thread/protocol"
-import { makeSupplementalApiRequestHandler, secureResponse, type HttpDependencies } from "./http"
+import * as Http from "./http"
+import type { HttpDependencies } from "./http"
 
 export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
   const incoming = new URL(input.request.url)
@@ -14,19 +15,21 @@ export const canonicalPublicRequest = (input: { readonly request: Request; reado
   const headers = new Headers(input.request.headers)
   headers.set("host", publicUrl.host)
   for (const name of ["forwarded", "x-forwarded-host", "x-forwarded-port", "x-forwarded-proto"]) headers.delete(name)
-  return new Request(publicUrl.href, {
+  const init: RequestInit = {
     method: input.request.method,
     headers,
     signal: input.request.signal,
-    ...(input.request.body === null ? {} : { body: input.request.body }),
-  })
+  }
+  if (input.request.body !== null) init.body = input.request.body
+  return new Request(publicUrl.href, init)
 }
 
 type SessionGateway = Pick<Gateway, "receive" | "disconnected" | "active">
+type WebSocketMessage = string | Buffer
 
 interface Session {
   readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
-  readonly receive: (socket: Socket, message: unknown) => void
+  readonly receive: (socket: Socket, message: WebSocketMessage) => void
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly validate: () => Effect.Effect<boolean>
   readonly stopAdmission: () => void
@@ -61,10 +64,10 @@ export const pollAuthority = (sessions: ReadonlySet<AuthoritySession>) =>
   )
 
 const ownedSession = (handler: {
-  readonly receive: (socket: Socket, message: unknown) => Effect.Effect<void>
+  readonly receive: (socket: Socket, message: WebSocketMessage) => Effect.Effect<void>
   readonly disconnected: (socket: Socket | undefined) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
-  readonly concurrent?: (message: unknown) => boolean
+  readonly concurrent?: (message: WebSocketMessage) => boolean
 }): Session => {
   const scope = Scope.makeUnsafe("parallel")
   const fibers = Effect.runSync(FiberSet.make<void, never>().pipe(Effect.provideService(Scope.Scope, scope)))
@@ -117,14 +120,15 @@ const ownedSession = (handler: {
 }
 
 const ReverseMessage = Schema.fromJsonString(
-  Schema.Struct({ _tag: Schema.Literals(["BindingInvoke", "MachineResult"]), payload: Schema.optional(Schema.Unknown) }),
+  Schema.Struct({
+    _tag: Schema.Literals(["BindingInvoke", "MachineResult"]),
+    payload: Schema.optional(Schema.Unknown),
+  }),
 )
 const decodeReverseMessage = Schema.decodeUnknownExit(ReverseMessage)
 
-const reverse = (message: unknown) => {
-  const text = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer)
-  return Exit.isSuccess(decodeReverseMessage(text))
-}
+const reverse = (message: WebSocketMessage) =>
+  Exit.isSuccess(decodeReverseMessage(Buffer.from(message).toString("utf8")))
 
 const session = (gateway: SessionGateway): Session =>
   ownedSession({
@@ -140,7 +144,7 @@ const encodeThreadFrame = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
 const threadSession = (connection: HostedThreadConnection): Session =>
   ownedSession({
     receive: (socket, message) => {
-      const body = typeof message === "string" ? message : Buffer.from(message as Uint8Array).toString("utf8")
+      const body = Buffer.from(message).toString("utf8")
       return decodeThreadMessage(body).pipe(
         Effect.flatMap(connection.receive),
         Effect.tap((frames) => Effect.sync(() => frames.forEach((current) => socket.send(encodeThreadFrame(current))))),
@@ -173,7 +177,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
       const runSessionClose = yield* FiberSet.runtime(sessionClosures)<never>()
       const context = yield* Effect.context<never>()
       return yield* Effect.sync(() => {
-        const api = makeRikaApiHandler(input.dependencies)
+        const api = Api.makeRikaApiHandler(input.dependencies)
         const sessions = new Set<Session>()
         const idleWaiters = new Set<() => void>()
         let activeRequests = 0
@@ -206,7 +210,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
             idleWaiters.delete(resolve)
           })
         })
-        const supplementalApi = makeSupplementalApiRequestHandler(input.dependencies)
+        const supplementalApi = Http.makeSupplementalApiRequestHandler(input.dependencies)
         const server = Bun.serve<Session>({
           hostname: "0.0.0.0",
           port: input.config.port,
@@ -253,22 +257,22 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
               return new Response("WebSocket upgrade required", { status: 426 })
             }
             const publicRequest = canonicalPublicRequest({ request, baseUrl: input.config.baseUrl })
-            if (isRikaApiPath(pathname))
+            if (Api.isRikaApiPath(pathname))
               return runRequest(
                 bridgePromise(() => api.handler(publicRequest)).pipe(
-                  Effect.map(secureResponse(input.dependencies.production)),
+                  Effect.map(Http.secureResponse(input.dependencies.production)),
                 ),
               )
             return runRequest(bridgePromise(() => supplementalApi(publicRequest)))
           },
           websocket: {
             open: (socket) => {
-              socket.data!.attach(socket)
+              socket.data.attach(socket)
             },
-            message: (socket, message) => socket.data!.receive(socket, message),
+            message: (socket, message) => socket.data.receive(socket, message),
             close: (socket) => {
-              sessions.delete(socket.data!)
-              runSessionClose(socket.data!.disconnected(socket))
+              sessions.delete(socket.data)
+              runSessionClose(socket.data.disconnected(socket))
             },
           },
         })

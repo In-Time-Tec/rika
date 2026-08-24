@@ -28,7 +28,7 @@ const failure = (kind: HostedError["kind"], message: string) => HostedError.make
 const emailSchema = Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
 
 export const normalizeOrigin = Effect.fn("HostedAccount.normalizeOrigin")(function* (raw: string) {
-  const decoded = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(raw).pipe(
+  const decoded = yield* Schema.decodeEffect(Schema.URLFromString)(raw).pipe(
     Effect.mapError(() => failure("invalid-input", "Hosted origin must be a valid HTTP or HTTPS URL")),
   )
   if (
@@ -133,7 +133,7 @@ export const authenticated = Effect.fn("HostedAccount.authenticated")(function* 
   return yield* request(session)
 })
 
-const json = (value: unknown) =>
+const json = <A>(value: A) =>
   Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
     Effect.mapError(() => failure("protocol", "Hosted output could not be encoded")),
   )
@@ -207,7 +207,7 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
     deviceId: started.deviceId,
     clientId: started.clientId,
     owner: previous !== undefined && previous.origin === origin ? previous.owner : { kind: "personal" },
-    ...(previous !== undefined && previous.origin === origin ? { project: previous.project } : {}),
+    project: previous !== undefined && previous.origin === origin ? previous.project : undefined,
   }
   const issuedAt = yield* Clock.currentTimeMillis
   const verification = started.authorization.verificationUriComplete ?? started.authorization.verificationUri
@@ -255,7 +255,7 @@ export const status = Effect.fn("HostedAccount.status")(function* (asJson: boole
         deviceId: loaded.value.deviceId,
         account: identity.account,
         owner: loaded.value.owner,
-        ...(loaded.value.project === undefined ? {} : { project: loaded.value.project }),
+        project: loaded.value.project,
       }),
     )
     return
@@ -377,7 +377,7 @@ export const useOrganization = Effect.fn("HostedAccount.useOrganization")(functi
 })
 
 export const invite = Effect.fn("HostedAccount.invite")(function* (rawEmail: string) {
-  const email = yield* Schema.decodeUnknownEffect(emailSchema)(rawEmail).pipe(
+  const email = yield* Schema.decodeEffect(emailSchema)(rawEmail).pipe(
     Effect.mapError(() => failure("invalid-input", "Invitation email is invalid")),
   )
   const profile = yield* selectedProfile()
@@ -564,15 +564,17 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
     http.context(profile.origin, session).pipe(
       Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner),
       Effect.andThen(http.issueThreadTicket(profile.origin, session)),
-      Effect.flatMap((ticket) =>
-        threads.create({
+      Effect.flatMap((ticket) => {
+        const request = {
           ticket,
           commandId,
           owner: profile.owner,
-          ...(profile.project === undefined ? {} : { project: profile.project }),
           executorKind: "orb",
-        }),
-      ),
+        } satisfies Parameters<typeof threads.create>[0]
+        return threads.create(
+          Object.assign(request, profile.project === undefined ? undefined : { project: profile.project }),
+        )
+      }),
     ),
   )
   yield* Console.log(`Created Orb Thread ${threadId}`)

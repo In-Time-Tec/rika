@@ -1,11 +1,11 @@
 import * as ThreadView from "@rika/product/thread-view"
 import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { Function, Result } from "effect"
+import { Function, Result, Schema } from "effect"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
 import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
-import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
+import type { Model } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import { overlayPendingSubmissions } from "@rika/terminal/terminal-submission-state"
 import type { State, TranscriptEvent, Update } from "./service"
@@ -92,7 +92,9 @@ const project = (
       ...model.threadSidebar,
       selected: Math.max(
         0,
-        (model.threads as ReadonlyArray<ThreadItem>).findIndex((thread) => thread.id === snapshot.thread.id),
+        model.threads.findIndex(
+          (thread) => Schema.is(Schema.Struct({ id: Schema.String }))(thread) && thread.id === snapshot.thread.id,
+        ),
       ),
     },
     threadPreview: { _tag: "Idle" },
@@ -109,15 +111,12 @@ const project = (
       // The snapshot carries the run's real failure in the last Error unit; a generic status
       // sentence would discard it at the same boundary the wire schema was built to protect.
       const turn = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)
-      const errorUnit = [...(turn?.units ?? [])].reverse().find((unit) => {
-        const content = unit.content as { _tag?: string; block?: { _tag?: string } }
-        return content._tag === "Block" && content.block?._tag === "Error"
-      })
-      const errorBlock = (
-        errorUnit?.content as
-          | { block?: { title?: string; detail?: string; category?: string; retryable?: boolean } }
-          | undefined
-      )?.block
+      const errorUnit = [...(turn?.units ?? [])]
+        .reverse()
+        .find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")
+      const errorContent = errorUnit?.content
+      const errorBlock =
+        errorContent?._tag === "Block" && errorContent.block._tag === "Error" ? errorContent.block : undefined
       const message =
         errorBlock?.detail !== undefined && errorBlock.detail.length > 0
           ? errorBlock.detail
@@ -248,15 +247,12 @@ const projectPatch = (
     const settled = view.turn(previousActiveTurnId)?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
     if (settled?.status === "failed") {
-      const errorUnit = [...view.units(previousActiveTurnId)].reverse().find((unit) => {
-        const content = unit.content as { _tag?: string; block?: { _tag?: string } }
-        return content._tag === "Block" && content.block?._tag === "Error"
-      })
-      const errorBlock = (
-        errorUnit?.content as
-          | { block?: { title?: string; detail?: string; category?: string; retryable?: boolean } }
-          | undefined
-      )?.block
+      const errorUnit = [...view.units(previousActiveTurnId)]
+        .reverse()
+        .find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")
+      const errorContent = errorUnit?.content
+      const errorBlock =
+        errorContent?._tag === "Block" && errorContent.block._tag === "Error" ? errorContent.block : undefined
       const message =
         errorBlock?.detail !== undefined && errorBlock.detail.length > 0
           ? errorBlock.detail

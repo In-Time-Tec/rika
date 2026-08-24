@@ -1,6 +1,6 @@
-import { Effect, Option } from "effect"
+import { Config, Effect, Layer, Option } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { AccountSchema, type AccountAccess, type AccountGatewayRequest } from "./gateway"
+import { AccountGateway, AccountSchema, type AccountAccess, type AccountGatewayRequest } from "./gateway"
 
 const accountUrl = (input: { readonly domain: string; readonly port: string }) =>
   new URL("/api/account", `http://${input.domain}:${input.port}`).href
@@ -46,3 +46,14 @@ export const makeApiAccountGateway = (input: {
         Effect.orElseSucceed((): AccountAccess => ({ _tag: "unavailable" })),
       ),
 })
+
+export const apiAccountGatewayLayer = Layer.effect(
+  AccountGateway,
+  Effect.gen(function* () {
+    return makeApiAccountGateway({
+      domain: yield* Config.string("API_DOMAIN"),
+      port: yield* Config.string("API_PORT"),
+      client: yield* HttpClient.HttpClient,
+    })
+  }),
+)

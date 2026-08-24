@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Prompt, Response } from "tenetkit"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
@@ -35,6 +36,10 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
+        selection: "Surgeon",
+        prompt: Prompt.make("Fix the projection defect"),
+        childDepth: 1,
+        readiness: "ready",
       }),
     )
     expect(block(linked, "SubagentCard")).toBeUndefined()
@@ -122,6 +127,10 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-long",
         invocationId: "provider-call-long",
+        selection: "Task",
+        prompt: Prompt.make("Return a detailed report"),
+        childDepth: 1,
+        readiness: "ready",
       }),
     )
     const response = `BEGIN\n\n${"complete paragraph. ".repeat(700)}\n\nEND`
@@ -154,8 +163,10 @@ describe("TenetKit subagent card projection", () => {
         childRunId: "raw-review-run",
         invocationId: "review:correctness",
         selection: "Review",
-        prompt: [{ role: "user", content: [{ type: "text", text: "Review correctness" }] }],
-      } as never),
+        prompt: Prompt.make("Review correctness"),
+        childDepth: 1,
+        readiness: "ready",
+      }),
     )
     expect(block(linked, "SubagentCard")).toEqual({
       _tag: "Block",
@@ -237,9 +248,8 @@ describe("TenetKit subagent card projection", () => {
       treeEvent("raw-root-run", {
         _tag: "ToolExecutionCompleted",
         turn: 0,
-        call,
-        result: {
-          type: "tool-result",
+        call: Response.toolCallPart(call),
+        result: Response.toolResultPart({
           id: call.id,
           name: call.name,
           isFailure: true,
@@ -248,8 +258,8 @@ describe("TenetKit subagent card projection", () => {
           providerExecuted: false,
           preliminary: false,
           metadata: {},
-        },
-      } as never),
+        }),
+      }),
     )
     const cards = projector
       .snapshot()
@@ -282,7 +292,9 @@ describe("TenetKit subagent card projection", () => {
         metadata: {},
       }
       projector.apply(modelResponse("raw-root-run", call))
-      projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call } as never))
+      projector.apply(
+        treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: Response.toolCallPart(call) }),
+      )
     }
     const link = (group: string, toolCallId: string, key: string, childRunId: string) =>
       projector.apply(
@@ -291,12 +303,12 @@ describe("TenetKit subagent card projection", () => {
           childRunId,
           invocationId: `fan-${group}:${key}`,
           selection: key === "first" ? "Oracle" : "Task",
-          prompt: [{ role: "user", content: [{ type: "text", text: `${group} ${key} prompt` }] }],
+          prompt: Prompt.make(`${group} ${key} prompt`),
           childDepth: 1,
           key,
           label: `${group} ${key}`,
           origin: { parentToolCallId: toolCallId },
-        } as never),
+        }),
       )
     declare("group-one-call", "one")
     link("one", "group-one-call", "first", "raw-one-first")
@@ -349,6 +361,10 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-parent-child",
         invocationId: "parent-call",
+        selection: "Task",
+        prompt: Prompt.make("Inspect the backend"),
+        childDepth: 1,
+        readiness: "ready",
       }),
     )
     projector.apply(
@@ -428,7 +444,11 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
-      } as never),
+        selection: "Surgeon",
+        prompt: Prompt.make("Fix the projection defect"),
+        childDepth: 1,
+        readiness: "ready",
+      }),
     )
     const repaired = projector
       .snapshot()
@@ -458,7 +478,11 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
-      } as never),
+        selection: "Surgeon",
+        prompt: Prompt.make("Fix the projection defect"),
+        childDepth: 1,
+        readiness: "ready",
+      }),
     )
     projector.apply(
       treeEvent(
@@ -474,7 +498,10 @@ describe("TenetKit subagent card projection", () => {
     projector.apply(
       treeEvent(
         "raw-child-run",
-        { _tag: "RunCompleted", status: "succeeded", terminalEventId: "terminal-1" } as never,
+        {
+          _tag: "RunCompleted",
+          result: { text: "", turns: 0, session: { sessionId: "raw-child-run:session", leafId: null } },
+        },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
@@ -515,6 +542,10 @@ describe("TenetKit subagent card projection", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
+        selection: "Task",
+        prompt: Prompt.make("Inspect the tree"),
+        childDepth: 1,
+        readiness: "ready",
       }),
     )
     projector.apply(

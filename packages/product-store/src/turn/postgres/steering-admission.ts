@@ -11,6 +11,7 @@ import type { Interface } from "@rika/product/turn-repository"
 import { SteeringAdmission } from "@rika/product/turn-repository-steering"
 import { TurnId } from "@rika/product/turn-record"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
 import { decodeAgent, decodeQueueState } from "./row-codec"
 import { turnRowJson } from "./row-json-codec"
 import { queuedTurnUnavailable, repositoryError } from "../memory/errors"
@@ -23,15 +24,17 @@ const Row = Schema.Struct({
   source_withdrawn: Schema.Finite,
   status: Schema.Literals(["pending", "accepted", "rejected"]),
 })
+const RequestIdRow = Schema.Struct({ request_id: Schema.String })
+const TurnIdRow = Schema.Struct({ id: TurnId })
 const equivalentTarget = Schema.toEquivalence(ExecutionLink)
 const equivalentInput = Schema.toEquivalence(SteeringInput)
 const equivalentReceipt = Schema.toEquivalence(SteeringReceipt)
 const equivalentFailure = Schema.toEquivalence(SteeringFailure)
 
-const decodeAdmission = (row: unknown) =>
+const decodeAdmission = (row: SqlRow) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
-    const admission = yield* Schema.decodeUnknownEffect(turnRowJson.steeringAdmission)(value.admission_json)
+    const admission = yield* Schema.decodeEffect(turnRowJson.steeringAdmission)(value.admission_json)
     const status = admission.outcome._tag.toLowerCase()
     if (
       value.request_id !== admission.input.idempotencyKey ||
@@ -74,7 +77,8 @@ const validateCapacity = (sql: SqlClient, target: ExecutionLink, pendingRequestI
     const rows = yield* sql`SELECT request_id FROM rika_turn_steering_outbox
       WHERE target_turn_id = ${target.turnId} AND status <> 'rejected'`
     const requests = new Set(pendingRequestIds)
-    for (const row of rows) requests.add(String((row as { readonly request_id: unknown }).request_id))
+    const requestRows = yield* Effect.all(rows.map((row) => Schema.decodeUnknownEffect(RequestIdRow)(row)))
+    for (const row of requestRows) requests.add(row.request_id)
     if (requests.size >= PendingSteeringMaxEntries)
       return yield* RepositoryError.make({
         message: `Turn ${target.turnId} already has the maximum number of pending steering requests`,
@@ -90,7 +94,7 @@ const insertAdmission = (sql: SqlClient, admission: SteeringAdmission) =>
         ${admission.target.threadId}, ${encoded}, ${Number(admission.sourceWithdrawn === true)}, 'pending', ${admission.preparedAt})`
   })
 
-const preserveQueuedUnavailable = (error: unknown) =>
+const preserveQueuedUnavailable = <E>(error: E) =>
   Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error)
 
 export const makeTurnSqlSteeringAdmission = (
@@ -267,9 +271,8 @@ export const makeTurnSqlSteeringAdmission = (
                       )
                     )
                   ORDER BY created_at ASC, id ASC`
-                const position = visibleRows.findIndex(
-                  (row) => String((row as { readonly id: unknown }).id) === admission.source!.id,
-                )
+                const visibleTurns = yield* Effect.all(visibleRows.map((row) => Schema.decodeUnknownEffect(TurnIdRow)(row)))
+                const position = visibleTurns.findIndex((row) => row.id === admission.source!.id)
                 const queueRows = yield* sql`UPDATE rika_thread_queue_state
                   SET revision = revision + 1,
                     queued_count = queued_count + ${admission.sourceWithdrawn === true ? 1 : 0}
@@ -292,9 +295,11 @@ export const makeTurnSqlSteeringAdmission = (
               }
             }
           }
+          const outcome: SteeringAdmission["outcome"] =
+            queue === undefined ? { _tag: "Rejected", failure } : { _tag: "Rejected", failure, queue }
           const rejected: SteeringAdmission = {
             ...admission,
-            outcome: { _tag: "Rejected", failure, ...(queue === undefined ? {} : { queue }) },
+            outcome,
           }
           const encoded = yield* encodeAdmission(rejected)
           yield* sql`UPDATE rika_turn_steering_outbox

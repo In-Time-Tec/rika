@@ -25,9 +25,7 @@ export interface Interface {
     path: string,
   ) => Effect.Effect<Output, MediaMissingError | MediaOversizedError | UnsupportedMediaError | MediaAnalysisError>
 }
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/coding-tools/media/service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/coding-tools/media/service") {}
 
 const maximumSize = 25 * 1024 * 1024
 const ascii = (bytes: Uint8Array, start: number, length: number) =>

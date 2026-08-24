@@ -8,21 +8,13 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import type { Status } from "@rika/product/execution-status"
-import { ProviderCredentialStore, type ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
-export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+export type ProviderCredentialStoreService = ProviderCredentialStore["Service"]
 import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
-import {
-  type CellResolver,
-  type KernelOptions,
-  type LocalCellResolver,
-  type LocalCellServices,
-  type RemoteCellRoute,
-  configure,
-  makeResolver,
-  resolveCellRoute,
-} from "./route"
+import { type KernelOptions, type RemoteCellRoute, configure, resolveCellRoute } from "./route"
+import * as Route from "./route"
 import * as Postgres from "./postgres"
 import { TreeProjector } from "./projection/tree/projector"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic/event"
@@ -32,7 +24,7 @@ const derivedKernelOptions = (dataRoot: string): KernelOptions => ({ runtimeVers
 /** The kernel a cell runs in, plus the seam that answers its host requests. */
 export type KernelPoolServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
 
-export interface LocalCells extends LocalCellResolver {
+export interface LocalCells extends Route.LocalCellResolver {
   readonly built: Effect.Effect<
     ReadonlyArray<
       Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
@@ -93,12 +85,11 @@ export const remoteCells = (options: Omit<RemoteCellRoute, "_tag">): RemoteCellR
   ...options,
 })
 
-const resolveCells = (cells: Cells | undefined): CellResolver | undefined => {
+const resolveCells = (cells: Cells | undefined): Route.CellResolver | undefined => {
   if (cells === undefined || cells._tag === "Remote") return cells
   return {
     _tag: "Local",
-    forWorkspace: (workspace) =>
-      cells.forWorkspace(workspace).pipe(Effect.map((services) => services as Context.Context<LocalCellServices>)),
+    forWorkspace: cells.forWorkspace,
   }
 }
 
@@ -109,10 +100,14 @@ const message = (cause: unknown) => {
 }
 const titleRunId = (rootRunId: string) => `${rootRunId}:title`
 const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
+const decodeCauseTag = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))
 
 const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalResponseFailure => {
   if (isApprovalResponseFailure(cause)) return cause
-  const tag = typeof cause === "object" && cause !== null && "_tag" in cause ? String(cause._tag) : ""
+  const tag = Option.getOrElse(
+    Option.map(decodeCauseTag(cause), (tagged) => tagged._tag),
+    () => "",
+  )
   let kind: ExecutionGateway.ApprovalResponseFailure["kind"] = "unavailable"
   if (tag.endsWith("/ApprovalStale")) kind = "stale"
   else if (tag.endsWith("/ApprovalMismatch")) kind = "mismatch"
@@ -137,16 +132,12 @@ const prompt = (input: ExecutionGateway.StartTurn) =>
     : [
         {
           role: "user" as const,
-          content: input.promptParts.map((part) =>
-            part.type === "text"
-              ? { type: "text" as const, text: part.text }
-              : {
-                  type: "file" as const,
-                  mediaType: part.mediaType,
-                  data: part.data,
-                  ...(part.filename === undefined ? {} : { fileName: part.filename }),
-                },
-          ),
+          content: input.promptParts.map((part) => {
+            if (part.type === "text") return { type: "text" as const, text: part.text }
+            if (part.filename === undefined)
+              return { type: "file" as const, mediaType: part.mediaType, data: part.data }
+            return { type: "file" as const, mediaType: part.mediaType, data: part.data, fileName: part.filename }
+          }),
         },
       ]
 
@@ -221,22 +212,19 @@ export const makeModelTerminalTelemetry = (limit = 256) => {
       const outputTokens = tokenTotal(
         event._tag === "ModelAttemptCompleted" ? event.usage.outputTokens.total : event.providerUsage?.outputTokens,
       )
-      const usage =
-        inputTokens === undefined && outputTokens === undefined
-          ? undefined
-          : {
-              ...(inputTokens === undefined ? {} : { inputTokens }),
-              ...(outputTokens === undefined ? {} : { outputTokens }),
-            }
+      let usage: ModelTerminalObservation["usage"]
+      if (inputTokens !== undefined && outputTokens !== undefined) usage = { inputTokens, outputTokens }
+      else if (inputTokens !== undefined) usage = { inputTokens }
+      else if (outputTokens !== undefined) usage = { outputTokens }
       let outcome: ModelTerminalObservation["outcome"] = "success"
       if (event._tag === "ModelAttemptFailed") outcome = event.category === "cancellation" ? "interrupted" : "failure"
-      return {
+      const observation = {
         modelAttemptId: event.modelAttemptId,
         outcome,
         durationMillis: Math.max(0, terminalAt - startedAt),
         syntheticStart: recordedStart === undefined,
-        ...(usage === undefined ? {} : { usage }),
       }
+      return usage === undefined ? observation : { ...observation, usage }
     },
   }
 }
@@ -281,7 +269,11 @@ export const makeHostedModelObserver = (link: ExecutionGateway.ExecutionLink) =>
   }
 }
 
-const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined, hosted: boolean) =>
+const make = (
+  options: CommonOptions,
+  credentialStore: ProviderCredentialStore["Service"] | undefined,
+  hosted: boolean,
+) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
     // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
@@ -367,20 +359,26 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
             yield* cell.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
           const turnCapabilities =
             options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
-          const configured = yield* configure({
+          let configureOptions: Route.ConfigureOptions = {
             executionRoute: input.executionRoute,
             workspace: input.workspaceId,
             executionIdentity: { threadId: input.threadId, turnId: input.turnId },
             kernel: options.kernel,
-            ...(cell === undefined ? {} : { cell }),
-            ...(turnCapabilities === undefined
-              ? {}
-              : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
-            ...(credentialStore === undefined ? {} : { credentialStore }),
-            ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
-            ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
-          })
-          const receipt = yield* runtime.start({
+          }
+          if (cell !== undefined) configureOptions = { ...configureOptions, cell }
+          if (turnCapabilities !== undefined)
+            configureOptions = {
+              ...configureOptions,
+              skills: turnCapabilities.skills,
+              harnessSnapshot: turnCapabilities.harnessSnapshot,
+            }
+          if (credentialStore !== undefined) configureOptions = { ...configureOptions, credentialStore }
+          if (options.openAiAccountAccess !== undefined)
+            configureOptions = { ...configureOptions, openAiAccountAccess: options.openAiAccountAccess }
+          if (options.modelServices !== undefined)
+            configureOptions = { ...configureOptions, modelServices: options.modelServices }
+          const configured = yield* configure(configureOptions)
+          let startOptions: Parameters<typeof runtime.start>[0] = {
             executable: configured.executable,
             registrations: configured.registrations,
             treePolicy: input.executionRoute.subagents,
@@ -388,30 +386,31 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
             idempotencyKey: input.turnId,
             prompt: prompt(input),
             metadata: { threadId: input.threadId, turnId: input.turnId },
-            ...(input.reviewIntent === undefined
-              ? {}
-              : {
-                  initialFanOuts: [
-                    {
-                      idempotencyKey: `${input.turnId}:review`,
-                      members: input.reviewIntent.lanes.map((lane) => ({
-                        key: lane.key,
-                        selection: "Review",
-                        prompt: lane.prompt,
-                        metadata: {
-                          threadId: input.threadId,
-                          turnId: input.turnId,
-                          productIntent: "review",
-                          reviewLane: lane.key,
-                        },
-                      })),
-                      concurrency: input.reviewIntent.concurrency,
-                      join: { _tag: "AllSettled" },
-                      remainder: "await",
+          }
+          if (input.reviewIntent !== undefined)
+            startOptions = {
+              ...startOptions,
+              initialFanOuts: [
+                {
+                  idempotencyKey: `${input.turnId}:review`,
+                  members: input.reviewIntent.lanes.map((lane) => ({
+                    key: lane.key,
+                    selection: "Review",
+                    prompt: lane.prompt,
+                    metadata: {
+                      threadId: input.threadId,
+                      turnId: input.turnId,
+                      productIntent: "review",
+                      reviewLane: lane.key,
                     },
-                  ],
-                }),
-          })
+                  })),
+                  concurrency: input.reviewIntent.concurrency,
+                  join: { _tag: "AllSettled" },
+                  remainder: "await",
+                },
+              ],
+            }
+          const receipt = yield* runtime.start(startOptions)
           const derivedTitleRunId = titleRunId(receipt.runId)
           if (input.titleIntent !== undefined)
             yield* runtime.start({
@@ -428,12 +427,12 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
                 expectedTitle: input.titleIntent.expectedTitle,
               },
             })
-          return {
+          const link = {
             runId: receipt.runId,
-            ...(input.titleIntent === undefined ? {} : { titleRunId: derivedTitleRunId }),
             turnId: input.turnId,
             threadId: input.threadId,
           }
+          return input.titleIntent === undefined ? link : { ...link, titleRunId: derivedTitleRunId }
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
       cancelTurn: (link, reason) =>
         Effect.all(
@@ -468,11 +467,13 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         } catch (cause) {
           return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
         }
-        const rootEvents = RunTree.watch({
+        let watchOptions: Parameters<typeof RunTree.watch>[0] = {
           rootRunId: link.runId,
           settlement: "root-blocked",
-          ...(input?.checkpoint === undefined ? {} : { cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }),
-        }).pipe(
+        }
+        if (input?.checkpoint !== undefined)
+          watchOptions = { ...watchOptions, cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }
+        const rootEvents = RunTree.watch(watchOptions).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
           Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
           Stream.tap(observeModel),
@@ -517,12 +518,10 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
             const changes: Array<{
               readonly change: ReturnType<typeof projector.apply>
               readonly childRunId?: string
-            }> = [
-              {
-                change,
-                ...(event.event.event._tag === "ChildLinked" ? { childRunId: event.event.event.childRunId } : {}),
-              },
-            ]
+            }> = []
+            if (event.event.event._tag === "ChildLinked")
+              changes.push({ change, childRunId: event.event.event.childRunId })
+            else changes.push({ change })
             if (pendingTitle !== undefined) {
               const snapshot = pendingTitle
               pendingTitle = undefined
@@ -561,12 +560,9 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
                 Stream.flatMap(
                   (runId) => {
                     const parentId = projector.previewParentId(runId)
-                    return runtime.previews({ runId }).pipe(
-                      Stream.map((event) => ({
-                        ...event,
-                        ...(parentId === undefined ? {} : { parentId }),
-                      })),
-                    )
+                    return runtime
+                      .previews({ runId })
+                      .pipe(Stream.map((event) => (parentId === undefined ? event : { ...event, parentId })))
                   },
                   { concurrency: "unbounded" },
                 ),
@@ -622,14 +618,14 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
 
 const executionLayer = <E>(
   options: CommonOptions,
-  runtimeLayer: (credentialStore: ProviderCredentialStoreShape | undefined) => Layer.Layer<Runtime.Runtime, E>,
+  runtimeLayer: (credentialStore: ProviderCredentialStore["Service"] | undefined) => Layer.Layer<Runtime.Runtime, E>,
 ): Layer.Layer<
   ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Runtime.Runtime,
   ExecutionGateway.StartTurnFailure
 > =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const credentialStore: ProviderCredentialStoreShape | undefined =
+      const credentialStore: ProviderCredentialStore["Service"] | undefined =
         options.credentialStore === undefined
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
@@ -645,16 +641,17 @@ const executionLayer = <E>(
     }),
   )
 
-const resolverFor = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined) => {
+const resolverFor = (options: CommonOptions, credentialStore: ProviderCredentialStore["Service"] | undefined) => {
   const cell = resolveCells(options.cells)
-  return makeResolver({
-    kernel: options.kernel,
-    ...(cell === undefined ? {} : { cell }),
-    ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
-    ...(credentialStore === undefined ? {} : { credentialStore }),
-    ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
-    ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
-  })
+  let resolverOptions: Route.ResolverOptions = { kernel: options.kernel }
+  if (cell !== undefined) resolverOptions = { ...resolverOptions, cell }
+  if (options.capabilities !== undefined) resolverOptions = { ...resolverOptions, capabilities: options.capabilities }
+  if (credentialStore !== undefined) resolverOptions = { ...resolverOptions, credentialStore }
+  if (options.openAiAccountAccess !== undefined)
+    resolverOptions = { ...resolverOptions, openAiAccountAccess: options.openAiAccountAccess }
+  if (options.modelServices !== undefined)
+    resolverOptions = { ...resolverOptions, modelServices: options.modelServices }
+  return Route.makeResolver(resolverOptions)
 }
 
 export const layerHosted = (
@@ -665,18 +662,18 @@ export const layerHosted = (
 > =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const credentialStore: ProviderCredentialStoreShape | undefined =
+      const credentialStore: ProviderCredentialStore["Service"] | undefined =
         options.credentialStore === undefined
           ? undefined
           : Context.get(yield* Layer.build(options.credentialStore), ProviderCredentialStore)
-      const apiPostgres = Postgres.layer({
+      let postgresOptions: Parameters<typeof Postgres.layer>[0] = {
         postgres: options.postgres,
         resolver: resolverFor(options, credentialStore),
-        ...(options.subscriberQueueCapacity === undefined
-          ? {}
-          : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
-        ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
-      })
+      }
+      if (options.subscriberQueueCapacity !== undefined)
+        postgresOptions = { ...postgresOptions, subscriberQueueCapacity: options.subscriberQueueCapacity }
+      if (options.scheduler !== undefined) postgresOptions = { ...postgresOptions, scheduler: options.scheduler }
+      const apiPostgres = Postgres.layer(postgresOptions)
       const execution = Layer.effectContext(make(options, credentialStore, true)).pipe(Layer.provide(apiPostgres))
       const readiness = Layer.effect(Postgres.Readiness, Effect.map(Postgres.Readiness, Postgres.Readiness.of)).pipe(
         Layer.provide(apiPostgres),
@@ -704,14 +701,14 @@ export const layerMemory = (
     ...options,
     kernel: options.kernel ?? derivedKernelOptions(options.dataRoot),
   }
-  return executionLayer(shared, (credentialStore) =>
-    Runtime.layerMemory({
+  return executionLayer(shared, (credentialStore) => {
+    let runtimeOptions: Parameters<typeof Runtime.layerMemory>[0] = {
       resolver: resolverFor(shared, credentialStore),
       addresses: [],
-      ...(options.subscriberQueueCapacity === undefined
-        ? {}
-        : { subscriberQueueCapacity: options.subscriberQueueCapacity }),
-      ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
-    }),
-  )
+    }
+    if (options.subscriberQueueCapacity !== undefined)
+      runtimeOptions = { ...runtimeOptions, subscriberQueueCapacity: options.subscriberQueueCapacity }
+    if (options.scheduler !== undefined) runtimeOptions = { ...runtimeOptions, scheduler: options.scheduler }
+    return Runtime.layerMemory(runtimeOptions)
+  })
 }

@@ -18,9 +18,9 @@ import {
 } from "@rika/product/environment-policy"
 import { EnvironmentStore, EnvironmentStoreError } from "@rika/product/environment-store"
 import { BetterAuthUserId, OwnerId, ProjectId, type HostedOwner } from "@rika/product/hosted-model"
-import { Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
+import { Context, Crypto, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
-import { makeSecretCipher } from "../../security/secret-cipher"
+import * as SecretCipher from "../../security/secret-cipher"
 
 export class HostedEnvironmentError extends Schema.TaggedError<HostedEnvironmentError>()("HostedEnvironmentError", {
   kind: Schema.Literals(["forbidden", "invalid", "missing", "unavailable"]),
@@ -37,6 +37,13 @@ interface OwnerInput {
   readonly principal: AuthenticatedPrincipal
   readonly owner: HostedOwner
   readonly projectId?: string
+}
+
+interface ResolvedOwner {
+  readonly ownerId: OwnerId
+  readonly kind: "personal" | "organization"
+  readonly projectId?: ProjectId
+  readonly userId: BetterAuthUserId
 }
 
 export interface HostedEnvironmentService {
@@ -97,6 +104,11 @@ const PhaseEnvironmentDigest = Schema.Array(
   }),
 )
 const encodePhaseEnvironmentDigest = Schema.encodeSync(Schema.fromJsonString(PhaseEnvironmentDigest))
+const Checkout = Schema.Struct({
+  owner: Schema.optionalKey(Schema.String),
+  commitSha: Schema.optionalKey(Schema.String),
+})
+const decodeCheckout = Schema.decodeUnknownOption(Checkout)
 const storeFailure = (error: EnvironmentStoreError) => {
   if (error.kind === "not-found") return rejected("missing", error.message)
   if (error.kind === "forbidden") return rejected("forbidden", "Environment operation was rejected")
@@ -114,7 +126,7 @@ export const layer = (options: {
       const sql = yield* PgClient.PgClient
       const crypto = yield* Crypto.Crypto
       const store = yield* EnvironmentStore
-      const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "environment" })
+      const cipher = SecretCipher.makeSecretCipher({ encodedKey: options.encryptionKey, domain: "environment" })
 
       const authority = Effect.fn("HostedEnvironment.authority")(function* (input: OwnerInput) {
         if (input.owner._tag === "PersonalOwner" && input.owner.userId !== input.principal.userId)
@@ -138,12 +150,12 @@ export const layer = (options: {
             AND (${input.projectId ?? null}::text IS NULL OR project.id IS NOT NULL)`.pipe(Effect.mapError(unavailable))
         const row = rows[0]
         if (row === undefined) return yield* rejected("forbidden", "Owner or Project is unavailable")
-        return {
+        const common: ResolvedOwner = {
           ownerId: OwnerId.make(row.ownerId),
           kind: row.kind,
-          ...(row.projectId === null ? {} : { projectId: ProjectId.make(row.projectId) }),
           userId: BetterAuthUserId.make(input.principal.userId),
         }
+        return row.projectId === null ? common : { ...common, projectId: ProjectId.make(row.projectId) }
       })
 
       const scoped = Effect.fn("HostedEnvironment.scoped")(function* (
@@ -177,47 +189,55 @@ export const layer = (options: {
       const put: HostedEnvironmentService["put"] = Effect.fn("HostedEnvironment.put")(function* (input) {
         const value = Redacted.value(input.value)
         if (value.length === 0) return yield* rejected("invalid", "Environment value must not be empty")
-        const name = yield* Schema.decodeUnknownEffect(EnvironmentValueName)(input.name).pipe(
+        const name = yield* Schema.decodeEffect(EnvironmentValueName)(input.name).pipe(
           Effect.mapError(() => rejected("invalid", "Environment name is invalid")),
         )
         const resolved = yield* scoped(input)
         const identity = `${resolved.ownerId}/${input.scope}/${resolved.scopeId}/${name}`
         const encrypted = cipher.encrypt(identity, input.value)
+        const request = {
+          id: EnvironmentReferenceId.make(
+            `environment-${yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable))}`,
+          ),
+          ownerId: resolved.ownerId,
+          userId: resolved.userId,
+          scope: input.scope,
+          scopeId: resolved.scopeId,
+          name,
+          classification: input.classification,
+          phases: input.phases,
+          valueDigest: yield* digest(encrypted),
+          encrypted,
+          actorUserId: resolved.userId,
+        }
         return yield* store
-          .putValue({
-            id: EnvironmentReferenceId.make(
-              `environment-${yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable))}`,
-            ),
-            ownerId: resolved.ownerId,
-            ...(input.scope === "project" && resolved.projectId !== undefined ? { projectId: resolved.projectId } : {}),
-            userId: resolved.userId,
-            scope: input.scope,
-            scopeId: resolved.scopeId,
-            name,
-            classification: input.classification,
-            phases: input.phases,
-            valueDigest: yield* digest(encrypted),
-            encrypted,
-            actorUserId: resolved.userId,
-          })
+          .putValue(
+            input.scope === "project" && resolved.projectId !== undefined
+              ? { ...request, projectId: resolved.projectId }
+              : request,
+          )
           .pipe(Effect.mapError(storeFailure))
       })
 
       const revoke: HostedEnvironmentService["revoke"] = Effect.fn("HostedEnvironment.revoke")(function* (input) {
-        const name = yield* Schema.decodeUnknownEffect(EnvironmentValueName)(input.name).pipe(
+        const name = yield* Schema.decodeEffect(EnvironmentValueName)(input.name).pipe(
           Effect.mapError(() => rejected("invalid", "Environment name is invalid")),
         )
         const resolved = yield* scoped(input)
+        const request = {
+          ownerId: resolved.ownerId,
+          userId: resolved.userId,
+          scope: input.scope,
+          scopeId: resolved.scopeId,
+          name,
+          actorUserId: resolved.userId,
+        }
         return yield* store
-          .revokeValue({
-            ownerId: resolved.ownerId,
-            ...(input.scope === "project" && resolved.projectId !== undefined ? { projectId: resolved.projectId } : {}),
-            userId: resolved.userId,
-            scope: input.scope,
-            scopeId: resolved.scopeId,
-            name,
-            actorUserId: resolved.userId,
-          })
+          .revokeValue(
+            input.scope === "project" && resolved.projectId !== undefined
+              ? { ...request, projectId: resolved.projectId }
+              : request,
+          )
           .pipe(Effect.mapError(storeFailure))
       })
 
@@ -244,18 +264,18 @@ export const layer = (options: {
         },
       ) {
         const resolved = yield* authority(input)
-        const sourceCommitSha = yield* Schema.decodeUnknownEffect(SourceCommitSha)(input.sourceCommitSha).pipe(
+        const sourceCommitSha = yield* Schema.decodeEffect(SourceCommitSha)(input.sourceCommitSha).pipe(
           Effect.mapError(() => rejected("invalid", "Source commit SHA is invalid")),
         )
         if (input.sourceOwner.trim().length === 0) return yield* rejected("invalid", "Source owner is required")
-        return {
+        const request = {
           ownerId: resolved.ownerId,
-          ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
           sourceOwner: input.sourceOwner,
           sourceCommitSha,
           phase: input.phase,
           actorUserId: resolved.userId,
         }
+        return resolved.projectId === undefined ? request : { ...request, projectId: resolved.projectId }
       })
 
       const approveSource: HostedEnvironmentService["approveSource"] = Effect.fn("HostedEnvironment.approveSource")(
@@ -279,13 +299,13 @@ export const layer = (options: {
           })
           if (policy === undefined)
             return yield* rejected("invalid", "Egress allowlist contains a protected destination")
+          const request = {
+            ownerId: resolved.ownerId,
+            policy,
+            actorUserId: resolved.userId,
+          }
           return yield* store
-            .putEgress({
-              ownerId: resolved.ownerId,
-              ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
-              policy,
-              actorUserId: resolved.userId,
-            })
+            .putEgress(resolved.projectId === undefined ? request : { ...request, projectId: resolved.projectId })
             .pipe(Effect.mapError(storeFailure))
         },
       )
@@ -299,7 +319,7 @@ export const layer = (options: {
                   readonly ownerId: string
                   readonly projectId: string | null
                   readonly userId: string
-                  readonly checkout: { readonly owner?: unknown; readonly commitSha?: unknown } | null
+                  readonly checkout: unknown
                 }>`SELECT assignment.owner_id AS "ownerId", thread.project_id AS "projectId",
                     thread.created_by_user_id AS "userId", assignment.checkout
                   FROM rika_hosted_executor_assignments assignment
@@ -309,9 +329,9 @@ export const layer = (options: {
                   FOR SHARE OF assignment, thread`.pipe(Effect.mapError(unavailable))
                 const assignment = assignments[0]
                 if (assignment === undefined) return yield* rejected("missing", "Executor assignment is unavailable")
-                const checkout = assignment.checkout
-                const durableOwner = typeof checkout?.owner === "string" ? checkout.owner : undefined
-                const durableSha = typeof checkout?.commitSha === "string" ? checkout.commitSha : undefined
+                const checkout = Option.getOrUndefined(decodeCheckout(assignment.checkout))
+                const durableOwner = checkout?.owner
+                const durableSha = checkout?.commitSha
                 const sourceBound = durableOwner !== undefined && durableSha !== undefined
                 const source: SourceTrust = sourceBound
                   ? {
@@ -326,22 +346,30 @@ export const layer = (options: {
                       fork: true,
                       trustedRef: false,
                     }
+                const phaseRequest = {
+                  ownerId: OwnerId.make(assignment.ownerId),
+                  userId: BetterAuthUserId.make(assignment.userId),
+                  phase: input.phase,
+                  source,
+                }
                 const storedPhase = yield* store
-                  .resolvePhase({
-                    ownerId: OwnerId.make(assignment.ownerId),
-                    ...(assignment.projectId === null ? {} : { projectId: ProjectId.make(assignment.projectId) }),
-                    userId: BetterAuthUserId.make(assignment.userId),
-                    phase: input.phase,
-                    source,
-                  })
+                  .resolvePhase(
+                    assignment.projectId === null
+                      ? phaseRequest
+                      : { ...phaseRequest, projectId: ProjectId.make(assignment.projectId) },
+                  )
                   .pipe(Effect.mapError(storeFailure))
-                const references = resolveEnvironmentReferences({
+                const resolution = {
                   candidates: storedPhase.candidates,
                   phase: input.phase,
                   source,
-                  ...(sourceBound && storedPhase.approval !== undefined ? { approval: storedPhase.approval } : {}),
                   organizationPersonalOverrides: storedPhase.organizationPersonalOverrides,
-                })
+                }
+                const references = resolveEnvironmentReferences(
+                  sourceBound && storedPhase.approval !== undefined
+                    ? { ...resolution, approval: storedPhase.approval }
+                    : resolution,
+                )
                 const byId = new Map(storedPhase.candidates.map((candidate) => [candidate.reference.id, candidate]))
                 const values: Record<string, Redacted.Redacted<string>> = {}
                 for (const reference of references) {

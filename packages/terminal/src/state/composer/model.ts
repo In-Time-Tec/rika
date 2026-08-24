@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Model } from "../model"
 
 export type PromptPart =
@@ -58,7 +58,7 @@ export const promptParts: {
   (input: string, pastedText?: ReadonlyArray<ComposerAttachment>): ReadonlyArray<PromptPart>
   (pastedText?: ReadonlyArray<ComposerAttachment>): (input: string) => ReadonlyArray<PromptPart>
 } = Function.dual(
-  (args) => args.length > 1 || typeof args[0] === "string",
+  (args) => args.length > 1 || Schema.is(Schema.String)(args[0]),
   (input: string, pastedText: ReadonlyArray<ComposerAttachment> = []): ReadonlyArray<PromptPart> => {
     const parts: Array<PromptPart> = []
     for (const value of input.split(/([\uE000-\uF8FF])/u)) {

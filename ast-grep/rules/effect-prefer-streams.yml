@@ -1,6 +1,6 @@
 id: effect-prefer-streams
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — prefer Stream/Channel for streaming and Queue/PubSub for coordination; isolate Node streams or EventEmitter behind an adapter.
 rule:
   any:

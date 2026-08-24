@@ -9,7 +9,7 @@ const model = (goal?: Model["goal"], width = 120): Model => ({
   ...initial("/work", "high"),
   width,
   height: 40,
-  ...(goal === undefined ? {} : { goal }),
+  goal,
 })
 const active = { objective: "land R4", status: "active" as const, startedAtMillis: 0 }
 

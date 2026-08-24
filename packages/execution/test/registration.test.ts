@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
-import type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
+import type { ProviderCredentialStoreService } from "@rika/product/provider-credential-store"
 import { Effect, Exit, Layer, Option, Redacted, Ref } from "effect"
 import * as Models from "../src/models"
 
@@ -34,7 +34,7 @@ it.effect("loads owner-bound credentials for OpenAI and Anthropic models and fai
   Effect.scoped(
     Effect.gen(function* () {
       const loaded = yield* Ref.make<ReadonlyArray<string>>([])
-      const store: ProviderCredentialStoreShape = {
+      const store: ProviderCredentialStoreService = {
         load: (identity) =>
           Ref.update(loaded, (current) => [...current, identity]).pipe(
             Effect.as(Option.some(Redacted.make(`secret-for-${identity}`))),

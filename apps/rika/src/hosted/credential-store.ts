@@ -11,11 +11,12 @@ const RefreshLockDisk = Schema.Struct({ pid: Schema.Int })
 
 export type SecretVault = Pick<typeof Bun.secrets, "get" | "set" | "delete">
 
-const liveVault = (Bun as unknown as { readonly secrets: SecretVault }).secrets
+const liveVault: SecretVault = Bun.secrets
 const name = (origin: string, deviceId: string) => `${new URL(origin).origin}/${deviceId}`
 const failure = (message: string) => HostedError.make({ kind: "storage", message })
-const errorCode = (cause: unknown) =>
-  typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : undefined
+const ErrorCode = Schema.Struct({ code: Schema.String })
+const decodeErrorCode = Schema.decodeUnknownOption(ErrorCode)
+const errorCode = (cause: unknown) => Option.getOrUndefined(decodeErrorCode(cause))?.code
 type RefreshLock = FileSystem.File.Info
 
 export const layer = (options: {
@@ -38,9 +39,7 @@ export const layer = (options: {
         if (Option.isNone(observed)) return false
         const text = yield* fileSystem.readFileString(options.lockPath).pipe(Effect.option)
         if (Option.isNone(text)) return false
-        const value = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RefreshLockDisk))(text.value).pipe(
-          Effect.option,
-        )
+        const value = yield* Schema.decodeEffect(Schema.fromJsonString(RefreshLockDisk))(text.value).pipe(Effect.option)
         if (Option.isNone(value)) return false
         const alive = yield* Effect.sync(() => {
           try {
@@ -99,7 +98,7 @@ export const layer = (options: {
           catch: () => failure("Platform credential storage is unavailable"),
         })
         if (stored === null) return Option.none<Credential>()
-        const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(CredentialDisk))(stored).pipe(
+        const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(CredentialDisk))(stored).pipe(
           Effect.mapError(() => failure("Hosted credentials are corrupt")),
         )
         return Option.some({

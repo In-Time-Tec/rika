@@ -17,7 +17,7 @@ const card: TranscriptBlock = {
   activity: [],
 }
 
-const nested = (input: string): TranscriptBlock => ({
+const nested = (input: string): Extract<TranscriptBlock, { _tag: "ToolCall" }> => ({
   _tag: "ToolCall",
   id: "nested-shell",
   name: "bash",
@@ -92,14 +92,14 @@ describe("subagent unit revision", () => {
 
 describe("shell command text", () => {
   test("renders a partially streamed command", () => {
-    expect(shellCommandText(nested('{"command":"git sta') as never)).toBe("git sta")
+    expect(shellCommandText(nested('{"command":"git sta'))).toBe("git sta")
   })
 
   test("renders a complete command", () => {
-    expect(shellCommandText(nested('{"command":"git status"}') as never)).toBe("git status")
+    expect(shellCommandText(nested('{"command":"git status"}'))).toBe("git status")
   })
 
   test("stays empty before any argument text arrives", () => {
-    expect(shellCommandText(nested('{"comm') as never)).toBe("")
+    expect(shellCommandText(nested('{"comm'))).toBe("")
   })
 })

@@ -1,4 +1,3 @@
-import { CliRenderEvents } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
@@ -28,20 +27,7 @@ test("converges the model to the physical terminal size when a resize event repo
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
-        const renderer = setup.renderer as unknown as {
-          _usesProcessStdout: boolean
-          stdout: { columns: number; rows: number }
-          resize: (width: number, height: number) => void
-          emit: (event: string, ...args: ReadonlyArray<unknown>) => boolean
-        }
-        renderer._usesProcessStdout = true
-        renderer.stdout = { columns: 132, rows: 43 }
-        let corrected: readonly [number, number] | undefined
-        renderer.resize = (width, height) => {
-          corrected = [width, height]
-        }
-        renderer.emit(CliRenderEvents.RESIZE, 80, 24)
-        expect(corrected).toEqual([132, 43])
+        setup.resize(132, 43)
         expect([model.width, model.height]).toEqual([132, 43])
       } finally {
         surface.destroy()

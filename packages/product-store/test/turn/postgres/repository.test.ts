@@ -107,7 +107,26 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
   ),
 )
 
-const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
+interface TurnRowOverrides {
+  readonly id?: string
+  readonly thread_id?: string
+  readonly turn_kind?: string
+  readonly prompt?: string | number
+  readonly prompt_parts_json?: string
+  readonly execution_route_json?: string
+  readonly shell_command?: string | null
+  readonly shell_result_text?: string | null
+  readonly shell_result_truncated?: boolean | null
+  readonly shell_result_exit_code?: number | null
+  readonly author_json?: string
+  readonly lineage_json?: string
+  readonly status?: string
+  readonly execution_link_json?: string | null
+  readonly created_at?: number
+  readonly updated_at?: number
+}
+
+const row = (overrides: TurnRowOverrides = {}) => ({
   id: "turn-a",
   thread_id: "thread-a",
   turn_kind: "AgentExecution",
@@ -126,7 +145,13 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   ...overrides,
 })
 
-const queueRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
+interface QueueRowOverrides {
+  readonly thread_id?: string
+  readonly revision?: number
+  readonly queued_count?: number
+}
+
+const queueRow = (overrides: QueueRowOverrides = {}) => ({
   thread_id: "thread-a",
   revision: 1,
   queued_count: 1,
@@ -169,7 +194,7 @@ it.effect("sql turns create, get, and list current turn shapes", () =>
       expect(listed.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-a"), Turn.TurnId.make("turn-b")])
       const parameters = sql.statements[0]?.parameters ?? []
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
-      const executionRoute = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+      const executionRoute = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
         String(parameters[4]),
       )
       expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())

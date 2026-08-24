@@ -1,6 +1,9 @@
 import { Function } from "effect"
-import type { Model } from "../../../state/model"
-import type { TranscriptBlock, TranscriptItem } from "../../../state/transcript/model"
+import { Schema } from "effect"
+import { Block } from "@rika/transcript/transcript-presentation-model"
+import { Model } from "../../../state/model"
+import type { TranscriptItem } from "../../../state/transcript/model"
+import { orderedTranscriptItems } from "../../../presentation/transcript/row"
 import type { TextChunk } from "@opentui/core"
 import type { PathTarget } from "../../../presentation/transcript/tool/detail-types"
 import { spacing } from "../../../presentation/terminal/theme"
@@ -29,7 +32,7 @@ export const boundedTranscriptModel: {
   (model: Model, end: number): BoundedTranscriptModel
   (end: number): (model: Model) => BoundedTranscriptModel
 } = Function.dual(
-  (args) => typeof args[0] === "object",
+  (args) => Schema.is(Model)(args[0]),
   (model: Model, end = model.items.length): BoundedTranscriptModel => {
     const limit = maxMountedTranscriptEntries
     if (model.items.length === 0)
@@ -41,8 +44,8 @@ export const boundedTranscriptModel: {
       }
     const windowEnd = Math.min(model.items.length, Math.max(0, Math.floor(end)))
     if (windowEnd === model.items.length && model.items.length <= limit)
-      return { ...model, items: model.items as ReadonlyArray<TranscriptItem> }
-    const allItems = model.items as ReadonlyArray<TranscriptItem>
+      return { ...model, items: orderedTranscriptItems(model) }
+    const allItems = orderedTranscriptItems(model)
     let hasParent = false
     for (let position = 0; position < windowEnd; position += 1)
       if (allItems[position]?.parentId !== undefined) {
@@ -81,7 +84,8 @@ export const boundedTranscriptModel: {
     const cellBlockIds = new Set<string>()
     for (const [position, item] of allItems.entries()) {
       if (item._tag !== "Block") continue
-      const block = model.blocks[item.index] as TranscriptBlock | undefined
+      const candidate = model.blocks[item.index]
+      const block = candidate === undefined ? undefined : Schema.decodeUnknownSync(Block)(candidate)
       if (block?._tag === "ToolCall" || block?._tag === "SubagentCard") itemPositionByBlockId.set(block.id, position)
       if (block?._tag === "Cell") cellBlockIds.add(block.id)
     }
@@ -216,12 +220,10 @@ export interface TranscriptUnitBuild {
   readonly nested: ReadonlyArray<UnitLineRange>
 }
 
-const offsetUnitRangeImpl = (range: UnitLineRange, offset: number): UnitLineRange => ({
-  ...range,
-  start: range.start + offset,
-  end: range.end + offset,
-  ...(range.headerEnd === undefined ? {} : { headerEnd: range.headerEnd + offset }),
-})
+const offsetUnitRangeImpl = (range: UnitLineRange, offset: number): UnitLineRange =>
+  range.headerEnd === undefined
+    ? { ...range, start: range.start + offset, end: range.end + offset }
+    : { ...range, start: range.start + offset, end: range.end + offset, headerEnd: range.headerEnd + offset }
 
 export const offsetUnitRange: {
   (

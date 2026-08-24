@@ -17,7 +17,7 @@ import { type InteractiveRuntimeContext, type PreparedTurn } from "../session"
 import { isReviewRouteMode, reviewIntent } from "../../review/policy"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../../thread/queue/pending-policy"
 import { turnFailure } from "../../failure-message"
-import { makeFailure } from "../../failure"
+import * as OperationFailure from "../../failure"
 import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../../retry-policy"
 
 export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
@@ -223,7 +223,7 @@ export const promotePendingTurns = (input: {
         _tag: "ExecutionFailed",
         selectionEpoch: 0,
         threadId: input.thread.id,
-        failure: makeFailure(staleError),
+        failure: OperationFailure.makeFailure(staleError),
       })
       return yield* staleError
     })
@@ -234,16 +234,22 @@ export const promotePendingTurns = (input: {
       readonly message: string
     }) =>
       Effect.gen(function* () {
-        const created = yield* input.turns.createForSubmission({
+        const lineage: import("../../../thread/model/relationship").TurnLineage = {
+          _tag: "Retried",
+          sourceTurnId: failed.sourceTurnId,
+        }
+        const retryBase = {
           id: yield* input.makeTurnId(),
           threadId: input.thread.id,
           prompt: failed.turn.prompt,
-          ...(failed.turn.promptParts === undefined ? {} : { promptParts: failed.turn.promptParts }),
           executionRoute: failed.turn.executionRoute,
-          lineage: { _tag: "Retried", sourceTurnId: failed.sourceTurnId },
+          lineage,
           queueCapacity: input.pendingCapacity,
           now: yield* Clock.currentTimeMillis,
-        })
+        }
+        const retrySubmission =
+          failed.turn.promptParts === undefined ? retryBase : { ...retryBase, promptParts: failed.turn.promptParts }
+        const created = yield* input.turns.createForSubmission(retrySubmission)
         const retryClaimed = yield* input.owner
           .claim(created.id, created.status)
           .pipe(Effect.mapError((error) => operationError(operationFailureDetail(error), error)))
@@ -298,15 +304,18 @@ export const promotePendingTurns = (input: {
           threadId: input.thread.id,
           turn: running,
         })
-        yield* input.owner.startTurn({
+        const startBase = {
           threadId: input.thread.id,
           turnId: turn.id,
           workspaceId: input.thread.workspace,
           prompt: prepared.prompt,
-          ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
           executionRoute: turn.executionRoute,
-          ...(isReviewRouteMode(turn.executionRoute.mode) ? { reviewIntent: reviewIntent(turn.prompt) } : {}),
-        })
+        }
+        const startWithParts = prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
+        const startInput = isReviewRouteMode(turn.executionRoute.mode)
+          ? { ...startWithParts, reviewIntent: reviewIntent(turn.prompt) }
+          : startWithParts
+        yield* input.owner.startTurn(startInput)
         const clock = yield* Clock.Clock
         const publish = (change: ExecutionProjection.Change) => {
           input.emit(input.dispatch, {
@@ -369,15 +378,19 @@ export const promotePendingTurns = (input: {
             threadId: input.thread.id,
             turn: transition.turn,
           })
-          yield* input.owner.startTurn({
+          const startBase = {
             threadId: input.thread.id,
             turnId: promoted.id,
             workspaceId: input.thread.workspace,
             prompt: prepared.prompt,
-            ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
             executionRoute: promoted.executionRoute,
-            ...(isReviewRouteMode(promoted.executionRoute.mode) ? { reviewIntent: reviewIntent(promoted.prompt) } : {}),
-          })
+          }
+          const startWithParts =
+            prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
+          const startInput = isReviewRouteMode(promoted.executionRoute.mode)
+            ? { ...startWithParts, reviewIntent: reviewIntent(promoted.prompt) }
+            : startWithParts
+          yield* input.owner.startTurn(startInput)
           const clock = yield* Clock.Clock
           const publish = (change: ExecutionProjection.Change) => {
             input.emit(input.dispatch, {
@@ -420,7 +433,7 @@ export const promotePendingTurns = (input: {
             selectionEpoch: 0,
             threadId: input.thread.id,
             turnId: promoted.id,
-            failure: makeFailure(input.failureMessage),
+            failure: OperationFailure.makeFailure(input.failureMessage),
           })
           return true
         }

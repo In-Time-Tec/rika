@@ -25,7 +25,7 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
-import { Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/database/migrations"
@@ -160,11 +160,11 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
           WHERE tablename = 'rika_hosted_executor_operations'
           ORDER BY indexname`),
       )
-      const recoveryIndex = indexes.rows.find(
-        (row: { indexname: string }) => row.indexname === "rika_hosted_executor_operations_recovery",
-      ) as { readonly indexdef: string } | undefined
-      expect(recoveryIndex?.indexdef).toContain("(state, deadline_at)")
-      expect(recoveryIndex?.indexdef).toContain("WHERE (state = 'dispatched'")
+      const recoveryIndex = yield* Schema.decodeUnknownEffect(Schema.Struct({ indexdef: Schema.String }))(
+        indexes.rows.find((row: { indexname: string }) => row.indexname === "rika_hosted_executor_operations_recovery"),
+      )
+      expect(recoveryIndex.indexdef).toContain("(state, deadline_at)")
+      expect(recoveryIndex.indexdef).toContain("WHERE (state = 'dispatched'")
       const definition = yield* Effect.tryPromise(() =>
         pool.query(`SELECT pg_get_functiondef('rika_hosted_validate_executor_fence'::regproc) AS definition`),
       )

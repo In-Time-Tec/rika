@@ -96,7 +96,7 @@ it.effect("does not let one nonresponsive Turn starve an unrelated claimed Turn"
       })
       const claims = [makeClaim("turn-blocked", "thread-blocked"), makeClaim("turn-unrelated", "thread-unrelated")]
       const store: HostedTurnWorkerStoreService = {
-        claimRecovery: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        claimRecovery: () => Effect.void.pipe(Effect.as<TurnClaim | undefined>(undefined)),
         claimNext: () => Ref.getAndUpdate(claimIndex, (value) => value + 1).pipe(Effect.map((index) => claims[index])),
         prepare: () => Effect.succeed(true),
         renew: () => Effect.succeed(true),
@@ -166,7 +166,7 @@ it.effect("replaces stale local execution when the same prepared Turn is reclaim
       const store: HostedTurnWorkerStoreService = {
         claimRecovery: () =>
           Ref.getAndUpdate(claimIndex, (value) => value + 1).pipe(Effect.map((index) => claims[index])),
-        claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        claimNext: () => Effect.void.pipe(Effect.as<TurnClaim | undefined>(undefined)),
         prepare: () => Effect.die("prepared recovery claims must not be prepared again"),
         renew: () => Effect.succeed(true),
         complete: (claim) =>
@@ -230,10 +230,10 @@ it.effect("rejects a stale Turn worker when claiming blocks after a successful p
         claimRecovery: () =>
           Ref.getAndUpdate(claims, (count) => count + 1).pipe(
             Effect.flatMap((count) =>
-              count === 0 ? Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)) : Deferred.await(blocked),
+              count === 0 ? Effect.void.pipe(Effect.as<TurnClaim | undefined>(undefined)) : Deferred.await(blocked),
             ),
           ),
-        claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        claimNext: () => Effect.void.pipe(Effect.as<TurnClaim | undefined>(undefined)),
         prepare: () => Effect.die("unused"),
         renew: () => Effect.die("unused"),
         complete: () => Effect.die("unused"),
@@ -260,7 +260,7 @@ it.effect("rejects the current Turn claim failure immediately", () =>
     Effect.gen(function* () {
       const store: HostedTurnWorkerStoreService = {
         claimRecovery: () => Effect.die("claim unavailable"),
-        claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        claimNext: () => Effect.void.pipe(Effect.as<TurnClaim | undefined>(undefined)),
         prepare: () => Effect.die("unused"),
         renew: () => Effect.die("unused"),
         complete: () => Effect.die("unused"),

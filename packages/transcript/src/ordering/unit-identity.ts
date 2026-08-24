@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 
 export type IdentityComponent = string | number
 
@@ -22,7 +22,7 @@ const decodeString = (value: string): string | undefined => {
 }
 
 const encodeComponent = (value: IdentityComponent): string =>
-  typeof value === "string" ? encodeString(value) : `%n${Object.is(value, -0) ? "-0" : String(value)}`
+  Schema.is(Schema.String)(value) ? encodeString(value) : `%n${Object.is(value, -0) ? "-0" : String(value)}`
 
 export const identityKey = (family: string, ...components: ReadonlyArray<IdentityComponent>): string =>
   [encodeString(family), ...components.map(encodeComponent)].join(":")

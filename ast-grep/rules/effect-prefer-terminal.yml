@@ -1,6 +1,6 @@
 id: effect-prefer-terminal
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — prefer Terminal for interactive I/O and a typed application result for exit status; keep raw process streams and process.exit in the process host.
 rule:
   any:

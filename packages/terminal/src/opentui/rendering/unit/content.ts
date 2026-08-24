@@ -1,8 +1,8 @@
-import { Function } from "effect"
+import { Function, Option, Schema } from "effect"
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
-import type { TranscriptBlock } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { truncateToWidth } from "../../../presentation/terminal/format"
 import {
@@ -47,6 +47,7 @@ const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
   state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
 
 const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
+  const blockAt = (index: number) => Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[index]))
   let chunks: Array<TextChunk> = []
   let line = 0
   const append = (chunk: TextChunk | TerminalTextChunk) => {
@@ -239,7 +240,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
   }
   const renderNestedCell = (unit: CellTranscriptUnit, prefix: string, last: boolean) => {
-    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>
+    const block = blockAt(unit.block)
+    if (block?._tag !== "Cell") return
     const expanded = rowExpanded(transcriptUnitId(model, unit))
     const rowWidth = transcriptWrapWidth(model.width)
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 8))
@@ -247,8 +249,6 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
     const start = line
-    // The cell body is authored against the left margin, so its own line breaks are re-indented
-    // onto this branch rather than escaping the subagent's timeline.
     const appendIndented = (chunk: TextChunk | TerminalTextChunk) =>
       append(
         chunk.text.includes("\n") ? { ...chunk, text: chunk.text.replaceAll("\n", `\n${continuationPrefix}`) } : chunk,
@@ -270,7 +270,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   }
   const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
     const index = unit.blocks[0]!
-    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+    const block = blockAt(index)
+    if (block?._tag !== "ToolCall") return
     const id = transcriptUnitId(model, unit)
     const expanded = rowExpanded(id)
     const running = block.status === "running"
@@ -346,15 +347,17 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (expandable) append(marker(expanded))
     const headerEnd = line
     const rangeIndex = nestedRanges.length
-    nestedRanges.push({
+    const nestedRangeBase: UnitLineRange = {
       start,
       end: start,
       headerEnd,
       unit: id,
       expandable,
       animated: running,
-      ...(detail.target === undefined ? {} : { targets: [detail.target] }),
-    })
+    }
+    const nestedRange: UnitLineRange =
+      detail.target === undefined ? nestedRangeBase : { ...nestedRangeBase, targets: [detail.target] }
+    nestedRanges.push(nestedRange)
     const bodyPrefix = `${visiblePrefix}${last ? "  " : "│ "}`
     const bodyIndent = `${bodyPrefix}  `
     if (expanded && agent && block.detail.length > 0) {
@@ -386,7 +389,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
   }
   const renderSubagentHeader = (unit: SubagentTranscriptUnit, expanded: boolean) => {
-    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+    const block = blockAt(unit.block)
+    if (block?._tag !== "SubagentCard") return
     const running = block.status === "running" || block.status === "waiting" || block.status === "cancelling"
     const failed = block.status === "failed"
     const cancelled = block.status === "cancelled"
@@ -396,7 +400,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(marker(expanded))
   }
   const renderSubagentContents = (unit: SubagentTranscriptUnit, bodyIndent: string) => {
-    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+    const block = blockAt(unit.block)
+    if (block?._tag !== "SubagentCard") return
     if (block.prompt.length > 0) renderAgentPrompt(block.prompt, bodyIndent)
     if (block.promptTruncated)
       append(dim(fg(colors.amber)(`\n${bodyIndent}Prompt truncated; inspect the source request for full detail.`)))
@@ -414,7 +419,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
   }
   const renderNestedSubagent = (unit: SubagentTranscriptUnit, prefix: string, last: boolean) => {
-    const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>
+    const block = blockAt(unit.block)
+    if (block?._tag !== "SubagentCard") return
     const id = transcriptUnitId(model, unit)
     const expanded = rowExpanded(id)
     const running = block.status === "running" || block.status === "waiting" || block.status === "cancelling"
@@ -443,20 +449,24 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (expanded) renderSubagentContents(unit, "  ")
   }
   const renderCellUnitBody = (index: number, selected: boolean, expanded: boolean) => {
-    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Cell" }>
+    const block = blockAt(index)
+    if (block?._tag !== "Cell") return
     renderCellBody(block, selected, expanded, transcriptWrapWidth(model.width), spinnerFrame, append)
   }
   const renderDiffUnitBody = (index: number, selected: boolean, expanded: boolean) => {
-    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Diff" }>
+    const block = blockAt(index)
+    if (block?._tag !== "Diff") return
     renderDiffBody(block, selected, expanded, transcriptWrapWidth(model.width), append, appendAll)
   }
   const renderReasoningBody = (index: number, selected: boolean) => {
-    const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "Reasoning" }>
+    const block = blockAt(index)
+    if (block?._tag !== "Reasoning") return
     const text = wrapTextToWidth(block.text, transcriptWrapWidth(model.width)).join("\n")
     append(selected ? bold(fg(colors.blue)(text)) : dim(italic(fg(colors.text)(text))))
   }
   const renderPlainBlock = (index: number, selected: boolean, expanded: boolean) => {
-    const block = model.blocks[index] as TranscriptBlock
+    const block = blockAt(index)
+    if (block === undefined) return
     const width = transcriptWrapWidth(model.width)
     if (block._tag === "AuthorizationCard") {
       let icon = "✕"
@@ -490,9 +500,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       rowExpanded(id) ||
       (unit.kind === "tool" &&
         unit.group === "edit" &&
-        unit.blocks.some(
-          (block) => (model.blocks[block] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).status === "running",
-        ))
+        toolUnitsFor(model, unit.blocks).some((toolUnit) => toolUnit.block.status === "running"))
     const selected = expandable && model.detailSelection === id
     const start = line
     const chunkStart = chunks.length
@@ -516,13 +524,15 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       if (expanded && unit.agentResponse !== undefined) {
         const timeline = (unit.children?.length ?? 0) > 0
         const prefix = timeline ? "  │   " : "  "
-        const ownerId = (model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).id
-        const response = agentResponseOutcome(unit.agentResponse)
-        const range =
-          response.kind === "answer"
-            ? renderAgentResponse(response.entry, prefix, timeline)
-            : renderAgentError(response, ownerId, prefix, timeline)
-        if (range !== undefined) nestedRanges.push(range)
+        const ownerId = toolUnitsFor(model, unit.blocks)[0]?.block.id
+        if (ownerId !== undefined) {
+          const response = agentResponseOutcome(unit.agentResponse)
+          const range =
+            response.kind === "answer"
+              ? renderAgentResponse(response.entry, prefix, timeline)
+              : renderAgentError(response, ownerId, prefix, timeline)
+          if (range !== undefined) nestedRanges.push(range)
+        }
       }
     } else if (unit.group === "explore")
       toolBodies.renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
@@ -532,37 +542,38 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     else for (const toolUnit of toolUnitsFor(model, unit.blocks)) renderOtherToolBody(toolUnit, selected, expanded)
     const cancelledAgent =
       unit.kind === "tool" &&
-      unit.blocks.some((index) => {
-        const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
-        return block.status === "cancelled" && block.presentation.family === "agent"
-      })
+      toolUnitsFor(model, unit.blocks).some(
+        (toolUnit) => toolUnit.block.status === "cancelled" && toolUnit.block.presentation.family === "agent",
+      )
     if (expanded && cancelledAgent) addExpandedBodyGutter(chunkStart)
     let animated = false
     if (unit.kind === "tool") {
-      animated = unit.blocks.some(
-        (index) => (model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).status === "running",
-      )
+      animated = toolUnitsFor(model, unit.blocks).some((toolUnit) => toolUnit.block.status === "running")
     } else if (unit.kind === "subagent") {
-      const status = (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "SubagentCard" }>).status
+      const block = blockAt(unit.block)
+      const status = block?._tag === "SubagentCard" ? block.status : undefined
       const answerDelivered = unit.agentResponse?._tag === "Streaming"
       animated = !answerDelivered && (status === "running" || status === "waiting" || status === "cancelling")
-    } else if (unit.kind === "cell")
-      animated = (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>).status === "running"
+    } else if (unit.kind === "cell") {
+      const block = blockAt(unit.block)
+      animated = block?._tag === "Cell" && block.status === "running"
+    }
     let targets: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly column?: number }> | undefined
     if (unit.kind === "tool") {
       targets = toolDetails(model, unit).flatMap((detail) => (detail.target === undefined ? [] : [detail.target]))
     } else if (unit.kind === "diff") {
-      targets = [{ path: (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Diff" }>).path }]
+      const block = blockAt(unit.block)
+      if (block?._tag === "Diff") targets = [{ path: block.path }]
     }
-    const root: UnitLineRange = {
+    const rootBase: UnitLineRange = {
       start,
       end: nestedRanges.length === 0 ? line : nestedRanges[0]!.start - 1,
       unit: id,
       expandable,
       animated,
       gapBefore: false,
-      ...(targets === undefined ? {} : { targets }),
     }
+    const root: UnitLineRange = targets === undefined ? rootBase : { ...rootBase, targets }
     return { chunks, lines: line, root, nested: nestedRanges }
   }
   return { renderUnit, isUnitVisible }

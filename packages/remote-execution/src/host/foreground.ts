@@ -349,11 +349,14 @@ const consumeApi = (
           if (frame.cursor !== receipt.frames.length + 1) return false
           yield* Ref.update(receipts, (values) => {
             const next = new Map(values)
-            next.set(operationKey, {
+            const nextReceipt = {
               ...receipt,
               frames: [...receipt.frames, frame],
-              ...(terminal === undefined ? {} : { state: "completed" as const, response: terminal.response }),
-            })
+            }
+            next.set(
+              operationKey,
+              terminal === undefined ? nextReceipt : { ...nextReceipt, state: "completed", response: terminal.response },
+            )
             return next
           })
           yield* persist()

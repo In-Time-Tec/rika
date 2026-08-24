@@ -64,7 +64,7 @@ export const latestReleaseVersion = Effect.fn("ReleaseDownload.latestReleaseVers
       `The GitHub releases API answered ${response.status} for ${releaseRepository}. No release was resolved.`,
     )
   const body = yield* response.text.pipe(Effect.mapError(transportFailure("the GitHub releases API")))
-  const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(LatestRelease))(body).pipe(
+  const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(LatestRelease))(body).pipe(
     Effect.mapError(() =>
       failWith("release-unavailable", "The GitHub releases API returned a response without a release tag."),
     ),

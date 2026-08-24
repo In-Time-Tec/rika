@@ -1,14 +1,16 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as ResolvedContext from "../../../../src/context/resolution-service"
-import type * as RootTurnOwner from "../../../../src/thread/queue/root-owner"
+import * as RootTurnOwner from "../../../../src/thread/queue/root-owner"
 import { watchRootTurn } from "../../../../src/operation/interactive/turn/observation"
 
 const thread: Thread.Thread = {
@@ -73,21 +75,32 @@ it.effect("delivers completion only through the live projection callback", () =>
     const previewEvents: Array<typeof preview> = []
     let statusUpdates = 0
     let settlements = 0
+    const turns = TurnRepository.Service.of({ get: () => Effect.succeed(turn) })
+    const owner = {
+      ...(yield* RootTurnOwner.make(
+        turns,
+        TranscriptRepository.Service.of({}),
+        ExecutionGateway.Service.of({}),
+      )),
+      watchTurn: (
+        _turnId: Turn.TurnId,
+        onChange?: (value: ExecutionProjection.Change) => void,
+        onPreview?: (value: ExecutionGateway.ModelPreviewEvent) => void,
+      ) =>
+        Effect.sync(() => {
+          onPreview?.(preview)
+          onChange?.(change)
+          return { turnId: turn.id, status: "completed" as const, state, units: [] }
+        }),
+    }
     const watched = watchRootTurn({
       turnId: turn.id,
-      turns: { get: () => Effect.succeed(turn) } as TurnRepository.Interface,
-      owner: {
-        watchTurn: (_turnId, onChange, onPreview) =>
-          Effect.sync(() => {
-            onPreview?.(preview)
-            onChange?.(change)
-            return { turnId: turn.id, status: "completed" as const, state, units: [] }
-          }),
-      } as RootTurnOwner.Interface,
+      turns,
+      owner,
       setTurnStatus: (_turnId, status, now) =>
         Effect.sync(() => {
           statusUpdates += 1
-          return { ...turn, status, updatedAt: now } as Turn.AgentExecutionTurn
+          return { ...turn, status, updatedAt: now }
         }),
       settleThread: () =>
         Effect.sync(() => {
@@ -101,16 +114,16 @@ it.effect("delivers completion only through the live projection callback", () =>
       now: Effect.succeed(1),
     }).pipe(
       Effect.orDie,
-      Effect.provideService(ResolvedContext.Service, ResolvedContext.Service.of({} as ResolvedContext.Interface)),
-      Effect.provideService(ThreadRepository.Service, ThreadRepository.Service.of({} as ThreadRepository.Interface)),
-      Effect.provideService(TurnRepository.Service, TurnRepository.Service.of({} as TurnRepository.Interface)),
+      Effect.provideService(ResolvedContext.Service, ResolvedContext.Service.of({})),
+      Effect.provideService(ThreadRepository.Service, ThreadRepository.Service.of({})),
+      Effect.provideService(TurnRepository.Service, turns),
       Effect.provideService(
         ThreadSummaryRepository.Service,
-        ThreadSummaryRepository.Service.of({} as ThreadSummaryRepository.Interface),
+        ThreadSummaryRepository.Service.of({}),
       ),
       Effect.provideService(
         ExecutionExtensions.ExecutionExtensionService,
-        ExecutionExtensions.ExecutionExtensionService.of({} as ExecutionExtensions.ExecutionExtensionInterface),
+        ExecutionExtensions.ExecutionExtensionService.of({}),
       ),
     )
     yield* watched

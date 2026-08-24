@@ -3,7 +3,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { OperationUnavailable } from "../contract/product"
 import { Service } from "../contract/product-service"
-import { makeProductOperationRun } from "./program"
+import * as ProductOperationProgram from "./program"
 import type { ProductOperationRuntimeState } from "../runtime/state"
 import type { ProductOperationSchedule } from "./schedule"
 import type { ProductLayerOptions } from "../foundation/options"
@@ -24,7 +24,7 @@ export interface ProductOperationServiceInput {
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly operationError: typeof import("../error").operationError
   readonly publishInteractiveActivity: (origin: number, event: InteractiveEvent) => InteractiveEvent
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly queueMutationEvent: ProductOperationRuntimeState["queueMutationEvent"]
   readonly extensionOperations: typeof import("../contract/extension")
   readonly configOperations: typeof import("../contract/configuration")
@@ -49,12 +49,12 @@ export const makeProductOperationService = (input: ProductOperationServiceInput)
   return Service.of({
     stopActiveExecutionWork: stopActiveExecutionWorkWithProjection.pipe(
       Effect.provide(typedExecutionDependencies),
-      Effect.mapError((error: unknown) =>
+      Effect.mapError((error) =>
         OperationUnavailable.make({ operation: "ExecutionShutdown", message: String(error) }),
       ),
     ),
     closeAdmissions,
-    run: makeProductOperationRun({
+    run: ProductOperationProgram.makeProductOperationRun({
       ...state,
       ...input,
       ...schedule,

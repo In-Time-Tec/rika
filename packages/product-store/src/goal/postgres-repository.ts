@@ -6,19 +6,25 @@ import { RepositoryError } from "@rika/product/goal-repository"
 import { Goal } from "@rika/product/goal-record"
 import { GoalRow } from "./row-codec"
 
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
+const repositoryError = (error: { readonly message: string }) => RepositoryError.make({ message: error.message })
 
-const decode = (row: unknown) =>
+const decode = <Row>(row: Row) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(GoalRow)(row)
-    return yield* Schema.decodeUnknownEffect(Goal)({
+    let budget: Goal["budget"]
+    if (value.budget_tokens === null)
+      budget =
+        value.budget_wall_clock_millis === null ? {} : { wallClockMillis: value.budget_wall_clock_millis }
+    else
+      budget =
+        value.budget_wall_clock_millis === null
+          ? { tokens: value.budget_tokens }
+          : { tokens: value.budget_tokens, wallClockMillis: value.budget_wall_clock_millis }
+    const goal = {
       threadId: value.thread_id,
       objective: value.objective,
       status: value.status,
-      budget: {
-        ...(value.budget_tokens === null ? {} : { tokens: value.budget_tokens }),
-        ...(value.budget_wall_clock_millis === null ? {} : { wallClockMillis: value.budget_wall_clock_millis }),
-      },
+      budget,
       usage: {
         tokens: value.usage_tokens,
         elapsedMillis: value.usage_elapsed_millis,
@@ -26,9 +32,16 @@ const decode = (row: unknown) =>
       },
       startedAtMillis: value.started_at,
       updatedAtMillis: value.updated_at,
-      ...(value.completed_at === null ? {} : { completedAtMillis: value.completed_at }),
-      ...(value.summary === null ? {} : { summary: value.summary }),
-    })
+    }
+    if (value.completed_at === null)
+      return yield* Schema.decodeUnknownEffect(Goal)(
+        value.summary === null ? goal : { ...goal, summary: value.summary },
+      )
+    return yield* Schema.decodeUnknownEffect(Goal)(
+      value.summary === null
+        ? { ...goal, completedAtMillis: value.completed_at }
+        : { ...goal, completedAtMillis: value.completed_at, summary: value.summary },
+    )
   }).pipe(Effect.mapError(repositoryError))
 
 export const layer = Layer.effect(

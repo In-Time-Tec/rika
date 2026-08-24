@@ -117,14 +117,7 @@ export class SurfaceState {
   public mountedTranscriptRowCount(): number {
     return this.transcriptPane.mountedRowCount()
   }
-  public animationDiagnostics(): {
-    readonly loaderRunning: boolean
-    readonly welcomeRunning: boolean
-    readonly goalRunning: boolean
-    readonly loaderPhase: number
-    readonly welcomePhase: number
-    readonly goalPhase: number
-  } {
+  public animationDiagnostics() {
     return {
       loaderRunning: this.loaderController.running,
       welcomeRunning: this.welcomeController.running,

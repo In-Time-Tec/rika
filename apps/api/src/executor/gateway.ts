@@ -45,6 +45,7 @@ import {
   Deferred,
   Effect,
   Encoding,
+  Layer,
   Option,
   PubSub,
   Redacted,
@@ -57,9 +58,11 @@ import type { EnvironmentPhase } from "@rika/product/environment-policy"
 import { invokeAdmittedTool, type HostedToolPolicyService } from "../hosted/execution/tool-policy"
 
 export interface Socket {
-  readonly send: (message: string) => unknown
-  readonly close: (code?: number, reason?: string) => unknown
+  readonly send: (message: string) => void
+  readonly close: (code?: number, reason?: string) => void
 }
+
+export type SocketFrame = string | Uint8Array<ArrayBufferLike>
 
 interface Session {
   readonly socket: Socket
@@ -178,7 +181,7 @@ export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGa
 }) {}
 
 export interface ExecutorDataPlane {
-  readonly receive: (socket: Socket, frame: unknown) => Effect.Effect<void>
+  readonly receive: (socket: Socket, frame: SocketFrame) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
   readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
@@ -220,6 +223,10 @@ export interface Gateway extends ExecutorDataPlane {
   readonly quiesce: (assignmentId: string) => Effect.Effect<Quiescence, GatewayError>
   readonly pushBranch: (input: BranchPushInput) => Effect.Effect<BranchPushOutcome, GatewayError>
 }
+
+export class ExecutorGateway extends Context.Service<ExecutorGateway, Gateway>()(
+  "@rika/api/executor/gateway/ExecutorGateway",
+) {}
 
 export interface LifecycleStore {
   readonly append: (
@@ -1000,9 +1007,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         turnId: operation.request.turnId,
         runId: operation.request.runId,
         operationId: operationKey,
-        ...(request.cellId === undefined ? {} : { cellId: request.cellId }),
         bindingId: callId,
       }
+      if (request.cellId !== undefined) Object.assign(correlation, { cellId: request.cellId })
       yield* HostedObservability.event("binding_send", "success", correlation)
       const outcome = yield* HostedObservability.observe(
         "binding_terminal",
@@ -1410,29 +1417,29 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
                 purpose: message.purpose,
               }
         const credential = yield* controller.credential(redactAccess(message.access), command)
+        const credentialResponse = {
+          requestId: message.requestId,
+          ownerId: message.ownerId,
+          assignmentId: message.assignmentId,
+          repositoryId: message.repositoryId,
+          workspaceId: message.workspaceId,
+          purpose: message.purpose,
+          assignmentGeneration: message.assignmentGeneration,
+          leaseEpoch: message.leaseEpoch,
+          ...credential,
+          token: Redacted.value(credential.token),
+        }
+        if (message.purpose === "branch-push")
+          Object.assign(credentialResponse, {
+            publicationId: message.publicationId,
+            branch: message.branch,
+            ref: message.ref,
+            commitSha: message.commitSha,
+          })
         socket.send(
           encode({
             _tag: "RepositoryCredential",
-            credential: {
-              requestId: message.requestId,
-              ownerId: message.ownerId,
-              assignmentId: message.assignmentId,
-              repositoryId: message.repositoryId,
-              workspaceId: message.workspaceId,
-              purpose: message.purpose,
-              ...(message.purpose === "branch-push"
-                ? {
-                    publicationId: message.publicationId,
-                    branch: message.branch,
-                    ref: message.ref,
-                    commitSha: message.commitSha,
-                  }
-                : {}),
-              assignmentGeneration: message.assignmentGeneration,
-              leaseEpoch: message.leaseEpoch,
-              ...credential,
-              token: Redacted.value(credential.token),
-            },
+            credential: credentialResponse,
           }),
         )
         return
@@ -1594,7 +1601,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     }
   })
 
-  const receive = (socket: Socket, frame: unknown) =>
+  const receive = (socket: Socket, frame: SocketFrame) =>
     decode(frame).pipe(
       Effect.matchEffect({
         onFailure: () => Effect.sync(() => close(socket, 1007, "malformed")),
@@ -1793,11 +1800,12 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     if (durable.state !== "completed" && durable.state !== "unknown") return undefined
     if (durable.response === undefined || durable.outcome === undefined)
       return yield* GatewayError.make({ kind: "transport", message: "Persisted executor terminal is incomplete" })
-    return {
-      ...(access === undefined ? {} : { access }),
+    const result = {
       response: durable.response,
       outcome: durable.outcome,
     }
+    if (access !== undefined) Object.assign(result, { access })
+    return result
   })
 
   const execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError> = Effect.fn(
@@ -2246,3 +2254,23 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     pushBranch,
   } satisfies Gateway
 })
+
+export const gatewayLayer = (options: {
+  readonly controller: Controller
+  readonly lifecycle: LifecycleStore
+  readonly phases: PhaseAuthority
+  readonly preparation: PreparationStore
+  readonly bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>
+  readonly toolPolicy: HostedToolPolicyService
+}) =>
+  Layer.effect(
+    ExecutorGateway,
+    makeGateway(
+      options.controller,
+      options.lifecycle,
+      options.phases,
+      options.preparation,
+      options.bindingContract,
+      options.toolPolicy,
+    ),
+  )

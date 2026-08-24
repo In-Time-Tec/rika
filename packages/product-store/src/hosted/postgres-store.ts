@@ -1,6 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Effect, Layer, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import * as HostedObservability from "@rika/product/hosted-observability"
@@ -11,12 +12,15 @@ import {
   AuthenticatedDevice,
   CommitCursor,
   CredentialReference,
+  type HostedOwner,
   HostedThread,
   HostedOwnerRecord,
   HostedWorkspace,
   JsonObject,
   ExecutorInstanceId,
+  OrganizationOwner,
   type OwnerId,
+  PersonalOwner,
   Presence,
   Project,
   ProjectGrant,
@@ -59,14 +63,53 @@ const databaseError = (cause: unknown) =>
 const failure = (reason: StoreError["reason"], message: string) => StoreError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
-const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(databaseError))
+const decode = <S extends Schema.Top>(schema: S, value: SqlRow | undefined) =>
+  Schema.decodeEffect(schema)(value).pipe(Effect.mapError(databaseError))
 const limit = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 1_000)
 const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const AdmissionStatus = Schema.Literals(["accepted", "queued"])
+const OwnerRow = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.String,
+  userId: Schema.NullOr(Schema.String),
+  organizationId: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+})
+const WorkspaceRow = Schema.Struct({
+  id: Schema.String,
+  ownerId: Schema.String,
+  projectId: Schema.NullOr(Schema.String),
+  createdByUserId: Schema.String,
+  executorKind: Schema.Literals(["orb", "runner"]),
+  inheritProjectGrants: Schema.Boolean,
+  createdAt: Schema.String,
+})
+const ThreadRow = Schema.Struct({
+  id: Schema.String,
+  ownerId: Schema.String,
+  projectId: Schema.NullOr(Schema.String),
+  workspaceId: Schema.String,
+  createdByUserId: Schema.String,
+  executorKind: Schema.Literals(["orb", "runner"]),
+  inheritProjectGrants: Schema.Boolean,
+  createdAt: Schema.String,
+})
+const CredentialReferenceRow = Schema.Struct({
+  id: Schema.String,
+  ownerId: Schema.String,
+  projectId: Schema.NullOr(Schema.String),
+  provider: Schema.String,
+  purpose: Schema.String,
+  externalReference: Schema.String,
+  metadata: JsonObject,
+  createdByUserId: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+})
+const ExistingAdmissionRow = Schema.Struct({ turnId: Schema.String, admissionStatus: AdmissionStatus })
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -164,10 +207,18 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           ) {
             return yield* failure("conflict", "Owner identity cannot be reassigned")
           }
-          const identity =
-            matching.kind === "personal"
-              ? { _tag: "PersonalOwner", userId: matching.userId }
-              : { _tag: "OrganizationOwner", organizationId: matching.organizationId }
+          let identity: HostedOwner
+          if (matching.kind === "personal") {
+            if (matching.userId === null) return yield* failure("database", "Personal owner has no user identity")
+            identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: matching.userId })
+          } else {
+            if (matching.organizationId === null)
+              return yield* failure("database", "Organization owner has no organization identity")
+            identity = yield* decode(OrganizationOwner, {
+              _tag: "OrganizationOwner",
+              organizationId: matching.organizationId,
+            })
+          }
           return yield* decode(HostedOwnerRecord, { id: matching.id, identity, createdAt: matching.createdAt })
         }
         const rows = yield* query(sql`INSERT INTO rika_hosted_owners (id, kind, user_id, organization_id, created_at)
@@ -182,17 +233,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
         if (rows[0] === undefined) return yield* failure("conflict", "Owner identity cannot be reassigned")
         yield* query(sql`INSERT INTO rika_hosted_owner_counters (owner_id) VALUES (${input.id}) ON CONFLICT DO NOTHING`)
-        const row = rows[0] as {
-          id: string
-          kind: string
-          userId: string | null
-          organizationId: string | null
-          createdAt: string
+        const row = yield* decode(OwnerRow, rows[0])
+        let identity: HostedOwner
+        if (row.kind === "personal") {
+          if (row.userId === null) return yield* failure("database", "Personal owner has no user identity")
+          identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: row.userId })
+        } else {
+          if (row.organizationId === null)
+            return yield* failure("database", "Organization owner has no organization identity")
+          identity = yield* decode(OrganizationOwner, {
+            _tag: "OrganizationOwner",
+            organizationId: row.organizationId,
+          })
         }
-        const identity =
-          row.kind === "personal"
-            ? { _tag: "PersonalOwner", userId: row.userId }
-            : { _tag: "OrganizationOwner", organizationId: row.organizationId }
         return yield* decode(HostedOwnerRecord, { id: row.id, identity, createdAt: row.createdAt })
       }).pipe(Effect.catchTag("HostedStoreError", Effect.fail)),
     )
@@ -247,9 +300,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       RETURNING id, owner_id AS "ownerId", project_id AS "projectId", created_by_user_id AS "createdByUserId",
         executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants",
         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
-    const row = rows[0] as Record<string, unknown>
-    if (row.projectId === null) delete row.projectId
-    return yield* decode(HostedWorkspace, row)
+    const row = yield* decode(WorkspaceRow, rows[0])
+    const workspace = {
+      id: row.id,
+      ownerId: row.ownerId,
+      createdByUserId: row.createdByUserId,
+      executorKind: row.executorKind,
+      inheritProjectGrants: row.inheritProjectGrants,
+      createdAt: row.createdAt,
+    }
+    return yield* decode(
+      HostedWorkspace,
+      row.projectId === null ? workspace : { ...workspace, projectId: row.projectId },
+    )
   })
 
   const createThread = Effect.fn("PostgresStore.createThread")(function* (input: CreateThreadInput) {
@@ -266,9 +329,17 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         created_by_user_id AS "createdByUserId", executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants",
         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
     if (rows[0] === undefined) return yield* failure("not-found", "Workspace does not belong to the owner and project")
-    const row = rows[0] as Record<string, unknown>
-    if (row.projectId === null) delete row.projectId
-    return yield* decode(HostedThread, row)
+    const row = yield* decode(ThreadRow, rows[0])
+    const thread = {
+      id: row.id,
+      ownerId: row.ownerId,
+      workspaceId: row.workspaceId,
+      createdByUserId: row.createdByUserId,
+      executorKind: row.executorKind,
+      inheritProjectGrants: row.inheritProjectGrants,
+      createdAt: row.createdAt,
+    }
+    return yield* decode(HostedThread, row.projectId === null ? thread : { ...thread, projectId: row.projectId })
   })
 
   const readThread = Effect.fn("PostgresStore.readThread")(function* (input: ReadThreadInput) {
@@ -279,9 +350,17 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       FROM rika_hosted_threads
       WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}`)
     if (rows[0] === undefined) return undefined
-    const row = rows[0] as Record<string, unknown>
-    if (row.projectId === null) delete row.projectId
-    return yield* decode(HostedThread, row)
+    const row = yield* decode(ThreadRow, rows[0])
+    const thread = {
+      id: row.id,
+      ownerId: row.ownerId,
+      workspaceId: row.workspaceId,
+      createdByUserId: row.createdByUserId,
+      executorKind: row.executorKind,
+      inheritProjectGrants: row.inheritProjectGrants,
+      createdAt: row.createdAt,
+    }
+    return yield* decode(HostedThread, row.projectId === null ? thread : { ...thread, projectId: row.projectId })
   })
 
   const putThreadGrant = Effect.fn("PostgresStore.putThreadGrant")(function* (input: PutThreadGrantInput) {
@@ -463,18 +542,17 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       input.promptParts === undefined
         ? undefined
         : yield* Schema.encodeEffect(PromptPartsJson)(input.promptParts).pipe(Effect.mapError(databaseError))
+    const command: AdmitCommandInput["command"] =
+      input.promptParts === undefined
+        ? { _tag: "SubmitPrompt", prompt: input.prompt, mode: input.executionRoute.mode }
+        : { _tag: "SubmitPrompt", prompt: input.prompt, promptParts: input.promptParts, mode: input.executionRoute.mode }
     const commandInput: AdmitCommandInput = {
       ownerId: input.ownerId,
       threadId: input.threadId,
       commandId: input.commandId,
       idempotencyKey: input.idempotencyKey,
       actor: input.actor,
-      command: {
-        _tag: "SubmitPrompt",
-        prompt: input.prompt,
-        ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
-        mode: input.executionRoute.mode,
-      },
+      command,
       admittedAt: input.admittedAt,
     }
     let inserted = false
@@ -499,13 +577,10 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           const existing = yield* decode(ThreadCommand, existingRows[0])
           if (!commandEquivalent(existing, commandInput))
             return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
-          const turnId = (existingRows[0] as { readonly turnId?: unknown }).turnId
-          if (typeof turnId !== "string")
-            return yield* failure("conflict", "Command identity was admitted without a Turn")
-          const status = yield* Schema.decodeUnknownEffect(AdmissionStatus)(
-            (existingRows[0] as { readonly admissionStatus?: unknown }).admissionStatus,
-          ).pipe(Effect.mapError(databaseError))
-          return { command: existing, turnId: TurnId.make(turnId), status }
+          const admission = yield* decode(ExistingAdmissionRow, existingRows[0]).pipe(
+            Effect.catch(() => failure("conflict", "Command identity was admitted without a Turn")),
+          )
+          return { command: existing, turnId: TurnId.make(admission.turnId), status: admission.admissionStatus }
         }
         if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
         const productThread = yield* query(sql`SELECT 1 FROM rika_threads
@@ -927,9 +1002,22 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
         to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
     if (rows[0] === undefined)
       return yield* failure("invalid-authority", "Credential reference identity cannot be reassigned")
-    const row = rows[0] as Record<string, unknown>
-    if (row.projectId === null) delete row.projectId
-    return yield* decode(CredentialReference, row)
+    const row = yield* decode(CredentialReferenceRow, rows[0])
+    const reference = {
+      id: row.id,
+      ownerId: row.ownerId,
+      provider: row.provider,
+      purpose: row.purpose,
+      externalReference: row.externalReference,
+      metadata: row.metadata,
+      createdByUserId: row.createdByUserId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }
+    return yield* decode(
+      CredentialReference,
+      row.projectId === null ? reference : { ...reference, projectId: row.projectId },
+    )
   })
 
   return HostedStore.of({

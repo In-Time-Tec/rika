@@ -1,16 +1,37 @@
-import { Function } from "effect"
+import { Function, Predicate } from "effect"
 import type { Model } from "./model"
 import type { TranscriptItem } from "./transcript/model"
 
-type SubmissionItem = TranscriptItem & {
+type SubmissionItem = Extract<TranscriptItem, { readonly _tag: "Entry" }> & {
   readonly submissionId?: string
   readonly provisional?: boolean
 }
+
+interface ReconcileResult {
+  readonly model: Model
+  readonly found: boolean
+}
+
+interface ProvisionalSubmissionItem {
+  _tag: "Entry"
+  index: number
+  id: string
+  provisional: true
+  submissionId?: string
+}
+
+type MutableSubmissionItem = { -readonly [Key in keyof SubmissionItem]: SubmissionItem[Key] }
 
 export interface SubmissionReference {
   readonly submissionId?: string
   readonly turnId?: string
 }
+
+const isSubmissionItem = (item: Model["items"][number]): item is SubmissionItem =>
+  Predicate.hasProperty(item, "_tag") &&
+  item._tag === "Entry" &&
+  Predicate.hasProperty(item, "index") &&
+  Predicate.isNumber(item.index)
 
 const itemMatches = (item: SubmissionItem, reference: SubmissionReference): boolean => {
   if (item._tag !== "Entry") return false
@@ -20,54 +41,48 @@ const itemMatches = (item: SubmissionItem, reference: SubmissionReference): bool
 }
 
 const itemPosition = (model: Model, reference: SubmissionReference, provisionalOnly: boolean): number =>
-  (model.items as ReadonlyArray<SubmissionItem>).findIndex(
-    (item) => (!provisionalOnly || item.provisional === true) && itemMatches(item, reference),
+  model.items.findIndex(
+    (item) => isSubmissionItem(item) && (!provisionalOnly || item.provisional === true) && itemMatches(item, reference),
   )
 
 const appendProvisionalUserEntryImpl = (model: Model, prompt: string, submissionId?: string): Model => {
   const index = model.entries.length
   const localId = submissionId ?? `${model.history.length}:${model.submittedDrafts.length}:${index}`
+  const item: ProvisionalSubmissionItem = { _tag: "Entry", index, id: `submission:${localId}:user`, provisional: true }
+  if (submissionId !== undefined) item.submissionId = submissionId
   return {
     ...model,
     entries: [...model.entries, { role: "user", text: prompt }],
-    items: [
-      ...model.items,
-      {
-        _tag: "Entry",
-        index,
-        id: `submission:${localId}:user`,
-        ...(submissionId === undefined ? {} : { submissionId }),
-        provisional: true,
-      },
-    ],
+    items: [...model.items, item],
   }
 }
 
 const reconcileUserEntryImpl = (
   model: Model,
   reference: SubmissionReference & { readonly prompt?: string; readonly started: boolean },
-): { readonly model: Model; readonly found: boolean } => {
+): ReconcileResult => {
   const position = itemPosition(model, reference, false)
   if (position < 0) return { model, found: false }
-  const item = (model.items as ReadonlyArray<SubmissionItem>)[position]
-  if (item?._tag !== "Entry") return { model, found: false }
+  const item = model.items[position]
+  if (!isSubmissionItem(item)) return { model, found: false }
   const entry = model.entries[item.index]
   if (entry?.role !== "user") return { model, found: false }
   const turnId = reference.turnId ?? item.turnId
   const entries = [...model.entries]
-  entries[item.index] = {
-    ...entry,
-    ...(reference.prompt === undefined ? {} : { text: reference.prompt }),
-    ...(turnId === undefined ? {} : { turnId }),
-  }
-  const items = [...(model.items as ReadonlyArray<SubmissionItem>)]
+  const reconciledEntry = { ...entry }
+  if (reference.prompt !== undefined) reconciledEntry.text = reference.prompt
+  if (turnId !== undefined) reconciledEntry.turnId = turnId
+  entries[item.index] = reconciledEntry
+  const items = [...model.items]
   const { provisional: _, ...settledItem } = item
-  items[position] = {
-    ...settledItem,
-    ...(turnId === undefined ? {} : { id: `turn:${turnId}:user`, turnId }),
-    ...(reference.submissionId === undefined ? {} : { submissionId: reference.submissionId }),
-    ...(reference.started || item.provisional !== true ? {} : { provisional: true }),
+  const reconciledItem: MutableSubmissionItem = { ...settledItem }
+  if (turnId !== undefined) {
+    reconciledItem.id = `turn:${turnId}:user`
+    reconciledItem.turnId = turnId
   }
+  if (reference.submissionId !== undefined) reconciledItem.submissionId = reference.submissionId
+  if (!reference.started && item.provisional === true) reconciledItem.provisional = true
+  items[position] = reconciledItem
   return { model: { ...model, entries, items }, found: true }
 }
 
@@ -77,18 +92,18 @@ const hasProvisionalUserEntryImpl = (model: Model, reference: SubmissionReferenc
 const settleProvisionalUserEntryImpl = (model: Model, reference: SubmissionReference, restore: boolean): Model => {
   const position = itemPosition(model, reference, true)
   if (position < 0) return model
-  const item = (model.items as ReadonlyArray<SubmissionItem>)[position]
-  if (item?._tag !== "Entry") return model
+  const item = model.items[position]
+  if (!isSubmissionItem(item)) return model
   if (!restore) {
     const { provisional: _, ...settled } = item
-    const items = [...(model.items as ReadonlyArray<SubmissionItem>)]
+    const items = [...model.items]
     items[position] = settled
     return { ...model, items }
   }
   const entries = model.entries.filter((_, index) => index !== item.index)
-  const items = (model.items as ReadonlyArray<SubmissionItem>).flatMap((candidate, index) => {
+  const items = model.items.flatMap((candidate, index) => {
     if (index === position) return []
-    if (candidate._tag !== "Entry" || candidate.index < item.index) return [candidate]
+    if (!isSubmissionItem(candidate) || candidate.index < item.index) return [candidate]
     return [{ ...candidate, index: candidate.index - 1 }]
   })
   return { ...model, entries, items }
@@ -104,7 +119,7 @@ export const appendProvisionalUserEntry: {
     arg1: Parameters<typeof appendProvisionalUserEntryImpl>[1],
     arg2?: Parameters<typeof appendProvisionalUserEntryImpl>[2],
   ): (arg0: Parameters<typeof appendProvisionalUserEntryImpl>[0]) => ReturnType<typeof appendProvisionalUserEntryImpl>
-} = Function.dual((args) => typeof args[0] !== "string", appendProvisionalUserEntryImpl)
+} = Function.dual((args) => !Predicate.isString(args[0]), appendProvisionalUserEntryImpl)
 
 export const reconcileUserEntry: {
   (
@@ -143,10 +158,10 @@ export const overlayPendingSubmissions: {
   (arg1: Model): (arg0: Model) => Model
 } = Function.dual(2, (model: Model, previous: Model): Model => {
   const entries = [...model.entries]
-  const items = [...(model.items as ReadonlyArray<SubmissionItem>)]
-  for (const item of previous.items as ReadonlyArray<SubmissionItem>) {
-    if (item._tag !== "Entry" || item.provisional !== true) continue
-    if (items.some((candidate) => itemMatches(candidate, item))) continue
+  const items = [...model.items]
+  for (const item of previous.items) {
+    if (!isSubmissionItem(item) || item.provisional !== true) continue
+    if (items.some((candidate) => isSubmissionItem(candidate) && itemMatches(candidate, item))) continue
     const entry = previous.entries[item.index]
     if (entry === undefined) continue
     const index = entries.length

@@ -6,37 +6,22 @@ import {
   type PasteEvent,
   type ColorInput,
 } from "@opentui/core"
+import { Option, Schema } from "effect"
 import type { Model } from "../../../state/model"
 import { SidebarController } from "../sidebar/controller"
 import { classifyMouseJunk, fromOpenTui, type Key } from "../../../presentation/terminal/keymap"
 import { pastedTextTokenAt } from "../../../state/composer/paste"
 import { SurfaceState } from "../state"
 
-const readRendererProperty = (renderer: object, property: string): unknown => Reflect.get(renderer, property)
+const ProcessRenderer = Schema.Struct({
+  _usesProcessStdout: Schema.Literal(true),
+  stdout: Schema.Struct({ columns: Schema.Finite, rows: Schema.Finite }),
+})
 
-const isWriteFunction = (value: unknown): value is NodeJS.WriteStream["write"] => typeof value === "function"
-
-const isDimensionStream = (value: unknown): value is Pick<NodeJS.WriteStream, "columns" | "rows"> => {
-  if (typeof value !== "object" || value === null) return false
-  return typeof Reflect.get(value, "columns") === "number" && typeof Reflect.get(value, "rows") === "number"
-}
-
-type RendererOutput = {
-  readonly stdout: NodeJS.WriteStream
-  readonly realStdoutWrite: NodeJS.WriteStream["write"]
-}
-
-const isWritableStream = (value: unknown): value is NodeJS.WriteStream =>
-  typeof value === "object" && value !== null && isWriteFunction(Reflect.get(value, "write"))
-
-const readRendererOutput = (renderer: object): RendererOutput | undefined => {
-  const stdout = readRendererProperty(renderer, "stdout")
-  const realStdoutWrite = readRendererProperty(renderer, "realStdoutWrite")
-  if (!isWritableStream(stdout) || !isWriteFunction(realStdoutWrite)) return undefined
-  return { stdout, realStdoutWrite }
-}
+const processRenderer = Schema.decodeUnknownOption(ProcessRenderer)
 
 export abstract class SurfacePointer extends SurfaceState {
+  private pointerStyle: "ns-resize" | "ew-resize" | "default" = "default"
   protected abstract sidebarController: SidebarController
   protected abstract refreshSidebarRows(model: Model): void
   protected abstract showToast(message: string, color?: ColorInput): void
@@ -119,11 +104,10 @@ export abstract class SurfacePointer extends SurfaceState {
     this.handlers.paste?.(text)
   }
   protected readonly physicalTerminalSize = (width: number, height: number) => {
-    if (readRendererProperty(this.renderer, "_usesProcessStdout") !== true) return { width, height }
-    const stream = readRendererProperty(this.renderer, "stdout")
-    const output = isDimensionStream(stream) ? stream : undefined
-    const physicalWidth = output?.columns
-    const physicalHeight = output?.rows
+    const output = Option.getOrUndefined(processRenderer(this.renderer))
+    if (output === undefined) return { width, height }
+    const physicalWidth = output.stdout.columns
+    const physicalHeight = output.stdout.rows
     const currentWidth =
       Number.isInteger(physicalWidth) && physicalWidth !== undefined && physicalWidth > 0 ? physicalWidth : width
     const currentHeight =
@@ -139,20 +123,16 @@ export abstract class SurfacePointer extends SurfaceState {
       this.renderer.resize(current.width, current.height)
     this.handlers.resize(current.width, current.height)
   }
-  protected readonly setPointerShape = (shape: "ns-resize" | "ew-resize" | "default") => {
-    if (!this.pointerController.changeShape(shape)) return
-    const renderer = readRendererOutput(this.renderer)
-    if (renderer !== undefined) {
-      renderer.realStdoutWrite.call(renderer.stdout, `\u001b]22;${shape}\u001b\\`)
-      return
-    }
-    this.renderer.setMousePointer(shape === "default" ? "default" : "move")
+  protected readonly setPointerCursor = (style: "ns-resize" | "ew-resize" | "default") => {
+    if (this.pointerStyle === style) return
+    this.pointerStyle = style
+    this.renderer.setMousePointer(style === "default" ? "default" : "move")
   }
   protected readonly setComposerResizePointer = (active: boolean) => {
-    this.setPointerShape(active ? "ns-resize" : "default")
+    this.setPointerCursor(active ? "ns-resize" : "default")
   }
   protected readonly setSidebarResizePointer = (active: boolean) => {
-    this.setPointerShape(active ? "ew-resize" : "default")
+    this.setPointerCursor(active ? "ew-resize" : "default")
   }
   protected readonly onSidebarMouseMove = (event: MouseEvent) => {
     if (this.pointerController.sidebarDrag === undefined)

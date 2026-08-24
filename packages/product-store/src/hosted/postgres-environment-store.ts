@@ -51,10 +51,23 @@ const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, EnvironmentStor
   sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", database))
 
 const reference = (row: EnvironmentRow): Effect.Effect<EnvironmentReferenceValue, EnvironmentStoreError> =>
-  Schema.decodeUnknownEffect(EnvironmentReference)({
+  Schema.decodeEffect(EnvironmentReference)(row.projectId === null ? {
     id: row.id,
     ownerId: row.ownerId,
-    ...(row.projectId === null ? {} : { projectId: row.projectId }),
+    scope: row.scope,
+    scopeId: row.scopeId,
+    name: row.name,
+    classification: row.classification,
+    phases: row.phases,
+    revision: row.revision,
+    valueDigest: row.valueDigest,
+    state: row.state,
+    updatedByUserId: row.updatedByUserId,
+    updatedAt: row.updatedAt,
+  } : {
+    id: row.id,
+    ownerId: row.ownerId,
+    projectId: row.projectId,
     scope: row.scope,
     scopeId: row.scopeId,
     name: row.name,
@@ -95,9 +108,17 @@ const selectColumns = `id, owner_id AS "ownerId", project_id AS "projectId", sco
   updated_by_user_id AS "updatedByUserId",
   to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`
 
-const approvalValue = (row: ApprovalRow): SourceEnvironmentApproval => ({
+const approvalValue = (row: ApprovalRow): SourceEnvironmentApproval => row.projectId === null ? ({
   ownerId: OwnerId.make(row.ownerId),
-  ...(row.projectId === null ? {} : { projectId: ProjectId.make(row.projectId) }),
+  sourceOwner: row.sourceOwner,
+  sourceCommitSha: SourceCommitSha.make(row.sourceCommitSha),
+  phase: row.phase,
+  approvedByUserId: BetterAuthUserId.make(row.approvedByUserId),
+  approvedAt: Timestamp.make(row.approvedAt),
+  revokedAt: row.revokedAt === null ? null : Timestamp.make(row.revokedAt),
+}) : ({
+  ownerId: OwnerId.make(row.ownerId),
+  projectId: ProjectId.make(row.projectId),
   sourceOwner: row.sourceOwner,
   sourceCommitSha: SourceCommitSha.make(row.sourceCommitSha),
   phase: row.phase,
@@ -289,15 +310,15 @@ const make = Effect.gen(function* (): Effect.fn.Return<EnvironmentStoreService, 
             AND (project_id = ${input.projectId ?? null} OR project_id IS NULL)
           ORDER BY project_id NULLS LAST LIMIT 1 FOR SHARE`,
       )
-      return {
+      const resolved = {
         candidates: yield* Effect.forEach(
           rows.filter((row) => row.state === "active" && row.phases.includes(input.phase)),
           stored,
         ),
-        ...(approvals[0] === undefined ? {} : { approval: approvalValue(approvals[0]) }),
         organizationPersonalOverrides: policies[0]?.personalOverrides ?? true,
         egress: { phase: input.phase, allow: [...(egressRows[0]?.allow ?? [])] },
       }
+      return approvals[0] === undefined ? resolved : { ...resolved, approval: approvalValue(approvals[0]) }
     },
   )
 

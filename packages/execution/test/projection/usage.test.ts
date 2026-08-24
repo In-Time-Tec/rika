@@ -1,34 +1,51 @@
-import { RunTree, type RunEvent } from "tenetkit/runtime"
+import { RunEvent, RunTree } from "tenetkit/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../../src/projection/tree/projector"
 import type { SemanticTreeEvent } from "../../src/projection/semantic/event"
 
 let position = 0
+type RunEventInput = {
+  [Tag in Exclude<RunEvent.RunEvent["_tag"], "ModelResponseCommitted" | "ModelResponseInterrupted">]: Partial<
+    Extract<RunEvent.RunEvent, { readonly _tag: Tag }>
+  > & {
+    readonly _tag: Tag
+  }
+}[Exclude<RunEvent.RunEvent["_tag"], "ModelResponseCommitted" | "ModelResponseInterrupted">]
+
 const treeEvent = (
   runId: string,
-  event: Partial<RunEvent.RunEvent> & { readonly _tag: RunEvent.RunEvent["_tag"] },
+  event: RunEventInput,
   options: { readonly rootRunId?: string; readonly parentRunId?: string; readonly invocationId?: string } = {},
 ): SemanticTreeEvent => {
   position += 1
   const rootRunId = options.rootRunId ?? "raw-root-run"
-  return {
+  const decodedEvent = RunEvent.RunEvent.make({
+    specVersion: "1",
+    eventId: `${runId}:${position}`,
+    runId,
+    rootRunId,
+    sequence: position,
+    executableRef: {
+      active: `agent-pin:v1:sha256:${"1".repeat(64)}`,
+      executable: `executable-pin:v1:sha256:${"2".repeat(64)}`,
+    },
+    depth: options.parentRunId === undefined ? 0 : 1,
+    occurredAt: occurredAt(position),
+    ...event,
+  })
+  if (decodedEvent._tag === "ModelResponseCommitted" || decodedEvent._tag === "ModelResponseInterrupted") {
+    throw new TypeError("Usage projections do not accept model response events")
+  }
+  const base = {
+    event: decodedEvent,
     rootRunId,
     runId,
-    ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
-    ...(options.invocationId === undefined ? {} : { invocationId: options.invocationId }),
-    event: {
-      specVersion: "1",
-      eventId: `${runId}:${position}`,
-      runId,
-      rootRunId,
-      sequence: position,
-      executableRef: {} as never,
-      occurredAt: occurredAt(position),
-      ...event,
-    } as SemanticTreeEvent["event"],
     cursor: RunTree.TreeCursor.make(`tree-cursor-${position}`),
   }
+  if (options.parentRunId === undefined) return base
+  if (options.invocationId === undefined) return { ...base, parentRunId: options.parentRunId }
+  return { ...base, invocationId: options.invocationId, parentRunId: options.parentRunId }
 }
 
 const occurredAt = (millis: number): string => DateTime.formatIso(DateTime.makeUnsafe(millis))
@@ -140,7 +157,7 @@ describe("TenetKit tree projector usage accounting", () => {
             outputTokens: { total: 3, text: 2, reasoning: 1 },
           },
           finishReason: "stop",
-        } as never),
+        }),
       )
     }
     const snapshot = projector.snapshot()
@@ -175,10 +192,10 @@ describe("TenetKit tree projector usage accounting", () => {
         attempt: 0,
         failedAt: 1,
         category: "provider-response",
-        classification: "retryable",
+        classification: "transient",
         disposition: "retry",
         providerUsage: { inputTokens: 7, outputTokens: 5, totalTokens: 15 },
-      } as never),
+      }),
     )
     projector.apply(
       treeEvent("raw-root-run", {
@@ -195,19 +212,18 @@ describe("TenetKit tree projector usage accounting", () => {
           outputTokens: { total: 4, text: 3, reasoning: 1 },
         },
         finishReason: "stop",
-        cost: { amount: 0.125, currency: "USD" },
-      } as never),
+      }),
     )
     const usage = projector.snapshot().state.usage
     expect(usage).toEqual(
       expect.objectContaining({
-        costNanoUsd: 125_000_000,
-        pricedAttempts: 1,
-        unpricedAttempts: 1,
+        pricedAttempts: 0,
+        unpricedAttempts: 2,
         countedAttempts: 2,
         uncountedAttempts: 0,
       }),
     )
+    expect(usage).not.toHaveProperty("costNanoUsd")
     expect(usage.tokens).toEqual({
       total: 30,
       input: { total: 18, uncached: 8, cacheRead: 2, cacheWrite: 1 },
@@ -227,7 +243,7 @@ describe("TenetKit tree projector usage accounting", () => {
         modelCallId: "call-one",
         purpose: "conversation",
         startedAt: 1,
-      } as never),
+      }),
     )
     projector.apply(
       treeEvent("raw-root-run", {
@@ -241,7 +257,7 @@ describe("TenetKit tree projector usage accounting", () => {
         usageAt: 2,
         usage: { inputTokens: { total: 20 }, outputTokens: { total: 2 } },
         finishReason: "stop",
-      } as never),
+      }),
     )
     expect(projector.snapshot().state.usage).toEqual(
       expect.objectContaining({
@@ -257,7 +273,7 @@ describe("TenetKit tree projector usage accounting", () => {
         modelCallId: "call-two",
         purpose: "conversation",
         startedAt: 3,
-      } as never),
+      }),
     )
     expect(projector.snapshot().state.usage).toEqual(
       expect.objectContaining({
@@ -277,7 +293,7 @@ describe("TenetKit tree projector usage accounting", () => {
         usageAt: 4,
         usage: { inputTokens: { total: 30 }, outputTokens: { total: 3 } },
         finishReason: "stop",
-      } as never),
+      }),
     )
     expect(projector.snapshot().state.usage).toEqual(
       expect.objectContaining({
@@ -295,7 +311,7 @@ describe("TenetKit tree projector usage accounting", () => {
           modelCallId: "child-call",
           purpose: "conversation",
           startedAt: 5,
-        } as never,
+        },
         { parentRunId: "raw-root-run", invocationId: "child" },
       ),
     )
@@ -313,7 +329,7 @@ describe("TenetKit tree projector usage accounting", () => {
           usageAt: 6,
           usage: { inputTokens: { total: 999 }, outputTokens: { total: 1 } },
           finishReason: "stop",
-        } as never,
+        },
         { parentRunId: "raw-root-run", invocationId: "child" },
       ),
     )
@@ -349,8 +365,8 @@ describe("TenetKit tree projector usage accounting", () => {
       treeEvent("raw-root-run", {
         _tag: "RunWaiting",
         occurredAt: occurredAt(30),
-        wait: { waitId: "wait", status: "open", openedAt: occurredAt(30), reason: { _tag: "Input" } },
-      } as never),
+        wait: { waitId: "wait", status: "open", openedAt: occurredAt(30), reason: { _tag: "Timer" } },
+      }),
     )
     const childDone = projector.apply(
       treeEvent(
@@ -358,8 +374,8 @@ describe("TenetKit tree projector usage accounting", () => {
         {
           _tag: "RunCompleted",
           occurredAt: occurredAt(40),
-          result: { text: "", turns: 1, transcript: [] },
-        } as never,
+          result: { text: "", turns: 1, session: { sessionId: "child-session", leafId: null } },
+        },
         { parentRunId: "raw-root-run", invocationId: "child" },
       ),
     )
@@ -369,8 +385,8 @@ describe("TenetKit tree projector usage accounting", () => {
         _tag: "RunResumed",
         occurredAt: occurredAt(50),
         waitId: "wait",
-        resolution: { _tag: "Provided", value: null },
-      } as never),
+        resolution: { _tag: "Signal", name: "resume" },
+      }),
     )
     const resumed = TreeProjector.make(
       "turn-active",
@@ -382,8 +398,12 @@ describe("TenetKit tree projector usage accounting", () => {
       treeEvent("raw-root-run", {
         _tag: "RunCompleted",
         occurredAt: occurredAt(70),
-        result: { text: "aggregate output must not project", turns: 1, transcript: [] },
-      } as never),
+        result: {
+          text: "aggregate output must not project",
+          turns: 1,
+          session: { sessionId: "root-session", leafId: null },
+        },
+      }),
     )
     expect(completed.state.usage.active).toEqual({ _tag: "Available", accumulatedMillis: 50 })
     expect(completed.state.usage.sourceComplete).toBe(true)
@@ -405,7 +425,7 @@ describe("TenetKit tree projector usage accounting", () => {
           modelAttemptId: `attempt-${index}`,
           attempt: 0,
           startedAt: index,
-        } as never),
+        }),
       )
     expect(() =>
       projector.apply(
@@ -417,7 +437,7 @@ describe("TenetKit tree projector usage accounting", () => {
           modelAttemptId: "overflow",
           attempt: 0,
           startedAt: 257,
-        } as never),
+        }),
       ),
     ).toThrow(/in-flight attempts exceeds 256/)
   })

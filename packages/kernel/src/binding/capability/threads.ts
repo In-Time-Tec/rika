@@ -20,33 +20,41 @@ const failure = (tool: string, cause: { readonly _tag: string }) => ({
   retryable: false,
 })
 
-const selector = (selection: typeof ThreadContract.ReadThreadInput.Type.selection) => {
+type ReadRequest = Parameters<ThreadQuery.Interface["read"]>[0]
+
+const selector = (selection: typeof ThreadContract.ReadThreadInput.Type.selection): ReadRequest["selector"] => {
   if (selection.mode === "overview") return { _tag: "overview" as const }
-  if (selection.mode === "subtree")
-    return {
+  if (selection.mode === "subtree") {
+    let value: ReadRequest["selector"] = {
       _tag: "subtree" as const,
       subagentId: selection.subagentId,
-      ...(selection.cursor?.before === undefined
-        ? {}
-        : { before: { ...selection.cursor.before, turnId: Turn.TurnId.make(selection.cursor.before.turnId) } }),
-      ...(selection.cursor !== undefined && "offset" in selection.cursor ? { offset: selection.cursor.offset } : {}),
     }
-  if (selection.mode === "recent")
-    return {
+    if (selection.cursor?.before !== undefined)
+      value = {
+        ...value,
+        before: { ...selection.cursor.before, turnId: Turn.TurnId.make(selection.cursor.before.turnId) },
+      }
+    if (selection.cursor !== undefined && "offset" in selection.cursor)
+      value = { ...value, offset: selection.cursor.offset }
+    return value
+  }
+  if (selection.mode === "recent") {
+    let value: ReadRequest["selector"] = {
       _tag: "recent" as const,
-      ...(selection.limit === undefined ? {} : { limit: selection.limit }),
-      ...(selection.cursor === undefined
-        ? {}
-        : { before: { ...selection.cursor, id: Turn.TurnId.make(selection.cursor.id) } }),
     }
-  return {
+    if (selection.limit !== undefined) value = { ...value, limit: selection.limit }
+    if (selection.cursor !== undefined)
+      value = { ...value, before: { ...selection.cursor, id: Turn.TurnId.make(selection.cursor.id) } }
+    return value
+  }
+  let value: ReadRequest["selector"] = {
     _tag: "relevant" as const,
     query: selection.query,
-    ...(selection.limit === undefined ? {} : { limit: selection.limit }),
-    ...(selection.cursor === undefined
-      ? {}
-      : { before: { ...selection.cursor, turnId: Turn.TurnId.make(selection.cursor.turnId) } }),
   }
+  if (selection.limit !== undefined) value = { ...value, limit: selection.limit }
+  if (selection.cursor !== undefined)
+    value = { ...value, before: { ...selection.cursor, turnId: Turn.TurnId.make(selection.cursor.turnId) } }
+  return value
 }
 
 export const make = (workspace: string): HostBindingRegistry.Module<ThreadQuery.Factory> => {
@@ -81,11 +89,18 @@ export const make = (workspace: string): HostBindingRegistry.Module<ThreadQuery.
         failure: Failure,
         handle: (input) =>
           Effect.flatMap(query, (thread) =>
-            thread.read({
-              threadId: input.threadId,
-              ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
-              selector: selector(input.selection),
-            }),
+            thread.read(
+              input.includeArchived === undefined
+                ? {
+                    threadId: input.threadId,
+                    selector: selector(input.selection),
+                  }
+                : {
+                    threadId: input.threadId,
+                    includeArchived: input.includeArchived,
+                    selector: selector(input.selection),
+                  },
+            ),
           ).pipe(
             Effect.map((result) => ({
               text: JSON.stringify(ThreadToolAction.publicReadResult(result)),

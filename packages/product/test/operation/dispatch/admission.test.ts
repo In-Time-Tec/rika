@@ -7,7 +7,6 @@ import {
   type ProductOperationScheduleInput,
 } from "../../../src/operation/run/schedule"
 import { OperationError } from "../../../src/operation/error"
-import type { InteractiveSessionRuntimeResult } from "../../../src/operation/interactive/session"
 
 const link = { runId: "run", turnId: "turn", threadId: "thread" }
 
@@ -43,21 +42,14 @@ it.effect("fails operation startup when initial execution supervision fails", ()
   Effect.scoped(
     Effect.gen(function* () {
       const failure = OperationError.make({ message: "startup recovery failed" })
-      const initialized = yield* Deferred.make<void, OperationError>()
-      const owner = {
-        session: {},
-        supervise: Deferred.fail(initialized, failure).pipe(Effect.andThen(Effect.fail(failure))),
-        initialized: Deferred.await(initialized),
-        watchClaimed: () => Effect.void,
-        close: Effect.void,
-      } as InteractiveSessionRuntimeResult
-      const outcome = yield* makeProductOperationSchedule({
+      const input = {
         options: { defaultWorkspace: "/work" },
         ownerScope: yield* Effect.scope,
-        makeInteractiveSession: () => Effect.succeed(owner),
+        makeInteractiveSession: () => Effect.fail(failure),
         repairThreadSummaries: Effect.void,
         executionDependencies: undefined,
-      } as unknown as ProductOperationScheduleInput).pipe(Effect.result)
+      } satisfies ProductOperationScheduleInput
+      const outcome = yield* makeProductOperationSchedule(input).pipe(Effect.result)
       expect(outcome).toMatchObject({
         _tag: "Failure",
         failure: { _tag: "OperationError", message: expect.stringContaining("startup recovery failed") },

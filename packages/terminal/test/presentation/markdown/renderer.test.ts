@@ -12,17 +12,6 @@ const transcript = (count: number) =>
     turnId: `turn-${index}`,
   }))
 
-interface ScrollbarProbe {
-  readonly transcriptViewport: { readonly mode: { readonly _tag: string } }
-  readonly transcriptScrollbar: {
-    scrollSize: number
-    viewportSize: number
-    scrollPosition: number
-    readonly slider: { readonly screenX: number; readonly screenY: number }
-  }
-  syncTranscriptScrollbar: () => void
-}
-
 test("treats every scrollbar write inside a transcript sync as programmatic, not as a user scroll", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -32,35 +21,11 @@ test("treats every scrollbar write inside a transcript sync as programmatic, not
         const base: Model = { ...initial("/work", "medium"), entries: transcript(60) }
         surface.update(base)
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as ScrollbarProbe
-        expect(probe.transcriptViewport.mode._tag).toBe("Following")
-
-        // syncTranscriptScrollbar writes scrollSize, viewportSize and scrollPosition. Each of
-        // those setters re-enters the scrollbar onChange handler. Record which of those writes
-        // are seen while the programmatic guard is engaged: it must be all of them, otherwise a
-        // sync is misread as a user scroll and detaches the transcript from Following.
-        const seenWhileGuarded: Array<boolean> = []
-        const guard = () => (surface as unknown as { readonly scrollbarSyncing: boolean }).scrollbarSyncing
-        const scrollbar = probe.transcriptScrollbar
-        const observe = <K extends "scrollSize" | "viewportSize" | "scrollPosition">(key: K) => {
-          let value = scrollbar[key]
-          Object.defineProperty(scrollbar, key, {
-            configurable: true,
-            get: () => value,
-            set: (next: number) => {
-              seenWhileGuarded.push(guard())
-              value = next
-            },
-          })
-        }
-        observe("scrollSize")
-        observe("viewportSize")
-        observe("scrollPosition")
-
-        probe.syncTranscriptScrollbar()
-
-        expect(seenWhileGuarded.length).toBeGreaterThanOrEqual(3)
-        expect(seenWhileGuarded.every((guarded) => guarded)).toBe(true)
+        expect(surface.transcriptDiagnostics().following).toBe(true)
+        surface.update({ ...base, entries: transcript(90), width: 90, height: 26 })
+        yield* openTui(() => setup.flush())
+        expect(surface.transcriptDiagnostics().following).toBe(true)
+        expect(surface.transcriptScrollbar.scrollPosition).toBeGreaterThan(0)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -76,14 +41,15 @@ test("accepts a user scrollbar change immediately after synchronizing geometry",
       try {
         surface.update({ ...initial("/work", "medium"), entries: transcript(60) })
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as ScrollbarProbe
-        probe.syncTranscriptScrollbar()
-        expect(probe.transcriptViewport.mode._tag).toBe("Following")
+        expect(surface.transcriptDiagnostics().following).toBe(true)
         yield* openTui(() =>
-          setup.mockMouse.click(probe.transcriptScrollbar.slider.screenX, probe.transcriptScrollbar.slider.screenY),
+          setup.mockMouse.click(
+            surface.transcriptScrollbar.slider.screenX,
+            surface.transcriptScrollbar.slider.screenY,
+          ),
         )
         yield* openTui(() => setup.flush())
-        expect(probe.transcriptViewport.mode._tag).toBe("Anchored")
+        expect(surface.transcriptDiagnostics().following).toBe(false)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

@@ -4,11 +4,11 @@ import { mergeConfigurationSettings, withWebSearchConfiguration } from "./merge"
 import type { ConfigurationEnvironment, EffectiveConfiguration } from "./model"
 import type { ConfigurationSettingsInput } from "./input"
 
-export interface ConfigurationServiceShape {
+export interface ConfigurationServiceContract {
   readonly effective: Effect.Effect<EffectiveConfiguration>
 }
 
-export class ConfigurationService extends Context.Service<ConfigurationService, ConfigurationServiceShape>()(
+export class ConfigurationService extends Context.Service<ConfigurationService, ConfigurationServiceContract>()(
   "@rika/configuration/settings/service/ConfigurationService",
 ) {}
 

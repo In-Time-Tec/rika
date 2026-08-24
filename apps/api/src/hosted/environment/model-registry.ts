@@ -1,4 +1,4 @@
-import type { ModeId } from "@rika/configuration/behavior-mode"
+import { ModeId } from "@rika/configuration/behavior-mode"
 import { Defaults } from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import type { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
@@ -46,7 +46,9 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const credentials = yield* HostedProviderCredentials
     const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
-      const mode = (requestedMode ?? hostedSettings.defaultMode) as ModeId
+      const mode = yield* Schema.decodeEffect(ModeId)(requestedMode ?? hostedSettings.defaultMode).pipe(
+        Effect.mapError(invalid),
+      )
       const account = yield* credentials.requireOpenAiAccount(ownerId).pipe(Effect.mapError(credentialFailure))
       return yield* Effect.try({
         try: () =>

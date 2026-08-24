@@ -47,27 +47,10 @@ test("toggles expandable transcript headers without selecting them and keeps bod
         },
         resize: () => undefined,
       })
-      const records = () =>
-        (
-          surface as unknown as {
-            readonly transcriptRecords: ReadonlyMap<
-              string,
-              {
-                readonly renderable: {
-                  readonly screenX: number
-                  readonly screenY: number
-                  readonly selectable: boolean
-                  readonly content: {
-                    readonly chunks: ReadonlyArray<{
-                      readonly text: string
-                      readonly fg?: { readonly equals: (color: unknown) => boolean }
-                    }>
-                  }
-                }
-              }
-            >
-          }
-        ).transcriptRecords
+      const records = () => {
+        const diagnostics = surface.transcriptDiagnostics()
+        return new Map(diagnostics.keys.map((key, index) => [key, { renderable: diagnostics.rows[index]! }]))
+      }
       const commandIsBlue = () =>
         records()
           .get("tool:shell-selection:header")!

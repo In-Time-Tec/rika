@@ -99,17 +99,17 @@ describe("executor protocol v1", () => {
         ref: "refs/heads/rika/thread-1",
         commitSha: "a".repeat(40),
       }
-      expect(yield* Schema.decodeUnknownEffect(BranchPushRequest)(request)).toEqual(request)
+      expect(yield* Schema.decodeEffect(BranchPushRequest)(request)).toEqual(request)
       expect(
-        (yield* Effect.flip(Schema.decodeUnknownEffect(BranchPushRequest)({ ...request, commitSha: "b" }))).issue,
+        (yield* Effect.flip(Schema.decodeEffect(BranchPushRequest)({ ...request, commitSha: "b" }))).issue,
       ).toBeDefined()
       expect(
         (yield* Effect.flip(
-          Schema.decodeUnknownEffect(ApiMessage)({ _tag: "BranchPush", request: { ...request, workspaceId: "" } }),
+          Schema.decodeEffect(ApiMessage)({ _tag: "BranchPush", request: { ...request, workspaceId: "" } }),
         )).issue,
       ).toBeDefined()
       expect(
-        yield* Schema.decodeUnknownEffect(ExecutorMessage)({
+        yield* Schema.decodeEffect(ExecutorMessage)({
           _tag: "BranchPushResult",
           access: request.access,
           publicationId: request.publicationId,
@@ -145,12 +145,12 @@ describe("executor protocol v1", () => {
         deadlineAt: "2999-01-01T00:00:00.000Z",
         bindings: { digest: "a".repeat(64), descriptors: [] },
       })
-      expect(yield* Schema.decodeUnknownEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
+      expect(yield* Schema.decodeEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
         _tag: "CellExecute",
         request,
       })
       expect(
-        yield* Schema.decodeUnknownEffect(ApiMessage)({
+        yield* Schema.decodeEffect(ApiMessage)({
           _tag: "CellTerminalSuperseded",
           access: request.access,
           operationKey: request.operationKey,
@@ -176,7 +176,7 @@ describe("executor protocol v1", () => {
         expect((yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)(incomplete))).issue).toBeDefined()
       }
       expect(
-        (yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
+        (yield* Effect.flip(Schema.decodeEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
       ).toBeDefined()
     }),
   )
@@ -194,7 +194,7 @@ describe("executor protocol v1", () => {
           cursors: { command: 0, event: 0, pty: 0 },
         },
       })
-      expect(yield* Schema.decodeUnknownEffect(RunnerMessage)(local)).toEqual(local)
+      expect(yield* Schema.decodeEffect(RunnerMessage)(local)).toEqual(local)
       expect((yield* Effect.flip(Schema.decodeUnknownEffect(ExecutorMessage)(local))).issue).toBeDefined()
     }),
   )
@@ -211,13 +211,13 @@ describe("executor protocol v1", () => {
           maximumBytes: 1024,
         },
       }
-      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(request)).toEqual(request)
+      expect(yield* Schema.decodeEffect(ApiMessage)(request)).toEqual(request)
       const response = {
         _tag: "WorkspaceResponse" as const,
         access: { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" },
         response: { _tag: "RepositoryServiceRunning" as const, requestId: "service-1", serviceId: "docs" },
       }
-      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(response)).toEqual(response)
+      expect(yield* Schema.decodeEffect(ExecutorMessage)(response)).toEqual(response)
     }),
   )
 
@@ -243,9 +243,9 @@ describe("executor protocol v1", () => {
         redacted: true as const,
         truncated: false,
       }
-      expect(yield* Schema.decodeUnknownEffect(CellLifecycleFrame)(output)).toEqual(output)
+      expect(yield* Schema.decodeEffect(CellLifecycleFrame)(output)).toEqual(output)
       expect(
-        (yield* Effect.flip(Schema.decodeUnknownEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) })))
+        (yield* Effect.flip(Schema.decodeEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) })))
           .issue,
       ).toBeDefined()
       expect(
@@ -272,8 +272,8 @@ describe("executor protocol v1", () => {
         operationKey: "operation-1",
         attempt: 0,
       }
-      expect(yield* Schema.decodeUnknownEffect(RunnerMessage)(goodbye)).toEqual(goodbye)
-      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(receipt)).toEqual(receipt)
+      expect(yield* Schema.decodeEffect(RunnerMessage)(goodbye)).toEqual(goodbye)
+      expect(yield* Schema.decodeEffect(ApiMessage)(receipt)).toEqual(receipt)
       expect(
         (yield* Effect.flip(
           Schema.decodeUnknownEffect(RunnerMessage)({
@@ -297,12 +297,12 @@ describe("executor protocol v1", () => {
         gap: { fromCursor: 1, toCursor: 4 },
       }
       const terminated = { _tag: "PtyTerminated" as const, access, ptyId: "pty-1", cursor: 8 }
-      expect(yield* Schema.decodeUnknownEffect(ApiMessage)(terminate)).toEqual(terminate)
-      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(gap)).toEqual(gap)
-      expect(yield* Schema.decodeUnknownEffect(ExecutorMessage)(terminated)).toEqual(terminated)
+      expect(yield* Schema.decodeEffect(ApiMessage)(terminate)).toEqual(terminate)
+      expect(yield* Schema.decodeEffect(ExecutorMessage)(gap)).toEqual(gap)
+      expect(yield* Schema.decodeEffect(ExecutorMessage)(terminated)).toEqual(terminated)
       expect(
         (yield* Effect.flip(
-          Schema.decodeUnknownEffect(ApiMessage)({
+          Schema.decodeEffect(ApiMessage)({
             _tag: "PtyInput",
             fence,
             request: { ptyId: "pty-1", data: "x".repeat(16_385) },

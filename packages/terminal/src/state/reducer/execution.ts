@@ -2,16 +2,13 @@ import { Function } from "effect"
 import type { Message } from "../message"
 import type { Model } from "../model"
 import type { QueueItem } from "../queue/item"
+import type { TranscriptItem } from "../transcript/model"
 import { classifyPrompt } from "../composer/model"
 import { expandPastedText } from "../composer/paste"
 import { bindSubmittedDraft, validQueueSelection } from "../queue/model"
 import { composerHeightLimit, clampSidebarWidth } from "../layout/model"
 import { runningToolsActivity, type Activity } from "../activity/model"
-import {
-  appendProvisionalUserEntry,
-  reconcileUserEntry,
-  settleProvisionalUserEntry,
-} from "../submission"
+import { appendProvisionalUserEntry, reconcileUserEntry, settleProvisionalUserEntry } from "../submission"
 
 const reduceExecutionImpl = (
   model: Model,
@@ -46,17 +43,20 @@ const reduceExecutionImpl = (
       if (model.submittedDrafts.some((draft) => draft.turnId === undefined)) return model
       const submission = classifyPrompt(model.input)
       if (submission._tag === "Shell" && submission.command.length === 0) return model
+      const submittedDraft = {
+        input: model.input,
+        attachments: model.pastedText,
+        cursor: model.cursor,
+      }
+      if (message.submissionId !== undefined) {
+        return {
+          ...model,
+          submittedDrafts: [...model.submittedDrafts, { ...submittedDraft, submissionId: message.submissionId }],
+        }
+      }
       return {
         ...model,
-        submittedDrafts: [
-          ...model.submittedDrafts,
-          {
-            input: model.input,
-            attachments: model.pastedText,
-            cursor: model.cursor,
-            ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
-          },
-        ],
+        submittedDrafts: [...model.submittedDrafts, submittedDraft],
       }
     }
     case "SubmissionAdmitted": {
@@ -68,11 +68,24 @@ const reduceExecutionImpl = (
       const prompt = draft === undefined ? undefined : expandPastedText(draft.input, draft.attachments)
       const composerUnchanged =
         draft !== undefined && model.input === draft.input && model.pastedText === draft.attachments
+      const submissionReference =
+        message.submissionId === undefined
+          ? { turnId: message.turnId }
+          : { turnId: message.turnId, submissionId: message.submissionId }
       const submittedHistory =
         draft === undefined
-          ? {}
+          ? {
+              history: model.history,
+              historyComposers: model.historyComposers,
+              historyDraft: model.historyDraft,
+              historyIndex: model.historyIndex,
+              historySearch: model.historySearch,
+            }
           : {
-              history: [...model.history.filter((candidate) => candidate !== prompt), prompt!],
+              history: [
+                ...model.history.filter((candidate) => candidate !== expandPastedText(draft.input, draft.attachments)),
+                expandPastedText(draft.input, draft.attachments),
+              ],
               historyComposers: [
                 ...model.historyComposers.filter(
                   (candidate) => expandPastedText(candidate.input, candidate.attachments) !== prompt,
@@ -91,49 +104,42 @@ const reduceExecutionImpl = (
       let queue = model.queue.flatMap(admitProvisional)
       if (message.status === "queued" && !queue.some((item) => item.id === message.turnId) && prompt !== undefined)
         queue = [...queue, { id: message.turnId, prompt, provisional: true }]
+      const sendingActivity: Activity = { _tag: "Sending" }
       const laneModel =
         message.status === "queued"
-          ? settleProvisionalUserEntry(
-              { ...model, queue },
-              {
-                turnId: message.turnId,
-                ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
-              },
-              true,
-            )
-          : { ...model, queue, busy: true, activity: model.busy ? model.activity : { _tag: "Sending" as const } }
+          ? settleProvisionalUserEntry({ ...model, queue }, submissionReference, true)
+          : { ...model, queue, busy: true, activity: model.busy ? model.activity : sendingActivity }
       const admitted = reconcileUserEntry(
         {
           ...laneModel,
           ...submittedHistory,
-          ...(composerUnchanged ? { input: "", cursor: 0, pastedText: [] } : {}),
+          input: composerUnchanged ? "" : laneModel.input,
+          cursor: composerUnchanged ? 0 : laneModel.cursor,
+          pastedText: composerUnchanged ? [] : laneModel.pastedText,
           queueSelection: validQueueSelection(laneModel.queueSelection, queue),
           submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
         },
-        {
-          turnId: message.turnId,
-          ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
-          started: false,
-        },
+        { ...submissionReference, started: false },
       )
       if (message.status !== "active" || admitted.found || prompt === undefined) return admitted.model
       return reconcileUserEntry(appendProvisionalUserEntry(admitted.model, prompt, message.submissionId), {
-        turnId: message.turnId,
-        ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+        ...submissionReference,
         started: false,
       }).model
     }
     case "SteeringFailed": {
       const index = model.steeringRequests.findIndex((row) => row.requestId === message.requestId)
       if (index < 0) return model
-      const rejected = model.steeringRequests[index]!
+      const rejected = model.steeringRequests[index]
+      if (rejected === undefined) return model
       const steeringRequests = model.steeringRequests.filter((_, position) => position !== index)
       if (model.activeTurnId !== rejected.turnId) return { ...model, steeringRequests }
       const restoreInput = rejected.origin === "composer" && model.input.length === 0
       return {
         ...model,
         steeringRequests,
-        ...(restoreInput ? { input: rejected.text, cursor: rejected.text.length } : {}),
+        input: restoreInput ? rejected.text : model.input,
+        cursor: restoreInput ? rejected.text.length : model.cursor,
         blocks: [...model.blocks, { _tag: "Notification", title: "Steering not delivered", detail: message.message }],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
@@ -157,40 +163,43 @@ const reduceExecutionImpl = (
       let compactionShimmer = model.compactionShimmer
       if (running) compactionShimmer = undefined
       else if (complete) compactionShimmer = model.compactionShimmer ?? { tick: 0, remaining: 14 }
-      return {
+      const compacted = {
         ...modelWithoutShimmer,
         contextAnimation:
           running || complete ? { ...model.contextAnimation, compactionPending: true } : contextAnimation,
-        ...(compactionShimmer === undefined ? {} : { compactionShimmer }),
-        ...(model.busy
-          ? { activity: running ? ({ _tag: "Compacting" } as const) : ({ _tag: "Waiting" } as const) }
-          : {}),
       }
+      const activity: Activity = running ? { _tag: "Compacting" } : { _tag: "Waiting" }
+      if (compactionShimmer !== undefined) {
+        return model.busy ? { ...compacted, compactionShimmer, activity } : { ...compacted, compactionShimmer }
+      }
+      return model.busy ? { ...compacted, activity } : compacted
     }
     case "TurnStarted": {
       const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
       const boundModel = { ...model, submittedDrafts: boundDrafts }
+      const submissionReference =
+        message.submissionId === undefined
+          ? { turnId: message.turnId }
+          : { turnId: message.turnId, submissionId: message.submissionId }
       const reconciled = reconcileUserEntry(boundModel, {
-        turnId: message.turnId,
-        ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+        ...submissionReference,
         prompt: message.prompt,
         started: true,
       })
+      const userEntry: Model["entries"][number] = { role: "user", text: message.prompt, turnId: message.turnId }
+      const userItem: TranscriptItem = {
+        _tag: "Entry",
+        index: model.entries.length,
+        id: `turn:${message.turnId}:user`,
+        turnId: message.turnId,
+      }
       const started =
         reconciled.found || model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId)
           ? reconciled.model
           : {
               ...boundModel,
-              entries: [...model.entries, { role: "user" as const, text: message.prompt, turnId: message.turnId }],
-              items: [
-                ...model.items,
-                {
-                  _tag: "Entry" as const,
-                  index: model.entries.length,
-                  id: `turn:${message.turnId}:user`,
-                  turnId: message.turnId,
-                },
-              ],
+              entries: [...model.entries, userEntry],
+              items: [...model.items, userItem],
             }
       return {
         ...started,
@@ -203,7 +212,8 @@ const reduceExecutionImpl = (
     }
     case "BlockAdded": {
       const blocks = [...model.blocks, message.block]
-      const items = [...model.items, { _tag: "Block" as const, index: model.blocks.length }]
+      const item: TranscriptItem = { _tag: "Block", index: model.blocks.length }
+      const items = [...model.items, item]
       const activityForAddedBlock = (): Activity => {
         if (message.block._tag === "ToolCall" || message.block._tag === "Cell")
           return runningToolsActivity({ ...model, blocks, items })
@@ -213,12 +223,12 @@ const reduceExecutionImpl = (
         }
         return model.activity ?? { _tag: "Waiting" }
       }
-      return {
+      const added = {
         ...model,
         blocks,
         items,
-        ...(model.busy ? { activity: activityForAddedBlock() } : {}),
       }
+      return model.busy ? { ...added, activity: activityForAddedBlock() } : added
     }
   }
   return undefined

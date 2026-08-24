@@ -7,14 +7,14 @@ import * as ProcessLayer from "./layer"
 import * as ProcessSignals from "../lifecycle/signals"
 import * as PaletteController from "../../controller/palette"
 import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
-import { execute, type Action, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
+import { execute, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
-import type { Mode } from "@rika/terminal/terminal-state"
+import { Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Deferred, Effect, Fiber, FileSystem, Schema, SubscriptionRef } from "effect"
+import { Cause, Clock, Deferred, Effect, Fiber, FileSystem, Option, Schema, SubscriptionRef } from "effect"
 import * as Logging from "../../../diagnostics/file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { InteractiveRuntimeContext } from "./context"
@@ -33,6 +33,49 @@ const editorArguments = ProcessFiles.editorArguments
 const materializePromptParts = ProcessPrompt.materializePromptParts
 const quitStopWorkBound = ProcessLifecycle.quitStopWorkBound
 const tuiSignalExitCode = ProcessLifecycle.tuiSignalExitCode
+
+const PromptPart = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String, pasted: Schema.optionalKey(Schema.Boolean) }),
+  Schema.Struct({ type: Schema.Literal("image"), path: Schema.String }),
+])
+const PendingAction = Schema.Union([
+  Schema.TaggedStruct("Submit", {
+    prompt: Schema.String,
+    parts: Schema.Array(PromptPart),
+    mode: Mode,
+    tuning: Schema.optionalKey(Schema.Struct({ fastMode: Schema.optionalKey(Schema.Boolean) })),
+    submissionId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.TaggedStruct("EditQueued", { id: Schema.String, prompt: Schema.String }),
+  Schema.TaggedStruct("Dequeue", { id: Schema.String }),
+  Schema.TaggedStruct("SteerQueued", {
+    id: Schema.String,
+    prompt: Schema.String,
+    requestId: Schema.String,
+  }),
+  Schema.TaggedStruct("Steer", {
+    prompt: Schema.String,
+    requestId: Schema.String,
+    turnId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.TaggedStruct("ApproveAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
+  Schema.TaggedStruct("DenyAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
+  Schema.TaggedStruct("InterruptAndSend", { prompt: Schema.String }),
+  Schema.TaggedStruct("SetSubagentLimit", {
+    limit: Schema.Literals(["maxDepth", "maxSubagents"]),
+    value: Schema.Finite,
+  }),
+  Schema.TaggedStruct("Cancel", {}),
+  Schema.TaggedStruct("Quit", {}),
+  Schema.TaggedStruct("NewThread", {}),
+  Schema.TaggedStruct("NewOrbThread", {}),
+  Schema.TaggedStruct("PauseOrb", {}),
+  Schema.TaggedStruct("ResumeOrb", {}),
+  Schema.TaggedStruct("EnableRemoteThreadCreation", {}),
+  Schema.TaggedStruct("DisableRemoteThreadCreation", {}),
+  Schema.TaggedStruct("SelectThread", { id: Schema.String }),
+])
+const decodePendingAction = Schema.decodeUnknownOption(PendingAction)
 
 export const makeProcessRuntime = (runtime: Runtime) => {
   const { loop, fork, session, options, recoverSession, resume } = runtime
@@ -358,7 +401,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       ),
     )
   }
-  const adapter: Adapter = {
+  let adapter: Adapter = {
     submit,
     quit: () => close(),
     editQueued: (id, prompt) => run(session.editQueued(id, prompt)),
@@ -370,32 +413,34 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
     cancel: () => run(session.cancel),
     newThread: () => startSelection(() => session.newThread),
-    ...(session.newOrbThread === undefined ? {} : { newOrbThread: () => startSelection(() => session.newOrbThread!) }),
-    ...(session.pauseOrb === undefined ? {} : { pauseOrb: () => run(session.pauseOrb!) }),
-    ...(session.resumeOrb === undefined ? {} : { resumeOrb: () => run(session.resumeOrb!) }),
-    ...(session.enableRemoteThreadCreation === undefined
-      ? {}
-      : { enableRemoteThreadCreation: () => run(session.enableRemoteThreadCreation!) }),
-    ...(session.disableRemoteThreadCreation === undefined
-      ? {}
-      : { disableRemoteThreadCreation: () => run(session.disableRemoteThreadCreation!) }),
     selectThread: (id) => {
       loop.requestedThreadId = id
       startSelection(() => session.selectThread(id))
     },
   }
+  if (session.newOrbThread !== undefined) {
+    const newOrbThread = session.newOrbThread
+    adapter = { ...adapter, newOrbThread: () => startSelection(() => newOrbThread) }
+  }
+  if (session.pauseOrb !== undefined) {
+    const pauseOrb = session.pauseOrb
+    adapter = { ...adapter, pauseOrb: () => run(pauseOrb) }
+  }
+  if (session.resumeOrb !== undefined) {
+    const resumeOrb = session.resumeOrb
+    adapter = { ...adapter, resumeOrb: () => run(resumeOrb) }
+  }
+  if (session.enableRemoteThreadCreation !== undefined) {
+    const enableRemoteThreadCreation = session.enableRemoteThreadCreation
+    adapter = { ...adapter, enableRemoteThreadCreation: () => run(enableRemoteThreadCreation) }
+  }
+  if (session.disableRemoteThreadCreation !== undefined) {
+    const disableRemoteThreadCreation = session.disableRemoteThreadCreation
+    adapter = { ...adapter, disableRemoteThreadCreation: () => run(disableRemoteThreadCreation) }
+  }
   const consumePendingAction = () => {
-    const action = loop.model.pendingAction as unknown
-    if (
-      action !== null &&
-      typeof action === "object" &&
-      "_tag" in action &&
-      action._tag === "SetSubagentLimit" &&
-      "limit" in action &&
-      "value" in action &&
-      (action.limit === "maxDepth" || action.limit === "maxSubagents") &&
-      typeof action.value === "number"
-    )
+    const action = Option.getOrUndefined(decodePendingAction(loop.model.pendingAction))
+    if (action?._tag === "SetSubagentLimit")
       run(
         PaletteController.writeSubagentLimit(loop.model.workspace, action.limit, action.value).pipe(
           Effect.tap(() =>
@@ -412,9 +457,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
           ),
         ),
       )
-    else if (action !== undefined) {
-      execute(adapter, action as Action)
-    }
+    else if (action !== undefined) execute(adapter, action)
     loop.model = update(loop.model, { _tag: "PaletteActionConsumed" })
   }
 

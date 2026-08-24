@@ -39,19 +39,19 @@ const {
   lineage: LineageJson,
 } = turnRowJson
 
-const repositoryError = (error: unknown) =>
+const repositoryError = (error: string | { readonly message: string }) =>
   Schema.is(RepositoryError)(error) ? error : RepositoryError.make({ message: String(error) })
 
-export const decodeQueueState = (row: unknown) =>
+export const decodeQueueState = <Row>(row: Row) =>
   Schema.decodeUnknownEffect(QueueStateRow)(row).pipe(Effect.mapError(repositoryError))
 
-export const decode = (row: unknown) =>
+export const decode = <Row>(row: Row) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
-    const author = yield* Schema.decodeUnknownEffect(AuthorJson)(value.author_json)
-    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
-    const id = yield* Schema.decodeUnknownEffect(TurnId)(value.id)
-    const threadId = yield* Schema.decodeUnknownEffect(ThreadId)(value.thread_id)
+    const author = yield* Schema.decodeEffect(AuthorJson)(value.author_json)
+    const lineage = yield* Schema.decodeEffect(LineageJson)(value.lineage_json)
+    const id = yield* Schema.decodeEffect(TurnId)(value.id)
+    const threadId = yield* Schema.decodeEffect(ThreadId)(value.thread_id)
     if (value.turn_kind === "RecordedShell") {
       if (value.shell_command === null)
         return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no command` })
@@ -61,7 +61,7 @@ export const decode = (row: unknown) =>
         (value.shell_result_text === null || (value.shell_result_truncated !== 0 && value.shell_result_truncated !== 1))
       )
         return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no terminal result` })
-      return yield* Schema.decodeUnknownEffect(Turn)({
+      const recordedShell = {
         _tag: "RecordedShell",
         id,
         threadId,
@@ -72,16 +72,17 @@ export const decode = (row: unknown) =>
         lineage,
         createdAt: value.created_at,
         updatedAt: value.updated_at,
-        ...(terminal
-          ? {
-              result: {
-                text: value.shell_result_text,
-                truncated: value.shell_result_truncated === 1,
-                ...(value.shell_result_exit_code === null ? {} : { exitCode: value.shell_result_exit_code }),
-              },
+      }
+      if (!terminal) return yield* Schema.decodeUnknownEffect(Turn)(recordedShell)
+      const result =
+        value.shell_result_exit_code === null
+          ? { text: value.shell_result_text, truncated: value.shell_result_truncated === 1 }
+          : {
+              text: value.shell_result_text,
+              truncated: value.shell_result_truncated === 1,
+              exitCode: value.shell_result_exit_code,
             }
-          : {}),
-      })
+      return yield* Schema.decodeUnknownEffect(Turn)({ ...recordedShell, result })
     }
     if (value.turn_kind !== "AgentExecution")
       return yield* RepositoryError.make({ message: `Turn ${id} has unknown kind ${value.turn_kind}` })
@@ -91,29 +92,29 @@ export const decode = (row: unknown) =>
     const promptParts =
       value.prompt_parts_json == null
         ? undefined
-        : yield* Schema.decodeUnknownEffect(PromptPartsJson)(value.prompt_parts_json)
-    const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(value.execution_route_json)
+        : yield* Schema.decodeEffect(PromptPartsJson)(value.prompt_parts_json)
+    const executionRoute = yield* Schema.decodeEffect(ExecutionRouteJson)(value.execution_route_json)
     const executionLink =
       value.execution_link_json == null
         ? undefined
-        : yield* Schema.decodeUnknownEffect(ExecutionLinkJson)(value.execution_link_json)
-    return {
+        : yield* Schema.decodeEffect(ExecutionLinkJson)(value.execution_link_json)
+    const agent = {
       _tag: "AgentExecution" as const,
       id,
       threadId,
       prompt: value.prompt,
-      ...(promptParts === undefined ? {} : { promptParts }),
       status,
       executionRoute,
-      ...(executionLink === undefined ? {} : { executionLink }),
       author,
       lineage,
       createdAt: value.created_at,
       updatedAt: value.updated_at,
     }
+    if (promptParts === undefined) return executionLink === undefined ? agent : { ...agent, executionLink }
+    return executionLink === undefined ? { ...agent, promptParts } : { ...agent, promptParts, executionLink }
   }).pipe(Effect.mapError(repositoryError))
 
-export const decodeAgent = (row: unknown) =>
+export const decodeAgent = <Row>(row: Row) =>
   decode(row).pipe(
     Effect.filterOrFail(TurnResult.isAgentExecution, () => repositoryError("Expected an AgentExecution turn")),
   )

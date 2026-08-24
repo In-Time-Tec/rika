@@ -1,9 +1,6 @@
 import { Effect } from "effect"
-import {
-  makeInteractiveSession as makeInteractiveSessionRuntime,
-  type InteractiveSessionInput,
-  type InteractiveSessionRuntimeResult,
-} from "../interactive/session"
+import * as InteractiveSessionRuntime from "../interactive/session"
+import type { InteractiveSessionInput, InteractiveSessionRuntimeResult } from "../interactive/session"
 import { isTerminalStatus } from "../../execution/session/status"
 import {
   executionStartFailureMessage,
@@ -53,6 +50,6 @@ export const makeProductOperationInteractiveSession = (
       nextSessionId: () => (sequence += 1),
       activitySequence: input.activitySequence,
     }
-    return makeInteractiveSessionRuntime(runtimeInput)(workspace, settings)
+    return InteractiveSessionRuntime.makeInteractiveSession(runtimeInput)(workspace, settings)
   }
 }

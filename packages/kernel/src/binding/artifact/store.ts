@@ -40,10 +40,12 @@ const make = (dataRoot: string): Effect.Effect<Interface, never, FileSystem.File
     return {
       put: (input) =>
         Effect.gen(function* () {
-          const encoded = yield* encodeStored({
-            value: input.value,
-            ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
-          }).pipe(Effect.mapError(() => unavailable("", "corrupt", "artifact value is not JSON")))
+          const persisted: typeof Persisted.Type = input.mediaType === undefined
+            ? { value: input.value }
+            : { value: input.value, mediaType: input.mediaType }
+          const encoded = yield* encodeStored(persisted).pipe(
+            Effect.mapError(() => unavailable("", "corrupt", "artifact value is not JSON")),
+          )
           const bytes = new TextEncoder().encode(encoded).byteLength
           const id = identifier(encoded)
           if (bytes > maxBytes)

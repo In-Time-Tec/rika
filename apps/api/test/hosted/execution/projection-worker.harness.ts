@@ -175,7 +175,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         revision: 1,
         projector_cursor: "cursor-completed",
       })
-      expect(yield* Schema.decodeUnknownEffect(JsonUnit)(String(persisted.rows[0].unit_json))).toMatchObject({
+      expect(yield* Schema.decodeEffect(JsonUnit)(String(persisted.rows[0].unit_json))).toMatchObject({
         content: { text: "complete" },
       })
     } finally {

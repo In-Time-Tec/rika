@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Schema } from "effect"
 import { partialInputRecord } from "../../src/presentation/partial-input"
 
 describe("partialInputRecord", () => {
@@ -50,9 +51,8 @@ describe("partialInputRecord", () => {
   it("never yields raw JSON as a field value", () => {
     for (let cut = 1; cut <= 60; cut += 1) {
       const record = partialInputRecord('{"command":"cat > a.ts <<EOF\\nimport x\\nEOF","timeout":30000}'.slice(0, cut))
-      for (const value of Object.values(record)) {
-        if (typeof value === "string") expect(value.includes('{"')).toBe(false)
-      }
+      for (const value of Object.values(record).filter(Schema.is(Schema.String)))
+        expect(value.includes('{"')).toBe(false)
     }
   })
 

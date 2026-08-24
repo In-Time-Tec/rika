@@ -1,5 +1,10 @@
 const encoder = new TextEncoder()
 
+interface BoundedText {
+  readonly text: string
+  readonly truncated: boolean
+}
+
 const byteLength = (text: string): number => encoder.encode(text).byteLength
 
 const boundedPrefix = (text: string, limit: number): string => {
@@ -16,20 +21,15 @@ const boundedPrefix = (text: string, limit: number): string => {
   return final >= 0xd800 && final <= 0xdbff ? prefix.slice(0, -1) : prefix
 }
 
-const boundedText = <Result extends { readonly text: string; readonly truncated: boolean }>(
-  text: string,
-  limit: number,
-  recovery: string,
-  knownTotalBytes?: number,
-): Result => {
+const boundedText = (text: string, limit: number, recovery: string, knownTotalBytes?: number): BoundedText => {
   const totalBytes = knownTotalBytes ?? byteLength(text)
-  if (totalBytes <= limit && byteLength(text) === totalBytes) return { text, truncated: false } as Result
+  if (totalBytes <= limit && byteLength(text) === totalBytes) return { text, truncated: false }
   const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
   const kept = boundedPrefix(text, Math.max(0, limit - byteLength(longestMarker) - 1))
   const keptBytes = byteLength(kept)
   const marker = `[truncated: kept first ${keptBytes} of ${totalBytes} bytes — ${recovery}]`
   const separator = kept.length === 0 || kept.endsWith("\n") ? "" : "\n"
-  return { text: `${kept}${separator}${marker}`, truncated: true } as Result
+  return { text: `${kept}${separator}${marker}`, truncated: true }
 }
 
 const boundedDiff = (patch: string | undefined): { readonly diff?: string } =>

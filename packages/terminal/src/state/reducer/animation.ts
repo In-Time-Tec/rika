@@ -49,16 +49,20 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
       compactTick = undefined
     } else compactTick += 1
   }
+  const baseAnimation = {
+    flashTicks,
+    flashed75,
+    flashed90,
+  }
+  const compactedAnimation =
+    compactFromPercent === undefined ? baseAnimation : { ...baseAnimation, compactFromPercent }
+  const tickingAnimation = compactTick === undefined ? compactedAnimation : { ...compactedAnimation, compactTick }
+  const contextAnimation = compactionPending
+    ? { ...tickingAnimation, compactionPending: true }
+    : tickingAnimation
   return {
     ...after,
-    contextAnimation: {
-      ...(compactFromPercent === undefined ? {} : { compactFromPercent }),
-      ...(compactTick === undefined ? {} : { compactTick }),
-      ...(compactionPending ? { compactionPending: true } : {}),
-      flashTicks,
-      flashed75,
-      flashed90,
-    },
+    contextAnimation,
   }
 }
 

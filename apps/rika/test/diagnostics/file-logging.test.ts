@@ -402,7 +402,14 @@ describe("Logging", () => {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-values-" })
         const secret = "cause-secret-f839"
-        const cyclic: Record<string, unknown> = { value: secret }
+        class CyclicValue {
+          readonly value: string
+          self?: CyclicValue
+          constructor(value: string) {
+            this.value = value
+          }
+        }
+        const cyclic = new CyclicValue(secret)
         cyclic.self = cyclic
         yield* Effect.scoped(
           Effect.flatMap(

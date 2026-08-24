@@ -242,25 +242,45 @@ const unitsImpl = (
     const parentId = preview.preview?.parentId
     if (preview.reasoning.length > 0) {
       const key = `${prefix}:reasoning`
-      result.push({
-        key,
-        turnId: current.turnId,
-        ...(parentId === undefined ? {} : { parentId }),
-        order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 0),
-        revision: preview.sequence,
-        content: { _tag: "Block", block: { _tag: "Reasoning", text: preview.reasoning } },
-      })
+      const unit: TranscriptUnit.Unit =
+        parentId === undefined
+          ? {
+              key,
+              turnId: current.turnId,
+              order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 0),
+              revision: preview.sequence,
+              content: { _tag: "Block", block: { _tag: "Reasoning", text: preview.reasoning } },
+            }
+          : {
+              key,
+              turnId: current.turnId,
+              parentId,
+              order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 0),
+              revision: preview.sequence,
+              content: { _tag: "Block", block: { _tag: "Reasoning", text: preview.reasoning } },
+            }
+      result.push(unit)
     }
     if (preview.text.length > 0) {
       const key = `${prefix}:assistant`
-      result.push({
-        key,
-        turnId: current.turnId,
-        ...(parentId === undefined ? {} : { parentId }),
-        order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 1),
-        revision: preview.sequence,
-        content: { _tag: "Entry", role: "assistant", text: preview.text },
-      })
+      const unit: TranscriptUnit.Unit =
+        parentId === undefined
+          ? {
+              key,
+              turnId: current.turnId,
+              order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 1),
+              revision: preview.sequence,
+              content: { _tag: "Entry", role: "assistant", text: preview.text },
+            }
+          : {
+              key,
+              turnId: current.turnId,
+              parentId,
+              order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER, 1),
+              revision: preview.sequence,
+              content: { _tag: "Entry", role: "assistant", text: preview.text },
+            }
+      result.push(unit)
     }
   }
   return result

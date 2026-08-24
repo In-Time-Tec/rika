@@ -112,7 +112,19 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
 
 behavior("memory", ThreadRepository.memoryLayer())
 
-const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
+interface ThreadRowOverrides {
+  readonly id?: string
+  readonly workspace?: string
+  readonly title?: string
+  readonly labels_json?: string
+  readonly pinned?: number
+  readonly archived?: number
+  readonly lineage_json?: string
+  readonly created_at?: number
+  readonly updated_at?: number
+}
+
+const row = (overrides: ThreadRowOverrides = {}) => ({
   id: "thread-a",
   workspace: "/work/a",
   title: "First",

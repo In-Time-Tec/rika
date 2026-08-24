@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { defaults } from "../../src/settings/defaults"
 import { dataPaths, resolveProfileDataPaths } from "../../src/path-resolution/profile-data-paths"
-import { globalDirectory, globalPaths, workspaceDirectory, workspacePaths } from "../../src/path-resolution/configuration-paths"
+import {
+  globalDirectory,
+  globalPaths,
+  workspaceDirectory,
+  workspacePaths,
+} from "../../src/path-resolution/configuration-paths"
 
 describe("on-disk layout", () => {
   it("puts every workspace file under one directory", () => {

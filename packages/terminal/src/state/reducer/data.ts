@@ -1,17 +1,41 @@
-import { Function } from "effect"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
+import { Function, Option, Schema } from "effect"
 import type { Message } from "../message"
 import type { Model } from "../model"
-import type { TranscriptBlock, TranscriptItem } from "../transcript/model"
-import type { ThreadItem } from "../thread/model"
 import { idle, loading, ready } from "../loadable"
 import { runningToolsActivity, streamActivity, type Activity } from "../activity/model"
-import {
-  filteredFiles,
-  filteredThreads,
-  selectedThreadMetadata,
-  renameThread,
-} from "../thread/navigation"
+import { filteredFiles, filteredThreads, selectedThreadMetadata, renameThread } from "../thread/navigation"
 import { context } from "./model"
+
+const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
+const ThreadItemSchema = Schema.Struct({
+  archived: Schema.Boolean,
+  id: Schema.String,
+  lastActivityAt: Schema.Finite,
+  pinned: Schema.Boolean,
+  status: Schema.Literals(["idle", "error", "queued", "running"]),
+  title: Schema.String,
+  unread: Schema.Boolean,
+  workspace: Schema.String,
+  editTotals: Schema.optionalKey(
+    Schema.Struct({ added: Schema.Finite, modified: Schema.Finite, removed: Schema.Finite }),
+  ),
+})
+const decodeThreadItem = Schema.decodeUnknownSync(ThreadItemSchema)
+const decodeTranscriptItem = Schema.decodeUnknownOption(
+  Schema.Union([
+    Schema.TaggedStruct("Entry", {
+      id: Schema.optionalKey(Schema.String),
+      index: Schema.Finite,
+      turnId: Schema.optionalKey(Schema.String),
+    }),
+    Schema.TaggedStruct("Block", {
+      id: Schema.optionalKey(Schema.String),
+      index: Schema.Finite,
+      turnId: Schema.optionalKey(Schema.String),
+    }),
+  ]),
+)
 
 const reduceDataImpl = (
   model: Model,
@@ -31,7 +55,8 @@ const reduceDataImpl = (
     case "PastedTextExpanded":
       return expandPastedTextAttachment(model, message.token)
     case "ThreadsReplaced": {
-      const selectedId = (model.threads as ReadonlyArray<ThreadItem>)[model.threadSidebar.selected]?.id
+      const selectedThread = Schema.decodeUnknownOption(ThreadItemSchema)(model.threads[model.threadSidebar.selected])
+      const selectedId = Option.getOrUndefined(selectedThread)?.id
       const browserSelectedId = selectedThreadMetadata(model)?.id
       const selected = Math.max(
         0,
@@ -65,9 +90,8 @@ const reduceDataImpl = (
           ...replacedThreads.threadSwitcher,
           selected: Math.min(browserSelected, Math.max(0, browserThreads.length - 1)),
         },
-        ...(model.threadSwitcher.open && browserThread?.id !== previewThreadId
-          ? { threadPreview: { _tag: "Idle" as const } }
-          : {}),
+        threadPreview:
+          model.threadSwitcher.open && browserThread?.id !== previewThreadId ? { _tag: "Idle" } : model.threadPreview,
       }
     }
     case "ThreadActivated":
@@ -80,7 +104,11 @@ const reduceDataImpl = (
       return {
         ...model,
         currentThreadTitle: model.currentThreadId === message.threadId ? message.title : model.currentThreadTitle,
-        threads: renameThread(model.threads as ReadonlyArray<ThreadItem>, message.threadId, message.title),
+        threads: renameThread(
+          model.threads.map((thread) => decodeThreadItem(thread)),
+          message.threadId,
+          message.title,
+        ),
       }
     case "FilesRequested":
       return model.filePicker.items._tag === "Ready"
@@ -116,22 +144,24 @@ const reduceDataImpl = (
     }
     case "ThreadSidebarSelectionConfirmed": {
       const index = message.index ?? model.threadSidebar.selected
-      const thread = (model.threads as ReadonlyArray<ThreadItem>)[index]
-      return thread === undefined
+      const thread = Schema.decodeUnknownOption(Schema.Struct({ id: Schema.String }))(model.threads[index])
+      const selectedThread = Option.getOrUndefined(thread)
+      return selectedThread === undefined
         ? model
         : {
             ...model,
             threadSidebar: { ...model.threadSidebar, selected: index },
-            pendingAction: thread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: thread.id },
+            pendingAction:
+              selectedThread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: selectedThread.id },
           }
     }
     case "EventReplayed":
       if (model.seenEventIds.includes(message.event.id)) return model
       {
         const incoming = message.event.block
-        const blocks = [...model.blocks] as Array<TranscriptBlock>
-        let items = [...model.items] as Array<TranscriptItem>
-        const lastItem = items.at(-1)
+        const blocks = model.blocks.map((block) => decodeTranscriptBlock(block))
+        const items = [...model.items]
+        const lastItem = Option.getOrUndefined(decodeTranscriptItem(items.at(-1)))
         const last = lastItem?._tag === "Block" ? blocks[lastItem.index] : undefined
         if (
           incoming._tag === "Reasoning" &&
@@ -143,7 +173,8 @@ const reduceDataImpl = (
         else if (incoming._tag === "ToolResult") {
           const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
           if (index >= 0) {
-            const requested = blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+            const requested = blocks[index]
+            if (requested?._tag !== "ToolCall") return model
             blocks[index] = {
               ...requested,
               output: incoming.output,
@@ -154,19 +185,19 @@ const reduceDataImpl = (
               _tag: "Block",
               index: blocks.length,
               id: message.event.id,
-              ...(message.event.turnId === undefined ? {} : { turnId: message.event.turnId }),
+              turnId: message.event.turnId,
             })
             blocks.push(incoming)
           }
         } else if (incoming._tag === "ToolCall") {
           const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
-          if (index >= 0) blocks[index] = { ...(blocks[index] as typeof incoming), ...incoming }
+          if (index >= 0) blocks[index] = incoming
           else {
             items.push({
               _tag: "Block",
               index: blocks.length,
               id: message.event.id,
-              ...(message.event.turnId === undefined ? {} : { turnId: message.event.turnId }),
+              turnId: message.event.turnId,
             })
             blocks.push(incoming)
           }
@@ -175,7 +206,7 @@ const reduceDataImpl = (
             _tag: "Block",
             index: blocks.length,
             id: message.event.id,
-            ...(message.event.turnId === undefined ? {} : { turnId: message.event.turnId }),
+            turnId: message.event.turnId,
           })
           blocks.push(incoming)
         }
@@ -191,14 +222,14 @@ const reduceDataImpl = (
           }
           return model.activity ?? { _tag: "Waiting" }
         }
-        return {
+        const replayed = {
           ...model,
           blocks,
           items,
           seenEventIds: [...model.seenEventIds, message.event.id],
           eventCursor: message.event.cursor,
-          ...(model.busy ? { activity: activityForIncomingBlock() } : {}),
         }
+        return model.busy ? { ...replayed, activity: activityForIncomingBlock() } : replayed
       }
   }
   return undefined

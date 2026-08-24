@@ -5,15 +5,16 @@ import { Effect, Function, Context, Schema, Semaphore, Exit, Scope, Deferred } f
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product"
 import { type InteractiveEvent } from "./session-event"
-import { makeInteractiveQueue } from "./turn/queue"
-import { makeInteractiveSubmission } from "./turn/admission"
-import { makeInteractiveFollowing, makeInteractiveSupervision, ignoreInteractiveEvent } from "./turn/observation"
-import { makeInteractiveTranscript } from "./view/transcript-window"
-import { makeInteractiveControl, makeInteractiveSessionControls } from "./turn/control"
-import { type InteractiveSessionState, makeInteractiveSessionState } from "./session-state"
-import { makeInteractiveShell } from "./shell"
+import * as InteractiveQueue from "./turn/queue"
+import * as InteractiveAdmission from "./turn/admission"
+import * as InteractiveObservation from "./turn/observation"
+import * as InteractiveTranscript from "./view/transcript-window"
+import * as InteractiveControl from "./turn/control"
+import * as InteractiveState from "./session-state"
+import * as InteractiveShell from "./shell"
 import { type InteractiveOperationFeed } from "./view/feed"
-import { makeInteractiveSessionSelection, type SelectionEpochState } from "./view/selection"
+import * as InteractiveSelection from "./view/selection"
+import { type SelectionEpochState } from "./view/selection"
 import type {
   InteractiveRuntimeContext,
   InteractiveSession,
@@ -33,8 +34,8 @@ export type {
   PreparedTurn,
 } from "./session-contract"
 export const makeInteractiveExecution = (input: InteractiveRuntimeContext) => {
-  const queue = makeInteractiveQueue(input)
-  const submit = makeInteractiveSubmission({ ...input, ...queue })
+  const queue = InteractiveQueue.makeInteractiveQueue(input)
+  const submit = InteractiveAdmission.makeInteractiveSubmission({ ...input, ...queue })
   const safe = <A, E, R>(dispatch: (event: InteractiveEvent) => void, effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provide(input.executionDependencies),
@@ -43,7 +44,10 @@ export const makeInteractiveExecution = (input: InteractiveRuntimeContext) => {
     )
   return { submit, safe, ...queue }
 }
-const makeInteractiveExecutionComponentsImpl = (input: InteractiveRuntimeContext, state: InteractiveSessionState) => {
+const makeInteractiveExecutionComponentsImpl = (
+  input: InteractiveRuntimeContext,
+  state: InteractiveState.InteractiveSessionState,
+) => {
   const execution = makeInteractiveExecution({
     ...input,
     ...state,
@@ -83,18 +87,18 @@ const makeInteractiveExecutionComponentsImpl = (input: InteractiveRuntimeContext
 }
 export const makeInteractiveExecutionComponents: {
   (
-    arg1: InteractiveSessionState,
+    arg1: InteractiveState.InteractiveSessionState,
   ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof makeInteractiveExecutionComponentsImpl>
   (
     arg0: InteractiveRuntimeContext,
-    arg1: InteractiveSessionState,
+    arg1: InteractiveState.InteractiveSessionState,
   ): ReturnType<typeof makeInteractiveExecutionComponentsImpl>
 } = Function.dual(2, makeInteractiveExecutionComponentsImpl)
 const makeInteractiveFollowingComponentsImpl = (
   input: InteractiveSessionInput,
   execution: ReturnType<typeof makeInteractiveExecution>,
 ) =>
-  makeInteractiveFollowing({
+  InteractiveObservation.makeInteractiveFollowing({
     rootTurnOwner: input.rootTurnOwner,
     setTurnStatus: input.setTurnStatus,
     settleThread: execution.settleThread,
@@ -111,8 +115,11 @@ export const makeInteractiveFollowingComponents: {
     arg1: ReturnType<typeof makeInteractiveExecution>,
   ): ReturnType<typeof makeInteractiveFollowingComponentsImpl>
 } = Function.dual(2, makeInteractiveFollowingComponentsImpl)
-const makeInteractiveTranscriptComponentsImpl = (input: InteractiveRuntimeContext, state: InteractiveSessionState) =>
-  makeInteractiveTranscript({
+const makeInteractiveTranscriptComponentsImpl = (
+  input: InteractiveRuntimeContext,
+  state: InteractiveState.InteractiveSessionState,
+) =>
+  InteractiveTranscript.makeInteractiveTranscript({
     ...input,
     ...state,
     executionDependencies: input.executionDependencies,
@@ -124,20 +131,20 @@ const makeInteractiveTranscriptComponentsImpl = (input: InteractiveRuntimeContex
   })
 export const makeInteractiveTranscriptComponents: {
   (
-    arg1: InteractiveSessionState,
+    arg1: InteractiveState.InteractiveSessionState,
   ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof makeInteractiveTranscriptComponentsImpl>
   (
     arg0: InteractiveRuntimeContext,
-    arg1: InteractiveSessionState,
+    arg1: InteractiveState.InteractiveSessionState,
   ): ReturnType<typeof makeInteractiveTranscriptComponentsImpl>
 } = Function.dual(2, makeInteractiveTranscriptComponentsImpl)
 const makeInteractiveSupervisionComponentsImpl = (
   input: InteractiveRuntimeContext,
-  state: InteractiveSessionState,
-  following: ReturnType<typeof makeInteractiveFollowing>,
+  state: InteractiveState.InteractiveSessionState,
+  following: ReturnType<typeof InteractiveObservation.makeInteractiveFollowing>,
   execution: ReturnType<typeof makeInteractiveExecution>,
 ) => {
-  const supervise = makeInteractiveSupervision({
+  const supervise = InteractiveObservation.makeInteractiveSupervision({
     acquiredBackend: input.acquiredBackend,
     rootTurnOwner: input.rootTurnOwner,
     executionDependencies: input.executionDependencies,
@@ -158,7 +165,7 @@ const makeInteractiveSupervisionComponentsImpl = (
     queueMutationEvent: input.queueMutationEvent,
     initialized: input.supervisionInitialized,
   })
-  const control = makeInteractiveControl({
+  const control = InteractiveControl.makeInteractiveControl({
     turns: Context.get(input.dependencyContext, TurnRepository.Service),
     transcripts: Context.get(input.dependencyContext, TranscriptRepository.Service),
     backend: input.acquiredBackend,
@@ -173,14 +180,14 @@ const makeInteractiveSupervisionComponentsImpl = (
 }
 export const makeInteractiveSupervisionComponents: {
   (
-    arg1: InteractiveSessionState,
-    arg2: ReturnType<typeof makeInteractiveFollowing>,
+    arg1: InteractiveState.InteractiveSessionState,
+    arg2: ReturnType<typeof InteractiveObservation.makeInteractiveFollowing>,
     arg3: ReturnType<typeof makeInteractiveExecution>,
   ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
   (
     arg0: InteractiveRuntimeContext,
-    arg1: InteractiveSessionState,
-    arg2: ReturnType<typeof makeInteractiveFollowing>,
+    arg1: InteractiveState.InteractiveSessionState,
+    arg2: ReturnType<typeof InteractiveObservation.makeInteractiveFollowing>,
     arg3: ReturnType<typeof makeInteractiveExecution>,
   ): ReturnType<typeof makeInteractiveSupervisionComponentsImpl>
 } = Function.dual(4, makeInteractiveSupervisionComponentsImpl)
@@ -202,8 +209,10 @@ export const makeInteractiveSessionEvents = (
 > => {
   const operationFeed: InteractiveOperationFeed = input.operationFeed
   const submissionAdmission: Semaphore.Semaphore = input.submissionAdmission
-  const operationUnavailable = (operation: string) => (error: unknown) =>
-    Schema.is(OperationUnavailable)(error) ? error : OperationUnavailable.make({ operation, message: String(error) })
+  const operationUnavailable =
+    <E>(operation: string) =>
+    (error: E) =>
+      Schema.is(OperationUnavailable)(error) ? error : OperationUnavailable.make({ operation, message: String(error) })
   const events = (dispatch: Parameters<InteractiveSession["events"]>[0]) =>
     Effect.gen(function* () {
       yield* input.dispatchThreadSummaries(input.sessionDispatch)
@@ -222,13 +231,9 @@ export const makeInteractiveSessionEvents = (
     parts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     tuning?: { readonly fastMode?: boolean },
     submissionId?: string,
-  ) =>
-    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId) as Effect.Effect<
-      void,
-      OperationUnavailable,
-      never
-    >
-  const shell = makeInteractiveShell(input)
+  ): Effect.Effect<void, OperationUnavailable, never> =>
+    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId)
+  const shell = InteractiveShell.makeInteractiveShell(input)
   return {
     events,
     submit: (prompt, mode, parts, tuning, submissionId) => submit(prompt, mode, parts, tuning, submissionId),
@@ -261,8 +266,8 @@ export const makeInteractiveSessionEvents = (
 }
 export type InteractiveImplementationInput = InteractiveRuntimeContext &
   ReturnType<typeof makeInteractiveExecution> &
-  ReturnType<typeof makeInteractiveFollowing> &
-  ReturnType<typeof makeInteractiveTranscript> &
+  ReturnType<typeof InteractiveObservation.makeInteractiveFollowing> &
+  ReturnType<typeof InteractiveTranscript.makeInteractiveTranscript> &
   ReturnType<typeof makeInteractiveSupervisionComponents> & {
     readonly getCurrentSelectionEpoch: () => number
     readonly getSelectedThreadId: () => string | undefined
@@ -273,8 +278,8 @@ export type InteractiveSessionControlsInput = Omit<InteractiveImplementationInpu
 export type InteractiveSessionSelectionInput = Omit<InteractiveImplementationInput, "submit">
 export const makeInteractiveImplementation = (input: InteractiveImplementationInput): InteractiveSession => {
   const events = makeInteractiveSessionEvents(input)
-  const controls = makeInteractiveSessionControls({ ...input, ...events })
-  const selection = makeInteractiveSessionSelection({ ...input, ...events, ...controls })
+  const controls = InteractiveControl.makeInteractiveSessionControls({ ...input, ...events })
+  const selection = InteractiveSelection.makeInteractiveSessionSelection({ ...input, ...events, ...controls })
   return {
     ...events,
     ...controls,
@@ -297,7 +302,7 @@ export const makeInteractiveSession = (
   ) {
     const sessionId = input.nextSessionId()
     const supervisionInitialized = yield* Deferred.make<void, InteractiveSupervisionError>()
-    const state: InteractiveSessionState = yield* makeInteractiveSessionState({
+    const state: InteractiveState.InteractiveSessionState = yield* InteractiveState.makeInteractiveSessionState({
       sessionId,
       publishInteractiveActivity: input.publishInteractiveActivity,
       activitySequence: input.activitySequence,
@@ -375,7 +380,8 @@ export const makeInteractiveSession = (
       session,
       supervise: supervision.supervise,
       initialized: Deferred.await(supervisionInitialized),
-      watchClaimed: (turnId: TurnId) => following.watchClaimedTurn(turnId, ignoreInteractiveEvent),
+      watchClaimed: (turnId: TurnId) =>
+        following.watchClaimedTurn(turnId, InteractiveObservation.ignoreInteractiveEvent),
       close: typedLifecycleAdmission.withPermits(1)(
         Effect.suspend(() => {
           if (typedGetLifecycle() === "closed") return Effect.void

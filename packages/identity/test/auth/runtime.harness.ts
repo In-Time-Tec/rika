@@ -1,11 +1,11 @@
 import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { serve } from "bun"
-import { Clock, Config, Effect, FileSystem, Random, Redacted } from "effect"
+import { Clock, Config, Context, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
-import { makeBetterAuthIdentityRuntime, type IdentityRuntime } from "../../src/auth/runtime"
+import { IdentityRuntimeService, identityRuntimeLayer, type IdentityRuntime } from "../../src/auth/runtime"
 import { identityMigrations } from "../../src/database/migrations"
 import { runMigration } from "../../src/database/postgres"
 
@@ -14,14 +14,28 @@ const live = databaseUrl.length > 0
 const encoder = new TextEncoder()
 
 const base64Url = (value: Uint8Array) => Buffer.from(value).toString("base64url")
-const jsonSegment = (value: unknown) => base64Url(encoder.encode(JSON.stringify(value)))
+const JsonValue = Schema.Json
+type JsonValue = Schema.Json
+const jsonSegment = (value: JsonValue) => base64Url(encoder.encode(JSON.stringify(value)))
+
+const CryptoKeyPairSchema = Schema.Struct({
+  privateKey: Schema.instanceOf(CryptoKey),
+  publicKey: Schema.instanceOf(CryptoKey),
+})
 
 const makeDpopKey = Effect.gen(function* () {
-  const pair = (yield* Effect.tryPromise(() =>
+  const generated = yield* Effect.tryPromise(() =>
     crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]),
-  )) as CryptoKeyPair
+  )
+  const pair = yield* Schema.decodeEffect(CryptoKeyPairSchema)(generated)
   const exported = yield* Effect.tryPromise(() => crypto.subtle.exportKey("jwk", pair.publicKey))
-  const publicJwk = { kty: "EC" as const, crv: "P-256" as const, x: exported.x!, y: exported.y! }
+  const PublicJwk = Schema.Struct({
+    kty: Schema.Literal("EC"),
+    crv: Schema.Literal("P-256"),
+    x: Schema.String,
+    y: Schema.String,
+  })
+  const publicJwk = yield* Schema.decodeUnknownEffect(PublicJwk)(exported)
   return { privateKey: pair.privateKey, publicJwk }
 })
 
@@ -37,13 +51,13 @@ const dpopProof = Effect.fn("IdentityLiveTest.dpopProof")(function* (input: {
     input.accessToken === undefined
       ? undefined
       : yield* Effect.tryPromise(() => crypto.subtle.digest("SHA-256", encoder.encode(input.accessToken)))
-  const payload = {
+  let payload: JsonValue = {
     jti: `identity-live-${sequence}`,
     htm: input.method,
     htu: input.url,
     iat: Math.floor((yield* TestClock.withLive(Clock.currentTimeMillis)) / 1_000),
-    ...(accessDigest === undefined ? {} : { ath: base64Url(new Uint8Array(accessDigest)) }),
   }
+  if (accessDigest !== undefined) payload = { ...payload, ath: base64Url(new Uint8Array(accessDigest)) }
   const unsigned = `${jsonSegment({ typ: "dpop+jwt", alg: "ES256", jwk: input.publicJwk })}.${jsonSegment(payload)}`
   const signature = yield* Effect.tryPromise(() =>
     crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, input.privateKey, encoder.encode(unsigned)),
@@ -51,17 +65,23 @@ const dpopProof = Effect.fn("IdentityLiveTest.dpopProof")(function* (input: {
   return `${unsigned}.${base64Url(new Uint8Array(signature))}`
 })
 
-const request = (baseUrl: string, path: string, body?: unknown, cookie?: string) =>
-  new Request(`${baseUrl}${path}`, {
+const request = (baseUrl: string, path: string, body?: JsonValue, cookie?: string) => {
+  const headers = new Headers({ accept: "application/json", origin: baseUrl })
+  if (body !== undefined) headers.set("content-type", "application/json")
+  if (cookie !== undefined) headers.set("cookie", cookie)
+  const init: RequestInit = {
     method: body === undefined ? "GET" : "POST",
-    headers: {
-      accept: "application/json",
-      origin: baseUrl,
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-      ...(cookie === undefined ? {} : { cookie }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
+    headers,
+  }
+  if (body !== undefined) init.body = JSON.stringify(body)
+  return new Request(`${baseUrl}${path}`, init)
+}
+
+const Registration = Schema.Struct({ client_id: Schema.String })
+const Authorization = Schema.Struct({ device_code: Schema.String, user_code: Schema.String })
+const Tokens = Schema.Struct({ access_token: Schema.String, refresh_token: Schema.String, token_type: Schema.String })
+const decodeResponse = <S extends Schema.Top>(schema: S, response: Response) =>
+  Effect.tryPromise(() => response.json()).pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
 it.layer(BunServices.layer)((test) => {
   test.effect.skipIf(!live)("uses the reviewed PostgreSQL schema for identity and DPoP OAuth device flows", () =>
@@ -93,24 +113,27 @@ it.layer(BunServices.layer)((test) => {
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
         const sent: Array<{ readonly to: string }> = []
-        runtime = makeBetterAuthIdentityRuntime({
-          config: {
-            production: false,
-            port,
-            baseUrl,
-            trustedOrigins: [baseUrl],
-            authSecret: Redacted.make("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"),
-            databaseUrl: Redacted.make(url),
-            databaseSsl: "disable",
-            githubClientId: "github-client",
-            githubClientSecret: Redacted.make("github-secret"),
-            resendApiKey: Redacted.make("resend-secret"),
-            emailFrom: "Rika <no-reply@example.test>",
-            resource: `${baseUrl}/api/v1`,
-          },
-          pool,
-          mail: { send: (message) => Effect.sync(() => void sent.push({ to: message.to })) },
-        })
+        const runtimeContext = yield* Layer.build(
+          identityRuntimeLayer({
+            config: {
+              production: false,
+              port,
+              baseUrl,
+              trustedOrigins: [baseUrl],
+              authSecret: Redacted.make("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"),
+              databaseUrl: Redacted.make(url),
+              databaseSsl: "disable",
+              githubClientId: "github-client",
+              githubClientSecret: Redacted.make("github-secret"),
+              resendApiKey: Redacted.make("resend-secret"),
+              emailFrom: "Rika <no-reply@example.test>",
+              resource: `${baseUrl}/api/v1`,
+            },
+            pool,
+            mail: { send: (message) => Effect.sync(() => void sent.push({ to: message.to })) },
+          }),
+        )
+        runtime = Context.get(runtimeContext, IdentityRuntimeService)
         expect(yield* runtime.protectedResourceMetadata).toMatchObject({
           resource: `${baseUrl}/api/v1`,
           authorization_servers: [`${baseUrl}/api/auth`],
@@ -158,7 +181,7 @@ it.layer(BunServices.layer)((test) => {
           }),
         )
         expect(registered.status).toBe(201)
-        const registration = (yield* Effect.tryPromise(() => registered.json())) as { readonly client_id: string }
+        const registration = yield* decodeResponse(Registration, registered)
         const deviceUrl = `${baseUrl}/api/auth/device/code`
         const device = yield* runtime.handle(
           new Request(deviceUrl, {
@@ -181,10 +204,7 @@ it.layer(BunServices.layer)((test) => {
           }),
         )
         expect(device.status).toBe(200)
-        const authorization = (yield* Effect.tryPromise(() => device.json())) as {
-          readonly device_code: string
-          readonly user_code: string
-        }
+        const authorization = yield* decodeResponse(Authorization, device)
         const claimed = yield* runtime.handle(
           request(baseUrl, `/api/auth/device?user_code=${authorization.user_code}`, undefined, cookie),
         )
@@ -217,11 +237,7 @@ it.layer(BunServices.layer)((test) => {
           }),
         )
         expect(token.status).toBe(200)
-        const tokens = (yield* Effect.tryPromise(() => token.json())) as {
-          readonly access_token: string
-          readonly refresh_token: string
-          readonly token_type: string
-        }
+        const tokens = yield* decodeResponse(Tokens, token)
         expect(tokens.token_type.toLowerCase()).toBe("dpop")
         expect(tokens.refresh_token.length).toBeGreaterThan(0)
 

@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Unit, UnitOrder, UnitOrderSegment } from "../schema/unit"
 
 const numberWidth = 16
@@ -39,14 +39,17 @@ const encodeKey = (value: string): string => {
 const encodeSegment = (segment: UnitOrderSegment): string =>
   `${encodeNumber(segment.sequence, 1)}${encodeNumber(segment.part, 0)}${encodeKey(segment.key)}`
 
-const immutableOrder = (segments: ReadonlyArray<UnitOrderSegment>): UnitOrder =>
-  Object.freeze(segments.map((segment) => Object.freeze({ ...segment }))) as UnitOrder
+const immutableOrder = (segments: ReadonlyArray<UnitOrderSegment>): UnitOrder => {
+  const [first, ...rest] = segments
+  if (first === undefined) throw new RangeError("Unit orders must contain at least one segment")
+  return Object.freeze([Object.freeze({ ...first }), ...rest.map((segment) => Object.freeze({ ...segment }))])
+}
 
 export const unitOrder: {
   (key: string, sequence: number, part?: number): UnitOrder
   (sequence: number, part?: number): (key: string) => UnitOrder
 } = Function.dual(
-  (args) => typeof args[0] === "string",
+  (args) => Schema.is(Schema.String)(args[0]),
   (key: string, sequence: number, part = 0): UnitOrder => {
     const segment = { sequence, part, key }
     assertSegment(segment)

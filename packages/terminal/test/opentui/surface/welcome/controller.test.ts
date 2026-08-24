@@ -1,8 +1,9 @@
+import { ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { WelcomeController } from "../../../../src/opentui/surface/welcome/controller"
 import { orbGeometry, orbRows } from "../../../../src/opentui/surface/welcome/orb"
 
-const host = { clock: { setInterval: () => 0, clearInterval: () => {} } as never, destroyed: () => false }
+const host = { clock: new ManualClock(), destroyed: () => false }
 
 test("records a strike at the clicked cell and decays it away", () => {
   const controller = new WelcomeController(host)

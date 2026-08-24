@@ -1,13 +1,12 @@
 import { Function } from "effect"
 import type { Message } from "../message"
 import type { Model } from "../model"
-import type { QueueItem } from "../queue/item"
-import type { TranscriptBlock, TranscriptItem } from "../transcript/model"
 import { isPrintable } from "../../presentation/terminal/keymap"
 import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript/row"
 import { context } from "./model"
 import { reduceKeyboardPrelude } from "./keyboard-prelude"
 import { reduceKeyboardPicker } from "./keyboard-picker"
+import { decodeTranscriptBlocks, decodeTranscriptItems } from "../transcript/model"
 
 const selectedAuthorization = (
   model: Model,
@@ -17,9 +16,10 @@ const selectedAuthorization = (
     (candidate) => candidate.kind === "block" && transcriptUnitId(model, candidate) === model.detailSelection,
   )
   if (unit?.kind !== "block") return undefined
-  const block = model.blocks[unit.block] as TranscriptBlock
+  const block = decodeTranscriptBlocks(model.blocks)[unit.block]
+  if (block === undefined) return undefined
   if (block._tag !== "AuthorizationCard" || block.status !== "pending") return undefined
-  const item = (model.items as ReadonlyArray<TranscriptItem>).find(
+  const item = decodeTranscriptItems(model.items).find(
     (candidate) => candidate._tag === "Block" && candidate.index === unit.block,
   )
   const turnId = item?.rootTurnId ?? item?.turnId
@@ -117,7 +117,7 @@ const reduceKeyboardImpl = (
       const steeringQueueIds = new Set(
         model.steeringRequests.flatMap((request) => (request.origin === "queue" ? [request.queuedTurnId] : [])),
       )
-      const queued = (model.queue as ReadonlyArray<QueueItem>).filter((item) => !steeringQueueIds.has(item.id))
+      const queued = model.queue.filter((item) => !steeringQueueIds.has(item.id))
       if (model.input.length === 0 && queued.length > 0 && model.editingTurnId === undefined) {
         const current = queued.findIndex((item) => item.id === model.queueSelection)
         if (current < 0) {

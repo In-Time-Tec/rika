@@ -52,7 +52,7 @@ export interface Interface {
 import { ThreadRow as Row } from "./row-codec"
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const LineageJson = Schema.fromJsonString(ThreadLineage)
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
+const repositoryError = (error: { readonly message: string }) => RepositoryError.make({ message: error.message })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 50, 1), 100)
 const missing = (id: ThreadId) => RepositoryError.make({ message: `Thread ${id} does not exist` })
 const clone = (thread: Thread): Thread => structuredClone(thread)
@@ -73,12 +73,12 @@ const select = (threads: ReadonlyArray<Thread>, input: ListInput = {}) =>
     .slice(0, listLimit(input.limit))
     .map(clone)
 
-const decode = (row: unknown) =>
+const decode = <SqlRow>(row: SqlRow) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
-    const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(value.labels_json)
-    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
-    const id = yield* Schema.decodeUnknownEffect(ThreadId)(value.id)
+    const labels = yield* Schema.decodeEffect(LabelsJson)(value.labels_json)
+    const lineage = yield* Schema.decodeEffect(LineageJson)(value.lineage_json)
+    const id = yield* Schema.decodeEffect(ThreadId)(value.id)
     return {
       id,
       workspace: value.workspace,
@@ -211,7 +211,7 @@ export const layerForOwner = (ownerId: string) =>
           WHERE thread.owner_id = ${ownerId}
           ORDER BY deletion.requested_at ASC, deletion.thread_id ASC`.pipe(Effect.mapError(repositoryError))
           return yield* Effect.forEach(rows, (row) =>
-            Schema.decodeUnknownEffect(ThreadId)(row.thread_id).pipe(
+            Schema.decodeEffect(ThreadId)(row.thread_id).pipe(
               Effect.map((threadId) => ({ threadId, requestedAt: Number(row.requested_at) })),
               Effect.mapError(repositoryError),
             ),

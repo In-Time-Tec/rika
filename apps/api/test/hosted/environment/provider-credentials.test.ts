@@ -20,6 +20,7 @@ import {
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const key = Redacted.make("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+type JwtPayload = Schema.Json
 const principal = (userId: string) => ({ userId, deviceId: `device-${userId}`, clientId: `client-${userId}` })
 const personal = (userId: string) => ({ _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(userId) })
 const organization = (organizationId: string) => ({
@@ -28,7 +29,7 @@ const organization = (organizationId: string) => ({
 })
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.tryPromise(() => pool.query(text, [...values]))
-const jwt = (payload: unknown) => `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
+const jwt = (payload: JwtPayload) => `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
 
 const failureKind = <A>(effect: Effect.Effect<A, HostedProviderCredentialError>) =>
   effect.pipe(

@@ -9,7 +9,7 @@ const mkdirImpl = (path: string, options?: { readonly recursive?: boolean }) =>
 export const mkdir: {
   (options?: { readonly recursive?: boolean }): (path: string) => ReturnType<typeof mkdirImpl>
   (path: string, options?: { readonly recursive?: boolean }): ReturnType<typeof mkdirImpl>
-} = Function.dual((args) => typeof args[0] === "string", mkdirImpl)
+} = Function.dual((args) => Schema.is(Schema.String)(args[0]), mkdirImpl)
 const realpath = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.realPath(path)))
 const rmImpl = (path: string, options?: { readonly force?: boolean }) =>
   FileSystem.FileSystem.pipe(
@@ -20,7 +20,7 @@ const rmImpl = (path: string, options?: { readonly force?: boolean }) =>
 export const rm: {
   (options?: { readonly force?: boolean }): (path: string) => ReturnType<typeof rmImpl>
   (path: string, options?: { readonly force?: boolean }): ReturnType<typeof rmImpl>
-} = Function.dual((args) => typeof args[0] === "string", rmImpl)
+} = Function.dual((args) => Schema.is(Schema.String)(args[0]), rmImpl)
 const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
 
 const workspaceGlobError = (workspace: string, method: string, cause: unknown) =>
@@ -56,10 +56,12 @@ export const resolveLocalFileImpl = Effect.fn("Main.resolveLocalFile")(function*
   const fileSystem = yield* FileSystem.FileSystem
   const pathService = yield* Path.Path
   const home = yield* Config.string("HOME").pipe(Config.option, Effect.orElseSucceed(Option.none<string>))
+  const resolutionOptions = { path: pathService, base: workspace }
+  if (Option.isSome(home)) Object.assign(resolutionOptions, { home: home.value })
   const corrected = yield* LocalPath.resolveExistingPath(
     { exists: (name) => fileSystem.exists(name), readDirectory: (name) => fileSystem.readDirectory(name) },
     target.path,
-    { path: pathService, base: workspace, ...(Option.isNone(home) ? {} : { home: home.value }) },
+    resolutionOptions,
   ).pipe(Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path does not exist" })))
   const path = yield* realpath(corrected).pipe(
     Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path does not exist" })),

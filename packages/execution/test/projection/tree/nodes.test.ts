@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+import { Prompt } from "effect/unstable/ai"
 
 describe("TenetKit tree projector parent attribution", () => {
   it("attributes a child unit to its subagent card when the child streams before ChildLinked", () => {
@@ -43,7 +44,11 @@ describe("TenetKit tree projector parent attribution", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
-      } as never),
+        selection: "Surgeon",
+        prompt: Prompt.make("Fix the projection defect"),
+        childDepth: 1,
+        readiness: "ready",
+      }),
     )
     const repaired = projector
       .snapshot()
@@ -73,7 +78,11 @@ describe("TenetKit tree projector parent attribution", () => {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
         invocationId: "provider-call-1",
-      } as never),
+        selection: "Surgeon",
+        prompt: Prompt.make("Fix the projection defect"),
+        childDepth: 1,
+        readiness: "ready",
+      }),
     )
     projector.apply(
       treeEvent(
@@ -85,7 +94,10 @@ describe("TenetKit tree projector parent attribution", () => {
     projector.apply(
       treeEvent(
         "raw-child-run",
-        { _tag: "RunCompleted", status: "succeeded", terminalEventId: "terminal-1" } as never,
+        {
+          _tag: "RunCompleted",
+          result: { text: "", turns: 1, session: { sessionId: "raw-child-run:session", leafId: null } },
+        },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )

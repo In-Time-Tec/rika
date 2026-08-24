@@ -1,4 +1,5 @@
 import { partialInputRecord } from "@rika/transcript/partial-tool-input"
+import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../../terminal/format"
 import type { Model } from "../../../state/model"
@@ -11,12 +12,28 @@ const readToolNames = new Set(["read", "view_file", "get_diagnostics"])
 const searchToolNames = new Set(["grep", "glob", "list_dir", "codebase_search"])
 const editToolNames = new Set(["edit", "write"])
 const shellToolNames = new Set(["bash", "run_command"])
-const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-
-const summary = (primary: string, secondary?: string): ToolSummary => ({
-  primary,
-  ...(secondary === undefined || secondary.length === 0 ? {} : { secondary: ` ${secondary}` }),
+const ToolInput = Schema.Struct({
+  cmd: Schema.optionalKey(Schema.String),
+  command: Schema.optionalKey(Schema.String),
+  file: Schema.optionalKey(Schema.String),
+  file_path: Schema.optionalKey(Schema.String),
+  glob: Schema.optionalKey(Schema.String),
+  name: Schema.optionalKey(Schema.String),
+  offset: Schema.optionalKey(Schema.Finite),
+  path: Schema.optionalKey(Schema.String),
+  pattern: Schema.optionalKey(Schema.String),
+  query: Schema.optionalKey(Schema.String),
+  script: Schema.optionalKey(Schema.String),
 })
+type ToolInput = typeof ToolInput.Type
+const ToolInputJson = Schema.fromJsonString(ToolInput)
+const decodeToolInput = Schema.decodeUnknownOption(ToolInput)
+const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
+
+const summary = (primary: string, secondary?: string): ToolSummary => {
+  if (secondary === undefined || secondary.length === 0) return { primary }
+  return { primary, secondary: ` ${secondary}` }
+}
 
 const withLabel = (block: number, value: ToolSummary): Pick<ToolDetail, "block" | "label" | "summary"> => ({
   block,
@@ -44,12 +61,19 @@ export const agentToolSummary = (label: string): ToolSummary => {
 
 export const escapePathTarget = escapeControlCharacters
 
-export const inputValue = (input: string): Record<string, unknown> =>
-  Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => partialInputRecord(input))
+export const inputValue = (input: string): ToolInput =>
+  Option.getOrElse(Schema.decodeOption(ToolInputJson)(input), () =>
+    Option.getOrElse(decodeToolInput(partialInputRecord(input)), () => ({})),
+  )
 
-const stringValue = (value: Record<string, unknown>, keys: ReadonlyArray<string>): string | undefined => {
-  for (const key of keys) if (typeof value[key] === "string" && value[key].length > 0) return value[key]
+const stringValue = (values: ReadonlyArray<string | undefined>): string | undefined => {
+  for (const value of values) if (value !== undefined && value.length > 0) return value
   return undefined
+}
+
+const withTarget = (detail: ToolDetail, target: ToolDetail["target"]): ToolDetail => {
+  if (target === undefined) return detail
+  return { ...detail, target }
 }
 
 export const toolDetail: {
@@ -62,45 +86,32 @@ export const toolDetail: {
     (call.presentation.action === "read" || call.presentation.action === "media")
       ? "read"
       : toolKind(call.name, call.presentation.family)
-  const path = call.files[0]?.path ?? stringValue(input, ["path", "file_path", "file"])
-  const offset =
-    typeof input.offset === "number" && Number.isFinite(input.offset)
-      ? Math.max(0, Math.trunc(input.offset))
-      : undefined
-  const target =
-    path === undefined
-      ? undefined
-      : {
-          path,
-          ...(offset === undefined ? {} : { line: offset + 1, column: 1 }),
-        }
+  const path = call.files[0]?.path ?? stringValue([input.path, input.file_path, input.file])
+  const offset = input.offset === undefined ? undefined : Math.max(0, Math.trunc(input.offset))
+  let target: ToolDetail["target"]
+  if (path === undefined) target = undefined
+  else if (offset === undefined) target = { path }
+  else target = { path, line: offset + 1, column: 1 }
   const displayPath = path === undefined ? undefined : escapePathTarget(path)
   if (kind === "read") {
     const verb = call.presentation.action === "media" ? "Viewed" : "Read"
     const location = path === undefined ? undefined : call.detail.match(/\s+L\d+(?:-\d+)?$/)?.[0]
     const detail = path === undefined ? call.detail : `${displayPath}${location ?? ""}`
-    return {
-      ...withLabel(block, summary(verb, detail || displayPath || call.name)),
-      ...(target === undefined ? {} : { target }),
-    }
+    return withTarget(withLabel(block, summary(verb, detail || displayPath || call.name)), target)
   }
   if (kind === "search") {
-    const query = stringValue(input, ["pattern", "query", "glob", "path"])
-    return {
-      ...withLabel(
+    const query = stringValue([input.pattern, input.query, input.glob, input.path])
+    return withTarget(
+      withLabel(
         block,
         summary(call.presentation.action === "grep" ? "Grep" : "Searched", call.detail || query || "workspace"),
       ),
-      ...(target === undefined ? {} : { target }),
-    }
+      target,
+    )
   }
-  if (kind === "edit")
-    return {
-      ...withLabel(block, summary("Edit", displayPath ?? call.detail)),
-      ...(target === undefined ? {} : { target }),
-    }
+  if (kind === "edit") return withTarget(withLabel(block, summary("Edit", displayPath ?? call.detail)), target)
   if (kind === "shell") {
-    const command = call.detail || stringValue(input, ["command", "cmd", "script"]) || ""
+    const command = call.detail || stringValue([input.command, input.cmd, input.script]) || ""
     return withLabel(block, summary("$", command || (call.input.trimStart().startsWith("{") ? "" : call.input)))
   }
   let label = call.presentation.completeLabel
@@ -121,9 +132,10 @@ export const toolDetails: {
 } = Function.dual(
   2,
   (model: Model, unit: Extract<TranscriptUnit, { kind: "tool" }>): ReadonlyArray<ToolDetail> =>
-    unit.blocks.map((block) =>
-      toolDetail(block, model.blocks[block] as Extract<TranscriptBlock, { _tag: "ToolCall" }>),
-    ),
+    unit.blocks.flatMap((block) => {
+      const call = decodeTranscriptBlock(model.blocks[block])
+      return call._tag === "ToolCall" ? [toolDetail(block, call)] : []
+    }),
 )
 
 type ToolFamily = Extract<TranscriptBlock, { _tag: "ToolCall" }>["presentation"]["family"]

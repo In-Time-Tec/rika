@@ -11,6 +11,7 @@ import {
   IdempotencyKey,
   OrganizationId,
   OwnerId,
+  RequestId,
   ThreadEventCursor,
   ThreadId,
   ThreadVersion,
@@ -427,7 +428,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         expect(
           yield* session.receive({
             protocolVersion: 1,
-            requestId: requestId as never,
+            requestId: RequestId.make(requestId),
             command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
           }),
         ).toMatchObject([
@@ -444,7 +445,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
 
       const duplicate = {
         protocolVersion: 1 as const,
-        requestId: "duplicate-a" as never,
+        requestId: RequestId.make("duplicate-a"),
         command: {
           _tag: "SubmitPrompt" as const,
           threadId,
@@ -455,7 +456,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
         },
       }
       const duplicateResponses = yield* Effect.all(
-        [controllerA.receive(duplicate), controllerB.receive({ ...duplicate, requestId: "duplicate-b" as never })],
+        [controllerA.receive(duplicate), controllerB.receive({ ...duplicate, requestId: RequestId.make("duplicate-b") })],
         { concurrency: "unbounded" },
       )
       expect(
@@ -465,13 +466,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       ).toHaveLength(2)
       expect(runs.filter((input) => input.operationKey === "duplicate-submit")).toHaveLength(1)
       expect(
-        yield* controllerA.receive({ ...duplicate, requestId: "duplicate-after-completion" as never }),
+        yield* controllerA.receive({ ...duplicate, requestId: RequestId.make("duplicate-after-completion") }),
       ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "1", cursor: "1" } }])
       expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({
         protocolVersion: 1 as const,
-        requestId: requestId as never,
+        requestId: RequestId.make(requestId),
         command: {
           _tag: "SubmitPrompt" as const,
           threadId,
@@ -503,7 +504,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(
         yield* delayedSession.receive({
           ...delayed,
-          requestId: "delayed-resync" as never,
+          requestId: RequestId.make("delayed-resync"),
           command: { ...delayed.command, expectedThreadVersion: ThreadVersion.make("2") },
         }),
       ).toMatchObject([
@@ -541,7 +542,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(
         yield* approvalController.receive({
           protocolVersion: 1,
-          requestId: "approval-attach" as never,
+          requestId: RequestId.make("approval-attach"),
           command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("3") },
         }),
       ).toMatchObject([
@@ -558,7 +559,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       ])
       const approval = {
         protocolVersion: 1 as const,
-        requestId: "approval-request" as never,
+        requestId: RequestId.make("approval-request"),
         command: {
           _tag: "Approve" as const,
           threadId,
@@ -573,7 +574,9 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(yield* approvalController.receive(approval)).toMatchObject([
         { payload: { _tag: "CommandAccepted", threadVersion: "4", result: { _tag: "Applied" } } },
       ])
-      expect(yield* approvalController.receive({ ...approval, requestId: "approval-retry" as never })).toMatchObject([
+      expect(
+        yield* approvalController.receive({ ...approval, requestId: RequestId.make("approval-retry") }),
+      ).toMatchObject([
         { payload: { _tag: "CommandAccepted", threadVersion: "4" } },
       ])
       expect(
@@ -598,7 +601,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(
         yield* approvalController.receive({
           ...approval,
-          requestId: "cross-thread-approval" as never,
+          requestId: RequestId.make("cross-thread-approval"),
           command: {
             ...approval.command,
             commandId: CommandId.make("cross-thread-approval"),
@@ -628,7 +631,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(
         yield* approvalController.receive({
           protocolVersion: 1,
-          requestId: "denial-request" as never,
+          requestId: RequestId.make("denial-request"),
           command: {
             _tag: "Deny",
             threadId,
@@ -732,7 +735,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       const replayController = yield* open
       const replay = yield* replayController.receive({
         protocolVersion: 1,
-        requestId: "replay-attach" as never,
+        requestId: RequestId.make("replay-attach"),
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
       })
       expect(replay).toHaveLength(1)
@@ -751,7 +754,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       expect(
         (yield* replayController.receive({
           protocolVersion: 1,
-          requestId: "large-replay-ack" as never,
+          requestId: RequestId.make("large-replay-ack"),
           command: { _tag: "AcknowledgeCursor", threadId, cursor: ThreadEventCursor.make("1005") },
         }))[0]?.payload,
       ).toMatchObject({ _tag: "CommandAccepted", cursor: "1005" })
@@ -768,7 +771,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed controller 
       ])
       const appendOnlyReplay = yield* replayController.receive({
         protocolVersion: 1,
-        requestId: "append-only-replay" as never,
+        requestId: RequestId.make("append-only-replay"),
         command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("1005") },
       })
       expect(appendOnlyReplay).toHaveLength(1)

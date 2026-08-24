@@ -4,7 +4,6 @@ import { expandableRowIds, transcriptUnits } from "../../../../src/presentation/
 import { initial, type Model } from "../../../../src/state/model"
 import { colors } from "../../../../src/presentation/terminal/theme"
 import stringWidth from "string-width"
-import type { TranscriptBlock } from "../../../../src/state/transcript/model"
 
 const source = 'const result = await rika.workspace.read({"path":"nested.txt"})'
 
@@ -12,6 +11,20 @@ const rendered = (model: Model) =>
   buildTranscript(model)
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
+
+const cell = {
+  _tag: "Cell" as const,
+  id: "oracle-cell",
+  status: "complete" as const,
+  visual: "ts",
+  summary: source,
+  source: { text: source, lines: 1, truncated: false },
+  output: { stdout: "NESTED_CELL_STDOUT", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+  durationMillis: 1_240,
+  epoch: 0,
+  notices: [],
+  files: [],
+}
 
 const model = (): Model => ({
   ...initial("/workspace", "medium"),
@@ -27,19 +40,7 @@ const model = (): Model => ({
       status: "complete",
       activity: [],
     },
-    {
-      _tag: "Cell",
-      id: "oracle-cell",
-      status: "complete",
-      visual: "ts",
-      summary: source,
-      source: { text: source, lines: 1, truncated: false },
-      output: { stdout: "NESTED_CELL_STDOUT", stderr: "", droppedBytes: 0, droppedEvents: 0 },
-      durationMillis: 1_240,
-      epoch: 0,
-      notices: [],
-      files: [],
-    },
+    cell,
   ],
   entries: [],
   items: [
@@ -89,7 +90,6 @@ describe("a subagent's own cell", () => {
   test("wraps highlighted source inside the card timeline", () => {
     const longSource = `const result = await rika.workspace.read({"path":"${"nested/".repeat(12)}fixture.txt"})`
     const base = model()
-    const cell = base.blocks[1] as Extract<TranscriptBlock, { _tag: "Cell" }>
     const current: Model = {
       ...base,
       width: 60,

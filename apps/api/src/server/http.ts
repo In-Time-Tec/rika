@@ -76,7 +76,7 @@ const secured = (response: Response, production: boolean) => {
 
 export const secureResponse = (production: boolean) => (response: Response) => secured(response, production)
 
-const json = (body: unknown, production: boolean, status = 200, extraHeaders?: Headers) => {
+const json = <Body>(body: Body, production: boolean, status = 200, extraHeaders?: Headers) => {
   const headers = securityHeaders(production)
   headers.set("content-type", "application/json; charset=utf-8")
   headers.set("cache-control", "no-store")
@@ -140,12 +140,12 @@ export const accountAccess = Effect.fn("ApiHttp.accountAccess")(function* (
   )
   if (device._tag === "unavailable") return { _tag: "unavailable" }
   if (identity.principal.clientId !== undefined && device.value === undefined) return { _tag: "invalid" }
-  return {
+  const access: Extract<AccountAccess, { readonly _tag: "account" }> = {
     _tag: "account",
     account: account.value,
     principal: identity.principal,
-    ...(device.value === undefined ? {} : { deviceId: device.value }),
   }
+  return device.value === undefined ? access : { ...access, deviceId: device.value }
 })
 
 const decodeJson = <S extends Schema.Constraint>(request: Request, schema: S) =>
@@ -275,7 +275,7 @@ const routeRequest = Effect.fn("ApiHttp.route")(function* (request: Request, dep
     const access = yield* accountAccess(request, dependencies)
     if (access._tag !== "account") return accessFailure(access, dependencies)
     const membership = access.account.memberships.find(
-      (candidate) => candidate.organization.id === decodeURIComponent(invitationRoute[1] as string),
+      (candidate) => candidate.organization.id === decodeURIComponent(invitationRoute[1] ?? ""),
     )
     if (membership === undefined) return json({ message: "Organization is unavailable" }, dependencies.production, 404)
     const decoded = yield* decodeJson(request, InvitationRequest)

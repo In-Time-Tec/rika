@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { Pool } from "pg"
+import type { Pool, QueryResultRow } from "pg"
 import type { IdentityPrincipal } from "../auth/runtime"
 
 export const CliDeviceRegistration = Schema.Struct({
@@ -35,14 +35,20 @@ export interface CliDeviceDirectory {
   readonly revokeAll: (principal: IdentityPrincipal) => Effect.Effect<void, CliDeviceDirectoryError>
 }
 
+interface ListedCliDevice {
+  id: string
+  current: boolean
+  lastSeenAt?: string
+}
+
 const failure = (operation: string) => CliDeviceDirectoryError.make({ operation })
 
 export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory => {
-  const query = <A>(operation: string, text: string, values: ReadonlyArray<unknown> = []) =>
+  const query = <A extends QueryResultRow>(operation: string, text: string, values: ReadonlyArray<unknown> = []) =>
     Effect.tryPromise({
-      try: () => pool.query(text, [...values]),
+      try: () => pool.query<A>(text, [...values]),
       catch: () => failure(operation),
-    }).pipe(Effect.map((result) => result.rows as ReadonlyArray<A>))
+    }).pipe(Effect.map((result) => result.rows))
 
   const authenticate = Effect.fn("CliDeviceDirectory.authenticate")(function* (principal: IdentityPrincipal) {
     if (principal.clientId === undefined || principal.dpopJkt === undefined) return undefined
@@ -98,11 +104,11 @@ export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory =
          order by last_seen_at desc nulls last, created_at desc`,
         [principal.userId, current ?? ""],
       )
-      return rows.map((row) => ({
-        id: row.id,
-        current: row.current,
-        ...(row.lastSeenAt === null ? {} : { lastSeenAt: row.lastSeenAt.toISOString() }),
-      }))
+      return rows.map((row) => {
+        const device: ListedCliDevice = { id: row.id, current: row.current }
+        if (row.lastSeenAt !== null) device.lastSeenAt = row.lastSeenAt.toISOString()
+        return device
+      })
     }),
     revoke: Effect.fn("CliDeviceDirectory.revoke")(function* (principal, deviceId) {
       yield* authenticate(principal)

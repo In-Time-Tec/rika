@@ -23,14 +23,17 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
       const path = yield* Path.Path
       const target = options.filename ?? path.join(options.home, ".config", "rika", "hosted.json")
       const save = Effect.fn("HostedProfileStore.save")(function* (profile: Profile) {
-        const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))({
+        const diskProfile: typeof ProfileDisk.Encoded = {
           formatVersion: 3,
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,
           owner: profile.owner,
-          ...(profile.project === undefined ? {} : { project: profile.project }),
-        }).pipe(Effect.mapError(() => failure("Hosted profile could not be encoded")))
+        }
+        if (profile.project !== undefined) Object.assign(diskProfile, { project: profile.project })
+        const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))(diskProfile).pipe(
+          Effect.mapError(() => failure("Hosted profile could not be encoded")),
+        )
         const parent = path.dirname(target)
         const temporary = `${target}.tmp-${process.pid}`
         yield* fileSystem
@@ -50,16 +53,17 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
         const text = yield* fileSystem
           .readFileString(target)
           .pipe(Effect.mapError(() => failure("Hosted profile could not be read")))
-        const profile = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
+        const profile = yield* Schema.decodeEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
           Effect.mapError(() => failure("Hosted profile is corrupt")),
         )
-        return Option.some<Profile>({
+        const loaded: Profile = {
           origin: profile.origin,
           deviceId: profile.deviceId,
           clientId: profile.clientId,
           owner: profile.owner,
-          ...(profile.project === undefined ? {} : { project: profile.project }),
-        })
+        }
+        if (profile.project !== undefined) Object.assign(loaded, { project: profile.project })
+        return Option.some(loaded)
       })
       return ProfileStore.of({ load, save })
     }),

@@ -86,17 +86,18 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
         const contextProjection = projections
           .toReversed()
           .find((projection) => projection.state.usage.context !== undefined)
-        return {
+        const summary = {
           usage: ExecutionProjection.aggregateUsage(projections.map((projection) => projection.state.usage)),
-          ...(contextProjection?.turn._tag !== "AgentExecution"
-            ? {}
-            : {
-                contextCapacity: {
-                  contextWindow: contextProjection.turn.executionRoute.main.compaction.contextWindow,
-                  reserveTokens: contextProjection.turn.executionRoute.main.compaction.reserveTokens,
-                },
-              }),
         }
+        return contextProjection?.turn._tag !== "AgentExecution"
+          ? summary
+          : {
+              ...summary,
+              contextCapacity: {
+                contextWindow: contextProjection.turn.executionRoute.main.compaction.contextWindow,
+                reserveTokens: contextProjection.turn.executionRoute.main.compaction.reserveTokens,
+              },
+            }
       }),
     )
   const service = Service.of({
@@ -128,15 +129,18 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
         if (change._tag === "ProjectionSnapshot" && !change.hasOlder) units.clear()
         for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
         for (const unit of upsert) units.set(unit.key, clone(unit))
-        const candidate: Projection = {
+        const candidateBase = {
           turn: clone(turn),
           units: [...units.values()],
           checkpointGeneration: (current?.checkpointGeneration ?? -1) + 1,
           revision: change.revision,
           state: clone(change.state),
-          ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: clone(change.checkpoint) }),
           projectionVersion: ExecutionProjection.projectionVersion,
         }
+        const candidate: Projection =
+          change.checkpoint === undefined
+            ? candidateBase
+            : { ...candidateBase, projectorCheckpoint: clone(change.checkpoint) }
         const next = new Map(entries)
         next.set(turn.id, materialize(candidate))
         return ["committed" as const, next]

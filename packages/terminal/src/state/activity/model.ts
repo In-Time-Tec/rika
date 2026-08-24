@@ -1,7 +1,8 @@
 import { Function, Schema } from "effect"
 import { formatTokens, plural } from "../../presentation/terminal/format"
+import { orderedTranscriptItems } from "../../presentation/transcript/row"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Model } from "../model"
-import type { TranscriptBlock, TranscriptItem } from "../transcript/model"
 
 export const Activity = Schema.Union([
   Schema.TaggedStruct("Sending", {}),
@@ -60,22 +61,26 @@ const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: n
 export const formatActivity: {
   (activity: Activity | undefined, countdownSeconds?: number): string | undefined
   (activity: Activity | undefined): (countdownSeconds?: number) => string | undefined
-} = Function.dual((args) => typeof args[0] !== "number", formatActivityImpl)
+} = Function.dual((args) => args[0] === undefined || Schema.is(Activity)(args[0]), formatActivityImpl)
 
 const runningCardStatuses: ReadonlySet<string> = new Set(["running", "waiting", "cancelling"])
+const decodeBlock = Schema.decodeUnknownSync(Block)
 
 export const runningToolsActivity = (model: Model): Extract<Activity, { readonly _tag: "RunningTools" }> => {
-  const items = model.items as ReadonlyArray<TranscriptItem>
+  const items = orderedTranscriptItems(model)
   const blockItems = items.flatMap((item) => (item._tag === "Block" ? [item] : []))
   const ownsChildren = (index: number): boolean => {
-    const block = model.blocks[index] as TranscriptBlock | undefined
-    if (block === undefined) return false
+    const candidate = model.blocks[index]
+    if (candidate === undefined) return false
+    const block = decodeBlock(candidate)
     return block._tag === "SubagentCard" || (block._tag === "ToolCall" && block.presentation.family === "agent")
   }
   const ownerById = new Map(
     blockItems.flatMap((item) => {
-      const block = model.blocks[item.index] as TranscriptBlock | undefined
-      if (block?._tag !== "SubagentCard" && block?._tag !== "ToolCall") return []
+      const candidate = model.blocks[item.index]
+      if (candidate === undefined) return []
+      const block = decodeBlock(candidate)
+      if (block._tag !== "SubagentCard" && block._tag !== "ToolCall") return []
       return [[block.id, item] as const]
     }),
   )
@@ -95,7 +100,7 @@ export const runningToolsActivity = (model: Model): Extract<Activity, { readonly
   let subagents = 0
   let tools = 0
   for (const [index, candidate] of model.blocks.entries()) {
-    const block = candidate as TranscriptBlock
+    const block = decodeBlock(candidate)
     if (block._tag === "SubagentCard") {
       const item = itemByIndex.get(index)
       if (runningCardStatuses.has(block.status) && (item === undefined || !ownedByCard(item))) subagents += 1
@@ -121,12 +126,11 @@ const streamActivityImpl = (
   tag: "Thinking" | "Streaming",
   text: string,
   blockId?: string,
-): Activity => ({
-  _tag: tag,
-  bytes:
-    current?._tag === tag && current.blockId === blockId ? current.bytes + utf8ByteLength(text) : utf8ByteLength(text),
-  ...(blockId === undefined ? {} : { blockId }),
-})
+): Activity => {
+  const bytes =
+    current?._tag === tag && current.blockId === blockId ? current.bytes + utf8ByteLength(text) : utf8ByteLength(text)
+  return blockId === undefined ? { _tag: tag, bytes } : { _tag: tag, bytes, blockId }
+}
 
 export const streamActivity: {
   (current: Activity | undefined, tag: "Thinking" | "Streaming", text: string, blockId: string | undefined): Activity

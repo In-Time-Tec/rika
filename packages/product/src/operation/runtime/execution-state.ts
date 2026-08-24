@@ -2,9 +2,10 @@ import { Context, Effect, PubSub, Scope, Semaphore, Layer } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadDeletion from "../../thread/lifecycle/deletion"
-import { makeProductOperationFoundation } from "../foundation/composition"
+import * as ProductOperationFoundation from "../foundation/composition"
 import { operationError } from "../error"
-import { makeProductOperationExecution, type ProductOperationExecution } from "./execution"
+import * as ProductOperationExecutionRuntime from "./execution"
+import type { ProductOperationExecution } from "./execution"
 import { executionStartFailureMessage, temporaryThreadTitle } from "../interactive/shell"
 import { queueMutationEvent as queueMutationEventValue } from "./support"
 
@@ -62,7 +63,7 @@ export interface ProductOperationExecutionStateInput {
   readonly activitySequence: number
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly operationError: typeof operationError
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly staleQueuedTurnsError: staleQueuedTurnsError
   readonly queuedTurnPromoteMaxAgeMs: number
   readonly queueMutationEvent?: queueMutationEvent
@@ -134,7 +135,7 @@ export const buildProductOperationExecutionState = (
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
-    const foundation = yield* makeProductOperationFoundation({ options, ownerScope }).pipe(
+    const foundation = yield* ProductOperationFoundation.makeProductOperationFoundation({ options, ownerScope }).pipe(
       Effect.provideService(Scope.Scope, ownerScope),
       Effect.mapError((error) => operationError(String(error), error)),
     )
@@ -198,7 +199,7 @@ export const buildProductOperationExecutionState = (
       }).pipe(turnMutationAdmission.withPermits(1))
     const claimQueuedTurn = (threadId: ThreadId, now: number) =>
       requireAdmission(threadId).pipe(Effect.andThen(rootTurnOwner.claimQueued(threadId, now)))
-    const execution = yield* makeProductOperationExecution({
+    const execution = yield* ProductOperationExecutionRuntime.makeProductOperationExecution({
       options,
       ownerScope,
       pendingTurnCapacity,

@@ -55,11 +55,9 @@ const invalidError = (
   reason: ThreadViewInvalidPatch["reason"],
   key?: string,
 ) =>
-  ThreadViewInvalidPatch.make({
-    threadId,
-    reason,
-    ...(key === undefined ? {} : { key }),
-  })
+  key === undefined
+    ? ThreadViewInvalidPatch.make({ threadId, reason })
+    : ThreadViewInvalidPatch.make({ threadId, reason, key })
 
 const headerFrom = (snapshot: ThreadViewSnapshot): ThreadViewHeader => ({
   thread: snapshot.thread,

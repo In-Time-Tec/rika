@@ -37,9 +37,7 @@ describe("tool contracts", () => {
       expect(contractFixtures.ThreadFind.findMaximumLimit).toBe(50)
       expect(contractFixtures.ThreadFind.previewDefaultLimit).toBe(10)
       expect(contractFixtures.ThreadFind.previewMaximumLimit).toBe(20)
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadFind.FindThreadInput)({ query: "all", limit: 51 }),
-      )
+      yield* Effect.flip(Schema.decodeEffect(contractFixtures.ThreadFind.FindThreadInput)({ query: "all", limit: 51 }))
     }),
   )
 
@@ -75,32 +73,30 @@ describe("tool contracts", () => {
   it.effect("rejects invalid bounds while preserving file ranges for typed runtime failures", () =>
     Effect.gen(function* () {
       const definition = Catalog.get("read")!
-      yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, timeoutMillis: 0 }))
-      yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, outputLimit: 1.5 }))
+      yield* Effect.flip(Schema.decodeEffect(Catalog.Definition)({ ...definition, timeoutMillis: 0 }))
+      yield* Effect.flip(Schema.decodeEffect(Catalog.Definition)({ ...definition, outputLimit: 1.5 }))
       expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.RuntimeContract.Request)({
+        yield* Schema.decodeEffect(contractFixtures.RuntimeContract.Request)({
           _tag: "Read",
           path: "a",
           readRange: [-1, 0],
         }),
       ).toEqual({ _tag: "Read", path: "a", readRange: [-1, 0] })
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.RuntimeContract.Request)({
+        Schema.decodeEffect(contractFixtures.RuntimeContract.Request)({
           _tag: "Read",
           path: "a",
           readRange: [1, Number.POSITIVE_INFINITY],
         }),
       )
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.RuntimeContract.Request)({
+        Schema.decodeEffect(contractFixtures.RuntimeContract.Request)({
           _tag: "Bash",
           command: "echo",
           timeoutMillis: 0.5,
         }),
       )
-      yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.ThreadFind.FindThreadInput)({ query: "all", limit: 0 }),
-      )
+      yield* Effect.flip(Schema.decodeEffect(contractFixtures.ThreadFind.FindThreadInput)({ query: "all", limit: 0 }))
     }),
   )
 
@@ -115,7 +111,7 @@ describe("tool contracts", () => {
         recovery: "after_change",
         nextAction: "Correct the path",
       })
-      expect(yield* Schema.decodeUnknownEffect(contractFixtures.RuntimeContract.ToolError)(failure)).toEqual(failure)
+      expect(yield* Schema.decodeEffect(contractFixtures.RuntimeContract.ToolError)(failure)).toEqual(failure)
       yield* Effect.flip(
         Schema.decodeUnknownEffect(contractFixtures.RuntimeContract.ToolError)({
           _tag: "ToolError",
@@ -233,7 +229,8 @@ describe("tool contracts", () => {
     Effect.gen(function* () {
       const schema = Tool.getJsonSchema(contractFixtures.RuntimeServiceTools.webSearchTool)
       expect(schema.required).toContain("objective")
-      const searchQueries = (schema.properties as Record<string, unknown>).searchQueries
+      const properties = yield* Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Json))(schema.properties)
+      const searchQueries = properties.searchQueries
       expect(searchQueries).toEqual({
         type: "array",
         items: { type: "string", pattern: "\\S" },
@@ -251,21 +248,21 @@ describe("tool contracts", () => {
         "capability, not a particular provider",
       )
       expect(
-        yield* Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)(["current docs"]),
+        yield* Schema.decodeEffect(contractFixtures.WebSearchInputContract.SearchQueries)(["current docs"]),
       ).toEqual(["current docs"])
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
+        Schema.decodeEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "",
           searchQueries: ["docs"],
         }),
       )
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
+        Schema.decodeEffect(contractFixtures.WebSearchRequestContract.SearchInput)({
           objective: "   ",
           searchQueries: ["docs"],
         }),
       )
-      yield* Effect.flip(Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)([]))
+      yield* Effect.flip(Schema.decodeEffect(contractFixtures.WebSearchInputContract.SearchQueries)([]))
       yield* Effect.flip(
         Schema.decodeUnknownEffect(contractFixtures.WebSearchInputContract.SearchQueries)({
           0: "current docs",

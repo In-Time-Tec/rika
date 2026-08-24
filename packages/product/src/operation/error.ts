@@ -16,17 +16,17 @@ export const operationError: {
   (message: string): OperationError
   (cause?: unknown): (message: string) => OperationError
   (message: string, cause?: unknown): OperationError
-} = Function.dual((args) => args.length === 2 || typeof args[0] === "string", operationErrorImpl)
+} = Function.dual((args) => args.length === 2 || Schema.is(Schema.String)(args[0]), operationErrorImpl)
 
 export const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
-  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
-    return failure._tag
+  const tagged = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))(failure)
+  if (tagged._tag === "Some") return tagged.value._tag
   if (failure instanceof Error) return failure.name
-  return typeof failure
+  return "unknown"
 }
 
-export const operationFailureDetail = (error: unknown) => {
+export const operationFailureDetail = <ErrorValue>(error: ErrorValue) => {
   if (
     Schema.is(OperationError)(error) ||
     Schema.is(TurnRepository.QueuedTurnUnavailable)(error) ||

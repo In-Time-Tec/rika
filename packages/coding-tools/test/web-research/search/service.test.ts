@@ -18,7 +18,7 @@ const makeProvider = (
   search: WebSearchProvider.SearchProvider["search"] = () => Effect.succeed({ results: [result] }),
 ): WebSearchProvider.SearchProvider => ({ id, priority, capabilities: new Set(capabilities), search })
 
-const response = (httpRequest: HttpClientRequest.HttpClientRequest, body: unknown, status = 200, headers = {}) =>
+const response = (httpRequest: HttpClientRequest.HttpClientRequest, body: Schema.Json, status = 200, headers = {}) =>
   HttpClientResponse.fromWeb(
     httpRequest,
     new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {

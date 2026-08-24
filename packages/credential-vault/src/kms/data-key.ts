@@ -12,7 +12,7 @@ export interface GeneratedDataEncryptionKey {
   readonly wrapped: Uint8Array
 }
 
-export interface KmsDataKeyShape {
+export interface KmsDataKeyContract {
   readonly generateDataKey: <A, E, R>(
     context: CredentialKmsEncryptionContext,
     use: (key: GeneratedDataEncryptionKey) => Effect.Effect<A, E, R>,
@@ -24,6 +24,6 @@ export interface KmsDataKeyShape {
   ) => Effect.Effect<A, KmsFailure | E, R>
 }
 
-export class KmsDataKey extends Context.Service<KmsDataKey, KmsDataKeyShape>()(
+export class KmsDataKey extends Context.Service<KmsDataKey, KmsDataKeyContract>()(
   "@rika/credential-vault/kms/data-key/KmsDataKey",
 ) {}

@@ -95,20 +95,18 @@ export const webhookVerifierLayer = (options: WebhookVerifierOptions) =>
         untrustedHeaders: WebhookHeaders,
         untrustedRawBody: Uint8Array,
       ) {
-        const headers = yield* Schema.decodeUnknownEffect(WebhookHeaders)(untrustedHeaders).pipe(
+        const headers = yield* Schema.decodeEffect(WebhookHeaders)(untrustedHeaders).pipe(
           Effect.mapError(() =>
             WebhookVerificationError.make({ reason: "headers", message: "GitHub webhook headers are invalid" }),
           ),
         )
-        const rawBody = yield* Schema.decodeUnknownEffect(Schema.Uint8Array)(untrustedRawBody).pipe(
+        const rawBody = yield* Schema.decodeEffect(Schema.Uint8Array)(untrustedRawBody).pipe(
           Effect.mapError(() =>
             WebhookVerificationError.make({ reason: "event", message: "GitHub webhook body is invalid" }),
           ),
         )
         const expected = yield* crypto.hmacSha256(options.secret, rawBody)
-        const supplied = yield* Schema.decodeUnknownEffect(Schema.Uint8ArrayFromHex)(
-          headers.signature256.slice(7),
-        ).pipe(
+        const supplied = yield* Schema.decodeEffect(Schema.Uint8ArrayFromHex)(headers.signature256.slice(7)).pipe(
           Effect.mapError(() =>
             WebhookVerificationError.make({ reason: "headers", message: "GitHub webhook signature is invalid" }),
           ),

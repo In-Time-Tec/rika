@@ -2,7 +2,7 @@ export type RuntimeEnvironment = Readonly<Record<string, string | undefined>>
 
 const railwayDomain = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.up\.railway\.app$/
 
-export const runtimeEnvironment = (environment: RuntimeEnvironment): RuntimeEnvironment => {
+export const runtimeEnvironment = (environment: RuntimeEnvironment) => {
   const railwayEnvironment = environment.RAILWAY_ENVIRONMENT_NAME?.trim()
   if (railwayEnvironment === undefined || railwayEnvironment.length === 0 || railwayEnvironment === "production")
     return environment

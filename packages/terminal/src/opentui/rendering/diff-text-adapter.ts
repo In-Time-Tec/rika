@@ -8,14 +8,14 @@ import {
 } from "../../presentation/tool/diff-renderer"
 import { renderPierreDiff as pierreDiff, type DiffRenderOptions } from "../../presentation/tool/pierre-diff-adapter"
 import { renderToolSummary as toolSummary } from "../../presentation/tool/summary"
-const toOpenChunk = (chunk: TerminalTextChunk): TextChunk => ({
-  __isChunk: true,
-  text: chunk.text,
-  ...(chunk.fg === undefined ? {} : { fg: toOpenColor(chunk.fg) }),
-  ...(chunk.bg === undefined ? {} : { bg: toOpenColor(chunk.bg) }),
-  ...(chunk.attributes === undefined ? {} : { attributes: chunk.attributes }),
-  ...(chunk.link === undefined ? {} : { link: chunk.link }),
-})
+const toOpenChunk = (chunk: TerminalTextChunk): TextChunk => {
+  const result: TextChunk = { __isChunk: true, text: chunk.text }
+  if (chunk.fg !== undefined) result.fg = toOpenColor(chunk.fg)
+  if (chunk.bg !== undefined) result.bg = toOpenColor(chunk.bg)
+  if (chunk.attributes !== undefined) result.attributes = chunk.attributes
+  if (chunk.link !== undefined) result.link = chunk.link
+  return result
+}
 const toOpenText = (text: TerminalStyledText): StyledText => new StyledText(text.chunks.map(toOpenChunk))
 
 const renderDiffStyledImpl = (patch: string, options: Parameters<typeof diffStyled>[1]): StyledText =>
@@ -65,7 +65,7 @@ const renderToolSummaryImpl = (
   summary: Parameters<typeof toolSummary>[0],
   options?: Parameters<typeof toolSummary>[1],
 ): ReadonlyArray<ReadonlyArray<TextChunk>> =>
-  toolSummary(summary, options).map((line) => line.map((chunk) => ({ ...chunk, __isChunk: true }) as TextChunk))
+  toolSummary(summary, options).map((line) => line.map(toOpenChunk))
 
 export const renderToolSummary: {
   (

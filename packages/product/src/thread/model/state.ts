@@ -13,7 +13,7 @@ const ranked = [
 }>
 
 export const statusRank = (status: string): number =>
-  ranked.find((entry) => (entry.statuses as ReadonlyArray<string>).includes(status))?.rank ?? 0
+  ranked.find((entry) => entry.statuses.some((candidate) => candidate === status))?.rank ?? 0
 
 export const rankCase = (column: string): string =>
   [

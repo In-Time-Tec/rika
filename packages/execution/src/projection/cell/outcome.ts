@@ -1,5 +1,6 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { bounded, optionalString, record, string } from "../values"
+import { Cell as TenetCell } from "tenetkit/repl"
+import { bounded, optionalString } from "../values"
 import { cellTextLimit } from "./state"
 import {
   cellExecutionFailedTag,
@@ -16,17 +17,16 @@ export interface CellOutcome {
   readonly diagnostic?: { readonly title: string; readonly detail: string; readonly recoverable: boolean }
 }
 
-export const failureOutcome = (failure: unknown): CellOutcome => {
-  const value = record(failure)
-  const message = optionalString(value.message)
-  switch (value._tag) {
+export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
+  const message = optionalString(failure.message)
+  switch (failure._tag) {
     case cellExecutionFailedTag:
       return {
         status: "failed",
         error: {
-          name: string(value.name, "Error"),
+          name: failure.name,
           message: bounded(message, cellTextLimit),
-          ...(typeof value.stack === "string" ? { stack: bounded(value.stack, cellTextLimit) } : {}),
+          stack: bounded(optionalString(failure.stack), cellTextLimit),
         },
       }
     case kernelUnavailableTag:
@@ -34,7 +34,7 @@ export const failureOutcome = (failure: unknown): CellOutcome => {
         status: "failed",
         diagnostic: {
           title: "Kernel unavailable",
-          detail: `No kernel ran the cell (${string(value.reason, "unknown")}). ${message}`.trim(),
+          detail: `No kernel ran the cell (${failure.reason}). ${message}`.trim(),
           recoverable: false,
         },
       }
@@ -53,7 +53,7 @@ export const failureOutcome = (failure: unknown): CellOutcome => {
         diagnostic: {
           title: "Cell outcome unknown",
           detail:
-            `The cell may or may not have committed its effects (${string(value.reason, "unknown")}). ${message} Resolve it explicitly; it is never replayed.`.trim(),
+            `The cell may or may not have committed its effects (${failure.reason}). ${message} Resolve it explicitly; it is never replayed.`.trim(),
           recoverable: true,
         },
       }

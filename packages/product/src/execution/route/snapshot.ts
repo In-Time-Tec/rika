@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { ModelRegistrationIdentity } from "../model/registration-identity"
+import { ModelRegistrationIdentity, modelRegistrationIdentity } from "../model/registration-identity"
 import { ProviderConnectionSnapshot } from "../model/provider-connection"
 import { defaultCompactionSummaryPrompt } from "../compaction/prompt"
 
@@ -76,11 +76,11 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
       baseUrl: "test://model",
       authentication: "none" as const,
     },
-    registrationIdentity: "test" as ExecutionRouteModelCandidateSnapshot["registrationIdentity"],
+    registrationIdentity: modelRegistrationIdentity("test"),
   }
   const route = {
     selection: "test",
-    registrationIdentity: "test-route" as ExecutionRouteModelSnapshot["registrationIdentity"],
+    registrationIdentity: modelRegistrationIdentity("test-route"),
     effort: "medium",
     fast: false,
     candidates: [candidate],
@@ -106,20 +106,19 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const RecordValue = Schema.Record(Schema.String, Schema.Unknown)
 
-const requireRecord = (value: unknown, message: string): Record<string, unknown> => {
-  if (!isRecord(value)) throw new Error(message)
-  return value
+const requireRecord = <A>(value: A, message: string) => {
+  if (!Schema.is(RecordValue)(value)) throw new Error(message)
+  return Schema.decodeUnknownSync(RecordValue)(value)
 }
 
-const requireKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<string>, message: string) => {
+const requireKeys = (value: typeof RecordValue.Type, allowed: ReadonlyArray<string>, message: string) => {
   const allowedSet = new Set(allowed)
   if (Object.keys(value).some((key) => !allowedSet.has(key))) throw new Error(message)
 }
 
-const validateConnection = (value: unknown): void => {
+const validateConnection = <A>(value: A): void => {
   const connection = requireRecord(value, "Malformed provider connection")
   requireKeys(
     connection,
@@ -138,9 +137,9 @@ const validateConnection = (value: unknown): void => {
     connection.authentication === "account" &&
     (connection.provider !== "openai" ||
       connection.protocol !== "openai-responses" ||
-      typeof connection.credentialIdentity !== "string" ||
+      !Schema.is(Schema.String)(connection.credentialIdentity) ||
       connection.credentialIdentity.length === 0 ||
-      typeof connection.accountFingerprint !== "string" ||
+      !Schema.is(Schema.String)(connection.accountFingerprint) ||
       connection.accountFingerprint.length === 0 ||
       connection.apiKeyEnvironment !== undefined)
   ) {
@@ -151,7 +150,7 @@ const validateConnection = (value: unknown): void => {
   }
 }
 
-const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {
+const validateModel = <A>(value: A, expectedRole: ModelRouteRole): void => {
   const model = requireRecord(value, "Malformed execution route model")
   requireKeys(
     model,
@@ -178,7 +177,7 @@ const validateModel = (value: unknown, expectedRole: ModelRouteRole): void => {
   )
 }
 
-export const toExecutionRouteSnapshot = (routeValue: unknown): ExecutionRouteSnapshot => {
+export const toExecutionRouteSnapshot = <A extends object>(routeValue: A): ExecutionRouteSnapshot => {
   const route = requireRecord(routeValue, "Malformed execution route")
   requireKeys(
     route,

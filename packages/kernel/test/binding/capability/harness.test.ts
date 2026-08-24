@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { NestedOperation } from "tenetkit"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import { HarnessState, HarnessStore } from "tenetkit/harness"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { journal, mountModules } from "../../support/binding"
@@ -17,11 +17,15 @@ const store = () => {
 }
 
 const registry = (backing = store(), nested?: NestedOperation.Interface, sessionId?: string) =>
-  mountModules({
+  mountModules(sessionId === undefined ? {
     modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
     services: Context.make(HarnessStore.HarnessStore, backing.service),
     nested,
-    ...(sessionId === undefined ? {} : { sessionId }),
+  } : {
+    modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
+    services: Context.make(HarnessStore.HarnessStore, backing.service),
+    nested,
+    sessionId,
   })
 
 const emptySnapshot = HarnessState.snapshotId(HarnessState.empty("thread:session"))
@@ -181,8 +185,9 @@ describe("harness binding", () => {
       const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success") {
-        const entries = (response.output as { readonly entries: { readonly memory: ReadonlyArray<{ id: string }> } })
-          .entries.memory
+        const entries = (yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ entries: Schema.Struct({ memory: Schema.Array(Schema.Struct({ id: Schema.String })) }) }),
+        )(response.output)).entries.memory
         expect(entries.map((entry) => entry.id).toSorted()).toEqual(["global", "threaded"])
       }
     }),
@@ -222,7 +227,9 @@ describe("harness binding", () => {
       const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success")
-        expect((response.output as { readonly snapshotId: string }).snapshotId).toMatch(/^harness-snapshot:v1:sha256:/)
+        expect((yield* Schema.decodeUnknownEffect(Schema.Struct({ snapshotId: Schema.String }))(response.output)).snapshotId).toMatch(
+          /^harness-snapshot:v1:sha256:/,
+        )
     }),
   )
 

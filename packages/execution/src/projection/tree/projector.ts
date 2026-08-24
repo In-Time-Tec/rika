@@ -3,25 +3,27 @@ import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { completeTool } from "../tool/state"
-import { makeAuthorizationProjection } from "../authorization"
-import { cellToolName, makeCellProjection } from "../cell/state"
-import { makeDiagnosticProjection } from "../diagnostic"
-import { makeSubagentCardProjection } from "../subagent/card"
-import { makeSemanticResponseProjection } from "../semantic/response"
+import * as Authorization from "../authorization"
+import * as Cell from "../cell/state"
+import * as Diagnostic from "../diagnostic"
+import * as SubagentCard from "../subagent/card"
+import * as SemanticResponse from "../semantic/response"
 import type { SemanticTreeEvent } from "../semantic/event"
-import { makeSteeringProjection } from "../steering"
-import { makeToolUnitProjection } from "../tool/unit"
-import { authorizationTarget, makeProjectorCheckpointCodec } from "../checkpoint"
-import { makeUsageAccounting } from "../usage"
+import * as Steering from "../steering"
+import * as ToolUnit from "../tool/unit"
+import * as Checkpoint from "../checkpoint"
+import * as Usage from "../usage"
 import { type Card, type Node, type Projector } from "../model"
 import { type AuthorizationState, type ModelCallState, type ProjectorCore } from "../persistence"
 import { boundedInsert, subagentCardStatus } from "./nodes"
-import { makeProjectorRecoveryIndex, type CheckpointInstrumentation } from "./projector-recovery"
+import * as ProjectorRecovery from "./projector-recovery"
+import type { CheckpointInstrumentation } from "./projector-recovery"
 import { bounded, boundedHead, optionalString, record, string } from "../values"
 import { projectorNames, textLimit, toolTextLimit } from "../values"
 
 import { scopedId } from "../decoding"
 import { encoded, providerCostNanoUsd, token } from "../decoding"
+import { Option, Schema } from "effect"
 
 export type { Projector }
 
@@ -36,7 +38,7 @@ const make = (
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
-  const usage = makeUsageAccounting(pricing)
+  const usage = Usage.makeUsageAccounting(pricing)
   const { attemptStarts, modelCalls, observeLifecycleAt, activate, deactivate, recordAttempt, settleOpenAttempts } =
     usage
   const core: ProjectorCore = {
@@ -54,29 +56,45 @@ const make = (
   const cardsByChild = new Map<string, Card>()
   const unitKeysByRun = new Map<string, Set<string>>()
   const authorizations = new Map<string, AuthorizationState>()
-  const recovery = makeProjectorRecoveryIndex({
-    nodes,
-    ...(instrumentation === undefined ? {} : { instrumentation }),
-  })
+  const recoveryOptions: Parameters<typeof ProjectorRecovery.makeProjectorRecoveryIndex>[0] =
+    instrumentation === undefined ? { nodes } : { instrumentation, nodes }
+  const recovery = ProjectorRecovery.makeProjectorRecoveryIndex(recoveryOptions)
   let changed = new Map<string, Unit>()
   let removed = new Set<string>()
   let createdInBatch = new Set<string>()
   let semanticOrderPart: number | undefined
   let titleSettled = !titleExpected
 
-  const projectionState = (): Projection.ProjectionState => ({
-    status: core.rootStatus,
-    usage: {
-      ...structuredClone(usage.usage()),
-      sourceComplete:
-        titleSettled &&
-        (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
-      contextPending: usage.contextPending(),
-      active: usage.activeTime(),
-    },
-    ...(core.title === undefined ? {} : { title: core.title }),
-    steering: steering.summary(core.steeringMessages, core.followUpMessages),
-  })
+  const projectionState = (): Projection.ProjectionState => {
+    const state: Projection.ProjectionState =
+      core.title === undefined
+        ? {
+            status: core.rootStatus,
+            usage: {
+              ...structuredClone(usage.usage()),
+              sourceComplete:
+                titleSettled &&
+                (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
+              contextPending: usage.contextPending(),
+              active: usage.activeTime(),
+            },
+            steering: steering.summary(core.steeringMessages, core.followUpMessages),
+          }
+        : {
+            status: core.rootStatus,
+            steering: steering.summary(core.steeringMessages, core.followUpMessages),
+            title: core.title,
+            usage: {
+              ...structuredClone(usage.usage()),
+              sourceComplete:
+                titleSettled &&
+                (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
+              contextPending: usage.contextPending(),
+              active: usage.activeTime(),
+            },
+          }
+    return state
+  }
 
   const put = (unit: Unit) => {
     if (!units.has(unit.key) && !removed.has(unit.key)) createdInBatch.add(unit.key)
@@ -113,19 +131,15 @@ const make = (
       unitKeysByRun.set(node.rawRunId, emitted)
     }
     emitted.add(key)
-    return {
-      key,
-      turnId,
-      ...(parentId === undefined ? {} : { parentId }),
-      order: units.get(key)?.order ?? orderFor(node, key, orderPart),
-      revision: core.revision,
-      content,
-    }
+    const order = units.get(key)?.order ?? orderFor(node, key, orderPart)
+    return parentId === undefined
+      ? { content, key, order, revision: core.revision, turnId }
+      : { content, key, order, parentId, revision: core.revision, turnId }
   }
 
-  const steering = makeSteeringProjection({ turnId, put, unit })
+  const steering = Steering.makeSteeringProjection({ turnId, put, unit })
 
-  const { notice, error, modelFailureError, executionFailureError } = makeDiagnosticProjection({
+  const { notice, error, modelFailureError, executionFailureError } = Diagnostic.makeDiagnosticProjection({
     turnId,
     localId,
     put,
@@ -133,7 +147,7 @@ const make = (
     get: (key) => units.get(key),
   })
 
-  const { putAuthorization, resolveAuthorization, settleAuthorizations } = makeAuthorizationProjection({
+  const { putAuthorization, resolveAuthorization, settleAuthorizations } = Authorization.makeAuthorizationProjection({
     core,
     units,
     authorizations,
@@ -143,7 +157,7 @@ const make = (
     recover: recovery.authorizationChanged,
   })
 
-  const { toolState, putTool, updateTool } = makeToolUnitProjection({
+  const { toolState, putTool, updateTool } = ToolUnit.makeToolUnitProjection({
     units,
     localId,
     put,
@@ -151,7 +165,7 @@ const make = (
     recover: recovery.toolChanged,
   })
 
-  const { openCell, progressCell, completeCell, settleRunningCells } = makeCellProjection({
+  const { openCell, progressCell, completeCell, settleRunningCells } = Cell.makeCellProjection({
     units,
     localId,
     put,
@@ -162,7 +176,7 @@ const make = (
     error,
   })
 
-  const { cardFor, updateCard, groupCards, bindChild } = makeSubagentCardProjection({
+  const { cardFor, updateCard, groupCards, bindChild } = SubagentCard.makeSubagentCardProjection({
     core,
     units,
     nodes,
@@ -176,7 +190,7 @@ const make = (
     recoverNode: recovery.nodeChanged,
   })
 
-  const semanticResponse = makeSemanticResponseProjection({
+  const semanticResponse = SemanticResponse.makeSemanticResponseProjection({
     localId,
     put,
     unit,
@@ -199,13 +213,11 @@ const make = (
     if (current !== undefined) return current
     const card = cardsByChild.get(input.runId)
     const hidden = input.invocationId === projectorNames.titleInvocationId
-    const created: Node = {
+    const base: Node = {
       rawRunId: input.runId,
       publicId:
         card?.publicId ??
         (input.parentRunId === undefined ? "root" : localId("subagent", turnId, input.invocationId ?? "orphan")),
-      ...(input.parentRunId === undefined ? {} : { parentRawRunId: input.parentRunId }),
-      ...(card === undefined ? {} : { parentUnitKey: card.unitKey, parentBlockId: card.blockId }),
       hidden,
       tools: new Map(),
       cells: new Map(),
@@ -213,6 +225,16 @@ const make = (
       status: "running",
       lifecycle: "unknown",
       started: false,
+    }
+    let created: Node
+    if (card !== undefined && input.parentRunId !== undefined) {
+      created = { ...base, parentBlockId: card.blockId, parentRawRunId: input.parentRunId, parentUnitKey: card.unitKey }
+    } else if (card !== undefined) {
+      created = { ...base, parentBlockId: card.blockId, parentUnitKey: card.unitKey }
+    } else if (input.parentRunId !== undefined) {
+      created = { ...base, parentRawRunId: input.parentRunId }
+    } else {
+      created = base
     }
     nodes.set(input.runId, created)
     return created
@@ -289,7 +311,7 @@ const make = (
       case "ModelResponseInterrupted":
         return semanticResponse.apply(node, event)
       case "ToolExecutionStarted":
-        if (event.call.name === cellToolName)
+        if (event.call.name === Cell.cellToolName)
           return openCell(node, event.call.id, string(record(event.call.params).code, ""))
         if (event.call.name === projectorNames.runChild) {
           const input = record(event.call.params)
@@ -303,25 +325,22 @@ const make = (
           return remove(toolState(node, event.call.id).key)
         }
         if (event.call.name === projectorNames.runChildGroup) {
-          groupCards(node, event.call.id, event.call.params)
+          const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
+          if (Option.isSome(params)) groupCards(node, event.call.id, params.value)
           return remove(toolState(node, event.call.id).key)
         }
         return putTool(node, event.call.id, event.call.name, encoded(event.call.params))
       case "ToolProgress":
         if (node.cells.has(event.toolCallId)) return progressCell(node, event.toolCallId, event.data)
-        return updateTool(node, event.toolCallId, (tool) => ({
-          ...tool,
-          ...(event.message === undefined
-            ? {}
-            : {
-                output: bounded(
-                  `${tool.output === undefined ? "" : `${tool.output}\n`}${event.message}`,
-                  toolTextLimit,
-                ),
-              }),
-        }))
+        return updateTool(node, event.toolCallId, (tool) => {
+          if (event.message === undefined) return tool
+          return {
+            ...tool,
+            output: bounded(`${tool.output === undefined ? "" : `${tool.output}\n`}${event.message}`, toolTextLimit),
+          }
+        })
       case "ToolExecutionCompleted": {
-        if (event.call.name === cellToolName)
+        if (event.call.name === Cell.cellToolName)
           return completeCell(node, event.call.id, event.result.result, event.result.isFailure)
         if (event.call.name === projectorNames.runChild) {
           const card = cardsByInvocation.get(`${node.rawRunId}\u0000${event.call.id}`)
@@ -338,8 +357,10 @@ const make = (
           if (event.result.isFailure) {
             const result = record(event.result.result)
             const detail = optionalString(result.message)
-            for (const card of groupCards(node, event.call.id, event.call.params))
-              if (card.rawChildRunId === undefined) updateCard(card, "failed", detail)
+            const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
+            if (Option.isSome(params))
+              for (const card of groupCards(node, event.call.id, params.value))
+                if (card.rawChildRunId === undefined) updateCard(card, "failed", detail)
           }
           return
         }
@@ -380,10 +401,9 @@ const make = (
             throw new TypeError(`Conflicting TenetKit model call: ${event.modelCallId}`)
           return
         }
-        const value: ModelCallState = {
-          purpose: event.purpose,
-          ...(rootConversation ? { requestOrdinal: usage.requestOrdinal() + 1 } : {}),
-        }
+        const value: ModelCallState = rootConversation
+          ? { purpose: event.purpose, requestOrdinal: usage.requestOrdinal() + 1 }
+          : { purpose: event.purpose }
         if (boundedInsert(modelCalls, key, value, Projection.limits.modelCalls, "model calls") && rootConversation)
           usage.awaitContext(usage.nextRequestOrdinal())
         return
@@ -466,17 +486,16 @@ const make = (
           current?.content._tag === "Block" && current.content.block._tag === "Compaction"
             ? current.content.block
             : undefined
-        put(
-          unit(node, key, {
-            _tag: "Block",
-            block: {
-              _tag: "Compaction",
-              summary: previous?.summary ?? "",
-              status: "complete",
-              ...(event._tag === "CompactionApplied" ? { checkpoint: event.checkpointId } : {}),
-            },
-          }),
-        )
+        const block: Extract<Unit["content"], { readonly _tag: "Block" }>["block"] =
+          event._tag === "CompactionApplied"
+            ? {
+                _tag: "Compaction",
+                checkpoint: event.checkpointId,
+                status: "complete",
+                summary: previous?.summary ?? "",
+              }
+            : { _tag: "Compaction", status: "complete", summary: previous?.summary ?? "" }
+        put(unit(node, key, { _tag: "Block", block }))
         recovery.compactionChanged(key, false)
         return
       }
@@ -547,10 +566,9 @@ const make = (
           node.status = "failed"
           return
         }
-        executionFailureError(node, event.error.message, {
-          status: "failed",
-          ...(event.error.message.length === 0 ? {} : { reason: event.error.message }),
-        })
+        const failure: Parameters<typeof executionFailureError>[2] =
+          event.error.message.length === 0 ? { status: "failed" } : { reason: event.error.message, status: "failed" }
+        executionFailureError(node, event.error.message, failure)
         return settleNode(node, "failed", event, event.error.message)
       case "RunCancellationRequested": {
         const card = cardsByChild.get(node.rawRunId)
@@ -575,7 +593,7 @@ const make = (
     }
   }
 
-  const { serialize, restore } = makeProjectorCheckpointCodec({
+  const { serialize, restore } = Checkpoint.makeProjectorCheckpointCodec({
     turnId,
     baselineUnits,
     core,
@@ -724,14 +742,24 @@ const make = (
       const materialized = [...units.values()].toSorted((left, right) =>
         UnitOrder.compareUnitOrder(left.order, right.order),
       )
-      return {
-        _tag: "ProjectionSnapshot",
-        revision: core.revision,
-        ...(core.checkpoint === undefined ? {} : { checkpoint: core.checkpoint }),
-        units: materialized.slice(-Projection.limits.snapshotUnits),
-        hasOlder: core.historyOmitted || materialized.length > Projection.limits.snapshotUnits,
-        state: projectionState(),
-      }
+      const snapshot: Projection.Snapshot =
+        core.checkpoint === undefined
+          ? {
+              _tag: "ProjectionSnapshot",
+              revision: core.revision,
+              units: materialized.slice(-Projection.limits.snapshotUnits),
+              hasOlder: core.historyOmitted || materialized.length > Projection.limits.snapshotUnits,
+              state: projectionState(),
+            }
+          : {
+              _tag: "ProjectionSnapshot",
+              checkpoint: core.checkpoint,
+              hasOlder: core.historyOmitted || materialized.length > Projection.limits.snapshotUnits,
+              revision: core.revision,
+              state: projectionState(),
+              units: materialized.slice(-Projection.limits.snapshotUnits),
+            }
+      return snapshot
     },
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
@@ -747,5 +775,5 @@ const make = (
   }
 }
 
-export const TreeProjector = { make, authorizationTarget }
+export const TreeProjector = { make, authorizationTarget: Checkpoint.authorizationTarget }
 export const titleInvocationId = projectorNames.titleInvocationId

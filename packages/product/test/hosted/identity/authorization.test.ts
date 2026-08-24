@@ -19,19 +19,19 @@ const threadActions: ReadonlyArray<AuthorizationAction> = [
   "workspace:service:control",
 ]
 
-const projectExpected: Readonly<Record<GrantRole, ReadonlyArray<boolean>>> = {
+const projectExpected = {
   viewer: [true, false, false],
   controller: [true, false, false],
   operator: [true, true, false],
   owner: [true, true, true],
-}
+} satisfies Readonly<Record<GrantRole, ReadonlyArray<boolean>>>
 
-const threadExpected: Readonly<Record<GrantRole, ReadonlyArray<boolean>>> = {
+const threadExpected = {
   viewer: [true, false, false, false, true, false, true, false, false],
   controller: [true, true, false, false, true, true, true, true, true],
   operator: [true, true, true, false, true, true, true, true, true],
   owner: [true, true, true, true, true, true, true, true, true],
-}
+} satisfies Readonly<Record<GrantRole, ReadonlyArray<boolean>>>
 
 describe("hosted authorization policy", () => {
   it("exhaustively applies the project role matrix", () => {

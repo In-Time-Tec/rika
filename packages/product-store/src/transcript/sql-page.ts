@@ -10,6 +10,32 @@ import { decode } from "../turn/postgres/row-codec"
 
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
 const StateJson = Schema.fromJsonString(ExecutionProjection.ProjectionState)
+const TurnRow = Schema.Struct({
+  id: Schema.String,
+  thread_id: Schema.String,
+  turn_kind: Schema.String,
+  prompt: Schema.String,
+  status: Schema.String,
+  execution_route_json: Schema.NullOr(Schema.String),
+  execution_link_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  prompt_parts_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  shell_command: Schema.NullOr(Schema.String),
+  shell_result_text: Schema.NullOr(Schema.String),
+  shell_result_truncated: Schema.NullOr(Schema.Finite),
+  shell_result_exit_code: Schema.NullOr(Schema.Finite),
+  author_json: Schema.String,
+  lineage_json: Schema.String,
+  created_at: Schema.Finite,
+  updated_at: Schema.Finite,
+})
+const UsageRow = Schema.Struct({ ...TurnRow.fields, state_json: Schema.String })
+const PageRow = Schema.Struct({
+  ...TurnRow.fields,
+  unit_json: Schema.String,
+  unit_order_key: Schema.String,
+  projection_revision: Schema.Finite,
+  state_json: Schema.String,
+})
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
 const compareText = (left: string, right: string) => {
@@ -32,25 +58,23 @@ export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | 
       ORDER BY t.created_at ASC, t.id ASC`
     const values = yield* Effect.forEach(rows, (raw) =>
       Effect.gen(function* () {
-        const row = raw as Record<string, unknown>
+        const row = yield* Schema.decodeUnknownEffect(UsageRow)(raw)
         return {
           turn: yield* decode(row),
-          state: yield* Schema.decodeUnknownEffect(StateJson)(row.state_json),
+          state: yield* Schema.decodeEffect(StateJson)(row.state_json),
         }
       }),
     )
     const contextValue = values.toReversed().find((value) => value.state.usage.context !== undefined)
-    return {
+    const result: Effect.Success<ReturnType<Interface["usage"]>> = {
       usage: ExecutionProjection.aggregateUsage(values.map((value) => value.state.usage)),
-      ...(contextValue?.turn._tag !== "AgentExecution"
-        ? {}
-        : {
-            contextCapacity: {
-              contextWindow: contextValue.turn.executionRoute.main.compaction.contextWindow,
-              reserveTokens: contextValue.turn.executionRoute.main.compaction.reserveTokens,
-            },
-          }),
     }
+    if (contextValue?.turn._tag === "AgentExecution")
+      Object.assign(result, { contextCapacity: {
+        contextWindow: contextValue.turn.executionRoute.main.compaction.contextWindow,
+        reserveTokens: contextValue.turn.executionRoute.main.compaction.reserveTokens,
+      } })
+    return result
   }, Effect.mapError(error))
   return {
     page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
@@ -79,15 +103,15 @@ export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | 
       ).pipe(Effect.mapError(error))
       const decoded = yield* Effect.forEach(rows, (raw) =>
         Effect.gen(function* () {
-          const row = raw as Record<string, unknown>
+          const row = yield* Schema.decodeUnknownEffect(PageRow)(raw).pipe(Effect.mapError(error))
           const turn = yield* decode(row).pipe(Effect.mapError(error))
-          const unit = yield* Schema.decodeUnknownEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
+          const unit = yield* Schema.decodeEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
           const cursor = { createdAt: turn.createdAt, turnId: turn.id, orderKey: String(row.unit_order_key) }
           if (unit.turnId !== turn.id || TranscriptOrdering.encodeUnitOrder(unit.order) !== cursor.orderKey)
             return yield* RepositoryError.make({
               message: `Transcript unit ${unit.key} does not match its durable identity`,
             })
-          const projectionState = yield* Schema.decodeUnknownEffect(StateJson)(row.state_json).pipe(
+          const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(
             Effect.mapError(error),
           )
           return { turn, unit, cursor, revision: Number(row.projection_revision), projectionState }

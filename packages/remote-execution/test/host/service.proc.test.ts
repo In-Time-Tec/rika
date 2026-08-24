@@ -86,7 +86,7 @@ console.log(
 const bootstrapResetProof = `
 import { Effect, Redacted } from "effect"
 import { createConnection } from "node:net"
-import { testing } from "./src/host.ts"
+import { testing } from "./src/host/service.ts"
 const sandboxId = await Bun.file("/run/e2b/.E2B_SANDBOX_ID").text().then((value) => value.trim()).catch(() => "sandbox-1")
 const received = Effect.runPromise(testing.receiveBootstrap)
 await Bun.sleep(20)

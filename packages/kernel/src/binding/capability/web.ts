@@ -37,41 +37,39 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     input: SearchInput,
     output: Page,
     failure: Failure,
-    handle: (input) =>
-      nested(
+    handle: (input) => {
+      const request = CodingToolRuntime.Request.make({
+        _tag: "WebSearch",
+        objective: input.objective,
+        searchQueries: input.searchQueries,
+      })
+      if (input.kind !== undefined) Object.assign(request, { kind: input.kind })
+      if (input.strategy !== undefined) Object.assign(request, { strategy: input.strategy })
+      if (input.githubSearchType !== undefined) Object.assign(request, { githubSearchType: input.githubSearchType })
+      return nested(
         { kind: "web.search", payload: input, replayPolicy: "provider-idempotent" },
-        Effect.map(
-          run({
-            _tag: "WebSearch",
-            objective: input.objective,
-            searchQueries: input.searchQueries,
-            ...(input.kind === undefined ? {} : { kind: input.kind }),
-            ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
-            ...(input.githubSearchType === undefined ? {} : { githubSearchType: input.githubSearchType }),
-          }),
-          page,
-        ),
-      ),
+        Effect.map(run(request), page),
+      )
+    },
   }),
   operation({
     name: "readPage",
     input: ReadPageInput,
     output: Page,
     failure: Failure,
-    handle: (input) =>
-      nested(
+    handle: (input) => {
+      const request = CodingToolRuntime.Request.make({
+        _tag: "ReadWebPage",
+        url: input.url,
+      })
+      if (input.objective !== undefined) Object.assign(request, { objective: input.objective })
+      if (input.fullContent !== undefined) Object.assign(request, { fullContent: input.fullContent })
+      if (input.forceRefetch !== undefined) Object.assign(request, { forceRefetch: input.forceRefetch })
+      return nested(
         { kind: "web.readPage", payload: input, replayPolicy: "provider-idempotent" },
-        Effect.map(
-          run({
-            _tag: "ReadWebPage",
-            url: input.url,
-            ...(input.objective === undefined ? {} : { objective: input.objective }),
-            ...(input.fullContent === undefined ? {} : { fullContent: input.fullContent }),
-            ...(input.forceRefetch === undefined ? {} : { forceRefetch: input.forceRefetch }),
-          }),
-          page,
-        ),
-      ),
+        Effect.map(run(request), page),
+      )
+    },
   }),
 ]
 

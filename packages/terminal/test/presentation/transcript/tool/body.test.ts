@@ -8,7 +8,7 @@ const call = (
   },
 ): Extract<TranscriptBlock, { _tag: "ToolCall" }> => {
   const { action, ...rest } = overrides
-  return {
+  const toolCall: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
     _tag: "ToolCall",
     id: "tool-1",
     name: "tool",
@@ -18,7 +18,8 @@ const call = (
     detail: "",
     files: [],
     ...rest,
-  } as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+  }
+  return toolCall
 }
 
 describe("tool body contract", () => {

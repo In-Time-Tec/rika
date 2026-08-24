@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import { meterGlyphs, muncherGlyphs } from "./glyph"
 
 export interface Reading {
@@ -32,7 +32,7 @@ export const meter: {
   (reading: Reading, options?: MeterOptions): Meter
   (options?: MeterOptions): (reading: Reading) => Meter
 } = Function.dual(
-  (args) => typeof args[0] === "object" && args[0] !== null && "inputTokens" in args[0],
+  (args) => Schema.is(Schema.Struct({ inputTokens: Schema.Finite }))(args[0]),
   (reading: Reading, options: MeterOptions = {}): Meter => {
     const cells = Math.max(1, Math.floor(options.cells ?? 8))
     const value = pressure(reading)
@@ -50,7 +50,7 @@ export const loadingMeter: {
   (phase: number, options?: { readonly cells?: number }): ReadonlyArray<string>
   (options?: { readonly cells?: number }): (phase: number) => ReadonlyArray<string>
 } = Function.dual(
-  (args) => typeof args[0] === "number",
+  (args) => Schema.is(Schema.Finite)(args[0]),
   (phase: number, options: { readonly cells?: number } = {}): ReadonlyArray<string> => {
     const width = Math.max(1, Math.floor(options.cells ?? 8))
     const period = Math.max(1, width * 2 - 2)

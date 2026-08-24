@@ -5,7 +5,7 @@ import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ReadWebPageContract from "../../../src/web-research/read-page/contract"
 import { provide } from "../../support/layer"
 
-const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
+const response = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json, status = 200) =>
   HttpClientResponse.fromWeb(
     request,
     new Response(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(body), {
@@ -31,7 +31,7 @@ const failingClientLayer = Layer.succeed(
   ),
 )
 
-const apiResponse = (overrides: Record<string, unknown> = {}) => ({
+const apiResponse = (overrides: Schema.JsonObject = {}) => ({
   extract_id: "extract-1",
   session_id: "session-1",
   results: [

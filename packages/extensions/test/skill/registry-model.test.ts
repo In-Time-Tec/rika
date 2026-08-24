@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as SkillFileSystem from "../../src/skill/file-system"
 import { provideLayer } from "../support/extension-test-layer"
@@ -8,7 +8,7 @@ import { provideLayer } from "../support/extension-test-layer"
 const document = (name: string, description: string, body: string) =>
   `---\nname: ${name}\ndescription: ${description}\n---\n${body}`
 
-const manifest = (value: Record<string, unknown>) => JSON.stringify(value)
+const manifest = (value: Schema.JsonObject) => JSON.stringify(value)
 
 const platform = Layer.merge(SkillFileSystem.fileSystemLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer)
 

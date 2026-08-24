@@ -174,7 +174,7 @@ const pasteClipboardPngImpl = (
 export const pasteClipboardPng: {
   (now?: () => number, extract?: ClipboardPngExtractor): (workspace: string) => ReturnType<typeof pasteClipboardPngImpl>
   (workspace: string, now?: () => number, extract?: ClipboardPngExtractor): ReturnType<typeof pasteClipboardPngImpl>
-} = Function.dual((args) => typeof args[0] === "string", pasteClipboardPngImpl)
+} = Function.dual((args) => Schema.is(Schema.String)(args[0]), pasteClipboardPngImpl)
 
 const pastedImagePathImpl = (
   bytes: Uint8Array,

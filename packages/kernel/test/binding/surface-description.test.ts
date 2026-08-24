@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest"
 import * as McpDiscovery from "@rika/extensions/mcp-discovery"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { cellInstructions, make, surfaceOf, type Options } from "../../src/binding/modules"
+import { operation } from "../../src/binding/envelope"
 import * as WorkspaceBinding from "../../src/binding/capability/workspace"
+
+const NoFailure = Schema.TaggedStruct("NoFailure", {})
+const noOutput = { output: Schema.Void, failure: NoFailure, handle: () => Effect.void }
 
 const options: Options = {
   workspace: "/workspace",
   workspaceDigest: "digest",
   trustMode: "trusted-local",
-  servers: [] as ReadonlyArray<McpDiscovery.ConfiguredServer>,
+  servers: [] satisfies ReadonlyArray<McpDiscovery.ConfiguredServer>,
 }
 
 const instructionFacts = (modules = make(options)) => ({
@@ -27,17 +31,22 @@ describe("mounted surface", () => {
       {
         name: "probe",
         operations: [
-          { name: "one", input: Schema.Struct({ path: Schema.String, mode: Schema.Literals(["a", "b"]) }) },
-          {
+          operation({
+            name: "one",
+            input: Schema.Struct({ path: Schema.String, mode: Schema.Literals(["a", "b"]) }),
+            ...noOutput,
+          }),
+          operation({
             name: "two",
             input: Schema.Struct({
               pick: Schema.Union([Schema.Struct({ kind: Schema.String }), Schema.Struct({ id: Schema.Int })]),
             }),
-          },
-          { name: "none", input: Schema.Struct({}) },
+            ...noOutput,
+          }),
+          operation({ name: "none", input: Schema.Struct({}), ...noOutput }),
         ],
       },
-    ] as unknown as Parameters<typeof surfaceOf>[0]
+    ]
     expect(surfaceOf(probe)).toBe(
       '//   rika.probe -> one({ path, mode: "a"|"b" }), two({ pick: { kind }|{ id } }), none()',
     )
@@ -63,9 +72,7 @@ describe("mounted surface", () => {
   it("refuses to describe an operation whose input is not a struct", () => {
     // Printing an empty argument list would tell a model the operation takes nothing, which it would
     // believe. No binding does this today, so the guard is what keeps it that way.
-    const odd = [{ name: "odd", operations: [{ name: "one", input: Schema.String }] }] as unknown as Parameters<
-      typeof surfaceOf
-    >[0]
+    const odd = [{ name: "odd", operations: [operation({ name: "one", input: Schema.String, ...noOutput })] }]
     expect(() => surfaceOf(odd)).toThrow("rika.odd.one has an input that is not a struct")
   })
 })
@@ -124,7 +131,7 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
  * maximum of 8. Each guess cost a turn.
  */
 it("names the bound and the shape each input actually enforces", () => {
-  const surface = surfaceOf([WorkspaceBinding.module] as never)
+  const surface = surfaceOf([WorkspaceBinding.module])
   expect(surface).toContain("range: [start, end]")
   expect(surface).toContain("depth: 1-8")
 })

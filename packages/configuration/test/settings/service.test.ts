@@ -247,7 +247,7 @@ describe("ConfigService", () => {
         Layer.build(layer).pipe(
           Effect.map((context) => Context.get(context, ConfigurationService.ConfigurationService)),
         ),
-      ).pipe(Effect.flatMap((service: ConfigurationService.ConfigurationServiceShape) => service.effective))
+      ).pipe(Effect.flatMap((service: ConfigurationService.ConfigurationServiceContract) => service.effective))
       expect(Object.keys(effective.environment.providerCredentials).toSorted()).toEqual([
         "ANTHROPIC_API_KEY",
         "RIKA_MODEL_API_KEY",

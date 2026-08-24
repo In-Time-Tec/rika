@@ -2,8 +2,8 @@ import { workspacePaths } from "@rika/configuration/configuration-paths"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+const SettingsObject = Schema.Record(Schema.String, Schema.Json)
+const decodeSettingsObject = Schema.decodeUnknownEffect(SettingsObject)
 
 export const writeSubagentLimit = Effect.fn("InteractivePalette.writeSubagentLimit")(function* (
   workspace: string,
@@ -17,7 +17,7 @@ export const writeSubagentLimit = Effect.fn("InteractivePalette.writeSubagentLim
     Effect.flatMap((exists) =>
       exists
         ? fileSystem.readFileString(filename).pipe(
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(SettingsObject))),
             Effect.mapError((cause) =>
               SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
                 path: filename,
@@ -25,21 +25,22 @@ export const writeSubagentLimit = Effect.fn("InteractivePalette.writeSubagentLim
               }),
             ),
           )
-        : Effect.succeed({}),
+        : Effect.succeed(Schema.decodeSync(SettingsObject)({})),
     ),
   )
-  if (!isRecord(current))
-    return yield* SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
-      path: filename,
-      message: "Cannot update settings file: root must be an object",
-    })
   const subagents = current.subagents
-  if (subagents !== undefined && !isRecord(subagents))
-    return yield* SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
-      path: filename,
-      message: "Cannot update settings file: subagents must be an object",
-    })
-  const next = { ...current, subagents: { ...subagents, [limit]: value } }
+  const decodedSubagents =
+    subagents === undefined
+      ? {}
+      : yield* decodeSettingsObject(subagents).pipe(
+          Effect.mapError(() =>
+            SettingsDecoder.Decoder.ConfigurationSettingsFileError.make({
+              path: filename,
+              message: "Cannot update settings file: subagents must be an object",
+            }),
+          ),
+        )
+  const next = { ...current, subagents: { ...decodedSubagents, [limit]: value } }
   SettingsDecoder.Decoder.decodeSettingsInput(filename, next)
   yield* fileSystem.makeDirectory(path.dirname(filename), { recursive: true })
   const encoded = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(next)

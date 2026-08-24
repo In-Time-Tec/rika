@@ -255,10 +255,10 @@ it.effect.skipIf(databaseUrl === "")(
             authorizationId: "internal-approval",
             authorizationCheckpoint: { version: 4, cursor: "checkpoint-cursor" },
           })
-          const stored = (yield* query(
+          const stored = yield* Schema.decodeUnknownEffect(Schema.String)((yield* query(
             pool,
             `SELECT jsonb_agg(to_jsonb(record))::text AS value FROM rika_hosted_tool_audit_records record`,
-          )).rows[0]?.value as string
+          )).rows[0]?.value)
           expect(stored).not.toContain(rawMarker)
           expect(stored).not.toContain("command")
           const mutation = yield* Effect.result(

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as ThreadDeletion from "@rika/product/thread-deletion"
 import type * as RootTurnOwner from "@rika/product/root-turn-owner"
 import { rankCase, statusRank, threadState, threadStateFromRank } from "@rika/product/thread-state"
 import * as ThreadRepository from "../../src/thread/memory-repository"
+import * as TurnRepository from "../../src/turn/memory/repository"
 import { Effect, Semaphore } from "effect"
 
 const viaRank = (statuses: ReadonlyArray<string>) =>
@@ -29,10 +32,22 @@ it.effect("keeps a failed cleanup tombstoned and retries the exact cleanup seque
       closeKernel: () => Effect.sync(() => calls.push("close")).pipe(Effect.asVoid),
       dropKernelState: () => Effect.sync(() => calls.push("drop")).pipe(Effect.asVoid),
     })
-    const rootTurns = {
+    const rootTurns: RootTurnOwner.Interface = {
+      claim: () => Effect.die("unused"),
+      release: () => Effect.die("unused"),
+      claimQueued: () => Effect.die("unused"),
+      startTurn: () => Effect.die("unused"),
+      recoverExecutionAdmissions: Effect.die("unused"),
+      prepareSteering: () => Effect.die("unused"),
+      prepareQueuedSteering: () => Effect.die("unused"),
+      recoverSteeringAdmissions: Effect.die("unused"),
+      acknowledgeSteeringRejection: () => Effect.die("unused"),
+      watchTurn: () => Effect.die("unused"),
+      install: () => Effect.die("unused"),
+      accepted: () => Effect.die("unused"),
       quiesceThread: () => Effect.sync(() => calls.push("quiesce")).pipe(Effect.asVoid),
-    } as unknown as RootTurnOwner.Interface
-    const turns = { list: () => Effect.succeed([]) } as unknown as import("@rika/product/turn-repository").Interface
+    }
+    const turns = yield* TurnRepository.makeMemory()
     const saga = ThreadDeletion.make({
       threads: repository,
       turns,
@@ -71,26 +86,40 @@ it.effect(
         closeKernel: (input) => Effect.sync(() => calls.push(`close:${input.sessionId}`)).pipe(Effect.asVoid),
         dropKernelState: (input) => Effect.sync(() => calls.push(`drop:${input.sessionId}`)).pipe(Effect.asVoid),
       })
-      const rootTurns = {
+      const rootTurns: RootTurnOwner.Interface = {
+        claim: () => Effect.die("unused"),
+        release: () => Effect.die("unused"),
+        claimQueued: () => Effect.die("unused"),
+        startTurn: () => Effect.die("unused"),
+        recoverExecutionAdmissions: Effect.die("unused"),
+        prepareSteering: () => Effect.die("unused"),
+        prepareQueuedSteering: () => Effect.die("unused"),
+        recoverSteeringAdmissions: Effect.die("unused"),
+        acknowledgeSteeringRejection: () => Effect.die("unused"),
+        watchTurn: () => Effect.die("unused"),
+        install: () => Effect.die("unused"),
+        accepted: () => Effect.die("unused"),
         quiesceThread: () => Effect.sync(() => calls.push("quiesce")).pipe(Effect.asVoid),
-      } as unknown as RootTurnOwner.Interface
-      const turns = {
-        list: () =>
-          Effect.succeed([
-            {
-              _tag: "AgentExecution",
-              id: "turn-1",
-              threadId: String(threadId),
-              executionLink: {
-                runId: "run-1",
-                titleRunId: "run-1:title",
-                turnId: "turn-1",
-                threadId: String(threadId),
-              },
-            },
-            { _tag: "RecordedShell", id: "turn-2", threadId: String(threadId), executionLink: undefined },
-          ]),
-      } as unknown as import("@rika/product/turn-repository").Interface
+      }
+      const turns = yield* TurnRepository.makeMemory([
+        Turn.AgentExecutionTurn.make({
+          id: Turn.TurnId.make("turn-1"),
+          threadId,
+          prompt: "prompt",
+          status: "completed",
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+          executionLink: {
+            runId: "run-1",
+            titleRunId: "run-1:title",
+            turnId: "turn-1",
+            threadId: String(threadId),
+          },
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      ])
       const saga = ThreadDeletion.make({
         threads: repository,
         turns,

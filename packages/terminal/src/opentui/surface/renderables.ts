@@ -7,7 +7,4 @@ export class ProjectedEditorRenderable extends EditBufferRenderable {
   }
 }
 
-export const cutoutBackground = (renderer: CliRenderer): RGBA => {
-  const background: unknown = Reflect.get(renderer, "backgroundColor")
-  return background instanceof RGBA && background.a > 0 ? RGBA.defaultBackground(background) : RGBA.defaultBackground()
-}
+export const cutoutBackground = (_renderer: CliRenderer): RGBA => RGBA.defaultBackground()

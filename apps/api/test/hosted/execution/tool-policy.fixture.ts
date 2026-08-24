@@ -1,14 +1,14 @@
-import { Effect } from "effect"
-import type { ActorAttribution } from "@rika/product/hosted-model"
+import { Effect, Schema } from "effect"
+import { ActorAttribution } from "@rika/product/hosted-model"
 import type { HostedToolPolicyService, ToolAuditExecutor } from "../../../src/hosted/execution/tool-policy"
 
-const actor = {
+const actor = Schema.decodeSync(ActorAttribution)({
   _tag: "PersonalActor",
   owner: { _tag: "PersonalOwner", userId: "user-test" },
   userId: "user-test",
   clientId: "client-test",
   deviceId: "device-test",
-} as ActorAttribution
+})
 
 export const testToolPolicy: HostedToolPolicyService = {
   begin: (input) =>

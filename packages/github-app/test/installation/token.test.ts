@@ -14,12 +14,16 @@ const RequestBody = Schema.fromJsonString(
   }),
 )
 
-const requestBody = (request: HttpClientRequest.HttpClientRequest) => {
-  if (request.body._tag !== "Uint8Array") return undefined
-  return Schema.decodeUnknownSync(RequestBody)(new TextDecoder().decode(request.body.body))
+interface JsonFields {
+  readonly [key: string]: Schema.Json | undefined
 }
 
-const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 201) =>
+const requestBody = (request: HttpClientRequest.HttpClientRequest) => {
+  if (request.body._tag !== "Uint8Array") return undefined
+  return Schema.decodeSync(RequestBody)(new TextDecoder().decode(request.body.body))
+}
+
+const response = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json | JsonFields, status = 201) =>
   HttpClientResponse.fromWeb(
     request,
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),

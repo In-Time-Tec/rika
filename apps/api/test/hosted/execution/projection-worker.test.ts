@@ -8,9 +8,14 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
+import * as TranscriptStore from "@rika/product-store/postgres-transcript-repository"
+import * as TurnStore from "@rika/product-store/postgres-turn-repository"
 import { Context, Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
+import {
+  HostedProjectionWorker,
+  layer as hostedProjectionWorkerLayer,
+} from "../../../src/hosted/execution/projection-worker"
 
 const threadId = Thread.ThreadId.make("thread-test")
 const turnId = Turn.TurnId.make("turn-test")
@@ -39,30 +44,33 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
     Effect.gen(function* () {
       const settled = yield* Deferred.make<Turn.AgentExecutionTurn>()
       let projection: Projection | undefined
-      const turns = {
+      const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
+      const turns = TurnRepository.Service.of({
+        ...turnRepository,
         get: () => Effect.succeed(turn),
-        setStatus: (_id: Turn.TurnId, status: ExecutionProjection.Result["status"], now: number) => {
-          const updated = { ...turn, status, updatedAt: now }
-          return Deferred.succeed(settled, updated).pipe(Effect.as(updated))
-        },
-      } as unknown as TurnRepository.Interface
-      const transcripts = {
+        setStatus: (id, status, now) =>
+          turnRepository.setStatus(id, status, now).pipe(Effect.tap((updated) => Deferred.succeed(settled, updated))),
+      })
+      const transcripts = TranscriptRepository.Service.of({
+        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
         get: () => Effect.succeed(projection),
         commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
           Effect.sync(() => {
-            projection = {
+            const common = {
               turn,
               units: change._tag === "ProjectionSnapshot" ? change.units : (projection?.units ?? []),
               checkpointGeneration: (projection?.checkpointGeneration ?? 0) + 1,
               revision: change.revision,
               state: change.state,
-              ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
               projectionVersion: ExecutionProjection.projectionVersion,
             }
+            const next: Projection =
+              change.checkpoint === undefined ? common : { ...common, projectorCheckpoint: change.checkpoint }
+            projection = next
             return "committed" as const
           }),
-      } as unknown as TranscriptRepository.Interface
+      })
       const running: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
         revision: 0,
@@ -110,13 +118,15 @@ it.effect("does not reset active projection age when a duplicate candidate is re
   Effect.scoped(
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
-      const turns = {
+      const turns = TurnRepository.Service.of({
+        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
         get: () => Deferred.succeed(started, undefined).pipe(Effect.as(turn)),
-      } as unknown as TurnRepository.Interface
-      const transcripts = {
+      })
+      const transcripts = TranscriptRepository.Service.of({
+        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
-        get: () => Effect.void,
-      } as unknown as TranscriptRepository.Interface
+        get: () => Effect.as(Effect.void, undefined),
+      })
       const gateway = ExecutionGateway.Service.of({
         ...Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service),
         watchTurn: () => Stream.never,
@@ -157,7 +167,8 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
         id,
         executionLink: { runId: `run-${id}`, threadId, turnId: id },
       })
-      const turns = {
+      const turns = TurnRepository.Service.of({
+        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
         get: (id: Turn.TurnId) => Effect.succeed(turnFor(id)),
         setStatus: (id: Turn.TurnId) =>
           Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(
@@ -168,8 +179,13 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
             ),
             Effect.as(turnFor(id)),
           ),
-      } as unknown as TurnRepository.Interface
-      const transcripts = {
+      })
+      const transcriptRepository = Context.get(
+        yield* Layer.build(TranscriptStore.memoryLayer()),
+        TranscriptRepository.Service,
+      )
+      const transcripts = TranscriptRepository.Service.of({
+        ...transcriptRepository,
         listProjectionRecoveryCandidates: () =>
           Ref.get(failedTurns).pipe(
             Effect.map((settled) =>
@@ -179,26 +195,28 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
             ),
           ),
         get: (id: Turn.TurnId) => Effect.sync(() => projections.get(id)),
-        replaceUnits: (failed: Turn.AgentExecutionTurn) =>
-          Ref.update(events, (current) => [...current, `persisted:${failed.id}`]).pipe(
-            Effect.andThen(Ref.update(failedTurns, (current) => new Set([...current, failed.id]))),
-            Effect.as(undefined as never),
+        replaceUnits: (failed, units) =>
+          transcriptRepository.replaceUnits(failed, units).pipe(
+            Effect.tap(() => Ref.update(events, (current) => [...current, `persisted:${failed.id}`])),
+            Effect.tap(() => Ref.update(failedTurns, (current) => new Set([...current, failed.id]))),
           ),
         commitProjection: (candidateTurn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
           Effect.sync(() => {
             const previous = projections.get(candidateTurn.id)
-            projections.set(candidateTurn.id, {
+            const common = {
               turn: candidateTurn,
               units: change._tag === "ProjectionSnapshot" ? change.units : (previous?.units ?? []),
               checkpointGeneration: (previous?.checkpointGeneration ?? 0) + 1,
               revision: change.revision,
               state: change.state,
-              ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
               projectionVersion: ExecutionProjection.projectionVersion,
-            })
+            }
+            const next: Projection =
+              change.checkpoint === undefined ? common : { ...common, projectorCheckpoint: change.checkpoint }
+            projections.set(candidateTurn.id, next)
             return "committed" as const
           }),
-      } as unknown as TranscriptRepository.Interface
+      })
       const completed: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
         revision: 0,
@@ -242,15 +260,17 @@ it.effect("rejects a stale projection worker when listing blocks after a success
     Effect.gen(function* () {
       const lists = yield* Ref.make(0)
       const blocked = yield* Deferred.make<ReadonlyArray<TranscriptRepository.ProjectionRecoveryCandidate>>()
-      const transcripts = {
+      const transcripts = TranscriptRepository.Service.of({
+        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () =>
           Ref.getAndUpdate(lists, (count) => count + 1).pipe(
             Effect.flatMap((count) => (count === 0 ? Effect.succeed([]) : Deferred.await(blocked))),
           ),
-      } as unknown as TranscriptRepository.Interface
+      })
+      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, {} as TurnRepository.Interface)),
+          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),
@@ -267,12 +287,14 @@ it.effect("rejects a stale projection worker when listing blocks after a success
 it.effect("rejects the current projection list failure immediately", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const transcripts = {
+      const transcripts = TranscriptRepository.Service.of({
+        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.die("list unavailable"),
-      } as unknown as TranscriptRepository.Interface
+      })
+      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, {} as TurnRepository.Interface)),
+          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),

@@ -494,14 +494,11 @@ test("keeps the welcome orb moving without dispatching global ViewState ticks", 
       try {
         surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
         yield* openTui(() => setup.renderOnce())
-        const welcome = (
-          surface as unknown as { readonly welcomeController: { readonly child: { readonly content: unknown } } }
-        ).welcomeController.child
-        const firstContent = welcome.content
-        clock.advance(1_000)
+        const firstPhase = surface.animationDiagnostics().welcomePhase
+        clock.advance(100)
         yield* openTui(() => setup.renderOnce())
         expect(setup.captureCharFrame()).toContain("Welcome to Rika")
-        expect(welcome.content).not.toBe(firstContent)
+        expect(surface.animationDiagnostics().welcomePhase).toBeGreaterThan(firstPhase)
         expect(globalTicks).toBe(0)
         expect(setup.renderer.isRunning).toBe(false)
       } finally {

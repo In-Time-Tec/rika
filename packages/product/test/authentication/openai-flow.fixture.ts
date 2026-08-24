@@ -35,10 +35,7 @@ const jwtImpl = (account = "account-secret", user = "user-secret", exp = 2_000_0
   return `header.${payload}.signature`
 }
 
-export const jwt: {
-  (arg1: unknown, arg2: unknown): (arg0: unknown) => ReturnType<typeof jwtImpl>
-  (arg0: unknown, arg1: unknown, arg2: unknown): ReturnType<typeof jwtImpl>
-} = Function.dual((args) => args.length <= 3, jwtImpl)
+export const jwt = { make: jwtImpl }
 
 export const expiryJwt = (exp: number) => {
   const payload = Encoding.encodeBase64Url(new TextEncoder().encode(JSON.stringify({ exp })))
@@ -46,8 +43,8 @@ export const expiryJwt = (exp: number) => {
 }
 
 const tokensImpl = (account?: string, user?: string) => ({
-  access_token: jwt(account, user),
-  id_token: jwt(account, user),
+  access_token: jwt.make(account, user),
+  id_token: jwt.make(account, user),
   refresh_token: "refresh-secret",
   expires_in: 3600,
 })
@@ -60,8 +57,8 @@ export const tokens: {
 type Disk = typeof Contract.CredentialDisk.Type
 export const disk = (overrides: Partial<Disk> = {}): Disk => ({
   formatVersion: Flow.configuration.credentialFormatVersion,
-  accessToken: jwt(),
-  idToken: jwt(),
+  accessToken: jwt.make(),
+  idToken: jwt.make(),
   refreshToken: "refresh-secret",
   accountId: "account-secret",
   fingerprint: createHash("sha256").update("account-secret\0user-secret").digest("base64url"),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { HarnessState, HarnessStore } from "tenetkit/harness"
-import { Context, Effect } from "effect"
+import { Context, Effect, Schema } from "effect"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { mountModules } from "../support/binding"
 
@@ -24,8 +24,12 @@ const registry = (backing: ReturnType<typeof store>) =>
 const baseline = (backing: ReturnType<typeof store>, scope: string) =>
   HarnessState.snapshotId(backing.states.get(scope) ?? HarnessState.empty(scope))
 
-const output = (response: unknown) =>
-  (response as { readonly output: { readonly snapshotId: string; readonly applied: number } }).output
+const MutationResponse = Schema.Struct({
+  _tag: Schema.tag("Success"),
+  output: Schema.Struct({ snapshotId: Schema.String, applied: Schema.Finite }),
+})
+const SnapshotResponse = Schema.Struct({ _tag: Schema.tag("Success"), output: HarnessState.HarnessState })
+const OverviewResponse = Schema.Struct({ _tag: Schema.tag("Success"), output: Schema.Struct({ text: Schema.String }) })
 
 const memories = (backing: ReturnType<typeof store>, scope: string) =>
   (backing.states.get(scope)?.entries.memory ?? []).map((entry) => entry.id)
@@ -93,7 +97,7 @@ describe("per-session continual harness", () => {
       })
       expect(response._tag).toBe("Success")
       expect(memories(backing, "thread:session")).toEqual([])
-      expect(output(response).snapshotId).toBe(before)
+      expect((yield* Schema.decodeUnknownEffect(MutationResponse)(response)).output.snapshotId).toBe(before)
     }),
   )
 
@@ -158,7 +162,7 @@ describe("per-session continual harness", () => {
         },
       })
       const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
-      const merged = (response as { readonly output: HarnessState.HarnessState }).output
+      const merged = (yield* Schema.decodeUnknownEffect(SnapshotResponse)(response)).output
       expect(merged.entries.prompt.map((entry) => entry.id)).toEqual(["always"])
       expect(merged.entries.prompt[0]?.scope).toBe("global")
     }),
@@ -185,7 +189,7 @@ describe("per-session continual harness", () => {
         input: { id: "shared", title: "thread", content: "inner", baseSnapshot: baseline(backing, "thread:session") },
       })
       const response = yield* mounted.invoke({ module: "harness", operation: "snapshot", input: {} })
-      const merged = (response as { readonly output: HarnessState.HarnessState }).output
+      const merged = (yield* Schema.decodeUnknownEffect(SnapshotResponse)(response)).output
       expect(merged.entries.memory).toHaveLength(1)
       expect(merged.entries.memory[0]).toMatchObject({ title: "thread", scope: "thread:session" })
     }),
@@ -207,7 +211,7 @@ describe("per-session continual harness", () => {
           },
         })
       const response = yield* mounted.invoke({ module: "harness", operation: "overview", input: {} })
-      const text = (response as { readonly output: { readonly text: string } }).output.text
+      const text = (yield* Schema.decodeUnknownEffect(OverviewResponse)(response)).output.text
       expect(text).toContain("memory: 12 (showing 8)")
       expect(text).not.toContain("x".repeat(600))
     }),

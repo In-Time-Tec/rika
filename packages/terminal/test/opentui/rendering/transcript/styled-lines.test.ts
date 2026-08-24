@@ -354,7 +354,6 @@ test("preserves a detached window when prepended history and live appends share 
       }))
       const base: Model = { ...initial("/work", "high"), entries, items }
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      const state = surface as unknown as { readonly transcriptWindowEnd: number }
       try {
         surface.update(base)
         yield* openTui(() => setup.flush())
@@ -396,7 +395,7 @@ test("preserves a detached window when prepended history and live appends share 
         surface.update({ ...base, entries: combinedEntries, items: combinedItems }, true)
         yield* openTui(() => setup.flush())
 
-        expect(state.transcriptWindowEnd).toBe(550)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(550)
         expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(marker)
       } finally {
         surface.destroy()

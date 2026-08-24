@@ -1,6 +1,7 @@
 import { Function } from "effect"
 import type { Model } from "../model"
 import type { TranscriptItem } from "./model"
+import { decodeTranscriptItems } from "./model"
 
 export const maxInMemoryTranscriptUnits = 20_000
 
@@ -8,7 +9,7 @@ export const trimTranscriptTimeline: {
   (cap: number): (model: Model) => Model
   (model: Model, cap: number): Model
 } = Function.dual(2, (model: Model, cap: number): Model => {
-  const items = model.items as ReadonlyArray<TranscriptItem>
+  const items = decodeTranscriptItems(model.items)
   if (items.length <= cap) return model
   const childrenByParent = new Map<string, Array<number>>()
   for (const [position, item] of items.entries())

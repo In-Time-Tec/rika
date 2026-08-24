@@ -1,4 +1,5 @@
 import { ThreadId } from "@rika/product/thread-record"
+import { Function } from "effect"
 import type { MemoryQueueState, MemoryState } from "./state"
 
 export const emptyQueueState: MemoryQueueState = {
@@ -16,22 +17,12 @@ export function queueState(
   return state.queues.get(threadId) ?? emptyQueueState
 }
 
-export function withQueueState(threadId: ThreadId, queue: MemoryQueueState): (state: MemoryState) => MemoryState
-export function withQueueState(state: MemoryState, threadId: ThreadId, queue: MemoryQueueState): MemoryState
-export function withQueueState(
-  stateOrThreadId: MemoryState | ThreadId,
-  threadIdOrQueue?: ThreadId | MemoryQueueState,
-  queue?: MemoryQueueState,
-): MemoryState | ((state: MemoryState) => MemoryState) {
-  if (queue === undefined) {
-    if (typeof stateOrThreadId !== "string" || threadIdOrQueue === undefined || typeof threadIdOrQueue === "string")
-      throw new Error("Invalid queue state arguments")
-    return (state) => withQueueState(state, stateOrThreadId, threadIdOrQueue)
-  }
-  if (typeof stateOrThreadId === "string" || threadIdOrQueue === undefined || typeof threadIdOrQueue !== "string")
-    throw new Error("Invalid queue state arguments")
-  return {
-    ...stateOrThreadId,
-    queues: new Map(stateOrThreadId.queues).set(threadIdOrQueue, queue),
-  }
-}
+const withQueueStateImpl = (state: MemoryState, threadId: ThreadId, queue: MemoryQueueState): MemoryState => ({
+    ...state,
+    queues: new Map(state.queues).set(threadId, queue),
+  })
+
+export const withQueueState: {
+  (threadId: ThreadId, queue: MemoryQueueState): (state: MemoryState) => MemoryState
+  (state: MemoryState, threadId: ThreadId, queue: MemoryQueueState): MemoryState
+} = Function.dual(3, withQueueStateImpl)

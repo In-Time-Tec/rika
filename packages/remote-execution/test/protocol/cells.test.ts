@@ -148,7 +148,7 @@ describe("Cells", () => {
                   count === 1
                     ? Deferred.succeed(firstReadStarted, undefined).pipe(
                         Effect.andThen(Deferred.await(releaseFirstRead)),
-                        Effect.as(undefined as State | undefined),
+                        Effect.as<State | undefined>(undefined),
                       )
                     : state.read(operationKey),
                 ),
@@ -337,7 +337,7 @@ describe("Cells", () => {
             read: () =>
               Deferred.succeed(readStarted, undefined).pipe(
                 Effect.andThen(Deferred.await(releaseRead)),
-                Effect.as(undefined as State | undefined),
+                Effect.as<State | undefined>(undefined),
               ),
             write: (_operationKey, state) =>
               Effect.sync(() => {

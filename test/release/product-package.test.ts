@@ -5,7 +5,7 @@ import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
 const PackageManifest = Schema.Struct({ exports: Schema.Record(Schema.String, Schema.String) })
 const PackageManifestJson = Schema.fromJsonString(PackageManifest)
 
-const expected: Record<string, ReadonlyArray<string>> = {
+const expected = {
   "@rika/configuration": [
     "behavior-mode",
     "model-route",
@@ -204,7 +204,7 @@ it.effect("every frozen export target resolves to a source file", () =>
       const fileSystem = Context.get(context, FileSystem.FileSystem)
       for (const [packageName, names] of Object.entries(expected)) {
         const packagePath = packageName.slice("@rika/".length)
-        const manifest = yield* Schema.decodeUnknownEffect(PackageManifestJson)(
+        const manifest = yield* Schema.decodeEffect(PackageManifestJson)(
           yield* fileSystem.readFileString(path.resolve("packages", packagePath, "package.json")),
         )
         for (const name of names) {
@@ -229,7 +229,7 @@ for (const [packageName, names] of Object.entries(expected)) {
           const context = yield* Layer.build(BunServices.layer)
           const path = Context.get(context, Path.Path)
           const fileSystem = Context.get(context, FileSystem.FileSystem)
-          const manifest = yield* Schema.decodeUnknownEffect(PackageManifestJson)(
+          const manifest = yield* Schema.decodeEffect(PackageManifestJson)(
             yield* fileSystem.readFileString(path.resolve("packages", packagePath, "package.json")),
           )
           expect(Object.keys(manifest.exports).toSorted()).toEqual(names.map((name) => `./${name}`).toSorted())

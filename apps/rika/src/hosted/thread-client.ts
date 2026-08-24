@@ -147,20 +147,21 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const connection = yield* connect(input.ticket)
             const requestId = `${input.commandId}:create`
+            const createThread = {
+              _tag: "CreateThread" as const,
+              commandId: CommandId.make(input.commandId),
+              idempotencyKey: IdempotencyKey.make(input.commandId),
+              expectedThreadVersion: ThreadVersion.make("0"),
+              owner:
+                input.owner.kind === "personal"
+                  ? ({ kind: "personal" } as const)
+                  : ({ kind: "organization", organizationId: input.owner.organizationId } as const),
+              executorKind: input.executorKind,
+            }
+            if (input.project !== undefined) Object.assign(createThread, { projectId: ProjectId.make(input.project) })
+            if (input.runnerTarget !== undefined) Object.assign(createThread, { runnerTarget: input.runnerTarget })
             yield* connection.send(
-              envelope(requestId, {
-                _tag: "CreateThread",
-                commandId: CommandId.make(input.commandId),
-                idempotencyKey: IdempotencyKey.make(input.commandId),
-                expectedThreadVersion: ThreadVersion.make("0"),
-                owner:
-                  input.owner.kind === "personal"
-                    ? { kind: "personal" }
-                    : { kind: "organization", organizationId: input.owner.organizationId },
-                ...(input.project === undefined ? {} : { projectId: ProjectId.make(input.project) }),
-                executorKind: input.executorKind,
-                ...(input.runnerTarget === undefined ? {} : { runnerTarget: input.runnerTarget }),
-              }),
+              envelope(requestId, createThread),
             )
             const accepted = yield* awaitCommand(connection, requestId, input.commandId)
             if (accepted.result._tag !== "ThreadCreated")
@@ -178,16 +179,17 @@ export const layer = Layer.effect(
             const connection = yield* connect(input.ticket)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:submit`
+            const submitPrompt = {
+              _tag: "SubmitPrompt" as const,
+              threadId: ThreadId.make(input.threadId),
+              commandId: CommandId.make(input.commandId),
+              idempotencyKey: IdempotencyKey.make(input.commandId),
+              expectedThreadVersion: snapshot.threadVersion,
+              text,
+            }
+            if (input.request.mode !== undefined) Object.assign(submitPrompt, { mode: input.request.mode })
             yield* connection.send(
-              envelope(requestId, {
-                _tag: "SubmitPrompt",
-                threadId: ThreadId.make(input.threadId),
-                commandId: CommandId.make(input.commandId),
-                idempotencyKey: IdempotencyKey.make(input.commandId),
-                expectedThreadVersion: snapshot.threadVersion,
-                text,
-                ...(input.request.mode === undefined ? {} : { mode: input.request.mode }),
-              }),
+              envelope(requestId, submitPrompt),
             )
             const accepted = yield* awaitCommand(connection, requestId, input.commandId, input.threadId)
             if (accepted.result._tag !== "PromptAdmitted")

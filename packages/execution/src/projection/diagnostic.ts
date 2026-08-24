@@ -69,17 +69,18 @@ export const makeDiagnosticProjection = (input: DiagnosticProjectionInput): Diag
   ): string | undefined => {
     if (node.hidden) return undefined
     const key = localId(family, node.publicId, discriminator)
-    const block = unit(node, key, {
+    const errorBlock: Extract<Unit["content"], { readonly _tag: "Block" }> = {
       _tag: "Block",
       block: {
         _tag: "Error",
         title: titleText,
         detail: bounded(detail, toolTextLimit),
-        ...(category === undefined ? {} : { category }),
-        ...(retryable === undefined ? {} : { retryable }),
         turnId,
       },
-    })
+    }
+    if (category !== undefined) Object.assign(errorBlock.block, { category })
+    if (retryable !== undefined) Object.assign(errorBlock.block, { retryable })
+    const block = unit(node, key, errorBlock)
     put(outcome === undefined ? block : { ...block, executionOutcome: outcome })
     return key
   }

@@ -1,7 +1,7 @@
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import * as Contract from "./openai-auth-contract"
-import * as OpenAiAuth from "./openai-auth-service"
+import * as Contract from "./openai-contract"
+import * as OpenAiAuth from "./openai-service"
 
 const PermanentRefreshError = Schema.Struct({
   error: Schema.optionalKey(Schema.Union([Schema.String, Schema.Struct({ code: Schema.optionalKey(Schema.String) })])),
@@ -78,7 +78,7 @@ export const layer = Layer.effect(
               }
               return decode(response, PermanentRefreshError).pipe(
                 Effect.flatMap((body) => {
-                  const code = typeof body.error === "string" ? body.error : (body.error?.code ?? body.code)
+                  const code = Schema.is(Schema.String)(body.error) ? body.error : (body.error?.code ?? body.code)
                   return Effect.fail(
                     code === "refresh_token_expired" ||
                       code === "refresh_token_reused" ||

@@ -5,7 +5,7 @@ import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Redacted, Sche
 import { ProviderCredentialStore, ProviderCredentialStoreError } from "@rika/product/provider-credential-store"
 import type { HostedOwner } from "@rika/product/hosted-model"
 import type { AuthenticatedPrincipal } from "../product"
-import { makeSecretCipher } from "../../security/secret-cipher"
+import { SecretCipherService, layer as secretCipherLayer } from "../../security/secret-cipher"
 
 export const HostedModelProvider = Schema.Literals(["openai", "anthropic", "openrouter"])
 export type HostedModelProvider = typeof HostedModelProvider.Type
@@ -133,7 +133,7 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
       const sql = yield* PgClient.PgClient
       const crypto = yield* Crypto.Crypto
       const openAiHttp = yield* OpenAiAuth.Http
-      const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "provider-credential" })
+      const cipher = yield* SecretCipherService
       const authorizedOwnerId = Effect.fn("HostedProviderCredentials.authorizedOwnerId")(function* (
         principal: AuthenticatedPrincipal,
         owner: HostedOwner,
@@ -211,23 +211,26 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
           Effect.map((rows) => rows[0]),
         )
       const decodeOpenAiAccount = (row: OpenAiAccountRow) => {
-        if (row.key_version !== 1 || row.nonce === null || row.ciphertext === null || row.authentication_tag === null) {
+        const nonce = row.nonce
+        const ciphertext = row.ciphertext
+        const authenticationTag = row.authentication_tag
+        if (row.key_version !== 1 || nonce === null || ciphertext === null || authenticationTag === null) {
           return Effect.fail(openAiStoreError("corrupt", "OpenAI account credential record is corrupt"))
         }
         return Effect.try({
           try: () =>
             cipher.decrypt(`${row.owner_id}/openai-account`, {
               keyVersion: 1,
-              nonce: row.nonce!,
-              ciphertext: row.ciphertext!,
-              authenticationTag: row.authentication_tag!,
+              nonce,
+              ciphertext,
+              authenticationTag,
             }),
           catch: () => openAiStoreError("corrupt", "OpenAI account credential cannot be decrypted"),
         }).pipe(
           Effect.flatMap((value) =>
-            Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAiAuthContract.CredentialDisk))(
-              Redacted.value(value),
-            ).pipe(Effect.mapError(() => openAiStoreError("corrupt", "OpenAI account credential is corrupt"))),
+            Schema.decodeEffect(Schema.fromJsonString(OpenAiAuthContract.CredentialDisk))(Redacted.value(value)).pipe(
+              Effect.mapError(() => openAiStoreError("corrupt", "OpenAI account credential is corrupt")),
+            ),
           ),
           Effect.filterOrFail(
             (value) => value.fingerprint === row.fingerprint,
@@ -502,6 +505,8 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
         openAiAccountAccess,
       })
     }),
+  ).pipe(
+    Layer.provide(secretCipherLayer({ encodedKey: options.encryptionKey, domain: "provider-credential" })),
   )
 
 export const storeLayer = (options: { readonly encryptionKey: Redacted.Redacted<string> }) =>
@@ -509,7 +514,7 @@ export const storeLayer = (options: { readonly encryptionKey: Redacted.Redacted<
     ProviderCredentialStore,
     Effect.gen(function* () {
       const sql = yield* PgClient.PgClient
-      const cipher = makeSecretCipher({ encodedKey: options.encryptionKey, domain: "provider-credential" })
+      const cipher = yield* SecretCipherService
       return ProviderCredentialStore.of({
         load: (credentialIdentity) =>
           sql<CredentialRow>`SELECT
@@ -547,4 +552,6 @@ export const storeLayer = (options: { readonly encryptionKey: Redacted.Redacted<
         remove: () => Effect.fail(storeError("unsafe", "Hosted credentials require an authenticated revoke")),
       })
     }),
+  ).pipe(
+    Layer.provide(secretCipherLayer({ encodedKey: options.encryptionKey, domain: "provider-credential" })),
   )

@@ -3,6 +3,7 @@ import { ModelRegistry, Response as AiResponse } from "tenetkit"
 import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Context, Effect, Layer, Random, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
@@ -15,9 +16,9 @@ type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
 
 const withIdentity = (model: RouteModel, identity: string): RouteModel => ({
   ...model,
-  registrationIdentity: identity as typeof model.registrationIdentity,
+  registrationIdentity: modelRegistrationIdentity(identity),
   candidates: model.candidates.map((candidate) =>
-    Object.assign({}, candidate, { registrationIdentity: identity as typeof candidate.registrationIdentity }),
+    Object.assign({}, candidate, { registrationIdentity: modelRegistrationIdentity(identity) }),
   ),
 })
 

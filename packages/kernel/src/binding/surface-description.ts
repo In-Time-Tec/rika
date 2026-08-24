@@ -1,3 +1,4 @@
+import { Option, Schema, SchemaAST } from "effect"
 import type { HostBindingRegistry } from "tenetkit/repl"
 import type { BindingRequirements } from "./requirements"
 
@@ -14,33 +15,36 @@ import type { BindingRequirements } from "./requirements"
  * refusals were identical in kind: `range` sent as `{ start, end }` when it is a two-element array,
  * `depth` sent as 10 against a maximum of 8, `limit` sent as 50 against 20.
  */
-const boundsOf = (schema: unknown): string | undefined => {
-  const ast = (schema as { readonly ast?: { readonly _tag?: string; readonly checks?: ReadonlyArray<unknown> } }).ast
-  if (ast === undefined) return undefined
+const BoundRepresentation = Schema.Struct({
+  id: Schema.String,
+  payload: Schema.NullOr(
+    Schema.Struct({
+      exclusiveMinimum: Schema.optionalKey(Schema.Finite),
+      minimum: Schema.optionalKey(Schema.Finite),
+      exclusiveMaximum: Schema.optionalKey(Schema.Finite),
+      maximum: Schema.optionalKey(Schema.Finite),
+    }),
+  ),
+})
+
+const boundsOf = (ast: SchemaAST.AST): string | undefined => {
   let minimum: number | undefined
   let maximum: number | undefined
   let length: number | undefined
   for (const check of ast.checks ?? []) {
-    const representation = (
-      check as {
-        readonly annotations?: {
-          readonly representation?: { readonly id?: string; readonly payload?: Record<string, unknown> | null }
-        }
-      }
-    ).annotations?.representation
-    const payload = representation?.payload
-    if (payload === undefined || payload === null) continue
-    const tag = representation?.id
-    if (tag === "effect/schema/isGreaterThan" && typeof payload.exclusiveMinimum === "number")
+    const decoded = Schema.decodeUnknownOption(BoundRepresentation)(check.annotations?.representation)
+    if (Option.isNone(decoded) || decoded.value.payload === null) continue
+    const { id: tag, payload } = decoded.value
+    if (tag === "effect/schema/isGreaterThan" && payload.exclusiveMinimum !== undefined)
       minimum = payload.exclusiveMinimum + 1
-    if (tag === "effect/schema/isGreaterThanOrEqualTo" && typeof payload.minimum === "number") minimum = payload.minimum
-    if (tag === "effect/schema/isLessThan" && typeof payload.exclusiveMaximum === "number")
+    if (tag === "effect/schema/isGreaterThanOrEqualTo" && payload.minimum !== undefined) minimum = payload.minimum
+    if (tag === "effect/schema/isLessThan" && payload.exclusiveMaximum !== undefined)
       maximum = payload.exclusiveMaximum - 1
-    if (tag === "effect/schema/isLessThanOrEqualTo" && typeof payload.maximum === "number") maximum = payload.maximum
+    if (tag === "effect/schema/isLessThanOrEqualTo" && payload.maximum !== undefined) maximum = payload.maximum
     if (
       tag === "effect/schema/isLengthBetween" &&
       payload.minimum === payload.maximum &&
-      typeof payload.minimum === "number"
+      payload.minimum !== undefined
     )
       length = payload.minimum
   }
@@ -54,16 +58,28 @@ const boundsOf = (schema: unknown): string | undefined => {
   return undefined
 }
 
-const shapeOf = (fields: Record<string, unknown> | undefined): string => {
+const objectFields = (ast: SchemaAST.AST): ReadonlyArray<SchemaAST.PropertySignature> | undefined =>
+  ast._tag === "Objects" ? ast.propertySignatures : undefined
+
+const literalOf = (ast: SchemaAST.AST): SchemaAST.LiteralValue | undefined => {
+  if (ast._tag === "Literal") return ast.literal
+  if (ast._tag === "Union") {
+    const literal = ast.types.find((member) => member._tag === "Literal")
+    return literal?._tag === "Literal" ? literal.literal : undefined
+  }
+  return undefined
+}
+
+const objectDescription = (fields: ReadonlyArray<SchemaAST.PropertySignature> | undefined): string => {
   if (fields === undefined) return "…"
   /**
    * A union member is told apart by its tag, and a tag carries one `literal` rather than a list of
    * them. Naming the fields alone leaves a model shown several alternatives with nothing to choose
    * between them, which is how one call gets guessed six ways.
    */
-  const named = Object.entries(fields).map(([name, value]) => {
-    const holder = value as { readonly literal?: unknown; readonly schema?: { readonly literal?: unknown } }
-    const literal = holder.literal ?? holder.schema?.literal
+  const named = fields.map((field) => {
+    const name = String(field.name)
+    const literal = literalOf(field.type)
     return literal === undefined ? name : `${name}: ${JSON.stringify(literal)}`
   })
   return `{ ${named.join(", ")} }`
@@ -74,22 +90,17 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
     .map((module) => {
       const operations = module.operations
         .map((operation) => {
-          type Literal = {
-            readonly literals?: ReadonlyArray<unknown>
-            readonly literal?: unknown
-            readonly schema?: Literal
-            readonly members?: ReadonlyArray<Literal>
-            readonly fields?: Record<string, Literal>
-          }
           /**
            * Every operation takes a struct, and one that does not cannot be described field by
            * field. Defaulting to none would tell a model the operation takes no argument, so this
            * refuses rather than describing a surface that is not there.
            */
-          const shape = (operation.input as unknown as { readonly fields?: Record<string, Literal> }).fields
-          if (shape === undefined)
+          const inputFields = objectFields(operation.input.ast)
+          if (inputFields === undefined)
             throw new Error(`rika.${module.name}.${operation.name} has an input that is not a struct`)
-          const fields = Object.entries(shape).map(([field, value]) => {
+          const fields = inputFields.map((inputField) => {
+            const field = String(inputField.name)
+            const value = inputField.type
             // An optional field wraps the schema it makes optional, so the allowed values sit one
             // level in. Naming them matters more than naming the field: a model that invents one
             // spends a turn discovering the field would only ever have taken a few.
@@ -98,19 +109,19 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
              * thing that tells one member of a union from another. Reading only the list left a
              * model shown four alternatives with nothing to choose between them.
              */
-            const tag = value.literal ?? value.schema?.literal
-            const literals = value.literals ?? value.schema?.literals ?? (tag === undefined ? undefined : [tag])
+            const members = value._tag === "Union" ? value.types.filter((member) => member._tag !== "Undefined") : [value]
+            const literals = members.flatMap((member) => (member._tag === "Literal" ? [member.literal] : []))
             // A literal is written the way a cell writes it, so a number stays a number rather than
             // arriving quoted and being sent as a string.
-            if (literals !== undefined) return `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`
+            if (literals.length > 0) return `${field}: ${literals.map((one) => JSON.stringify(one)).join("|")}`
             // A field whose value is one of several shapes is named by those shapes, because a model
             // told only the field name reads it as "any value" and writes a string.
-            const members = value.members ?? value.schema?.members
-            if (members === undefined) {
-              const bounds = boundsOf(value.schema ?? value)
+            const alternatives = members.map(objectFields).filter((candidate) => candidate !== undefined)
+            if (alternatives.length === 0) {
+              const bounds = boundsOf(members[0] ?? value)
               return bounds === undefined ? field : `${field}: ${bounds}`
             }
-            return `${field}: ${members.map((member) => shapeOf(member.fields ?? member.schema?.fields)).join("|")}`
+            return `${field}: ${alternatives.map(objectDescription).join("|")}`
           })
           return `${operation.name}(${fields.length === 0 ? "" : `{ ${fields.join(", ")} }`})`
         })

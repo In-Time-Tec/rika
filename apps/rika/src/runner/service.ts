@@ -20,16 +20,19 @@ const statusLine = (status: RunnerStatus) => {
 const runnerProfile = (
   registration: Parameters<RunnerAdmission["Service"]["awaitAdmission"]>[0],
   profile: Profile,
-) => ({
-  workspaceIdentity: registration.workspaceIdentity,
-  ...(profile.project === undefined ? {} : { projectId: ProjectId.make(profile.project) }),
-  repository: registration.repository,
-  kernel: registration.kernel,
-  capabilities: registration.capabilities,
-})
+) => {
+  const runner = {
+    workspaceIdentity: registration.workspaceIdentity,
+    repository: registration.repository,
+    kernel: registration.kernel,
+    capabilities: registration.capabilities,
+  }
+  if (profile.project !== undefined) Object.assign(runner, { projectId: ProjectId.make(profile.project) })
+  return runner
+}
 
 const admissionError = (message: string) => RunnerError.make({ message })
-const mapAdmissionError = (error: unknown) =>
+const mapAdmissionError = (error: HostedError | RunnerError) =>
   Schema.is(RunnerError)(error)
     ? error
     : admissionError(Schema.is(HostedError)(error) ? error.message : "Hosted Runner admission failed")

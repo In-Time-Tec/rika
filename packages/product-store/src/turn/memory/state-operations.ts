@@ -2,7 +2,6 @@ import { TurnResult } from "@rika/product/thread-result"
 import { Effect, Ref, Semaphore } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { TurnId, AgentExecutionTurn, Turn } from "@rika/product/turn-record"
-import { MemoryCoordinatorTypeId } from "./coordination"
 import { clone, sameTurn } from "./state"
 import { emptyQueueState } from "./queue-state"
 import type { MemoryCoordinator } from "./coordination"
@@ -99,13 +98,11 @@ export const makeTurnMemoryState = (initial: ReadonlyArray<Turn>) =>
         setUnlocked: (next) => Ref.set(state, next),
       } satisfies TurnMemoryContext,
       coordinator: {
-        [MemoryCoordinatorTypeId]: {
-          withLock,
-          agentExecutions,
-          adoptRefold,
-          writeRecordedShell,
-        } satisfies MemoryCoordinator,
-      },
+        withLock,
+        agentExecutions,
+        adoptRefold,
+        writeRecordedShell,
+      } satisfies MemoryCoordinator,
       get,
     }
   })

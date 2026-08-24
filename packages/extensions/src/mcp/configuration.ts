@@ -60,66 +60,67 @@ export class ConfigError extends Schema.TaggedError<ConfigError>()("@rika/extens
   message: Schema.String,
 }) {}
 
-const record = (value: unknown): Readonly<Record<string, string>> | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
-  const entries = Object.entries(value)
-  return entries.every(([, item]) => typeof item === "string") ? Object.fromEntries(entries) : undefined
-}
+const StringRecord = Schema.Record(Schema.String, Schema.String)
+const ServerInput = Schema.Struct({
+  command: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  args: Schema.optionalKey(Schema.Array(Schema.String)),
+  env: Schema.optionalKey(StringRecord),
+  cwd: Schema.optionalKey(Schema.String),
+  headers: Schema.optionalKey(StringRecord),
+})
+const ServerInputs = Schema.Record(Schema.String, ServerInput)
+const Document = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 
 const parse = (content: string, source: Source, digest: string): Effect.Effect<ReadonlyArray<Server>, ConfigError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(content).pipe(
+  Schema.decodeEffect(Document)(content).pipe(
     Effect.mapError((cause) => ConfigError.make({ source, message: String(cause) })),
     Effect.flatMap((document) =>
-      Effect.try({
-        try: () => {
-          if (typeof document !== "object" || document === null || Array.isArray(document))
-            throw new Error("Expected object")
-          /**
-           * A bare configuration is its own server map, and `disabled` sits beside those names
-           * rather than among them.
-           */
-          const { disabled: _disabled, ...bare } = document as Record<string, unknown>
-          const servers = "servers" in document ? document.servers : bare
-          if (typeof servers !== "object" || servers === null || Array.isArray(servers))
-            throw new Error("Expected servers object")
-          const parsed: Array<Server> = []
-          for (const [name, raw] of Object.entries(servers)) {
-            if (typeof raw !== "object" || raw === null || Array.isArray(raw))
-              throw new Error(`Invalid server: ${name}`)
-            const hasCommand = "command" in raw
-            const hasUrl = "url" in raw
-            if (hasCommand === hasUrl) throw new Error(`Server requires exactly one of command or url: ${name}`)
-            if (hasCommand && typeof raw.command === "string" && raw.command.length > 0) {
-              const args = "args" in raw ? raw.args : []
-              const environment = "env" in raw ? record(raw.env) : {}
-              if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string") || environment === undefined)
-                throw new Error(`Invalid local server: ${name}`)
-              const cwd = "cwd" in raw ? raw.cwd : undefined
-              if (cwd !== undefined && typeof cwd !== "string") throw new Error(`Invalid cwd: ${name}`)
-              parsed.push({
-                kind: "local",
-                name,
-                command: raw.command,
-                args,
-                environment,
-                cwd,
-                source,
-                sourceDigest: digest,
-              })
-              continue
+      Effect.gen(function* () {
+        const bare = Object.fromEntries(Object.entries(document).filter(([name]) => name !== "disabled"))
+        const serverDocument = "servers" in document ? document.servers : bare
+        const servers = yield* Schema.decodeUnknownEffect(ServerInputs)(serverDocument).pipe(
+          Effect.mapError((cause) => ConfigError.make({ source, message: String(cause) })),
+        )
+        const parsed: Array<Server> = []
+        for (const [name, raw] of Object.entries(servers)) {
+          const hasCommand = raw.command !== undefined
+          const hasUrl = raw.url !== undefined
+          if (hasCommand === hasUrl)
+            return yield* ConfigError.make({
+              source,
+              message: `Server requires exactly one of command or url: ${name}`,
+            })
+          if (raw.command !== undefined && raw.command.length > 0) {
+            const server: LocalServer = {
+              kind: "local",
+              name,
+              command: raw.command,
+              args: raw.args ?? [],
+              environment: raw.env ?? {},
+              source,
+              sourceDigest: digest,
             }
-            if (hasUrl && typeof raw.url === "string") {
-              const headers = "headers" in raw ? record(raw.headers) : {}
-              if (headers === undefined) throw new Error(`Invalid headers: ${name}`)
-              const url = new URL(raw.url).toString()
-              parsed.push({ kind: "remote", name, url, headers, source, sourceDigest: digest })
-              continue
-            }
-            throw new Error(`Server requires command or url: ${name}`)
+            if (raw.cwd !== undefined) parsed.push({ ...server, cwd: raw.cwd })
+            else parsed.push(server)
+            continue
           }
-          return parsed
-        },
-        catch: (cause) => ConfigError.make({ source, message: cause instanceof Error ? cause.message : String(cause) }),
+          if (raw.url !== undefined) {
+            const remoteUrl = raw.url
+            const url = yield* Effect.try({
+              try: () => new URL(remoteUrl).toString(),
+              catch: (cause) =>
+                ConfigError.make({
+                  source,
+                  message: cause instanceof Error ? cause.message : String(cause),
+                }),
+            })
+            parsed.push({ kind: "remote", name, url, headers: raw.headers ?? {}, source, sourceDigest: digest })
+            continue
+          }
+          return yield* ConfigError.make({ source, message: `Server requires command or url: ${name}` })
+        }
+        return parsed
       }),
     ),
   )

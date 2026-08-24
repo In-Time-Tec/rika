@@ -5,23 +5,20 @@ import type { Node } from "../model"
 import { encoded } from "../decoding"
 import { optionalString, record, string } from "../values"
 import { projectorNames } from "../values"
+import { Option, Schema } from "effect"
+import { SubagentGroupParams, type SubagentGroupParams as SubagentGroupInput } from "../subagent/card"
+import type { Card } from "../model"
 
 export interface SemanticResponseProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
   readonly openCell: (node: Node, rawId: string, source: string) => void
-  readonly cardFor: (node: Node, rawId: string, selection: string, prompt: string, label?: string) => unknown
-  readonly groupCards: (node: Node, rawId: string, input: unknown) => unknown
+  readonly cardFor: (node: Node, rawId: string, selection: string, prompt: string, label?: string) => Card
+  readonly groupCards: (node: Node, rawId: string, input: SubagentGroupInput) => ReadonlyArray<Card>
   readonly removeTool: (node: Node, rawId: string) => void
   readonly putTool: (node: Node, rawId: string, name: string, input: string) => void
-  readonly notice: (
-    node: Node,
-    family: string,
-    title: string,
-    detail: string,
-    discriminator: string | number,
-  ) => unknown
+  readonly notice: (node: Node, family: string, title: string, detail: string, discriminator: string | number) => void
   readonly beginOrderedResponse: () => void
   readonly endOrderedResponse: () => void
 }
@@ -71,7 +68,8 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
               )
               input.removeTool(node, part.id)
             } else if (part.name === projectorNames.runChildGroup) {
-              input.groupCards(node, part.id, part.params)
+              const params = Schema.decodeUnknownOption(SubagentGroupParams)(part.params)
+              if (Option.isSome(params)) input.groupCards(node, part.id, params.value)
               input.removeTool(node, part.id)
             } else input.putTool(node, part.id, part.name, encoded(part.params))
             break

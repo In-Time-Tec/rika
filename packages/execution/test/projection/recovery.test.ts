@@ -3,6 +3,7 @@ import { ModelRegistry } from "tenetkit"
 import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Context, Effect, Layer, Random, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
@@ -17,9 +18,9 @@ type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
 
 const withIdentity = (model: RouteModel, identity: string): RouteModel => ({
   ...model,
-  registrationIdentity: identity as typeof model.registrationIdentity,
+  registrationIdentity: modelRegistrationIdentity(identity),
   candidates: model.candidates.map((candidate) =>
-    Object.assign({}, candidate, { registrationIdentity: identity as typeof candidate.registrationIdentity }),
+    Object.assign({}, candidate, { registrationIdentity: modelRegistrationIdentity(identity) }),
   ),
 })
 
@@ -28,25 +29,8 @@ const routeWithIdentity = (rootIdentity: string, titleIdentity: string) => {
   return { ...route, main: withIdentity(route.main, rootIdentity), title: withIdentity(route.title, titleIdentity) }
 }
 
-const partText = (part: unknown): ReadonlyArray<string> => {
-  const candidate = part as { readonly type?: string; readonly text?: string }
-  return candidate.type === "text" && candidate.text !== undefined ? [candidate.text] : []
-}
-
-const messageText = (message: unknown): ReadonlyArray<string> => {
-  const content = (message as { readonly content?: unknown }).content
-  if (typeof content === "string") return [content]
-  return Array.isArray(content) ? content.flatMap(partText) : []
-}
-
-/** Every text part the model actually received, so an assertion reads model context, not a wire shape. */
-const requestText = (requests: ReadonlyArray<unknown>): string =>
-  requests
-    .flatMap((request) => {
-      const prompt = (request as { readonly prompt?: { readonly content?: ReadonlyArray<unknown> } }).prompt
-      return (prompt?.content ?? []).flatMap(messageText)
-    })
-    .join("\n")
+const requestText = (requests: ReadonlyArray<TestModel.Request>): string =>
+  requests.map((request) => JSON.stringify(request.prompt)).join("\n")
 
 it.live(
   "continues a thread so each in-memory turn carries the prior conversation",
@@ -124,14 +108,23 @@ it.live(
               }),
             )
             const gateway = Context.get(context, ExecutionGateway.Service)
-            const receipt = yield* gateway.startTurn({
-              threadId,
-              turnId,
-              workspaceId: "/workspace",
-              prompt,
-              executionRoute: routeWithIdentity("isolation-root", "isolation-title"),
-              ...(titled ? { titleIntent: { _tag: "GenerateThreadTitle" as const, expectedTitle: prompt } } : {}),
-            })
+            const request: Parameters<typeof gateway.startTurn>[0] = titled
+              ? {
+                  threadId,
+                  turnId,
+                  workspaceId: "/workspace",
+                  prompt,
+                  executionRoute: routeWithIdentity("isolation-root", "isolation-title"),
+                  titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: prompt },
+                }
+              : {
+                  threadId,
+                  turnId,
+                  workspaceId: "/workspace",
+                  prompt,
+                  executionRoute: routeWithIdentity("isolation-root", "isolation-title"),
+                }
+            const receipt = yield* gateway.startTurn(request)
             yield* gateway.watchTurn(receipt).pipe(Stream.runCollect)
           }),
         )

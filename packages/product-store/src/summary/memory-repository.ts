@@ -47,7 +47,7 @@ interface Activity {
   readonly updatedAt: number
 }
 
-const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
+const repositoryError = (error: { readonly message: string }) => RepositoryError.make({ message: error.message })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 100, 1), 100)
 
 const compareSummaries = (left: ThreadSummary, right: ThreadSummary) =>
@@ -93,7 +93,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           }),
           { added: 0, modified: 0, removed: 0 },
         )
-        return ThreadSummary.make({
+        const summary = {
           id: thread.id,
           workspace: thread.workspace,
           title: thread.title,
@@ -102,8 +102,12 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           status: ThreadState.threadState(history.map((turn) => turn.status)),
           unread: lastActivityAt > (readValues.get(thread.id) ?? 0),
           lastActivityAt,
-          ...(history.length > 0 && currentProjected.length === history.length ? { editTotals: totals } : {}),
-        })
+        }
+        return ThreadSummary.make(
+          history.length > 0 && currentProjected.length === history.length
+            ? { ...summary, editTotals: totals }
+            : summary,
+        )
       }),
     )
     return summaries
@@ -128,19 +132,27 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
       )
     }),
     replaceTurn: Effect.fn("ThreadSummaryRepository.replaceTurn")(function* (input) {
-      yield* Ref.update(activities, (current) =>
-        (current.get(input.turnId)?.updatedAt ?? Number.NEGATIVE_INFINITY) > input.now
-          ? current
-          : new Map(current).set(input.turnId, {
-              turnId: input.turnId,
-              threadId: input.threadId,
-              ...(input.projectedCursor === undefined ? {} : { projectedCursor: input.projectedCursor }),
-              complete: input.complete,
-              editTotals: structuredClone(input.editTotals),
-              ...(input.lastEventAt === undefined ? {} : { lastEventAt: input.lastEventAt }),
-              updatedAt: input.now,
-            }),
-      )
+      yield* Ref.update(activities, (current) => {
+        if ((current.get(input.turnId)?.updatedAt ?? Number.NEGATIVE_INFINITY) > input.now) return current
+        const activity = {
+          turnId: input.turnId,
+          threadId: input.threadId,
+          complete: input.complete,
+          editTotals: structuredClone(input.editTotals),
+          updatedAt: input.now,
+        }
+        if (input.projectedCursor === undefined)
+          return new Map(current).set(
+            input.turnId,
+            input.lastEventAt === undefined ? activity : { ...activity, lastEventAt: input.lastEventAt },
+          )
+        return new Map(current).set(
+          input.turnId,
+          input.lastEventAt === undefined
+            ? { ...activity, projectedCursor: input.projectedCursor }
+            : { ...activity, projectedCursor: input.projectedCursor, lastEventAt: input.lastEventAt },
+        )
+      })
     }),
     markRead: Effect.fn("ThreadSummaryRepository.markRead")(function* (threadId, now) {
       yield* Ref.update(readAt, (current) => new Map(current).set(threadId, Math.max(current.get(threadId) ?? 0, now)))

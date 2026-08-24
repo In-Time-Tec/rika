@@ -27,17 +27,17 @@ import {
   SubscriptionRef,
 } from "effect"
 import { interactiveTui } from "../../src/interactive/process/lifecycle/loop"
-import {
-  makeTuiAppQueue,
-  makeTuiAppRepositoryLayers,
-  seedHistoricalTranscript,
-  type HistoricalTranscriptFixture,
-  type TuiAppQueue,
-} from "./tui-repositories.harness"
+import * as TuiRepositories from "./tui-repositories.harness"
+import type { HistoricalTranscriptFixture, TuiAppQueue } from "./tui-repositories.harness"
 import type { Lane, LaneModels, Profile, ProviderHttpEnvelopeCounts } from "./tui-model.fixture"
 import { tuiToolRuntimeLayer } from "./tui-tool-runtime.harness"
-import { backendLayer, kernelPoolFor, prepareTuiRuntimeState, type RuntimeStatePreparation } from "./tui-backend.harness"
-import { laneExecutionRoute, makeLaneModels } from "./tui-model.fixture"
+import {
+  backendLayer,
+  kernelPoolFor,
+  prepareTuiRuntimeState,
+  type RuntimeStatePreparation,
+} from "./tui-backend.harness"
+import * as TuiModel from "./tui-model.fixture"
 
 type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
 type InteractiveConnectionState = InteractiveConnection["initialState"]
@@ -155,7 +155,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     yield* fileSystem.writeFileString(target, content)
   }
   const lanes = options.lanes ?? [{ steps: options.script ?? [] }]
-  const laneModels = yield* makeLaneModels(lanes)
+  const laneModels = yield* TuiModel.makeLaneModels(lanes)
   const awaitModelRequests = (count: number): Effect.Effect<void> =>
     Effect.gen(function* () {
       const started = yield* Clock.currentTimeMillis
@@ -174,7 +174,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     threadSearchRepositoryLayer,
     threadSummaryRepositoryLayer,
     transcriptRepositoryLayer,
-  } = makeTuiAppRepositoryLayers()
+  } = TuiRepositories.makeTuiAppRepositoryLayers()
   const repositoryContext = yield* Layer.buildWithScope(
     Layer.mergeAll(
       repositoryLayer,
@@ -187,7 +187,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   )
   const repositories = Layer.succeedContext(repositoryContext)
   if (options.historicalTranscriptFixture !== undefined)
-    yield* seedHistoricalTranscript(options.historicalTranscriptFixture, workspace).pipe(
+    yield* TuiRepositories.seedHistoricalTranscript(options.historicalTranscriptFixture, workspace).pipe(
       Effect.provide(repositoryContext),
     )
   const toolRuntimeContext = yield* Layer.buildWithScope(tuiToolRuntimeLayer(workspace), resourceScope)
@@ -266,7 +266,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
     resolveExecutionRoute: (mode) => {
-      const route = laneExecutionRoute(mode)
+      const route = TuiModel.laneExecutionRoute(mode)
       return Effect.succeed(options.subagents === undefined ? route : { ...route, subagents: options.subagents })
     },
     interactive: (settings, current) => {
@@ -311,16 +311,20 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const threads = Context.get(repositoryContext, ThreadRepository.Service)
   const transcripts =
     options.inspectTranscript === true ? Context.get(repositoryContext, TranscriptRepository.Service) : undefined
-  const queue = makeTuiAppQueue(repositoryContext)
+  const queue = TuiRepositories.makeTuiAppQueue(repositoryContext)
   const operationFiber = yield* Effect.forkChild(
     operation
-      .run({
-        _tag: "Interactive",
-        prompt: options.initialPrompt ?? [],
-        workspace,
-        ...(options.initialThreadId === undefined ? {} : { threadId: options.initialThreadId }),
-        ephemeral: false,
-      })
+      .run(
+        options.initialThreadId === undefined
+          ? { _tag: "Interactive", prompt: options.initialPrompt ?? [], workspace, ephemeral: false }
+          : {
+              _tag: "Interactive",
+              prompt: options.initialPrompt ?? [],
+              workspace,
+              ephemeral: false,
+              threadId: options.initialThreadId,
+            },
+      )
       .pipe(Effect.orDie),
   )
   yield* Effect.addFinalizer(() => Fiber.interrupt(operationFiber).pipe(Effect.asVoid))

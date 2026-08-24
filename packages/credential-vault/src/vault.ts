@@ -60,7 +60,7 @@ export type CredentialVaultFailure =
   | CredentialRevoked
   | CredentialMaterialInvalid
 
-export interface CredentialVaultShape {
+export interface CredentialVaultContract {
   readonly encrypt: (input: EncryptCredentialInput) => Effect.Effect<EncryptedCredential, CredentialVaultFailure>
   readonly decrypt: <A, E, R>(
     input: DecryptCredentialInput,
@@ -70,7 +70,7 @@ export interface CredentialVaultShape {
   readonly revoke: (input: RevokeCredentialInput) => Effect.Effect<EncryptedCredential, CredentialVaultFailure>
 }
 
-export class CredentialVault extends Context.Service<CredentialVault, CredentialVaultShape>()(
+export class CredentialVault extends Context.Service<CredentialVault, CredentialVaultContract>()(
   "@rika/credential-vault/vault/CredentialVault",
 ) {}
 
@@ -166,7 +166,7 @@ export const layer = Layer.effect(
       return yield* Effect.scoped(encryptScoped(input))
     })
 
-    const decrypt: CredentialVaultShape["decrypt"] = Effect.fn("CredentialVault.decrypt")(function* (input, use) {
+    const decrypt: CredentialVaultContract["decrypt"] = Effect.fn("CredentialVault.decrypt")(function* (input, use) {
       yield* requireBinding(input.binding, input.credential)
       yield* requireActive(input.credential)
       const material = yield* decodeMaterial(input.credential)

@@ -228,13 +228,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     notify: boolean,
   ): SteeringAdmissionOutcome => {
     if (admission.outcome._tag !== "Rejected") return { _tag: "Pending" }
-    return {
-      _tag: "Rejected",
-      admission,
-      ...(admission.outcome.queue === undefined ? {} : { queue: admission.outcome.queue }),
-      failure: admission.outcome.failure,
-      notify,
-    }
+    return admission.outcome.queue === undefined
+      ? { _tag: "Rejected", admission, failure: admission.outcome.failure, notify }
+      : { _tag: "Rejected", admission, queue: admission.outcome.queue, failure: admission.outcome.failure, notify }
   }
   const rejectSteering = (
     admission: TurnRepositorySteering.SteeringAdmission,
@@ -251,13 +247,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       if (admission.outcome._tag !== "Accepted") return { _tag: "Pending" as const }
       const receipt = admission.outcome.receipt
       const queue = yield* turns.completeSteeringAdmission(admission.input.idempotencyKey, admission.target, receipt)
-      return {
-        _tag: "Completed" as const,
-        admission,
-        receipt,
-        notify,
-        ...(queue === undefined ? {} : { queue }),
-      }
+      return queue === undefined
+        ? { _tag: "Completed" as const, admission, receipt, notify }
+        : { _tag: "Completed" as const, admission, receipt, notify, queue }
     })
   const recoverSteeringAdmission = (
     admission: TurnRepositorySteering.SteeringAdmission,
@@ -343,26 +335,12 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           return {
             rejected: outcomes.flatMap((outcome) =>
               outcome._tag === "Rejected"
-                ? [
-                    {
-                      admission: outcome.admission,
-                      ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
-                      failure: outcome.failure,
-                      notify: outcome.notify,
-                    },
-                  ]
+                ? [outcome]
                 : [],
             ),
             completed: outcomes.flatMap((outcome) =>
               outcome._tag === "Completed"
-                ? [
-                    {
-                      admission: outcome.admission,
-                      receipt: outcome.receipt,
-                      notify: outcome.notify,
-                      ...(outcome.queue === undefined ? {} : { queue: outcome.queue }),
-                    },
-                  ]
+                ? [outcome]
                 : [],
             ),
             pending: outcomes.some((outcome) => outcome._tag === "Pending" || outcome._tag === "Rejected"),
@@ -372,15 +350,15 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
     ),
     acknowledgeSteeringRejection: (requestId) =>
       ownerAdmission.withPermits(1)(turns.completeRejectedSteeringAdmission(requestId)),
-    watchTurn: (turnId, onChange, onPreview) =>
-      ExecutionProjectionWatch.watch({
-        turnId,
-        turns,
-        transcripts,
-        backend,
-        ...(onChange === undefined ? {} : { onChange }),
-        ...(onPreview === undefined ? {} : { onPreview }),
-      }),
+    watchTurn: (turnId, onChange, onPreview) => {
+      if (onChange === undefined) {
+        if (onPreview === undefined) return ExecutionProjectionWatch.watch({ turnId, turns, transcripts, backend })
+        return ExecutionProjectionWatch.watch({ turnId, turns, transcripts, backend, onPreview })
+      }
+      if (onPreview === undefined)
+        return ExecutionProjectionWatch.watch({ turnId, turns, transcripts, backend, onChange })
+      return ExecutionProjectionWatch.watch({ turnId, turns, transcripts, backend, onChange, onPreview })
+    },
     install: (installed) =>
       Effect.sync(() => {
         lifecycle = installed

@@ -3,16 +3,17 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ContextBinding from "@rika/kernel/context-binding"
+import { NestedOperationFailed } from "@rika/kernel/nested-operation-envelope"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Ref } from "effect"
+import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Option, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as HostedKernel from "../../src/host/kernel"
 import {
   bindingManifest,
+  BindingResponse as BindingResponseSchema,
   type BindingOutcome,
-  type BindingResponse,
   type CellRequest,
   type CellResponse,
 } from "../../src/protocol/messages"
@@ -66,8 +67,9 @@ const toolContext = (operationKey: string, toolCallId: string) =>
   })
 
 const resultValue = (response: CellResponse) => {
-  if (response._tag !== "Success" || typeof response.result !== "object" || response.result === null) return ""
-  return "value" in response.result ? String(response.result.value) : ""
+  if (response._tag !== "Success") return ""
+  const result = Schema.decodeUnknownOption(Schema.Struct({ value: Schema.Json }))(response.result)
+  return Option.isSome(result) ? String(result.value.value) : ""
 }
 
 describe("hosted TypeScript kernel", () => {
@@ -139,10 +141,19 @@ describe("hosted TypeScript kernel", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-kernel-" })
         const session = yield* Layer.build(Session.layerMemory)
-        const nestedRequests: Array<NestedOperation.Request> = []
+        const nestedRequests: Array<Omit<NestedOperation.Request, "render">> = []
         const nested = NestedOperation.NestedOperations.of({
           run: (input, effect) => {
-            nestedRequests.push(input as unknown as NestedOperation.Request)
+            nestedRequests.push(
+              input.approval === undefined
+                ? { kind: input.kind, payload: input.payload, replayPolicy: input.replayPolicy }
+                : {
+                    kind: input.kind,
+                    payload: input.payload,
+                    replayPolicy: input.replayPolicy,
+                    approval: input.approval,
+                  },
+            )
             return input.approval === undefined
               ? effect
               : NestedOperation.NestedOperationSuspended.make({
@@ -164,10 +175,14 @@ describe("hosted TypeScript kernel", () => {
         )
         const authority = (operationKey: string, toolCallId: string) =>
           Context.add(base, ToolContext.ToolContext, toolContext(operationKey, toolCallId))
-        const modules = [
-          ContextBinding.make({ workspace: root, trustMode: "hosted" }),
-          WorkspaceBinding.module,
-        ] as unknown as ReadonlyArray<HostBindingRegistry.Module<never>>
+        const modules: ReadonlyArray<
+          HostBindingRegistry.Module<
+            | CodingToolRuntime.Service
+            | NestedOperation.NestedOperations
+            | Session.SessionStore
+            | ToolContext.ToolContext
+          >
+        > = [ContextBinding.make({ workspace: root, trustMode: "hosted" }), WorkspaceBinding.module]
         const registry = yield* HostBindingRegistry.make(modules).pipe(
           Effect.provideContext(authority("operation-1", "call-1")),
         )
@@ -187,16 +202,14 @@ describe("hosted TypeScript kernel", () => {
               Effect.provideContext(authority(message.operationKey, message.request.cellId ?? "")),
               Effect.match({
                 onFailure: (failure): BindingOutcome => ({ _tag: "Rejected", failure }),
-                onSuccess: (response): BindingOutcome =>
-                  response._tag === "Failure" &&
-                  typeof response.failure === "object" &&
-                  response.failure !== null &&
-                  "_tag" in response.failure &&
-                  response.failure._tag === "NestedOperationFailed" &&
-                  "token" in response.failure &&
-                  typeof response.failure.token === "string"
-                    ? { _tag: "Suspend", token: response.failure.token }
-                    : { _tag: "Returned", response: response as BindingResponse },
+                onSuccess: (response): BindingOutcome => {
+                  if (response._tag === "Failure") {
+                    const nestedFailure = Schema.decodeUnknownOption(NestedOperationFailed)(response.failure)
+                    if (Option.isSome(nestedFailure) && nestedFailure.value.token !== undefined)
+                      return { _tag: "Suspend", token: nestedFailure.value.token }
+                  }
+                  return { _tag: "Returned", response: Schema.decodeUnknownSync(BindingResponseSchema)(response) }
+                },
               }),
               Effect.flatMap((outcome) => kernel.completeBinding({ ...message, outcome })),
               Effect.asVoid,
@@ -259,9 +272,12 @@ describe("hosted TypeScript kernel", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const sources = yield* Effect.all(
-        ["../../src/host/foreground.ts", "../../src/host/service.ts", "../../src/host/kernel.ts", "../../../kernel/src/cell-executor.ts"].map(
-          (path) => fileSystem.readFileString(new URL(path, import.meta.url).pathname),
-        ),
+        [
+          "../../src/host/foreground.ts",
+          "../../src/host/service.ts",
+          "../../src/host/kernel.ts",
+          "../../../kernel/src/cell-executor.ts",
+        ].map((path) => fileSystem.readFileString(new URL(path, import.meta.url).pathname)),
       )
       expect(sources.join("\n")).not.toContain("/bin/sh -c")
     }).pipe(provideLayer(BunFileSystem.layer)),

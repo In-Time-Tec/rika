@@ -49,14 +49,10 @@ const toolPresentation = {
   completeLabel: "Read",
   outputDisplay: "expandable" as const,
 }
-const semanticUnit = (key: string, index: number, content: Unit["content"], parentId?: string, revision = 0): Unit => ({
-  key,
-  turnId: "performance",
-  order: unitOrder(key, index),
-  revision,
-  ...(parentId === undefined ? {} : { parentId }),
-  content,
-})
+const semanticUnit = (key: string, index: number, content: Unit["content"], parentId?: string, revision = 0): Unit => {
+  if (parentId === undefined) return { key, turnId: "performance", order: unitOrder(key, index), revision, content }
+  return { key, turnId: "performance", order: unitOrder(key, index), revision, parentId, content }
+}
 const childUnits = (child: number): ReadonlyArray<Unit> => {
   const id = childTurnId(child)
   const cardKey = `subagent:performance:${child}`

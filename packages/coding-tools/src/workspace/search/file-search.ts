@@ -28,29 +28,31 @@ export class Service extends Context.Service<Service, Interface>()(
  * A spawn that cannot find the program reports that rather than the search it was attempting, so a
  * reader is told what is missing instead of that a search went wrong.
  */
+const ErrorReason = Schema.Struct({ _tag: Schema.String })
+const ErrorCause = Schema.Struct({
+  _tag: Schema.optionalKey(Schema.String),
+  message: Schema.optionalKey(Schema.String),
+  reason: Schema.optionalKey(Schema.Union([Schema.String, ErrorReason])),
+})
+
 const indexError = (operation: Operation, cause: unknown) => {
   /**
    * A spawn failure is a typed object whose own fields carry the account, so stringifying it gave
    * `[object Object]` and the pattern below never matched. Reading the tag and message first is what
    * lets a reader learn the program is missing rather than that a search went wrong.
    */
-  const described =
-    typeof cause === "object" && cause !== null
-      ? [
-          "_tag" in cause ? String(cause._tag) : "",
-          "message" in cause && typeof cause.message === "string" ? cause.message : "",
-          "reason" in cause && typeof cause.reason === "string" ? cause.reason : "",
-        ]
-          .filter((part) => part.length > 0)
-          .join(": ")
-      : ""
+  const decoded = Schema.decodeUnknownOption(ErrorCause)(cause)
+  const details = Option.getOrUndefined(decoded)
+  const described = [
+    details?._tag ?? "",
+    details?.message ?? "",
+    Schema.is(Schema.String)(details?.reason) ? details.reason : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(": ")
   const fromObject = described.length > 0 ? described : String(cause)
   const message = cause instanceof Error ? cause.message : fromObject
-  const reason = typeof cause === "object" && cause !== null && "reason" in cause ? cause.reason : undefined
-  const reasonTag =
-    typeof reason === "object" && reason !== null && "_tag" in reason && typeof reason._tag === "string"
-      ? reason._tag
-      : reason
+  const reasonTag = Schema.is(ErrorReason)(details?.reason) ? details.reason._tag : details?.reason
   return WorkspaceIndexError.make({
     operation,
     /**
@@ -199,15 +201,18 @@ const emptySearch = (totalFiles: number): SearchResult => ({
   totalFiles,
 })
 
-const emptyGrep = (totalFiles: number, regexFallbackError?: string): GrepResult => ({
-  items: [],
-  totalMatched: 0,
-  totalFilesSearched: totalFiles,
-  totalFiles,
-  filteredFileCount: totalFiles,
-  nextCursor: null,
-  ...(regexFallbackError === undefined ? {} : { regexFallbackError }),
-})
+const emptyGrep = (totalFiles: number, regexFallbackError?: string): GrepResult => {
+  let result: GrepResult = {
+    items: [],
+    totalMatched: 0,
+    totalFilesSearched: totalFiles,
+    totalFiles,
+    filteredFileCount: totalFiles,
+    nextCursor: null,
+  }
+  if (regexFallbackError !== undefined) result = { ...result, regexFallbackError }
+  return result
+}
 
 const runRg = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -385,16 +390,20 @@ const fallbackGrep = (
       const completed = yield* Effect.timeoutOption(search, `${options.deadlineMillis} millis`)
       deadlineReached = Option.isNone(completed)
     }
-    return {
+    const result: GrepResult & {
+      deadlineReached?: boolean
+      outputTruncation?: { keptBytes: number; totalBytes: number }
+    } = {
       items,
       totalMatched,
       totalFilesSearched: filesSearched,
       totalFiles: contained.length,
       filteredFileCount: included.length,
       nextCursor: null,
-      ...(deadlineReached ? { deadlineReached: true } : {}),
-      ...(outputBytes > keptBytes ? { outputTruncation: { keptBytes, totalBytes: outputBytes } } : {}),
     }
+    if (deadlineReached) result.deadlineReached = true
+    if (outputBytes > keptBytes) result.outputTruncation = { keptBytes, totalBytes: outputBytes }
+    return result
   })
 
 const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
@@ -505,23 +514,24 @@ const makeService = (workspace: string) =>
             )
               items.push(match)
           }
-          return {
+          const grepResult: GrepResult & {
+            deadlineReached?: boolean
+            outputTruncation?: { keptBytes: number; totalBytes: number }
+          } = {
             items,
             totalMatched: items.length,
             totalFilesSearched: items.length,
             totalFiles: items.length,
             filteredFileCount: items.length,
             nextCursor: null,
-            ...(result.deadlineReached ? { deadlineReached: true } : {}),
-            ...(outputTruncated
-              ? {
-                  outputTruncation: {
-                    keptBytes: RuntimeFilesystem.byteLength(result.stdout),
-                    totalBytes: result.stdoutBytes,
-                  },
-                }
-              : {}),
           }
+          if (result.deadlineReached) grepResult.deadlineReached = true
+          if (outputTruncated)
+            grepResult.outputTruncation = {
+              keptBytes: RuntimeFilesystem.byteLength(result.stdout),
+              totalBytes: result.stdoutBytes,
+            }
+          return grepResult
         }),
     }
     return interface_

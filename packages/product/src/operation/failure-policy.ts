@@ -32,7 +32,7 @@ export const FailureCategory = Schema.Literals([
 ])
 export type FailureCategory = typeof FailureCategory.Type
 
-const modelFailureMessages: Readonly<Record<ModelFailureCategory, string>> = {
+const modelFailureMessages = {
   authentication: "The provider rejected the configured credentials.",
   "rate-limit": "The provider limited how often requests are accepted.",
   transport: "The connection to the model provider was lost.",
@@ -45,7 +45,7 @@ const modelFailureMessages: Readonly<Record<ModelFailureCategory, string>> = {
   timeout: "The provider did not answer in time.",
   cancellation: "The model request was cancelled.",
   unknown: "The model request failed.",
-}
+} satisfies Readonly<Record<ModelFailureCategory, string>>
 
 /**
  * Present a TenetKit model-call failure from its structured category and
@@ -59,5 +59,5 @@ export const modelFailurePresentation = (input: {
   message: modelFailureMessages[input.category],
   category: input.category,
   retryable: input.classification === "transient",
-  retry: (input.classification === "transient" ? "automatic" : "none") as "automatic" | "none",
+  retry: input.classification === "transient" ? "automatic" : "none",
 })

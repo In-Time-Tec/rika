@@ -1,9 +1,9 @@
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Context, Effect, Layer, PlatformError, PubSub, Scope, Semaphore } from "effect"
 import { operationError } from "../error"
-import { makeExecutionLifecycle } from "./execution-lifecycle"
-import { makeExecutionProjection } from "./execution-projection"
-import { makeExecutionContext } from "./execution-context"
+import * as ExecutionLifecycle from "./execution-lifecycle"
+import * as ExecutionProjectionRuntime from "./execution-projection"
+import * as ExecutionContextRuntime from "./execution-context"
 
 type ThreadId = import("@rika/product/thread-record").ThreadId
 type TurnId = import("@rika/product/turn-record").TurnId
@@ -150,7 +150,7 @@ export interface ProductOperationExecutionInput {
   readonly executionStartFailureMessage: string
   readonly unavailable: (input: Input, message?: string) => OperationUnavailable
   readonly temporaryThreadTitle: temporaryThreadTitle
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
 }
 
 export const makeProductOperationExecution = (
@@ -162,9 +162,9 @@ export const makeProductOperationExecution = (
       TurnRepository.Service,
       Context.get(input.dependencyContext, TurnRepository.Service),
     )
-    const lifecycle = yield* makeExecutionLifecycle(input)
-    const projection = yield* makeExecutionProjection({ ...input, ...lifecycle })
-    const context = yield* makeExecutionContext({
+    const lifecycle = yield* ExecutionLifecycle.makeExecutionLifecycle(input)
+    const projection = yield* ExecutionProjectionRuntime.makeExecutionProjection({ ...input, ...lifecycle })
+    const context = yield* ExecutionContextRuntime.makeExecutionContext({
       options: input.options,
     })
     return { ...lifecycle, ...projection, ...context }

@@ -15,7 +15,7 @@ import {
   type EncryptedCredential,
 } from "../src/model"
 import { CredentialVault, layer as credentialVaultLayer } from "../src/vault"
-import { KmsDataKey, KmsFailure, type KmsDataKeyShape } from "../src/kms/data-key"
+import { KmsDataKey, KmsFailure, type KmsDataKeyContract } from "../src/kms/data-key"
 import { nobleAes256GcmLayer } from "../src/crypto/aes-256-gcm"
 import { plaintext, scopedDataEncryptionKey, scopedPlaintext } from "../src/secret-bytes"
 
@@ -65,7 +65,7 @@ const makeFakeKms = () => {
   }
   const entries = new Map<string, { readonly key: Uint8Array; readonly context: CredentialKmsEncryptionContext }>()
   let sequence = 0
-  const generateDataKey: KmsDataKeyShape["generateDataKey"] = Effect.fn("FakeKms.generateDataKey")(
+  const generateDataKey: KmsDataKeyContract["generateDataKey"] = Effect.fn("FakeKms.generateDataKey")(
     function* (context, use) {
       if (control.failGenerate) return yield* KmsFailure.make({ operation: "GenerateDataKey", reason: "RequestFailed" })
       sequence += 1
@@ -83,7 +83,7 @@ const makeFakeKms = () => {
       )
     },
   )
-  const decryptDataKey: KmsDataKeyShape["decryptDataKey"] = Effect.fn("FakeKms.decryptDataKey")(
+  const decryptDataKey: KmsDataKeyContract["decryptDataKey"] = Effect.fn("FakeKms.decryptDataKey")(
     function* (wrapped, context, use) {
       control.decryptedContexts.push({ ...context })
       const entry = entries.get(Encoding.encodeBase64(wrapped))

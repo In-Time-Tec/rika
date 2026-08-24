@@ -20,7 +20,7 @@ const withConfig = <A, E>(build: (configPath: string) => Effect.Effect<A, E, Fil
 
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-const write = (configPath: string, value: unknown) =>
+const write = (configPath: string, value: Schema.Json) =>
   Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.writeFileString(configPath, encode(value)))
 
 it("returns an empty set when the Workspace has no MCP configuration", () =>

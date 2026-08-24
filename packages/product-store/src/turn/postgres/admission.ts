@@ -16,10 +16,10 @@ const OutboxRow = Schema.Struct({
 
 const equivalentStartTurn = Schema.toEquivalence(ExecutionGateway.StartTurn)
 
-const decodeStartTurn = (row: unknown) =>
+const decodeStartTurn = <Row>(row: Row) =>
   Effect.gen(function* () {
     const decoded = yield* Schema.decodeUnknownEffect(OutboxRow)(row)
-    return yield* Schema.decodeUnknownEffect(turnRowJson.startTurn)(decoded.start_input_json)
+    return yield* Schema.decodeEffect(turnRowJson.startTurn)(decoded.start_input_json)
   })
 
 export const makeTurnSqlAdmission = (
@@ -29,8 +29,8 @@ export const makeTurnSqlAdmission = (
     return yield* sql
       .withTransaction(
         Effect.gen(function* () {
-          const prepared = yield* Schema.decodeUnknownEffect(ExecutionGateway.StartTurn)(input)
-          const turnId = yield* Schema.decodeUnknownEffect(TurnId)(prepared.turnId)
+          const prepared = yield* Schema.decodeEffect(ExecutionGateway.StartTurn)(input)
+          const turnId = yield* Schema.decodeEffect(TurnId)(prepared.turnId)
           const encoded = yield* Schema.encodeEffect(turnRowJson.startTurn)(prepared)
           const inserted = yield* sql`INSERT INTO rika_turn_admission_outbox (
               turn_id, start_input_json, prepared_at

@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import type { Message } from "../message"
 import type { Model } from "../model"
-import type { ThreadItem } from "../thread/model"
 import type { Key } from "../../presentation/terminal/keymap"
 import { filteredThreads } from "../thread/navigation"
 import { expandPastedText } from "../composer/paste"
@@ -43,7 +42,7 @@ const reduceKeyboardPreludeImpl = (
   if (key.ctrl && (key.name === "\\" || key.sequence === "\u001c")) {
     const currentIndex = Math.max(
       0,
-      (model.threads as ReadonlyArray<ThreadItem>).findIndex((thread) => thread.id === model.currentThreadId),
+      model.threads.findIndex((thread) => thread.id === model.currentThreadId),
     )
     if (model.threadSidebar.open) {
       if (model.threadSidebar.focused) {
@@ -77,7 +76,7 @@ const reduceKeyboardPreludeImpl = (
         (thread) => thread.id === model.currentThreadId,
       ),
     )
-    return {
+    const next: Model = {
       ...model,
       threadSwitcher: { open, query: "", selected, kind: "switch" },
       paletteOpen: false,
@@ -85,8 +84,8 @@ const reduceKeyboardPreludeImpl = (
       modePicker: { ...model.modePicker, open: false },
       filePicker: { ...model.filePicker, open: false },
       shortcutsOpen: false,
-      ...(open ? {} : { threadPreview: { _tag: "Idle" as const } }),
     }
+    return open ? next : { ...next, threadPreview: { _tag: "Idle" } }
   }
   return undefined
 }

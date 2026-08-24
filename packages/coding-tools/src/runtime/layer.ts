@@ -2,7 +2,9 @@ import { Config, ConfigProvider, Data, Effect, FileSystem, Function, Layer, Opti
 import * as LocalPath from "../workspace/path/value"
 import * as LocalSafetyPolicy from "../policy/local-safety"
 import * as WebSearchService from "../web-research/search/service"
+import type { SearchInput } from "../web-research/search/request"
 import * as ReadWebPageService from "../web-research/read-page/service"
+import type { Input as ReadWebPageInput } from "../web-research/read-page/contract"
 import * as ProcessRegistry from "../process/registry"
 import * as Bash from "../process/bash"
 import * as ShellStatus from "../process/command-status"
@@ -58,11 +60,11 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
         readDirectory: (target) => fileSystem.readDirectory(target),
         realPath: (target) => fileSystem.realPath(target),
       }
-      const resolveOptions = {
+      const resolveOptions: LocalPath.Options = {
         path,
         base: workspace,
-        ...(Option.isNone(home) ? {} : { home: home.value }),
       }
+      if (Option.isSome(home)) Object.assign(resolveOptions, { home: home.value })
       const localPathError = (value: string, cause: unknown) => {
         if (!Schema.is(LocalPath.LocalPathError)(cause)) return operationError(cause)
         if (cause.reason === "ambiguous_case")
@@ -160,13 +162,14 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
             switch (request._tag) {
               case "Grep": {
                 const deadlineMillis = Math.max(1_000, contract(request).timeoutMillis - 1_000)
-                const page = yield* workspaceIndex.grep(request.pattern, {
+                const grepOptions: NonNullable<Parameters<WorkspaceIndex.Interface["grep"]>[1]> = {
                   mode: request.regex ? "regex" : "plain",
                   maxMatchesPerFile: 1_000,
                   pageSize: 1_000,
                   deadlineMillis,
-                  ...(request.path === undefined ? {} : { include: request.path }),
-                })
+                }
+                if (request.path !== undefined) Object.assign(grepOptions, { include: request.path })
+                const page = yield* workspaceIndex.grep(request.pattern, grepOptions)
                 if (page.regexFallbackError !== undefined)
                   return yield* runtimeError({
                     category: "invalid_input",
@@ -366,24 +369,24 @@ const runtimeLayerImpl = (workspace: string, dependencies: RuntimeLayerDependenc
                 return { ...status, text: `${stdout}${stderr}` }
               }
               case "WebSearch": {
-                const results = yield* webSearch.search({
+                const input: SearchInput = {
                   objective: request.objective,
                   searchQueries: request.searchQueries,
-                  ...(request.kind === undefined ? {} : { kind: request.kind }),
-                  ...(request.strategy === undefined ? {} : { strategy: request.strategy }),
-                  ...(request.githubSearchType === undefined ? {} : { githubSearchType: request.githubSearchType }),
-                })
+                }
+                if (request.kind !== undefined) Object.assign(input, { kind: request.kind })
+                if (request.strategy !== undefined) Object.assign(input, { strategy: request.strategy })
+                if (request.githubSearchType !== undefined)
+                  Object.assign(input, { githubSearchType: request.githubSearchType })
+                const results = yield* webSearch.search(input)
                 return bounded(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(results))
               }
-              case "ReadWebPage":
-                return bounded(
-                  yield* readWebPage.read({
-                    url: request.url,
-                    ...(request.objective === undefined ? {} : { objective: request.objective }),
-                    ...(request.fullContent === undefined ? {} : { fullContent: request.fullContent }),
-                    ...(request.forceRefetch === undefined ? {} : { forceRefetch: request.forceRefetch }),
-                  }),
-                )
+              case "ReadWebPage": {
+                const input: ReadWebPageInput = { url: request.url }
+                if (request.objective !== undefined) Object.assign(input, { objective: request.objective })
+                if (request.fullContent !== undefined) Object.assign(input, { fullContent: request.fullContent })
+                if (request.forceRefetch !== undefined) Object.assign(input, { forceRefetch: request.forceRefetch })
+                return bounded(yield* readWebPage.read(input))
+              }
               case "ViewMedia": {
                 const viewed = yield* mediaView.view(request.path)
                 return { text: viewed.text, artifact: viewed.artifact, truncated: viewed.truncated }

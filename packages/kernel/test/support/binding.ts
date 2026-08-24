@@ -42,8 +42,10 @@ export const codingToolRuntime = (run: CodingToolRuntime.Interface["run"]) =>
   Context.make(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run }))
 
 export const mountModules = <R>(input: {
-  readonly modules: ReadonlyArray<HostBindingRegistry.Module<R>>
-  readonly services: Context.Context<never>
+  readonly modules: ReadonlyArray<
+    HostBindingRegistry.Module<R | ToolContext.ToolContext | NestedOperation.NestedOperations>
+  >
+  readonly services: Context.Context<R>
   readonly nested?: NestedOperation.Interface | undefined
   readonly sessionId?: string
 }): Effect.Effect<HostBindingRegistry.Interface, HostBindingRegistry.HostBindingConflict> => {
@@ -58,6 +60,6 @@ export const mountModules = <R>(input: {
     services.pipe(
       Context.add(ToolContext.ToolContext, context),
       Context.add(NestedOperation.NestedOperations, NestedOperation.NestedOperations.of(nested)),
-    ) as Context.Context<R>,
+    ),
   )
 }

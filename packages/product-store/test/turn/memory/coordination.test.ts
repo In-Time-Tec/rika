@@ -12,17 +12,19 @@ import { turnProvenance } from "../postgres/repository-selection.fixture"
 const staleStatuses = ["accepted", "accepted", "running", "waiting", "cancelling"] as const
 const staleTurns = staleStatuses.map((status, index): Turn.AgentExecutionTurn => {
   const id = Turn.TurnId.make(`stale-${index}`)
-  return {
+  const turn = {
     ...turnProvenance,
     id,
     threadId: Thread.ThreadId.make(`thread-${index}`),
     prompt: `stale prompt ${index}`,
     executionRoute: executionRoute(),
-    ...(index === 0 ? {} : { executionLink: { runId: `missing-${index}`, turnId: id, threadId: `thread-${index}` } }),
     status,
     createdAt: index + 1,
     updatedAt: index + 1,
   }
+  return index === 0
+    ? turn
+    : { ...turn, executionLink: { runId: `missing-${index}`, turnId: id, threadId: `thread-${index}` } }
 })
 
 const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag: "running" }) =>

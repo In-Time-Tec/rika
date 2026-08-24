@@ -75,15 +75,21 @@ const run = (input: { readonly command: ReadonlyArray<string>; readonly cwd?: st
   Effect.scoped(
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const child = yield* spawner
-        .spawn(
-          ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
-            ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+      const command =
+        input.cwd === undefined
+          ? ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
             stdin: input.stdin === undefined ? "ignore" : Stream.fromIterable([input.stdin]),
             stdout: "pipe",
             stderr: "pipe",
-          }),
-        )
+            })
+          : ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
+              cwd: input.cwd,
+              stdin: input.stdin === undefined ? "ignore" : Stream.fromIterable([input.stdin]),
+              stdout: "pipe",
+              stderr: "pipe",
+            })
+      const child = yield* spawner
+        .spawn(command)
         .pipe(Effect.mapError(() => failure("archive", "Workspace archive command could not start")))
       const [stdout, , exitCode] = yield* Effect.all(
         [

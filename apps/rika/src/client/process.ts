@@ -30,15 +30,27 @@ const provideLayerScoped =
       ),
     )
 
-const operationFailure = (input: ProductOperation.Input, error: unknown) =>
+type OperationFailure = ProductOperation.OperationUnavailable | Error
+
+const operationFailure = (input: ProductOperation.Input, error: OperationFailure) =>
   Schema.is(ProductOperation.OperationUnavailable)(error)
     ? error
     : ProductOperation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
 type InterruptibleRoot = { readonly interruptUnsafe: () => void }
 type SignalEmitter = {
-  readonly on: (event: "SIGINT", handler: () => void) => unknown
-  readonly off: (event: "SIGINT", handler: () => void) => unknown
+  readonly on: (event: "SIGINT", handler: () => void) => void
+  readonly off: (event: "SIGINT", handler: () => void) => void
+}
+const liveSignalEmitter: SignalEmitter = {
+  on: (_event, handler) => {
+    process.on("SIGINT", handler)
+  },
+  off: (_event, handler) => {
+    const remaining = process.listeners("SIGINT").filter((listener) => listener !== handler)
+    process.removeAllListeners("SIGINT")
+    for (const listener of remaining) process.on("SIGINT", listener)
+  },
 }
 
 export const installClientSigintHandler = (input: {
@@ -48,7 +60,7 @@ export const installClientSigintHandler = (input: {
   readonly process?: SignalEmitter
 }) => {
   const ownership = input.ownership ?? clientSigintOwnership
-  const processEmitter = input.process ?? (process as unknown as SignalEmitter)
+  const processEmitter = input.process ?? liveSignalEmitter
   const handler = () => {
     if (!ownership.rootOwns()) return
     input.onSignal()
@@ -62,9 +74,9 @@ export const runInProcessInteractive = Effect.fn("ClientMain.runInProcessInterac
   runner: Effect.Effect<never, E, R>,
   interactive: Effect.Effect<A, E2, R2>,
 ) {
-    yield* runner.pipe(Effect.forkScoped)
-    yield* Effect.yieldNow
-    return yield* interactive
+  yield* runner.pipe(Effect.forkScoped)
+  yield* Effect.yieldNow
+  return yield* interactive
 })
 
 const dispatcherLayer = () =>
@@ -179,11 +191,15 @@ const runnerCommandLayer = Layer.effect(
           const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
           const preferencePath = yield* Runner.preferencePath
           const hosted = HostedCli.liveLayer(home)
-          return yield* Runner.runRunner({
-            workspace: input.workspace ?? process.cwd(),
-            preferencePath,
-            ...(input.remoteThreadCreation === undefined ? {} : { requestedPreference: input.remoteThreadCreation }),
-          }).pipe(
+          const runnerInput: Parameters<typeof Runner.runRunner>[0] =
+            input.remoteThreadCreation === undefined
+              ? { workspace: input.workspace ?? process.cwd(), preferencePath }
+              : {
+                  workspace: input.workspace ?? process.cwd(),
+                  preferencePath,
+                  requestedPreference: input.remoteThreadCreation,
+                }
+          return yield* Runner.runRunner(runnerInput).pipe(
             Effect.scoped,
             provideLayerScoped(Layer.merge(hosted, Runner.liveAdmissionLayer.pipe(Layer.provide(hosted)))),
           )

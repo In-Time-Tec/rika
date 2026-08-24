@@ -43,7 +43,9 @@ const response = (
 ) => {
   const headers = securityHeaders(input.production)
   input.headers?.forEach((value, name) => headers.set(name, value))
-  return new Response(body, { headers, ...(input.status === undefined ? {} : { status: input.status }) })
+  const init: ResponseInit = { headers }
+  if (input.status !== undefined) init.status = input.status
+  return new Response(body, init)
 }
 
 const html = (body: string, production: boolean, status = 200) =>
@@ -152,14 +154,16 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
   if (pathname === "/organizations/new")
     return yield* guarded(request, url, dependencies, () => newOrganizationPage(destination), false)
   const invitation = /^\/invitations\/([^/]+)$/.exec(pathname)
-  if (invitation?.[1] !== undefined)
+  if (invitation?.[1] !== undefined) {
+    const invitationId = invitation[1]
     return yield* guarded(
       request,
       url,
       dependencies,
-      () => invitationPage({ id: decodeURIComponent(invitation[1] as string), redirect: destination }),
+      () => invitationPage({ id: decodeURIComponent(invitationId), redirect: destination }),
       false,
     )
+  }
   if (pathname === "/device") {
     const userCode = url.searchParams.get("user_code") ?? ""
     return yield* guarded(request, url, dependencies, () => devicePage({ userCode, redirect: destination }), true)

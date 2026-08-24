@@ -34,15 +34,30 @@ const StopInput = Schema.Struct({ processId: Schema.String })
 const run = (request: typeof CodingToolRuntime.Request.Type) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
-const output = (result: CodingToolResult.Result) => ({
-  text: result.text,
-  truncated: result.truncated,
-  ...(result.running === undefined ? {} : { running: result.running }),
-  ...(result.processId === undefined ? {} : { processId: result.processId }),
-  ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-  ...(result.stdout === undefined ? {} : { stdout: result.stdout }),
-  ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
-})
+const output = (result: CodingToolResult.Result) => {
+  let value: typeof Output.Type = {
+    text: result.text,
+    truncated: result.truncated,
+  }
+  if (result.running !== undefined) value = { ...value, running: result.running }
+  if (result.processId !== undefined) value = { ...value, processId: result.processId }
+  if (result.exitCode !== undefined) value = { ...value, exitCode: result.exitCode }
+  if (result.stdout !== undefined) value = { ...value, stdout: result.stdout }
+  if (result.stderr !== undefined) value = { ...value, stderr: result.stderr }
+  return value
+}
+
+const startRequest = (input: typeof StartInput.Type): typeof CodingToolRuntime.Request.Type => {
+  let request: typeof CodingToolRuntime.Request.Type = { _tag: "Bash", command: input.command }
+  if (input.workdir !== undefined) request = { ...request, workdir: input.workdir }
+  if (input.timeoutMillis !== undefined) request = { ...request, timeoutMillis: input.timeoutMillis }
+  return request
+}
+
+const statusRequest = (input: typeof StatusInput.Type): typeof CodingToolRuntime.Request.Type =>
+  input.waitMillis === undefined
+    ? { _tag: "ShellCommandStatus", processId: input.processId }
+    : { _tag: "ShellCommandStatus", processId: input.processId, waitMillis: input.waitMillis }
 
 const stopFailure = (processId: string) =>
   CodingToolRuntime.ToolError.make({
@@ -71,15 +86,7 @@ export const operations: ReadonlyArray<
           replayPolicy: "never",
           approval: { capability: "process.start", request: { command: input.command } },
         },
-        Effect.map(
-          run({
-            _tag: "Bash",
-            command: input.command,
-            ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
-            ...(input.timeoutMillis === undefined ? {} : { timeoutMillis: input.timeoutMillis }),
-          }),
-          output,
-        ),
+        Effect.map(run(startRequest(input)), output),
       ),
   }),
   operation({
@@ -87,15 +94,7 @@ export const operations: ReadonlyArray<
     input: StatusInput,
     output: Output,
     failure: Failure,
-    handle: (input) =>
-      Effect.map(
-        run({
-          _tag: "ShellCommandStatus",
-          processId: input.processId,
-          ...(input.waitMillis === undefined ? {} : { waitMillis: input.waitMillis }),
-        }),
-        output,
-      ),
+    handle: (input) => Effect.map(run(statusRequest(input)), output),
   }),
   operation({
     name: "stop",

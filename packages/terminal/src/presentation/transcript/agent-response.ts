@@ -1,4 +1,6 @@
 import { Exit, Function, Schema } from "effect"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Model } from "../../state/model"
 import type { TranscriptBlock, TranscriptItem } from "../../state/transcript/model"
 import type { AgentResponseState } from "./tool/kinds"
@@ -10,19 +12,27 @@ const agentFailureFallback = "The subagent failed without a reported reason."
 const agentEmptyFallback = "The subagent finished without a final message."
 const agentCancelledFallback = "The subagent was cancelled."
 
-const stringField = (value: object, key: string): string | undefined => {
-  if (!(key in value)) return undefined
-  const field = (value as Record<string, unknown>)[key]
-  return typeof field === "string" && field.trim().length > 0 ? field : undefined
-}
+const TextPart = Schema.Struct({ text: Schema.String })
+const DelegationOutput = Schema.Struct({
+  _tag: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.String),
+  reason: Schema.optionalKey(Schema.String),
+  recovery: Schema.optionalKey(Schema.String),
+  output: Schema.optionalKey(Schema.Array(TextPart)),
+})
 
-const decodedOutput = (output: string | undefined): object | undefined => {
+type DelegationOutput = typeof DelegationOutput.Type
+
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value !== undefined && value.trim().length > 0 ? value : undefined
+
+const decodedOutput = (output: string | undefined): DelegationOutput | undefined => {
   if (output === undefined) return undefined
   const value = output.trim()
   if (!(value.startsWith("{") || value.startsWith("["))) return undefined
-  const decoded = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown))(value)
+  const decoded = Schema.decodeExit(Schema.fromJsonString(DelegationOutput))(value)
   if (Exit.isFailure(decoded)) return undefined
-  return typeof decoded.value === "object" && decoded.value !== null ? decoded.value : undefined
+  return decoded.value
 }
 
 const failedDelegationTags = new Set(["NoReport", "Failed"])
@@ -30,14 +40,14 @@ const failedDelegationTags = new Set(["NoReport", "Failed"])
 export const isFailedDelegationOutput = (output: string | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
-  const tag = stringField(decoded, "_tag")
-  return tag !== undefined && failedDelegationTags.has(tag) && stringField(decoded, "status") === "failed"
+  const tag = nonEmpty(decoded._tag)
+  return tag !== undefined && failedDelegationTags.has(tag) && nonEmpty(decoded.status) === "failed"
 }
 
 export const isDeliveredDelegationOutput = (output: string | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
-  return stringField(decoded, "_tag") === "Report" && stringField(decoded, "status") === "completed"
+  return nonEmpty(decoded._tag) === "Report" && nonEmpty(decoded.status) === "completed"
 }
 
 const succeededDelegationTags = new Set(["Report", "NoReport"])
@@ -45,14 +55,14 @@ const succeededDelegationTags = new Set(["Report", "NoReport"])
 export const isSucceededDelegationOutput = (output: string | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
-  const tag = stringField(decoded, "_tag")
-  return tag !== undefined && succeededDelegationTags.has(tag) && stringField(decoded, "status") === "completed"
+  const tag = nonEmpty(decoded._tag)
+  return tag !== undefined && succeededDelegationTags.has(tag) && nonEmpty(decoded.status) === "completed"
 }
 
-const noReportText = (decoded: object): string | undefined => {
-  if (stringField(decoded, "_tag") !== "NoReport") return undefined
-  const reason = stringField(decoded, "reason") ?? agentEmptyFallback
-  const recovery = stringField(decoded, "recovery")
+const noReportText = (decoded: DelegationOutput): string | undefined => {
+  if (nonEmpty(decoded._tag) !== "NoReport") return undefined
+  const reason = nonEmpty(decoded.reason) ?? agentEmptyFallback
+  const recovery = nonEmpty(decoded.recovery)
   return recovery === undefined ? reason : `${reason}\n\n${recovery}`
 }
 
@@ -64,18 +74,9 @@ export const agentOutputText = (output: string | undefined): string | undefined 
   if (decoded === undefined) return output
   const noReport = noReportText(decoded)
   if (noReport !== undefined) return noReport
-  if ("output" in decoded && Array.isArray((decoded as { readonly output: unknown }).output)) {
-    const text = (decoded as { readonly output: ReadonlyArray<unknown> }).output
-      .flatMap((part) =>
-        typeof part === "object" &&
-        part !== null &&
-        "text" in part &&
-        typeof (part as { text: unknown }).text === "string"
-          ? [(part as { readonly text: string }).text]
-          : [],
-      )
-      .join("\n")
-    const reason = stringField(decoded, "reason")
+  if (decoded.output !== undefined) {
+    const text = decoded.output.map((part) => part.text).join("\n")
+    const reason = nonEmpty(decoded.reason)
     if (text.trim().length > 0) return reason === undefined ? text : `${text}\n\n${reason}`
     if (reason !== undefined) return reason
   }
@@ -91,19 +92,27 @@ const lastAnswerEntry = (model: Model, children: ReadonlyArray<TranscriptItem>):
   )?.index
 
 const childErrorDetail = (model: Model, children: ReadonlyArray<TranscriptItem>): string | undefined => {
+  const errorAt = (index: number) => {
+    const decoded = Schema.decodeUnknownExit(Block)(model.blocks[index])
+    return Exit.isSuccess(decoded) && decoded.value._tag === "Error" ? decoded.value : undefined
+  }
   const item = children.findLast(
     (candidate): candidate is Extract<TranscriptItem, { readonly _tag: "Block" }> =>
-      candidate._tag === "Block" && (model.blocks[candidate.index] as TranscriptBlock | undefined)?._tag === "Error",
+      candidate._tag === "Block" && errorAt(candidate.index) !== undefined,
   )
   if (item === undefined) return undefined
-  const block = model.blocks[item.index] as Extract<TranscriptBlock, { _tag: "Error" }>
+  const block = errorAt(item.index)
+  if (block === undefined) return undefined
   const detail = block.detail.trim().length > 0 ? block.detail : block.title
   return detail.trim().length > 0 ? detail : undefined
 }
 
 const outcomeReason = (model: Model, block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): string | undefined => {
-  const outcomes = model.childExecutionOutcomes as Readonly<Record<string, { readonly reason?: string }>>
-  const reason = outcomes[block.id]?.reason
+  const decoded = Schema.decodeUnknownExit(Schema.Struct({ reason: Schema.optionalKey(Schema.String) }))(
+    model.childExecutionOutcomes[block.id],
+  )
+  if (Exit.isFailure(decoded)) return undefined
+  const reason: NonNullable<Unit["executionOutcome"]>["reason"] = decoded.value.reason
   return reason !== undefined && reason.trim().length > 0 ? reason : undefined
 }
 

@@ -1,5 +1,4 @@
 import { nonSpaceBounds } from "../../../support/surface/transcript/renderables.fixture"
-import { Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
@@ -406,17 +405,13 @@ test("moves the bounded transcript window to older mounted entries and keeps it 
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
         const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
-        const state = surface as unknown as {
-          readonly transcriptWindowEnd: number
-          readonly transcriptChildren: ReadonlyArray<Renderable>
-        }
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
         expect(firstBefore).toBe(300)
         expect(firstAfter).toBeLessThan(300)
         expect(firstAfter).toBeGreaterThan(200)
-        expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
+        expect(surface.transcriptDiagnostics().rows.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
         surface.update({ ...base, input: "next", cursor: 4 })
-        expect(state.transcriptWindowEnd).toBe(historySize - 100)
+        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
       } finally {
         surface.destroy()
         setup.renderer.destroy()

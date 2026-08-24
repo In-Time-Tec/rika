@@ -12,17 +12,6 @@ const entries = (count: number) =>
     turnId: `turn-${index}`,
   }))
 
-interface Probe {
-  readonly transcriptScroll: { scrollTop: number; readonly scrollHeight: number }
-  readonly transcriptViewport: { readonly mode: { readonly _tag: string } }
-  dispatchTranscriptViewport: (event: { readonly _tag: string; readonly anchor?: unknown }) => void
-  captureViewportAnchor: () => unknown
-}
-
-const detach = (probe: Probe) => {
-  probe.dispatchTranscriptViewport({ _tag: "DetachCommanded", anchor: probe.captureViewportAnchor() })
-}
-
 test("expanding a block below the reading position does not move the viewport", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -61,21 +50,25 @@ test("expanding a block below the reading position does not move the viewport", 
         }
         surface.update(base)
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as Probe
-
-        // Detach and park part-way up, so the tool block sits below the reading position.
-        probe.transcriptScroll.scrollTop = Math.max(0, probe.transcriptScroll.scrollHeight - 200)
-        detach(probe)
-        expect(probe.transcriptViewport.mode._tag).toBe("Anchored")
+        surface.transcriptScroll.scrollTop = Math.max(0, surface.transcriptScroll.scrollHeight - 200)
+        yield* openTui(() =>
+          setup.mockMouse.scroll(
+            surface.transcriptScroll.screenX + Math.floor(surface.transcriptScroll.width / 2),
+            surface.transcriptScroll.screenY + Math.floor(surface.transcriptScroll.height / 2),
+            "up",
+            { delayMs: 0 },
+          ),
+        )
+        yield* openTui(() => setup.flush())
+        expect(surface.transcriptDiagnostics().following).toBe(false)
         surface.update({ ...base, expandedRowKeys: [] })
         yield* openTui(() => setup.flush())
-        const before = probe.transcriptScroll.scrollTop
+        const before = surface.transcriptScroll.scrollTop
 
-        // Expanding the trailing tool grows content strictly below the anchor.
         surface.update({ ...base, expandedRowKeys: ["tool:tail-tool"] }, true)
         yield* openTui(() => setup.flush())
 
-        expect(probe.transcriptScroll.scrollTop).toBe(before)
+        expect(surface.transcriptScroll.scrollTop).toBe(before)
       } finally {
         surface.destroy()
       }
@@ -100,16 +93,21 @@ test("replacing the whole transcript while detached does not scroll the viewport
         }
         surface.update(base)
         yield* openTui(() => setup.flush())
-        const probe = surface as unknown as Probe
-        probe.transcriptScroll.scrollTop = Math.max(0, probe.transcriptScroll.scrollHeight - 200)
-        detach(probe)
-        expect(probe.transcriptViewport.mode._tag).toBe("Anchored")
+        surface.transcriptScroll.scrollTop = Math.max(0, surface.transcriptScroll.scrollHeight - 200)
+        yield* openTui(() =>
+          setup.mockMouse.scroll(
+            surface.transcriptScroll.screenX + Math.floor(surface.transcriptScroll.width / 2),
+            surface.transcriptScroll.screenY + Math.floor(surface.transcriptScroll.height / 2),
+            "up",
+            { delayMs: 0 },
+          ),
+        )
+        yield* openTui(() => setup.flush())
+        expect(surface.transcriptDiagnostics().following).toBe(false)
         surface.update(base, true)
         yield* openTui(() => setup.flush())
-        const before = probe.transcriptScroll.scrollTop
+        const before = surface.transcriptScroll.scrollTop
 
-        // The anchored unit keys are all replaced, so the restore must not translate a total
-        // content-height change into a scroll offset.
         const grown: Model = {
           ...base,
           entries: entries(120),
@@ -123,7 +121,7 @@ test("replacing the whole transcript while detached does not scroll the viewport
         surface.update(grown, true)
         yield* openTui(() => setup.flush())
 
-        expect(probe.transcriptScroll.scrollTop).toBe(before)
+        expect(surface.transcriptScroll.scrollTop).toBe(before)
       } finally {
         surface.destroy()
       }

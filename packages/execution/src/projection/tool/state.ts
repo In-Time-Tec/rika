@@ -5,15 +5,56 @@ import type { Block } from "@rika/product/execution-transcript-contract"
 type Tool = Extract<Block, { readonly _tag: "ToolCall" }>
 type ToolFile = Tool["files"][number]
 
-const record = (value: unknown): Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null ? (value as Readonly<Record<string, unknown>>) : {}
-const optionalString = (value: unknown): string => (typeof value === "string" ? value : "")
-const inputRecord = (input: string): Readonly<Record<string, unknown>> => {
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))(input)
-  return Option.isSome(decoded) ? record(decoded.value) : {}
+const ToolInput = Schema.Struct({
+  path: Schema.optionalKey(Schema.String),
+  file_path: Schema.optionalKey(Schema.String),
+  file: Schema.optionalKey(Schema.String),
+  read_range: Schema.optionalKey(Schema.Tuple([Schema.Finite, Schema.Finite])),
+  offset: Schema.optionalKey(Schema.Finite),
+  limit: Schema.optionalKey(Schema.Finite),
+  pattern: Schema.optionalKey(Schema.String),
+  command: Schema.optionalKey(Schema.String),
+  cmd: Schema.optionalKey(Schema.String),
+  script: Schema.optionalKey(Schema.String),
+  args: Schema.optionalKey(Schema.Array(Schema.String)),
+  processId: Schema.optionalKey(Schema.String),
+  process_id: Schema.optionalKey(Schema.String),
+  objective: Schema.optionalKey(Schema.String),
+  query: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(Schema.String),
+  prompt: Schema.optionalKey(Schema.String),
+  task: Schema.optionalKey(Schema.String),
+  content: Schema.optionalKey(Schema.String),
+  old_str: Schema.optionalKey(Schema.String),
+  oldText: Schema.optionalKey(Schema.String),
+  new_str: Schema.optionalKey(Schema.String),
+  newText: Schema.optionalKey(Schema.String),
+})
+type ToolInput = typeof ToolInput.Type
+
+const ToolOutput = Schema.Struct({
+  status: Schema.optionalKey(Schema.String),
+  running: Schema.optionalKey(Schema.Boolean),
+  processId: Schema.optionalKey(Schema.String),
+  exitCode: Schema.optionalKey(Schema.Finite),
+  stdout: Schema.optionalKey(Schema.String),
+  stderr: Schema.optionalKey(Schema.String),
+  truncated: Schema.optionalKey(Schema.Boolean),
+  diff: Schema.optionalKey(Schema.String),
+})
+
+const emptyInput = ToolInput.make({})
+const emptyOutput = ToolOutput.make({})
+const inputRecord = (input: string): ToolInput => {
+  const decoded = Schema.decodeOption(Schema.fromJsonString(ToolInput))(input)
+  return Option.isSome(decoded) ? decoded.value : emptyInput
 }
-const field = (input: Readonly<Record<string, unknown>>, names: ReadonlyArray<string>): string | undefined => {
-  for (const name of names) if (typeof input[name] === "string" && input[name].length > 0) return input[name]
+const field = (input: ToolInput, names: ReadonlyArray<keyof ToolInput>): string | undefined => {
+  for (const name of names) {
+    const value = input[name]
+    if (Schema.is(Schema.String)(value) && value.length > 0) return value
+  }
   return undefined
 }
 const lineCounts = (patch: string) => {
@@ -30,19 +71,16 @@ const detail = (name: string, encodedInput: string): string => {
   const normalized = name.toLowerCase()
   const path = field(input, ["path", "file_path", "file"])
   if (normalized === "read") {
-    const range = Array.isArray(input.read_range) ? input.read_range : undefined
-    if (typeof range?.[0] === "number" && typeof range[1] === "number")
-      return `${path ?? name} L${range[0]}-${range[1]}`
-    const offset = typeof input.offset === "number" ? input.offset : 1
-    const limit = typeof input.limit === "number" ? input.limit : undefined
+    const range = input.read_range
+    if (range !== undefined) return `${path ?? name} L${range[0]}-${range[1]}`
+    const offset = input.offset ?? 1
+    const limit = input.limit
     return `${path ?? name}${limit === undefined ? "" : ` L${offset}-${offset + Math.max(0, limit - 1)}`}`
   }
   if (normalized === "grep") return `${path === undefined ? "" : `${path} `}"${field(input, ["pattern"]) ?? ""}"`.trim()
   if (normalized === "bash") {
     const command = field(input, ["command", "cmd", "script"]) ?? ""
-    const args = Array.isArray(input.args)
-      ? input.args.filter((value): value is string => typeof value === "string")
-      : []
+    const args = input.args ?? []
     return [command, ...args].join(" ").trim()
   }
   if (normalized === "shell_command_status") return field(input, ["processId", "process_id"]) ?? ""
@@ -55,16 +93,18 @@ const files = (id: string, name: string, encodedInput: string): ReadonlyArray<To
   const input = inputRecord(encodedInput)
   const path = field(input, ["path", "file_path", "file"])
   if (path === undefined || (name !== "write" && name !== "edit")) return []
+  const oldText = input.old_str ?? input.oldText ?? ""
+  const newText = input.new_str ?? input.newText ?? ""
   const patch =
     name === "write"
-      ? `--- /dev/null\n+++ b/${path}\n${optionalString(input.content)
+      ? `--- /dev/null\n+++ b/${path}\n${(input.content ?? "")
           .split("\n")
           .map((line) => `+${line}`)
           .join("\n")}`
-      : `--- a/${path}\n+++ b/${path}\n${optionalString(input.old_str ?? input.oldText)
+      : `--- a/${path}\n+++ b/${path}\n${oldText
           .split("\n")
           .map((line) => `-${line}`)
-          .join("\n")}\n${optionalString(input.new_str ?? input.newText)
+          .join("\n")}\n${newText
           .split("\n")
           .map((line) => `+${line}`)
           .join("\n")}`
@@ -81,32 +121,35 @@ const files = (id: string, name: string, encodedInput: string): ReadonlyArray<To
   ]
 }
 
-const makeToolImpl = (id: string, name: string, input: string, previous?: Tool): Tool => ({
-  _tag: "ToolCall",
-  id,
-  name,
-  input,
-  status: previous?.status ?? "running",
-  presentation:
-    previous === undefined || previous.name !== name ? Catalog.resolvePresentation(name) : previous.presentation,
-  detail: detail(name, input),
-  files: files(id, name, input),
-  ...(previous?.output === undefined ? {} : { output: previous.output }),
-  ...(previous?.process === undefined ? {} : { process: previous.process }),
-  ...(previous?.parentId === undefined ? {} : { parentId: previous.parentId }),
-})
-
-const completeToolImpl = (tool: Tool, output: unknown, isFailure: boolean, encodedOutput: string): Tool => {
-  const value = record(output)
-  const statusText = optionalString(value.status).toLowerCase()
-  const process = {
-    ...(typeof value.running === "boolean" ? { running: value.running } : {}),
-    ...(typeof value.processId === "string" ? { processId: value.processId } : {}),
-    ...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
-    ...(typeof value.stdout === "string" ? { stdout: value.stdout } : {}),
-    ...(typeof value.stderr === "string" ? { stderr: value.stderr } : {}),
-    ...(typeof value.truncated === "boolean" ? { truncated: value.truncated } : {}),
+const makeToolImpl = (id: string, name: string, input: string, previous?: Tool): Tool => {
+  let tool: Tool = {
+    _tag: "ToolCall",
+    id,
+    name,
+    input,
+    status: previous?.status ?? "running",
+    presentation:
+      previous === undefined || previous.name !== name ? Catalog.resolvePresentation(name) : previous.presentation,
+    detail: detail(name, input),
+    files: files(id, name, input),
   }
+  if (previous?.output !== undefined) tool = { ...tool, output: previous.output }
+  if (previous?.process !== undefined) tool = { ...tool, process: previous.process }
+  if (previous?.parentId !== undefined) tool = { ...tool, parentId: previous.parentId }
+  return tool
+}
+
+const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean, encodedOutput: string): Tool => {
+  const decoded = Schema.decodeUnknownOption(ToolOutput)(output)
+  const value = Option.isSome(decoded) ? decoded.value : emptyOutput
+  const statusText = (value.status ?? "").toLowerCase()
+  let process: NonNullable<Tool["process"]> = {}
+  if (value.running !== undefined) process = { ...process, running: value.running }
+  if (value.processId !== undefined) process = { ...process, processId: value.processId }
+  if (value.exitCode !== undefined) process = { ...process, exitCode: value.exitCode }
+  if (value.stdout !== undefined) process = { ...process, stdout: value.stdout }
+  if (value.stderr !== undefined) process = { ...process, stderr: value.stderr }
+  if (value.truncated !== undefined) process = { ...process, truncated: value.truncated }
   const failed = isFailure || statusText === "failed" || (process.exitCode !== undefined && process.exitCode !== 0)
   const cancelled = statusText === "cancelled" || statusText === "canceled"
   const running = process.running === true
@@ -117,17 +160,18 @@ const completeToolImpl = (tool: Tool, output: unknown, isFailure: boolean, encod
   let fileStatus: ToolFile["status"] = "complete"
   if (running) fileStatus = "running"
   if (failed) fileStatus = "failed"
-  const resolved = optionalString(value.diff)
-  return {
+  const resolved = value.diff ?? ""
+  let completed: Tool = {
     ...tool,
     status: completionStatus,
     output: encodedOutput,
-    ...(Object.keys(process).length === 0 ? {} : { process }),
     files: tool.files.map((file, index) => {
       const applied = index === 0 && resolved.length > 0 ? { patch: resolved, ...lineCounts(resolved) } : {}
       return { ...file, ...applied, preview: false, status: fileStatus }
     }),
   }
+  if (Object.keys(process).length > 0) completed = { ...completed, process }
+  return completed
 }
 
 export const makeTool: {

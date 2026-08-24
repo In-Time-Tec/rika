@@ -1,5 +1,5 @@
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { makeTool } from "./state"
+import * as ToolBlock from "./state"
 import { type Node, type ToolState } from "../model"
 import { bounded, toolTextLimit } from "../values"
 
@@ -61,7 +61,7 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     if (node.hidden) return
     const identity = toolState(node, rawId)
     const previous = toolBlock(node, rawId)
-    const base = makeTool(identity.blockId, name, bounded(input, toolTextLimit), previous)
+    const base = ToolBlock.makeTool(identity.blockId, name, bounded(input, toolTextLimit), previous)
     const block = mutate === undefined ? base : mutate(base)
     put(unit(node, identity.key, { _tag: "Block", block }))
     recover(node, identity, block.status === "running")

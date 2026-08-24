@@ -32,7 +32,10 @@ const longDiff = [
   "",
 ].join("\n")
 
-const toolCall = (id: string, changes: Partial<Extract<TranscriptBlock, { _tag: "ToolCall" }>>) =>
+const toolCall = (
+  id: string,
+  changes: Partial<Extract<TranscriptBlock, { _tag: "ToolCall" }>>,
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> =>
   ({
     _tag: "ToolCall",
     id,
@@ -43,7 +46,7 @@ const toolCall = (id: string, changes: Partial<Extract<TranscriptBlock, { _tag: 
     detail: "",
     files: [],
     ...changes,
-  }) as TranscriptBlock
+  })
 
 const nestedCommand = `git show --format=fuller ${"a".repeat(180)} -- packages/terminal/src/opentui/surface/opentui-surface.ts packages/terminal/test/transcript-bounds.test.ts`
 

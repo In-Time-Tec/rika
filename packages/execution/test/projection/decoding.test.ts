@@ -5,6 +5,8 @@ import { Runtime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
+import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Context, Effect, Layer, Random, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
@@ -19,9 +21,9 @@ type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
 
 const withIdentity = (model: RouteModel, identity: string): RouteModel => ({
   ...model,
-  registrationIdentity: identity as typeof model.registrationIdentity,
+  registrationIdentity: modelRegistrationIdentity(identity),
   candidates: model.candidates.map((candidate) =>
-    Object.assign({}, candidate, { registrationIdentity: identity as typeof candidate.registrationIdentity }),
+    Object.assign({}, candidate, { registrationIdentity: modelRegistrationIdentity(identity) }),
   ),
 })
 
@@ -33,28 +35,15 @@ const routeWithIdentity = (rootIdentity: string, titleIdentity: string) => {
 const readTreeEvents = (runtime: Runtime.Interface, rootRunId: string) =>
   runtime.treeHistory({ rootRunId, limit: 1_000 }).pipe(Effect.map(({ events }) => events))
 
-const partText = (part: unknown): ReadonlyArray<string> => {
-  const candidate = part as { readonly type?: string; readonly text?: string }
-  return candidate.type === "text" && candidate.text !== undefined ? [candidate.text] : []
-}
-
-const promptText = (prompt: { readonly content?: ReadonlyArray<unknown> } | undefined): string =>
-  (prompt?.content ?? [])
-    .flatMap((message) => {
-      const content = (message as { readonly content?: unknown }).content
-      if (typeof content === "string") return [content]
-      return Array.isArray(content) ? content.flatMap(partText) : []
-    })
-    .join("\n")
+const promptText = (prompt: TestModel.Request["prompt"] | undefined): string => JSON.stringify(prompt)
 
 const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
   events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
 
-const assistantText = (units: ReadonlyArray<{ readonly content: unknown }>) =>
-  units.flatMap((unit) => {
-    const content = unit.content as { _tag?: string; role?: string; text?: string }
-    return content._tag === "Entry" && content.role === "assistant" ? [content.text ?? ""] : []
-  })
+const assistantText = (units: ReadonlyArray<Unit>) =>
+  units.flatMap((unit) =>
+    unit.content._tag === "Entry" && unit.content.role === "assistant" ? [unit.content.text] : [],
+  )
 
 it.live(
   "starts the root turn without waiting for thread titling and still generates the title",

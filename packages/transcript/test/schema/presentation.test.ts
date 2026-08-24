@@ -1,22 +1,24 @@
 import * as ToolPolicy from "@rika/coding-tools/coding-tool-policy"
+import { SchemaAST } from "effect"
 import { describe, expect, it } from "vitest"
 import { Presentation } from "../../src/schema/presentation"
 
-const shape = (ast: {
-  readonly _tag: string
-  readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey; readonly type: never }>
-  readonly types?: ReadonlyArray<never>
-  readonly literal?: unknown
-}): unknown => {
+type SchemaContract =
+  | { readonly object: ReadonlyArray<readonly [string, SchemaContract]> }
+  | { readonly union: ReadonlyArray<SchemaContract> }
+  | { readonly literal: SchemaAST.LiteralValue }
+  | { readonly tag: SchemaAST.AST["_tag"] }
+
+const contractOf = (ast: SchemaAST.AST): SchemaContract => {
   if (ast._tag === "Objects")
-    return { object: (ast.propertySignatures ?? []).map((property) => [String(property.name), shape(property.type)]) }
-  if (ast._tag === "Union") return { union: (ast.types ?? []).map(shape) }
+    return { object: ast.propertySignatures.map((property) => [String(property.name), contractOf(property.type)]) }
+  if (ast._tag === "Union") return { union: ast.types.map(contractOf) }
   if (ast._tag === "Literal") return { literal: ast.literal }
   return { tag: ast._tag }
 }
 
 describe("Presentation parity", () => {
   it("matches the ToolPolicy definition exactly", () => {
-    expect(shape(Presentation.ast as never)).toEqual(shape(ToolPolicy.Presentation.ast as never))
+    expect(contractOf(Presentation.ast)).toEqual(contractOf(ToolPolicy.Presentation.ast))
   })
 })

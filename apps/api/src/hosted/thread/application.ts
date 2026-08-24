@@ -17,7 +17,7 @@ import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { isDurableThreadEvent, type HostedThreadSnapshot } from "@rika/product/client-protocol"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedStore } from "@rika/product/hosted-store"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
@@ -90,27 +90,21 @@ const viewSource = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): ThreadView
   const newest = turns.findLast((turn) => turn.units.length > 0)
   const oldestUnit = oldest?.units[0]
   const newestUnit = newest?.units.at(-1)
-  return {
-    projectionVersion: ExecutionProjection.projectionVersion,
-    ...(oldest === undefined || oldestUnit === undefined
-      ? {}
-      : {
-          oldestCursor: {
-            createdAt: oldest.turn.createdAt,
-            turnId: oldest.turn.id,
-            orderKey: encodeUnitOrder(oldestUnit.order),
-          },
-        }),
-    ...(newest === undefined || newestUnit === undefined
-      ? {}
-      : {
-          newestCursor: {
-            createdAt: newest.turn.createdAt,
-            turnId: newest.turn.id,
-            orderKey: encodeUnitOrder(newestUnit.order),
-          },
-        }),
-  }
+  const oldestCursor =
+    oldest === undefined || oldestUnit === undefined
+      ? undefined
+      : { createdAt: oldest.turn.createdAt, turnId: oldest.turn.id, orderKey: encodeUnitOrder(oldestUnit.order) }
+  const newestCursor =
+    newest === undefined || newestUnit === undefined
+      ? undefined
+      : { createdAt: newest.turn.createdAt, turnId: newest.turn.id, orderKey: encodeUnitOrder(newestUnit.order) }
+  if (oldestCursor === undefined)
+    return newestCursor === undefined
+      ? { projectionVersion: ExecutionProjection.projectionVersion }
+      : { projectionVersion: ExecutionProjection.projectionVersion, newestCursor }
+  return newestCursor === undefined
+    ? { projectionVersion: ExecutionProjection.projectionVersion, oldestCursor }
+    : { projectionVersion: ExecutionProjection.projectionVersion, oldestCursor, newestCursor }
 }
 
 const pendingAuthorizations = (
@@ -213,9 +207,9 @@ export const layer = Layer.effect(
       projectionAdmissions.set(key, current)
       return current
     }
-    const applicationFailure = (error: unknown) =>
+    const applicationFailure = (error: { readonly message: string }) =>
       HostedThreadApplicationError.make({
-        message: Schema.is(StoreError)(error) ? error.message : String(error),
+        message: error.message,
       })
     const awaitProjection = (key: string): Effect.Effect<void, HostedThreadApplicationError> =>
       Effect.suspend(() => {
@@ -295,6 +289,10 @@ export const layer = Layer.effect(
                 const createdAt = left.turn.createdAt - right.turn.createdAt
                 return createdAt === 0 ? String(left.turn.id).localeCompare(String(right.turn.id)) : createdAt
               })
+              const viewUsage: ThreadView.ThreadViewSnapshot["usage"] =
+                usage.contextCapacity === undefined
+                  ? { state: usage.usage }
+                  : { state: usage.usage, contextCapacity: usage.contextCapacity }
               const view: ThreadView.ThreadViewSnapshot = {
                 thread,
                 revision: 0,
@@ -307,10 +305,7 @@ export const layer = Layer.effect(
                 })),
                 hasOlder: false,
                 hasNewer: false,
-                usage: {
-                  state: usage.usage,
-                  ...(usage.contextCapacity === undefined ? {} : { contextCapacity: usage.contextCapacity }),
-                },
+                usage: viewUsage,
               }
               const checkpoints = new Map(
                 projections.flatMap((projection) =>
@@ -407,11 +402,11 @@ export const layer = Layer.effect(
                 yield* Effect.yieldNow
                 invocations.delete(ownerId)
                 state.invocation = undefined
-                yield* Deferred.succeed(invocation.completed, {
-                  events: invocation.events,
-                  snapshot: state.snapshot,
-                  ...(result._tag === "Failure" ? { failure: result.failure } : {}),
-                })
+                const batch: HostedInteractiveBatch =
+                  result._tag === "Failure"
+                    ? { events: invocation.events, snapshot: state.snapshot, failure: result.failure }
+                    : { events: invocation.events, snapshot: state.snapshot }
+                yield* Deferred.succeed(invocation.completed, batch)
               }).pipe(
                 Effect.ensuring(
                   Effect.sync(() => {

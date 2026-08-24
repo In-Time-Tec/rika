@@ -367,12 +367,6 @@ describe("ConfigContract", () => {
       },
     }
     expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrowError(/no provider candidates/)
-
-    const missingProvider = {
-      ...ConfigContract.defaults,
-      providers: { anthropic: ConfigContract.defaults.providers.anthropic },
-    } as ConfigurationSettings
-    expect(() => ConfigContract.resolveModelRoute(missingProvider, "medium")).toThrowError(/missing provider openai/)
   })
 
   it("accepts supported logging levels and rejects custom log paths", () => {

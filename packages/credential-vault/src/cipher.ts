@@ -12,7 +12,7 @@ export interface EncryptedCredentialBytes {
   readonly authTag: Uint8Array
 }
 
-export interface CredentialCipherShape {
+export interface CredentialCipherContract {
   readonly encrypt: (input: {
     readonly key: DataEncryptionKey
     readonly plaintext: Plaintext
@@ -28,6 +28,6 @@ export interface CredentialCipherShape {
   ) => Effect.Effect<A, CredentialCipherFailure | E, R>
 }
 
-export class CredentialCipher extends Context.Service<CredentialCipher, CredentialCipherShape>()(
+export class CredentialCipher extends Context.Service<CredentialCipher, CredentialCipherContract>()(
   "@rika/credential-vault/cipher/CredentialCipher",
 ) {}

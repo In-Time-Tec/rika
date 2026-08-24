@@ -296,10 +296,10 @@ export interface S3Options {
 }
 
 export const s3ObjectStoreLayer = (options: S3Options): Layer.Layer<ObjectStore> => {
-  const client = new S3Client({
-    region: options.region,
-    ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
-  })
+  const client =
+    options.endpoint === undefined
+      ? new S3Client({ region: options.region })
+      : new S3Client({ region: options.region, endpoint: options.endpoint })
   return Layer.succeed(
     ObjectStore,
     ObjectStore.of({

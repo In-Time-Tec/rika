@@ -11,6 +11,8 @@ import { Response } from "effect/unstable/ai"
 import * as Kernel from "../../../support/kernel-layer.harness"
 import { GoalService, layer as goalServiceLayer } from "@rika/product/goal-service"
 import * as GoalRepository from "@rika/product/goal-repository"
+import * as ThreadQuery from "@rika/product/thread-query-service"
+import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 
 const kernel = { runtimeVersion: Bun.version, dataRoot: "/tmp/rika-kernel-wiring" } as const
 
@@ -38,8 +40,8 @@ const kernelOptions = (roots: { home: string; workspace: string; dataRoot: strin
   dataRoot: roots.dataRoot,
   runtimeVersion: Bun.version,
   goalRepositoryLayer: GoalRepository.memoryLayer,
-  queryFactory: Layer.empty as never,
-  toolRuntimeLayer: Layer.empty as never,
+  queryFactory: Layer.succeed(ThreadQuery.Factory, ThreadQuery.Factory.of({ forWorkspace: () => Effect.never })),
+  toolRuntimeLayer: Layer.succeed(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run: () => Effect.never })),
 })
 
 const cellRequest = (code: string, sessionId: string): ToolExecutor.Request => {

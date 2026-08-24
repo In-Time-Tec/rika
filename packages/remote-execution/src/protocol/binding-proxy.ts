@@ -73,19 +73,19 @@ export const make: (options: {
     manifest.descriptors.map((descriptor) => [descriptor.module, new Set(descriptor.operations)] as const),
   )
   const notFound = (request: HostBindingRegistry.Request) =>
-    HostBindingRegistry.HostBindingNotFound.make({
-      module: request.module,
-      ...(known.has(request.module) ? { operation: request.operation } : {}),
-    })
+    known.has(request.module)
+      ? HostBindingRegistry.HostBindingNotFound.make({ module: request.module, operation: request.operation })
+      : HostBindingRegistry.HostBindingNotFound.make({ module: request.module })
   const resolve: HostBindingRegistry.Interface["resolve"] = (request) => {
     if (known.get(request.module)?.has(request.operation) !== true) return notFound(request)
-    return Effect.succeed({
+    const operation: HostBindingRegistry.AnyOperation = {
       name: request.operation,
       input: Schema.Unknown,
       output: Schema.Unknown,
       failure: Schema.Unknown,
       handle: () => Effect.die("proxy operations are invoked through the remote registry"),
-    } as HostBindingRegistry.AnyOperation)
+    }
+    return Effect.succeed(operation)
   }
   const registry: HostBindingRegistry.Interface = {
     descriptors: manifest.descriptors,
@@ -103,13 +103,16 @@ export const make: (options: {
           })
         const ordinal = yield* Ref.getAndUpdate(cell.nextOrdinal, (value) => value + 1)
         const callId = `${cell.operationKey}:binding:${ordinal}`
-        const wireRequest: BindingRequest = {
-          module: request.module,
-          operation: request.operation,
-          ...(request.input === undefined ? {} : { input: request.input as NonNullable<BindingRequest["input"]> }),
-          ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
-          ...(request.cellId === undefined ? {} : { cellId: request.cellId }),
-        }
+        const wireRequest = yield* Schema.decodeUnknownEffect(BindingRequestSchema)(request).pipe(
+          Effect.mapError(() =>
+            HostBindingRegistry.HostBindingSchemaFailure.make({
+              module: request.module,
+              operation: request.operation,
+              stage: "decode-input",
+              message: "binding input is not JSON",
+            }),
+          ),
+        )
         const requestDigest = Encoding.encodeHex(
           yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeRequest(wireRequest))).pipe(
             Effect.mapError(() =>
@@ -169,13 +172,18 @@ export const make: (options: {
               }),
             ),
           )
-        if (outcome._tag === "Returned") return outcome.response as HostBindingRegistry.Response
+        if (outcome._tag === "Returned")
+          return outcome.response._tag === "Success"
+            ? { _tag: "Success", output: outcome.response.output }
+            : { _tag: "Failure", failure: outcome.response.failure }
         if (outcome._tag === "Rejected") {
           if (outcome.failure._tag === "tenetkit/repl/HostBindingNotFound")
-            return yield* HostBindingRegistry.HostBindingNotFound.make({
-              module: outcome.failure.module,
-              ...(outcome.failure.operation === undefined ? {} : { operation: outcome.failure.operation }),
-            })
+            return yield* outcome.failure.operation === undefined
+              ? HostBindingRegistry.HostBindingNotFound.make({ module: outcome.failure.module })
+              : HostBindingRegistry.HostBindingNotFound.make({
+                  module: outcome.failure.module,
+                  operation: outcome.failure.operation,
+                })
           return yield* HostBindingRegistry.HostBindingSchemaFailure.make({
             module: outcome.failure.module,
             operation: outcome.failure.operation,

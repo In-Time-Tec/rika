@@ -6,7 +6,7 @@ import type { Interface } from "@rika/product/turn-repository"
 import { isTerminalStatus } from "@rika/product/execution-status"
 
 export { isTerminalStatus }
-export const MemoryCoordinatorTypeId = Symbol("@rika/product/turn-repository/MemoryCoordinator")
+const coordinators = new WeakMap<Interface, MemoryCoordinator>()
 
 type TerminalStatus = "completed" | "failed" | "cancelled"
 export type MemoryRefoldWrite<A> = { readonly _tag: "Commit"; readonly value: A } | { readonly _tag: "Stale" }
@@ -29,5 +29,10 @@ export interface MemoryCoordinator {
   ) => Effect.Effect<MemoryRefoldWrite<{ readonly turn: RecordedShellTurn; readonly value: A }>>
 }
 
-export const memoryCoordinator = (repository: Interface): MemoryCoordinator | undefined =>
-  (repository as Interface & { readonly [MemoryCoordinatorTypeId]?: MemoryCoordinator })[MemoryCoordinatorTypeId]
+export const MemoryCoordination = {
+  register(coordinator: MemoryCoordinator, repository: Interface): void {
+    coordinators.set(repository, coordinator)
+  },
+}
+
+export const memoryCoordinator = (repository: Interface): MemoryCoordinator | undefined => coordinators.get(repository)

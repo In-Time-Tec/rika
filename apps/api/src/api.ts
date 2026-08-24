@@ -394,12 +394,15 @@ const publicHandlers = (dependencies: HttpDependencies) =>
     }),
   )
 
-const authenticatedPrincipal = (access: CurrentAccess["Service"]) => ({
-  userId: access.principal.userId,
-  deviceId: access.deviceId!,
-  clientId: access.principal.clientId!,
-  ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
-})
+const authenticatedPrincipal = (access: CurrentAccess["Service"]) => {
+  const principal = {
+    userId: access.principal.userId,
+    deviceId: access.deviceId!,
+    clientId: access.principal.clientId!,
+  }
+  if (access.principal.dpopJkt !== undefined) Object.assign(principal, { dpopJkt: access.principal.dpopJkt })
+  return principal
+}
 
 const hostedOwner = (owner: typeof ConnectionOwner.Type, access: CurrentAccess["Service"]) =>
   owner.kind === "personal"
@@ -664,25 +667,24 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.publication === undefined)
             return yield* ServiceUnavailable.make({ message: "Repository publication service unavailable" })
-          const result = yield* dependencies.publication
-            .publish({
-              principal: authenticatedPrincipal(access),
-              threadId: params.threadId,
-              idempotencyKey: headers["idempotency-key"],
-              commitSha: payload.commit_sha,
-              ...(payload.target_branch === undefined ? {} : { targetRef: payload.target_branch }),
-              title: payload.title,
-              body: payload.body,
-            })
-            .pipe(
-              Effect.mapError((error) => {
-                if (error.kind === "missing") return NotFound.make({ message: error.message })
-                if (error.kind === "forbidden") return Forbidden.make({ message: error.message })
-                if (error.kind === "conflict") return Conflict.make({ message: error.message })
-                if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
-                return ServiceUnavailable.make({ message: error.message })
-              }),
-            )
+          const publication = {
+            principal: authenticatedPrincipal(access),
+            threadId: params.threadId,
+            idempotencyKey: headers["idempotency-key"],
+            commitSha: payload.commit_sha,
+            title: payload.title,
+            body: payload.body,
+          }
+          if (payload.target_branch !== undefined) Object.assign(publication, { targetRef: payload.target_branch })
+          const result = yield* dependencies.publication.publish(publication).pipe(
+            Effect.mapError((error) => {
+              if (error.kind === "missing") return NotFound.make({ message: error.message })
+              if (error.kind === "forbidden") return Forbidden.make({ message: error.message })
+              if (error.kind === "conflict") return Conflict.make({ message: error.message })
+              if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
+              return ServiceUnavailable.make({ message: error.message })
+            }),
+          )
           return {
             publicationId: result.id,
             state: result.state,
@@ -810,18 +812,17 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          return yield* dependencies.environment
-            .put({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              scope: payload.scope,
-              name: params.name,
-              classification: payload.classification,
-              phases: payload.phases,
-              value: payload.value,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            scope: payload.scope,
+            name: params.name,
+            classification: payload.classification,
+            phases: payload.phases,
+            value: payload.value,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          return yield* dependencies.environment.put(request).pipe(Effect.mapError(environmentFailure))
         }),
       revokeEnvironment: ({ params, payload }) =>
         Effect.gen(function* () {
@@ -830,15 +831,14 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          return yield* dependencies.environment
-            .revoke({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              scope: payload.scope,
-              name: params.name,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            scope: payload.scope,
+            name: params.name,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          return yield* dependencies.environment.revoke(request).pipe(Effect.mapError(environmentFailure))
         }),
       putEnvironmentPolicy: ({ payload }) =>
         Effect.gen(function* () {
@@ -847,14 +847,13 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          yield* dependencies.environment
-            .putOrganizationPolicy({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              personalOverrides: payload.personal_overrides,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            personalOverrides: payload.personal_overrides,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          yield* dependencies.environment.putOrganizationPolicy(request).pipe(Effect.mapError(environmentFailure))
         }),
       approveEnvironmentSource: ({ payload }) =>
         Effect.gen(function* () {
@@ -863,16 +862,15 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          return yield* dependencies.environment
-            .approveSource({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              sourceOwner: payload.source_owner,
-              sourceCommitSha: payload.source_commit_sha,
-              phase: payload.phase,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            sourceOwner: payload.source_owner,
+            sourceCommitSha: payload.source_commit_sha,
+            phase: payload.phase,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          return yield* dependencies.environment.approveSource(request).pipe(Effect.mapError(environmentFailure))
         }),
       revokeEnvironmentSource: ({ payload }) =>
         Effect.gen(function* () {
@@ -881,16 +879,15 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          return yield* dependencies.environment
-            .revokeSourceApproval({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              sourceOwner: payload.source_owner,
-              sourceCommitSha: payload.source_commit_sha,
-              phase: payload.phase,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            sourceOwner: payload.source_owner,
+            sourceCommitSha: payload.source_commit_sha,
+            phase: payload.phase,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          return yield* dependencies.environment.revokeSourceApproval(request).pipe(Effect.mapError(environmentFailure))
         }),
       putEgress: ({ params, payload }) =>
         Effect.gen(function* () {
@@ -899,15 +896,14 @@ const productHandlers = (dependencies: HttpDependencies) =>
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.environment === undefined)
             return yield* ServiceUnavailable.make({ message: "Environment service unavailable" })
-          return yield* dependencies.environment
-            .putEgress({
-              principal: authenticatedPrincipal(access),
-              owner: hostedOwner(payload.owner, access),
-              ...(payload.project_id === undefined ? {} : { projectId: payload.project_id }),
-              phase: params.phase,
-              allow: payload.allow,
-            })
-            .pipe(Effect.mapError(environmentFailure))
+          const request = {
+            principal: authenticatedPrincipal(access),
+            owner: hostedOwner(payload.owner, access),
+            phase: params.phase,
+            allow: payload.allow,
+          }
+          if (payload.project_id !== undefined) Object.assign(request, { projectId: payload.project_id })
+          return yield* dependencies.environment.putEgress(request).pipe(Effect.mapError(environmentFailure))
         }),
       listToolAudit: ({ payload }) =>
         Effect.gen(function* () {

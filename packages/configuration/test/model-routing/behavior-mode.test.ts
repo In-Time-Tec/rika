@@ -5,8 +5,8 @@ import { ModeId } from "../../src/model-routing/behavior-mode"
 
 describe("modes", () => {
   it("accepts custom non-empty mode names", () => {
-    expect(Schema.decodeUnknownSync(ModeId)("deep-review")).toBe("deep-review")
-    expect(() => Schema.decodeUnknownSync(ModeId)("")).toThrow()
+    expect(Schema.decodeSync(ModeId)("deep-review")).toBe("deep-review")
+    expect(() => Schema.decodeSync(ModeId)("")).toThrow()
   })
 
   it("ships a valid configurable default mode", () => {

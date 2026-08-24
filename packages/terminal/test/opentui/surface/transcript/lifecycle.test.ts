@@ -193,9 +193,7 @@ test("clamps an oversized focused queued prompt to the queue box with an indicat
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
-        const text = (surface.queueText.content as unknown as { chunks: ReadonlyArray<{ text: string }> }).chunks
-          .map((chunk) => chunk.text)
-          .join("")
+        const text = surface.queueText.content.chunks.map((chunk) => chunk.text).join("")
         expect(text).toContain("…")
         expect(text.length).toBeLessThan(40)
         const frame = setup.captureCharFrame()
