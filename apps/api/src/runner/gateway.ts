@@ -1,9 +1,7 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
+import { HostedExecutionOperations, HostedExecutionOperationsError, layer as hostedExecutionOperationsLayer, type FinalizeOperationInput } from "@rika/product-store/executor-operations"
 import {
   ApiMessage,
-  CellLifecycleFrame as CellLifecycleFrameSchema,
-  CellResponse as CellResponseSchema,
   RunnerMessage,
   redactAccess,
   redactHeartbeat,
@@ -25,7 +23,7 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
-import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Redacted, Ref, Schema, Semaphore } from "effect"
+import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Redacted, Ref, Schema, Semaphore } from "effect"
 import {
   GatewayError,
   type BindingAuthority,
@@ -61,6 +59,7 @@ interface Pending {
   readonly result: Deferred.Deferred<FinalResult, GatewayError>
   readonly bindings: BindingAuthority
   readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
+  readonly bindingLock: Semaphore.Semaphore
   readonly nextMachineOrdinal: Ref.Ref<number>
 }
 
@@ -82,40 +81,17 @@ interface MachineCall {
   readonly result: Deferred.Deferred<MachineBindings.Outcome>
 }
 
-interface OperationRow {
-  readonly requestDigest: string
-  readonly workspaceId: string
-  readonly sessionId: string
-  readonly threadId: string
-  readonly turnId: string
-  readonly runId: string
-  readonly rootRunId: string
-  readonly toolCallId: string
-  readonly code: string
-  readonly attempt: string
-  readonly replayPolicy: "pure" | "provider-idempotent" | "never"
-  readonly admittedAt: string | null
-  readonly deadlineAt: string
-  readonly state: "accepted" | "dispatched" | "completed" | "unknown"
-  readonly dispatchedGeneration: string | null
-  readonly dispatchedLeaseEpoch: string | null
-  readonly dispatchedExecutorInstanceId: string | null
-  readonly dispatchedProcessIncarnation: string | null
-  readonly response: unknown
-  readonly terminalOutcome: "completed" | "failed" | "cancelled" | "unknown" | null
-}
-
 type LocalExecuteInput = Omit<CellRequest, "access" | "bindings"> & {
   readonly assignmentId: string
   readonly bindings: BindingAuthority
 }
 
+type MutableFinalizeOperationInput = {
+  -readonly [Key in keyof FinalizeOperationInput]: FinalizeOperationInput[Key]
+}
+
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(RunnerMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
-const decodeResponse = Schema.decodeUnknownEffect(CellResponseSchema)
-const equivalentResponse = Schema.toEquivalence(CellResponseSchema)
-const decodeLifecycle = Schema.decodeUnknownEffect(CellLifecycleFrameSchema)
-const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrameSchema)
 const OperationIdentity = Schema.Struct({
   workspaceId: Schema.String,
   sessionId: Schema.String,
@@ -127,8 +103,6 @@ const OperationIdentity = Schema.Struct({
   code: Schema.String,
   attempt: Schema.Int,
   replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
-  admittedAt: Schema.NullOr(Schema.String),
-  deadlineAt: Schema.String,
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
 const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
@@ -167,11 +141,11 @@ export interface RunnerGateway extends ExecutorDataPlane {
   readonly execute: (input: LocalExecuteInput) => Effect.Effect<FinalResult, GatewayError>
 }
 
-export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
+const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function* (
   authority: RunnerExecutorAuthority,
   toolPolicy: HostedToolPolicyService,
 ) {
-  const sql = yield* PgClient.PgClient
+  const operations = yield* HostedExecutionOperations
   const store = yield* HostedStore
   const crypto = yield* Crypto.Crypto
   const sessions = yield* Ref.make(new Map<string, Session>())
@@ -189,37 +163,6 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     return Encoding.encodeHex(bytes)
   })
 
-  const operation = (assignmentId: string, operationKey: string, attempt: number) =>
-    sql<OperationRow>`SELECT request_digest AS "requestDigest", workspace_id AS "workspaceId",
-      session_id AS "sessionId", thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId",
-      root_run_id AS "rootRunId", tool_call_id AS "toolCallId", code, attempt::text AS attempt,
-      replay_policy AS "replayPolicy",
-      admitted_at AS "admittedAt",
-      to_char(deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "deadlineAt", state,
-      dispatched_generation::text AS "dispatchedGeneration",
-      dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
-      dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
-      dispatched_process_incarnation AS "dispatchedProcessIncarnation",
-      response, terminal_outcome AS "terminalOutcome"
-      FROM rika_hosted_executor_operations
-      WHERE assignment_id = ${assignmentId} AND operation_key = ${operationKey} AND attempt = ${attempt}::bigint`
-
-  const lockedOperation = (assignmentId: string, operationKey: string, attempt: number) =>
-    sql<OperationRow>`SELECT request_digest AS "requestDigest", workspace_id AS "workspaceId",
-      session_id AS "sessionId", thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId",
-      root_run_id AS "rootRunId", tool_call_id AS "toolCallId", code, attempt::text AS attempt,
-      replay_policy AS "replayPolicy",
-      admitted_at AS "admittedAt",
-      to_char(deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "deadlineAt", state,
-      dispatched_generation::text AS "dispatchedGeneration",
-      dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
-      dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
-      dispatched_process_incarnation AS "dispatchedProcessIncarnation",
-      response, terminal_outcome AS "terminalOutcome"
-      FROM rika_hosted_executor_operations
-      WHERE assignment_id = ${assignmentId} AND operation_key = ${operationKey} AND attempt = ${attempt}::bigint
-      FOR UPDATE`
-
   const prepare = Effect.fn("RunnerGateway.prepare")(function* (input: LocalExecuteInput) {
     const digest = yield* requestDigest(
       encodeOperationIdentity({
@@ -233,24 +176,11 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
         code: input.code,
         attempt: input.attempt,
         replayPolicy: input.replayPolicy,
-        admittedAt: input.admittedAt,
-        deadlineAt: input.deadlineAt,
       }),
     )
-    yield* sql`INSERT INTO rika_hosted_executor_operations
-      (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id, turn_id,
-       run_id, root_run_id, tool_call_id, code, attempt, replay_policy, admitted_at, deadline_at, state)
-      SELECT assignment.id, assignment.owner_id, ${input.operationKey}, ${digest}, ${input.workspaceId},
-        ${input.sessionId}, ${input.threadId}, ${input.turnId}, ${input.runId}, ${input.rootRunId},
-        ${input.toolCallId}, ${input.code}, ${input.attempt}, ${input.replayPolicy}, ${input.admittedAt}, ${input.deadlineAt}, 'accepted'
-      FROM rika_hosted_executor_assignments assignment
-      WHERE assignment.id = ${input.assignmentId}
-      ON CONFLICT (assignment_id, operation_key, attempt) DO NOTHING`.pipe(
+    const row = yield* operations.upsertOperation({ ...input, requestDigest: digest }).pipe(
       Effect.mapError(() => failure("transport", "Could not persist Runner operation")),
     )
-    const row = (yield* operation(input.assignmentId, input.operationKey, input.attempt).pipe(
-      Effect.mapError(() => failure("transport", "Could not read Runner operation")),
-    ))[0]
     if (row === undefined) return yield* failure("transport", "Runner operation is unavailable")
     if (
       row.requestDigest !== digest ||
@@ -262,10 +192,8 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
       row.rootRunId !== input.rootRunId ||
       row.toolCallId !== input.toolCallId ||
       row.code !== input.code ||
-      Number(row.attempt) !== input.attempt ||
-      row.replayPolicy !== input.replayPolicy ||
-      row.admittedAt !== input.admittedAt ||
-      row.deadlineAt !== input.deadlineAt
+      row.attempt !== input.attempt ||
+      row.replayPolicy !== input.replayPolicy
     )
       return yield* failure("fenced", "Runner operation key conflicts with a different request")
     return row
@@ -277,80 +205,17 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     readonly attempt: number
   }) {
     const sessionDigest = yield* requestDigest(input.session.access.sessionToken)
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const assignmentRows = yield* sql<{ readonly id: string }>`SELECT assignment.id
-            FROM rika_hosted_executor_assignments assignment
-            JOIN rika_hosted_runner_admissions admission
-              ON admission.assignment_id = assignment.id
-              AND admission.owner_id = assignment.owner_id
-              AND admission.generation = assignment.generation
-              AND admission.device_id = assignment.provider_instance_id
-              AND admission.process_incarnation = assignment.process_incarnation
-              AND admission.consumed_at IS NOT NULL
-              AND admission.revoked_at IS NULL
-            JOIN rika_hosted_workspace_capability_admissions capability_admission
-              ON capability_admission.assignment_id = assignment.id
-              AND capability_admission.thread_id = assignment.thread_id
-              AND capability_admission.turn_id = (
-                SELECT operation.turn_id FROM rika_hosted_executor_operations operation
-                WHERE operation.assignment_id = ${input.session.access.fence.assignmentId}
-                  AND operation.operation_key = ${input.operationKey} AND operation.attempt = ${input.attempt}::bigint
-              )
-              AND capability_admission.assignment_generation = assignment.generation
-              AND capability_admission.environment_digest = assignment.capability_snapshot->>'environmentDigest'
-            JOIN rika_cli_registration registration
-              ON registration.client_id = admission.client_id
-              AND registration.device_id::text = admission.device_id
-              AND registration.user_id = admission.user_id
-              AND registration.revoked_at IS NULL
-            JOIN rika_hosted_owners owner_record
-              ON owner_record.id = assignment.owner_id
-            WHERE assignment.id = ${input.session.access.fence.assignmentId}
-              AND (
-                (owner_record.kind = 'personal' AND owner_record.user_id = admission.user_id)
-                OR (owner_record.kind = 'organization' AND EXISTS (
-                  SELECT 1 FROM member membership
-                  WHERE membership.organization_id = owner_record.organization_id
-                    AND membership.user_id = admission.user_id
-                ))
-              )
-              AND assignment.lifecycle = 'active'
-              AND assignment.capability_generation = assignment.generation
-              AND assignment.generation = ${input.session.access.fence.assignmentGeneration}::bigint
-              AND assignment.lease_epoch = ${input.session.access.leaseEpoch}::bigint
-              AND assignment.lease_expires_at > clock_timestamp()
-              AND assignment.provider_instance_id = ${input.session.access.fence.instanceId}
-              AND assignment.executor_instance_id = ${input.session.access.fence.executorId}
-              AND assignment.process_incarnation = ${input.session.access.fence.processIncarnation}
-              AND assignment.session_digest = ${sessionDigest}
-            FOR UPDATE`.pipe(Effect.mapError(() => failure("transport", "Could not claim Runner fence")))
-          if (assignmentRows[0] === undefined) return yield* failure("fenced", "Runner fence is no longer current")
-          const rows = yield* lockedOperation(
-            input.session.access.fence.assignmentId,
-            input.operationKey,
-            input.attempt,
-          ).pipe(Effect.mapError(() => failure("transport", "Could not lock Runner operation")))
-          const operationRow = rows[0]
-          if (operationRow === undefined) return yield* failure("transport", "Runner operation is unavailable")
-          if (operationRow.state !== "accepted")
-            return yield* failure("fenced", "Runner operation changed before dispatch")
-          const updated = yield* sql`UPDATE rika_hosted_executor_operations SET
-            state = 'dispatched', dispatched_generation = ${input.session.access.fence.assignmentGeneration}::bigint,
-            dispatched_lease_epoch = ${input.session.access.leaseEpoch}::bigint,
-            dispatched_executor_instance_id = ${input.session.access.fence.executorId},
-            dispatched_process_incarnation = ${input.session.access.fence.processIncarnation},
-            updated_at = clock_timestamp()
-            WHERE assignment_id = ${input.session.access.fence.assignmentId}
-              AND operation_key = ${input.operationKey} AND attempt = ${input.attempt}::bigint
-              AND state = 'accepted' RETURNING operation_key`.pipe(
-            Effect.mapError(() => failure("transport", "Could not persist Runner dispatch")),
-          )
-          if (updated[0] === undefined) return yield* failure("fenced", "Runner operation changed before dispatch")
-        }),
-      )
-      .pipe(Effect.catchTag("SqlError", () => Effect.fail(failure("transport", "Could not claim Runner fence"))))
+    const operation = yield* operations.findOperation({ assignmentId: input.session.access.fence.assignmentId, operationKey: input.operationKey, attempt: input.attempt }).pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
+    if (operation === undefined) return yield* failure("transport", "Runner operation is unavailable")
+    const disposition = yield* operations.claimDispatch(operation, {
+      assignmentGeneration: input.session.access.fence.assignmentGeneration,
+      leaseEpoch: input.session.access.leaseEpoch,
+      providerInstanceId: input.session.access.fence.instanceId,
+      executorInstanceId: input.session.access.fence.executorId,
+      processIncarnation: input.session.access.fence.processIncarnation,
+    }, sessionDigest).pipe(Effect.mapError(() => failure("transport", "Could not claim Runner fence")))
+    if (disposition === "missing") return yield* failure("transport", "Runner operation is unavailable")
+    if (disposition !== "claimed" && disposition !== "same-fence") return yield* failure("fenced", "Runner fence is no longer current")
   })
 
   const register = Effect.fn("RunnerGateway.register")(function* (session: Session) {
@@ -392,17 +257,19 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
   })
 
   const replayPending = Effect.fn("RunnerGateway.replayPending")(function* (session: Session) {
-    for (const pendingOperation of (yield* Ref.get(pending)).values())
-      if (pendingOperation.assignmentId === session.access.fence.assignmentId)
-        session.socket.send(
-          encode({
-            _tag: "CellReplay",
-            access: session.access,
-            operationKey: pendingOperation.operationKey,
-            attempt: pendingOperation.attempt,
-            afterCursor: 0,
-          }),
-        )
+    const queuedOperations = yield* operations.replayQueue(session.access.fence.assignmentId).pipe(
+      Effect.mapError(() => failure("transport", "Could not load Runner replay queue")),
+    )
+    for (const queued of queuedOperations)
+      session.socket.send(
+        encode({
+          _tag: "CellReplay",
+          access: session.access,
+          operationKey: queued.operationKey,
+          attempt: queued.attempt,
+          afterCursor: queued.afterCursor,
+        }),
+      )
     yield* machineLock.withPermits(1)(
       Effect.uninterruptible(
         Effect.gen(function* () {
@@ -458,72 +325,81 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
       request.cellId !== pendingOperation.request.toolCallId
     )
       return yield* failure("fenced", "Local binding call has a stale cell identity")
-    const expected = yield* requestDigest(encodeBindingRequest(request))
-    if (expected !== digest) return yield* failure("fenced", "Local binding request digest is invalid")
-    const candidate = yield* Deferred.make<BindingOutcome>()
-    const call = yield* Ref.modify(pendingOperation.bindingCalls, (current) => {
-      const known = current.get(callId)
-      if (known !== undefined) return [known, current] as const
-      const created = { requestDigest: digest, result: candidate }
-      return [created, new Map(current).set(callId, created)] as const
-    })
-    if (call.requestDigest !== digest)
-      return yield* failure("fenced", "Local binding call id conflicts with a different request")
-    const remaining = Math.max(
-      0,
-      DateTime.toEpochMillis(DateTime.makeUnsafe(pendingOperation.request.deadlineAt)) -
-        (yield* Clock.currentTimeMillis),
-    )
-    const deadlineOutcome = {
-      _tag: "Unknown" as const,
-      message: "Cell binding outcome is unknown at the operation deadline",
-    }
-    if (call.result === candidate) {
-      const outcome = yield* invokeAdmittedTool({
-        policyService: toolPolicy,
-        threadId: pendingOperation.request.threadId,
-        turnId: pendingOperation.request.turnId,
-        workspaceId: pendingOperation.request.workspaceId,
-        operationKey,
-        callId,
-        request,
-        access,
-        invoke: pendingOperation.bindings.registry.invoke({ ...request, input: request.input }),
-      }).pipe(
-        Effect.provideContext(pendingOperation.bindings.context),
-        Effect.provideService(Crypto.Crypto, crypto),
-        Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.succeed(deadlineOutcome) }),
-        Effect.orElseSucceed(
-          (): BindingOutcome => ({
-            _tag: "Unknown",
-            message: "Tool admission could not durably record its decision",
-          }),
-        ),
-        Effect.onInterrupt(() => Deferred.succeed(candidate, deadlineOutcome).pipe(Effect.asVoid)),
-      )
-      yield* Deferred.succeed(candidate, outcome)
-    }
-    const outcome = yield* Deferred.await(call.result).pipe(
-      Effect.timeoutOrElse({
-        duration: remaining,
-        orElse: () => Deferred.succeed(call.result, deadlineOutcome).pipe(Effect.andThen(Deferred.await(call.result))),
-      }),
-    )
-    yield* gatewayLock.withPermits(1)(
+    return yield* pendingOperation.bindingLock.withPermits(1)(
       Effect.gen(function* () {
-        const assigned = (yield* Ref.get(assignments)).get(socket)
-        const current = (yield* Ref.get(sessions)).get(pendingOperation.assignmentId)
-        if (assigned !== pendingOperation.assignmentId || current?.socket !== socket || !same(current.access, access))
-          return yield* failure("disconnected", "Local binding result has no executor")
-        socket.send(
-          encode({
-            _tag: "BindingResult",
-            access,
+        const expected = yield* requestDigest(encodeBindingRequest(request))
+        if (expected !== digest) return yield* failure("fenced", "Local binding request digest is invalid")
+        const candidate = yield* Deferred.make<BindingOutcome>()
+        const call = yield* Ref.modify(pendingOperation.bindingCalls, (current) => {
+          const known = current.get(callId)
+          if (known !== undefined) return [known, current] as const
+          const created = { requestDigest: digest, result: candidate }
+          return [created, new Map(current).set(callId, created)] as const
+        })
+        if (call.requestDigest !== digest)
+          return yield* failure("fenced", "Local binding call id conflicts with a different request")
+        const remaining = Math.max(
+          0,
+          DateTime.toEpochMillis(DateTime.makeUnsafe(pendingOperation.request.deadlineAt)) -
+            (yield* Clock.currentTimeMillis),
+        )
+        const deadlineOutcome = {
+          _tag: "Unknown" as const,
+          message: "Cell binding outcome is unknown at the operation deadline",
+        }
+        if (call.result === candidate) {
+          const outcome = yield* invokeAdmittedTool({
+            policyService: toolPolicy,
+            threadId: pendingOperation.request.threadId,
+            turnId: pendingOperation.request.turnId,
+            workspaceId: pendingOperation.request.workspaceId,
             operationKey,
-            attempt,
             callId,
-            requestDigest: digest,
-            outcome,
+            request,
+            access,
+            invoke: pendingOperation.bindings.registry.invoke({ ...request, input: request.input }),
+          }).pipe(
+            Effect.provideContext(pendingOperation.bindings.context),
+            Effect.provideService(Crypto.Crypto, crypto),
+            Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.succeed(deadlineOutcome) }),
+            Effect.orElseSucceed(
+              (): BindingOutcome => ({
+                _tag: "Unknown",
+                message: "Tool admission could not durably record its decision",
+              }),
+            ),
+            Effect.onInterrupt(() => Deferred.succeed(candidate, deadlineOutcome).pipe(Effect.asVoid)),
+          )
+          yield* Deferred.succeed(candidate, outcome)
+        }
+        const outcome = yield* Deferred.await(call.result).pipe(
+          Effect.timeoutOrElse({
+            duration: remaining,
+            orElse: () =>
+              Deferred.succeed(call.result, deadlineOutcome).pipe(Effect.andThen(Deferred.await(call.result))),
+          }),
+        )
+        yield* gatewayLock.withPermits(1)(
+          Effect.gen(function* () {
+            const assigned = (yield* Ref.get(assignments)).get(socket)
+            const current = (yield* Ref.get(sessions)).get(pendingOperation.assignmentId)
+            if (
+              assigned !== pendingOperation.assignmentId ||
+              current?.socket !== socket ||
+              !same(current.access, access)
+            )
+              return yield* failure("disconnected", "Local binding result has no executor")
+            socket.send(
+              encode({
+                _tag: "BindingResult",
+                access,
+                operationKey,
+                attempt,
+                callId,
+                requestDigest: digest,
+                outcome,
+              }),
+            )
           }),
         )
       }),
@@ -605,136 +481,42 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
   }) {
     const assignmentId = input.access?.fence.assignmentId ?? input.assignmentId
     if (assignmentId === undefined) return yield* failure("fenced", "Runner assignment is unavailable")
-    if (input.state === "completed") {
-      if (input.access === undefined) return yield* failure("fenced", "Runner completion has no authenticated access")
-      yield* authority
-        .validateAccess(redactAccess(input.access))
-        .pipe(Effect.mapError((error) => failure("fenced", error.message)))
+    const recovering = input.access === undefined
+    const completionFence = input.access === undefined ? undefined : {
+      assignmentGeneration: input.access.fence.assignmentGeneration,
+      leaseEpoch: input.access.leaseEpoch,
+      executorInstanceId: input.access.fence.executorId,
+      processIncarnation: input.access.fence.processIncarnation,
     }
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const rows = yield* lockedOperation(assignmentId, input.operationKey, input.attempt).pipe(
-            Effect.mapError(() => failure("transport", "Could not lock Runner operation")),
-          )
-          const current = rows[0]
-          if (current === undefined) return yield* failure("transport", "Runner operation is unavailable")
-          if (Number(current.attempt) !== input.attempt)
-            return yield* failure("fenced", "Runner operation attempt is stale")
-          if (current.state === "completed" || current.state === "unknown") {
-            const previous = yield* decodeResponse(current.response).pipe(
-              Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-            )
-            if (current.terminalOutcome === null)
-              return yield* failure("transport", "Persisted Runner terminal outcome is missing")
-            if (!equivalentResponse(previous, input.response)) {
-              if (input.state === "unknown" || current.state === "unknown")
-                return finalResult(previous, current.terminalOutcome, input.access)
-              return yield* failure("fenced", "Runner operation already has a different terminal result")
-            }
-            return finalResult(previous, current.terminalOutcome, input.access)
-          }
-          if (current.state !== "dispatched") return yield* failure("fenced", "Runner operation was not dispatched")
-          if (
-            current.dispatchedGeneration === null ||
-            current.dispatchedLeaseEpoch === null ||
-            current.dispatchedExecutorInstanceId === null ||
-            current.dispatchedProcessIncarnation === null
-          )
-            return yield* failure("fenced", "Runner operation has an incomplete dispatch fence")
-          const persistedFence = {
-            assignmentGeneration: current.dispatchedGeneration,
-            leaseEpoch: current.dispatchedLeaseEpoch,
-            executorInstanceId: current.dispatchedExecutorInstanceId,
-            processIncarnation: current.dispatchedProcessIncarnation,
-          }
-          const terminalRows = yield* sql<{ readonly frame: unknown }>`SELECT frame
-            FROM rika_hosted_executor_operation_frames
-            WHERE assignment_id = ${assignmentId} AND operation_key = ${input.operationKey}
-              AND attempt = ${input.attempt}::bigint AND kind = 'Terminal'
-            LIMIT 1`.pipe(Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipt")))
-          const terminal =
-            terminalRows[0] === undefined
-              ? undefined
-              : yield* decodeLifecycle(terminalRows[0].frame).pipe(
-                  Effect.mapError(() => failure("transport", "Persisted Runner terminal receipt is invalid")),
-                )
-          const terminalFrame = terminal?._tag === "Terminal" ? terminal : undefined
-          const terminalResponse = terminalFrame?.response
-          let resolvedState: typeof input.state | "unknown" | "completed" = input.state
-          if (terminalFrame !== undefined) resolvedState = terminalFrame.outcome === "unknown" ? "unknown" : "completed"
-          const resolvedResponse = terminalResponse ?? input.response
-          const resolvedOutcome = terminalFrame?.outcome ?? "unknown"
-          if (
-            resolvedState === "completed" &&
-            terminalResponse === undefined &&
-            (input.access === undefined ||
-              input.access.fence.assignmentId !== assignmentId ||
-              String(input.access.fence.assignmentGeneration) !== persistedFence.assignmentGeneration ||
-              input.access.fence.executorId !== persistedFence.executorInstanceId ||
-              input.access.fence.processIncarnation !== persistedFence.processIncarnation)
-          )
-            return yield* failure("fenced", "Runner completion does not match the dispatched fence")
-          const expectedFence = input.dispatchedFence ?? persistedFence
-          if (
-            persistedFence.assignmentGeneration !== expectedFence.assignmentGeneration ||
-            persistedFence.leaseEpoch !== expectedFence.leaseEpoch ||
-            persistedFence.executorInstanceId !== expectedFence.executorInstanceId ||
-            persistedFence.processIncarnation !== expectedFence.processIncarnation
-          )
-            return yield* failure("fenced", "Runner operation was not dispatched to this fence")
-          const updated = yield* sql`UPDATE rika_hosted_executor_operations SET
-              state = ${resolvedState}, response = ${sql.json(resolvedResponse)},
-              terminal_outcome = ${resolvedOutcome},
-              resolution_state = ${resolvedState === "unknown" ? "pending" : null},
-              updated_at = clock_timestamp()
-              WHERE assignment_id = ${assignmentId} AND operation_key = ${input.operationKey}
-                AND attempt = ${input.attempt}::bigint AND state = 'dispatched'
-                AND dispatched_generation = ${expectedFence.assignmentGeneration}::bigint
-                AND dispatched_lease_epoch = ${expectedFence.leaseEpoch}::bigint
-                AND dispatched_executor_instance_id = ${expectedFence.executorInstanceId}
-                AND dispatched_process_incarnation = ${expectedFence.processIncarnation}
-              RETURNING operation_key`.pipe(
-            Effect.mapError(() => failure("transport", "Could not persist Runner result")),
-          )
-          if (updated[0] === undefined) return yield* failure("fenced", "Runner result lost its fence")
-          const commands = yield* sql<{ readonly sequence: string }>`SELECT sequence::text AS sequence
-          FROM rika_hosted_thread_commands
-          WHERE thread_id = ${current.threadId} AND idempotency_key = ${input.operationKey}
-          LIMIT 1`.pipe(Effect.mapError(() => failure("transport", "Runner command is unavailable")))
-          const command = commands[0]
-          if (command === undefined) return yield* failure("transport", "Runner command is unavailable")
-          const event = {
-            eventId: EventId.make(input.operationKey),
-            idempotencyKey: IdempotencyKey.make(input.operationKey),
-            assignmentId: ExecutorAssignmentId.make(assignmentId),
-            assignmentGeneration: FencingGeneration.make(expectedFence.assignmentGeneration),
-            leaseEpoch: AssignmentLeaseEpoch.make(
-              resolvedState === "completed" && input.access !== undefined
-                ? String(input.access.leaseEpoch)
-                : expectedFence.leaseEpoch,
-            ),
-            commandSequence: Sequence.make(command.sequence),
-            event: { _tag: "CellResult", operationKey: input.operationKey, response: resolvedResponse },
-          }
-          if (resolvedState === "unknown")
-            yield* store
-              .appendRecoveredEvent({
-                ...event,
-                assignmentGeneration: FencingGeneration.make(expectedFence.assignmentGeneration),
-                leaseEpoch: AssignmentLeaseEpoch.make(expectedFence.leaseEpoch),
-                executorInstanceId: expectedFence.executorInstanceId,
-                processIncarnation: expectedFence.processIncarnation,
-              })
-              .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner recovery event")))
-          else
-            yield* store
-              .appendEvent(event)
-              .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner event")))
-          return finalResult(resolvedResponse, resolvedOutcome, input.access)
-        }),
-      )
-      .pipe(Effect.catchTag("SqlError", () => Effect.fail(failure("transport", "Could not persist Runner result"))))
+    const finalizeInput: MutableFinalizeOperationInput = {
+      assignmentId,
+      operationKey: input.operationKey,
+      attempt: input.attempt,
+      response: input.response,
+      state: input.state,
+    }
+    if (completionFence !== undefined) finalizeInput.completionFence = completionFence
+    if (input.dispatchedFence !== undefined) finalizeInput.expectedFence = { ...input.dispatchedFence, assignmentGeneration: Number(input.dispatchedFence.assignmentGeneration), leaseEpoch: Number(input.dispatchedFence.leaseEpoch) }
+    finalizeInput.onFinalize = (persisted) => {
+      const event: Parameters<typeof store.appendEvent>[0] = {
+        eventId: EventId.make(input.operationKey),
+        idempotencyKey: IdempotencyKey.make(input.operationKey),
+        assignmentId: ExecutorAssignmentId.make(assignmentId),
+        assignmentGeneration: FencingGeneration.make(String(persisted.fence.assignmentGeneration)),
+        leaseEpoch: AssignmentLeaseEpoch.make(input.access === undefined ? String(persisted.fence.leaseEpoch) : String(input.access.leaseEpoch)),
+        commandSequence: Sequence.make(String(persisted.commandSequence)),
+        event: { _tag: "CellResult", operationKey: input.operationKey, response: persisted.response },
+      }
+      if (recovering) return store.appendRecoveredEvent({ ...event, assignmentGeneration: FencingGeneration.make(String(persisted.fence.assignmentGeneration)), leaseEpoch: AssignmentLeaseEpoch.make(String(persisted.fence.leaseEpoch)), executorInstanceId: persisted.fence.executorInstanceId, processIncarnation: persisted.fence.processIncarnation }).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
+      return store.appendEvent(event).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
+    }
+    const persisted = yield* operations.finalizeOperation(finalizeInput).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner result")))
+    if (persisted._tag === "already-terminal") return finalResult(persisted.response, persisted.outcome, input.access)
+    if (persisted._tag === "response-conflict") return yield* failure("fenced", "Runner operation already has a different terminal result")
+    if (persisted._tag === "missing") return yield* failure("transport", "Runner operation is unavailable")
+    if (persisted._tag === "command-missing") return yield* failure("transport", "Runner command is unavailable")
+    if (persisted._tag !== "finalized") return yield* failure("fenced", "Runner operation was not dispatched to this fence")
+    return finalResult(persisted.response, persisted.outcome, input.access)
   })
 
   const settlePending = Effect.fn("RunnerGateway.settlePending")(function* (
@@ -762,109 +544,20 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     }).pipe(Effect.ignore)
   })
 
-  const recoverStale = Effect.fn("RunnerGateway.recoverStale")(function* (access: AccessWire) {
-    const rows = yield* sql<{
-      readonly operationKey: string
-      readonly attempt: string
-      readonly dispatchedGeneration: string
-      readonly dispatchedLeaseEpoch: string
-      readonly dispatchedExecutorInstanceId: string | null
-      readonly dispatchedProcessIncarnation: string | null
-    }>`SELECT operation_key AS "operationKey", attempt::text AS attempt,
-        dispatched_generation::text AS "dispatchedGeneration",
-        dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
-        dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
-        dispatched_process_incarnation AS "dispatchedProcessIncarnation"
-      FROM rika_hosted_executor_operations
-      WHERE assignment_id = ${access.fence.assignmentId} AND state = 'dispatched'
-        AND (
-          dispatched_generation <> ${access.fence.assignmentGeneration}::bigint
-          OR dispatched_executor_instance_id IS DISTINCT FROM ${access.fence.executorId}
-          OR dispatched_process_incarnation IS DISTINCT FROM ${access.fence.processIncarnation}
-        )`.pipe(Effect.mapError(() => failure("transport", "Could not recover Runner operations")))
-    yield* Effect.forEach(
-      rows,
-      (row) =>
-        row.dispatchedExecutorInstanceId === null || row.dispatchedProcessIncarnation === null
-          ? Effect.void
-          : finalize({
-              assignmentId: access.fence.assignmentId,
-              access,
-              operationKey: row.operationKey,
-              attempt: Number(row.attempt),
-              response: unknownResponse,
-              state: "unknown",
-              dispatchedFence: {
-                assignmentGeneration: row.dispatchedGeneration,
-                leaseEpoch: row.dispatchedLeaseEpoch,
-                executorInstanceId: row.dispatchedExecutorInstanceId,
-                processIncarnation: row.dispatchedProcessIncarnation!,
-              },
-            }).pipe(
-              Effect.flatMap((result) =>
-                settlePending(access.fence.assignmentId, row.operationKey, Number(row.attempt), result),
-              ),
-              Effect.ignore,
-            ),
-      { discard: true },
-    )
-  })
-
-  const recoverDue = Effect.fn("RunnerGateway.recoverDue")(function* () {
-    const rows = yield* sql<{
-      readonly assignmentId: string
-      readonly operationKey: string
-      readonly attempt: string
-      readonly dispatchedGeneration: string
-      readonly dispatchedLeaseEpoch: string
-      readonly dispatchedExecutorInstanceId: string | null
-      readonly dispatchedProcessIncarnation: string | null
-    }>`SELECT operation.assignment_id AS "assignmentId", operation.operation_key AS "operationKey",
-        operation.attempt::text AS attempt, operation.dispatched_generation::text AS "dispatchedGeneration",
-        operation.dispatched_lease_epoch::text AS "dispatchedLeaseEpoch",
-        operation.dispatched_executor_instance_id AS "dispatchedExecutorInstanceId",
-        operation.dispatched_process_incarnation AS "dispatchedProcessIncarnation"
-      FROM rika_hosted_executor_operations operation
-      JOIN rika_hosted_executor_assignments assignment ON assignment.id = operation.assignment_id
-      WHERE operation.state = 'dispatched'
-        AND (
-          operation.deadline_at <= clock_timestamp()
-          OR assignment.lifecycle <> 'active'
-          OR assignment.lease_expires_at <= clock_timestamp()
-          OR assignment.generation <> operation.dispatched_generation
-          OR assignment.executor_instance_id IS DISTINCT FROM operation.dispatched_executor_instance_id
-          OR assignment.process_incarnation IS DISTINCT FROM operation.dispatched_process_incarnation
-        )`.pipe(Effect.mapError(() => failure("transport", "Could not inspect Runner recovery queue")))
-    yield* Effect.forEach(
-      rows,
-      (row) =>
-        row.dispatchedExecutorInstanceId === null || row.dispatchedProcessIncarnation === null
-          ? Effect.void
-          : finalize({
-              assignmentId: row.assignmentId,
-              operationKey: row.operationKey,
-              attempt: Number(row.attempt),
-              response: unknownResponse,
-              state: "unknown",
-              dispatchedFence: {
-                assignmentGeneration: row.dispatchedGeneration,
-                leaseEpoch: row.dispatchedLeaseEpoch,
-                executorInstanceId: row.dispatchedExecutorInstanceId,
-                processIncarnation: row.dispatchedProcessIncarnation!,
-              },
-            }).pipe(
-              Effect.flatMap((result) =>
-                Effect.all(
-                  [
-                    settlePending(row.assignmentId, row.operationKey, Number(row.attempt), result),
-                    sendCancel(row.assignmentId, row.operationKey, Number(row.attempt)),
-                  ],
-                  { discard: true },
-                ),
-              ),
-              Effect.ignore,
-            ),
-      { discard: true },
+  const recoverTerminals = Effect.fn("RunnerGateway.recoverTerminals")(function* () {
+    const rows = yield* operations.terminalRecoveryScan.pipe(Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipts")))
+    return yield* Effect.forEach(rows, (row) =>
+      finalize({
+                assignmentId: row.assignmentId,
+                operationKey: row.operationKey,
+                attempt: row.attempt,
+                response: row.frame.response,
+                state: row.frame.outcome === "unknown" ? "unknown" : "completed",
+              }).pipe(
+        Effect.flatMap((result) => settlePending(row.assignmentId, row.operationKey, row.attempt, result)),
+        Effect.as<GatewayError | undefined>(undefined),
+        Effect.catch((error) => Effect.succeed<GatewayError | undefined>(error)),
+      ),
     )
   })
 
@@ -890,54 +583,16 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
   })
 
   const shutdown = Effect.fn("RunnerGateway.shutdown")(function* (socket: Socket, access: AccessWire) {
-    const detached = yield* gatewayLock.withPermits(1)(
-      Effect.gen(function* () {
-        const id = yield* Ref.get(assignments).pipe(Effect.map((current) => current.get(socket)))
-        const currentSession =
-          id === undefined ? undefined : yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(id)))
-        if (
-          id === undefined ||
-          id !== access.fence.assignmentId ||
-          currentSession?.socket !== socket ||
-          !same(currentSession.access, access)
-        )
-          return yield* failure("fenced", "Runner shutdown does not match the current session")
-        yield* Ref.update(assignments, (current) => {
-          const next = new Map(current)
-          next.delete(socket)
-          return next
-        })
-        yield* Ref.update(sessions, (current) => {
-          const next = new Map(current)
-          next.delete(id)
-          return next
-        })
-        const values = yield* Ref.modify(pending, (current) => {
-          const matches = [...current.entries()].filter(([, value]) => value.assignmentId === id)
-          const next = new Map(current)
-          for (const [name] of matches) next.delete(name)
-          return [matches.map(([, value]) => value), next] as const
-        })
-        return values
-      }),
+    const assignmentId = (yield* Ref.get(assignments)).get(socket)
+    const session = assignmentId === undefined ? undefined : (yield* Ref.get(sessions)).get(assignmentId)
+    if (
+      assignmentId === undefined ||
+      assignmentId !== access.fence.assignmentId ||
+      session?.socket !== socket ||
+      !same(session.access, access)
     )
-    yield* Effect.forEach(
-      detached,
-      (value) =>
-        finalize({
-          access: value.access,
-          operationKey: value.operationKey,
-          attempt: value.attempt,
-          response: unknownResponse,
-          state: "unknown",
-        }).pipe(
-          Effect.matchEffect({
-            onFailure: () => Deferred.fail(value.result, failure("disconnected", "Runner shut down")),
-            onSuccess: (result) => Deferred.succeed(value.result, result),
-          }),
-        ),
-      { discard: true },
-    )
+      return yield* failure("fenced", "Runner shutdown does not match the current session")
+    yield* disconnected(socket)
     yield* authority.release(redactAccess(access)).pipe(Effect.ignore)
   })
 
@@ -963,40 +618,19 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
           return yield* failure("fenced", "Runner result attempt is stale")
       }),
     )
-    const persisted = (yield* operation(access.fence.assignmentId, operationKey, attempt).pipe(
+    const persisted = yield* operations.findOperation({ assignmentId: access.fence.assignmentId, operationKey, attempt }).pipe(
       Effect.mapError(() => failure("transport", "Could not read Runner operation")),
-    ))[0]
+    )
     if (persisted === undefined) return yield* failure("fenced", "Runner operation is unavailable")
     if (persisted.state === "completed" || persisted.state === "unknown") {
-      const canonical = yield* decodeResponse(persisted.response).pipe(
-        Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-      )
-      if (persisted.terminalOutcome === null)
-        return yield* failure("transport", "Persisted Runner terminal outcome is missing")
-      if (persisted.state === "completed" && !equivalentResponse(canonical, response))
-        return yield* failure("fenced", "Runner operation already has a different terminal result")
-      return {
-        access,
-        response: canonical,
-        outcome: persisted.terminalOutcome,
-        eventPersisted: true as const,
-      }
+      const result = yield* finalize({ access, operationKey, attempt, response, state: "completed" })
+      if (pendingCurrent !== undefined) yield* Deferred.succeed(pendingCurrent.result, result)
+      return result
     }
-    const terminalRows = yield* sql<{ readonly frame: unknown }>`SELECT frame
-      FROM rika_hosted_executor_operation_frames
-      WHERE assignment_id = ${access.fence.assignmentId}
-        AND operation_key = ${operationKey}
-        AND attempt = ${attempt}::bigint
-        AND kind = 'Terminal'`.pipe(
+    const terminalFrame = yield* operations.terminalFrame({ assignmentId: access.fence.assignmentId, operationKey, attempt }).pipe(
       Effect.mapError(() => failure("transport", "Could not read Runner terminal receipt")),
     )
-    const terminal = terminalRows[0]
-    if (terminal === undefined) return yield* failure("fenced", "Runner result arrived before its terminal receipt")
-    const terminalFrame = yield* decodeLifecycle(terminal.frame).pipe(
-      Effect.mapError(() => failure("transport", "Persisted Runner terminal receipt is invalid")),
-    )
-    if (terminalFrame._tag !== "Terminal" || !equivalentResponse(terminalFrame.response, response))
-      return yield* failure("fenced", "Runner result conflicts with its terminal receipt")
+    if (terminalFrame === undefined) return yield* failure("fenced", "Runner result arrived before its terminal receipt")
     const result = yield* finalize({ access, operationKey, attempt, response, state: "completed" }).pipe(
       Effect.tapError((error) =>
         pendingCurrent === undefined ? Effect.void : Deferred.fail(pendingCurrent.result, error).pipe(Effect.asVoid),
@@ -1021,63 +655,8 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
         if (assignmentId === undefined || session?.socket !== socket || !same(session.access, access))
           return yield* failure("fenced", "Runner lifecycle frame has a stale session")
         const attribution = frame.attribution
-        const disposition = yield* sql.withTransaction(
-          Effect.gen(function* () {
-            const persisted = (yield* lockedOperation(assignmentId, attribution.operationKey, attribution.attempt).pipe(
-              Effect.mapError(() => failure("transport", "Could not lock Runner lifecycle operation")),
-            ))[0]
-            if (
-              persisted === undefined ||
-              Number(persisted.attempt) !== attribution.attempt ||
-              persisted.workspaceId !== attribution.workspaceId ||
-              persisted.sessionId !== attribution.sessionId ||
-              persisted.threadId !== attribution.threadId ||
-              persisted.turnId !== attribution.turnId ||
-              persisted.runId !== attribution.runId ||
-              persisted.rootRunId !== attribution.rootRunId ||
-              persisted.toolCallId !== attribution.toolCallId
-            )
-              return yield* failure("fenced", "Runner lifecycle attribution is invalid")
-            const stored = yield* sql<{ readonly frame: unknown }>`SELECT frame
-              FROM rika_hosted_executor_operation_frames
-              WHERE assignment_id = ${assignmentId} AND operation_key = ${attribution.operationKey}
-                AND attempt = ${attribution.attempt}::bigint
-              ORDER BY cursor`.pipe(
-              Effect.mapError(() => failure("transport", "Could not read Runner lifecycle frames")),
-            )
-            const known = yield* Effect.forEach(stored, (row) =>
-              decodeLifecycle(row.frame).pipe(
-                Effect.mapError(() => failure("transport", "Persisted Runner lifecycle frame is invalid")),
-              ),
-            )
-            const existing = known.find((retained) => retained.cursor === frame.cursor)
-            if (existing !== undefined) {
-              if (!equivalentLifecycle(existing, frame))
-                return yield* failure("fenced", "Runner lifecycle cursor has different content")
-              return persisted.state === "completed" || persisted.state === "unknown"
-                ? ("already-terminal" as const)
-                : ("appended" as const)
-            }
-            if (persisted.state === "completed" || persisted.state === "unknown") return "already-terminal" as const
-            if (
-              frame.cursor !== known.length + 1 ||
-              known.some((retained) => retained._tag === "Terminal") ||
-              (frame.cursor === 1 && frame._tag !== "Accepted") ||
-              (frame.cursor === 2 && frame._tag !== "Started") ||
-              (frame.cursor > 2 && frame._tag !== "Output" && frame._tag !== "Terminal") ||
-              (frame._tag === "Output" && known.filter((retained) => retained._tag === "Output").length >= 16)
-            )
-              return yield* failure("fenced", "Runner lifecycle sequence is invalid")
-            if (persisted.state !== "dispatched") return yield* failure("fenced", "Runner operation was not dispatched")
-            yield* sql`INSERT INTO rika_hosted_executor_operation_frames
-              (assignment_id, operation_key, attempt, cursor, kind, frame)
-              VALUES (${assignmentId}, ${attribution.operationKey}, ${attribution.attempt},
-                ${frame.cursor}, ${frame._tag}, ${sql.json(frame)})`.pipe(
-              Effect.mapError(() => failure("transport", "Could not persist Runner lifecycle frame")),
-            )
-            return "appended" as const
-          }),
-        )
+        const disposition = yield* operations.appendFrame(assignmentId, frame).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner lifecycle frame")))
+        if (disposition === "invalid-sequence") return yield* failure("fenced", "Runner lifecycle sequence or attribution is invalid")
         if (frame._tag === "Terminal") {
           if (disposition === "appended") {
             const result = yield* finalize({
@@ -1123,14 +702,6 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
                 }),
               ),
               Effect.tap((welcome) =>
-                recoverStale({
-                  version: 1,
-                  fence: welcome.fence,
-                  leaseEpoch: welcome.leaseEpoch,
-                  sessionToken: Redacted.value(welcome.sessionToken),
-                }),
-              ),
-              Effect.tap((welcome) =>
                 Effect.sync(() => {
                   socket.send(
                     encode({
@@ -1151,7 +722,6 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
                   leaseExpiresAt: welcome.leaseExpiresAt,
                 }
                 return register(session).pipe(
-                  Effect.andThen(recoverStale(session.access)),
                   Effect.andThen(
                     Effect.sync(() => {
                       socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
@@ -1160,7 +730,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
                   Effect.andThen(replayPending(session)),
                 )
               }),
-              Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
+              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
           if (message._tag === "ExecutorHeartbeat")
             return authority.heartbeat(redactHeartbeat(message.heartbeat)).pipe(
@@ -1176,7 +746,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
                   socket.send(encode({ _tag: "LeaseReceipt", receipt }))
                 }),
               ),
-              Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
+              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
           if (message._tag === "CellLifecycle")
             return authority.validateAccess(redactAccess(message.access)).pipe(
@@ -1241,97 +811,45 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     )
 
   const timeoutAccepted = Effect.fn("RunnerGateway.timeoutAccepted")(function* (input: LocalExecuteInput) {
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const rows = yield* lockedOperation(input.assignmentId, input.operationKey, input.attempt).pipe(
-            Effect.mapError(() => failure("transport", "Could not lock Runner operation")),
-          )
-          const row = rows[0]
-          if (row === undefined) return yield* failure("transport", "Runner operation is unavailable")
-          if (row.state === "completed" || row.state === "unknown") {
-            const response = yield* decodeResponse(row.response).pipe(
-              Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-            )
-            if (row.terminalOutcome === null)
-              return yield* failure("transport", "Persisted Runner terminal outcome is missing")
-            return {
-              response,
-              outcome: row.terminalOutcome,
-              eventPersisted: true,
-            } satisfies FinalResult
-          }
-          if (row.state === "dispatched") return undefined
-          const updated = yield* sql`UPDATE rika_hosted_executor_operations SET
-            state = 'completed', response = ${sql.json(timeoutResponse)}, terminal_outcome = 'failed',
-            updated_at = clock_timestamp()
-            WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
-              AND attempt = ${input.attempt}::bigint AND state = 'accepted'
-            RETURNING operation_key`.pipe(
-            Effect.mapError(() => failure("transport", "Could not persist Runner deadline")),
-          )
-          if (updated[0] === undefined) return undefined
-          const commands = yield* sql<{ readonly sequence: string }>`SELECT sequence::text AS sequence
-            FROM rika_hosted_thread_commands
-            WHERE thread_id = ${row.threadId} AND idempotency_key = ${input.operationKey}
-            LIMIT 1`.pipe(Effect.mapError(() => failure("transport", "Runner command is unavailable")))
-          const command = commands[0]
-          if (command === undefined) return yield* failure("transport", "Runner command is unavailable")
-          const assignmentRows = yield* sql<{
-            readonly generation: string
-            readonly leaseEpoch: string
-          }>`SELECT generation::text AS generation, lease_epoch::text AS "leaseEpoch"
-            FROM rika_hosted_executor_assignments
-            WHERE id = ${input.assignmentId} AND lease_epoch IS NOT NULL
-            FOR SHARE`.pipe(Effect.mapError(() => failure("transport", "Runner assignment is unavailable")))
-          const assignment = assignmentRows[0]
-          if (assignment === undefined) return yield* failure("transport", "Runner assignment is unavailable")
-          yield* store
-            .appendEvent({
-              eventId: EventId.make(input.operationKey),
-              idempotencyKey: IdempotencyKey.make(input.operationKey),
-              assignmentId: ExecutorAssignmentId.make(input.assignmentId),
-              assignmentGeneration: FencingGeneration.make(assignment.generation),
-              leaseEpoch: AssignmentLeaseEpoch.make(assignment.leaseEpoch),
-              commandSequence: Sequence.make(command.sequence),
-              event: { _tag: "CellResult", operationKey: input.operationKey, response: timeoutResponse },
-            })
-            .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner deadline event")))
-          return { response: timeoutResponse, outcome: "failed", eventPersisted: true } satisfies FinalResult
-        }),
-      )
-      .pipe(Effect.catchTag("SqlError", () => Effect.fail(failure("transport", "Could not persist Runner deadline"))))
+    const current = yield* operations.findOperation(input).pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
+    if (current === undefined) return yield* failure("transport", "Runner operation is unavailable")
+    if (current.state === "completed" || current.state === "unknown") {
+      if (current.response === null || current.terminalOutcome === null) return yield* failure("transport", "Persisted Runner terminal outcome is missing")
+      return { response: current.response, outcome: current.terminalOutcome, eventPersisted: true }
+    }
+    if (current.state === "dispatched") return undefined
+    const timedOut = yield* operations.timeoutAccepted(input, timeoutResponse, (result) => store.appendEvent({
+      eventId: EventId.make(input.operationKey),
+      idempotencyKey: IdempotencyKey.make(input.operationKey),
+      assignmentId: ExecutorAssignmentId.make(input.assignmentId),
+      assignmentGeneration: FencingGeneration.make(String(result.assignmentGeneration)),
+      leaseEpoch: AssignmentLeaseEpoch.make(String(result.leaseEpoch)),
+      commandSequence: Sequence.make(String(result.commandSequence)),
+      event: { _tag: "CellResult", operationKey: input.operationKey, response: timeoutResponse },
+    }).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner deadline")))
+    if (timedOut === undefined) return undefined
+    const result: FinalResult = { response: timeoutResponse, outcome: "failed", eventPersisted: true }
+    return result
   })
 
   const waitForTerminal = (input: LocalExecuteInput): Effect.Effect<FinalResult, GatewayError> =>
     Effect.gen(function* () {
-      yield* recoverDue().pipe(Effect.ignore)
-      const rows = yield* operation(input.assignmentId, input.operationKey, input.attempt).pipe(
+      yield* recoverTerminals().pipe(Effect.ignore)
+      const row = yield* operations.findOperation(input).pipe(
         Effect.mapError(() => failure("transport", "Could not read Runner operation")),
       )
-      const row = rows[0]
       if (row === undefined) return yield* failure("transport", "Runner operation is unavailable")
       if (row.state === "completed" || row.state === "unknown") {
-        const response = yield* decodeResponse(row.response).pipe(
-          Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-        )
-        if (row.terminalOutcome === null)
+        if (row.response === null || row.terminalOutcome === null)
           return yield* failure("transport", "Persisted Runner terminal outcome is missing")
         const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-        return finalResult(response, row.terminalOutcome, session?.access)
+        return finalResult(row.response, row.terminalOutcome, session?.access)
       }
       if ((yield* Clock.currentTimeMillis) >= DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))) {
         const timedOut = yield* timeoutAccepted(input)
         if (timedOut !== undefined) return timedOut
-        const result = yield* finalize({
-          assignmentId: input.assignmentId,
-          operationKey: input.operationKey,
-          attempt: input.attempt,
-          response: unknownResponse,
-          state: "unknown",
-        })
         yield* sendCancel(input.assignmentId, input.operationKey, input.attempt)
-        return result
+        return { response: unknownResponse, outcome: "unknown", eventPersisted: false }
       }
       return yield* Effect.sleep("100 millis").pipe(Effect.andThen(waitForTerminal(input)))
     })
@@ -1349,52 +867,48 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     )
   })
 
+  const awaitSession = (input: LocalExecuteInput): Effect.Effect<Session | undefined> =>
+    Effect.gen(function* () {
+      const session = (yield* Ref.get(sessions)).get(input.assignmentId)
+      if (session !== undefined) return session
+      if ((yield* Clock.currentTimeMillis) >= DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt)))
+        return undefined
+      return yield* Effect.sleep("100 millis").pipe(Effect.andThen(awaitSession(input)))
+    })
+
   const execute = Effect.fn("RunnerGateway.execute")(function* (input: LocalExecuteInput) {
-    yield* recoverDue().pipe(Effect.ignore)
-    const pendingKey = key(input.assignmentId, input.operationKey, input.attempt)
+    yield* recoverTerminals().pipe(Effect.ignore)
+    const durable = yield* prepare(input)
+    const request = {
+      ...input,
+      admittedAt: durable.admittedAt,
+      deadlineAt: durable.deadlineAt,
+    }
+    const pendingKey = key(request.assignmentId, request.operationKey, request.attempt)
     const existingPending = yield* gatewayLock.withPermits(1)(
       Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey))),
     )
     if (existingPending !== undefined) {
-      if (existingPending.code !== input.code)
+      if (existingPending.code !== request.code)
         return yield* failure("fenced", "Runner operation identity conflicts with different code")
-      return yield* awaitResult(existingPending.result, input)
+      return yield* awaitResult(existingPending.result, request)
     }
 
-    const durable = yield* prepare(input)
     if (durable.state === "completed" || durable.state === "unknown") {
-      const response = yield* decodeResponse(durable.response).pipe(
-        Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-      )
-      if (durable.terminalOutcome === null)
+      if (durable.response === null || durable.terminalOutcome === null)
         return yield* failure("transport", "Persisted Runner terminal outcome is missing")
-      const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-      return finalResult(response, durable.terminalOutcome, session?.access)
-    }
-    if (durable.state === "dispatched") {
-      const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-      if (session !== undefined) {
-        yield* recoverStale(session.access)
-        const refreshed = yield* prepare(input)
-        if (refreshed.state === "completed" || refreshed.state === "unknown") {
-          const response = yield* decodeResponse(refreshed.response).pipe(
-            Effect.mapError(() => failure("transport", "Persisted Runner response is invalid")),
-          )
-          if (refreshed.terminalOutcome === null)
-            return yield* failure("transport", "Persisted Runner terminal outcome is missing")
-          return {
-            access: session.access,
-            response,
-            outcome: refreshed.terminalOutcome,
-            eventPersisted: true as const,
-          }
-        }
+      const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(request.assignmentId)))
+      const result: FinalResult = {
+        response: durable.response,
+        outcome: durable.terminalOutcome,
+        eventPersisted: true as const,
       }
-      return yield* waitForTerminal(input)
+      if (session !== undefined) return { ...result, access: session.access }
+      return result
     }
 
-    const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
-    if (session === undefined) return yield* waitForTerminal(input)
+    const session = yield* awaitSession(request)
+    if (session === undefined) return yield* waitForTerminal(request)
     const workspace = yield* authority
       .workspaceIdentity(redactAccess(session.access))
       .pipe(Effect.mapError((error) => failure("fenced", error.message)))
@@ -1402,11 +916,11 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
       Effect.gen(function* () {
         const currentPending = yield* Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey)))
         if (currentPending !== undefined) {
-          if (currentPending.code !== input.code)
+          if (currentPending.code !== request.code)
             return yield* failure("fenced", "Runner operation identity conflicts with different code")
           return { existing: currentPending } as const
         }
-        const currentSession = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
+        const currentSession = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(request.assignmentId)))
         if (
           currentSession === undefined ||
           currentSession.socket !== session.socket ||
@@ -1416,86 +930,68 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
         yield* authority
           .validateAccess(redactAccess(currentSession.access))
           .pipe(Effect.mapError((error) => failure("fenced", error.message)))
-        yield* claimDispatch({
-          session: currentSession,
-          operationKey: input.operationKey,
-          attempt: Number(durable.attempt),
-        })
+        const currentOperation = yield* prepare(request)
+        if (currentOperation.state === "accepted")
+          yield* claimDispatch({
+            session: currentSession,
+            operationKey: request.operationKey,
+            attempt: Number(currentOperation.attempt),
+          })
+        else if (
+          currentOperation.state !== "dispatched" ||
+          currentOperation.dispatchedGeneration !== currentSession.access.fence.assignmentGeneration ||
+          currentOperation.dispatchedExecutorInstanceId !== currentSession.access.fence.executorId ||
+          currentOperation.dispatchedProcessIncarnation !== currentSession.access.fence.processIncarnation
+        )
+          return yield* failure("fenced", "Runner operation was dispatched to a different executor")
         const result = yield* Deferred.make<FinalResult, GatewayError>()
         const current: Pending = {
-          assignmentId: input.assignmentId,
-          operationKey: input.operationKey,
-          attempt: Number(durable.attempt),
-          code: input.code,
-          request: input,
+          assignmentId: request.assignmentId,
+          operationKey: request.operationKey,
+          attempt: Number(currentOperation.attempt),
+          code: request.code,
+          request,
           socket: currentSession.socket,
           access: currentSession.access,
           result,
-          bindings: input.bindings,
+          bindings: request.bindings,
           bindingCalls: yield* Ref.make(new Map()),
+          bindingLock: yield* Semaphore.make(1),
           nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (values) => new Map(values).set(pendingKey, current))
-        const sent = yield* Effect.try({
+        yield* Effect.try({
           try: () => {
             currentSession.socket.send(
               encode({
                 _tag: "CellExecute",
                 request: {
                   access: currentSession.access,
-                  operationKey: input.operationKey,
+                  operationKey: request.operationKey,
                   workspaceId: workspace,
-                  sessionId: input.sessionId,
-                  threadId: input.threadId,
-                  turnId: input.turnId,
-                  runId: input.runId,
-                  toolCallId: input.toolCallId,
-                  code: input.code,
-                  rootRunId: input.rootRunId,
+                  sessionId: request.sessionId,
+                  threadId: request.threadId,
+                  turnId: request.turnId,
+                  runId: request.runId,
+                  toolCallId: request.toolCallId,
+                  code: request.code,
+                  rootRunId: request.rootRunId,
                   attempt: current.attempt,
-                  replayPolicy: input.replayPolicy,
-                  admittedAt: input.admittedAt,
-                  deadlineAt: input.deadlineAt,
-                  bindings: input.bindings.manifest,
+                  replayPolicy: request.replayPolicy,
+                  admittedAt: request.admittedAt,
+                  deadlineAt: request.deadlineAt,
+                  bindings: request.bindings.manifest,
                 },
               }),
             )
           },
-          catch: () => failure("disconnected", "Runner delivery failed"),
-        }).pipe(
-          Effect.as(true),
-          Effect.orElseSucceed(() => false),
-        )
-        return { current, sent } as const
+          catch: () => undefined,
+        }).pipe(Effect.ignore)
+        return { current } as const
       }),
     )
-    if ("existing" in setup) return yield* awaitResult(setup.existing.result, input)
-    return yield* Effect.gen(function* () {
-      if (!setup.sent)
-        return yield* finalize({
-          access: setup.current.access,
-          operationKey: input.operationKey,
-          attempt: setup.current.attempt,
-          response: unknownResponse,
-          state: "unknown",
-        })
-      return yield* awaitResult(setup.current.result, input).pipe(
-        Effect.onInterrupt(() =>
-          Effect.try({
-            try: () =>
-              setup.current.socket.send(
-                encode({
-                  _tag: "CellCancel",
-                  access: setup.current.access,
-                  operationKey: setup.current.operationKey,
-                  attempt: setup.current.attempt,
-                }),
-              ),
-            catch: () => undefined,
-          }).pipe(Effect.ignore),
-        ),
-      )
-    }).pipe(
+    if ("existing" in setup) return yield* awaitResult(setup.existing.result, request)
+    return yield* awaitResult(setup.current.result, request).pipe(
       Effect.ensuring(
         Effect.all(
           [
@@ -1506,7 +1002,7 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
             }),
             machineLock.withPermits(1)(
               Ref.update(machineCalls, (values) => {
-                const prefix = `${input.assignmentId}\u001f${input.operationKey}\u001f${input.attempt}\u001f`
+                const prefix = `${request.assignmentId}\u001f${request.operationKey}\u001f${request.attempt}\u001f`
                 return new Map(Array.from(values).filter(([callKey]) => !callKey.startsWith(prefix)))
               }),
             ),
@@ -1617,10 +1113,26 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
   })
 
   const pollAccepted = Effect.fn("RunnerGateway.pollAccepted")(function* () {
-    yield* recoverDue().pipe(Effect.ignore)
+    const failures = (yield* recoverTerminals()).filter((error): error is GatewayError => error !== undefined)
+    const first = failures[0]
+    if (first === undefined) return
+    yield* Effect.logError("runner-recovery.failed").pipe(
+      Effect.annotateLogs({
+        "rika.error.kind": first.kind,
+        "rika.error.message": first.message,
+        "rika.recovery.failures": failures.length,
+      }),
+    )
   })
 
-  const pollTick = Effect.sleep("100 millis").pipe(Effect.andThen(pollAccepted()), Effect.ignore)
+  const pollTick = Effect.sleep("1 second").pipe(
+    Effect.andThen(pollAccepted()),
+    Effect.catch((error) =>
+      Effect.logError("runner-recovery.poll-failed").pipe(
+        Effect.annotateLogs({ "rika.error.kind": error.kind, "rika.error.message": error.message }),
+      ),
+    ),
+  )
   yield* Effect.forever(pollTick).pipe(Effect.forkScoped)
 
   const active: RunnerGateway["active"] = (socket) =>
@@ -1636,4 +1148,9 @@ export const makeRunnerGateway = Effect.fn("RunnerGateway.make")(function* (
     })
 
   return { receive, disconnected, active, execute, cancel, machine }
+})
+
+export const makeRunnerGateway = Effect.fn("RunnerGateway.makeLive")(function* (authority: RunnerExecutorAuthority, toolPolicy: HostedToolPolicyService) {
+  const context = yield* Layer.build(hostedExecutionOperationsLayer)
+  return yield* makeRunnerGatewayWithOperations(authority, toolPolicy).pipe(Effect.provideContext(context))
 })

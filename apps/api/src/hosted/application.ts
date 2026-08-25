@@ -1,5 +1,5 @@
 import { BunCrypto } from "@effect/platform-bun"
-import type * as PgClient from "@effect/sql-pg/PgClient"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { appJwtJoseLayer } from "@rika/github-app/app-jwt"
 import { installationLayer } from "@rika/github-app/installation-service"
 import { installationTokenLayer } from "@rika/github-app/installation-token"
@@ -11,29 +11,42 @@ import * as ExecutionSessionLifecycle from "@rika/product/execution-session-life
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import * as OpenAiAuthHttp from "@rika/product/openai-auth-http"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
-import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
-import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
-import * as HostedTurnWorkerStore from "@rika/product-store/postgres-turn-worker-store"
+import { layer as postgresLayer } from "@rika/product-store/layer"
+import * as ProductRepositories from "@rika/product-store/product-repositories"
+import * as HostedTurnWorkerStore from "@rika/product-store/turn-worker-store"
 import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import * as RemoteCells from "@rika/execution/remote-cells"
-import { type ExecutorConfig, Executor, layer as executorLayer, service as executorService } from "../executor/service"
+import {
+  type ExecutorConfig,
+  Executor,
+  layer as executorLayer,
+  runnerOnlyControllerLayer,
+  service as executorService,
+} from "../executor/service"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./environment/runtime"
 import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "./thread/application"
-import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "./thread/protocol"
+import { HostedThreadCommandWorker, layer as hostedThreadCommandWorkerLayer } from "../hosted-thread-command-worker"
+import { HostedThreadProtocol, layerWithOptions as hostedThreadProtocolLayer } from "./thread/protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./environment/model-registry"
-import { HostedProduct, HostedProductError, layer as hostedProductLayer } from "./product"
+import { HostedProduct, layer as hostedProductLayer } from "./product"
 import { HostedPublication, layer as hostedPublicationLayer } from "./publication"
 import {
   HostedProviderCredentials,
   layer as hostedProviderCredentialsLayer,
   storeLayer as providerCredentialStoreLayer,
 } from "./environment/provider-credentials"
+import { HostedExecutionReconciler, layer as hostedExecutionReconcilerLayer } from "../hosted-execution-reconciler"
 import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./execution/projection-worker"
 import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLayer } from "./execution/recovery"
-import { HostedRepositories, layer as hostedRepositoriesLayer } from "./repositories"
+import {
+  HostedRepositories,
+  layer as hostedRepositoriesLayer,
+  unavailableLayer as hostedRepositoriesUnavailableLayer,
+} from "./repositories"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./thread/turn-worker"
 import { layer as hostedWorkspaceLayer } from "./environment/workspace"
+import { workspacePlacement } from "../hosted-workspace-placement"
 import { layer as runnerExecutorLayer } from "../runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
 
@@ -49,8 +62,10 @@ export interface HostedApplicationService {
   readonly recovery: HostedRecoveryService
   readonly repositories: HostedRepositories["Service"]
   readonly publication: HostedPublication["Service"]
+  readonly executionReconciler: HostedExecutionReconciler["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
+  readonly threadCommandWorker: HostedThreadCommandWorker["Service"]
   readonly execution: {
     readonly gateway: ExecutionGateway.Interface
     readonly lifecycle: ExecutionSessionLifecycle.Interface
@@ -62,12 +77,17 @@ export class HostedApplication extends Context.Service<HostedApplication, Hosted
   "@rika/api/hosted/application/HostedApplication",
 ) {}
 
+type MutableHostedProductOptions = {
+  -readonly [Key in keyof Parameters<typeof hostedProductLayer>[0]]: Parameters<typeof hostedProductLayer>[0][Key]
+}
+
 export const layer = (options: {
   readonly database: PgClient.PgPoolConfig
   readonly databaseUrl: Redacted.Redacted<string>
   readonly providerCredentialKey: Redacted.Redacted<string>
-  readonly executor: ExecutorConfig
-  readonly github: { readonly appId: number; readonly privateKey: Redacted.Redacted<string> }
+  readonly executor?: ExecutorConfig
+  readonly github?: { readonly appId: number; readonly privateKey: Redacted.Redacted<string> }
+  readonly developmentModel?: string
   readonly workerId: string
 }) =>
   Layer.effect(
@@ -94,26 +114,35 @@ export const layer = (options: {
         }).pipe(Layer.provide(retainedData)),
       )
       const modelContext = yield* Layer.build(
-        hostedModelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(Context.merge(data, credentialContext)))),
-      )
-      const githubLayer = Layer.merge(
-        installationLayer({ appId: options.github.appId }),
-        installationTokenLayer(),
-      ).pipe(
-        Layer.provide(appJwtJoseLayer({ issuer: String(options.github.appId), privateKey: options.github.privateKey })),
-        Layer.provide(httpLayer),
+        hostedModelRegistryLayer(
+          options.developmentModel === undefined ? {} : { developmentModel: options.developmentModel },
+        ).pipe(Layer.provide(Layer.succeedContext(Context.merge(data, credentialContext)))),
       )
       const repositoryContext = yield* Layer.build(
-        hostedRepositoriesLayer().pipe(
-          Layer.provide(githubLayer),
-          Layer.provide(httpLayer),
-          Layer.provide(retainedData),
-        ),
+        options.github === undefined
+          ? hostedRepositoriesUnavailableLayer
+          : hostedRepositoriesLayer().pipe(
+              Layer.provide(
+                Layer.merge(installationLayer({ appId: options.github.appId }), installationTokenLayer()).pipe(
+                  Layer.provide(
+                    appJwtJoseLayer({ issuer: String(options.github.appId), privateKey: options.github.privateKey }),
+                  ),
+                  Layer.provide(httpLayer),
+                ),
+              ),
+              Layer.provide(httpLayer),
+              Layer.provide(retainedData),
+            ),
       )
       const toolPolicyContext = yield* Layer.build(hostedToolPolicyLayer.pipe(Layer.provide(retainedData)))
       const executorContext = yield* Layer.build(
         executorService.pipe(
-          Layer.provide(Layer.merge(executorLayer(options.executor), runnerExecutorLayer)),
+          Layer.provide(
+            Layer.merge(
+              options.executor === undefined ? runnerOnlyControllerLayer : executorLayer(options.executor),
+              runnerExecutorLayer,
+            ),
+          ),
           Layer.provide(
             Layer.succeedContext(
               Context.merge(
@@ -179,17 +208,23 @@ export const layer = (options: {
           Layer.provide(retainedData),
         ),
       )
+      const executionReconcilerContext = yield* Layer.build(
+        hostedExecutionReconcilerLayer({
+          pollIntervalMillis: 250,
+        }).pipe(Layer.provide(ProductRepositories.projectionLayer), Layer.provide(Layer.succeedContext(hostedContext))),
+      )
+      const executionReconciler = Context.get(executionReconcilerContext, HostedExecutionReconciler)
       const projectionWorkerContext = yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 32, pollIntervalMillis: 250 }).pipe(
-          Layer.provide(ProductRepositories.projectionLayer),
-          Layer.provide(Layer.succeedContext(hostedContext)),
-        ),
+        hostedProjectionWorkerLayer({
+          concurrency: 32,
+          pollIntervalMillis: 250,
+        }).pipe(Layer.provide(ProductRepositories.projectionLayer), Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const projectionWorker = Context.get(projectionWorkerContext, HostedProjectionWorker)
       const turnWorkerContext = yield* Layer.build(
         hostedTurnWorkerLayer({
           workerId: options.workerId,
-          leaseMillis: 30_000,
+          leaseMillis: 120_000,
           pollIntervalMillis: 250,
           concurrency: 32,
         }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedContext))),
@@ -199,6 +234,9 @@ export const layer = (options: {
       const readiness = ExecutionPostgres.Readiness.of({
         check: Effect.all([
           executionReadiness.check,
+          executionReconciler.ready.pipe(
+            Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
+          ),
           projectionWorker.ready.pipe(
             Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
           ),
@@ -208,34 +246,24 @@ export const layer = (options: {
         ]).pipe(Effect.map(([proof]) => proof)),
         status: Effect.all({
           execution: executionReadiness.status,
+          reconciliation: executionReconciler.status,
           turn: turnWorker.status,
           projection: projectionWorker.status,
         }).pipe(Effect.map((status) => ({ ...status.execution, ...status }))),
       })
-      const environment = Context.get(environmentContext, HostedEnvironment)
-      const productContext = yield* Layer.build(
-        hostedProductLayer({
+      const productOptions: MutableHostedProductOptions = {
+        promptAdmissionReadiness: readiness.check.pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        ),
+      }
+      if (options.executor !== undefined)
+        productOptions.orb = {
           templateBuildId: options.executor.templateBuildId,
           providerScope: options.executor.deploymentId,
-          promptAdmissionReadiness: readiness.check.pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
-          ),
-          provision: (assignmentId) =>
-            environment
-              .usePhase({ assignmentId, phase: "setup" }, (resolved) =>
-                executor.controller.provision(assignmentId, {
-                  egress: resolved.egress,
-                  environmentDigest: resolved.manifest.digest,
-                }),
-              )
-              .pipe(
-                Effect.asVoid,
-                Effect.mapError(() =>
-                  HostedProductError.make({ kind: "unavailable", message: "Remote workspace provisioning failed" }),
-                ),
-              ),
-        }).pipe(Layer.provide(Layer.succeedContext(hostedContext))),
+        }
+      const productContext = yield* Layer.build(
+        hostedProductLayer(productOptions).pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const publicationContext = yield* Layer.build(
         hostedPublicationLayer({ product: Context.get(productContext, HostedProduct), executor }).pipe(
@@ -245,8 +273,29 @@ export const layer = (options: {
       const threadApplicationContext = yield* Layer.build(
         hostedThreadApplicationLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
+      const threadCommandWorkerContext = yield* Layer.build(
+        hostedThreadCommandWorkerLayer({
+          claimMillis: 10_000,
+          pollIntervalMillis: 250,
+          concurrency: 32,
+        }).pipe(
+          Layer.provide(
+            Layer.succeedContext(
+              Context.merge(
+                Context.merge(hostedContext, Context.merge(productContext, threadApplicationContext)),
+                workspaceContext,
+              ),
+            ),
+          ),
+        ),
+      )
+      const threadCommandWorker = Context.get(threadCommandWorkerContext, HostedThreadCommandWorker)
+      const placementSql = Context.get(data, PgClient.PgClient)
       const threadProtocolContext = yield* Layer.build(
-        hostedThreadProtocolLayer.pipe(
+        hostedThreadProtocolLayer({
+          databaseUrl: options.databaseUrl,
+          workspacePlacement: workspacePlacement(placementSql),
+        }).pipe(
           Layer.provide(
             Layer.succeedContext(
               Context.merge(
@@ -269,12 +318,23 @@ export const layer = (options: {
         recovery: Context.get(recoveryContext, HostedRecovery),
         repositories: Context.get(repositoryContext, HostedRepositories),
         publication: Context.get(publicationContext, HostedPublication),
+        executionReconciler,
         projectionWorker,
         turnWorker,
+        threadCommandWorker,
         execution: {
           gateway: Context.get(executionContext, ExecutionGateway.Service),
           lifecycle: Context.get(executionContext, ExecutionSessionLifecycle.Service),
-          readiness,
+          readiness: {
+            check: readiness.check.pipe(
+              Effect.tap(() =>
+                threadCommandWorker.ready.pipe(
+                  Effect.mapError((error) => ExecutionPostgres.WorkerUnavailable.make({ message: error.message })),
+                ),
+              ),
+            ),
+            status: readiness.status,
+          },
         },
       })
     }),

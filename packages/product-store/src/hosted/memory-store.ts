@@ -23,7 +23,15 @@ import {
   type ThreadGrant,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { HostedStore, StoreError, type StoreFailureReason, type StoreService } from "@rika/product/hosted-store"
+import {
+  HostedStore,
+  StoreError,
+  type AdmittedPrompt,
+  type CancelledPrompt,
+  type PromptCancellation,
+  type StoreFailureReason,
+  type StoreService,
+} from "@rika/product/hosted-store"
 import { isAuthorized, type AuthorizationAction, type AuthorizationSubject } from "@rika/product/hosted-authorization"
 import type { TurnId } from "@rika/product/turn-record"
 import { layer as assignmentLayer } from "./memory-assignments"
@@ -46,6 +54,7 @@ interface State {
   readonly clientAuthorities: Map<string, Timestamp>
   readonly commands: Map<string, ReadonlyArray<ThreadCommand>>
   readonly promptTurns: Map<string, { readonly turnId: TurnId; readonly status: "accepted" | "queued" }>
+  readonly promptCancellations: Map<string, { readonly cancelCommandId: string; readonly actor: ActorAttribution }>
   readonly events: Map<string, ReadonlyArray<ThreadEvent>>
   readonly cursors: Map<string, ResumableCursor>
   readonly writers: Map<string, TerminalWriterLease>
@@ -71,6 +80,7 @@ const emptyState = (): State => ({
   clientAuthorities: new Map(),
   commands: new Map(),
   promptTurns: new Map(),
+  promptCancellations: new Map(),
   events: new Map(),
   cursors: new Map(),
   writers: new Map(),
@@ -97,6 +107,7 @@ const projectGrantKey = (projectId: string, memberId: string) => `${projectId}\u
 const threadGrantKey = (threadId: string, memberId: string) => `${threadId}\u0000${memberId}`
 const cursorKey = (threadId: string, clientId: string) => `${threadId}\u0000${clientId}`
 const clientAuthorityKey = (clientId: string, ownerId: string) => `${clientId}\u0000${ownerId}`
+const promptCancellationKey = (threadId: string, commandId: string) => `${threadId}\u0000${commandId}`
 const ownerEquivalent = Schema.toEquivalence(HostedOwner)
 const allocateCommitCursor = (current: State, ownerId: string) => {
   const next = current.ownerCounters.get(ownerId) ?? 1n
@@ -115,6 +126,7 @@ const commandEquivalent = Schema.toEquivalence(
     command: Schema.Record(Schema.String, Schema.Unknown),
   }),
 )
+const actorEquivalent = Schema.toEquivalence(ActorAttribution)
 const eventEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: Schema.String,
@@ -462,8 +474,47 @@ const make = Effect.gen(function* () {
           commands: replace(current.commands, input.threadId, [...commands, command]),
         })
       }),
+    cancelPrompt: (input) =>
+      mutation<PromptCancellation>(state, (current) => {
+        const threadState = current.threads.get(input.threadId)
+        if (threadState === undefined || threadState.thread.ownerId !== input.ownerId)
+          return fail("not-found", "Thread does not exist in the organization")
+        const client = requireClient(current, input, input.cancelledAt)
+        if (!requireAccess(current, input, "thread:control", input.cancelledAt) || client === undefined)
+          return fail("invalid-authority", "Command actor attribution does not match the authenticated client")
+        const key = promptCancellationKey(input.threadId, input.targetCommandId)
+        const existing = current.promptCancellations.get(key)
+        const reused = [...current.promptCancellations.entries()].find(
+          ([candidateKey, cancellation]) =>
+            candidateKey !== key && cancellation.cancelCommandId === input.cancelCommandId,
+        )
+        if (reused !== undefined) return fail("conflict", "Cancellation identity targets a different submission")
+        if (
+          existing !== undefined &&
+          (existing.cancelCommandId !== input.cancelCommandId || !actorEquivalent(existing.actor, input.actor))
+        )
+          return fail("conflict", "Submission already has a different cancellation")
+        const commands = current.commands.get(input.threadId) ?? []
+        const target = commands.find((command) => command.commandId === input.targetCommandId)
+        const admission = target === undefined ? undefined : current.promptTurns.get(target.commandId)
+        if (target !== undefined && admission === undefined)
+          return fail("conflict", "Cancellation target is not a prompt submission")
+        const next =
+          existing === undefined
+            ? {
+                ...current,
+                promptCancellations: replace(current.promptCancellations, key, {
+                  cancelCommandId: input.cancelCommandId,
+                  actor: input.actor,
+                }),
+              }
+            : current
+        return admission === undefined
+          ? succeed({ _tag: "Pending" as const, targetCommandId: input.targetCommandId }, next)
+          : succeed({ _tag: "Turn" as const, targetCommandId: input.targetCommandId, turnId: admission.turnId }, next)
+      }),
     admitPrompt: (input) =>
-      mutation(state, (current) => {
+      mutation<AdmittedPrompt | CancelledPrompt>(state, (current) => {
         if (input.prompt.length === 0) return fail("conflict", "Prompt cannot be empty")
         const queueCapacity = Math.trunc(input.queueCapacity)
         if (queueCapacity < 1) return fail("conflict", "Prompt queue capacity must be positive")
@@ -487,9 +538,11 @@ const make = Effect.gen(function* () {
           const admission = current.promptTurns.get(previous.commandId)
           if (admission === undefined) return fail("conflict", "Command identity was admitted without a Turn")
           return commandEquivalent(previous, comparable)
-            ? succeed({ command: previous, ...admission }, current)
+            ? succeed({ _tag: "Admitted" as const, command: previous, ...admission }, current)
             : fail("conflict", "Command identity or idempotency key was reused with different content")
         }
+        if (current.promptCancellations.has(promptCancellationKey(input.threadId, input.commandId)))
+          return succeed({ _tag: "Cancelled" as const, targetCommandId: input.commandId }, current)
         if (!input.readinessProof) return fail("database", "Prompt admission workers are unavailable")
         if ([...current.promptTurns.values()].some((admission) => admission.turnId === input.turnId))
           return fail("conflict", "Turn identity is already in use")
@@ -515,7 +568,7 @@ const make = Effect.gen(function* () {
           commitCursor: allocated.commitCursor,
         }
         return succeed(
-          { command, turnId: input.turnId, status },
+          { _tag: "Admitted" as const, command, turnId: input.turnId, status },
           {
             ...current,
             ownerCounters: allocated.ownerCounters,

@@ -1,5 +1,6 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
+import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -12,7 +13,9 @@ import * as OperationFailure from "../../failure"
 import { type InteractiveSession, type InteractiveSessionControlsInput } from "../session"
 import { OperationUnavailable } from "../../contract/product"
 
-const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
+const routeEquivalent = Schema.toEquivalence(ExecutionRouteSnapshot)
+const terminal = (status: Turn.Turn["status"]) =>
+  status === "completed" || status === "failed" || status === "cancelled"
 
 export const makeInteractiveControl = (input: {
   readonly turns: TurnRepository.Interface
@@ -65,10 +68,10 @@ export const makeInteractiveControl = (input: {
     Effect.suspend(() => {
       let target: Pick<Turn.Turn, "id" | "threadId"> | undefined
       return Effect.gen(function* () {
-        const turn = yield* input.active
+        const turn =
+          targetTurnId === undefined ? yield* input.active : yield* input.turns.get(Turn.TurnId.make(targetTurnId))
+        if (turn === undefined) return yield* input.fail(`Steering target ${targetTurnId} is unavailable`)
         target = turn
-        if (targetTurnId !== undefined && String(turn.id) !== targetTurnId)
-          return yield* input.fail(`Steering target ${targetTurnId} is no longer the active turn`)
         if (turn._tag !== "AgentExecution" || turn.executionLink === undefined)
           return yield* input.fail(`Turn ${turn.id} has no persisted execution link`)
         yield* input.rootTurnOwner.prepareSteering(turn.executionLink, {
@@ -128,28 +131,21 @@ export const makeInteractiveControl = (input: {
           threadId = turn?.threadId
           if (turn === undefined || turn._tag !== "AgentExecution" || turn.executionLink === undefined)
             return yield* input.fail(`Turn ${turnId} has no persisted execution link`)
-          const projection = yield* input.transcripts.get(turnId)
-          if (projection?.projectorCheckpoint === undefined)
+          const projection = expectedCheckpoint === undefined ? yield* input.transcripts.get(turnId) : undefined
+          const checkpoint = expectedCheckpoint ?? projection?.projectorCheckpoint
+          if (checkpoint === undefined)
             return yield* ExecutionGateway.ApprovalResponseFailure.make({
               kind: "stale",
               message: "Authorization is no longer pending",
             })
-          if (
-            expectedCheckpoint !== undefined &&
-            !checkpointEquivalent(projection.projectorCheckpoint, expectedCheckpoint)
-          )
-            return yield* ExecutionGateway.ApprovalResponseFailure.make({
-              kind: "stale",
-              message: "Authorization checkpoint is stale",
-            })
           yield* decision === "approve"
             ? input.backend.approveTurn(turn.executionLink, {
                 authorizationId,
-                checkpoint: expectedCheckpoint ?? projection.projectorCheckpoint,
+                checkpoint,
               })
             : input.backend.denyTurn(turn.executionLink, {
                 authorizationId,
-                checkpoint: expectedCheckpoint ?? projection.projectorCheckpoint,
+                checkpoint,
               })
           yield* input.notifyTurnChanged(turn)
         }),
@@ -225,17 +221,14 @@ export const makeInteractiveSessionControls = (
     }
     const outcome = yield* Effect.exit(cancellation)
     if (outcome._tag === "Failure") {
-      yield* Effect.logWarning("execution.cancel.force_settled").pipe(
+      yield* Effect.logWarning("execution.cancel.unconfirmed").pipe(
         Effect.annotateLogs({
           "rika.thread.id": String(turn.threadId),
           "rika.turn.id": String(turn.id),
           "rika.failure.message": Cause.pretty(outcome.cause),
         }),
       )
-      const cancelled = yield* turns.setStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
-      yield* notifyThreadSummaries
-      yield* notifyTurnChanged(cancelled)
-      yield* publishTurnSettled?.(cancelled, false) ?? Effect.void
+      return yield* Effect.failCause(outcome.cause)
     } else if (beforeLink) {
       const cancelled = yield* turns.get(turn.id)
       yield* notifyThreadSummaries
@@ -245,23 +238,46 @@ export const makeInteractiveSessionControls = (
       }
     }
   })
-  const interruptAndSend = (prompt: string) =>
+  const interruptAndSend = (prompt: string, targetTurnId?: string) =>
     safe(
       sessionDispatch,
       Effect.gen(function* () {
         const turns = yield* TurnRepository.Service
         const backend = yield* ExecutionGateway.Service
-        const turn = yield* active
+        const turn = targetTurnId === undefined ? yield* active : yield* turns.get(Turn.TurnId.make(targetTurnId))
+        if (turn === undefined || turn._tag !== "AgentExecution")
+          return yield* operationError(`Interrupted Turn ${targetTurnId ?? "current"} is unavailable`)
         const thread = yield* threadForTurn(turn)
-        const pending = yield* createForSubmission(turns, {
-          id: yield* options.makeTurnId,
-          threadId: turn.threadId,
-          prompt,
-          executionRoute: turn.executionRoute,
-          queueCapacity: pendingTurnCapacity,
-          now: yield* Clock.currentTimeMillis,
-        })
+        const pendingId = yield* options.makeTurnId
+        const existing = yield* turns.get(pendingId)
+        if (
+          existing !== undefined &&
+          (existing._tag !== "AgentExecution" ||
+            existing.threadId !== turn.threadId ||
+            existing.prompt !== prompt ||
+            !routeEquivalent(existing.executionRoute, turn.executionRoute))
+        )
+          return yield* operationError(`Turn ${pendingId} exists with a different interrupted submission`)
+        const created =
+          existing === undefined
+            ? yield* createForSubmission(turns, {
+                id: pendingId,
+                threadId: turn.threadId,
+                prompt,
+                executionRoute: turn.executionRoute,
+                queueCapacity: pendingTurnCapacity,
+                now: yield* Clock.currentTimeMillis,
+              })
+            : undefined
+        const pending = existing ?? created!
         yield* ensureTurnSummary(pending)
+        if (
+          terminal(pending.status) ||
+          pending.status === "running" ||
+          pending.status === "cancelling" ||
+          pending.status === "waiting"
+        )
+          return
         if (pending.status === "accepted") {
           const requeued = yield* turns.requeueAccepted(pending.id, pendingTurnCapacity, yield* Clock.currentTimeMillis)
           emit(sessionDispatch, queueMutationEvent(requeued.queue))
@@ -269,38 +285,58 @@ export const makeInteractiveSessionControls = (
           return
         }
         if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
-        if (pending.queue !== undefined) emit(sessionDispatch, queueMutationEvent(pending.queue))
-        yield* cancelActiveTurn(turn, turns, backend)
+        if (created?.queue !== undefined) emit(sessionDispatch, queueMutationEvent(created.queue))
+        const target = yield* turns.get(turn.id)
+        if (target !== undefined && target._tag === "AgentExecution" && !terminal(target.status))
+          yield* cancelActiveTurn(target, turns, backend)
         yield* drainQueued(thread, sessionDispatch)
       }),
     )
-  const cancel = safe(
-    sessionDispatch,
-    Effect.gen(function* () {
-      const selectedThread = yield* Ref.get(interactiveThread)
-      if (selectedThread === undefined)
-        return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
-      const turns = yield* TurnRepository.Service
-      const turn = yield* turns.findActive(selectedThread.id)
-      if (turn === undefined)
-        return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
-      const backend = yield* ExecutionGateway.Service
-      yield* cancelActiveTurn(turn, turns, backend)
-      emit(sessionDispatch, {
-        _tag: "ExecutionControlled",
-        selectionEpoch: 0,
-        threadId: turn.threadId,
-        turnId: turn.id,
-        action: "cancelled",
-        agentResponseArrived: false,
-      })
-      const thread = yield* threadForTurn(turn)
-      yield* drainQueued(thread, sessionDispatch)
-    }),
-  )
+  const cancel: InteractiveSession["cancel"] = (target = {}) =>
+    safe(
+      sessionDispatch,
+      Effect.gen(function* () {
+        const selectedThread = yield* Ref.get(interactiveThread)
+        if (selectedThread === undefined)
+          return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+        if (target.threadId !== undefined && target.threadId !== selectedThread.id)
+          return yield* operationError(`Thread ${target.threadId} is not selected`)
+        const turns = yield* TurnRepository.Service
+        const turn =
+          target.turnId === undefined
+            ? yield* turns.findActive(selectedThread.id)
+            : yield* turns.get(Turn.TurnId.make(target.turnId))
+        if (turn === undefined)
+          return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+        if (turn.threadId !== selectedThread.id)
+          return yield* operationError(`Turn ${turn.id} does not belong to the selected Thread`)
+        if (terminal(turn.status))
+          return sessionDispatch({
+            _tag: "ExecutionControlled",
+            selectionEpoch: 0,
+            threadId: turn.threadId,
+            turnId: turn.id,
+            action: "cancelled",
+            agentResponseArrived: turn.status === "completed",
+          })
+        if (turn._tag !== "AgentExecution") return yield* operationError(`Turn ${turn.id} cannot be cancelled`)
+        const backend = yield* ExecutionGateway.Service
+        yield* cancelActiveTurn(turn, turns, backend)
+        emit(sessionDispatch, {
+          _tag: "ExecutionControlled",
+          selectionEpoch: 0,
+          threadId: turn.threadId,
+          turnId: turn.id,
+          action: "cancelled",
+          agentResponseArrived: false,
+        })
+        const thread = yield* threadForTurn(turn)
+        yield* drainQueued(thread, sessionDispatch)
+      }),
+    )
   return {
     steer: (text, requestId, targetTurnId) => safe(sessionDispatch, control.steer(text, requestId, targetTurnId)),
-    interruptAndSend: (prompt) => interruptAndSend(prompt),
+    interruptAndSend,
     cancel,
     quit: stopActiveExecutionWorkWithProjection.pipe(
       Effect.provide(executionDependencies),

@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import * as HostedPostgres from "@rika/product-store/postgres-layer"
+import * as HostedPostgres from "@rika/product-store/layer"
 import { FileSystem, Config, Context, Crypto, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -14,12 +14,12 @@ import {
   organizationOwner,
   personalOwner,
   policyFor,
-  toolAuthorizationRequest,
 } from "../../../src/hosted/execution/tool-policy"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.tryPromise(() => pool.query(text, [...values]))
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
 const personalActor = Schema.decodeSync(ActorAttribution)({
   _tag: "PersonalActor",
@@ -147,7 +147,10 @@ it.effect.skipIf(databaseUrl === "")(
             })
           yield* seed(pool)
           const dependencies = Layer.merge(
-            HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 4 }),
+            HostedPostgres.layer({
+              url: Redacted.make(url),
+              maxConnections: 4,
+            }),
             BunCrypto.layer,
           )
           const context = yield* Layer.build(
@@ -159,7 +162,9 @@ it.effect.skipIf(databaseUrl === "")(
           const request = {
             module: "processes",
             operation: "start",
-            input: { command: `git push https://${rawMarker}@example.test/repository` },
+            input: {
+              command: `git push https://${rawMarker}@example.test/repository`,
+            },
             sessionId: "personal-thread",
             cellId: "personal-call",
           } as const
@@ -181,13 +186,48 @@ it.effect.skipIf(databaseUrl === "")(
             executor: { assignmentId: "personal-assignment", kind: "orb" },
             policy: { capability: "publishing.execute", approval: "exact" },
           })
-          yield* policy.outcome({ ...admission, authorizationId: "internal-approval", outcome: "suspended" })
-          const exactRequest = toolAuthorizationRequest(admission)
-          const exactRequestText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(exactRequest)
-          const wrongDigestRequestText = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
-            ...exactRequest,
-            argumentsDigest: "0".repeat(64),
+          yield* policy.outcome({
+            ...admission,
+            authorizationId: "internal-approval",
+            outcome: "suspended",
           })
+          const authorizationProjectionState = {
+            authorizations: [
+              [
+                "internal-approval",
+                {
+                  authorizationId: "internal-approval",
+                  rawRunId: "personal-turn",
+                  approvalId: "personal-approval",
+                  unitKey: "personal-authorization",
+                },
+              ],
+            ],
+          }
+          const authorizationState = encodeJson(authorizationProjectionState)
+          yield* query(
+            pool,
+            `INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES ('personal-owner', 'hosted', 1)`,
+          )
+          yield* query(
+            pool,
+            `INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
+               VALUES ('personal-thread', 'personal-owner', 'hosted', 'Personal Thread', 1, 1)`,
+          )
+          yield* query(
+            pool,
+            `INSERT INTO rika_turns
+               (id, thread_id, prompt, status, execution_route_json, created_at, updated_at)
+               VALUES ('personal-turn', 'personal-thread', 'prompt', 'waiting', '{}', 1, 1)`,
+          )
+          yield* query(
+            pool,
+            `INSERT INTO rika_transcript_checkpoints
+               (turn_id, thread_id, revision, projection_version, state_json, projector_version,
+                projector_cursor, projector_state, updated_at)
+               VALUES ('personal-turn', 'personal-thread', 0, 4, '{}', 4, 'current-cursor', $1, 1)`,
+            [authorizationState],
+          )
           expect(
             yield* Effect.result(
               policy.recordDecision({
@@ -197,32 +237,11 @@ it.effect.skipIf(databaseUrl === "")(
                 actor: personalActor,
                 authorizationId: "wrong-authorization",
                 checkpoint: { version: 4, cursor: "wrong", state: "wrong" },
-                operation: "rika.tool.processes.start",
-                capability: "publishing.execute",
-                authorizationRequest: wrongDigestRequestText,
                 decision: "approved",
-                outcome: "admitted",
               }),
             ),
           ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
-          expect(
-            yield* Effect.result(
-              policy.recordDecision({
-                ownerId: "personal-owner",
-                threadId: "personal-thread",
-                turnId: "personal-turn",
-                actor: personalActor,
-                authorizationId: "wrong-authorization",
-                checkpoint: { version: 4, cursor: "wrong", state: "wrong" },
-                operation: "rika.tool.processes.start",
-                capability: "publishing.execute",
-                authorizationRequest: exactRequestText,
-                decision: "approved",
-                outcome: "admitted",
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
-          yield* policy.recordDecision({
+          const authorizationDecision = {
             ownerId: "personal-owner",
             threadId: "personal-thread",
             turnId: "personal-turn",
@@ -231,13 +250,54 @@ it.effect.skipIf(databaseUrl === "")(
             checkpoint: {
               version: 4,
               cursor: "checkpoint-cursor",
-              state: `checkpoint-with-${rawMarker}`,
+              state: encodeJson({
+                ...authorizationProjectionState,
+                marker: `checkpoint-with-${rawMarker}`,
+              }),
             },
-            operation: "rika.tool.processes.start",
-            capability: "publishing.execute",
-            authorizationRequest: exactRequestText,
             decision: "approved",
-            outcome: "admitted",
+          } as const
+          expect(
+            yield* Effect.result(
+              policy.recordDecision({
+                ...authorizationDecision,
+                checkpoint: {
+                  ...authorizationDecision.checkpoint,
+                  state: encodeJson({
+                    authorizations: [
+                      [
+                        "internal-approval",
+                        {
+                          authorizationId: "internal-approval",
+                          rawRunId: "different-run",
+                          approvalId: "different-approval",
+                          unitKey: "different-authorization",
+                        },
+                      ],
+                    ],
+                  }),
+                },
+              }),
+            ),
+          ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
+          expect(
+            (yield* query(
+              pool,
+              `SELECT count(*)::int AS count FROM rika_hosted_tool_audit_records WHERE phase = 'decision'`,
+            )).rows[0]?.count,
+          ).toBe(0)
+          yield* policy.recordDecision(authorizationDecision)
+          yield* policy.recordDecision(authorizationDecision)
+          expect(
+            yield* Effect.result(
+              policy.recordDecision({
+                ...authorizationDecision,
+                decision: "denied",
+              }),
+            ),
+          ).toMatchObject({
+            _tag: "Failure",
+            failure: { kind: "conflict" },
           })
           yield* policy.outcome({ ...admission, outcome: "succeeded" })
           const records = yield* policy.list({
@@ -245,7 +305,13 @@ it.effect.skipIf(databaseUrl === "")(
             owner: personalOwner("personal-user"),
             limit: 100,
           })
-          expect(records.map(({ phase, decision, outcome }) => ({ phase, decision, outcome }))).toEqual([
+          expect(
+            records.map(({ phase, decision, outcome }) => ({
+              phase,
+              decision,
+              outcome,
+            })),
+          ).toEqual([
             { phase: "outcome", decision: "pending", outcome: "succeeded" },
             { phase: "decision", decision: "approved", outcome: "admitted" },
             { phase: "outcome", decision: "pending", outcome: "suspended" },
@@ -253,12 +319,17 @@ it.effect.skipIf(databaseUrl === "")(
           ])
           expect(records.find(({ phase }) => phase === "decision")).toMatchObject({
             authorizationId: "internal-approval",
-            authorizationCheckpoint: { version: 4, cursor: "checkpoint-cursor" },
+            authorizationCheckpoint: {
+              version: 4,
+              cursor: "checkpoint-cursor",
+            },
           })
-          const stored = yield* Schema.decodeUnknownEffect(Schema.String)((yield* query(
-            pool,
-            `SELECT jsonb_agg(to_jsonb(record))::text AS value FROM rika_hosted_tool_audit_records record`,
-          )).rows[0]?.value)
+          const stored = yield* Schema.decodeUnknownEffect(Schema.String)(
+            (yield* query(
+              pool,
+              `SELECT jsonb_agg(to_jsonb(record))::text AS value FROM rika_hosted_tool_audit_records record`,
+            )).rows[0]?.value,
+          )
           expect(stored).not.toContain(rawMarker)
           expect(stored).not.toContain("command")
           const mutation = yield* Effect.result(
@@ -278,7 +349,10 @@ it.effect.skipIf(databaseUrl === "")(
               limit: 100,
             }),
           )
-          expect(foreign).toMatchObject({ _tag: "Failure", failure: { kind: "forbidden" } })
+          expect(foreign).toMatchObject({
+            _tag: "Failure",
+            failure: { kind: "forbidden" },
+          })
           yield* query(
             pool,
             `UPDATE rika_hosted_client_authorities SET revoked_at = now()
@@ -320,7 +394,10 @@ it.effect.skipIf(databaseUrl === "")(
               Effect.provideService(Crypto.Crypto, crypto),
             ),
           })
-          yield* policy.outcome({ ...organizationAdmission, outcome: "succeeded" })
+          yield* policy.outcome({
+            ...organizationAdmission,
+            outcome: "succeeded",
+          })
           expect(
             yield* policy.list({
               principal: { userId: "organization-user" },

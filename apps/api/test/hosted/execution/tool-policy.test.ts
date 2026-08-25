@@ -4,7 +4,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { BindingRequest } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { Context, Crypto, Effect, Layer, Schema } from "effect"
-import { argumentsDigest, invokeAdmittedTool, policyFor, type ToolAdmissionContext } from "../../../src/hosted/execution/tool-policy"
+import {
+  argumentsDigest,
+  invokeAdmittedTool,
+  policyFor,
+  type ToolAdmissionContext,
+} from "../../../src/hosted/execution/tool-policy"
 import { testToolPolicy } from "./tool-policy.fixture"
 
 const request = (module: string, operation: string, input: Exclude<BindingRequest["input"], undefined>) =>

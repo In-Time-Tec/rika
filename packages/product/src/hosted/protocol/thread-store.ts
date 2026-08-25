@@ -37,6 +37,10 @@ export type CommandAdmission =
   | { readonly _tag: "Admitted"; readonly command: ThreadProtocolCommand }
   | { readonly _tag: "Duplicate"; readonly command: ThreadProtocolCommand }
 
+export type CommandCompletion =
+  | { readonly _tag: "Completed"; readonly command: ThreadProtocolCommand }
+  | { readonly _tag: "Duplicate"; readonly command: ThreadProtocolCommand }
+
 export interface ThreadProtocolEvent {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
@@ -88,15 +92,33 @@ export interface ThreadProtocolStoreService {
     readonly command: JsonObject
     readonly admittedAt: Timestamp
   }) => Effect.Effect<CommandAdmission, StoreError>
+  readonly claimNextCommand: (input: {
+    readonly claimToken: string
+    readonly claimMillis: number
+  }) => Effect.Effect<ThreadProtocolCommand | undefined, StoreError>
+  readonly renewCommandClaim: (input: {
+    readonly ownerId: OwnerId
+    readonly threadId: ThreadId
+    readonly commandId: CommandId
+    readonly claimToken: string
+    readonly claimMillis: number
+  }) => Effect.Effect<boolean, StoreError>
+  readonly releaseCommandClaim: (input: {
+    readonly ownerId: OwnerId
+    readonly threadId: ThreadId
+    readonly commandId: CommandId
+    readonly claimToken: string
+  }) => Effect.Effect<void, StoreError>
   readonly completeCommand: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly commandId: CommandId
+    readonly claimToken: string
     readonly result: JsonObject
     readonly events: ReadonlyArray<InteractiveEvent>
     readonly snapshot?: HostedThreadSnapshot
     readonly completedAt: Timestamp
-  }) => Effect.Effect<ThreadProtocolCommand, StoreError>
+  }) => Effect.Effect<CommandCompletion, StoreError>
   readonly appendEvents: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId

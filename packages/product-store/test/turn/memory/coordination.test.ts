@@ -2,7 +2,6 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionAuthorityReconciliation from "@rika/product/execution-authority-reconciliation"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "../../../src/transcript/memory-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "../../../src/turn/memory/repository"
 import { Effect, Ref, Stream } from "effect"
@@ -32,6 +31,7 @@ const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag:
     const inspectCount = yield* Ref.make(0)
     const cancelCount = yield* Ref.make(0)
     const backend = ExecutionGateway.Service.of({
+      ...ExecutionGateway.makeTest(),
       startTurn: (input) =>
         Effect.succeed({ runId: `started-${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
       cancelTurn: () => Ref.update(cancelCount, (count) => count + 1),
@@ -51,64 +51,34 @@ const makeBackend = (status: { readonly _tag: "unavailable" } | { readonly _tag:
     return { inspectCount, cancelCount, backend }
   })
 
-it.effect("settles every stale nonterminal Turn whose durable execution is missing and stays idempotent", () =>
+it.effect("leaves stale Turns blocked when durable execution evidence is missing", () =>
   Effect.gen(function* () {
     const turns = yield* TurnRepository.makeMemory(staleTurns)
-    const transcripts = yield* TranscriptRepository.makeMemory({ turns })
     const { inspectCount, backend } = yield* makeBackend({ _tag: "unavailable" })
     const reconcile = () =>
       ExecutionAuthorityReconciliation.make({
         turns,
-        transcripts,
         backend,
         setTurnStatus: (id, status, now) => turns.setStatus(id, status, now),
       })
 
     const first = yield* reconcile()
-    expect(first.active).toEqual([])
-    expect(first.settledThreads).toEqual(staleTurns.map((turn) => turn.threadId))
-    const settled = staleTurns
+    expect(first.active.map((turn) => turn.id)).toEqual(staleTurns.slice(1).map((turn) => turn.id))
+    expect(first.settledThreads).toEqual([])
     expect((yield* Effect.forEach(staleTurns, (turn) => turns.get(turn.id))).map((turn) => turn?.status)).toEqual([
-      "failed",
-      "failed",
-      "failed",
-      "failed",
-      "failed",
+      "accepted",
+      "accepted",
+      "running",
+      "waiting",
+      "cancelling",
     ])
-    for (const turn of settled) {
-      const projection = yield* transcripts.get(turn.id)
-      const failures = projection?.units.filter((unit) => unit.executionOutcome?.status === "failed") ?? []
-      expect(failures).toHaveLength(1)
-      expect(projection?.units).toContainEqual(
-        expect.objectContaining({
-          executionOutcome: {
-            status: "failed",
-            reason: "The durable execution for this Turn is unavailable.",
-          },
-          content: {
-            _tag: "Block",
-            block: expect.objectContaining({
-              _tag: "Error",
-              title: "Execution unavailable",
-              category: "execution-unavailable",
-              retryable: false,
-            }),
-          },
-        }),
-      )
-    }
     const inspected = yield* Ref.get(inspectCount)
     expect(inspected).toBe(4)
 
     const second = yield* reconcile()
-    expect(second.active).toEqual([])
+    expect(second.active.map((turn) => turn.id)).toEqual(staleTurns.slice(1).map((turn) => turn.id))
     expect(second.settledThreads).toEqual([])
-    expect(yield* Ref.get(inspectCount)).toBe(inspected)
-    for (const turn of settled) {
-      const projection = yield* transcripts.get(turn.id)
-      const failures = projection?.units.filter((unit) => unit.executionOutcome?.status === "failed") ?? []
-      expect(failures).toHaveLength(1)
-    }
+    expect(yield* Ref.get(inspectCount)).toBe(inspected + 4)
   }),
 )
 
@@ -118,17 +88,14 @@ it.effect("leaves live durable executions active and never cancels them during r
     const turns = yield* TurnRepository.makeMemory([
       { ...live, status: "running", executionLink: { runId: "live-run", turnId: live.id, threadId: live.threadId } },
     ])
-    const transcripts = yield* TranscriptRepository.makeMemory({ turns })
     const { cancelCount, backend } = yield* makeBackend({ _tag: "running" })
     const result = yield* ExecutionAuthorityReconciliation.make({
       turns,
-      transcripts,
       backend,
       setTurnStatus: (id, status, now) => turns.setStatus(id, status, now),
     })
     expect(result.active.map((turn) => String(turn.id))).toEqual([String(live.id)])
     expect((yield* turns.get(live.id))?.status).toBe("running")
     expect(yield* Ref.get(cancelCount)).toBe(0)
-    expect((yield* transcripts.get(live.id))?.units ?? []).toHaveLength(0)
   }),
 )

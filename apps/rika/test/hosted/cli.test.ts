@@ -4,8 +4,7 @@ import { expect, it } from "@effect/vitest"
 import type { Account, CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
-import { ClientTicketResponse } from "@rika/product/client-protocol"
-import * as HostedPostgres from "@rika/product-store/postgres-layer"
+import * as HostedStore from "@rika/product-store/layer"
 import { ApiMessage, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
 import { Config, Context, Effect, FileSystem, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
@@ -25,7 +24,7 @@ import { Executor, service as executorService } from "../../../api/src/executor/
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../../api/src/hosted/environment/runtime"
 import { HostedProduct, layer as hostedProductLayer } from "../../../api/src/hosted/product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../api/src/hosted/environment/model-registry"
-import { testLayer as hostedRepositoriesTestLayer } from "../../../api/src/hosted/repositories"
+import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../../api/src/hosted/repositories"
 import { layer as runnerExecutorLayer } from "../../../api/src/runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "../../../api/src/hosted/execution/tool-policy"
 import { makeRikaApiHandler } from "../../../api/src/api"
@@ -42,10 +41,11 @@ import {
   ProfileStore,
   ThreadClient,
   type Credential,
+  PrivateJwk,
 } from "../../src/hosted/contract"
 import { generate } from "../../src/hosted/dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
-import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
+import { BetterAuthUserId, OrganizationId, Timestamp } from "@rika/product/hosted-model"
 
 const databaseUrl = Effect.runSync(Config.option(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL"))).pipe(
   Option.getOrUndefined,
@@ -98,11 +98,12 @@ const migrate = (url: string) =>
 
 const webRequest = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body._tag === "Uint8Array" ? request.body.body : undefined
-  return new Request(request.url, {
+  const init: RequestInit = {
     method: request.method,
     headers: request.headers,
-    body,
-  })
+  }
+  if (body !== undefined) init.body = body
+  return new Request(request.url, init)
 }
 
 const unusedHttpClient = HttpClient.make(() => Effect.die("The integration test did not install its HTTP client"))
@@ -250,13 +251,13 @@ it.layer(BunServices.layer)((test) => {
               ),
             ),
           )
-          const databaseLayer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
+          const databaseLayer = HostedStore.layer({ url: Redacted.make(url), maxConnections: 8 })
           const shared = Layer.mergeAll(
             databaseLayer,
             AuthorizationPolicy.layer,
             BunCrypto.layer,
             hostedModelRegistryTestLayer,
-            hostedRepositoriesTestLayer,
+            hostedRepositoriesUnavailableLayer,
           )
           const executionReadinessCheck = Effect.succeed({
             backend: "postgres" as const,
@@ -264,10 +265,11 @@ it.layer(BunServices.layer)((test) => {
             workerId: "rika-cli-e2e-integration",
           })
           const productLayer = hostedProductLayer({
-            templateBuildId: "template-build-v1-immutable",
-            providerScope: "integration-test",
+            orb: {
+              templateBuildId: "template-build-v1-immutable",
+              providerScope: "integration-test",
+            },
             promptAdmissionReadiness: executionReadinessCheck.pipe(Effect.as(true)),
-            provision: () => Effect.void,
           }).pipe(Layer.provide(shared))
           const environmentLayer = hostedEnvironmentLayer({
             encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),
@@ -358,19 +360,16 @@ it.layer(BunServices.layer)((test) => {
             toolPolicy,
             threads: {
               issueTicket: () =>
-                Effect.succeed(
-                  Schema.decodeSync(ClientTicketResponse)({
-                    ticket: "thread-ticket",
-                    expiresAt: "2026-08-21T07:00:00.000Z",
-                    websocketUrl: "wss://api.example.test/api/v1/threads",
-                    protocol: "rika.thread.v1",
-                  }),
-                ),
+                Effect.succeed({
+                  ticket: "thread-ticket",
+                  expiresAt: Timestamp.make("2026-08-21T07:00:00.000Z"),
+                }),
               connect: () => Effect.die("The test Thread client handles the canonical command boundary"),
             },
             recovery: {
               inspect: () => Effect.succeed([]),
               resolve: () => Effect.die("unused"),
+              reconcileCompleted: Effect.void,
             },
             executor,
             execution: {
@@ -449,7 +448,7 @@ it.layer(BunServices.layer)((test) => {
                     Option.some(
                       credential ?? {
                         refreshToken: Redacted.make("refresh-token"),
-                        privateJwk,
+                        privateJwk: Schema.decodeSync(PrivateJwk)(privateJwk),
                       },
                     ),
                   ),
@@ -478,15 +477,22 @@ it.layer(BunServices.layer)((test) => {
               ThreadClient.of({
                 create: () => Effect.die("unused"),
                 submit: ({ threadId, request, commandId }) => {
-                  const admission = {
+                  const base = {
                     principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
                     threadId,
                     operationKey: commandId,
                     prompt: request.prompt.join("\n"),
                   }
-                  return product
-                    .admitRun(request.mode === undefined ? admission : { ...admission, mode: request.mode })
-                    .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message })))
+                  const input: Parameters<typeof product.admitRun>[0] =
+                    request.mode === undefined ? base : { ...base, mode: request.mode }
+                  return product.admitRun(input).pipe(
+                    Effect.flatMap((result) =>
+                      result._tag === "Admitted"
+                        ? Effect.succeed(result)
+                        : Effect.fail(HostedError.make({ kind: "protocol", message: "Prompt was cancelled" })),
+                    ),
+                    Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message })),
+                  )
                 },
                 ensureService: () => Effect.die("unused"),
                 stopService: () => Effect.die("unused"),

@@ -18,7 +18,9 @@ import {
 } from "../../src/hosted/interactive-controller"
 import * as Runner from "../../src/runner/service"
 
-const { raceStructured, startRunnerWhenPlaced } = hostedInteractiveControllerInternals
+const { raceStructured, runnerConnectionState, startRunnerWhenPlaced } = hostedInteractiveControllerInternals
+const neverRunner = (): Effect.Effect<never> => Effect.never
+const unavailableRenderer = (): Effect.Effect<never> => Effect.die("renderer must not be acquired")
 
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
@@ -32,6 +34,16 @@ const placement = (target: "orb" | "runner") => ({
   connectivity: "connected" as const,
   target,
   participants: 1,
+})
+
+it("keeps local submission disconnected until the concrete Runner reports ready", () => {
+  expect(runnerConnectionState(placement("runner"), false)).toEqual({
+    connectivity: "connecting",
+    target: "runner",
+    participants: 1,
+  })
+  expect(runnerConnectionState(placement("runner"), true)).toEqual(placement("runner"))
+  expect(runnerConnectionState(placement("orb"), false)).toEqual(placement("orb"))
 })
 
 it.effect("prepares no Runner for Orb placement, then starts one Runner once despite repeated states", () =>
@@ -217,12 +229,14 @@ it.effect("parent interruption observes both active finalizers", () =>
   }),
 )
 
-it.effect("deferred commands fail while unavailable and synchronous projections delegate after attachment", () =>
+it.effect("deferred commands wait while unavailable and synchronous projections delegate after attachment", () =>
   Effect.gen(function* () {
     const ready = Deferred.makeUnsafe<InteractiveSession.InteractiveSession, OperationUnavailable>()
     const deferred = makeDeferredSession(ready)
-    const unavailable = yield* Effect.flip(deferred.session.submit("early"))
-    expect(unavailable).toBeInstanceOf(OperationUnavailable)
+    const submitted = yield* Deferred.make<void>()
+    const early = yield* deferred.session.submit("early").pipe(Effect.forkChild)
+    yield* Effect.yieldNow
+    expect(yield* Deferred.poll(submitted)).toEqual(Option.none())
     expect(deferred.session.currentView()).toBeUndefined()
     const view = yield* Schema.decodeEffect(ThreadView.ThreadViewSnapshot)({
       thread: {
@@ -253,10 +267,11 @@ it.effect("deferred commands fail while unavailable and synchronous projections 
       ...deferred.session,
       currentView: () => view,
       projectionCheckpoint: () => checkpoint,
-      submit: () => Effect.void,
+      submit: () => Deferred.succeed(submitted, undefined),
     }
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
+    yield* Fiber.join(early)
     expect(deferred.session.currentView()).toBe(view)
     expect(deferred.session.projectionCheckpoint("turn-1")).toBe(checkpoint)
     yield* deferred.session.submit("attached")
@@ -271,13 +286,13 @@ it.effect("direct Effect members delegate after attachment", () =>
     const real: InteractiveSession.InteractiveSession = {
       ...deferred.session,
       quit: Effect.sync(() => called.push("quit")),
-      cancel: Effect.sync(() => called.push("cancel")),
+      cancel: () => Effect.sync(() => called.push("cancel")),
       newThread: Effect.sync(() => called.push("newThread")),
     }
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
     yield* deferred.session.quit
-    yield* deferred.session.cancel
+    yield* deferred.session.cancel()
     yield* deferred.session.newThread
     expect(called).toEqual(["quit", "cancel", "newThread"])
   }),
@@ -356,7 +371,7 @@ it.layer(startupLayer)((test) => {
               return Effect.succeed(setup.renderer)
             },
             writeTerminalTitle: () => undefined,
-            startRunner: () => Effect.never,
+            startRunner: neverRunner,
           },
         ).pipe(
           Effect.provideService(ProfileStore, profileStore),
@@ -390,10 +405,10 @@ it.layer(startupLayer)((test) => {
         {
           makeRenderer: () => {
             rendererRequested = true
-            return Effect.die("renderer must not be acquired")
+            return unavailableRenderer()
           },
           writeTerminalTitle: () => undefined,
-          startRunner: () => Effect.never,
+          startRunner: neverRunner,
         },
       ).pipe(Effect.provideService(ProfileStore, profileStore))
       const exit = yield* operation.pipe(Effect.exit)
@@ -418,10 +433,10 @@ it.layer(startupLayer)((test) => {
         {
           makeRenderer: () => {
             rendererRequested = true
-            return Effect.die("renderer must not be acquired")
+            return unavailableRenderer()
           },
           writeTerminalTitle: () => undefined,
-          startRunner: () => Effect.never,
+          startRunner: neverRunner,
         },
       ).pipe(
         Effect.provideService(ProfileStore, profileStore),

@@ -82,7 +82,10 @@ const seed = (pool: Pool) =>
           'run-accept', 0, 8, 8, 1, '[]', now(), now()),
         ('run-abort', 'needs-resolution', 'agent:recovery', 'session-abort', 'message-abort',
           ${storedMessage("abort")}, 'abort-message-digest', 'run-abort', ${executableRef}, ${executableManifest},
-          'run-abort', 0, 8, 8, 1, '[]', now(), now());
+          'run-abort', 0, 8, 8, 1, '[]', now(), now()),
+        ('run-auto', 'needs-resolution', 'agent:recovery', 'session-auto', 'message-auto',
+          ${storedMessage("auto")}, 'auto-message-digest', 'run-auto', ${executableRef}, ${executableManifest},
+          'run-auto', 0, 8, 8, 1, '[]', now(), now());
     INSERT INTO tenetkit_run_operations
       (run_id, operation_id, operation_key, kind, status, input_digest, input_json, replay_policy,
         attempt, started_at, finished_at)
@@ -92,29 +95,35 @@ const seed = (pool: Pool) =>
         ('run-accept', 'tenet-accept', 'operation-accept', 'tool', 'unknown', 'accept-digest', '{}',
           'never', 0, now(), now()),
         ('run-abort', 'tenet-abort', 'operation-abort', 'tool', 'unknown', 'abort-digest', '{}',
+          'never', 0, now(), now()),
+        ('run-auto', 'tenet-auto', 'operation-auto', 'tool', 'unknown', 'auto-digest', '{}',
           'never', 0, now(), now());
     INSERT INTO rika_hosted_executor_operations
       (assignment_id, owner_id, operation_key, request_digest, code, attempt, state,
         dispatched_generation, dispatched_lease_epoch, dispatched_executor_instance_id,
         dispatched_process_incarnation, response, workspace_id, session_id, thread_id, turn_id,
-        run_id, root_run_id, tool_call_id, replay_policy, started_at, resolution_state, deadline_at,
-        terminal_outcome)
+        run_id, root_run_id, tool_call_id, replay_policy, started_at, deadline_at, terminal_outcome)
       VALUES
-        ('recovery-assignment', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'unknown',
+        ('recovery-assignment', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'dispatched',
           1, 1, 'executor-recovery', 'process-recovery',
-          '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
+          NULL,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-retry', 'run-retry',
-          'run-retry', 'call-retry', 'pure', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown'),
+          'run-retry', 'call-retry', 'pure', now(), '2999-01-01T00:00:00.000Z', NULL),
         ('recovery-assignment', 'recovery-owner', 'operation-accept', 'accept-digest', 'accept()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-accept', 'run-accept',
-          'run-accept', 'call-accept', 'never', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown'),
+          'run-accept', 'call-accept', 'never', now(), '2999-01-01T00:00:00.000Z', 'unknown'),
         ('recovery-assignment', 'recovery-owner', 'operation-abort', 'abort-digest', 'abort()', 0, 'unknown',
           1, 1, 'executor-recovery', 'process-recovery',
           '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
           'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-abort', 'run-abort',
-          'run-abort', 'call-abort', 'never', now(), 'pending', '2999-01-01T00:00:00.000Z', 'unknown')`,
+          'run-abort', 'call-abort', 'never', now(), '2999-01-01T00:00:00.000Z', 'unknown'),
+        ('recovery-assignment', 'recovery-owner', 'operation-auto', 'auto-digest', '6 * 7', 0, 'completed',
+          1, 1, 'executor-recovery', 'process-recovery',
+          '{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]}}'::jsonb,
+          'recovery-workspace', 'session-auto', 'recovery-thread', 'turn-auto', 'run-auto',
+          'run-auto', 'call-auto', 'never', now(), '2999-01-01T00:00:00.000Z', 'completed')`,
   )
 
 it.effect.skipIf(databaseUrl === "")(
@@ -159,6 +168,18 @@ it.effect.skipIf(databaseUrl === "")(
             ),
           )
           const recovery = Context.get(context, HostedRecovery)
+          yield* recovery.reconcileCompleted
+          const automaticallyRecovered = yield* query(
+            pool,
+            `SELECT status, resolution_idempotency_key, resolution_json FROM tenetkit_run_operations
+              WHERE operation_id = 'tenet-auto'`,
+          ).pipe(Effect.map((result) => result.rows[0]))
+          expect(automaticallyRecovered).toEqual({
+            status: "succeeded",
+            resolution_idempotency_key: "tenet-auto:executor-terminal",
+            resolution_json:
+              '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]}}}',
+          })
           const operations = yield* recovery.inspect({
             principal,
             threadId: "recovery-thread",
@@ -183,6 +204,15 @@ it.effect.skipIf(databaseUrl === "")(
           expect(
             (yield* Effect.result(recovery.resolve({ ...retryInput, idempotencyKey: "conflicting-retry" })))._tag,
           ).toBe("Failure")
+          yield* query(
+            pool,
+            `UPDATE tenetkit_run_operations SET status = 'succeeded', result_json = '{"answer":42}',
+              resolution_idempotency_key = 'resolve-accept',
+              resolution_json = '{"_tag":"Succeeded","value":{"answer":42}}', finished_at = now()
+              WHERE run_id = 'run-accept' AND operation_id = 'tenet-accept';
+            UPDATE tenetkit_runs SET status = 'queued', owner_worker_id = NULL, updated_at = now()
+              WHERE run_id = 'run-accept'`,
+          )
           expect(
             yield* recovery.resolve({
               ...retryInput,
@@ -204,34 +234,16 @@ it.effect.skipIf(databaseUrl === "")(
           expect(
             (yield* query(
               pool,
-              `SELECT operation_key, resolution_state, resolution_idempotency_key, resolution
-                FROM rika_hosted_executor_operations ORDER BY operation_key`,
+              `SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'rika_hosted_executor_operations'
+                  AND column_name IN ('resolution_state', 'resolution_idempotency_key', 'resolution', 'resolved_at')`,
             )).rows,
-          ).toEqual([
-            {
-              operation_key: "operation-abort",
-              resolution_state: "aborted",
-              resolution_idempotency_key: "resolve-abort",
-              resolution: { _tag: "Abort", reason: "operator confirmed failure" },
-            },
-            {
-              operation_key: "operation-accept",
-              resolution_state: "accepted",
-              resolution_idempotency_key: "resolve-accept",
-              resolution: { _tag: "Accept", value: { answer: 42 } },
-            },
-            {
-              operation_key: "operation-retry",
-              resolution_state: "retrying",
-              resolution_idempotency_key: "resolve-retry",
-              resolution: { _tag: "Retry" },
-            },
-          ])
+          ).toEqual([])
           expect(
             (yield* query(
               pool,
               `SELECT operation_id, status, resolution_idempotency_key, resolution_json
-                FROM tenetkit_run_operations ORDER BY operation_id`,
+                FROM tenetkit_run_operations WHERE operation_id <> 'tenet-auto' ORDER BY operation_id`,
             )).rows,
           ).toEqual([
             {

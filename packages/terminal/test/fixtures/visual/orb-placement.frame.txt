@@ -21,4 +21,4 @@
 │                                                                              │
 │                                                                              │
 │                                                                              │
-╰ ∼ Setting up workspace ───────────────────────────────────────── /workspace ─╯
+╰ ∼ Preparing workspace ────────────────────────────────────────── /workspace ─╯

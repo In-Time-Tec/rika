@@ -98,8 +98,8 @@ describe("hosted Thread client protocol", () => {
         attachments: [{ mediaType: "image/png", data: "aW1hZ2U", filename: "image.png" }],
       }),
       envelope({ _tag: "Steer", ...mutation, text: "focus", targetTurnId: "turn" }),
-      envelope({ _tag: "InterruptAndSend", ...mutation, text: "stop and do this" }),
-      envelope({ _tag: "Cancel", ...mutation }),
+      envelope({ _tag: "InterruptAndSend", ...mutation, text: "stop and do this", targetTurnId: "turn" }),
+      envelope({ _tag: "Cancel", ...mutation, target: { _tag: "Turn", turnId: "turn" } }),
       envelope({ _tag: "Approve", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
       envelope({ _tag: "Deny", ...mutation, turnId: "turn", authorizationId: "authorization", checkpoint }),
       envelope({

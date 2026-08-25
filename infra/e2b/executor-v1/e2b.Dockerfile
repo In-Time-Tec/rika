@@ -23,8 +23,8 @@ ARG SETUPTOOLS_VERSION=84.0.0
 
 USER root
 RUN export DEBIAN_FRONTEND=noninteractive \
-  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260820T000000Z bookworm main\n' > /etc/apt/sources.list \
-  && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260820T000000Z bookworm-security main\n' >> /etc/apt/sources.list \
+  && echo 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260820T000000Z bookworm main' > /etc/apt/sources.list \
+  && echo 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260820T000000Z bookworm-security main' >> /etc/apt/sources.list \
   && rm -f /etc/apt/sources.list.d/debian.sources \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -89,8 +89,11 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && groupadd --gid 10002 rika-workspace \
   && useradd --uid 10002 --gid rika-workspace --create-home --shell /bin/bash rika-workspace \
   && usermod --append --groups rika-workspace rika-executor \
-  && printf 'Defaults:rika-executor env_reset\nrika-executor ALL=(rika-workspace) NOPASSWD: ALL\n' > /etc/sudoers.d/rika-workspace \
+  && echo 'Defaults:rika-executor env_reset' > /etc/sudoers.d/rika-workspace \
+  && echo 'rika-executor ALL=(rika-workspace) NOPASSWD: ALL' >> /etc/sudoers.d/rika-workspace \
   && chmod 0440 /etc/sudoers.d/rika-workspace \
+  && echo 'rika-executor ALL=(root) NOPASSWD: /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika' > /etc/sudoers.d/rika-runtime \
+  && chmod 0440 /etc/sudoers.d/rika-runtime \
   && install -d -m 0700 -o rika-executor -g rika-executor /var/lib/rika-executor \
   && install -d -m 2750 -o rika-executor -g rika-workspace /run/rika \
   && install -d -m 0750 -o rika-workspace -g rika-workspace /home/rika-workspace/workspace
@@ -100,8 +103,24 @@ RUN npm install --global --force "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" \
 
 WORKDIR /opt/rika
 COPY package.json bun.lock ./
-COPY packages ./packages
-COPY apps ./apps
+COPY packages/coding-tools ./packages/coding-tools
+COPY packages/configuration ./packages/configuration
+COPY packages/credential-vault ./packages/credential-vault
+COPY packages/e2b-executor ./packages/e2b-executor
+COPY packages/execution ./packages/execution
+COPY packages/extensions ./packages/extensions
+COPY packages/github-app ./packages/github-app
+COPY packages/identity ./packages/identity
+COPY packages/kernel ./packages/kernel
+COPY packages/product ./packages/product
+COPY packages/product-store ./packages/product-store
+COPY packages/remote-execution ./packages/remote-execution
+COPY packages/terminal ./packages/terminal
+COPY packages/transcript ./packages/transcript
+COPY apps/api ./apps/api
+COPY apps/proxy ./apps/proxy
+COPY apps/rika ./apps/rika
+COPY apps/web ./apps/web
 RUN bun install --production --frozen-lockfile --ignore-scripts \
   && test -f node_modules/tenetkit/package.json \
   && test -f packages/kernel/src/executor-runtime.ts \

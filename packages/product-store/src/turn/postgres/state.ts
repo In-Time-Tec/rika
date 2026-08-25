@@ -1,49 +1,50 @@
+import { and, eq, inArray, isNull, notInArray } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
+import { rikaTurns } from "../../database/schema/product"
 import { decodeAgent } from "./row-codec"
+import { turnRowSelection } from "./reader"
 import { missing, repositoryError } from "../memory/errors"
+
 export const makeTurnSqlState = (
-  sql: SqlClient,
+  db: PgDrizzle.EffectPgDatabase,
 ): Pick<Interface, "setStatus" | "startAccepted" | "cancelUnlinked"> => ({
   setStatus: Effect.fn("TurnRepository.setStatus")(function* (id, status, now) {
     if (status === "queued")
-      return yield* RepositoryError.make({
-        message: `Turn ${id} cannot transition into 'queued' via setStatus`,
-      })
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const before = yield* sql`SELECT * FROM rika_turns WHERE id = ${id} AND turn_kind = 'AgentExecution'`
-          if (before[0] === undefined) return yield* missing(id)
-          const existing = yield* decodeAgent(before[0])
-          const wasQueued = existing.status === "queued"
-          if (wasQueued)
-            return yield* RepositoryError.make({
-              message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,
-            })
-          const rows = yield* sql`UPDATE rika_turns SET status = ${status}, updated_at = ${now}
-            WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status NOT IN ('completed', 'failed', 'cancelled')
-            RETURNING *`
-          if (rows[0] === undefined) return yield* decodeAgent(before[0])
-          const turn = yield* decodeAgent(rows[0])
-          return turn
-        }),
-      )
-      .pipe(Effect.mapError(repositoryError))
+      return yield* RepositoryError.make({ message: `Turn ${id} cannot transition into 'queued' via setStatus` })
+    return yield* db.transaction((tx) => Effect.gen(function* () {
+      const before = yield* tx.select(turnRowSelection).from(rikaTurns).where(and(
+        eq(rikaTurns.id, id), eq(rikaTurns.turnKind, "AgentExecution"),
+      )).limit(1)
+      if (before[0] === undefined) return yield* missing(id)
+      const existing = yield* decodeAgent(before[0])
+      if (existing.status === "queued")
+        return yield* RepositoryError.make({
+          message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,
+        })
+      const rows = yield* tx.update(rikaTurns).set({ status, updatedAt: now }).where(and(
+        eq(rikaTurns.id, id),
+        eq(rikaTurns.turnKind, "AgentExecution"),
+        notInArray(rikaTurns.status, ["completed", "failed", "cancelled"]),
+      )).returning(turnRowSelection)
+      return rows[0] === undefined ? existing : yield* decodeAgent(rows[0])
+    })).pipe(Effect.mapError(repositoryError))
   }),
   startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
-    const rows = yield* sql`UPDATE rika_turns SET status = 'running', updated_at = ${now}
-      WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status = 'accepted'
-      RETURNING id`.pipe(Effect.mapError(repositoryError))
+    const rows = yield* db.update(rikaTurns).set({ status: "running", updatedAt: now }).where(and(
+      eq(rikaTurns.id, id), eq(rikaTurns.turnKind, "AgentExecution"), eq(rikaTurns.status, "accepted"),
+    )).returning({ id: rikaTurns.id }).pipe(Effect.mapError(repositoryError))
     return rows[0] !== undefined
   }),
   cancelUnlinked: Effect.fn("TurnRepository.cancelUnlinked")(function* (id, now) {
-    const rows = yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${now}
-      WHERE id = ${id} AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'running')
-        AND execution_link_json IS NULL
-      RETURNING id`.pipe(Effect.mapError(repositoryError))
+    const rows = yield* db.update(rikaTurns).set({ status: "cancelled", updatedAt: now }).where(and(
+      eq(rikaTurns.id, id),
+      eq(rikaTurns.turnKind, "AgentExecution"),
+      inArray(rikaTurns.status, ["accepted", "running"]),
+      isNull(rikaTurns.executionLinkJson),
+    )).returning({ id: rikaTurns.id }).pipe(Effect.mapError(repositoryError))
     return rows[0] !== undefined
   }),
 })

@@ -1,5 +1,4 @@
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Schema } from "effect"
-import * as ExecutionProjection from "@rika/product/execution-projection"
+import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
 import {
   BetterAuthUserId,
   ClientId,
@@ -16,42 +15,37 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import { InteractiveCommand } from "@rika/product/interactive-command"
-import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import {
   type ClientMessage,
-  type MutatingThreadCommand,
+  HostedThreadSnapshot,
   ServerFrame,
-  isDurableThreadEvent,
+  type WorkspacePlacement,
   protocolVersion,
 } from "@rika/product/client-protocol"
-import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
+import { ThreadProtocolStore, type ThreadProtocolCommand, type ThreadReplay } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
-import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "../product"
-import { HostedToolPolicy } from "../execution/tool-policy"
 import { HostedWorkspace } from "../environment/workspace"
+import {
+  listenForThreadChanges,
+  ThreadProtocolNotificationService,
+  type ThreadProtocolNotificationGeneration,
+  type ThreadProtocolNotifications,
+} from "../../thread-protocol-notifications"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
 const zeroCursor = ThreadEventCursor.make("0")
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const encodeThreadSnapshotJson = (snapshot: HostedThreadSnapshot) =>
+  encodeUnknownJson(Schema.encodeSync(HostedThreadSnapshot)(snapshot))
 const maximumAttachmentEvents = 10_000
 const maximumAttachmentBytes = 32 * 1024 * 1024
-const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
 const replayDistance = (cursor: string, afterCursor: string) => {
   const distance = BigInt(cursor) - BigInt(afterCursor)
   return distance <= 0 ? 0 : Number(distance > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : distance)
-}
-
-const repositoryServiceFailureKind = (
-  reason: "conflict" | "invalid" | "missing" | "unavailable",
-): "conflict" | "invalid" | "unavailable" => {
-  if (reason === "conflict") return "conflict"
-  if (reason === "invalid") return "invalid"
-  return "unavailable"
 }
 
 export class HostedThreadProtocolError extends Schema.TaggedError<HostedThreadProtocolError>()(
@@ -81,6 +75,27 @@ const storeFailure = (error: StoreError) => {
 }
 const operationFailure = (error: HostedThreadApplicationError) => unavailable(error.message)
 const frame = (payload: ServerFrame["payload"]): ServerFrame => ({ protocolVersion, payload })
+type CommandRejectedPayload = Extract<ServerFrame["payload"], { readonly _tag: "CommandRejected" }>
+interface MutableCommandRejectedPayload {
+  _tag: CommandRejectedPayload["_tag"]
+  requestId: CommandRejectedPayload["requestId"]
+  commandId?: NonNullable<CommandRejectedPayload["commandId"]>
+  threadId?: NonNullable<CommandRejectedPayload["threadId"]>
+  reason: CommandRejectedPayload["reason"]
+  currentThreadVersion?: NonNullable<CommandRejectedPayload["currentThreadVersion"]>
+  currentCursor?: NonNullable<CommandRejectedPayload["currentCursor"]>
+  message: CommandRejectedPayload["message"]
+  details: CommandRejectedPayload["details"]
+}
+type CreateConnectionInput = Parameters<HostedProduct["Service"]["createConnection"]>[0]
+interface MutableCreateConnectionInput {
+  principal: CreateConnectionInput["principal"]
+  owner: CreateConnectionInput["owner"]
+  projectId?: NonNullable<CreateConnectionInput["projectId"]>
+  executorKind: CreateConnectionInput["executorKind"]
+  runnerTarget?: NonNullable<CreateConnectionInput["runnerTarget"]>
+  threadId: NonNullable<CreateConnectionInput["threadId"]>
+}
 
 const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): ServerFrame["payload"] => {
   if (command.result?._tag === "Rejected") {
@@ -126,70 +141,9 @@ const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): Se
   }
 }
 
-type InteractiveMutatingCommand = Exclude<
-  MutatingThreadCommand,
-  { readonly _tag: "SubmitPrompt" | "EnsureRepositoryService" | "StopRepositoryService" }
->
-
-const productCommand = (command: InteractiveMutatingCommand) => {
-  const decode = Schema.decodeUnknownEffect(InteractiveCommand)
-  switch (command._tag) {
-    case "Steer": {
-      const value =
-        command.targetTurnId === undefined
-          ? { _tag: "Steer", text: command.text, requestId: command.commandId }
-          : { _tag: "Steer", text: command.text, requestId: command.commandId, turnId: command.targetTurnId }
-      return decode(value).pipe(
-        Effect.mapError(() =>
-          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-        ),
-      )
-    }
-    case "InterruptAndSend":
-      return decode({ _tag: "InterruptAndSend", prompt: command.text }).pipe(
-        Effect.mapError(() =>
-          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-        ),
-      )
-    case "Cancel":
-      return decode({ _tag: "Cancel" }).pipe(
-        Effect.mapError(() =>
-          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-        ),
-      )
-    case "Approve":
-      return decode({
-        _tag: "ApproveAuthorization",
-        turnId: command.turnId,
-        authorizationId: command.authorizationId,
-        checkpoint: command.checkpoint,
-      }).pipe(
-        Effect.mapError(() =>
-          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-        ),
-      )
-    case "Deny":
-      return decode({
-        _tag: "DenyAuthorization",
-        turnId: command.turnId,
-        authorizationId: command.authorizationId,
-        checkpoint: command.checkpoint,
-      }).pipe(
-        Effect.mapError(() =>
-          HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-        ),
-      )
-  }
-  return decode(command).pipe(
-    Effect.mapError(() =>
-      HostedThreadProtocolError.make({ kind: "invalid", message: "Interactive command is invalid" }),
-    ),
-  )
-}
-
 export interface HostedThreadConnection {
   readonly receive: (message: ClientMessage) => Effect.Effect<ReadonlyArray<ServerFrame>, never>
-  readonly active: Effect.Effect<boolean>
+  readonly outbound: Effect.Effect<ReadonlyArray<ServerFrame>, HostedThreadProtocolError>
   readonly detach: Effect.Effect<void>
 }
 
@@ -211,144 +165,517 @@ export class HostedThreadProtocol extends Context.Service<HostedThreadProtocol, 
   "@rika/api/hosted/thread/protocol/HostedThreadProtocol",
 ) {}
 
-export const layer = Layer.effect(
-  HostedThreadProtocol,
-  Effect.gen(function* () {
-    const product = yield* HostedProduct
-    const operations = yield* HostedThreadApplication
-    const workspace = yield* HostedWorkspace
-    const store = yield* ThreadProtocolStore
-    const hosted = yield* HostedStore
-    const toolPolicy = yield* HostedToolPolicy
-    const crypto = yield* Crypto.Crypto
+export const layerWithOptions = (
+  options: {
+    readonly databaseUrl?: Redacted.Redacted<string>
+    readonly workspacePlacement?: (
+      ownerId: ThreadAuthority["ownerId"],
+      threadId: ThreadId,
+    ) => Effect.Effect<WorkspacePlacement, HostedThreadProtocolError>
+    readonly notifications?: ThreadProtocolNotifications
+  } = {},
+) =>
+  Layer.effect(
+    HostedThreadProtocol,
+    Effect.gen(function* () {
+      const product = yield* HostedProduct
+      const operations = yield* HostedThreadApplication
+      const workspace = yield* HostedWorkspace
+      const store = yield* ThreadProtocolStore
+      const hosted = yield* HostedStore
+      const crypto = yield* Crypto.Crypto
+      const contextualNotifications = yield* ThreadProtocolNotificationService
+      const changes = options.notifications ?? contextualNotifications
+      if (options.databaseUrl !== undefined)
+        yield* listenForThreadChanges({ databaseUrl: options.databaseUrl, changes }).pipe(Effect.forkScoped)
 
-    const digest = Effect.fn("HostedThreadProtocol.digest")(function* (ticket: string) {
-      const bytes = yield* crypto
-        .digest("SHA-256", new TextEncoder().encode(ticket))
-        .pipe(Effect.mapError(() => unavailable()))
-      return Encoding.encodeHex(bytes)
-    })
+      const digest = Effect.fn("HostedThreadProtocol.digest")(function* (ticket: string) {
+        const bytes = yield* crypto
+          .digest("SHA-256", new TextEncoder().encode(ticket))
+          .pipe(Effect.mapError(() => unavailable()))
+        return Encoding.encodeHex(bytes)
+      })
 
-    const issueTicket: HostedThreadProtocolService["issueTicket"] = Effect.fn("HostedThreadProtocol.issueTicket")(
-      function* (principal) {
-        yield* product.activatePrincipal(principal).pipe(Effect.mapError(productFailure))
-        const issuedAtMillis = yield* Clock.currentTimeMillis
-        const issuedAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis))
-        const expiresAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis + ticketLifetimeMillis))
-        const secret = Encoding.encodeBase64Url(
-          yield* crypto.randomBytes(32).pipe(Effect.mapError(() => unavailable("Ticket issuance failed"))),
-        )
-        const ticketId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(() => unavailable("Ticket issuance failed")))
-        yield* store
-          .issueTicket({
-            ticketId,
-            ticketDigest: yield* digest(secret),
-            userId: BetterAuthUserId.make(principal.userId),
-            clientId: ClientId.make(principal.clientId),
-            deviceId: DeviceId.make(principal.deviceId),
-            audience: threadWebSocketAudience,
-            issuedAt,
-            expiresAt,
+      const issueTicket: HostedThreadProtocolService["issueTicket"] = Effect.fn("HostedThreadProtocol.issueTicket")(
+        function* (principal) {
+          yield* product.activatePrincipal(principal).pipe(Effect.mapError(productFailure))
+          const issuedAtMillis = yield* Clock.currentTimeMillis
+          const issuedAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis))
+          const expiresAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis + ticketLifetimeMillis))
+          const secret = Encoding.encodeBase64Url(
+            yield* crypto.randomBytes(32).pipe(Effect.mapError(() => unavailable("Ticket issuance failed"))),
+          )
+          const ticketId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(() => unavailable("Ticket issuance failed")))
+          yield* store
+            .issueTicket({
+              ticketId,
+              ticketDigest: yield* digest(secret),
+              userId: BetterAuthUserId.make(principal.userId),
+              clientId: ClientId.make(principal.clientId),
+              deviceId: DeviceId.make(principal.deviceId),
+              audience: threadWebSocketAudience,
+              issuedAt,
+              expiresAt,
+            })
+            .pipe(Effect.mapError(storeFailure))
+          return { ticket: secret, expiresAt }
+        },
+      )
+
+      const connect: HostedThreadProtocolService["connect"] = Effect.fn("HostedThreadProtocol.connect")(
+        function* (ticket, audience) {
+          const connectedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+          const binding = yield* store
+            .redeemTicket({ ticketDigest: yield* digest(ticket), audience, redeemedAt: connectedAt })
+            .pipe(Effect.mapError(storeFailure))
+          const principal: AuthenticatedPrincipal = {
+            userId: binding.userId,
+            clientId: binding.clientId,
+            deviceId: binding.deviceId,
+          }
+          const pendingCommands = new Map<
+            string,
+            {
+              readonly requestId: RequestId
+              readonly command: ThreadProtocolCommand
+              readonly notificationGeneration: ThreadProtocolNotificationGeneration
+            }
+          >()
+          let attached:
+            | {
+                readonly threadId: ThreadId
+                readonly authority: ThreadAuthority
+                readonly cursor: ThreadEventCursor
+                readonly knownHead: ThreadEventCursor
+                readonly snapshotFingerprint: string
+                readonly notificationGeneration: ThreadProtocolNotificationGeneration
+              }
+            | undefined
+
+          const reject = Effect.fn("HostedThreadProtocol.reject")(function* (
+            message: ClientMessage,
+            error: HostedThreadProtocolError,
+          ) {
+            const commandId =
+              "commandId" in message.command ? CommandId.make(String(message.command.commandId)) : undefined
+            const threadId = "threadId" in message.command ? message.command.threadId : undefined
+            let current: { readonly threadVersion: ThreadVersion; readonly cursor: ThreadEventCursor } | undefined
+            if (threadId !== undefined) {
+              current = yield* product.authorizeThread(principal, threadId, "thread:view").pipe(
+                Effect.flatMap((authority) =>
+                  store.replay({
+                    ownerId: authority.ownerId,
+                    threadId,
+                    actor: authority.actor,
+                    afterCursor: zeroCursor,
+                    limit: 1,
+                  }),
+                ),
+                Effect.map((replay) => ({ threadVersion: replay.threadVersion, cursor: replay.cursor })),
+                Effect.orElseSucceed(() => undefined),
+              )
+            }
+            const rejection: MutableCommandRejectedPayload = {
+              _tag: "CommandRejected",
+              requestId: message.requestId,
+              reason: error.kind,
+              message: error.message,
+              details: {},
+            }
+            if (commandId !== undefined) rejection.commandId = commandId
+            if (threadId !== undefined) rejection.threadId = threadId
+            if (current !== undefined) {
+              rejection.currentThreadVersion = current.threadVersion
+              rejection.currentCursor = current.cursor
+            }
+            return [frame(rejection)]
           })
-          .pipe(Effect.mapError(storeFailure))
-        return { ticket: secret, expiresAt }
-      },
-    )
 
-    const connect: HostedThreadProtocolService["connect"] = Effect.fn("HostedThreadProtocol.connect")(
-      function* (ticket, audience) {
-        const connectedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-        const binding = yield* store
-          .redeemTicket({ ticketDigest: yield* digest(ticket), audience, redeemedAt: connectedAt })
-          .pipe(Effect.mapError(storeFailure))
-        const principal: AuthenticatedPrincipal = {
-          userId: binding.userId,
-          clientId: binding.clientId,
-          deviceId: binding.deviceId,
-        }
-        let attached: { readonly threadId: ThreadId; readonly authority: ThreadAuthority } | undefined
+          const receiveUnsafe = Effect.fn("HostedThreadProtocol.receive")(function* (
+            message: ClientMessage,
+          ): Effect.fn.Return<ReadonlyArray<ServerFrame>, HostedThreadProtocolError> {
+            const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+            const command = message.command
+            if (command._tag === "CreateThread") {
+              const owner =
+                command.owner.kind === "personal"
+                  ? { _tag: "PersonalOwner" as const, userId: binding.userId }
+                  : {
+                      _tag: "OrganizationOwner" as const,
+                      organizationId: OrganizationId.make(command.owner.organizationId),
+                    }
+              const createInput: MutableCreateConnectionInput = {
+                principal,
+                owner,
+                executorKind: command.executorKind,
+                threadId: command.commandId,
+              }
+              if (command.projectId !== undefined) createInput.projectId = command.projectId
+              if (command.runnerTarget !== undefined) createInput.runnerTarget = command.runnerTarget
+              const created = yield* product.createConnection(createInput).pipe(Effect.mapError(productFailure))
+              const threadId = ThreadId.make(created.threadId)
+              const authority = yield* product
+                .authorizeThread(principal, threadId, "thread:control")
+                .pipe(Effect.mapError(productFailure))
+              yield* store
+                .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
+                .pipe(Effect.mapError(storeFailure))
+              const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
+              const notificationGeneration = changes.generation(threadId)
+              const admission = yield* store
+                .admitCommand({
+                  ownerId: authority.ownerId,
+                  threadId,
+                  commandId: command.commandId,
+                  idempotencyKey: command.idempotencyKey,
+                  expectedThreadVersion: command.expectedThreadVersion,
+                  actor: authority.actor,
+                  command: encoded,
+                  admittedAt: receivedAt,
+                })
+                .pipe(Effect.mapError(storeFailure), (effect) =>
+                  HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
+                )
+              if (admission.command.state === "completed")
+                return [frame(commandResult(admission.command, message.requestId))]
+              pendingCommands.set(String(admission.command.commandId), {
+                requestId: message.requestId,
+                command: admission.command,
+                notificationGeneration,
+              })
+              return [
+                frame({
+                  _tag: "CommandAdmitted",
+                  requestId: message.requestId,
+                  commandId: admission.command.commandId,
+                  threadId,
+                  threadVersion: admission.command.threadVersion,
+                }),
+              ]
+            }
 
-        const reject = Effect.fn("HostedThreadProtocol.reject")(function* (
-          message: ClientMessage,
-          error: HostedThreadProtocolError,
-        ) {
-          const commandId =
-            "commandId" in message.command ? CommandId.make(String(message.command.commandId)) : undefined
-          const threadId = "threadId" in message.command ? message.command.threadId : undefined
-          let current: { readonly threadVersion: ThreadVersion; readonly cursor: ThreadEventCursor } | undefined
-          if (threadId !== undefined) {
-            current = yield* product.authorizeThread(principal, threadId, "thread:view").pipe(
-              Effect.flatMap((authority) =>
-                store.replay({
+            if (command._tag === "AttachThread") {
+              const authority = yield* product
+                .authorizeThread(principal, command.threadId, "thread:view")
+                .pipe(Effect.mapError(productFailure))
+              const notificationGeneration = changes.generation(command.threadId)
+              yield* store
+                .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
+                .pipe(Effect.mapError(storeFailure))
+              const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
+              const readReplay = store
+                .replay({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  actor: authority.actor,
+                  afterCursor: command.afterCursor,
+                  limit: 1_000,
+                })
+                .pipe(Effect.mapError(storeFailure))
+              let replay: ThreadReplay
+              while (true) {
+                const currentSnapshot = yield* operations
+                  .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
+                  .pipe(Effect.mapError(operationFailure))
+                const attachmentSnapshot =
+                  options.workspacePlacement === undefined
+                    ? currentSnapshot
+                    : {
+                        ...currentSnapshot,
+                        workspace: yield* options.workspacePlacement(authority.ownerId, command.threadId),
+                      }
+                replay = yield* readReplay
+                if (
+                  replay.snapshot !== undefined &&
+                  replay.snapshot.threadVersion === replay.threadVersion &&
+                  replay.snapshot.cursor === replay.cursor &&
+                  encodeThreadSnapshotJson(replay.snapshot.snapshot) === encodeThreadSnapshotJson(attachmentSnapshot)
+                )
+                  break
+                const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+                const saved = yield* store
+                  .saveSnapshot({
+                    ownerId: authority.ownerId,
+                    threadId: command.threadId,
+                    threadVersion: replay.threadVersion,
+                    cursor: replay.cursor,
+                    snapshot: attachmentSnapshot,
+                    createdAt,
+                  })
+                  .pipe(Effect.result)
+                if (saved._tag === "Success") {
+                  replay = yield* readReplay
+                  break
+                }
+                if (saved.failure.reason !== "conflict") return yield* storeFailure(saved.failure)
+              }
+              const replayLag = replayDistance(replay.cursor, command.afterCursor)
+              yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
+              if (replayLag >= HostedObservability.replayLagAlertEvents)
+                yield* HostedObservability.health("replay_lag", replayCorrelation, {
+                  value: replayLag,
+                  threshold: HostedObservability.replayLagAlertEvents,
+                })
+              const replaySnapshot = replay.snapshot
+              if (replaySnapshot === undefined)
+                return yield* unavailable("Hosted Thread replay has no durable snapshot")
+              const replayEvents = [...replay.events]
+              const snapshotCursor = replaySnapshot?.cursor ?? zeroCursor
+              const snapshotThreadVersion = replaySnapshot?.threadVersion ?? replay.threadVersion
+              let representedCursor = replayEvents.at(-1)?.cursor ?? snapshotCursor
+              while (BigInt(representedCursor) < BigInt(replay.cursor)) {
+                const page = yield* store
+                  .replay({
+                    ownerId: authority.ownerId,
+                    threadId: command.threadId,
+                    actor: authority.actor,
+                    afterCursor: representedCursor,
+                    throughCursor: replay.cursor,
+                    includeSnapshot: false,
+                    limit: 1_000,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+                if (page.events.length === 0)
+                  return yield* unavailable("Hosted Thread replay does not continuously represent its cursor")
+                replayEvents.push(...page.events)
+                if (replayEvents.length > maximumAttachmentEvents)
+                  return yield* unavailable("Hosted Thread replay exceeds the attachment event limit")
+                representedCursor = page.events.at(-1)!.cursor
+              }
+              let expectedCursor = BigInt(snapshotCursor) + 1n
+              for (const event of replayEvents) {
+                if (BigInt(event.cursor) !== expectedCursor)
+                  return yield* unavailable(
+                    `Hosted Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
+                  )
+                expectedCursor += 1n
+              }
+              if (representedCursor !== replay.cursor)
+                return yield* unavailable("Hosted Thread replay terminal cursor is not represented")
+              const representedThreadVersion = replayEvents.at(-1)?.threadVersion ?? snapshotThreadVersion
+              const snapshot =
+                options.workspacePlacement === undefined
+                  ? replaySnapshot.snapshot
+                  : {
+                      ...replaySnapshot.snapshot,
+                      workspace: yield* options.workspacePlacement(authority.ownerId, command.threadId),
+                    }
+              const presenceNow = Timestamp.make(receivedAt)
+              const presenceExpiresAt = Timestamp.make(
+                DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
+              )
+              const participants = yield* hosted
+                .upsertPresence({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  actor: authority.actor,
+                  status: "viewing",
+                  now: presenceNow,
+                  expiresAt: presenceExpiresAt,
+                })
+                .pipe(
+                  Effect.andThen(
+                    hosted.listPresence({
+                      ownerId: authority.ownerId,
+                      threadId: command.threadId,
+                      actor: authority.actor,
+                      now: presenceNow,
+                    }),
+                  ),
+                  Effect.orElseSucceed(() => []),
+                )
+              const attachment = frame({
+                _tag: "ThreadAttached",
+                requestId: message.requestId,
+                threadId: command.threadId,
+                snapshotThreadVersion,
+                snapshotCursor,
+                threadVersion: representedThreadVersion,
+                cursor: representedCursor,
+                snapshot,
+                events: replayEvents.map((event) => ({
+                  threadId: event.threadId,
+                  sequence: Sequence.make(event.sequence),
+                  cursor: event.cursor,
+                  threadVersion: event.threadVersion,
+                  event: event.event,
+                  createdAt: event.createdAt,
+                })),
+                participants: participants.map(({ actor, status }) => ({ actor, status })),
+              })
+              const encodedAttachment = encodeUnknownJson(attachment)
+              if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
+                return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
+              attached = {
+                threadId: command.threadId,
+                authority,
+                cursor: representedCursor,
+                knownHead: representedCursor,
+                snapshotFingerprint: encodeThreadSnapshotJson(snapshot),
+                notificationGeneration,
+              }
+              return [attachment]
+            }
+
+            if (command._tag === "Detach") {
+              if (attached !== undefined) {
+                const now = Timestamp.make(receivedAt)
+                yield* hosted
+                  .upsertPresence({
+                    ownerId: attached.authority.ownerId,
+                    threadId: attached.threadId,
+                    actor: attached.authority.actor,
+                    status: "away",
+                    now,
+                    expiresAt: now,
+                  })
+                  .pipe(Effect.ignore)
+              }
+              attached = undefined
+              return []
+            }
+            const threadId = command.threadId
+            let requiredAction: AuthorizationAction = "thread:control"
+            if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
+            if (
+              command._tag === "EnsureRepositoryService" ||
+              command._tag === "StopRepositoryService" ||
+              command._tag === "PauseOrb" ||
+              command._tag === "ResumeOrb" ||
+              command._tag === "OpenPortal"
+            )
+              requiredAction = "workspace:service:control"
+            if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
+            if (command._tag === "UpdatePresence") requiredAction = "presence:update"
+            const authority = yield* product
+              .authorizeThread(principal, threadId, requiredAction)
+              .pipe(Effect.mapError(productFailure))
+
+            if (command._tag === "UpdatePresence") {
+              const now = Timestamp.make(receivedAt)
+              yield* hosted
+                .upsertPresence({
                   ownerId: authority.ownerId,
                   threadId,
                   actor: authority.actor,
-                  afterCursor: zeroCursor,
-                  limit: 1,
+                  status: command.status,
+                  now,
+                  expiresAt: Timestamp.make(
+                    DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
+                  ),
+                })
+                .pipe(Effect.mapError(storeFailure))
+              const participants = yield* hosted
+                .listPresence({ ownerId: authority.ownerId, threadId, actor: authority.actor, now })
+                .pipe(Effect.mapError(storeFailure))
+              return [
+                frame({
+                  _tag: "PresenceSnapshot",
+                  threadId,
+                  participants: participants.map(({ actor, status }) => ({ actor, status })),
                 }),
-              ),
-              Effect.map((replay) => ({ threadVersion: replay.threadVersion, cursor: replay.cursor })),
-              Effect.orElseSucceed(() => undefined),
-            )
-          }
-          const rejected: Extract<ServerFrame["payload"], { readonly _tag: "CommandRejected" }> =
-            current === undefined
-              ? {
-                  _tag: "CommandRejected",
-                  requestId: message.requestId,
-                  reason: error.kind,
-                  message: error.message,
-                  details: {},
-                }
-              : {
-                  _tag: "CommandRejected",
-                  requestId: message.requestId,
-                  reason: error.kind,
-                  currentThreadVersion: current.threadVersion,
-                  currentCursor: current.cursor,
-                  message: error.message,
-                  details: {},
-                }
-          const identified = commandId === undefined ? rejected : { ...rejected, commandId }
-          return [frame(threadId === undefined ? identified : { ...identified, threadId })]
-        })
-
-        const receiveUnsafe = Effect.fn("HostedThreadProtocol.receive")(function* (
-          message: ClientMessage,
-        ): Effect.fn.Return<ReadonlyArray<ServerFrame>, HostedThreadProtocolError> {
-          const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const command = message.command
-          if (command._tag === "CreateThread") {
-            const owner =
-              command.owner.kind === "personal"
-                ? { _tag: "PersonalOwner" as const, userId: binding.userId }
-                : {
-                    _tag: "OrganizationOwner" as const,
-                    organizationId: OrganizationId.make(command.owner.organizationId),
-                  }
-            const connectionInput = {
-              principal,
-              owner,
-              executorKind: command.executorKind,
-              threadId: command.commandId,
+              ]
             }
-            const projectInput =
-              command.projectId === undefined ? connectionInput : { ...connectionInput, projectId: command.projectId }
-            const created = yield* product
-              .createConnection(
-                command.runnerTarget === undefined
-                  ? projectInput
-                  : { ...projectInput, runnerTarget: command.runnerTarget },
+
+            if (command._tag === "OpenPortal") {
+              const url = yield* workspace.portal(threadId, command.port).pipe(
+                Effect.mapError((error) =>
+                  HostedThreadProtocolError.make({
+                    kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                    message: error.message,
+                  }),
+                ),
               )
-              .pipe(Effect.mapError(productFailure))
-            const threadId = ThreadId.make(created.threadId)
-            const authority = yield* product
-              .authorizeThread(principal, threadId, "thread:control")
-              .pipe(Effect.mapError(productFailure))
-            yield* store
-              .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
-              .pipe(Effect.mapError(storeFailure))
+              return [
+                frame({
+                  _tag: "PortalOpened",
+                  requestId: message.requestId,
+                  threadId,
+                  port: command.port,
+                  url,
+                }),
+              ]
+            }
+
+            if (command._tag === "InspectWorkspaceFile") {
+              const inspection = yield* workspace
+                .execute(threadId, {
+                  _tag: "WorkspaceFileInspect",
+                  requestId: String(message.requestId),
+                  path: command.path,
+                  maximumBytes: command.maximumBytes,
+                })
+                .pipe(
+                  Effect.mapError((error) =>
+                    HostedThreadProtocolError.make({
+                      kind: error.kind === "unsupported" ? "invalid" : "unavailable",
+                      message: error.message,
+                    }),
+                  ),
+                )
+              if (inspection._tag !== "WorkspaceFileContent" && inspection._tag !== "WorkspaceFileRejected")
+                return yield* HostedThreadProtocolError.make({
+                  kind: "unavailable",
+                  message: "Executor returned an invalid file inspection result",
+                })
+              return [
+                frame({
+                  _tag: "WorkspaceFileInspected",
+                  requestId: message.requestId,
+                  threadId,
+                  inspection,
+                }),
+              ]
+            }
+
+            if (command._tag === "AcknowledgeCursor") {
+              const cursor = yield* store
+                .acknowledgeCursor({
+                  ownerId: authority.ownerId,
+                  threadId,
+                  actor: authority.actor,
+                  cursor: command.cursor,
+                  acknowledgedAt: receivedAt,
+                })
+                .pipe(Effect.mapError(storeFailure))
+              const replayCorrelation = { ownerId: authority.ownerId, threadId }
+              const replay = yield* HostedObservability.observe(
+                "attach",
+                replayCorrelation,
+                Effect.gen(function* () {
+                  const result = yield* store
+                    .replay({
+                      ownerId: authority.ownerId,
+                      threadId,
+                      actor: authority.actor,
+                      afterCursor: cursor,
+                      limit: 1,
+                    })
+                    .pipe(Effect.mapError(storeFailure))
+                  const replayLag = replayDistance(result.cursor, cursor)
+                  yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
+                  if (replayLag >= HostedObservability.replayLagAlertEvents)
+                    yield* HostedObservability.health("replay_lag", replayCorrelation, {
+                      value: replayLag,
+                      threshold: HostedObservability.replayLagAlertEvents,
+                    })
+                  return result
+                }),
+              )
+              return [
+                frame({
+                  _tag: "CommandAccepted",
+                  requestId: message.requestId,
+                  threadId,
+                  threadVersion: replay.threadVersion,
+                  cursor: replay.cursor,
+                  result: { _tag: "Applied" },
+                }),
+              ]
+            }
+
             const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
+            const notificationGeneration = changes.generation(threadId)
             const admission = yield* store
               .admitCommand({
                 ownerId: authority.ownerId,
@@ -361,657 +688,213 @@ export const layer = Layer.effect(
                 admittedAt: receivedAt,
               })
               .pipe(Effect.mapError(storeFailure), (effect) =>
-                HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
-              )
-            let completed: ThreadProtocolCommand
-            if (admission._tag === "Duplicate") {
-              if (admission.command.state !== "completed")
-                return yield* HostedThreadProtocolError.make({
-                  kind: "conflict",
-                  message: "Command is still being applied",
-                })
-              completed = admission.command
-            } else {
-              const createdSnapshot = yield* operations
-                .snapshot(authority.ownerId, ProductThreadId.make(threadId))
-                .pipe(Effect.result)
-              const completion = {
-                ownerId: authority.ownerId,
-                threadId,
-                commandId: command.commandId,
-                result: { _tag: "ThreadCreated", threadId },
-                events: [],
-                completedAt: receivedAt,
-              }
-              completed = yield* store
-                .completeCommand(
-                  createdSnapshot._tag === "Success"
-                    ? { ...completion, snapshot: createdSnapshot.success }
-                    : completion,
-                )
-                .pipe(Effect.mapError(storeFailure))
-            }
-            return [frame(commandResult(completed, message.requestId))]
-          }
-
-          if (command._tag === "AttachThread") {
-            const authority = yield* product
-              .authorizeThread(principal, command.threadId, "thread:view")
-              .pipe(Effect.mapError(productFailure))
-            yield* store
-              .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
-              .pipe(Effect.mapError(storeFailure))
-            const currentSnapshot = yield* operations
-              .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
-              .pipe(Effect.mapError(operationFailure))
-            const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
-            let replay = yield* HostedObservability.observe(
-              "attach",
-              replayCorrelation,
-              Effect.gen(function* () {
-                const result = yield* store
-                  .replay({
-                    ownerId: authority.ownerId,
-                    threadId: command.threadId,
-                    actor: authority.actor,
-                    afterCursor: command.afterCursor,
-                    limit: 1_000,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-                const replayLag = replayDistance(result.cursor, command.afterCursor)
-                yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
-                if (replayLag >= HostedObservability.replayLagAlertEvents)
-                  yield* HostedObservability.health("replay_lag", replayCorrelation, {
-                    value: replayLag,
-                    threshold: HostedObservability.replayLagAlertEvents,
-                  })
-                return result
-              }),
-            )
-            if (replay.snapshot === undefined) {
-              const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-              const saved = yield* store
-                .saveSnapshot({
-                  ownerId: authority.ownerId,
-                  threadId: command.threadId,
-                  threadVersion: replay.threadVersion,
-                  cursor: replay.cursor,
-                  snapshot: currentSnapshot,
-                  createdAt,
-                })
-                .pipe(Effect.result)
-              if (saved._tag === "Failure" && saved.failure.reason !== "conflict")
-                return yield* storeFailure(saved.failure)
-              replay = yield* store
-                .replay({
-                  ownerId: authority.ownerId,
-                  threadId: command.threadId,
-                  actor: authority.actor,
-                  afterCursor: command.afterCursor,
-                  limit: 1_000,
-                })
-                .pipe(Effect.mapError(storeFailure))
-            }
-            const replaySnapshot = replay.snapshot
-            if (replaySnapshot === undefined) return yield* unavailable("Hosted Thread replay has no durable snapshot")
-            const replayEvents = [...replay.events]
-            const snapshotCursor = replaySnapshot?.cursor ?? zeroCursor
-            const snapshotThreadVersion = replaySnapshot?.threadVersion ?? replay.threadVersion
-            let representedCursor = replayEvents.at(-1)?.cursor ?? snapshotCursor
-            while (BigInt(representedCursor) < BigInt(replay.cursor)) {
-              const page = yield* store
-                .replay({
-                  ownerId: authority.ownerId,
-                  threadId: command.threadId,
-                  actor: authority.actor,
-                  afterCursor: representedCursor,
-                  throughCursor: replay.cursor,
-                  includeSnapshot: false,
-                  limit: 1_000,
-                })
-                .pipe(Effect.mapError(storeFailure))
-              if (page.events.length === 0)
-                return yield* unavailable("Hosted Thread replay does not continuously represent its cursor")
-              replayEvents.push(...page.events)
-              if (replayEvents.length > maximumAttachmentEvents)
-                return yield* unavailable("Hosted Thread replay exceeds the attachment event limit")
-              representedCursor = page.events.at(-1)!.cursor
-            }
-            let expectedCursor = BigInt(snapshotCursor) + 1n
-            for (const event of replayEvents) {
-              if (BigInt(event.cursor) !== expectedCursor)
-                return yield* unavailable(
-                  `Hosted Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
-                )
-              expectedCursor += 1n
-            }
-            if (representedCursor !== replay.cursor)
-              return yield* unavailable("Hosted Thread replay terminal cursor is not represented")
-            const representedThreadVersion = replayEvents.at(-1)?.threadVersion ?? snapshotThreadVersion
-            const snapshot = replaySnapshot.snapshot
-            const presenceNow = Timestamp.make(receivedAt)
-            const presenceExpiresAt = Timestamp.make(
-              DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
-            )
-            const participants = yield* hosted
-              .upsertPresence({
-                ownerId: authority.ownerId,
-                threadId: command.threadId,
-                actor: authority.actor,
-                status: "viewing",
-                now: presenceNow,
-                expiresAt: presenceExpiresAt,
-              })
-              .pipe(
-                Effect.andThen(
-                  hosted.listPresence({
-                    ownerId: authority.ownerId,
-                    threadId: command.threadId,
-                    actor: authority.actor,
-                    now: presenceNow,
-                  }),
-                ),
-                Effect.orElseSucceed(() => []),
-              )
-            const attachment = frame({
-              _tag: "ThreadAttached",
-              requestId: message.requestId,
-              threadId: command.threadId,
-              snapshotThreadVersion,
-              snapshotCursor,
-              threadVersion: representedThreadVersion,
-              cursor: representedCursor,
-              snapshot,
-              events: replayEvents.map((event) => ({
-                threadId: event.threadId,
-                sequence: Sequence.make(event.sequence),
-                cursor: event.cursor,
-                threadVersion: event.threadVersion,
-                event: event.event,
-                createdAt: event.createdAt,
-              })),
-              participants: participants.map(({ actor, status }) => ({ actor, status })),
-            })
-            const encodedAttachment = encodeUnknownJson(attachment)
-            if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
-              return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
-            attached = { threadId: command.threadId, authority }
-            return [attachment]
-          }
-
-          if (command._tag === "Detach") {
-            if (attached !== undefined) {
-              const now = Timestamp.make(receivedAt)
-              yield* hosted
-                .upsertPresence({
-                  ownerId: attached.authority.ownerId,
-                  threadId: attached.threadId,
-                  actor: attached.authority.actor,
-                  status: "away",
-                  now,
-                  expiresAt: now,
-                })
-                .pipe(Effect.ignore)
-            }
-            attached = undefined
-            return []
-          }
-          const threadId = command.threadId
-          let requiredAction: AuthorizationAction = "thread:control"
-          if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
-          if (
-            command._tag === "EnsureRepositoryService" ||
-            command._tag === "StopRepositoryService" ||
-            command._tag === "PauseOrb" ||
-            command._tag === "ResumeOrb" ||
-            command._tag === "OpenPortal"
-          )
-            requiredAction = "workspace:service:control"
-          if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
-          if (command._tag === "UpdatePresence") requiredAction = "presence:update"
-          const authority = yield* product
-            .authorizeThread(principal, threadId, requiredAction)
-            .pipe(Effect.mapError(productFailure))
-
-          if (command._tag === "UpdatePresence") {
-            const now = Timestamp.make(receivedAt)
-            yield* hosted
-              .upsertPresence({
-                ownerId: authority.ownerId,
-                threadId,
-                actor: authority.actor,
-                status: command.status,
-                now,
-                expiresAt: Timestamp.make(
-                  DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
-                ),
-              })
-              .pipe(Effect.mapError(storeFailure))
-            const participants = yield* hosted
-              .listPresence({ ownerId: authority.ownerId, threadId, actor: authority.actor, now })
-              .pipe(Effect.mapError(storeFailure))
-            return [
-              frame({
-                _tag: "PresenceSnapshot",
-                threadId,
-                participants: participants.map(({ actor, status }) => ({ actor, status })),
-              }),
-            ]
-          }
-
-          if (command._tag === "OpenPortal") {
-            const url = yield* workspace.portal(threadId, command.port).pipe(
-              Effect.mapError((error) =>
-                HostedThreadProtocolError.make({
-                  kind: error.kind === "unsupported" ? "invalid" : "unavailable",
-                  message: error.message,
-                }),
-              ),
-            )
-            return [
-              frame({
-                _tag: "PortalOpened",
-                requestId: message.requestId,
-                threadId,
-                port: command.port,
-                url,
-              }),
-            ]
-          }
-
-          if (command._tag === "InspectWorkspaceFile") {
-            const inspection = yield* workspace
-              .execute(threadId, {
-                _tag: "WorkspaceFileInspect",
-                requestId: String(message.requestId),
-                path: command.path,
-                maximumBytes: command.maximumBytes,
-              })
-              .pipe(
-                Effect.mapError((error) =>
-                  HostedThreadProtocolError.make({
-                    kind: error.kind === "unsupported" ? "invalid" : "unavailable",
-                    message: error.message,
-                  }),
-                ),
-              )
-            if (inspection._tag !== "WorkspaceFileContent" && inspection._tag !== "WorkspaceFileRejected")
-              return yield* HostedThreadProtocolError.make({
-                kind: "unavailable",
-                message: "Executor returned an invalid file inspection result",
-              })
-            return [
-              frame({
-                _tag: "WorkspaceFileInspected",
-                requestId: message.requestId,
-                threadId,
-                inspection,
-              }),
-            ]
-          }
-
-          if (command._tag === "AcknowledgeCursor") {
-            const cursor = yield* store
-              .acknowledgeCursor({
-                ownerId: authority.ownerId,
-                threadId,
-                actor: authority.actor,
-                cursor: command.cursor,
-                acknowledgedAt: receivedAt,
-              })
-              .pipe(Effect.mapError(storeFailure))
-            const replayCorrelation = { ownerId: authority.ownerId, threadId }
-            const replay = yield* HostedObservability.observe(
-              "attach",
-              replayCorrelation,
-              Effect.gen(function* () {
-                const result = yield* store
-                  .replay({
-                    ownerId: authority.ownerId,
-                    threadId,
-                    actor: authority.actor,
-                    afterCursor: cursor,
-                    limit: 1,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-                const replayLag = replayDistance(result.cursor, cursor)
-                yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
-                if (replayLag >= HostedObservability.replayLagAlertEvents)
-                  yield* HostedObservability.health("replay_lag", replayCorrelation, {
-                    value: replayLag,
-                    threshold: HostedObservability.replayLagAlertEvents,
-                  })
-                return result
-              }),
-            )
-            return [
-              frame({
-                _tag: "CommandAccepted",
-                requestId: message.requestId,
-                threadId,
-                threadVersion: replay.threadVersion,
-                cursor: replay.cursor,
-                result: { _tag: "Applied" },
-              }),
-            ]
-          }
-
-          const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
-          const admission = yield* store
-            .admitCommand({
-              ownerId: authority.ownerId,
-              threadId,
-              commandId: command.commandId,
-              idempotencyKey: command.idempotencyKey,
-              expectedThreadVersion: command.expectedThreadVersion,
-              actor: authority.actor,
-              command: encoded,
-              admittedAt: receivedAt,
-            })
-            .pipe(Effect.mapError(storeFailure), (effect) =>
-              HostedObservability.observe(
-                "target_resolution",
-                {
-                  ownerId: authority.ownerId,
-                  threadId,
-                },
-                effect,
-              ),
-            )
-          if (admission._tag === "Duplicate") {
-            if (admission.command.state === "completed")
-              return [frame(commandResult(admission.command, message.requestId))]
-            if (command._tag !== "SubmitPrompt")
-              return yield* HostedThreadProtocolError.make({
-                kind: "conflict",
-                message: "Command is still being applied",
-              })
-          }
-
-          const applied = yield* Effect.gen(function* () {
-            if (command._tag === "SubmitPrompt") {
-              const promptParts = command.attachments?.map((attachment) =>
-                attachment.filename === undefined
-                  ? { type: "image" as const, mediaType: attachment.mediaType, data: attachment.data }
-                  : {
-                      type: "image" as const,
-                      mediaType: attachment.mediaType,
-                      data: attachment.data,
-                      filename: attachment.filename,
-                    },
-              )
-              const admissionInput = { principal, threadId, operationKey: command.commandId, prompt: command.text }
-              const partsInput = promptParts === undefined ? admissionInput : { ...admissionInput, promptParts }
-              const admitted = yield* product
-                .admitRun(command.mode === undefined ? partsInput : { ...partsInput, mode: command.mode })
-                .pipe(Effect.mapError(productFailure))
-              return {
-                result: { _tag: "PromptAdmitted" as const, status: admitted.status },
-                events: [
+                HostedObservability.observe(
+                  "target_resolution",
                   {
-                    _tag: "SubmissionAdmitted" as const,
-                    threadId: ProductThreadId.make(threadId),
-                    turnId: ProductTurnId.make(admitted.turnId),
-                    status: admitted.status === "accepted" ? ("active" as const) : ("queued" as const),
-                    submissionId: command.commandId,
-                  },
-                ],
-              }
-            }
-            let authorization:
-              | {
-                  readonly actor: ThreadAuthority["actor"]
-                  readonly turnId: string
-                  readonly authorizationId: string
-                  readonly checkpoint: ExecutionProjection.Checkpoint
-                  readonly operation: string
-                  readonly capability: string
-                  readonly arguments: string
-                  readonly repository: JsonObject | null
-                  readonly branch: string | null
-                  readonly executor: JsonObject
-                  readonly decision: "approve" | "deny"
-                }
-              | undefined
-            if (command._tag === "PauseOrb" || command._tag === "ResumeOrb") {
-              yield* (command._tag === "PauseOrb" ? workspace.pause(threadId) : workspace.resume(threadId)).pipe(
-                Effect.mapError((error) =>
-                  HostedThreadProtocolError.make({
-                    kind: error.kind === "unsupported" ? "invalid" : "unavailable",
-                    message: error.message,
-                  }),
-                ),
-              )
-              const events: ReadonlyArray<InteractiveEvent> = []
-              return { result: { _tag: "Applied" } as const, events }
-            }
-            if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
-              const result = yield* workspace
-                .execute(
-                  threadId,
-                  command._tag === "EnsureRepositoryService"
-                    ? { _tag: "RepositoryServiceEnsure", requestId: command.commandId, service: command.service }
-                    : { _tag: "RepositoryServiceStop", requestId: command.commandId, serviceId: command.serviceId },
-                )
-                .pipe(
-                  Effect.mapError((error) =>
-                    HostedThreadProtocolError.make({
-                      kind: error.kind === "unsupported" ? "invalid" : "unavailable",
-                      message: error.message,
-                    }),
-                  ),
-                )
-              if (result._tag === "RepositoryServiceRejected")
-                return yield* HostedThreadProtocolError.make({
-                  kind: repositoryServiceFailureKind(result.reason),
-                  message: result.message,
-                })
-              const events: ReadonlyArray<InteractiveEvent> = []
-              return { result: { _tag: "Applied" } as const, events }
-            }
-            if (command._tag === "Approve" || command._tag === "Deny") {
-              const snapshot = yield* operations
-                .snapshot(authority.ownerId, ProductThreadId.make(threadId))
-                .pipe(Effect.mapError(operationFailure))
-              const pending = snapshot.pendingAuthorizations.find(
-                (candidate) =>
-                  candidate.threadId === threadId &&
-                  candidate.turnId === command.turnId &&
-                  candidate.authorizationId === command.authorizationId &&
-                  checkpointEquivalent(candidate.checkpoint, command.checkpoint),
-              )
-              if (pending === undefined)
-                return yield* HostedThreadProtocolError.make({
-                  kind: "conflict",
-                  message: "Authorization checkpoint is stale or does not belong to this Thread",
-                })
-              if (pending.operation.startsWith("rika.tool.")) {
-                if (pending.inputTruncated)
-                  return yield* HostedThreadProtocolError.make({
-                    kind: "conflict",
-                    message: "Authorization request is not exact",
-                  })
-                yield* toolPolicy
-                  .recordDecision({
                     ownerId: authority.ownerId,
                     threadId,
-                    turnId: command.turnId,
-                    actor: authority.actor,
-                    authorizationId: command.authorizationId,
-                    checkpoint: command.checkpoint,
-                    operation: pending.operation,
-                    capability: pending.capability,
-                    authorizationRequest: pending.input,
-                    decision: command._tag === "Approve" ? "approved" : "denied",
-                    outcome: "admitted",
-                  })
-                  .pipe(
-                    Effect.mapError((error) =>
-                      HostedThreadProtocolError.make({
-                        kind: error.kind === "conflict" ? "conflict" : "unavailable",
-                        message:
-                          error.kind === "conflict"
-                            ? "Authorization request is not exact"
-                            : "Authorization audit is unavailable",
+                  },
+                  effect,
+                ),
+              )
+            if (admission._tag === "Duplicate") {
+              if (admission.command.state === "completed")
+                return [frame(commandResult(admission.command, message.requestId))]
+            }
+            pendingCommands.set(String(admission.command.commandId), {
+              requestId: message.requestId,
+              command: admission.command,
+              notificationGeneration,
+            })
+            return [
+              frame({
+                _tag: "CommandAdmitted",
+                requestId: message.requestId,
+                commandId: admission.command.commandId,
+                threadId,
+                threadVersion: admission.command.threadVersion,
+              }),
+            ]
+          })
+
+          const outbound: HostedThreadConnection["outbound"] = Effect.suspend(() => {
+            const current = attached
+            const waits = new Array<Effect.Effect<void>>()
+            if (current !== undefined)
+              waits.push(
+                BigInt(current.cursor) < BigInt(current.knownHead)
+                  ? Effect.void
+                  : changes.wait(current.threadId, current.notificationGeneration).pipe(Effect.asVoid),
+              )
+            const waitingThreads = new Set(current === undefined ? [] : [String(current.threadId)])
+            for (const entry of pendingCommands.values()) {
+              const threadId = String(entry.command.threadId)
+              if (waitingThreads.has(threadId)) continue
+              waitingThreads.add(threadId)
+              waits.push(changes.wait(entry.command.threadId, entry.notificationGeneration).pipe(Effect.asVoid))
+            }
+            if (waits.length === 0) return Effect.never
+            const wait = waits.slice(1).reduce((left, right) => Effect.raceFirst(left, right), waits[0]!)
+            return wait.pipe(
+              Effect.flatMap(() =>
+                Effect.gen(function* () {
+                  const commandFrames = new Array<ServerFrame>()
+                  for (const entry of [...pendingCommands.values()]) {
+                    const refreshed = yield* store
+                      .admitCommand({
+                        ownerId: entry.command.ownerId,
+                        threadId: entry.command.threadId,
+                        commandId: entry.command.commandId,
+                        idempotencyKey: entry.command.idempotencyKey,
+                        expectedThreadVersion: entry.command.expectedThreadVersion,
+                        actor: entry.command.actor,
+                        command: entry.command.command,
+                        admittedAt: entry.command.admittedAt,
+                      })
+                      .pipe(Effect.mapError(storeFailure))
+                    if (refreshed.command.state === "completed") {
+                      pendingCommands.delete(String(entry.command.commandId))
+                      commandFrames.push(frame(commandResult(refreshed.command, entry.requestId)))
+                    } else {
+                      pendingCommands.set(String(entry.command.commandId), {
+                        ...entry,
+                        command: refreshed.command,
+                        notificationGeneration: changes.generation(entry.command.threadId),
+                      })
+                    }
+                  }
+                  if (current === undefined || attached !== current) return commandFrames
+                  let replay = yield* store
+                    .replay({
+                      ownerId: current.authority.ownerId,
+                      threadId: current.threadId,
+                      actor: current.authority.actor,
+                      afterCursor: current.cursor,
+                      includeSnapshot: false,
+                      limit: 1_000,
+                    })
+                    .pipe(Effect.mapError(storeFailure))
+                  let expectedCursor = BigInt(current.cursor) + 1n
+                  let reset = replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor)
+                  for (const event of replay.events) {
+                    if (BigInt(event.cursor) !== expectedCursor) reset = true
+                    expectedCursor = BigInt(event.cursor) + 1n
+                  }
+                  if (reset) {
+                    replay = yield* store
+                      .replay({
+                        ownerId: current.authority.ownerId,
+                        threadId: current.threadId,
+                        actor: current.authority.actor,
+                        afterCursor: current.cursor,
+                        includeSnapshot: true,
+                        limit: 1_000,
+                      })
+                      .pipe(Effect.mapError(storeFailure))
+                    if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.cursor))
+                      return yield* unavailable("Hosted Thread replay gap has no newer durable snapshot")
+                    expectedCursor = BigInt(replay.snapshot.cursor) + 1n
+                    for (const event of replay.events) {
+                      if (BigInt(event.cursor) !== expectedCursor)
+                        return yield* unavailable(
+                          "Hosted Thread replay remains discontinuous after its durable snapshot",
+                        )
+                      expectedCursor += 1n
+                    }
+                  }
+                  const cursor = replay.events.at(-1)?.cursor ?? replay.snapshot?.cursor ?? current.cursor
+                  const representedHead = cursor === replay.cursor
+                  let durable: ThreadReplay | undefined
+                  if (reset) durable = replay
+                  else if (representedHead)
+                    durable = yield* store
+                      .replay({
+                        ownerId: current.authority.ownerId,
+                        threadId: current.threadId,
+                        actor: current.authority.actor,
+                        afterCursor: cursor,
+                        throughCursor: cursor,
+                        includeSnapshot: true,
+                        limit: 1,
+                      })
+                      .pipe(Effect.mapError(storeFailure))
+                  const snapshot = durable?.snapshot
+                  const projectedSnapshot =
+                    snapshot === undefined || options.workspacePlacement === undefined
+                      ? snapshot?.snapshot
+                      : {
+                          ...snapshot.snapshot,
+                          workspace: yield* options.workspacePlacement(current.authority.ownerId, current.threadId),
+                        }
+                  const snapshotFingerprint =
+                    projectedSnapshot === undefined
+                      ? current.snapshotFingerprint
+                      : encodeThreadSnapshotJson(projectedSnapshot)
+                  if (attached !== current) return commandFrames
+                  attached = {
+                    ...current,
+                    cursor,
+                    knownHead: replay.cursor,
+                    snapshotFingerprint,
+                    notificationGeneration: changes.generation(current.threadId),
+                  }
+                  const frames =
+                    reset && projectedSnapshot !== undefined
+                      ? [
+                          frame({
+                            _tag: "ThreadSnapshot",
+                            threadId: current.threadId,
+                            threadVersion: snapshot!.threadVersion,
+                            cursor: snapshot!.cursor,
+                            snapshot: projectedSnapshot,
+                          }),
+                        ]
+                      : []
+                  frames.push(
+                    ...replay.events.map((event) =>
+                      frame({
+                        _tag: "ThreadEvent",
+                        event: {
+                          threadId: event.threadId,
+                          sequence: Sequence.make(event.sequence),
+                          cursor: event.cursor,
+                          threadVersion: event.threadVersion,
+                          event: event.event,
+                          createdAt: event.createdAt,
+                        },
                       }),
                     ),
                   )
-              }
-              const execution = yield* product
-                .threadExecutionContext(authority.ownerId, threadId)
-                .pipe(Effect.mapError(productFailure))
-              authorization = {
-                actor: authority.actor,
-                turnId: pending.turnId,
-                authorizationId: pending.authorizationId,
-                checkpoint: pending.checkpoint,
-                operation: pending.operation,
-                capability: pending.capability,
-                arguments: pending.input,
-                repository: execution.repository,
-                branch: execution.branch,
-                executor: execution.executor,
-                decision: command._tag === "Approve" ? "approve" : "deny",
-              }
-            }
-            return yield* operations.interactive(
-              {
-                ownerId: authority.ownerId,
-                threadId: ProductThreadId.make(threadId),
-                commandId: command.commandId,
-                command: yield* productCommand(command),
-              },
-              (batch) =>
-                Effect.gen(function* () {
-                  const events = batch.events
-                  let controlFailure: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
-                  if (command._tag === "Approve" || command._tag === "Deny") {
-                    const action = command._tag === "Approve" ? "approve" : "deny"
-                    for (const event of events)
-                      if (event._tag === "ExecutionControlFailed" && event.action === action) {
-                        controlFailure = event
-                        break
-                      }
-                  }
-                  let result
-                  if (batch.failure !== undefined)
-                    result = { _tag: "Rejected" as const, reason: "unavailable", message: batch.failure.message }
-                  else if (controlFailure === undefined)
-                    result =
-                      authorization === undefined
-                        ? { _tag: "Applied" as const }
-                        : {
-                            _tag: "Applied" as const,
-                            authorization: { ...authorization, result: { _tag: "Delivered" as const } },
-                          }
-                  else
-                    result = {
-                      _tag: "Rejected" as const,
-                      reason: "conflict",
-                      message: controlFailure.failure.message,
-                      authorization: {
-                        ...authorization!,
-                        result: { _tag: "Rejected" as const, failure: controlFailure.failure },
-                      },
-                    }
-                  const durableEvents = events.filter(isDurableThreadEvent)
-                  const completedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-                  const completed = yield* store.completeCommand({
-                    ownerId: authority.ownerId,
-                    threadId,
-                    commandId: command.commandId,
-                    result,
-                    events: durableEvents,
-                    snapshot: batch.snapshot,
-                    completedAt,
-                  })
-                  return { result, events: durableEvents, completed, completedAt }
+                  if (!reset && projectedSnapshot !== undefined && snapshotFingerprint !== current.snapshotFingerprint)
+                    frames.push(
+                      frame({
+                        _tag: "ThreadSnapshot",
+                        threadId: current.threadId,
+                        threadVersion: snapshot!.threadVersion,
+                        cursor: snapshot!.cursor,
+                        snapshot: projectedSnapshot,
+                      }),
+                    )
+                  return [...commandFrames, ...frames]
                 }),
+              ),
             )
-          }).pipe(
-            Effect.catch((error) =>
-              Schema.is(StoreError)(error)
-                ? Effect.fail(storeFailure(error))
-                : Effect.succeed({
-                    result: {
-                      _tag: "Rejected" as const,
-                      reason: Schema.is(HostedThreadApplicationError)(error) ? "unavailable" : error.kind,
-                      message: error.message,
-                    },
-                    events: new Array<InteractiveEvent>(),
-                  }),
-            ),
-          )
-          const completedAt =
-            "completedAt" in applied
-              ? applied.completedAt
-              : DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const completionSnapshot =
-            "completed" in applied
-              ? undefined
-              : yield* operations
-                  .snapshot(authority.ownerId, ProductThreadId.make(threadId))
-                  .pipe(Effect.mapError(operationFailure))
-          const completed =
-            "completed" in applied
-              ? applied.completed
-              : yield* store
-                  .completeCommand({
-                    ownerId: authority.ownerId,
-                    threadId,
-                    commandId: command.commandId,
-                    result: applied.result,
-                    events: applied.events,
-                    snapshot: completionSnapshot!,
-                    completedAt,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-          return [
-            frame(commandResult(completed, message.requestId)),
-            ...applied.events.map((event, index) => {
-              const cursor = String(BigInt(completed.cursor ?? zeroCursor) - BigInt(applied.events.length - index - 1))
-              return frame({
-                _tag: "ThreadEvent",
-                event: {
-                  threadId,
-                  sequence: Sequence.make(cursor),
-                  cursor: ThreadEventCursor.make(cursor),
-                  threadVersion: completed.threadVersion,
-                  event,
-                  createdAt: completed.completedAt ?? completedAt,
-                },
-              })
-            }),
-          ]
-        })
+          })
 
-        return {
-          receive: (message) =>
-            receiveUnsafe(message).pipe(
-              Effect.catch((error) => reject(message, error)),
-              Effect.orDie,
-            ),
-          active: Effect.gen(function* () {
-            const at = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-            if (attached === undefined) {
-              yield* hosted.validateClient({
-                userId: binding.userId,
-                clientId: binding.clientId,
-                deviceId: binding.deviceId,
-                at,
-              })
-              return true
-            }
-            yield* product
-              .authorizeThread(principal, attached.threadId, "thread:view")
-              .pipe(Effect.mapError(productFailure))
-            return true
-          }).pipe(Effect.orElseSucceed(() => false)),
-          detach: Effect.sync(() => (attached = undefined)),
-        }
-      },
-    )
+          return {
+            receive: (message) =>
+              receiveUnsafe(message).pipe(
+                Effect.catch((error) => reject(message, error)),
+                Effect.orDie,
+              ),
+            outbound,
+            detach: Effect.sync(() => (attached = undefined)),
+          }
+        },
+      )
 
-    return HostedThreadProtocol.of({ issueTicket, connect })
-  }),
-)
+      return HostedThreadProtocol.of({ issueTicket, connect })
+    }),
+  ).pipe(Layer.provide(ThreadProtocolNotificationService.layer))
+
+export const layer = layerWithOptions()

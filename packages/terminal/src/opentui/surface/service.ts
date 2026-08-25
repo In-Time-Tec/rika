@@ -513,7 +513,8 @@ export const create = (handlers: Handlers) =>
           }),
         catch: adapterError,
       })
-    : handlers.makeRenderer()).pipe(
+    : handlers.makeRenderer()
+  ).pipe(
     Effect.flatMap((renderer) =>
       Effect.gen(function* () {
         const epochMillis = yield* EffectClock.currentTimeMillis

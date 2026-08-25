@@ -1,13 +1,23 @@
+import * as PgClient from "@effect/sql-pg/PgClient"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ExecutionRequest from "@rika/product/execution-request"
-import * as ThreadResult from "@rika/product/thread-result"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import * as ThreadResult from "@rika/product/thread-result"
 import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "../../../src/turn/postgres/repository"
 import * as TurnContract from "@rika/product/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, Schema } from "effect"
-import { makeRecordingSql } from "../../support/recording-sql"
+import { eq } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
+import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { fileURLToPath } from "node:url"
+import { Pool } from "pg"
+import { identityUser } from "../../../../identity/src/database/account-schema"
+import { identityMigrations } from "../../../../identity/src/database/migrations"
+import { runMigration } from "../../../../identity/src/database/postgres"
+import { rikaHostedOwners, rikaThreads, rikaTurns, rikaWorkspaces } from "../../../src/database/schema/product"
+import { migrations } from "../../../src/hosted/migrations"
+import * as TurnRepository from "../../../src/turn/postgres/repository"
 
 const provideLayer =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -107,358 +117,188 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
   ),
 )
 
-interface TurnRowOverrides {
-  readonly id?: string
-  readonly thread_id?: string
-  readonly turn_kind?: string
-  readonly prompt?: string | number
-  readonly prompt_parts_json?: string
-  readonly execution_route_json?: string
-  readonly shell_command?: string | null
-  readonly shell_result_text?: string | null
-  readonly shell_result_truncated?: boolean | null
-  readonly shell_result_exit_code?: number | null
-  readonly author_json?: string
-  readonly lineage_json?: string
-  readonly status?: string
-  readonly execution_link_json?: string | null
-  readonly created_at?: number
-  readonly updated_at?: number
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const readFileString = (url: URL) =>
+  Effect.scoped(
+    Layer.build(BunServices.layer).pipe(
+      Effect.flatMap((context) =>
+        Effect.provide(
+          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
+          context,
+        ),
+      ),
+    ),
+  )
+
+const isolated = <A, E, R>(run: (url: string) => Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const database = `rika_turn_repository_${Math.abs(yield* Random.nextInt)}_${Math.abs(yield* Random.nextInt)}`
+    const admin = new Pool({ connectionString: databaseUrl })
+    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+    const parsed = new URL(databaseUrl)
+    parsed.pathname = `/${database}`
+    const url = parsed.toString()
+    const pool = new Pool({ connectionString: url })
+    try {
+      for (const migration of [...identityMigrations, ...migrations]) {
+        const sql = yield* readFileString(migration.url)
+        yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+      }
+      return yield* run(url)
+    } finally {
+      yield* Effect.tryPromise(() => pool.end())
+      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+      yield* Effect.tryPromise(() => admin.end())
+    }
+  })
+
+const postgresLayer = (url: string) => {
+  const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
+  return TurnRepository.layer.pipe(Layer.provideMerge(postgres))
 }
 
-const row = (overrides: TurnRowOverrides = {}) => ({
-  id: "turn-a",
-  thread_id: "thread-a",
-  turn_kind: "AgentExecution",
-  prompt: "hello",
-  execution_route_json: JSON.stringify(ExecutionRouteSnapshot.testExecutionRoute()),
-  shell_command: null,
-  shell_result_text: null,
-  shell_result_truncated: null,
-  shell_result_exit_code: null,
-  author_json: '{"_tag":"Human"}',
-  lineage_json: '{"_tag":"Original"}',
-  status: "accepted",
-  execution_link_json: null,
-  created_at: 1,
-  updated_at: 1,
-  ...overrides,
-})
+it.effect.skipIf(databaseUrl === "")("runs the turn repository contract against isolated PostgreSQL", () =>
+  isolated((url) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(postgresLayer(url))
+        yield* Effect.gen(function* () {
+          const repository = yield* TurnRepository.Service
+          const db = yield* PgDrizzle.makeWithDefaults()
+          const ownerId = "turn-contract-owner"
+          const workspace = "/turn-contract"
+          const threadId = Thread.ThreadId.make("turn-contract-main")
+          const pageThreadId = Thread.ThreadId.make("turn-contract-page")
+          const malformedThreadId = Thread.ThreadId.make("turn-contract-malformed")
+          const now = DateTime.toDate(DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"))
 
-interface QueueRowOverrides {
-  readonly thread_id?: string
-  readonly revision?: number
-  readonly queued_count?: number
-}
+          yield* db.insert(identityUser).values({
+            id: "turn-contract-user",
+            name: "Turn Contract",
+            email: "turn-contract@example.test",
+            emailVerified: true,
+            createdAt: now,
+            updatedAt: now,
+          })
+          yield* db.insert(rikaHostedOwners).values({ id: ownerId, kind: "personal", userId: "turn-contract-user" })
+          yield* db.insert(rikaWorkspaces).values({ ownerId, path: workspace, createdAt: 1 })
+          yield* db.insert(rikaThreads).values(
+            [threadId, pageThreadId, malformedThreadId].map((id) => ({
+              id,
+              ownerId,
+              workspace,
+              title: id,
+              createdAt: 1,
+              updatedAt: 1,
+            })),
+          )
 
-const queueRow = (overrides: QueueRowOverrides = {}) => ({
-  thread_id: "thread-a",
-  revision: 1,
-  queued_count: 1,
-  ...overrides,
-})
+          const promptParts: ReadonlyArray<ExecutionRequest.PromptPart> = [
+            { type: "text", text: "inspect " },
+            { type: "image", mediaType: "image/png", data: "cG5n", filename: "shot.png" },
+          ]
+          const active = yield* create(repository, {
+            id: Turn.TurnId.make("turn-active"),
+            threadId,
+            prompt: "inspect [Image 1]",
+            promptParts,
+            now: 1,
+          })
+          const queued = yield* create(repository, {
+            id: Turn.TurnId.make("turn-queued"),
+            threadId,
+            prompt: "queued",
+            now: 2,
+          })
+          const dequeued = yield* create(repository, {
+            id: Turn.TurnId.make("turn-dequeued"),
+            threadId,
+            prompt: "dequeue",
+            now: 3,
+          })
 
-const sqlTest = (
-  run: (
-    sql: ReturnType<typeof makeRecordingSql>,
-  ) => Effect.Effect<
-    void,
-    TurnContract.RepositoryError | TurnContract.QueueFull | Schema.SchemaError,
-    TurnRepository.Service
-  >,
-) => {
-  const sql = makeRecordingSql()
-  return run(sql).pipe(provideLayer(TurnRepository.layer.pipe(Layer.provide(sql.layer))))
-}
+          expect(active).toMatchObject({ status: "accepted", promptParts })
+          const storedActive = yield* repository.get(active.id)
+          expect(
+            storedActive !== undefined && ThreadResult.TurnResult.isAgentExecution(storedActive)
+              ? storedActive.promptParts
+              : undefined,
+          ).toEqual(promptParts)
+          expect(yield* repository.get(Turn.TurnId.make("missing"))).toBeUndefined()
+          expect((yield* repository.list(threadId)).map((turn) => turn.id)).toEqual([active.id, queued.id, dequeued.id])
+          const persisted = yield* db
+            .select({ promptPartsJson: rikaTurns.promptPartsJson })
+            .from(rikaTurns)
+            .where(eq(rikaTurns.id, active.id))
+          expect(persisted[0]?.promptPartsJson).not.toBeNull()
 
-it.effect("sql turns create, get, and list current turn shapes", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows()
-      sql.rows(row())
-      sql.rows(row())
-      sql.rows()
-      sql.rows(row(), row({ id: "turn-b", created_at: 2, updated_at: 2 }))
-      const repository = yield* TurnRepository.Service
-      yield* create(repository, {
-        id: Turn.TurnId.make("turn-a"),
-        threadId: Thread.ThreadId.make("thread-a"),
-        prompt: "hello",
-        now: 1,
-      })
-      const found = yield* repository.get(Turn.TurnId.make("turn-a"))
-      const missing = yield* repository.get(Turn.TurnId.make("missing"))
-      const listed = yield* repository.list(Thread.ThreadId.make("thread-a"))
-      expect(found).toMatchObject({ id: Turn.TurnId.make("turn-a"), status: "accepted" })
-      expect(missing).toBeUndefined()
-      expect(listed.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-a"), Turn.TurnId.make("turn-b")])
-      const parameters = sql.statements[0]?.parameters ?? []
-      expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
-      const executionRoute = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-        String(parameters[4]),
-      )
-      expect(executionRoute).toEqual(ExecutionRouteSnapshot.testExecutionRoute())
-      expect(parameters.slice(5)).toEqual(['{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
-      expect(sql.statements.at(-1)).toEqual({
-        sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, id ASC",
-        parameters: ["thread-a"],
-      })
-    }),
-  ),
-)
+          expect((yield* repository.findActive(threadId))?.id).toBe(active.id)
+          expect(yield* repository.findActive(pageThreadId)).toBeUndefined()
+          expect(yield* repository.readQueue(threadId)).toMatchObject({
+            revision: 2,
+            queuedCount: 2,
+            turns: [{ id: queued.id }, { id: dequeued.id }],
+          })
+          expect((yield* repository.listNonterminal).map((turn) => turn.id)).toEqual([
+            active.id,
+            queued.id,
+            dequeued.id,
+          ])
 
-it.effect("sql turns encode and decode structured attachments", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      const promptParts: ReadonlyArray<ExecutionRequest.PromptPart> = [
-        { type: "text", text: "inspect " },
-        { type: "image", mediaType: "image/png", data: "cG5n", filename: "shot.png" },
-      ]
-      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ExecutionRequest.PromptPart)))(
-        promptParts,
-      )
-      sql.rows()
-      sql.rows(row({ prompt: "inspect [Image 1]", prompt_parts_json: encoded }))
-      const repository = yield* TurnRepository.Service
-      const created = yield* create(repository, {
-        id: Turn.TurnId.make("turn-a"),
-        threadId: Thread.ThreadId.make("thread-a"),
-        prompt: "inspect [Image 1]",
-        promptParts,
-        now: 1,
-      })
-      expect(created.promptParts).toEqual(promptParts)
-      expect(sql.statements[0]?.parameters[3]).toBe(encoded)
-    }),
-  ),
-)
+          expect((yield* Effect.result(repository.setStatus(active.id, "queued", 4)))._tag).toBe("Failure")
+          expect((yield* Effect.result(repository.setStatus(queued.id, "completed", 4)))._tag).toBe("Failure")
+          expect((yield* Effect.result(repository.setStatus(Turn.TurnId.make("missing"), "failed", 4)))._tag).toBe(
+            "Failure",
+          )
+          yield* repository.setStatus(active.id, "running", 4)
+          yield* repository.setStatus(active.id, "completed", 5)
+          expect((yield* repository.get(active.id))?.status).toBe("completed")
 
-it.effect("sql status updates bind status and activity time", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row({ status: "accepted" }))
-      sql.rows(row({ status: "running", updated_at: 2 }))
-      sql.rows(row({ status: "running" }))
-      sql.rows(row({ status: "completed", updated_at: 3 }))
-      const repository = yield* TurnRepository.Service
-      yield* repository.setStatus(Turn.TurnId.make("turn-a"), "running", 2)
-      yield* repository.setStatus(Turn.TurnId.make("turn-a"), "completed", 3)
-      expect(sql.statements[0]?.parameters).toEqual(["turn-a"])
-      expect(sql.statements[1]?.parameters).toEqual(["running", 2, "turn-a"])
-      expect(sql.statements[3]?.parameters).toEqual(["completed", 3, "turn-a"])
-    }),
-  ),
-)
+          const claim = yield* repository.claimNextQueued(threadId, 6)
+          if (claim === undefined) return yield* Effect.die("Expected queued claim")
+          expect(claim.turn.id).toBe(queued.id)
+          expect(yield* repository.claimNextQueued(threadId, 7)).toBeUndefined()
+          const edited = yield* repository.editQueued(queued.id, "edited", 8)
+          expect(edited).toMatchObject({ prompt: "edited", queue: { revision: 3, queuedCount: 2 } })
+          expect(edited.promptParts).toBeUndefined()
+          expect(yield* repository.finishQueuedClaim(claim, "running", 9)).toEqual({ _tag: "Unavailable" })
+          const replacement = yield* repository.claimNextQueued(threadId, 10)
+          if (replacement === undefined) return yield* Effect.die("Expected replacement claim")
+          expect((yield* repository.finishQueuedClaim(replacement, "running", 11))._tag).toBe("Transitioned")
+          expect((yield* repository.get(queued.id))?.status).toBe("running")
+          expect(yield* repository.dequeue(dequeued.id)).toMatchObject({ revision: 5, queuedCount: 0 })
+          expect(yield* repository.get(dequeued.id)).toBeUndefined()
+          expect((yield* Effect.result(repository.dequeue(dequeued.id)))._tag).toBe("Failure")
 
-it.effect("sql setStatus refuses to move a queued turn out of the queue", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row({ status: "queued" }))
-      const repository = yield* TurnRepository.Service
-      expect((yield* Effect.result(repository.setStatus(Turn.TurnId.make("turn-a"), "completed", 5)))._tag).toBe(
-        "Failure",
-      )
-      expect(sql.statements.map((statement) => statement.sql)).toEqual([
-        "SELECT * FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution'",
-      ])
-    }),
-  ),
-)
+          const pageIds: Array<Turn.TurnId> = []
+          for (let index = 1; index <= 4; index++) {
+            const turn = yield* create(repository, {
+              id: Turn.TurnId.make(`page-${index}`),
+              threadId: pageThreadId,
+              prompt: `page ${index}`,
+              now: index,
+            })
+            pageIds.push(turn.id)
+            yield* repository.setStatus(turn.id, "completed", index)
+          }
+          const newest = yield* repository.page(pageThreadId, { limit: 2 })
+          const older = yield* repository.page(pageThreadId, { before: newest.oldestCursor, limit: 2 })
+          expect(newest.turns.map((turn) => turn.id)).toEqual(pageIds.slice(2))
+          expect(newest.hasOlder).toBe(true)
+          expect(older.turns.map((turn) => turn.id)).toEqual(pageIds.slice(0, 2))
+          expect(older.hasOlder).toBe(false)
 
-it.effect("sql setStatus refuses to move a turn into queued", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      const repository = yield* TurnRepository.Service
-      expect((yield* Effect.result(repository.setStatus(Turn.TurnId.make("turn-a"), "queued", 5)))._tag).toBe("Failure")
-      expect(sql.statements).toEqual([])
-    }),
-  ),
-)
-
-it.effect("sql pages turns backward and returns chronological results", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(
-        row({ id: "turn-4", created_at: 4, updated_at: 4 }),
-        row({ id: "turn-3", created_at: 3, updated_at: 3 }),
-        row({ id: "turn-2", created_at: 2, updated_at: 2 }),
-      )
-      sql.rows(row({ id: "turn-1", created_at: 1, updated_at: 1 }))
-      const repository = yield* TurnRepository.Service
-      const newest = yield* repository.page(Thread.ThreadId.make("thread-a"), { limit: 2 })
-      const older = yield* repository.page(Thread.ThreadId.make("thread-a"), {
-        before: newest.oldestCursor,
-        limit: 2,
-      })
-      expect(newest.turns.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-3"), Turn.TurnId.make("turn-4")])
-      expect(newest.hasOlder).toBe(true)
-      expect(older.turns.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-1")])
-      expect(sql.statements).toEqual([
-        {
-          sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-          parameters: ["thread-a", 3],
-        },
-        {
-          sql: "SELECT * FROM rika_turns WHERE thread_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?",
-          parameters: ["thread-a", 3, 3, "turn-3", 3],
-        },
-      ])
-    }),
-  ),
-)
-
-it.effect("sql writes report missing rows after create and update", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows()
-      sql.rows()
-      sql.rows()
-      sql.rows()
-      const repository = yield* TurnRepository.Service
-      const missingCreate = yield* Effect.result(
-        create(repository, {
-          id: Turn.TurnId.make("turn-a"),
-          threadId: Thread.ThreadId.make("thread-a"),
-          prompt: "hello",
-          now: 1,
-        }),
-      )
-      const missingUpdate = yield* Effect.result(repository.setStatus(Turn.TurnId.make("turn-a"), "failed", 2))
-      expect(missingCreate._tag === "Failure" && missingCreate.failure._tag).toBe("TurnRepositoryError")
-      expect(missingUpdate._tag === "Failure" && missingUpdate.failure._tag).toBe("TurnRepositoryError")
-    }),
-  ),
-)
-
-it.effect("sql malformed rows, statuses, and failures map to repository errors", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row({ prompt: 1 }))
-      sql.rows(row({ status: "unknown" }))
-      sql.error("database unavailable")
-      const repository = yield* TurnRepository.Service
-      const malformed = yield* Effect.result(repository.get(Turn.TurnId.make("turn-a")))
-      const status = yield* Effect.result(repository.get(Turn.TurnId.make("turn-a")))
-      const failed = yield* Effect.result(repository.list(Thread.ThreadId.make("thread-a")))
-      expect(malformed._tag === "Failure" && malformed.failure._tag).toBe("TurnRepositoryError")
-      expect(status._tag === "Failure" && status.failure._tag).toBe("TurnRepositoryError")
-      expect(failed._tag === "Failure" && failed.failure._tag).toBe("TurnRepositoryError")
-    }),
-  ),
-)
-
-it.effect("sql finds active turns and lists queued turns", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row({ status: "running" }))
-      sql.rows()
-      sql.rows(queueRow({ revision: 2, queued_count: 2 }))
-      sql.rows(row({ status: "queued" }), row({ id: "turn-b", status: "queued" }))
-      const repository = yield* TurnRepository.Service
-      expect((yield* repository.findActive(Thread.ThreadId.make("thread-a")))?.status).toBe("running")
-      expect(yield* repository.findActive(Thread.ThreadId.make("thread-empty"))).toBeUndefined()
-      expect((yield* repository.readQueue(Thread.ThreadId.make("thread-a"))).turns.map((turn) => turn.id)).toEqual([
-        Turn.TurnId.make("turn-a"),
-        Turn.TurnId.make("turn-b"),
-      ])
-    }),
-  ),
-)
-
-it.effect("sql claims queued turns and reports empty, malformed, and failed queries", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows({ thread_id: "thread-a" })
-      sql.rows({ ...row({ status: "queued" }), queue_claim_token: "TOKEN" })
-      sql.rows({ thread_id: "thread-a" })
-      sql.rows()
-      sql.rows({ thread_id: "thread-a" })
-      sql.rows(row({ status: "invalid" }))
-      sql.rows({ thread_id: "thread-a" })
-      sql.error("claim unavailable")
-      sql.rows(row({ prompt: 1 }))
-      sql.error("active unavailable")
-      sql.error("queue unavailable")
-      const repository = yield* TurnRepository.Service
-      const threadId = Thread.ThreadId.make("thread-a")
-      expect((yield* repository.claimNextQueued(threadId, 2))?.turn.status).toBe("queued")
-      expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
-      const malformedClaim = yield* Effect.result(repository.claimNextQueued(threadId, 4))
-      const failedClaim = yield* Effect.result(repository.claimNextQueued(threadId, 5))
-      const malformedActive = yield* Effect.result(repository.findActive(threadId))
-      const failedActive = yield* Effect.result(repository.findActive(threadId))
-      const failedQueue = yield* Effect.result(repository.readQueue(threadId))
-      expect(malformedClaim._tag).toBe("Failure")
-      expect(failedClaim._tag).toBe("Failure")
-      expect(malformedActive._tag).toBe("Failure")
-      expect(failedActive._tag).toBe("Failure")
-      expect(failedQueue._tag).toBe("Failure")
-      expect(sql.statements[0]?.parameters).toEqual(["thread-a"])
-      expect(sql.statements[1]?.parameters.slice(1)).toEqual(["thread-a", "thread-a", "thread-a"])
-    }),
-  ),
-)
-
-it.effect("sql edits and dequeues only queued turns", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row({ status: "queued", prompt: "after", updated_at: 3 }))
-      sql.rows(queueRow())
-      sql.rows()
-      sql.rows(row({ status: "queued" }))
-      sql.rows(queueRow({ revision: 2, queued_count: 0 }))
-      sql.rows()
-      const repository = yield* TurnRepository.Service
-      expect(yield* repository.editQueued(Turn.TurnId.make("turn-a"), "after", 3)).toMatchObject({
-        prompt: "after",
-        updatedAt: 3,
-      })
-      expect((yield* Effect.result(repository.editQueued(Turn.TurnId.make("active"), "invalid", 4)))._tag).toBe(
-        "Failure",
-      )
-      yield* repository.dequeue(Turn.TurnId.make("turn-a"))
-      expect((yield* Effect.result(repository.dequeue(Turn.TurnId.make("active"))))._tag).toBe("Failure")
-      expect(sql.statements).toEqual([
-        {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
-          parameters: ["after", 3, "turn-a"],
-        },
-        {
-          sql: "UPDATE rika_thread_queue_state SET revision = revision + 1 WHERE thread_id = ? RETURNING *",
-          parameters: ["thread-a"],
-        },
-        {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
-          parameters: ["invalid", 4, "active"],
-        },
-        {
-          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
-          parameters: ["turn-a"],
-        },
-        {
-          sql: "UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END WHERE thread_id = ? RETURNING *",
-          parameters: ["thread-a"],
-        },
-        {
-          sql: "DELETE FROM rika_turns WHERE id = ? AND turn_kind = 'AgentExecution' AND status = 'queued' AND NOT EXISTS ( SELECT 1 FROM rika_turn_steering_outbox WHERE source_turn_id = rika_turns.id AND status != 'rejected' ) RETURNING *",
-          parameters: ["active"],
-        },
-      ])
-    }),
-  ),
-)
-
-it.effect("sql lists nonterminal turns", () =>
-  sqlTest((sql) =>
-    Effect.gen(function* () {
-      sql.rows(row(), row({ id: "turn-b", status: "waiting" }))
-      sql.error("list failed")
-      const repository = yield* TurnRepository.Service
-      expect((yield* repository.listNonterminal).map((turn) => turn.id)).toEqual([
-        Turn.TurnId.make("turn-a"),
-        Turn.TurnId.make("turn-b"),
-      ])
-      expect((yield* Effect.result(repository.listNonterminal))._tag).toBe("Failure")
-    }),
+          const malformed = yield* create(repository, {
+            id: Turn.TurnId.make("turn-malformed"),
+            threadId: malformedThreadId,
+            prompt: "malformed",
+            now: 1,
+          })
+          yield* db.update(rikaTurns).set({ executionRouteJson: "{" }).where(eq(rikaTurns.id, malformed.id))
+          const malformedResult = yield* Effect.result(repository.get(malformed.id))
+          expect(malformedResult).toMatchObject({ _tag: "Failure", failure: { _tag: "TurnRepositoryError" } })
+        }).pipe(Effect.provide(context))
+      }),
+    ),
   ),
 )

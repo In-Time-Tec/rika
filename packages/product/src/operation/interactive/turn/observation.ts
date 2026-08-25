@@ -214,6 +214,7 @@ export interface InteractiveSupervisionInput {
   readonly claimTurnObserver: InteractiveSessionInput["claimTurnObserver"]
   readonly observeTurn: ReturnType<typeof makeInteractiveFollowing>["observeTurn"]
   readonly recoveryOwner: boolean
+  readonly observeExecution: boolean
   readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly sessionId: number
   readonly getSelectedThreadId: () => string | undefined
@@ -243,6 +244,7 @@ export const makeInteractiveSupervision = (
     getSelectedThreadId,
     interactiveSinks,
     operationFeed,
+    observeExecution,
     queueMutationEvent,
     initialized,
   } = input
@@ -371,10 +373,9 @@ export const makeInteractiveSupervision = (
         )
       const recover = Effect.gen(function* () {
         if (recoveryOwner) {
-          yield* rootTurnOwner.recoverExecutionAdmissions
+          if (observeExecution) yield* rootTurnOwner.recoverExecutionAdmissions
           yield* launchSteeringRecovery
         }
-        const transcripts = yield* TranscriptRepository.Service
         const summaryRepository = yield* ThreadSummaryRepository.Service
         const setSettledStatus = (id: Turn.TurnId, status: ExecutionStatus.Status, now: number) =>
           setTurnStatus(id, status, now).pipe(
@@ -386,19 +387,20 @@ export const makeInteractiveSupervision = (
                 : Effect.die(new Error("Expected an agent execution turn")),
             ),
           )
-        const reconciled = yield* ExecutionAuthorityReconciliation.make({
-          turns,
-          transcripts,
-          backend: acquiredBackend,
-          setTurnStatus: setSettledStatus,
-        }).pipe(Effect.mapError((error) => operationError(String(error), error)))
-        for (const turn of reconciled.active) yield* launch(turn)
-        const threads = yield* ThreadRepository.Service
-        for (const threadId of new Set(reconciled.settledThreads)) {
-          const thread = yield* threads
-            .get(threadId)
-            .pipe(Effect.mapError((error) => operationError(String(error), error)))
-          if (thread !== undefined) yield* settleThread(thread, publishObserved)
+        if (observeExecution) {
+          const reconciled = yield* ExecutionAuthorityReconciliation.make({
+            turns,
+            backend: acquiredBackend,
+            setTurnStatus: setSettledStatus,
+          }).pipe(Effect.mapError((error) => operationError(String(error), error)))
+          for (const turn of reconciled.active) yield* launch(turn)
+          const threads = yield* ThreadRepository.Service
+          for (const threadId of new Set(reconciled.settledThreads)) {
+            const thread = yield* threads
+              .get(threadId)
+              .pipe(Effect.mapError((error) => operationError(String(error), error)))
+            if (thread !== undefined) yield* settleThread(thread, publishObserved)
+          }
         }
       })
       const scanDirty = Effect.gen(function* () {
@@ -408,6 +410,7 @@ export const makeInteractiveSupervision = (
         for (const turnId of dirty) {
           const turn = yield* turns.get(turnId)
           if (
+            observeExecution &&
             turn !== undefined &&
             turn._tag === "AgentExecution" &&
             terminalStatus(turn.status) !== true &&

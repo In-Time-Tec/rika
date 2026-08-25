@@ -13,10 +13,14 @@ export interface IdentityConfig extends IdentityDatabaseConfig {
   readonly baseUrl: string
   readonly trustedOrigins: ReadonlyArray<string>
   readonly authSecret: Redacted.Redacted<string>
-  readonly githubClientId: string
-  readonly githubClientSecret: Redacted.Redacted<string>
-  readonly resendApiKey: Redacted.Redacted<string>
-  readonly emailFrom: string
+  readonly github?: {
+    readonly clientId: string
+    readonly clientSecret: Redacted.Redacted<string>
+  }
+  readonly mail?: {
+    readonly resendApiKey: Redacted.Redacted<string>
+    readonly emailFrom: string
+  }
   readonly resource: string
 }
 
@@ -30,6 +34,8 @@ const required = (environment: Environment, name: string): Effect.Effect<string,
   const value = environment[name]?.trim()
   return value === undefined || value.length === 0 ? Effect.fail(failure(`${name} is required`)) : Effect.succeed(value)
 }
+
+const optional = (environment: Environment, name: string) => environment[name]?.trim() || undefined
 
 const parseUrl = (name: string, value: string, protocols: ReadonlyArray<string>) =>
   Effect.try({
@@ -127,19 +133,31 @@ export const loadIdentityConfig = Effect.fn("IdentityConfig.load")(function* (en
   const trustedOrigins = yield* Effect.forEach(configuredOrigins, (origin) =>
     parseOrigin("BETTER_AUTH_TRUSTED_ORIGINS", origin, production),
   )
-  const githubClientId = yield* required(environment, "GITHUB_CLIENT_ID")
-  const emailFrom = yield* required(environment, "EMAIL_FROM").pipe(Effect.flatMap(parseEmailFrom))
-  return {
+  const githubClientId = optional(environment, "GITHUB_CLIENT_ID")
+  const githubClientSecret = optional(environment, "GITHUB_CLIENT_SECRET")
+  if ((githubClientId === undefined) !== (githubClientSecret === undefined))
+    return yield* failure("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be configured together")
+  if (production && githubClientId === undefined)
+    return yield* failure("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are required in production")
+  const resendApiKey = optional(environment, "RESEND_API_KEY")
+  const configuredEmailFrom = optional(environment, "EMAIL_FROM")
+  if ((resendApiKey === undefined) !== (configuredEmailFrom === undefined))
+    return yield* failure("RESEND_API_KEY and EMAIL_FROM must be configured together")
+  if (production && resendApiKey === undefined)
+    return yield* failure("RESEND_API_KEY and EMAIL_FROM are required in production")
+  const emailFrom = configuredEmailFrom === undefined ? undefined : yield* parseEmailFrom(configuredEmailFrom)
+  const config: IdentityConfig = {
     ...database,
     production,
     port: yield* required(environment, "PORT").pipe(Effect.flatMap(parsePort)),
     baseUrl,
     trustedOrigins: Array.from(new Set([baseUrl, ...trustedOrigins])),
     authSecret: yield* required(environment, "BETTER_AUTH_SECRET").pipe(Effect.flatMap(parseSecret)),
-    githubClientId,
-    githubClientSecret: Redacted.make(yield* required(environment, "GITHUB_CLIENT_SECRET")),
-    resendApiKey: Redacted.make(yield* required(environment, "RESEND_API_KEY")),
-    emailFrom,
     resource: `${baseUrl}/api/v1`,
-  } satisfies IdentityConfig
+  }
+  if (githubClientId !== undefined)
+    Object.assign(config, { github: { clientId: githubClientId, clientSecret: Redacted.make(githubClientSecret!) } })
+  if (resendApiKey !== undefined)
+    Object.assign(config, { mail: { resendApiKey: Redacted.make(resendApiKey), emailFrom: emailFrom! } })
+  return config
 })

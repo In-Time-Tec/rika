@@ -115,4 +115,49 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "c91691d1b09392d0a4ab04949a78a39ca6c340eb0e16574e8cdf1557c834be70",
     url: new URL("../../migrations/postgres/0022-openai-account-credentials.sql", import.meta.url),
   },
+  {
+    id: "product/0023_staged_turn_admission",
+    checksum: "e81cf8e639ccc41045a78a88aa7bb51a8ef1beab159b51ea2a6353196a18135d",
+    url: new URL("../../migrations/postgres/0023-staged-turn-admission.sql", import.meta.url),
+  },
+  {
+    id: "product/0024_workspace_preparation_deadline",
+    checksum: "fc37ad145501ea889eceaa1866345216a8dd9a43a8454e54954a6af9ccafc687",
+    url: new URL("../../migrations/postgres/0024-workspace-preparation-deadline.sql", import.meta.url),
+  },
+  {
+    id: "product/0025_terminal_receipt_recovery",
+    checksum: "c465b9548caf57acca16009a69852a179b4b388aaa420e2a8111d6d3a32641c6",
+    url: new URL("../../migrations/postgres/0025-terminal-receipt-recovery.sql", import.meta.url),
+  },
+  {
+    id: "product/0026_runner_supervisor_lease",
+    checksum: "6e5556bfa15f4b9aac475f6e4ba5108d5bc90f7a594fb7e6ced77f7bb850c6c5",
+    url: new URL("../../migrations/postgres/0026-runner-supervisor-lease.sql", import.meta.url),
+  },
+  {
+    id: "product/0027_executor_recovery_authority",
+    checksum: "88867e86c9930a583a3cf06ec0507e4531d480fe7a1b120e1e191feb28b3a8fb",
+    url: new URL("../../migrations/postgres/0027-executor-recovery-authority.sql", import.meta.url),
+  },
+  {
+    id: "product/0028_tool_policy_decision_identity",
+    checksum: "94fc4d89eccbcad20f04cf7d654a38f60e22edc2248e46c9e7731c17f510aa9e",
+    url: new URL("../../migrations/postgres/0028-tool-policy-decision-identity.sql", import.meta.url),
+  },
+  {
+    id: "product/0029_command_application_and_prompt_cancellation",
+    checksum: "06953b4fce5fbb388e922c5421536238b82adf34f58456508c229daa103b600c",
+    url: new URL("../../migrations/postgres/0029-command-application-and-prompt-cancellation.sql", import.meta.url),
+  },
+  {
+    id: "product/0030_tenetkit_recovery_authority",
+    checksum: "3417c332907c9ac4a137168559b1e93a4839d023fcb2b106771fc24e793d6895",
+    url: new URL("../../migrations/postgres/0030-tenetkit-recovery-authority.sql", import.meta.url),
+  },
+  {
+    id: "product/0031_transactional_thread_notifications",
+    checksum: "a96925eb0745ef830c407242e207e940d50d16bedfcdd319c9ea0932d95f4f90",
+    url: new URL("../../migrations/postgres/0031-transactional-thread-notifications.sql", import.meta.url),
+  },
 ]

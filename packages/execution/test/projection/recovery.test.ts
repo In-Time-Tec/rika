@@ -4,7 +4,8 @@ import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
-import { Context, Effect, Layer, Random, Stream } from "effect"
+import { Context, Effect, Layer, Random, Schema, Stream } from "effect"
+import { Prompt } from "effect/unstable/ai"
 import { memoryLayer as layer } from "../support/adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
@@ -15,6 +16,7 @@ const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
 const testLayer = (options: Parameters<typeof layer>[0]) => layer(options)
 
 type RouteModel = ReturnType<typeof testExecutionRoute>["main"]
+type PromptRequest = Pick<TestModel.Request, "prompt">
 
 const withIdentity = (model: RouteModel, identity: string): RouteModel => ({
   ...model,
@@ -29,8 +31,31 @@ const routeWithIdentity = (rootIdentity: string, titleIdentity: string) => {
   return { ...route, main: withIdentity(route.main, rootIdentity), title: withIdentity(route.title, titleIdentity) }
 }
 
-const requestText = (requests: ReadonlyArray<TestModel.Request>): string =>
+const requestText = (requests: ReadonlyArray<PromptRequest>): string =>
   requests.map((request) => JSON.stringify(request.prompt)).join("\n")
+
+it.effect("keeps the plain prompt when structured prompt parts are empty", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        testLayer({ dataRoot: `/tmp/rika-empty-prompt-parts-${yield* Random.nextInt}.db` }),
+      )
+      const gateway = Context.get(context, ExecutionGateway.Service)
+      const prepared = yield* gateway.prepareTurn({
+        threadId: "thread-empty-parts",
+        turnId: "turn-empty-parts",
+        workspaceId: "/workspace",
+        prompt: "plain text survives",
+        promptParts: [],
+        executionRoute: testExecutionRoute(),
+      })
+      const admission = yield* Schema.decodeEffect(
+        Schema.fromJsonString(Schema.Struct({ prompt: Prompt.Prompt })),
+      )(prepared.rootAdmissionJson)
+      expect(requestText([{ prompt: admission.prompt }])).toContain("plain text survives")
+    }),
+  ),
+)
 
 it.live(
   "continues a thread so each in-memory turn carries the prior conversation",

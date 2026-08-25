@@ -8,8 +8,8 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product-store/postgres-transcript-repository"
-import * as TurnStore from "@rika/product-store/postgres-turn-repository"
+import * as TranscriptStore from "@rika/product-store/transcript-repository"
+import * as TurnStore from "@rika/product-store/turn-repository"
 import { Context, Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
@@ -39,17 +39,16 @@ const state = (status: "running" | "completed") => ({
   steering: { steeringMessages: 0, followUpMessages: 0 },
 })
 
-it.effect("projects a recovered Turn through its terminal cursor", () =>
+it.effect("projects a recovered Turn through its terminal cursor without owning Turn settlement", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const settled = yield* Deferred.make<Turn.AgentExecutionTurn>()
+      const projected = yield* Deferred.make<void>()
       let projection: Projection | undefined
       const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
       const turns = TurnRepository.Service.of({
         ...turnRepository,
         get: () => Effect.succeed(turn),
-        setStatus: (id, status, now) =>
-          turnRepository.setStatus(id, status, now).pipe(Effect.tap((updated) => Deferred.succeed(settled, updated))),
+        setStatus: () => Effect.die("projection worker settled the Turn"),
       })
       const transcripts = TranscriptRepository.Service.of({
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
@@ -65,16 +64,21 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
               state: change.state,
               projectionVersion: ExecutionProjection.projectionVersion,
             }
-            const next: Projection =
+            projection =
               change.checkpoint === undefined ? common : { ...common, projectorCheckpoint: change.checkpoint }
-            projection = next
-            return "committed" as const
-          }),
+          }).pipe(
+            Effect.andThen(change.state.status === "completed" ? Deferred.succeed(projected, undefined) : Effect.void),
+            Effect.as("committed" as const),
+          ),
       })
       const running: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
         revision: 0,
-        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "running", state: "{}" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "running",
+          state: "{}",
+        },
         units: [],
         hasOlder: false,
         state: state("running"),
@@ -83,7 +87,11 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "completed", state: "{}" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "completed",
+          state: "{}",
+        },
         upsert: [],
         remove: [],
         state: state("completed"),
@@ -94,13 +102,16 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "completed" }),
       })
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 2, pollIntervalMillis: 10 }).pipe(
+        hostedProjectionWorkerLayer({
+          concurrency: 2,
+          pollIntervalMillis: 10,
+        }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
       )
-      expect(yield* Deferred.await(settled)).toMatchObject({ status: "completed" })
+      yield* Deferred.await(projected)
       yield* HostedProjectionWorker.pipe(
         Effect.provide(context),
         Effect.flatMap((worker) => worker.ready),
@@ -132,7 +143,10 @@ it.effect("does not reset active projection age when a duplicate candidate is re
         watchTurn: () => Stream.never,
       })
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        hostedProjectionWorkerLayer({
+          concurrency: 1,
+          pollIntervalMillis: 10,
+        }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -146,21 +160,22 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       const duplicateRejected = yield* worker.status
       expect(duplicateRejected.oldestActiveProjectionAt).toBe(admitted.oldestActiveProjectionAt)
       expect(duplicateRejected.oldestActiveProjectionAgeMillis).toBe(11)
-      expect(duplicateRejected).toMatchObject({ active: 1, capacity: 1, availableCapacity: 0 })
+      expect(duplicateRejected).toMatchObject({
+        active: 1,
+        capacity: 1,
+        availableCapacity: 0,
+      })
       yield* worker.ready
     }),
   ),
 )
 
-it.effect("cancels a silent watch before failing it and admits the next recovery candidate", () =>
+it.effect("does not cancel or settle execution when projection is silent", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const silentTurnId = Turn.TurnId.make("turn-silent")
       const nextTurnId = Turn.TurnId.make("turn-next")
-      const silentSettled = yield* Deferred.make<void>()
-      const nextSettled = yield* Deferred.make<void>()
       const events = yield* Ref.make<ReadonlyArray<string>>([])
-      const failedTurns = yield* Ref.make<ReadonlySet<Turn.TurnId>>(new Set())
       const projections = new Map<Turn.TurnId, Projection>()
       const turnFor = (id: Turn.TurnId): Turn.AgentExecutionTurn => ({
         ...turn,
@@ -171,14 +186,7 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
         ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
         get: (id: Turn.TurnId) => Effect.succeed(turnFor(id)),
         setStatus: (id: Turn.TurnId) =>
-          Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(
-            Effect.andThen(
-              id === silentTurnId
-                ? Deferred.succeed(silentSettled, undefined)
-                : Deferred.succeed(nextSettled, undefined),
-            ),
-            Effect.as(turnFor(id)),
-          ),
+          Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(Effect.as(turnFor(id))),
       })
       const transcriptRepository = Context.get(
         yield* Layer.build(TranscriptStore.memoryLayer()),
@@ -187,18 +195,16 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
       const transcripts = TranscriptRepository.Service.of({
         ...transcriptRepository,
         listProjectionRecoveryCandidates: () =>
-          Ref.get(failedTurns).pipe(
-            Effect.map((settled) =>
-              [silentTurnId, nextTurnId]
-                .filter((candidateTurnId) => !settled.has(candidateTurnId))
-                .map((candidateTurnId) => ({ threadId, turnId: candidateTurnId })),
-            ),
+          Effect.succeed(
+            [silentTurnId, nextTurnId].map((candidateTurnId) => ({
+              threadId,
+              turnId: candidateTurnId,
+            })),
           ),
         get: (id: Turn.TurnId) => Effect.sync(() => projections.get(id)),
-        replaceUnits: (failed, units) =>
-          transcriptRepository.replaceUnits(failed, units).pipe(
-            Effect.tap(() => Ref.update(events, (current) => [...current, `persisted:${failed.id}`])),
-            Effect.tap(() => Ref.update(failedTurns, (current) => new Set([...current, failed.id]))),
+        replaceUnits: (failed: Turn.Turn, units) =>
+          Ref.update(events, (current) => [...current, `persisted:${failed.id}`]).pipe(
+            Effect.andThen(transcriptRepository.replaceUnits(failed, units)),
           ),
         commitProjection: (candidateTurn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
           Effect.sync(() => {
@@ -220,7 +226,11 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
       const completed: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
         revision: 0,
-        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "completed", state: "{}" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "completed",
+          state: "{}",
+        },
         units: [],
         hasOlder: false,
         state: state("completed"),
@@ -234,8 +244,11 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "completed" }),
         cancelTurn: (link) => Ref.update(events, (current) => [...current, `cancelled:${link.turnId}`]),
       })
-      yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 60_000 }).pipe(
+      const context = yield* Layer.build(
+        hostedProjectionWorkerLayer({
+          concurrency: 1,
+          pollIntervalMillis: 60_000,
+        }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -243,14 +256,16 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
       )
 
       yield* TestClock.adjust(15 * 60_000)
-      yield* Deferred.await(silentSettled)
-      yield* Effect.forEach([1, 2, 3, 4, 5], () => Effect.yieldNow.pipe(Effect.andThen(TestClock.adjust(60_000))), {
-        discard: true,
-      })
+      yield* Effect.yieldNow
       const observed = yield* Ref.get(events)
-      expect(observed.indexOf(`cancelled:${silentTurnId}`)).toBeGreaterThanOrEqual(0)
-      expect(observed.indexOf(`cancelled:${silentTurnId}`)).toBeLessThan(observed.indexOf(`persisted:${silentTurnId}`))
-      expect((yield* Deferred.poll(nextSettled))._tag).toBe("Some")
+      expect(observed).not.toContain(`cancelled:${silentTurnId}`)
+      expect(observed).not.toContain(`persisted:${silentTurnId}`)
+      expect(observed).not.toContain(`settled:${silentTurnId}`)
+      expect(observed).not.toContain(`started:${nextTurnId}`)
+      expect(yield* Context.get(context, HostedProjectionWorker).status).toMatchObject({
+        active: 1,
+        availableCapacity: 0,
+      })
     }),
   ),
 )
@@ -269,7 +284,10 @@ it.effect("rejects a stale projection worker when listing blocks after a success
       })
       const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        hostedProjectionWorkerLayer({
+          concurrency: 1,
+          pollIntervalMillis: 10,
+        }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
@@ -293,7 +311,10 @@ it.effect("rejects the current projection list failure immediately", () =>
       })
       const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        hostedProjectionWorkerLayer({
+          concurrency: 1,
+          pollIntervalMillis: 10,
+        }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),

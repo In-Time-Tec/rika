@@ -1,27 +1,32 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { Controller, type Interface as ControllerService } from "@rika/e2b-executor/controller"
+import { Controller, ControllerError, type Interface as ControllerService } from "@rika/e2b-executor/controller"
 import { identityMigrations, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { BetterAuthUserId, DeviceId, OrganizationId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { layer as productPostgres } from "@rika/product-store/postgres-layer"
-import type { Access, RunnerHelloWire } from "@rika/remote-execution/protocol"
-import { FileSystem, Config, Effect, Layer, Random, Redacted } from "effect"
+import { layer as productPostgres } from "@rika/product-store/layer"
+import { emptyCursor, type Access, type RunnerHelloWire } from "@rika/remote-execution/protocol"
+import { Config, Data, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../support/live-platform"
 import { Executor, service as executorLayer } from "../../src/executor/service"
-import { HostedEnvironment, type HostedEnvironmentService } from "../../src/hosted/environment/runtime"
+import {
+  HostedEnvironment,
+  type HostedEnvironmentService,
+  type ResolvedPhaseEnvironment,
+} from "../../src/hosted/environment/runtime"
 import { testLayer as hostedModelRegistryTestLayer } from "../../src/hosted/environment/model-registry"
 import { HostedProduct, layer as hostedProductLayer, type AuthenticatedPrincipal } from "../../src/hosted/product"
-import { testLayer as hostedRepositoriesTestLayer } from "../../src/hosted/repositories"
+import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../src/hosted/repositories"
 import { HostedToolPolicy } from "../../src/hosted/execution/tool-policy"
 import { RunnerExecutor, layer as runnerExecutorLayer } from "../../src/runner/executor"
 import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const helloReadiness = {
   capabilities: { cells: true, checkpoints: false, pty: true },
   workspaceCapabilities: {
@@ -33,7 +38,10 @@ const helloReadiness = {
     process: { _tag: "Ready", detail: "process ready" },
     pty: { _tag: "Ready", detail: "PTY ready" },
     browser: { _tag: "Ready", detail: "browser ready" },
-    services: { _tag: "Unavailable", reason: "repository services unavailable" },
+    services: {
+      _tag: "Unavailable",
+      reason: "repository services unavailable",
+    },
     workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
   },
   cursors: { command: 0, event: 0, pty: 0 },
@@ -69,10 +77,32 @@ const unusedController: ControllerService = {
   cleanupOrphans: Effect.succeed([]),
 }
 
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
+const availableHostedEnvironment: HostedEnvironmentService = {
+  ...unusedHostedEnvironment,
+  usePhase: (input, use) =>
+    use({
+      manifest: {
+        phase: input.phase,
+        digest: helloReadiness.workspaceCapabilities.environmentDigest,
+        references: [],
+      },
+      values: {},
+      egress: { phase: input.phase, allow: [] },
+    } satisfies ResolvedPhaseEnvironment),
+}
 
-const personal = (userId: string) => ({ _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(userId) })
+class TestDatabaseError extends Data.TaggedError("TestDatabaseError")<{ readonly cause: unknown }> {}
+
+const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
+  Effect.tryPromise({
+    try: () => pool.query(text, [...values]),
+    catch: (cause) => new TestDatabaseError({ cause }),
+  })
+
+const personal = (userId: string) => ({
+  _tag: "PersonalOwner" as const,
+  userId: BetterAuthUserId.make(userId),
+})
 const organization = (organizationId: string) => ({
   _tag: "OrganizationOwner" as const,
   organizationId: OrganizationId.make(organizationId),
@@ -123,8 +153,15 @@ const localConnection = (
       checkoutFingerprint: fingerprint,
       registration: {
         workspaceIdentity: WorkspaceId.make(`${checkoutFingerprint}-identity`),
-        repository: { identity: `repository-${checkoutFingerprint}`, branch: "main" },
-        kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+        repository: {
+          identity: `repository-${checkoutFingerprint}`,
+          branch: "main",
+        },
+        kernel: {
+          runtime: "bun",
+          runtimeVersion: Bun.version,
+          trustMode: "trusted-local",
+        },
         capabilities: { cells: true, checkpoints: false, pty: false },
       },
     })
@@ -156,6 +193,10 @@ const failureKind = <A>(effect: Effect.Effect<A, { readonly kind: string }>) =>
 const isolated = <A, E, R>(
   label: string,
   use: (pool: Pool) => Effect.Effect<A, E, R | Executor | HostedProduct | RunnerExecutor>,
+  services?: (pool: Pool) => {
+    readonly controller?: ControllerService
+    readonly environment?: HostedEnvironmentService
+  },
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -173,25 +214,32 @@ const isolated = <A, E, R>(
           const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.readFileString(migration.url.pathname),
           )
-          yield* runMigration({ pool: activePool, id: migration.id, checksum: migration.checksum, sql })
+          yield* runMigration({
+            pool: activePool,
+            id: migration.id,
+            checksum: migration.checksum,
+            sql,
+          })
         }
+        const overrides = services?.(activePool)
         const base = Layer.mergeAll(
           productPostgres({ url: Redacted.make(url), maxConnections: 8 }),
           AuthorizationPolicy.layer,
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
-          hostedRepositoriesTestLayer,
-          Layer.succeed(Controller, unusedController),
-          Layer.succeed(HostedEnvironment, unusedHostedEnvironment),
+          hostedRepositoriesUnavailableLayer,
+          Layer.succeed(Controller, overrides?.controller ?? unusedController),
+          Layer.succeed(HostedEnvironment, overrides?.environment ?? unusedHostedEnvironment),
           Layer.succeed(HostedToolPolicy, testToolPolicy),
         )
         const runnerExecutor = runnerExecutorLayer.pipe(Layer.provide(base))
         const context = yield* Layer.build(
           Layer.mergeAll(
             hostedProductLayer({
-              templateBuildId: "local-authority-live",
-              providerScope: "local-authority-live",
-              provision: () => Effect.void,
+              orb: {
+                templateBuildId: "local-authority-live",
+                providerScope: "local-authority-live",
+              },
               promptAdmissionReadiness: Effect.succeed(true),
             }).pipe(Layer.provide(base)),
             runnerExecutor,
@@ -201,9 +249,9 @@ const isolated = <A, E, R>(
         return yield* use(activePool).pipe(Effect.provide(context))
       } finally {
         const cleanupPool = pool
-        yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
-        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-        yield* Effect.tryPromise(() => admin.end())
+        yield* cleanupPool === undefined ? Effect.void : Effect.orDie(Effect.tryPromise(() => cleanupPool.end()))
+        yield* Effect.orDie(Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`)))
+        yield* Effect.orDie(Effect.tryPromise(() => admin.end()))
       }
     }),
   ).pipe(livePlatform)
@@ -219,7 +267,10 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       const threadAuthority = yield* product.authorizeThread(owner, connection.threadId, "thread:view")
       const context = yield* product.threadExecutionContext(threadAuthority.ownerId, ThreadId.make(connection.threadId))
       expect(context).toMatchObject({
-        repository: { identity: "repository-personal-workspace", branch: "main" },
+        repository: {
+          identity: "repository-personal-workspace",
+          branch: "main",
+        },
         branch: "main",
         executor: { kind: "runner", generation: "1", lifecycle: "pending" },
       })
@@ -231,15 +282,74 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         principal: owner,
         executorUrl: "ws://executor.test/local",
       })
+      const workspace = yield* query(pool, `SELECT workspace_id FROM rika_hosted_threads WHERE id = $1`, [
+        connection.threadId,
+      ])
+      expect(admission.workspaceIdentity).toBe(workspace.rows[0].workspace_id)
       const welcome = yield* authority.hello({
         admissionId: admission.admissionId,
         ticket: admission.ticket,
         processIncarnation: "personal-process",
         ...helloReadiness,
       })
+      const resume = yield* product.pollRunner({
+        principal: owner,
+        checkoutFingerprint: connection.checkoutFingerprint,
+        supervisorId: "10000000-0000-4000-8000-000000000011",
+        activeAssignmentIds: [],
+      })
+      expect(resume).toMatchObject({
+        claimed: true,
+        assignment: {
+          assignmentId: admission.assignmentId,
+          resume: true,
+        },
+      })
+      expect(Number.isFinite(resume.assignment?.leaseExpiresAt)).toBe(true)
+      expect(
+        yield* product.pollRunner({
+          principal: owner,
+          checkoutFingerprint: connection.checkoutFingerprint,
+          supervisorId: "10000000-0000-4000-8000-000000000012",
+          activeAssignmentIds: [],
+        }),
+      ).toEqual({ claimed: false })
+      yield* Effect.tryPromise(() =>
+        pool.query(
+          `UPDATE rika_hosted_runner_registrations SET supervisor_expires_at = clock_timestamp() - interval '1 second'`,
+        ),
+      )
+      expect(
+        yield* product.pollRunner({
+          principal: owner,
+          checkoutFingerprint: connection.checkoutFingerprint,
+          supervisorId: "10000000-0000-4000-8000-000000000012",
+          activeAssignmentIds: [admission.assignmentId],
+        }),
+      ).toEqual({ claimed: true })
+      expect(
+        yield* product.pollRunner({
+          principal: owner,
+          checkoutFingerprint: connection.checkoutFingerprint,
+          supervisorId: "10000000-0000-4000-8000-000000000012",
+          activeAssignmentIds: [],
+        }),
+      ).toMatchObject({
+        claimed: true,
+        assignment: { assignmentId: admission.assignmentId, resume: true },
+      })
       const access = accessFrom(welcome)
       yield* authority.validateAccess(access)
+      expect(yield* authority.workspaceIdentity(access)).toBe(workspace.rows[0].workspace_id)
+      yield* Effect.tryPromise(() =>
+        pool.query(
+          `UPDATE rika_hosted_executor_assignments SET lease_expires_at = clock_timestamp() - interval '1 second'
+           WHERE id = $1`,
+          [admission.assignmentId],
+        ),
+      )
       const reconnected = yield* authority.reconnect(access)
+      expect(reconnected.leaseExpiresAt).toBeGreaterThan(welcome.leaseExpiresAt)
       yield* authority.heartbeat({
         version: 1,
         access: { ...access, leaseEpoch: reconnected.leaseEpoch },
@@ -251,9 +361,7 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         operationKey: "personal-turn",
         prompt: "personal prompt",
       })
-      const workspace = yield* query(pool, `SELECT workspace_id FROM rika_hosted_threads WHERE id = $1`, [
-        connection.threadId,
-      ])
+      if (admitted._tag !== "Admitted") return yield* Effect.die("Runner prompt was cancelled unexpectedly")
       yield* Executor.pipe(
         Effect.flatMap((executor) =>
           executor.admitRun({
@@ -280,6 +388,93 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
     }),
   ),
 )
+
+it.effect.skipIf(!live)("leaves a blank Orb pending and provisions its first capability admission once", () => {
+  let provisionCount = 0
+  return isolated(
+    "orb-provisioning-owner",
+    (pool) =>
+      Effect.gen(function* () {
+        const owner = principal("orb-user", "orb-client", "15000000-0000-4000-8000-000000000001")
+        yield* seedPrincipal(pool, owner)
+        const product = yield* HostedProduct
+        const connection = yield* product.createConnection({
+          principal: owner,
+          owner: personal(owner.userId),
+          executorKind: "orb",
+        })
+        expect(provisionCount).toBe(0)
+        const admitted = yield* product.admitRun({
+          principal: owner,
+          threadId: connection.threadId,
+          operationKey: "orb-turn",
+          prompt: "run in the Orb",
+        })
+        if (admitted._tag !== "Admitted") return yield* Effect.die("Orb prompt was cancelled unexpectedly")
+        const assignment = (yield* query(
+          pool,
+          `SELECT id, workspace_id FROM rika_hosted_executor_assignments WHERE thread_id = $1`,
+          [connection.threadId],
+        )).rows[0]
+        const executor = yield* Executor
+        yield* executor.admitRun({
+          threadId: connection.threadId,
+          turnId: admitted.turnId,
+          workspaceId: assignment.workspace_id,
+        })
+        expect(provisionCount).toBe(1)
+        expect(
+          (yield* query(
+            pool,
+            `SELECT count(*)::int AS count FROM rika_hosted_workspace_capability_admissions
+               WHERE thread_id = $1 AND turn_id = $2`,
+            [connection.threadId, admitted.turnId],
+          )).rows,
+        ).toEqual([{ count: 1 }])
+      }),
+    (pool) => ({
+      environment: availableHostedEnvironment,
+      controller: {
+        ...unusedController,
+        cleanupOrphans: Effect.succeed([]),
+        provision: (assignmentId: string) =>
+          Effect.gen(function* () {
+            provisionCount += 1
+            const rows = yield* Effect.tryPromise({
+              try: () =>
+                pool.query(
+                  `UPDATE rika_hosted_executor_assignments SET
+                 revision = revision + 1, last_lease_epoch = 1, lifecycle = 'active',
+                 provider_instance_id = 'orb-sandbox', executor_instance_id = 'orb-executor',
+                 process_incarnation = 'orb-process', session_digest = 'orb-session-digest',
+                 lease_epoch = 1, lease_expires_at = clock_timestamp() + interval '1 minute',
+                 capability_generation = generation, capability_snapshot = $2::jsonb,
+                 last_active_at = clock_timestamp(), updated_at = clock_timestamp()
+               WHERE id = $1
+               RETURNING thread_id, generation`,
+                  [assignmentId, encodeJson(helloReadiness.workspaceCapabilities)],
+                ),
+              catch: (error) =>
+                ControllerError.make({
+                  kind: "repository",
+                  message: `Could not activate fake Orb assignment: ${String(error)}`,
+                }),
+            })
+            const row = rows.rows[0]
+            return {
+              assignmentId,
+              threadId: row.thread_id,
+              generation: Number(row.generation),
+              templateBuildId: "local-authority-live",
+              sandboxId: "orb-sandbox",
+              state: "running" as const,
+              cursor: emptyCursor,
+            }
+          }),
+      },
+    }),
+  )
+})
 
 it.effect.skipIf(!live)("fences organization access immediately while preserving a personal session", () =>
   isolated("membership", (pool) =>
@@ -323,7 +518,11 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
       for (const operation of [
         authority.validateAccess(organizationAccess),
         authority.reconnect(organizationAccess),
-        authority.heartbeat({ version: 1, access: organizationAccess, cursor: organizationWelcome.cursor }),
+        authority.heartbeat({
+          version: 1,
+          access: organizationAccess,
+          cursor: organizationWelcome.cursor,
+        }),
       ]) {
         expect(["authentication", "fenced"]).toContain(yield* failureKind(operation))
       }
@@ -331,7 +530,10 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
       const personalReconnect = yield* authority.reconnect(personalAccess)
       yield* authority.heartbeat({
         version: 1,
-        access: { ...personalAccess, leaseEpoch: personalReconnect.leaseEpoch },
+        access: {
+          ...personalAccess,
+          leaseEpoch: personalReconnect.leaseEpoch,
+        },
         cursor: personalReconnect.cursor,
       })
     }),

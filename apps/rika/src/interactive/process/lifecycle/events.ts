@@ -4,39 +4,38 @@ import { Clock, Effect, Schema } from "effect"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../../controller/service"
 import * as ThreadSelection from "../../controller/thread-selection"
-import type { InteractiveRuntimeContext } from "../runtime/context"
+import type { InteractiveLoop } from "../runtime/context"
 
-type Runtime = Pick<InteractiveRuntimeContext, "render"> & {
-  readonly loop: Pick<
-    InteractiveRuntimeContext["loop"],
-    | "closed"
-    | "ctrlCMenuVisible"
-    | "model"
-    | "modelPreview"
-    | "requestedThreadId"
-    | "submittedSinceIdle"
-    | "threadView"
-  > & {
-    readonly renderer:
-      | {
-          readonly surface: {
-            readonly showCtrlCMenu: (visible: boolean) => void
-            readonly showToast: (message: string, color?: string) => void
-            readonly update: (model: InteractiveRuntimeContext["loop"]["model"], preserveAnchor?: boolean) => void
-          }
-        }
-      | undefined
-  }
+type EventLoop = Pick<
+  InteractiveLoop,
+  | "closed"
+  | "model"
+  | "renderer"
+  | "submittedSinceIdle"
+  | "threadView"
+  | "modelPreview"
+  | "requestedThreadId"
+> &
+  Partial<Pick<InteractiveLoop, "newThreadSelectionGeneration" | "ctrlCMenuVisible">>
+
+type Runtime = {
+  readonly loop: EventLoop
+  readonly render: (immediate?: boolean) => void
   readonly refreshTerminalTitle: () => void
   readonly requestSelectionResync: (threadId: string) => void
 }
+type Mutable<T> = { -readonly [P in keyof T]: T[P] }
+type ControllerState = Mutable<InteractiveController.State>
+type TerminalMessage = Mutable<Parameters<typeof update>[0]>
 
 export const makeEventRouter = (runtime: Runtime) => {
   const { loop, refreshTerminalTitle, render, requestSelectionResync } = runtime
-  const controllerState = (): InteractiveController.State => {
-    let state: InteractiveController.State = { model: loop.model }
-    if (loop.threadView !== undefined) state = { ...state, view: loop.threadView }
-    if (loop.modelPreview !== undefined) state = { ...state, modelPreview: loop.modelPreview }
+  const controllerState = () => {
+    const state: ControllerState = {
+      model: loop.model,
+    }
+    if (loop.threadView !== undefined) state.view = loop.threadView
+    if (loop.modelPreview !== undefined) state.modelPreview = loop.modelPreview
     return state
   }
   const clearModelPreview = (turnId?: string) => {
@@ -46,7 +45,7 @@ export const makeEventRouter = (runtime: Runtime) => {
     loop.modelPreview = cleared.modelPreview
   }
   const dismissCtrlCMenuWhenBusy = () => {
-    if (!loop.model.busy || !loop.ctrlCMenuVisible) return
+    if (!loop.model.busy || loop.ctrlCMenuVisible !== true) return
     loop.ctrlCMenuVisible = false
     loop.renderer?.surface.showCtrlCMenu(false)
   }
@@ -59,20 +58,29 @@ export const makeEventRouter = (runtime: Runtime) => {
       event._tag === "ThreadRefolding" ||
       event._tag === "ExecutionModelPreviewChanged"
     ) {
+      const acceptsCreatedThread =
+        event._tag === "ThreadViewSnapshot" &&
+        loop.newThreadSelectionGeneration !== undefined &&
+        loop.requestedThreadId !== String(event.snapshot.thread.id) &&
+        loop.model.currentThreadId !== String(event.snapshot.thread.id)
       if (
         event._tag === "ThreadViewSnapshot" &&
         loop.requestedThreadId !== undefined &&
-        loop.requestedThreadId !== String(event.snapshot.thread.id)
+        loop.requestedThreadId !== String(event.snapshot.thread.id) &&
+        !acceptsCreatedThread
       )
         return
       const previousThreadId = loop.model.currentThreadId
       const previousThreadTitle = loop.model.currentThreadTitle
+      const submittedDrafts = acceptsCreatedThread ? loop.model.submittedDrafts : undefined
       const controlled = InteractiveController.update(controllerState(), event)
       loop.model = controlled.state.model
       loop.threadView = controlled.state.view
       loop.modelPreview = controlled.state.modelPreview
+      if (submittedDrafts !== undefined) loop.model = { ...loop.model, submittedDrafts }
       if (event._tag === "ThreadViewSnapshot") {
         loop.requestedThreadId = String(event.snapshot.thread.id)
+        if (loop.model.currentThreadId !== previousThreadId) loop.newThreadSelectionGeneration = undefined
         loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
         if (loop.model.currentThreadId !== previousThreadId || loop.model.currentThreadTitle !== previousThreadTitle)
           refreshTerminalTitle()
@@ -89,54 +97,44 @@ export const makeEventRouter = (runtime: Runtime) => {
       return
     }
     if (event._tag === "SubmissionAdmitted") {
-      if (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId)
-        loop.model =
-          event.submissionId === undefined
-            ? update(loop.model, { _tag: "SubmissionAdmitted", turnId: event.turnId, status: event.status })
-            : update(loop.model, {
-                _tag: "SubmissionAdmitted",
-                turnId: event.turnId,
-                status: event.status,
-                submissionId: event.submissionId,
-              })
+      if (loop.model.currentThreadId === undefined || loop.model.currentThreadId === event.threadId) {
+        const action: TerminalMessage = {
+          _tag: "SubmissionAdmitted",
+          turnId: event.turnId,
+          status: event.status,
+        }
+        if (event.submissionId !== undefined) action.submissionId = event.submissionId
+        loop.model = update(loop.model, action)
+      }
     } else if (event._tag === "SubmissionRejected") {
-      loop.model =
-        event.submissionId === undefined
-          ? update(loop.model, { _tag: "SubmissionRejected", message: event.message })
-          : update(loop.model, {
-              _tag: "SubmissionRejected",
-              message: event.message,
-              submissionId: event.submissionId,
-            })
+      const action: TerminalMessage = {
+        _tag: "SubmissionRejected",
+        message: event.message,
+      }
+      if (event.submissionId !== undefined) action.submissionId = event.submissionId
+      loop.model = update(loop.model, action)
     } else if (event._tag === "ThreadsListed") {
       loop.model = update(loop.model, {
         _tag: "ThreadsReplaced",
         threads: event.threads.map((thread) => {
-          const summary = {
-            id: thread.id,
-            title: thread.title,
-            workspace: thread.workspace,
-            pinned: thread.pinned,
-            archived: thread.archived,
-            status: thread.status,
-            unread: thread.unread,
+          const item = {
+            id: thread.id, title: thread.title, workspace: thread.workspace, pinned: thread.pinned,
+            archived: thread.archived, status: thread.status, unread: thread.unread,
             lastActivityAt: thread.lastActivityAt,
           }
-          return thread.editTotals === undefined ? summary : { ...summary, editTotals: thread.editTotals }
+          return thread.editTotals === undefined ? item : { ...item, editTotals: thread.editTotals }
         }),
       })
     } else if (event._tag === "ExecutionControlled") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       if (event.action === "cancelled") {
         clearModelPreview(event.turnId)
-        if (event.turnId === undefined)
-          loop.model = event.agentResponseArrived === undefined
-            ? update(loop.model, { _tag: "ExecutionCancelled" })
-            : update(loop.model, { _tag: "ExecutionCancelled", agentResponseArrived: event.agentResponseArrived })
-        else
-          loop.model = event.agentResponseArrived === undefined
-            ? update(loop.model, { _tag: "ExecutionCancelled", turnId: event.turnId })
-            : update(loop.model, { _tag: "ExecutionCancelled", turnId: event.turnId, agentResponseArrived: event.agentResponseArrived })
+        const action: TerminalMessage = {
+          _tag: "ExecutionCancelled",
+        }
+        if (event.turnId !== undefined) action.turnId = event.turnId
+        if (event.agentResponseArrived !== undefined) action.agentResponseArrived = event.agentResponseArrived
+        loop.model = update(loop.model, action)
       }
     } else if (event._tag === "ExecutionControlFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
@@ -146,10 +144,14 @@ export const makeEventRouter = (runtime: Runtime) => {
           requestId: event.steeringRequestId,
           message: event.failure.message,
         })
-      if (event.action === "cancel")
-        loop.model = event.turnId === undefined
-          ? update(loop.model, { _tag: "CancelFailed", message: event.failure.message })
-          : update(loop.model, { _tag: "CancelFailed", turnId: event.turnId, message: event.failure.message })
+      if (event.action === "cancel") {
+        const action: TerminalMessage = {
+          _tag: "CancelFailed",
+          message: event.failure.message,
+        }
+        if (event.turnId !== undefined) action.turnId = event.turnId
+        loop.model = update(loop.model, action)
+      }
       if (event.action === "approve" || event.action === "deny")
         loop.renderer?.surface.showToast(
           `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.failure.message}`,
@@ -175,9 +177,12 @@ export const makeEventRouter = (runtime: Runtime) => {
     } else if (event._tag === "ExecutionFailed") {
       if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       clearModelPreview(event.turnId)
-      loop.model = event.turnId === undefined
-        ? update(loop.model, { _tag: "ExecutionFailed", failure: event.failure })
-        : update(loop.model, { _tag: "ExecutionFailed", turnId: event.turnId, failure: event.failure })
+      const action: TerminalMessage = {
+        _tag: "ExecutionFailed",
+        failure: event.failure,
+      }
+      if (event.turnId !== undefined) action.turnId = event.turnId
+      loop.model = update(loop.model, action)
     } else if (event._tag === "QueueFull") {
       if (loop.model.currentThreadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = ThreadSelection.updateQueue(loop.model, event).model
@@ -190,11 +195,12 @@ export const makeEventRouter = (runtime: Runtime) => {
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "GoalChanged") {
       if (loop.model.currentThreadId !== event.threadId) return
-      loop.model = event.goal === undefined
-        ? update(loop.model, { _tag: "GoalChanged" })
-        : update(loop.model, { _tag: "GoalChanged", goal: event.goal })
+      const action: TerminalMessage = { _tag: "GoalChanged" }
+      if (event.goal !== undefined) action.goal = event.goal
+      loop.model = update(loop.model, action)
     } else if (event._tag === "ThreadActivated") {
       loop.requestedThreadId = event.threadId
+      loop.newThreadSelectionGeneration = undefined
       loop.model = update(loop.model, { _tag: "ThreadActivated", threadId: event.threadId, title: event.title })
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "ThreadPreviewLoaded") {

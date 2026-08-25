@@ -6,7 +6,9 @@ import { testing } from "../../src/host/service"
 import { provideLayer } from "../support/layer"
 
 const packageRoot = new URL("../..", import.meta.url).pathname
-const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+const decodeProof = (output: string) =>
+  decodeJson(output.trim().split("\n").findLast((line) => line.startsWith("{")) ?? output)
 
 const bootstrapProof = `
 import { Effect, Redacted, Schema } from "effect"
@@ -288,7 +290,7 @@ describe.sequential("executor host process", () => {
           }),
         )
         yield* Effect.sync(() => {
-          const decoded = decodeJson(stdout)
+          const decoded = decodeProof(stdout)
           expect(decoded).toEqual({
             malformedStatus: 400,
             invalidStatus: 400,
@@ -330,7 +332,7 @@ describe.sequential("executor host process", () => {
             env: { E2B_SANDBOX_ID: "sandbox-1" },
           }),
         )
-        expect(decodeJson(stdout)).toEqual({ credential: "reset-bootstrap", listener: "closed" })
+        expect(decodeProof(stdout)).toEqual({ credential: "reset-bootstrap", listener: "closed" })
       }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
     ),
   )
@@ -347,7 +349,7 @@ describe.sequential("executor host process", () => {
             }),
           )
           yield* Effect.sync(() => {
-            expect(decodeJson(stdout)).toMatchObject({
+            expect(decodeProof(stdout)).toMatchObject({
               status: 202,
               frame: {
                 _tag: "ExecutorHello",

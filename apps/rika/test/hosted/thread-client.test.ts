@@ -2,7 +2,7 @@ import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
 import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import { Sequence, ThreadEventCursor, ThreadId, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
+import { CommandId, Sequence, ThreadEventCursor, ThreadId, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import { Context, Effect, Layer, Schema } from "effect"
@@ -36,6 +36,18 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                 const message = decode(String(value))
                 commands.push(message.command)
                 if (message.command._tag === "CreateThread") {
+                  socket.send(
+                    encode({
+                      protocolVersion: 1,
+                      payload: {
+                        _tag: "CommandAdmitted",
+                        requestId: message.requestId,
+                        commandId: message.command.commandId,
+                        threadId: ThreadId.make("thread-1"),
+                        threadVersion: ThreadVersion.make("1"),
+                      },
+                    }),
+                  )
                   socket.send(
                     encode({
                       protocolVersion: 1,
@@ -302,6 +314,68 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
         }),
       )
       expect(result).toMatchObject({ _tag: "Failure", failure: { kind: "denied", message: "owner denied" } })
+    }),
+  ),
+)
+
+it.effect("rejects a command response with another durable command identity", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve<{ readonly authenticated: true }>({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: (request, upgradeServer) =>
+              upgradeServer.upgrade(request, {
+                data: { authenticated: true },
+                headers: { "sec-websocket-protocol": "rika.thread.v1" },
+              })
+                ? undefined
+                : new Response("upgrade failed", { status: 500 }),
+            websocket: {
+              message: (socket, value) => {
+                const message = decode(String(value))
+                if (message.command._tag !== "CreateThread") return
+                socket.send(
+                  encode({
+                    protocolVersion: 1,
+                    payload: {
+                      _tag: "CommandAccepted",
+                      requestId: message.requestId,
+                      commandId: CommandId.make("another-command"),
+                      threadId: ThreadId.make("thread-1"),
+                      threadVersion: ThreadVersion.make("1"),
+                      cursor: ThreadEventCursor.make("0"),
+                      result: { _tag: "ThreadCreated", threadId: ThreadId.make("thread-1") },
+                    },
+                  }),
+                )
+              },
+            },
+          }),
+        ),
+        (runningServer) => Effect.tryPromise(() => runningServer.stop(true)),
+      )
+      const context = yield* Layer.build(layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)))
+      const threads = Context.get(context, ThreadClient)
+      const result = yield* Effect.result(
+        threads.create({
+          ticket: {
+            ticket: "single-use-ticket",
+            expiresAt: Timestamp.make("2026-08-21T07:00:00.000Z"),
+            websocketUrl: `ws://127.0.0.1:${server.port}`,
+            protocol: "rika.thread.v1",
+          },
+          commandId: "create-1",
+          owner: { kind: "personal" },
+          executorKind: "orb",
+        }),
+      )
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { kind: "protocol", message: expect.stringContaining("command identity") },
+      })
     }),
   ),
 )

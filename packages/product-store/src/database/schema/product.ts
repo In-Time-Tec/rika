@@ -573,10 +573,6 @@ export const rikaHostedExecutorOperations = pgTable(
     deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
     replayPolicy: text("replay_policy").default("never").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }),
-    resolutionState: text("resolution_state"),
-    resolutionIdempotencyKey: text("resolution_idempotency_key"),
-    resolution: jsonb(),
-    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   },
   (table) => [
     primaryKey({
@@ -592,10 +588,6 @@ export const rikaHostedExecutorOperations = pgTable(
       .using("btree", table.state.asc().nullsLast(), table.deadlineAt.asc().nullsLast())
       .where(sql`(state = 'dispatched'::rika_hosted_runner_operation_state)`),
     unique("rika_hosted_executor_operations_attempt").on(table.assignmentId, table.operationKey, table.attempt),
-    check(
-      "rika_hosted_executor_operation_resolution",
-      sql`(((resolution_state IS NULL) AND (resolution_idempotency_key IS NULL) AND (resolution IS NULL) AND (resolved_at IS NULL)) OR ((state = 'unknown'::rika_hosted_runner_operation_state) AND (resolution_state IS NOT NULL) AND (((resolution_state = 'pending'::text) AND (resolution_idempotency_key IS NULL) AND (resolution IS NULL) AND (resolved_at IS NULL)) OR ((resolution_state <> 'pending'::text) AND (resolution_idempotency_key IS NOT NULL) AND (resolution IS NOT NULL) AND (resolved_at IS NOT NULL)))))`,
-    ),
     check("rika_hosted_executor_operations_attempt_check", sql`(attempt >= 0)`),
     check(
       "rika_hosted_executor_operations_check",
@@ -612,10 +604,6 @@ export const rikaHostedExecutorOperations = pgTable(
     check(
       "rika_hosted_executor_operations_replay_policy_check",
       sql`(replay_policy = ANY (ARRAY['pure'::text, 'provider-idempotent'::text, 'never'::text]))`,
-    ),
-    check(
-      "rika_hosted_executor_operations_resolution_state_check",
-      sql`(resolution_state = ANY (ARRAY['pending'::text, 'retrying'::text, 'accepted'::text, 'aborted'::text]))`,
     ),
     check("rika_hosted_executor_operations_root_run_id_check", sql`(length(root_run_id) > 0)`),
     check("rika_hosted_executor_operations_run_id_check", sql`(length(run_id) > 0)`),
@@ -1138,6 +1126,8 @@ export const rikaHostedRunnerRegistrations = pgTable(
     kernelProfile: jsonb("kernel_profile").notNull(),
     capabilities: jsonb().notNull(),
     remoteThreadCreationAllowed: boolean("remote_thread_creation_allowed").default(false).notNull(),
+    supervisorId: text("supervisor_id"),
+    supervisorExpiresAt: timestamp("supervisor_expires_at", { withTimezone: true }),
     registeredAt: timestamp("registered_at", { withTimezone: true })
       .default(sql`transaction_timestamp()`)
       .notNull(),
@@ -1168,6 +1158,10 @@ export const rikaHostedRunnerRegistrations = pgTable(
       sql`(jsonb_typeof(kernel_profile) = 'object'::text)`,
     ),
     check("rika_hosted_runner_registrations_repository_check", sql`(jsonb_typeof(repository) = 'object'::text)`),
+    check(
+      "rika_hosted_runner_supervisor_pair",
+      sql`((supervisor_id IS NULL) = (supervisor_expires_at IS NULL))`,
+    ),
   ],
 )
 
@@ -1432,6 +1426,8 @@ export const rikaHostedThreadProtocolCommands = pgTable(
     eventCursor: bigint("event_cursor", { mode: "number" }),
     admittedAt: timestamp("admitted_at", { withTimezone: true }).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
   },
   (table) => [
     primaryKey({ columns: [table.threadId, table.commandId], name: "rika_hosted_thread_protocol_commands_pkey" }),
@@ -1453,6 +1449,14 @@ export const rikaHostedThreadProtocolCommands = pgTable(
       sql`(state = ANY (ARRAY['admitted'::text, 'completed'::text]))`,
     ),
     check("rika_hosted_thread_protocol_commands_thread_version_check", sql`(thread_version > 0)`),
+    check(
+      "rika_hosted_thread_protocol_commands_claim_pair",
+      sql`((claim_token IS NULL) = (claim_expires_at IS NULL))`,
+    ),
+    check("rika_hosted_thread_protocol_commands_claim_state", sql`((state = 'admitted') OR (claim_token IS NULL))`),
+    index("rika_hosted_thread_protocol_commands_claims")
+      .on(table.claimExpiresAt)
+      .where(sql`(state = 'admitted')`),
   ],
 )
 
@@ -1475,6 +1479,32 @@ export const rikaHostedThreadProtocolCursors = pgTable(
       name: "rika_hosted_thread_protocol_cursors_thread_id_owner_id_fkey",
     }).onDelete("cascade"),
     check("rika_hosted_thread_protocol_cursors_cursor_check", sql`(cursor >= 0)`),
+  ],
+)
+
+export const rikaHostedPromptCancellations = pgTable(
+  "rika_hosted_prompt_cancellations",
+  {
+    ownerId: text("owner_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    targetCommandId: text("target_command_id").notNull(),
+    cancelCommandId: text("cancel_command_id").notNull(),
+    actor: jsonb().notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.threadId, table.targetCommandId], name: "rika_hosted_prompt_cancellations_pkey" }),
+    unique("rika_hosted_prompt_cancellations_thread_id_cancel_command_id_key").on(
+      table.threadId,
+      table.cancelCommandId,
+    ),
+    foreignKey({
+      columns: [table.threadId, table.ownerId],
+      foreignColumns: [rikaHostedThreads.id, rikaHostedThreads.ownerId],
+      name: "rika_hosted_prompt_cancellations_thread_id_owner_id_fkey",
+    }).onDelete("cascade"),
+    check("rika_hosted_prompt_cancellations_actor_check", sql`(jsonb_typeof(actor) = 'object')`),
+    check("rika_hosted_prompt_cancellations_owner_check", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
   ],
 )
 
@@ -1690,6 +1720,9 @@ export const rikaHostedToolAuditRecords = pgTable(
         table.sequence.desc().nullsFirst(),
       )
       .where(sql`(authorization_id IS NOT NULL)`),
+    uniqueIndex("rika_hosted_tool_audit_decision_identity")
+      .on(table.auditGroupId)
+      .where(sql`(phase = 'decision')`),
     index("rika_hosted_tool_audit_owner_timeline").using(
       "btree",
       table.ownerId.asc().nullsLast(),
@@ -1882,6 +1915,7 @@ export const rikaHostedWorkspacePreparations = pgTable(
     failure: jsonb(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.assignmentId, table.generation], name: "rika_hosted_workspace_preparations_pkey" }),
@@ -1905,6 +1939,9 @@ export const rikaHostedWorkspacePreparations = pgTable(
     ),
     check("rika_hosted_workspace_preparations_generation_check", sql`(generation >= 1)`),
     check("rika_hosted_workspace_preparations_lease_epoch_check", sql`(lease_epoch >= 1)`),
+    index("rika_hosted_workspace_preparations_overdue")
+      .on(table.deadlineAt)
+      .where(sql`(state = 'preparing')`),
   ],
 )
 
@@ -2109,13 +2146,21 @@ export const rikaTranscriptUnits = pgTable(
   ],
 )
 
-export const rikaTurnAdmissionOutbox = pgTable("rika_turn_admission_outbox", {
-  turnId: text("turn_id")
-    .primaryKey()
-    .references(() => rikaTurns.id, { onDelete: "cascade" }),
-  startInputJson: text("start_input_json").notNull(),
-  preparedAt: doublePrecision("prepared_at").notNull(),
-})
+export const rikaTurnAdmissionOutbox = pgTable(
+  "rika_turn_admission_outbox",
+  {
+    turnId: text("turn_id")
+      .primaryKey()
+      .references(() => rikaTurns.id, { onDelete: "cascade" }),
+    startInputJson: text("start_input_json").notNull(),
+    preparedTurnJson: text("prepared_turn_json"),
+    admissionLinkJson: text("admission_link_json"),
+    preparedAt: doublePrecision("prepared_at").notNull(),
+    admittedAt: doublePrecision("admitted_at"),
+    activationRequestedAt: doublePrecision("activation_requested_at"),
+  },
+  (table) => [index("rika_turn_admission_outbox_activation").on(table.activationRequestedAt, table.preparedAt, table.turnId)],
+)
 
 export const rikaTurnSteeringOutbox = pgTable(
   "rika_turn_steering_outbox",

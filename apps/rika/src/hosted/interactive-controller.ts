@@ -1,7 +1,7 @@
 import type * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
+import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http, ProfileStore } from "./contract"
@@ -12,24 +12,35 @@ import { RunnerAdmission } from "../runner/contract"
 import type { InteractiveTuiOptions } from "../interactive/process/lifecycle/loop"
 import { interactiveTui } from "../interactive/process/lifecycle/loop"
 
-const operationFailure = (error: Error | string) =>
-  OperationUnavailable.make({
+const FailureMessage = Schema.Struct({ message: Schema.String })
+type Mutable<T> = { -readonly [P in keyof T]: T[P] }
+type ThreadCreateInput = Mutable<Parameters<ThreadClient["Service"]["create"]>[0]>
+const operationFailure = <E>(error: E) => {
+  const parsed = Schema.decodeUnknownOption(FailureMessage)(error)
+  return OperationUnavailable.make({
     operation: "Interactive",
-    message: error instanceof Error ? error.message : String(error),
+    message: parsed._tag === "Some" ? parsed.value.message : String(error),
   })
+}
 
 const startRunnerWhenPlaced = <Prepared, E, R, E2, R2>(
   connection: InteractiveConnection.Connection,
   prepare: Effect.Effect<Prepared, E, R>,
-  startRunner: (prepared: Prepared) => Effect.Effect<never, E2, R2>,
+  startRunner: (prepared: Prepared, ready: Deferred.Deferred<void>) => Effect.Effect<never, E2, R2>,
+  ready = Deferred.makeUnsafe<void>(),
 ) =>
   Stream.concat(Stream.make(connection.initialState), connection.stateChanges).pipe(
     Stream.filter((state) => state.target === "runner"),
     Stream.runHead,
     Effect.flatMap((placement) =>
-      placement._tag === "Some" ? prepare.pipe(Effect.flatMap((prepared) => startRunner(prepared))) : Effect.never,
+      placement._tag === "Some"
+        ? prepare.pipe(Effect.flatMap((prepared) => startRunner(prepared, ready)))
+        : Effect.never,
     ),
   )
+
+const runnerConnectionState = (state: InteractiveConnection.State, ready: boolean): InteractiveConnection.State =>
+  state.target === "runner" && !ready ? { ...state, connectivity: "connecting" } : state
 
 const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right: Effect.Effect<A2, E2, R2>) =>
   Effect.scoped(
@@ -43,81 +54,49 @@ const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right
     }),
   )
 
-interface DeferredSession {
-  readonly session: InteractiveSession.InteractiveSession
-  readonly attach: (session: InteractiveSession.InteractiveSession) => void
-}
-
-const HostedInteractiveSessionFactory = Context.Reference<typeof HostedInteractiveSession.makeHostedInteractiveSession>(
-  "@rika/cli/hosted/interactive-controller/HostedInteractiveSessionFactory",
-  {
-    defaultValue: () => HostedInteractiveSession.makeHostedInteractiveSession,
-  },
-)
-
-export const makeDeferredSession = (
-  ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>,
-): DeferredSession => {
+export const makeDeferredSession = (ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>) => {
   let attached: InteractiveSession.InteractiveSession | undefined
   const unavailable = () => Effect.fail(operationFailure("Interactive session is still initializing"))
+  const deferredEffect = (select: (session: InteractiveSession.InteractiveSession) => Effect.Effect<void, OperationUnavailable>) =>
+    Deferred.await(ready).pipe(Effect.flatMap(select))
   const session: InteractiveSession.InteractiveSession = {
-    events: (dispatch) => Deferred.await(ready).pipe(Effect.flatMap((real) => real.events(dispatch))),
+    events: (dispatch) => Deferred.await(ready).pipe(Effect.flatMap((value) => value.events(dispatch))),
     currentView: () => attached?.currentView(),
     projectionCheckpoint: (turnId) => attached?.projectionCheckpoint(turnId),
-    submit: (...args) => (attached === undefined ? unavailable() : attached.submit(...args)),
-    shell: (...args) => (attached === undefined ? unavailable() : attached.shell(...args)),
-    editQueued: (...args) => (attached === undefined ? unavailable() : attached.editQueued(...args)),
-    dequeue: (...args) => (attached === undefined ? unavailable() : attached.dequeue(...args)),
-    steerQueued: (...args) => (attached === undefined ? unavailable() : attached.steerQueued(...args)),
-    steer: (...args) => (attached === undefined ? unavailable() : attached.steer(...args)),
-    approveAuthorization: (...args) =>
-      attached === undefined ? unavailable() : attached.approveAuthorization(...args),
-    denyAuthorization: (...args) => attached === undefined ? unavailable() : attached.denyAuthorization(...args),
-    interruptAndSend: (...args) => attached === undefined ? unavailable() : attached.interruptAndSend(...args),
-    get cancel() {
-      return attached?.cancel ?? unavailable()
-    },
-    get quit() {
-      return attached?.quit ?? unavailable()
-    },
-    get newThread() {
-      return attached?.newThread ?? unavailable()
-    },
-    get newOrbThread() {
-      return attached?.newOrbThread ?? unavailable()
-    },
-    get pauseOrb() {
-      return attached?.pauseOrb ?? unavailable()
-    },
-    get resumeOrb() {
-      return attached?.resumeOrb ?? unavailable()
-    },
-    get enableRemoteThreadCreation() {
-      return attached?.enableRemoteThreadCreation ?? unavailable()
-    },
-    get disableRemoteThreadCreation() {
-      return attached?.disableRemoteThreadCreation ?? unavailable()
-    },
-    get archiveThread() {
-      return attached?.archiveThread ?? unavailable()
-    },
-    get archiveAndNewThread() {
-      return attached?.archiveAndNewThread ?? unavailable()
-    },
-    selectThread: (...args) => (attached === undefined ? unavailable() : attached.selectThread(...args)),
-    readQueue: (...args) => (attached === undefined ? unavailable() : attached.readQueue(...args)),
-    previewThread: (...args) => (attached === undefined ? unavailable() : attached.previewThread(...args)),
-    get reopenThread() {
-      return attached?.reopenThread ?? unavailable()
-    },
+    submit: (...args) => deferredEffect((value) => value.submit(...args)),
+    shell: (...args) => deferredEffect((value) => value.shell(...args)),
+    editQueued: (...args) => deferredEffect((value) => value.editQueued(...args)),
+    dequeue: (...args) => deferredEffect((value) => value.dequeue(...args)),
+    steerQueued: (...args) => deferredEffect((value) => value.steerQueued(...args)),
+    steer: (...args) => deferredEffect((value) => value.steer(...args)),
+    approveAuthorization: (...args) => deferredEffect((value) => value.approveAuthorization(...args)),
+    denyAuthorization: (...args) => deferredEffect((value) => value.denyAuthorization(...args)),
+    interruptAndSend: (...args) => deferredEffect((value) => value.interruptAndSend(...args)),
+    cancel: (...args) => deferredEffect((value) => value.cancel(...args)),
+    quit: deferredEffect((value) => value.quit),
+    newThread: deferredEffect((value) => value.newThread),
+    newOrbThread: deferredEffect((value) => value.newOrbThread ?? unavailable()),
+    pauseOrb: deferredEffect((value) => value.pauseOrb ?? unavailable()),
+    resumeOrb: deferredEffect((value) => value.resumeOrb ?? unavailable()),
+    enableRemoteThreadCreation: deferredEffect((value) => value.enableRemoteThreadCreation ?? unavailable()),
+    disableRemoteThreadCreation: deferredEffect((value) => value.disableRemoteThreadCreation ?? unavailable()),
+    archiveThread: deferredEffect((value) => value.archiveThread),
+    archiveAndNewThread: deferredEffect((value) => value.archiveAndNewThread),
+    selectThread: (...args) => deferredEffect((value) => value.selectThread(...args)),
+    readQueue: (...args) => deferredEffect((value) => value.readQueue(...args)),
+    previewThread: (...args) => deferredEffect((value) => value.previewThread(...args)),
+    reopenThread: deferredEffect((value) => value.reopenThread),
   }
-  return { session, attach: (real) => (attached = real) }
+  return { session, attach: (real: InteractiveSession.InteractiveSession) => (attached = real) }
 }
 
-const run = Effect.fn("HostedInteractiveController.run")(function* <E extends Error, R extends object>(
+const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
-    readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
+    readonly startRunner: (
+      prepared: PreparedRunnerCheckout,
+      ready: Deferred.Deferred<void>,
+    ) => Effect.Effect<never, E, R>
   },
 ) {
   const profile = yield* localLoginProfile()
@@ -159,27 +138,24 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E extends Er
     const threads = yield* ThreadClient
     const crypto = yield* Crypto.Crypto
     const credentials = yield* CredentialStore
-    const makeSession = yield* HostedInteractiveSessionFactory
     const createThread = (executorKind: "runner" | "orb"): Effect.Effect<string, HostedError> =>
       Effect.gen(function* () {
+        const prepared = executorKind === "runner" ? yield* prepare : undefined
         const commandId = yield* crypto.randomUUIDv4
         const ticket = yield* authenticated(profile, (session) => http.issueThreadTicket(profile.origin, session))
-        const request = {
+        const createInput: ThreadCreateInput = {
           ticket,
           commandId,
           owner: profile.owner,
           executorKind,
         }
-        const requestWithProject = profile.project === undefined ? request : { ...request, project: profile.project }
-        if (executorKind === "orb") return yield* threads.create(requestWithProject)
-        const prepared = yield* prepare
-        return yield* threads.create({
-          ...requestWithProject,
-          runnerTarget: {
+        if (profile.project !== undefined) createInput.project = profile.project
+        if (executorKind === "runner" && prepared !== undefined)
+          createInput.runnerTarget = {
             deviceId: prepared.checkout.registration.deviceId,
             checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
-          },
-        })
+          }
+        return yield* threads.create(createInput)
       }).pipe(
         Effect.provideService(Http, http),
         Effect.provideService(CredentialStore, credentials),
@@ -210,20 +186,41 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E extends Er
         ),
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))
-    const hosted = yield* makeSession({
+    const hosted = yield* HostedInteractiveSession.makeHostedInteractiveSession({
       profile,
       threadId,
       createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
       setRemoteThreadCreation,
     })
+    const runnerReady = yield* Deferred.make<void>()
+    let runnerConnected = false
+    let latestHostedState = hosted.connection.initialState
     yield* hosted.connection.stateChanges.pipe(
-      Stream.runForEach((state) => SubscriptionRef.set(connectionState, state)),
+      Stream.runForEach((state) =>
+        Effect.sync(() => {
+          latestHostedState = state
+        }).pipe(Effect.andThen(SubscriptionRef.set(connectionState, runnerConnectionState(state, runnerConnected)))),
+      ),
+      Effect.forkScoped,
+    )
+    yield* Deferred.await(runnerReady).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          runnerConnected = true
+        }),
+      ),
+      Effect.andThen(
+        Effect.suspend(() => SubscriptionRef.set(connectionState, runnerConnectionState(latestHostedState, true))),
+      ),
       Effect.forkScoped,
     )
     deferred.attach(hosted.session)
     yield* Deferred.succeed(sessionReady, hosted.session)
-    return yield* startRunnerWhenPlaced(hosted.connection, prepare, (prepared) =>
-      options.startRunner(prepared).pipe(Effect.mapError(operationFailure)),
+    return yield* startRunnerWhenPlaced(
+      hosted.connection,
+      prepare,
+      (prepared, ready) => options.startRunner(prepared, ready).pipe(Effect.mapError(operationFailure)),
+      runnerReady,
     )
   }).pipe(Effect.mapError(operationFailure))
   yield* raceStructured(
@@ -238,13 +235,16 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E extends Er
   )
 })
 
-export const runHostedInteractive = Effect.fn("HostedInteractiveController.entry")(function* <E extends Error, R extends object>(
+export const runHostedInteractive = Effect.fn("HostedInteractiveController.entry")(function* <E, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
-    readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
+    readonly startRunner: (
+      prepared: PreparedRunnerCheckout,
+      ready: Deferred.Deferred<void>,
+    ) => Effect.Effect<never, E, R>
   },
 ) {
   return yield* run(input, options).pipe(Effect.mapError(operationFailure))
 })
 
-export const hostedInteractiveControllerInternals = { raceStructured, startRunnerWhenPlaced }
+export const hostedInteractiveControllerInternals = { raceStructured, runnerConnectionState, startRunnerWhenPlaced }

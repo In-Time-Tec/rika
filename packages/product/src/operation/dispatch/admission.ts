@@ -40,6 +40,30 @@ export const makeProductOperationAdmission = Effect.fn("ProductOperation.makeAdm
         rawBackend.startTurn(backendInput),
         ExecutionGateway.StartTurnFailure.make({ message: "Runtime shutdown has closed execution admission" }),
       ),
+    prepareTurn: (backendInput) =>
+      withExecutionAdmission(
+        rawBackend.prepareTurn(backendInput),
+        ExecutionGateway.PrepareTurnFailure.make({
+          kind: "unavailable",
+          message: "Runtime shutdown has closed execution admission",
+        }),
+      ),
+    admitTurn: (prepared) =>
+      withExecutionAdmission(
+        rawBackend.admitTurn(prepared),
+        ExecutionGateway.AdmitTurnFailure.make({
+          kind: "unavailable",
+          message: "Runtime shutdown has closed execution admission",
+        }),
+      ),
+    activateTurn: (prepared, link) =>
+      withExecutionAdmission(
+        rawBackend.activateTurn(prepared, link),
+        ExecutionGateway.ActivateTurnFailure.make({
+          kind: "unavailable",
+          message: "Runtime shutdown has closed execution admission",
+        }),
+      ),
     cancelTurn: (link, reason) =>
       withExecutionAdmission(
         rawBackend.cancelTurn(link, reason),

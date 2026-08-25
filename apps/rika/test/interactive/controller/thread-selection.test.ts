@@ -239,6 +239,149 @@ describe("interactive ThreadView controller", () => {
     expect(removed.state.model.busy).toBe(false)
   })
 
+  it("restores a draft when a cancelled snapshot contains only the user prompt", () => {
+    const running = {
+      kind: "agent" as const,
+      id: Turn.TurnId.make("cancelled-turn"),
+      threadId: Thread.ThreadId.make("thread"),
+      prompt: "cancel this",
+      status: "running" as const,
+      author: { _tag: "Human" as const },
+      lineage: { _tag: "Original" as const },
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const userKey = "cancelled-turn:user"
+    const units = [
+      {
+        key: userKey,
+        turnId: running.id,
+        order: TranscriptOrdering.unitOrder(userKey, -1),
+        revision: 0,
+        content: { _tag: "Entry" as const, role: "user" as const, text: running.prompt },
+      },
+    ]
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        turns: [
+          {
+            turn: running,
+            projectionRevision: 0,
+            usage: ExecutionProjection.emptyUsageState(),
+            units,
+          },
+        ],
+      },
+    }).state
+    const cancelled = InteractiveController.update(
+      {
+        ...loaded,
+        model: {
+          ...loaded.model,
+          submittedDrafts: [{ input: running.prompt, attachments: [], cursor: 6, turnId: running.id }],
+        },
+      },
+      {
+        _tag: "ThreadViewSnapshot",
+        snapshot: {
+          ...snapshot(Thread.ThreadId.make("thread"), 5),
+          turns: [
+            {
+              turn: { ...running, status: "cancelled" },
+              projectionRevision: 1,
+              usage: ExecutionProjection.emptyUsageState(),
+              units,
+            },
+          ],
+        },
+      },
+    ).state.model
+
+    expect(cancelled).toMatchObject({ input: "cancel this", cursor: 6, busy: false })
+    expect(cancelled.submittedDrafts).toEqual([])
+  })
+
+  it("retains committed output and does not restore the draft when a patch cancels the Turn", () => {
+    const running = {
+      kind: "agent" as const,
+      id: Turn.TurnId.make("responded-turn"),
+      threadId: Thread.ThreadId.make("thread"),
+      prompt: "start work",
+      status: "running" as const,
+      author: { _tag: "Human" as const },
+      lineage: { _tag: "Original" as const },
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const userKey = "responded-turn:user"
+    const assistantKey = "responded-turn:assistant"
+    const loaded = InteractiveController.update(state(), {
+      _tag: "ThreadViewSnapshot",
+      snapshot: {
+        ...snapshot(),
+        turns: [
+          {
+            turn: running,
+            projectionRevision: 1,
+            usage: ExecutionProjection.emptyUsageState(),
+            units: [
+              {
+                key: userKey,
+                turnId: running.id,
+                order: TranscriptOrdering.unitOrder(userKey, -1),
+                revision: 0,
+                content: { _tag: "Entry", role: "user", text: running.prompt },
+              },
+              {
+                key: assistantKey,
+                turnId: running.id,
+                order: TranscriptOrdering.unitOrder(assistantKey, 0),
+                revision: 1,
+                content: { _tag: "Entry", role: "assistant", text: "committed answer" },
+              },
+            ],
+          },
+        ],
+      },
+    }).state
+    const cancelled = InteractiveController.update(
+      {
+        ...loaded,
+        model: {
+          ...loaded.model,
+          submittedDrafts: [{ input: running.prompt, attachments: [], cursor: 4, turnId: running.id }],
+        },
+      },
+      {
+        _tag: "ThreadViewPatch",
+        patch: patch({
+          turnChanges: [
+            {
+              _tag: "UpsertTurn",
+              turn: { ...running, status: "cancelled" },
+              projectionRevision: 2,
+              usage: ExecutionProjection.emptyUsageState(),
+              pendingSteering: [],
+              settledSteering: [],
+            },
+          ],
+        }),
+      },
+    ).state.model
+
+    expect(cancelled.entries).toContainEqual({
+      _tag: "Entry",
+      role: "assistant",
+      text: "committed answer",
+      turnId: running.id,
+    })
+    expect(cancelled.input).toBe("")
+    expect(cancelled.submittedDrafts).toEqual([])
+    expect(cancelled.busy).toBe(false)
+  })
+
   it("reports a running cell as running work rather than leaving the line at Waiting", () => {
     // A cell is how a turn does work now. Counting only the tool call it replaced left the activity
     // line saying "Waiting" for the whole of a long cell, with nothing telling the reader it is live.
@@ -448,19 +591,22 @@ describe("interactive ThreadView controller", () => {
     expect(echo(admitted)).toBe(1)
     expect(admitted.busy).toBe(true)
 
-    const headerOnly = InteractiveController.update({ ...loaded.state, model: admitted }, {
-      _tag: "ThreadViewPatch",
-      patch: patch({
-        header: {
-          thread: { ...snapshot().thread, title: "Renamed" },
-          source: { projectionVersion: 1 },
-          pending: [],
-          hasOlder: false,
-          hasNewer: false,
-          usage: snapshot().usage,
-        },
-      }),
-    })
+    const headerOnly = InteractiveController.update(
+      { ...loaded.state, model: admitted },
+      {
+        _tag: "ThreadViewPatch",
+        patch: patch({
+          header: {
+            thread: { ...snapshot().thread, title: "Renamed" },
+            source: { projectionVersion: 1 },
+            pending: [],
+            hasOlder: false,
+            hasNewer: false,
+            usage: snapshot().usage,
+          },
+        }),
+      },
+    )
     expect(headerOnly.resync).toBeUndefined()
     expect(echo(headerOnly.state.model)).toBe(1)
 

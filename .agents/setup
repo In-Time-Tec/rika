@@ -2,14 +2,46 @@
 set -euo pipefail
 
 readonly bun_version="1.4.0"
+readonly cloudflared_version="2026.8.2"
 export BUN_INSTALL="${BUN_INSTALL:-$HOME/.local}"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
 echo "Preparing the Rika orb"
 
-if ! command -v curl >/dev/null || ! command -v unzip >/dev/null; then
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates caddy curl dbus-x11 gnome-keyring libsecret-1-0 unzip
+
+if ! command -v docker >/dev/null; then
+  sudo install -m 0755 -d /etc/apt/keyrings
+  sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
+    sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
   sudo apt-get update
-  sudo apt-get install -y curl unzip
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+
+if ! command -v cloudflared >/dev/null || [[ "$(cloudflared --version 2>&1)" != *"$cloudflared_version"* ]]; then
+  case "$(dpkg --print-architecture)" in
+    amd64)
+      readonly cloudflared_asset="cloudflared-linux-amd64"
+      readonly cloudflared_sha256="fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2"
+      ;;
+    arm64)
+      readonly cloudflared_asset="cloudflared-linux-arm64"
+      readonly cloudflared_sha256="7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790"
+      ;;
+    *)
+      echo "Unsupported cloudflared architecture: $(dpkg --print-architecture)" >&2
+      exit 1
+      ;;
+  esac
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+    "https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version/$cloudflared_asset" \
+    -o /tmp/cloudflared
+  echo "$cloudflared_sha256  /tmp/cloudflared" | sha256sum -c -
+  sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+  rm -f /tmp/cloudflared
 fi
 
 if ! command -v bun >/dev/null || [[ "$(bun --version)" != "$bun_version" ]]; then
@@ -21,5 +53,16 @@ echo "Installing frozen workspace dependencies"
 CI=1 bun install --frozen-lockfile
 
 find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
+
+profile_marker="# Rika headless Linux credential service"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >>"$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ "\${OSTYPE:-}" == linux* && -z "\${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=$HOME/.cache/rika/secret-service/bus"
+fi
+EOF
+fi
 
 echo "Rika orb setup complete"

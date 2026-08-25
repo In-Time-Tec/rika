@@ -90,9 +90,7 @@ test(
           expect(
             yield* fileSystem.readFileString(path.join(actual, "narrow-runner-placement.frame.txt")),
           ).not.toContain("Runner")
-          expect(
-            yield* fileSystem.readFileString(path.join(actual, "narrow-orb-placement.frame.txt")),
-          ).toContain("Orb")
+          expect(yield* fileSystem.readFileString(path.join(actual, "narrow-orb-placement.frame.txt"))).toContain("Orb")
           expect(scenarios().map(([name]) => name)).not.toContain("semantic-search")
           expect(scenarios().map(([name]) => name)).not.toContain("ast-grep-outline")
         }).pipe(Effect.provide(services))

@@ -167,7 +167,9 @@ describe("transcript renderers", () => {
 
   it.effect("renders a 4000-chunk unbroken stream without quadratic wrapping", () =>
     Effect.gen(function* () {
-      const source = Array.from({ length: 4_000 }, (_, index) => `LONG_CHUNK_${String(index).padStart(4, "0")};`).join("")
+      const source = Array.from({ length: 4_000 }, (_, index) => `LONG_CHUNK_${String(index).padStart(4, "0")};`).join(
+        "",
+      )
       const startedAt = yield* Clock.currentTimeMillis
       const rendered = renderMarkdownStyled(source, 116)
       const elapsed = (yield* Clock.currentTimeMillis) - startedAt

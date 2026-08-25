@@ -1,11 +1,11 @@
 import { Service } from "@rika/product/product-operation-service"
 import { productLayer } from "@rika/product/product-operation-service"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
+import * as ThreadRepository from "@rika/product-store/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
+import * as TranscriptRepository from "@rika/product-store/transcript-repository"
 import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
-import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
+import * as TurnRepository from "@rika/product-store/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
@@ -18,6 +18,7 @@ import { executionSessionLifecycleLayerTest } from "../turn/postgres/repository.
 import { provideLayer } from "../turn/postgres/repository-layer.harness"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),

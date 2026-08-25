@@ -4,13 +4,14 @@ import { identityMigrations, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
-import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
+import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
+import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted-execution-reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -51,7 +52,12 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
           fileSystem.readFileString(migration.url.pathname),
         )
-        yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+        yield* runMigration({
+          pool,
+          id: migration.id,
+          checksum: migration.checksum,
+          sql,
+        })
       }
       const route = yield* Schema.encodeEffect(JsonRoute)(ExecutionRoute.testExecutionRoute())
       const link = yield* Schema.encodeEffect(JsonLink)({
@@ -83,7 +89,11 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       const running: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
         revision: 0,
-        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "cursor-running", state: "{}" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "cursor-running",
+          state: "{}",
+        },
         units: [
           {
             key: unitKey,
@@ -100,7 +110,11 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         _tag: "ProjectionPatch",
         baseRevision: 0,
         revision: 1,
-        checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "cursor-completed", state: "{}" },
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "cursor-completed",
+          state: "{}",
+        },
         upsert: [
           {
             key: unitKey,
@@ -117,7 +131,13 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       const gatewayBase = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
       const build = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
         Layer.buildWithScope(
-          hostedProjectionWorkerLayer({ concurrency: 2, pollIntervalMillis: 10 }).pipe(
+          Layer.merge(
+            hostedProjectionWorkerLayer({
+              concurrency: 2,
+              pollIntervalMillis: 10,
+            }),
+            hostedExecutionReconcilerLayer({ pollIntervalMillis: 10 }),
+          ).pipe(
             Layer.provide(ProductRepositories.projectionLayer),
             Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })),
             Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -153,7 +173,11 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
             cursors.push(input?.checkpoint?.cursor)
             return Stream.succeed(completed)
           },
-          inspectTurn: () => Effect.succeed({ status: "completed", cursor: "cursor-completed" }),
+          inspectTurn: () =>
+            Effect.succeed({
+              status: "completed",
+              cursor: "cursor-completed",
+            }),
         }),
         secondScope,
       )

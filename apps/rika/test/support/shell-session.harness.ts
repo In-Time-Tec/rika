@@ -1,8 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
-import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
-import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
+import * as ThreadRepository from "@rika/product-store/thread-repository"
+import * as TranscriptRepository from "@rika/product-store/transcript-repository"
+import * as TurnRepository from "@rika/product-store/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -44,6 +44,7 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   let nextTurn = 0
   const executionReads: Array<"inspect"> = []
   const backend = ExecutionGateway.Service.of({
+    ...ExecutionGateway.makeTest(),
     startTurn: () => Effect.die("unused"),
     cancelTurn: () => Effect.die("unused"),
     steerTurn: () => Effect.die("unused"),

@@ -1,3 +1,5 @@
+import { and, asc, eq, inArray, ne, notExists, or, sql as expression } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
 import {
   ExecutionLink,
@@ -10,30 +12,41 @@ import { QueuedTurnUnavailable, RepositoryError } from "@rika/product/turn-repos
 import type { Interface } from "@rika/product/turn-repository"
 import { SteeringAdmission } from "@rika/product/turn-repository-steering"
 import { TurnId } from "@rika/product/turn-record"
-import { SqlClient } from "effect/unstable/sql/SqlClient"
-import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
+import { rikaThreadQueueState, rikaTurnSteeringOutbox, rikaTurns } from "../../database/schema/product"
 import { decodeAgent, decodeQueueState } from "./row-codec"
+import { turnRowSelection } from "./reader"
 import { turnRowJson } from "./row-json-codec"
 import { queuedTurnUnavailable, repositoryError } from "../memory/errors"
 
-const Row = Schema.Struct({
-  request_id: Schema.String,
-  target_turn_id: Schema.String,
-  source_turn_id: Schema.NullOr(Schema.String),
-  admission_json: Schema.String,
-  source_withdrawn: Schema.Finite,
-  status: Schema.Literals(["pending", "accepted", "rejected"]),
-})
-const RequestIdRow = Schema.Struct({ request_id: Schema.String })
-const TurnIdRow = Schema.Struct({ id: TurnId })
+const admissionSelection = {
+  request_id: rikaTurnSteeringOutbox.requestId,
+  target_turn_id: rikaTurnSteeringOutbox.targetTurnId,
+  source_turn_id: rikaTurnSteeringOutbox.sourceTurnId,
+  admission_json: rikaTurnSteeringOutbox.admissionJson,
+  source_withdrawn: rikaTurnSteeringOutbox.sourceWithdrawn,
+  status: rikaTurnSteeringOutbox.status,
+}
+const queueSelection = {
+  thread_id: rikaThreadQueueState.threadId,
+  revision: rikaThreadQueueState.revision,
+  queued_count: rikaThreadQueueState.queuedCount,
+}
 const equivalentTarget = Schema.toEquivalence(ExecutionLink)
 const equivalentInput = Schema.toEquivalence(SteeringInput)
 const equivalentReceipt = Schema.toEquivalence(SteeringReceipt)
 const equivalentFailure = Schema.toEquivalence(SteeringFailure)
 
-const decodeAdmission = (row: SqlRow) =>
+type AdmissionRow = {
+  request_id: string
+  target_turn_id: string
+  source_turn_id: string | null
+  admission_json: string
+  source_withdrawn: number
+  status: string
+}
+
+const decodeAdmission = (value: AdmissionRow) =>
   Effect.gen(function* () {
-    const value = yield* Schema.decodeUnknownEffect(Row)(row)
     const admission = yield* Schema.decodeEffect(turnRowJson.steeringAdmission)(value.admission_json)
     const status = admission.outcome._tag.toLowerCase()
     if (
@@ -59,11 +72,13 @@ const sameAdmission = (
   equivalentInput(admission.input, input) &&
   (admission.source?.id ?? undefined) === source
 
-const validateTarget = (sql: SqlClient, target: ExecutionLink) =>
+const validateTarget = (db: PgDrizzle.EffectPgDatabase, target: ExecutionLink) =>
   Effect.gen(function* () {
-    const rows = yield* sql`SELECT * FROM rika_turns
-      WHERE id = ${target.turnId} AND turn_kind = 'AgentExecution'
-        AND status IN ('accepted', 'running', 'waiting', 'cancelling')`
+    const rows = yield* db.select(turnRowSelection).from(rikaTurns).where(and(
+      eq(rikaTurns.id, target.turnId),
+      eq(rikaTurns.turnKind, "AgentExecution"),
+      inArray(rikaTurns.status, ["accepted", "running", "waiting", "cancelling"]),
+    )).limit(1)
     if (rows[0] === undefined)
       return yield* RepositoryError.make({ message: `Steering target ${target.turnId} is not active` })
     const turn = yield* decodeAgent(rows[0])
@@ -72,33 +87,43 @@ const validateTarget = (sql: SqlClient, target: ExecutionLink) =>
     return turn
   })
 
-const validateCapacity = (sql: SqlClient, target: ExecutionLink, pendingRequestIds: ReadonlyArray<string>) =>
+const validateCapacity = (
+  db: PgDrizzle.EffectPgDatabase,
+  target: ExecutionLink,
+  pendingRequestIds: ReadonlyArray<string>,
+) =>
   Effect.gen(function* () {
-    const rows = yield* sql`SELECT request_id FROM rika_turn_steering_outbox
-      WHERE target_turn_id = ${target.turnId} AND status <> 'rejected'`
+    const rows = yield* db.select({ request_id: rikaTurnSteeringOutbox.requestId }).from(
+      rikaTurnSteeringOutbox,
+    ).where(and(eq(rikaTurnSteeringOutbox.targetTurnId, target.turnId), ne(rikaTurnSteeringOutbox.status, "rejected")))
     const requests = new Set(pendingRequestIds)
-    const requestRows = yield* Effect.all(rows.map((row) => Schema.decodeUnknownEffect(RequestIdRow)(row)))
-    for (const row of requestRows) requests.add(row.request_id)
+    for (const row of rows) requests.add(row.request_id)
     if (requests.size >= PendingSteeringMaxEntries)
       return yield* RepositoryError.make({
         message: `Turn ${target.turnId} already has the maximum number of pending steering requests`,
       })
   })
 
-const insertAdmission = (sql: SqlClient, admission: SteeringAdmission) =>
+const insertAdmission = (db: PgDrizzle.EffectPgDatabase, admission: SteeringAdmission) =>
   Effect.gen(function* () {
     const encoded = yield* encodeAdmission(admission)
-    yield* sql`INSERT INTO rika_turn_steering_outbox
-      (request_id, target_turn_id, source_turn_id, thread_id, admission_json, source_withdrawn, status, prepared_at)
-      VALUES (${admission.input.idempotencyKey}, ${admission.target.turnId}, ${admission.source?.id ?? null},
-        ${admission.target.threadId}, ${encoded}, ${Number(admission.sourceWithdrawn === true)}, 'pending', ${admission.preparedAt})`
+    yield* db.insert(rikaTurnSteeringOutbox).values({
+      requestId: admission.input.idempotencyKey,
+      targetTurnId: admission.target.turnId,
+      sourceTurnId: admission.source?.id ?? null,
+      threadId: admission.target.threadId,
+      admissionJson: encoded,
+      sourceWithdrawn: Number(admission.sourceWithdrawn === true),
+      status: "pending",
+      preparedAt: admission.preparedAt,
+    })
   })
 
 const preserveQueuedUnavailable = <E>(error: E) =>
   Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error)
 
 export const makeTurnSqlSteeringAdmission = (
-  sql: SqlClient,
+  db: PgDrizzle.EffectPgDatabase,
 ): Pick<
   Interface,
   | "prepareSteeringAdmission"
@@ -111,26 +136,27 @@ export const makeTurnSqlSteeringAdmission = (
 > => ({
   prepareSteeringAdmission: Effect.fn("TurnRepository.prepareSteeringAdmission")(
     function* (target, input, pendingRequestIds, now) {
-      return yield* sql
-        .withTransaction(
+      return yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
-            const existingRows =
-              yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${input.idempotencyKey}`
+            const existingRows = yield* tx.select(admissionSelection).from(rikaTurnSteeringOutbox).where(
+              eq(rikaTurnSteeringOutbox.requestId, input.idempotencyKey),
+            ).limit(1)
             if (existingRows[0] !== undefined) {
               const existing = yield* decodeAdmission(existingRows[0])
               if (!sameAdmission(existing, target, input, undefined))
                 return yield* RepositoryError.make({ message: `Steering request ${input.idempotencyKey} conflicts` })
               return existing
             }
-            yield* validateTarget(sql, target)
-            yield* validateCapacity(sql, target, pendingRequestIds)
+            yield* validateTarget(tx, target)
+            yield* validateCapacity(tx, target, pendingRequestIds)
             const admission: SteeringAdmission = {
               target,
               input,
               preparedAt: now,
               outcome: { _tag: "Pending" },
             }
-            yield* insertAdmission(sql, admission)
+            yield* insertAdmission(tx, admission)
             return admission
           }),
         )
@@ -139,11 +165,13 @@ export const makeTurnSqlSteeringAdmission = (
   ),
   prepareQueuedSteeringAdmission: Effect.fn("TurnRepository.prepareQueuedSteeringAdmission")(
     function* (source, target, input, pendingRequestIds, now) {
-      return yield* sql
-        .withTransaction(
+      return yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
-            const existingRows = yield* sql`SELECT * FROM rika_turn_steering_outbox
-            WHERE request_id = ${input.idempotencyKey} OR source_turn_id = ${source}`
+            const existingRows = yield* tx.select(admissionSelection).from(rikaTurnSteeringOutbox).where(or(
+              eq(rikaTurnSteeringOutbox.requestId, input.idempotencyKey),
+              eq(rikaTurnSteeringOutbox.sourceTurnId, source),
+            ))
             if (existingRows.length > 0) {
               const admissions = yield* Effect.all(existingRows.map(decodeAdmission))
               const existing = admissions[0]!
@@ -151,8 +179,12 @@ export const makeTurnSqlSteeringAdmission = (
                 return yield* RepositoryError.make({
                   message: `Queued turn ${source} already has a different steering admission`,
                 })
-              const queueRows =
-                yield* sql`SELECT * FROM rika_thread_queue_state WHERE thread_id = ${existing.source!.threadId}`
+              if (existing.source === undefined)
+                return yield* RepositoryError.make({ message: `Steering admission ${existing.input.idempotencyKey} is inconsistent` })
+              const existingSource = existing.source
+              const queueRows = yield* tx.select(queueSelection).from(rikaThreadQueueState).where(
+                eq(rikaThreadQueueState.threadId, existingSource.threadId),
+              ).limit(1)
               const queue = queueRows[0] === undefined ? undefined : yield* decodeQueueState(queueRows[0])
               return {
                 admission: existing,
@@ -161,24 +193,27 @@ export const makeTurnSqlSteeringAdmission = (
                   existing.outcome._tag === "Rejected" && existing.outcome.queue !== undefined
                     ? existing.outcome.queue
                     : {
-                        threadId: existing.source!.threadId,
+                        threadId: existingSource.threadId,
                         revision: queue?.revision ?? 0,
                         queuedCount: queue?.queued_count ?? 0,
                         becameNonempty: false,
-                        change: { _tag: "Removed" as const, turnId: existing.source!.id },
+                        change: { _tag: "Removed" as const, turnId: existingSource.id },
                       },
               }
             }
-            const targetTurn = yield* validateTarget(sql, target)
-            const rows = yield* sql`SELECT * FROM rika_turns
-            WHERE id = ${source} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            const targetTurn = yield* validateTarget(tx, target)
+            const rows = yield* tx.select(turnRowSelection).from(rikaTurns).where(and(
+              eq(rikaTurns.id, source),
+              eq(rikaTurns.turnKind, "AgentExecution"),
+              eq(rikaTurns.status, "queued"),
+            )).limit(1)
             if (rows[0] === undefined) return yield* queuedTurnUnavailable(source)
             const sourceTurn = yield* decodeAgent(rows[0])
             if (sourceTurn.threadId !== targetTurn.threadId)
               return yield* RepositoryError.make({
                 message: `Queued turn ${source} does not belong to target ${target.turnId}`,
               })
-            yield* validateCapacity(sql, target, pendingRequestIds)
+            yield* validateCapacity(tx, target, pendingRequestIds)
             const admission: SteeringAdmission = {
               target,
               input,
@@ -187,12 +222,12 @@ export const makeTurnSqlSteeringAdmission = (
               preparedAt: now,
               outcome: { _tag: "Pending" },
             }
-            yield* insertAdmission(sql, admission)
-            yield* sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE id = ${sourceTurn.id}`
-            const queueRows = yield* sql`UPDATE rika_thread_queue_state
-            SET revision = revision + 1,
-              queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END
-            WHERE thread_id = ${sourceTurn.threadId} RETURNING *`
+            yield* insertAdmission(tx, admission)
+            yield* tx.update(rikaTurns).set({ queueClaimToken: null }).where(eq(rikaTurns.id, sourceTurn.id))
+            const queueRows = yield* tx.update(rikaThreadQueueState).set({
+              revision: expression`${rikaThreadQueueState.revision} + 1`,
+              queuedCount: expression`CASE WHEN ${rikaThreadQueueState.queuedCount} > 0 THEN ${rikaThreadQueueState.queuedCount} - 1 ELSE 0 END`,
+            }).where(eq(rikaThreadQueueState.threadId, sourceTurn.threadId)).returning(queueSelection)
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${sourceTurn.threadId} does not exist` })
             const queue = yield* decodeQueueState(queueRows[0])
@@ -213,15 +248,18 @@ export const makeTurnSqlSteeringAdmission = (
     },
   ),
   listSteeringAdmissions: Effect.gen(function* () {
-    const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox
-      ORDER BY prepared_at ASC, request_id ASC`
+    const rows = yield* db.select(admissionSelection).from(rikaTurnSteeringOutbox).orderBy(
+      asc(rikaTurnSteeringOutbox.preparedAt), asc(rikaTurnSteeringOutbox.requestId),
+    )
     return yield* Effect.all(rows.map(decodeAdmission))
   }).pipe(Effect.mapError(repositoryError)),
   acceptSteeringAdmission: Effect.fn("TurnRepository.acceptSteeringAdmission")(function* (requestId, receipt) {
-    return yield* sql
-      .withTransaction(
+    return yield* db
+      .transaction((tx) =>
         Effect.gen(function* () {
-          const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+          const rows = yield* tx.select(admissionSelection).from(rikaTurnSteeringOutbox).where(
+            eq(rikaTurnSteeringOutbox.requestId, requestId),
+          ).limit(1)
           if (rows[0] === undefined)
             return yield* RepositoryError.make({ message: `Steering admission ${requestId} does not exist` })
           const admission = yield* decodeAdmission(rows[0])
@@ -234,18 +272,21 @@ export const makeTurnSqlSteeringAdmission = (
           }
           const accepted: SteeringAdmission = { ...admission, outcome: { _tag: "Accepted", receipt } }
           const encoded = yield* encodeAdmission(accepted)
-          yield* sql`UPDATE rika_turn_steering_outbox
-            SET admission_json = ${encoded}, status = 'accepted' WHERE request_id = ${requestId}`
+          yield* tx.update(rikaTurnSteeringOutbox).set({ admissionJson: encoded, status: "accepted" }).where(
+            eq(rikaTurnSteeringOutbox.requestId, requestId),
+          )
           return accepted
         }),
       )
       .pipe(Effect.mapError(repositoryError))
   }),
   rejectSteeringAdmission: Effect.fn("TurnRepository.rejectSteeringAdmission")(function* (requestId, failure) {
-    return yield* sql
-      .withTransaction(
+    return yield* db
+      .transaction((tx) =>
         Effect.gen(function* () {
-          const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+          const rows = yield* tx.select(admissionSelection).from(rikaTurnSteeringOutbox).where(
+            eq(rikaTurnSteeringOutbox.requestId, requestId),
+          ).limit(1)
           if (rows[0] === undefined)
             return yield* RepositoryError.make({ message: `Steering admission ${requestId} does not exist` })
           const admission = yield* decodeAdmission(rows[0])
@@ -258,32 +299,37 @@ export const makeTurnSqlSteeringAdmission = (
           }
           let queue: Effect.Success<ReturnType<Interface["dequeue"]>> | undefined
           if (admission.source !== undefined) {
-            const existingRows = yield* sql`SELECT * FROM rika_turns WHERE id = ${admission.source.id}`
+            const source = admission.source
+            const existingRows = yield* tx.select(turnRowSelection).from(rikaTurns).where(
+              eq(rikaTurns.id, source.id),
+            ).limit(1)
             if (existingRows[0] !== undefined) {
               const existing = yield* decodeAgent(existingRows[0])
               if (existing.status === "queued") {
-                const visibleRows = yield* sql`SELECT id FROM rika_turns
-                  WHERE thread_id = ${admission.source.threadId} AND turn_kind = 'AgentExecution' AND status = 'queued'
-                    AND (
-                      id = ${admission.source.id} OR NOT EXISTS (
-                        SELECT 1 FROM rika_turn_steering_outbox
-                        WHERE source_turn_id = rika_turns.id AND status != 'rejected'
-                      )
-                    )
-                  ORDER BY created_at ASC, id ASC`
-                const visibleTurns = yield* Effect.all(visibleRows.map((row) => Schema.decodeUnknownEffect(TurnIdRow)(row)))
-                const position = visibleTurns.findIndex((row) => row.id === admission.source!.id)
-                const queueRows = yield* sql`UPDATE rika_thread_queue_state
-                  SET revision = revision + 1,
-                    queued_count = queued_count + ${admission.sourceWithdrawn === true ? 1 : 0}
-                  WHERE thread_id = ${admission.source.threadId} RETURNING *`
+                const hidden = tx.select({ requestId: rikaTurnSteeringOutbox.requestId }).from(
+                  rikaTurnSteeringOutbox,
+                ).where(and(
+                  eq(rikaTurnSteeringOutbox.sourceTurnId, rikaTurns.id),
+                  ne(rikaTurnSteeringOutbox.status, "rejected"),
+                ))
+                const visibleRows = yield* tx.select({ id: rikaTurns.id }).from(rikaTurns).where(and(
+                  eq(rikaTurns.threadId, source.threadId),
+                  eq(rikaTurns.turnKind, "AgentExecution"),
+                  eq(rikaTurns.status, "queued"),
+                  or(eq(rikaTurns.id, source.id), notExists(hidden)),
+                )).orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id))
+                const position = visibleRows.findIndex((row) => row.id === source.id)
+                const queueRows = yield* tx.update(rikaThreadQueueState).set({
+                  revision: expression`${rikaThreadQueueState.revision} + 1`,
+                  queuedCount: expression`${rikaThreadQueueState.queuedCount} + ${admission.sourceWithdrawn === true ? 1 : 0}`,
+                }).where(eq(rikaThreadQueueState.threadId, source.threadId)).returning(queueSelection)
                 if (queueRows[0] === undefined)
                   return yield* RepositoryError.make({
-                    message: `Queue state ${admission.source.threadId} does not exist`,
+                    message: `Queue state ${source.threadId} does not exist`,
                   })
                 const state = yield* decodeQueueState(queueRows[0])
                 queue = {
-                  threadId: admission.source.threadId,
+                  threadId: source.threadId,
                   revision: state.revision,
                   queuedCount: state.queued_count,
                   becameNonempty: admission.sourceWithdrawn === true && state.queued_count === 1,
@@ -302,8 +348,9 @@ export const makeTurnSqlSteeringAdmission = (
             outcome,
           }
           const encoded = yield* encodeAdmission(rejected)
-          yield* sql`UPDATE rika_turn_steering_outbox
-            SET admission_json = ${encoded}, status = 'rejected' WHERE request_id = ${requestId}`
+          yield* tx.update(rikaTurnSteeringOutbox).set({ admissionJson: encoded, status: "rejected" }).where(
+            eq(rikaTurnSteeringOutbox.requestId, requestId),
+          )
           return rejected
         }),
       )
@@ -311,10 +358,12 @@ export const makeTurnSqlSteeringAdmission = (
   }),
   completeSteeringAdmission: Effect.fn("TurnRepository.completeSteeringAdmission")(
     function* (requestId, target, receipt) {
-      return yield* sql
-        .withTransaction(
+      return yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
-            const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+            const rows = yield* tx.select(admissionSelection).from(rikaTurnSteeringOutbox).where(
+              eq(rikaTurnSteeringOutbox.requestId, requestId),
+            ).limit(1)
             if (rows[0] === undefined) return undefined
             const admission = yield* decodeAdmission(rows[0])
             if (
@@ -325,18 +374,24 @@ export const makeTurnSqlSteeringAdmission = (
               return yield* RepositoryError.make({
                 message: `Steering admission ${requestId} disposition conflicts`,
               })
-            yield* sql`DELETE FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+            yield* tx.delete(rikaTurnSteeringOutbox).where(eq(rikaTurnSteeringOutbox.requestId, requestId))
             if (admission.source === undefined) return undefined
-            const queued = yield* sql`SELECT id FROM rika_turns
-            WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            const queued = yield* tx.select({ id: rikaTurns.id }).from(rikaTurns).where(and(
+              eq(rikaTurns.id, admission.source.id),
+              eq(rikaTurns.turnKind, "AgentExecution"),
+              eq(rikaTurns.status, "queued"),
+            )).limit(1)
             if (queued[0] === undefined) return undefined
-            yield* sql`DELETE FROM rika_turns
-            WHERE id = ${admission.source.id} AND turn_kind = 'AgentExecution' AND status = 'queued'`
+            yield* tx.delete(rikaTurns).where(and(
+              eq(rikaTurns.id, admission.source.id),
+              eq(rikaTurns.turnKind, "AgentExecution"),
+              eq(rikaTurns.status, "queued"),
+            ))
             if (admission.sourceWithdrawn === true) return undefined
-            const queueRows = yield* sql`UPDATE rika_thread_queue_state
-              SET revision = revision + 1,
-                queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END
-              WHERE thread_id = ${admission.source.threadId} RETURNING *`
+            const queueRows = yield* tx.update(rikaThreadQueueState).set({
+              revision: expression`${rikaThreadQueueState.revision} + 1`,
+              queuedCount: expression`CASE WHEN ${rikaThreadQueueState.queuedCount} > 0 THEN ${rikaThreadQueueState.queuedCount} - 1 ELSE 0 END`,
+            }).where(eq(rikaThreadQueueState.threadId, admission.source.threadId)).returning(queueSelection)
             if (queueRows[0] === undefined)
               return yield* RepositoryError.make({ message: `Queue state ${admission.source.threadId} does not exist` })
             const state = yield* decodeQueueState(queueRows[0])
@@ -355,11 +410,14 @@ export const makeTurnSqlSteeringAdmission = (
   completeRejectedSteeringAdmission: Effect.fn("TurnRepository.completeRejectedSteeringAdmission")(
     function* (requestId) {
       return yield* Effect.gen(function* () {
-        const deleted = yield* sql`DELETE FROM rika_turn_steering_outbox
-        WHERE request_id = ${requestId} AND status = 'rejected'
-        RETURNING request_id`
+        const deleted = yield* db.delete(rikaTurnSteeringOutbox).where(and(
+          eq(rikaTurnSteeringOutbox.requestId, requestId),
+          eq(rikaTurnSteeringOutbox.status, "rejected"),
+        )).returning({ requestId: rikaTurnSteeringOutbox.requestId })
         if (deleted[0] !== undefined) return true
-        const rows = yield* sql`SELECT * FROM rika_turn_steering_outbox WHERE request_id = ${requestId}`
+        const rows = yield* db.select(admissionSelection).from(rikaTurnSteeringOutbox).where(
+          eq(rikaTurnSteeringOutbox.requestId, requestId),
+        ).limit(1)
         if (rows[0] === undefined) return true
         const admission = yield* decodeAdmission(rows[0])
         if (admission.outcome._tag !== "Rejected")

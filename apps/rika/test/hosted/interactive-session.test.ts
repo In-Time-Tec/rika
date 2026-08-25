@@ -1,15 +1,25 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
-import { ClientMessage, HostedThreadSnapshot, ServerFrame, type ThreadProtocolEvent } from "@rika/product/client-protocol"
+import {
+  ClientMessage,
+  ServerFrame,
+  type HostedThreadSnapshot,
+  type ThreadProtocolEvent,
+} from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import * as HostedModel from "@rika/product/hosted-model"
-import * as ThreadRecord from "@rika/product/thread-record"
-import * as TurnRecord from "@rika/product/turn-record"
-import { Deferred, Effect, Fiber, Layer, Logger, Metric, Option, Redacted, Schema, Stream } from "effect"
+import {
+  CommandId,
+  Sequence,
+  ThreadEventCursor,
+  ThreadId as HostedThreadId,
+  ThreadVersion,
+  Timestamp,
+} from "@rika/product/hosted-model"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
+import { Crypto, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import {
   CredentialStore,
@@ -23,27 +33,31 @@ import { makeHostedInteractiveSession } from "../../src/hosted/interactive-sessi
 
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(ClientMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
-const makeHostedThreadSnapshot = Schema.decodeUnknownSync(HostedThreadSnapshot)
-type ThreadAttached = Extract<ServerFrame["payload"], { readonly _tag: "ThreadAttached" }>
-const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
+type Message = ClientMessage
+type Frame = ServerFrame
+type Attached = Extract<Frame["payload"], { readonly _tag: "ThreadAttached" }>
+
 const profile: Profile = {
   origin: "https://hosted.example.test",
   deviceId: "device-1",
   clientId: "client-1",
   owner: { kind: "personal" },
 }
+const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
+
 const snapshot = (
-  updatedAt = 1,
+  threadId: string,
+  updatedAt: number,
   executorKind: "runner" | "orb" = "runner",
-  threadId = "thread-1",
-): HostedThreadSnapshot =>
-  makeHostedThreadSnapshot({
+  workspace?: HostedThreadSnapshot["workspace"],
+): HostedThreadSnapshot => {
+  const value: HostedThreadSnapshot = {
     executorKind,
     view: {
       thread: {
-        id: ThreadRecord.ThreadId.make(threadId),
+        id: Thread.ThreadId.make(threadId),
         workspace: "workspace-1",
-        title: "Thread",
+        title: `Thread ${threadId}`,
         labels: [],
         pinned: false,
         archived: false,
@@ -51,7 +65,7 @@ const snapshot = (
         createdAt: 1,
         updatedAt,
       },
-      revision: 0,
+      revision: updatedAt,
       source: { projectionVersion: ExecutionProjection.projectionVersion },
       turns: [],
       pending: [],
@@ -60,121 +74,129 @@ const snapshot = (
       usage: { state: ExecutionProjection.emptyUsageState() },
     },
     pendingAuthorizations: [],
-  })
-
-const authorizationCheckpoint = {
-  version: ExecutionProjection.projectionVersion,
-  cursor: "authorization-cursor",
-  state: '{"operation":"write","path":"README.md"}',
+  }
+  return workspace === undefined ? value : { ...value, workspace }
 }
-const authorizationSnapshot = (status: "pending" | "approved", commandReady: boolean): HostedThreadSnapshot => {
-  const updatedAt = status === "pending" ? 3 : 4
-  const current = snapshot(updatedAt)
-  const usage = {
-    ...ExecutionProjection.emptyUsageState(),
-    costNanoUsd: 42,
-    tokens: { total: 3, input: { total: 2 }, output: { total: 1 } },
-    pricedAttempts: 1,
-    countedAttempts: 1,
-    sourceComplete: true,
-    context: { requestOrdinal: 1, purpose: "conversation" as const, inputTokens: 2 },
-    active: { _tag: "Available" as const, accumulatedMillis: 25 },
-  }
-  const pendingSteering = {
-    runId: "run-1",
-    entryId: "entry-1",
-    requestId: "request-1",
-    sequence: 1,
-    text: "keep the exact API",
-  }
-  const view = {
-    ...current.view,
-    revision: status === "pending" ? 7 : 8,
-    turns: [
-      {
-        turn: {
-          kind: "agent" as const,
-          id: TurnRecord.TurnId.make("turn-authorization"),
-          threadId: ThreadRecord.ThreadId.make("thread-1"),
-          prompt: "Update the README",
-          status: "waiting" as const,
-          author: { _tag: "Human" as const },
-          lineage: { _tag: "Original" as const },
-          createdAt: 2,
-          updatedAt,
-        },
-        units: [
-          {
-            key: "authorization:1",
-            turnId: "turn-authorization",
-            order: [{ sequence: 0, part: 0, key: "authorization:1" }] as const,
-            revision: status === "pending" ? 4 : 5,
-            content: {
-              _tag: "Block" as const,
-              block: {
-                _tag: "AuthorizationCard" as const,
-                id: "authorization-1",
-                operation: "write",
-                capability: "workspace",
-                input: '{"path":"README.md"}',
-                inputTruncated: false,
-                status,
-              },
-            },
-          },
-        ],
-        projectionRevision: status === "pending" ? 4 : 5,
-        usage,
-        pendingSteering: [pendingSteering],
-        settledSteering: [],
-      },
-    ],
-    usage: { state: usage, contextCapacity: { contextWindow: 128_000, reserveTokens: 16_000 } },
-  }
+
+const waitingSnapshot = (
+  executorKind: "runner" | "orb" = "runner",
+  workspace?: HostedThreadSnapshot["workspace"],
+): HostedThreadSnapshot => {
+  const value = snapshot("thread-1", 2, executorKind, workspace)
   return {
-    executorKind: "runner",
-    view,
-    pendingAuthorizations: commandReady
-      ? [
-          {
-            threadId: HostedModel.ThreadId.make("thread-1"),
-            turnId: TurnRecord.TurnId.make("turn-authorization"),
-            authorizationId: "authorization-1",
-            operation: "write",
-            capability: "workspace",
-            input: '{"path":"README.md"}',
-            inputTruncated: false,
-            checkpoint: authorizationCheckpoint,
+    ...value,
+    view: {
+      ...value.view,
+      turns: [
+        {
+          turn: {
+            kind: "agent",
+            id: Turn.TurnId.make("turn-1"),
+            threadId: Thread.ThreadId.make("thread-1"),
+            prompt: "wait",
+            status: "waiting",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
+            createdAt: 1,
+            updatedAt: 2,
           },
-        ]
-      : [],
+          units: [],
+          projectionRevision: 0,
+          usage: ExecutionProjection.emptyUsageState(),
+          pendingSteering: [],
+          settledSteering: [],
+        },
+      ],
+    },
   }
 }
 
-const attachment = (input: {
-  readonly requestId: string
-  readonly threadId: string
-  readonly threadVersion: string
-  readonly cursor: string
-  readonly snapshotThreadVersion?: string
-  readonly snapshotCursor?: string
-  readonly snapshot: HostedThreadSnapshot
-  readonly events?: ReadonlyArray<ThreadProtocolEvent>
-  readonly participants?: ThreadAttached["participants"]
-}): ThreadAttached => ({
+const attached = (message: Message, value: HostedThreadSnapshot, cursor = "0"): Attached => ({
   _tag: "ThreadAttached",
-  requestId: HostedModel.RequestId.make(input.requestId),
-  threadId: HostedModel.ThreadId.make(input.threadId),
-  snapshotThreadVersion: HostedModel.ThreadVersion.make(input.snapshotThreadVersion ?? input.threadVersion),
-  snapshotCursor: HostedModel.ThreadEventCursor.make(
-    input.snapshotCursor ?? ((input.events?.length ?? 0) === 0 ? input.cursor : "0"),
-  ),
-  threadVersion: HostedModel.ThreadVersion.make(input.threadVersion),
-  cursor: HostedModel.ThreadEventCursor.make(input.cursor),
-  snapshot: input.snapshot,
-  events: input.events ?? [],
-  participants: input.participants ?? [],
+  requestId: message.requestId,
+  threadId: message.command._tag === "AttachThread" ? message.command.threadId : HostedThreadId.make("invalid"),
+  snapshotThreadVersion: ThreadVersion.make(cursor),
+  snapshotCursor: ThreadEventCursor.make(cursor),
+  threadVersion: ThreadVersion.make(cursor),
+  cursor: ThreadEventCursor.make(cursor),
+  snapshot: value,
+  events: [],
+  participants: [],
 })
+
+const event = (threadId: string, cursor: string): ThreadProtocolEvent => ({
+  threadId: HostedThreadId.make(threadId),
+  sequence: Sequence.make(cursor),
+  cursor: ThreadEventCursor.make(cursor),
+  threadVersion: ThreadVersion.make(cursor),
+  event: { _tag: "ThreadViewSnapshot", snapshot: snapshot(threadId, Number(cursor)).view },
+  createdAt: Timestamp.make("2026-08-25T00:00:00.000Z"),
+})
+
+class FakeWebSocket extends EventTarget {
+  readonly CONNECTING = 0
+  readonly OPEN = 1
+  readonly CLOSING = 2
+  readonly CLOSED = 3
+  readonly URL = "ws://fake"
+  readonly protocol = "rika.thread.v1"
+  readonly url = "ws://fake"
+  readonly extensions = ""
+  readonly bufferedAmount = 0
+  binaryType: WebSocket["binaryType"] = "arraybuffer"
+  readyState: WebSocket["readyState"] = 0
+  onopen = null
+  onerror = null
+  onclose = null
+  onmessage = null
+  ping: WebSocket["ping"] = () => undefined
+  pong: WebSocket["pong"] = () => undefined
+  terminate: WebSocket["terminate"] = () => undefined
+
+  constructor(readonly receive: (socket: FakeWebSocket, message: Message) => void) {
+    super()
+    Effect.runFork(
+      Effect.yieldNow.pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            this.readyState = 1
+            this.dispatchEvent(new Event("open"))
+          }),
+        ),
+      ),
+    )
+  }
+
+  send(value: string | ArrayBufferLike | Blob | ArrayBufferView) {
+    this.receive(this, decode(String(value)))
+  }
+
+  frame(payload: Frame["payload"]) {
+    if (this.readyState === 1)
+      this.dispatchEvent(new MessageEvent("message", { data: encode({ protocolVersion: 1, payload }) }))
+  }
+
+  close(code = 1006, reason = "closed") {
+    if (this.readyState >= 2) return
+    this.readyState = 3
+    this.dispatchEvent(new FakeCloseEvent(code, reason))
+  }
+}
+
+class FakeCloseEvent extends Event {
+  constructor(
+    readonly code: number,
+    readonly reason: string,
+  ) {
+    super("close")
+  }
+}
+
+interface Harness {
+  readonly sockets: Array<FakeWebSocket>
+  readonly messages: Array<Message>
+  readonly layer: Layer.Layer<Socket.WebSocketConstructor | Http | CredentialStore | ProfileStore | Crypto.Crypto>
+}
 
 const unusedHttp: HttpInterface = {
   register: () => Effect.die("unused"),
@@ -202,1276 +224,585 @@ const unusedHttp: HttpInterface = {
   publishRepository: () => Effect.die("unused"),
 }
 
-it.effect("replays without gaps across reconnect and attaches a second controller without duplicate events", () =>
-  Effect.gen(function* () {
-    const observations: Array<ReturnType<typeof Logger.formatStructured.log>> = []
-    const logger = Logger.map(Logger.formatStructured, (record) => observations.push(record))
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        const firstEvent = yield* Deferred.make<void>()
-        const firstClosed = yield* Deferred.make<void>()
-        const reattached = yield* Deferred.make<void>()
-        const secondAttached = yield* Deferred.make<void>()
-        const secondSnapshot = yield* Deferred.make<void>()
-        const setupStatus = yield* Deferred.make<void>()
-        const orbTarget = yield* Deferred.make<void>()
-        const orbSetup = yield* Deferred.make<void>()
-        const submittedSnapshot = yield* Deferred.make<void>()
-        const approvalRequired = yield* Deferred.make<void>()
-        const approvalCleared = yield* Deferred.make<void>()
-        const slowAttached = yield* Deferred.make<void>()
-        const runnerSetup = yield* Deferred.make<void>()
-        const orbReconnecting = yield* Deferred.make<void>()
-        const orbReconnected = yield* Deferred.make<void>()
-        const failureReconnecting = yield* Deferred.make<void>()
-        const failureReconnected = yield* Deferred.make<void>()
-        const gatedAttached = yield* Deferred.make<void>()
-        const staleRefreshAttached = yield* Deferred.make<void>()
-        const staleRefreshRecovered = yield* Deferred.make<void>()
-        const supersededAttached = yield* Deferred.make<void>()
-        const newerAttached = yield* Deferred.make<void>()
-        const queuedAttached = yield* Deferred.make<void>()
-        const queuedRecovered = yield* Deferred.make<void>()
-        const queuedRecoveryStatusObserved = yield* Deferred.make<void>()
-        const queuedRecoveryConnected = yield* Deferred.make<void>()
-        const failingAttached = yield* Deferred.make<void>()
-        const malformedAttached = yield* Deferred.make<void>()
-        const defectInitialAttached = yield* Deferred.make<void>()
-        const thread2Restored = yield* Deferred.make<void>()
-        const postDefectThread2Restored = yield* Deferred.make<void>()
-        const thread3Attached = yield* Deferred.make<void>()
-        const thread3Event = yield* Deferred.make<void>()
-        const thread3Replayed = yield* Deferred.make<void>()
-        const malformedRecovered = yield* Deferred.make<void>()
-        const defectRecovered = yield* Deferred.make<void>()
-        const defectThrown = yield* Deferred.make<void>()
-        const defectReplacementPublished = yield* Deferred.make<void>()
-        const defectConnected = yield* Deferred.make<void>()
-        const mismatchReattached = yield* Deferred.make<void>()
-        const sockets = new WeakMap<object, number>()
-        const attachments = new WeakMap<object, string>()
-        const attachmentLog: Array<{ readonly connection: number; readonly threadId: string }> = []
-        const commands: Array<ClientMessage["command"]> = []
-        const afterCursors: Array<string> = []
-        const mutationThreads: Array<string> = []
-        const mutationVersions: Array<string> = []
-        const acknowledgements: Array<{
-          readonly connection: number
-          readonly threadId: string
-          readonly cursor: string
-        }> = []
-        let sendSlowFrames: (() => void) | undefined
-        let releaseGated: (() => void) | undefined
-        let sendLateRetainedFrames: (() => void) | undefined
-        let sendRefreshEvent: (() => void) | undefined
-        let releaseStaleRefresh: (() => void) | undefined
-        let releaseSuperseded: (() => void) | undefined
-        let releaseQueued: (() => void) | undefined
-        let sendQueuedRecoveryStatus: (() => void) | undefined
-        let sendOrbSetup: (() => void) | undefined
-        let sendThread3Setup: (() => void) | undefined
-        let disconnectOrb: (() => void) | undefined
-        let finalRunnerExpected = false
-        let orbReconnectExpected = false
-        let orbReconnectObserved = false
-        let failureReconnectExpected = false
-        let failureReplacementObserved = false
-        let secondControllerExpected = false
-        let thread3Attaches = 0
-        let mismatchSent = false
-        let gatedReleased = false
-        let gatedAttaches = 0
-        let thread2RestoreExpected = false
-        let postDefectThread2RestoreExpected = false
-        let queuedRecoveryExpected = false
-        let malformedRecoveryExpected = false
-        let defectRecoveryExpected = false
-        let defectDispatchExpected = false
-        let defectAttaches = 0
-        const defectObservations: Array<{
-          readonly eventThread: string
-          readonly currentThread: string | undefined
-          readonly checkpoint: typeof authorizationCheckpoint | undefined
-          readonly target: string
-          readonly participants: number
-        }> = []
-        let approvalObserved = false
-        let opened = 0
-        let version = "1"
-        let cursor = "1"
-        const threadEvent: ThreadProtocolEvent = {
-          threadId: HostedModel.ThreadId.make("thread-1"),
-          sequence: HostedModel.Sequence.make("1"),
-          cursor: HostedModel.ThreadEventCursor.make("1"),
-          threadVersion: HostedModel.ThreadVersion.make("1"),
-          event: { _tag: "ExecutionControlled", action: "cancelled" },
-          createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-        }
-        const lateAuthorization = authorizationSnapshot("pending", true)
-        const lateAuthorizationSnapshot: HostedThreadSnapshot = {
-          ...lateAuthorization,
-          view: {
-            ...lateAuthorization.view,
-            thread: { ...lateAuthorization.view.thread, updatedAt: 99 },
-          },
-        }
-        const server = yield* BunHttpServer.make({ hostname: "127.0.0.1", port: 0 })
-        yield* server.serve(
-          Effect.gen(function* () {
-            const request = yield* HttpServerRequest.HttpServerRequest
-            const upgraded = yield* request.upgrade
-            const write = yield* upgraded.writer
-            const runSync = Effect.runSyncWith(yield* Effect.context<never>())
-            const socket = {
-              send: (value: string) => runSync(write(value)),
-              close: () => runSync(write(new Socket.CloseEvent())),
-            }
-            yield* upgraded
-              .runString(
-                (value) =>
-                  Effect.sync(() => {
-                    const message = decode(value)
-                    commands.push(message.command)
-                    if (message.command._tag === "AttachThread") {
-                      afterCursors.push(String(message.command.afterCursor))
-                      const connection = sockets.get(socket)
-                      const attachedThreadId = message.command.threadId
-                      const attachedThread = String(attachedThreadId)
-                      attachments.set(socket, attachedThread)
-                      attachmentLog.push({ connection: connection!, threadId: attachedThread })
-                      if (thread2RestoreExpected && attachedThread === "thread-2")
-                        Deferred.doneUnsafe(thread2Restored, Effect.void)
-                      if (postDefectThread2RestoreExpected && attachedThread === "thread-2")
-                        Deferred.doneUnsafe(postDefectThread2Restored, Effect.void)
-                      if (queuedRecoveryExpected && attachedThread === "thread-2")
-                        Deferred.doneUnsafe(queuedRecovered, Effect.void)
-                      if (malformedRecoveryExpected && attachedThread === "thread-2")
-                        Deferred.doneUnsafe(malformedRecovered, Effect.void)
-                      if (attachedThread === "thread-defect") {
-                        defectAttaches += 1
-                        if (defectRecoveryExpected && defectAttaches > 2)
-                          Deferred.doneUnsafe(defectRecovered, Effect.void)
-                      }
-                      if (failureReconnectExpected && connection !== undefined && attachedThread === "thread-2")
-                        failureReplacementObserved = true
-                      if (attachedThread === "thread-failing") {
-                        Deferred.doneUnsafe(failingAttached, Effect.void)
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "CommandRejected",
-                              requestId: message.requestId,
-                              threadId: message.command.threadId,
-                              reason: "unavailable",
-                              message: "selection unavailable",
-                              details: {},
-                            },
-                          }),
-                        )
-                        return
-                      }
-                      if (attachedThread === "thread-malformed") {
-                        Deferred.doneUnsafe(malformedAttached, Effect.void)
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: attachment({
-                              requestId: message.requestId,
-                              threadId: attachedThread,
-                              threadVersion: "10",
-                              cursor: "10",
-                              snapshotThreadVersion: "10",
-                              snapshotCursor: "9",
-                              snapshot: snapshot(10, "runner", attachedThread),
-                              events: [
-                                {
-                                  threadId: HostedModel.ThreadId.make(attachedThread),
-                                  sequence: HostedModel.Sequence.make("10"),
-                                  cursor: HostedModel.ThreadEventCursor.make("10"),
-                                  threadVersion: HostedModel.ThreadVersion.make("10"),
-                                  event: {
-                                    _tag: "ThreadViewPatch",
-                                    patch: {
-                                      threadId: ThreadRecord.ThreadId.make(attachedThread),
-                                      baseRevision: 99,
-                                      revision: 100,
-                                      upsert: [],
-                                      remove: [],
-                                      turnChanges: [],
-                                    },
-                                  },
-                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-                                },
-                              ],
-                            }),
-                          }),
-                        )
-                        return
-                      }
-                      if (attachedThread === "thread-slow") {
-                        sendSlowFrames = () => {
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: attachment({
-                                requestId: message.requestId,
-                                threadId: attachedThread,
-                                threadVersion: HostedModel.ThreadVersion.make("7"),
-                                cursor: HostedModel.ThreadEventCursor.make("7"),
-                                snapshot: snapshot(7, "orb", "thread-slow"),
-                              }),
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "WorkspaceStatus",
-                                threadId: HostedModel.ThreadId.make("thread-slow"),
-                                status: { state: "resuming" },
-                              },
-                            }),
-                          )
-                        }
-                        Deferred.doneUnsafe(slowAttached, Effect.void)
-                        return
-                      }
-                      if (attachedThread === "thread-superseded") {
-                        releaseSuperseded = () =>
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: attachment({
-                                requestId: message.requestId,
-                                threadId: attachedThread,
-                                threadVersion: HostedModel.ThreadVersion.make("8"),
-                                cursor: HostedModel.ThreadEventCursor.make("8"),
-                                snapshot: snapshot(8, "runner", "thread-superseded"),
-                              }),
-                            }),
-                          )
-                        Deferred.doneUnsafe(supersededAttached, Effect.void)
-                        return
-                      }
-                      if (attachedThread === "thread-queued") {
-                        releaseQueued = () =>
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: attachment({
-                                requestId: message.requestId,
-                                threadId: attachedThread,
-                                threadVersion: HostedModel.ThreadVersion.make("9"),
-                                cursor: HostedModel.ThreadEventCursor.make("9"),
-                                snapshot: snapshot(9, "runner", "thread-queued"),
-                              }),
-                            }),
-                          )
-                        Deferred.doneUnsafe(queuedAttached, Effect.void)
-                        return
-                      }
-                      if (attachedThread === "thread-gated") {
-                        gatedAttaches += 1
-                        sendLateRetainedFrames = () => {
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadSnapshot",
-                                threadId: HostedModel.ThreadId.make("thread-2"),
-                                threadVersion: HostedModel.ThreadVersion.make("99"),
-                                cursor: HostedModel.ThreadEventCursor.make("99"),
-                                snapshot: snapshot(99, "runner", "thread-2"),
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadEvent",
-                                event: {
-                                  threadId: HostedModel.ThreadId.make("thread-2"),
-                                  sequence: HostedModel.Sequence.make("99"),
-                                  cursor: HostedModel.ThreadEventCursor.make("99"),
-                                  threadVersion: HostedModel.ThreadVersion.make("99"),
-                                  event: { _tag: "ExecutionControlled", action: "cancelled" },
-                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-                                },
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ExecutorStatus",
-                                threadId: HostedModel.ThreadId.make("thread-2"),
-                                status: { state: "terminal" },
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "PresenceSnapshot",
-                                threadId: HostedModel.ThreadId.make("thread-2"),
-                                participants: [],
-                              },
-                            }),
-                          )
-                        }
-                        const sendGated = (threadVersion = "6", attachedCursor = "6") =>
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: attachment({
-                                requestId: message.requestId,
-                                threadId: attachedThread,
-                                threadVersion: HostedModel.ThreadVersion.make(threadVersion),
-                                cursor: HostedModel.ThreadEventCursor.make(attachedCursor),
-                                snapshot: snapshot(6, "runner", "thread-gated"),
-                              }),
-                            }),
-                          )
-                        if (gatedAttaches === 2) {
-                          sendRefreshEvent = () =>
-                            socket.send(
-                              encode({
-                                protocolVersion: 1,
-                                payload: {
-                                  _tag: "ThreadEvent",
-                                  event: {
-                                    threadId: HostedModel.ThreadId.make(attachedThread),
-                                    sequence: HostedModel.Sequence.make("7"),
-                                    cursor: HostedModel.ThreadEventCursor.make("7"),
-                                    threadVersion: HostedModel.ThreadVersion.make("7"),
-                                    event: { _tag: "ThreadTitled", threadId: attachedThread, title: "Gated seven" },
-                                    createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-                                  },
-                                },
-                              }),
-                            )
-                          releaseStaleRefresh = sendGated
-                          Deferred.doneUnsafe(staleRefreshAttached, Effect.void)
-                        } else if (gatedAttaches > 2) {
-                          sendGated("7", "7")
-                          Deferred.doneUnsafe(staleRefreshRecovered, Effect.void)
-                        } else if (gatedReleased) sendGated()
-                        else {
-                          releaseGated = () => {
-                            gatedReleased = true
-                            sendGated()
-                          }
-                          Deferred.doneUnsafe(gatedAttached, Effect.void)
-                        }
-                        return
-                      }
-                      if (attachedThread === "thread-defect") {
-                        if (defectAttaches === 1) {
-                          Deferred.doneUnsafe(defectInitialAttached, Effect.void)
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: attachment({
-                                requestId: message.requestId,
-                                threadId: attachedThread,
-                                threadVersion: "1",
-                                cursor: "1",
-                                snapshot: snapshot(1, "runner", attachedThread),
-                              }),
-                            }),
-                          )
-                          return
-                        }
-                        const defectSnapshot = snapshot(2, "orb", attachedThread)
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: attachment({
-                              requestId: message.requestId,
-                              threadId: attachedThread,
-                              threadVersion: "2",
-                              cursor: "2",
-                              snapshot: {
-                                ...defectSnapshot,
-                                pendingAuthorizations: [
-                                  {
-                                    threadId: HostedModel.ThreadId.make(attachedThread),
-                                    turnId: TurnRecord.TurnId.make("turn-defect"),
-                                    authorizationId: "authorization-defect",
-                                    operation: "write",
-                                    capability: "workspace",
-                                    input: "{}",
-                                    inputTruncated: false,
-                                    checkpoint: authorizationCheckpoint,
-                                  },
-                                ],
-                              },
-                              participants: [
-                                {
-                                  actor: {
-                                    _tag: "PersonalActor",
-                                    owner: {
-                                      _tag: "PersonalOwner",
-                                      userId: HostedModel.BetterAuthUserId.make("defect-user"),
-                                    },
-                                    userId: HostedModel.BetterAuthUserId.make("defect-user"),
-                                    clientId: HostedModel.ClientId.make("defect-client"),
-                                    deviceId: HostedModel.DeviceId.make("defect-device"),
-                                  },
-                                  status: "controlling",
-                                },
-                              ],
-                            }),
-                          }),
-                        )
-                        return
-                      }
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: attachment({
-                            requestId: message.requestId,
-                            threadId: attachedThread,
-                            threadVersion: HostedModel.ThreadVersion.make(version),
-                            cursor: HostedModel.ThreadEventCursor.make(
-                              attachedThread === "thread-3" && thread3Attaches > 0 ? "2" : cursor,
-                            ),
-                            snapshot: snapshot(
-                              Number(version),
-                              attachedThread === "thread-2" ? "orb" : "runner",
-                              attachedThread,
-                            ),
-                            events: connection === 1 ? [threadEvent] : [],
-                            participants:
-                              connection === 1
-                                ? [
-                                    {
-                                      actor: {
-                                        _tag: "PersonalActor",
-                                        owner: {
-                                          _tag: "PersonalOwner",
-                                          userId: HostedModel.BetterAuthUserId.make("initial-user"),
-                                        },
-                                        userId: HostedModel.BetterAuthUserId.make("initial-user"),
-                                        clientId: HostedModel.ClientId.make("initial-client"),
-                                        deviceId: HostedModel.DeviceId.make("initial-device"),
-                                      },
-                                      status: "controlling",
-                                    },
-                                  ]
-                                : [],
-                          }),
-                        }),
-                      )
-                      if (queuedRecoveryExpected && attachedThread === "thread-2")
-                        sendQueuedRecoveryStatus = () =>
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "WorkspaceStatus",
-                                threadId: HostedModel.ThreadId.make("thread-2"),
-                                status: { state: "resuming" },
-                              },
-                            }),
-                          )
-                      if (attachedThread === "thread-3") {
-                        thread3Attaches += 1
-                        let attached: Deferred.Deferred<void>
-                        if (thread3Attaches === 1) attached = thread3Attached
-                        else if (thread3Attaches === 2) attached = thread3Replayed
-                        else attached = mismatchReattached
-                        Deferred.doneUnsafe(attached, Effect.void)
-                        if (thread3Attaches === 1)
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadEvent",
-                                event: {
-                                  threadId: HostedModel.ThreadId.make("thread-3"),
-                                  sequence: HostedModel.Sequence.make("2"),
-                                  cursor: HostedModel.ThreadEventCursor.make("2"),
-                                  threadVersion: HostedModel.ThreadVersion.make("2"),
-                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-                                  event: { _tag: "ThreadTitled", threadId: "thread-3", title: "Three" },
-                                },
-                              },
-                            }),
-                          )
-                        sendThread3Setup = () =>
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "WorkspaceStatus",
-                                threadId: HostedModel.ThreadId.make("thread-3"),
-                                status: { state: "setup" },
-                              },
-                            }),
-                          )
-                      }
-                      if (attachedThread === "thread-newer") Deferred.doneUnsafe(newerAttached, Effect.void)
-                      if (connection === 1) {
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "ExecutorStatus",
-                              threadId: HostedModel.ThreadId.make("thread-1"),
-                              status: { state: "waiting" },
-                            },
-                          }),
-                        )
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "WorkspaceStatus",
-                              threadId: HostedModel.ThreadId.make("thread-1"),
-                              status: { state: "setup" },
-                            },
-                          }),
-                        )
-                      } else if (connection === 2) {
-                        Deferred.doneUnsafe(reattached, Effect.void)
-                        if (attachedThread === "thread-2") {
-                          disconnectOrb = () => socket.close()
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadSnapshot",
-                                threadId: HostedModel.ThreadId.make("thread-1"),
-                                threadVersion: HostedModel.ThreadVersion.make("99"),
-                                cursor: HostedModel.ThreadEventCursor.make("2"),
-                                snapshot: lateAuthorizationSnapshot,
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadEvent",
-                                event: {
-                                  ...threadEvent,
-                                  sequence: HostedModel.Sequence.make("3"),
-                                  cursor: HostedModel.ThreadEventCursor.make("3"),
-                                  threadVersion: HostedModel.ThreadVersion.make("99"),
-                                },
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "ThreadEvent",
-                                event: {
-                                  threadId: HostedModel.ThreadId.make("thread-1"),
-                                  sequence: HostedModel.Sequence.make("4"),
-                                  cursor: HostedModel.ThreadEventCursor.make("4"),
-                                  threadVersion: HostedModel.ThreadVersion.make("99"),
-                                  event: {
-                                    _tag: "ThreadViewSnapshot",
-                                    snapshot: {
-                                      ...lateAuthorizationSnapshot.view,
-                                      thread: { ...lateAuthorizationSnapshot.view.thread, updatedAt: 100 },
-                                    },
-                                  },
-                                  createdAt: HostedModel.Timestamp.make("2026-08-21T00:00:00.000Z"),
-                                },
-                              },
-                            }),
-                          )
-                          socket.send(
-                            encode({
-                              protocolVersion: 1,
-                              payload: {
-                                _tag: "PresenceSnapshot",
-                                threadId: HostedModel.ThreadId.make("thread-1"),
-                                participants: [
-                                  {
-                                    actor: {
-                                      _tag: "PersonalActor",
-                                      owner: {
-                                        _tag: "PersonalOwner",
-                                        userId: HostedModel.BetterAuthUserId.make("late-user"),
-                                      },
-                                      userId: HostedModel.BetterAuthUserId.make("late-user"),
-                                      clientId: HostedModel.ClientId.make("late-client"),
-                                      deviceId: HostedModel.DeviceId.make("late-device"),
-                                    },
-                                    status: "controlling",
-                                  },
-                                ],
-                              },
-                            }),
-                          )
-                          sendOrbSetup = () =>
-                            socket.send(
-                              encode({
-                                protocolVersion: 1,
-                                payload: {
-                                  _tag: "WorkspaceStatus",
-                                  threadId: HostedModel.ThreadId.make("thread-2"),
-                                  status: { state: "setup" },
-                                },
-                              }),
-                            )
-                        }
-                      } else if (secondControllerExpected) Deferred.doneUnsafe(secondAttached, Effect.void)
-                      return
-                    }
-                    if (message.command._tag === "AcknowledgeCursor") {
-                      acknowledgements.push({
-                        connection: sockets.get(socket)!,
-                        threadId: String(message.command.threadId),
-                        cursor: String(message.command.cursor),
-                      })
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "CommandAccepted",
-                            requestId: message.requestId,
-                            threadId: message.command.threadId,
-                            threadVersion: HostedModel.ThreadVersion.make(version),
-                            cursor: HostedModel.ThreadEventCursor.make(cursor),
-                            result: { _tag: "Applied" },
-                          },
-                        }),
-                      )
-                      if (sockets.get(socket) === 1 && message.command.cursor === "1") socket.close()
-                      return
-                    }
-                    if (message.command._tag === "SubmitPrompt") {
-                      const commandThread = String(message.command.threadId)
-                      mutationThreads.push(commandThread)
-                      mutationVersions.push(String(message.command.expectedThreadVersion))
-                      version = "2"
-                      const mismatch = message.command.commandId === "submission-mismatch" && !mismatchSent
-                      if (mismatch) mismatchSent = true
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "CommandAccepted",
-                            requestId: message.requestId,
-                            commandId: message.command.commandId,
-                            threadId: HostedModel.ThreadId.make(mismatch ? "thread-wrong" : message.command.threadId),
-                            threadVersion: HostedModel.ThreadVersion.make("2"),
-                            cursor: HostedModel.ThreadEventCursor.make(cursor),
-                            result: { _tag: "Applied" },
-                          },
-                        }),
-                      )
-                      if (mismatch) return
-                      if (commandThread === "thread-1") {
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "ThreadSnapshot",
-                              threadId: HostedModel.ThreadId.make("thread-1"),
-                              threadVersion: HostedModel.ThreadVersion.make("2"),
-                              cursor: HostedModel.ThreadEventCursor.make(cursor),
-                              snapshot: snapshot(2),
-                            },
-                          }),
-                        )
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "ThreadSnapshot",
-                              threadId: HostedModel.ThreadId.make("thread-1"),
-                              threadVersion: HostedModel.ThreadVersion.make("2"),
-                              cursor: HostedModel.ThreadEventCursor.make(cursor),
-                              snapshot: authorizationSnapshot("pending", false),
-                            },
-                          }),
-                        )
-                        socket.send(
-                          encode({
-                            protocolVersion: 1,
-                            payload: {
-                              _tag: "ThreadSnapshot",
-                              threadId: HostedModel.ThreadId.make("thread-1"),
-                              threadVersion: HostedModel.ThreadVersion.make("2"),
-                              cursor: HostedModel.ThreadEventCursor.make(cursor),
-                              snapshot: authorizationSnapshot("pending", true),
-                            },
-                          }),
-                        )
-                      }
-                      return
-                    }
-                    if (message.command._tag === "Approve") {
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "CommandAccepted",
-                            requestId: message.requestId,
-                            commandId: message.command.commandId,
-                            threadId: message.command.threadId,
-                            threadVersion: HostedModel.ThreadVersion.make("2"),
-                            cursor: HostedModel.ThreadEventCursor.make(cursor),
-                            result: { _tag: "Applied" },
-                          },
-                        }),
-                      )
-                      socket.send(
-                        encode({
-                          protocolVersion: 1,
-                          payload: {
-                            _tag: "ThreadSnapshot",
-                            threadId: message.command.threadId,
-                            threadVersion: HostedModel.ThreadVersion.make("2"),
-                            cursor: HostedModel.ThreadEventCursor.make(cursor),
-                            snapshot: authorizationSnapshot("approved", false),
-                          },
-                        }),
-                      )
-                    }
-                  }),
-                {
-                  onOpen: Effect.sync(() => {
-                    opened += 1
-                    sockets.set(socket, opened)
-                  }),
-                },
-              )
-              .pipe(
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    if (sockets.get(socket) === 1) Deferred.doneUnsafe(firstClosed, Effect.void)
-                  }),
-                ),
-              )
-            return HttpServerResponse.empty()
-          }),
-        )
-        const layer = Layer.mergeAll(
-          BunCrypto.layer,
-          BunSocket.layerWebSocketConstructor,
-          Layer.succeed(
-            ProfileStore,
-            ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
-          ),
-          Layer.succeed(
-            CredentialStore,
-            CredentialStore.of({
-              load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
-              save: () => Effect.void,
-              remove: () => Effect.succeed(true),
-              serialized: (effect) => effect,
-            }),
-          ),
-          Layer.succeed(
-            Http,
-            Http.of({
-              ...unusedHttp,
-              issueThreadTicket: () =>
-                Effect.succeed({
-                  ticket: `ticket-${opened + 1}`,
-                  expiresAt: HostedModel.Timestamp.make("2026-08-21T01:00:00.000Z"),
-                  websocketUrl: `ws://127.0.0.1:${server.address._tag === "TcpAddress" ? server.address.port : 0}`,
-                  protocol: "rika.thread.v1",
-                }),
-            }),
-          ),
-        )
-        const context = yield* Layer.build(layer)
-        const first = yield* makeHostedInteractiveSession({
-          profile,
-          threadId: "thread-1",
-          createThread: () => Effect.succeed("thread-2"),
-          setRemoteThreadCreation: () => Effect.void,
-        }).pipe(Effect.provide(context))
-        const firstEvents: Array<string> = []
-        const firstSnapshotUpdates: Array<string> = []
-        const states: Array<(typeof first.connection)["initialState"]> = []
-        yield* first.connection.stateChanges.pipe(
-          Stream.runForEach((state) =>
-            Effect.sync(() => {
-              states.push(state)
-              if (state.activity === "workspace-setup") Deferred.doneUnsafe(setupStatus, Effect.void)
-              if (state.target === "orb") Deferred.doneUnsafe(orbTarget, Effect.void)
-              if (state.target === "orb" && state.activity === "workspace-setup")
-                Deferred.doneUnsafe(orbSetup, Effect.void)
-              if (state.activity === "approval-required") {
-                approvalObserved = true
-                Deferred.doneUnsafe(approvalRequired, Effect.void)
-              } else if (approvalObserved) Deferred.doneUnsafe(approvalCleared, Effect.void)
-              if (finalRunnerExpected && state.target === "runner" && state.activity === "workspace-setup")
-                Deferred.doneUnsafe(runnerSetup, Effect.void)
-              if (orbReconnectExpected && state.target === "orb" && state.connectivity === "reconnecting") {
-                orbReconnectObserved = true
-                Deferred.doneUnsafe(orbReconnecting, Effect.void)
-              }
-              if (orbReconnectObserved && state.target === "orb" && state.connectivity === "connected")
-                Deferred.doneUnsafe(orbReconnected, Effect.void)
-              if (failureReconnectExpected && state.target === "orb" && state.connectivity === "reconnecting") {
-                Deferred.doneUnsafe(failureReconnecting, Effect.void)
-              }
-              if (failureReplacementObserved && state.target === "orb" && state.connectivity === "connected")
-                Deferred.doneUnsafe(failureReconnected, Effect.void)
-              if (defectRecoveryExpected && state.target === "orb" && state.connectivity === "connected")
-                Deferred.doneUnsafe(defectConnected, Effect.void)
-              if (queuedRecoveryExpected && state.target === "orb" && state.activity === "workspace-resuming")
-                Deferred.doneUnsafe(queuedRecoveryStatusObserved, Effect.void)
-              if (queuedRecoveryExpected && state.connectivity === "connected")
-                Deferred.doneUnsafe(queuedRecoveryConnected, Effect.void)
-            }),
-          ),
-          Effect.forkScoped,
-        )
-        const firstFiber = yield* first.session
-          .events((event) => {
-            firstEvents.push(event._tag)
-            if (event._tag === "ThreadViewSnapshot") {
-              if (defectDispatchExpected && String(event.snapshot.thread.id) === "thread-defect") {
-                defectDispatchExpected = false
-                defectObservations.push({
-                  eventThread: String(event.snapshot.thread.id),
-                  currentThread: first.session.currentView()?.thread.id,
-                  checkpoint: first.session.projectionCheckpoint("turn-defect"),
-                  target: states.at(-1)!.target,
-                  participants: states.at(-1)!.participants,
-                })
-                Deferred.doneUnsafe(defectThrown, Effect.void)
-                throw new Error("attachment dispatch defect")
-              }
-              firstSnapshotUpdates.push(`${event.snapshot.thread.id}:${event.snapshot.thread.updatedAt}`)
-              if (event.snapshot.thread.id === "thread-defect" && event.snapshot.thread.updatedAt === 2)
-                Deferred.doneUnsafe(defectReplacementPublished, Effect.void)
-              if (event.snapshot.thread.id === "thread-1" && event.snapshot.thread.updatedAt === 3)
-                Deferred.doneUnsafe(submittedSnapshot, Effect.void)
-            }
-            if (event._tag === "ExecutionControlled") Deferred.doneUnsafe(firstEvent, Effect.void)
-            if (event._tag === "ThreadTitled") Deferred.doneUnsafe(thread3Event, Effect.void)
-          })
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(setupStatus)
-        yield* Deferred.await(firstClosed)
-        /**
-         * The reconnect backoff runs on the TestClock, but the timer is scheduled when the close
-         * event lands, so one blind adjust can fire before the timer exists and starve it forever.
-         * Keep adjusting until the reattach lands.
-         */
-        const pumpReconnect = (done: Deferred.Deferred<void>) =>
-          Effect.gen(function* () {
-            for (let attempt = 0; attempt < 200 && !(yield* Deferred.isDone(done)); attempt += 1) {
-              yield* TestClock.adjust("50 millis")
-              yield* Effect.yieldNow
-            }
-            return yield* Deferred.await(done)
-          })
-        yield* pumpReconnect(reattached)
-        yield* first.session.selectThread("thread-1")
-        const unchangedRenderCount = firstSnapshotUpdates.length
-        const unchangedStateCount = states.length
-        const refreshCount = attachmentLog.length
-        for (let poll = 0; poll < 3; poll += 1) {
-          yield* TestClock.adjust("500 millis")
-          yield* Effect.yieldNow
-        }
-        expect(attachmentLog.length).toBeGreaterThan(refreshCount)
-        expect(firstSnapshotUpdates).toHaveLength(unchangedRenderCount)
-        expect(states.slice(unchangedStateCount)).toEqual([])
-        yield* first.session.submit("hello", undefined, undefined, undefined, "submission-1")
-        yield* Deferred.await(submittedSnapshot)
-        yield* Deferred.await(approvalRequired)
-        expect(first.session.currentView()).toMatchObject({
-          revision: 7,
-          usage: { state: { costNanoUsd: 42 }, contextCapacity: { contextWindow: 128_000 } },
-          turns: [
-            {
-              projectionRevision: 4,
-              pendingSteering: [{ text: "keep the exact API" }],
-              units: [{ content: { block: { _tag: "AuthorizationCard", status: "pending" } } }],
-            },
-          ],
-        })
-        expect(first.session.projectionCheckpoint("turn-authorization")).toEqual(authorizationCheckpoint)
-        yield* first.session.approveAuthorization(
-          TurnRecord.TurnId.make("turn-authorization"),
-          "authorization-1",
-          authorizationCheckpoint,
-        )
-        yield* Deferred.await(approvalCleared)
-        expect(first.session.projectionCheckpoint("turn-authorization")).toBeUndefined()
-        expect(first.session.currentView()).toMatchObject({
-          revision: 8,
-          turns: [{ units: [{ content: { block: { _tag: "AuthorizationCard", status: "approved" } } }] }],
-        })
-        yield* first.session.newOrbThread!
-        yield* Effect.sync(() => sendOrbSetup!())
-        yield* Deferred.await(orbTarget)
-        yield* Deferred.await(orbSetup)
-        expect(states.at(-1)).toMatchObject({ target: "orb", activity: "workspace-setup", participants: 0 })
-        expect(first.session.currentView()?.thread.id).toBe("thread-2")
-        expect(first.session.projectionCheckpoint("turn-authorization")).toBeUndefined()
-        expect(firstSnapshotUpdates).not.toContain("thread-1:99")
-        expect(firstSnapshotUpdates).not.toContain("thread-1:100")
-        orbReconnectExpected = true
-        yield* Effect.sync(() => disconnectOrb!())
-        yield* pumpReconnect(orbReconnecting)
-        yield* pumpReconnect(orbReconnected)
-        const gatedSelection = yield* first.session.selectThread("thread-gated").pipe(Effect.forkChild)
-        yield* Deferred.await(gatedAttached)
-        const retainedView = first.session.currentView()
-        const retainedCheckpoint = first.session.projectionCheckpoint("turn-authorization")
-        const retainedState = states.at(-1)
-        const retainedStateCount = states.length
-        const retainedRenderCount = firstSnapshotUpdates.length
-        const retainedEventCount = firstEvents.length
-        const retainedAckCount = acknowledgements.length
-        yield* Effect.sync(() => sendLateRetainedFrames!())
-        yield* Effect.yieldNow
-        expect(first.session.currentView()).toEqual(retainedView)
-        expect(first.session.projectionCheckpoint("turn-authorization")).toEqual(retainedCheckpoint)
-        expect(states).toHaveLength(retainedStateCount)
-        expect(states.at(-1)).toEqual(retainedState)
-        expect(firstSnapshotUpdates).toHaveLength(retainedRenderCount)
-        expect(firstEvents).toHaveLength(retainedEventCount)
-        expect(acknowledgements).toHaveLength(retainedAckCount)
-        yield* Effect.sync(() => releaseGated!())
-        yield* Fiber.join(gatedSelection)
-        expect(first.session.currentView()?.thread.id).toBe("thread-gated")
-        expect(states.at(-1)).toMatchObject({ target: "runner", participants: 0 })
-        for (
-          let attempt = 0;
-          attempt < 20 &&
-          !acknowledgements.some(
-            (acknowledgement) => acknowledgement.threadId === "thread-gated" && acknowledgement.cursor === "6",
-          );
-          attempt += 1
-        )
-          yield* Effect.yieldNow
-        const refreshRenderCount = firstSnapshotUpdates.length
-        const refreshAckCount = acknowledgements.length
-        const refreshEventCount = firstEvents.filter((event) => event === "ThreadTitled").length
-        yield* TestClock.adjust("500 millis")
-        yield* Deferred.await(staleRefreshAttached)
-        yield* Effect.sync(() => sendRefreshEvent!())
-        for (
-          let attempt = 0;
-          attempt < 20 &&
-          !acknowledgements
-            .slice(refreshAckCount)
-            .some((acknowledgement) => acknowledgement.threadId === "thread-gated" && acknowledgement.cursor === "7");
-          attempt += 1
-        )
-          yield* Effect.yieldNow
-        expect(acknowledgements.slice(refreshAckCount)).toEqual([
-          expect.objectContaining({ threadId: "thread-gated", cursor: "7" }),
-        ])
-        yield* Effect.sync(() => releaseStaleRefresh!())
-        yield* pumpReconnect(staleRefreshRecovered)
-        expect(first.session.currentView()?.thread.id).toBe("thread-gated")
-        expect(firstSnapshotUpdates).toHaveLength(refreshRenderCount)
-        expect(firstEvents.filter((event) => event === "ThreadTitled")).toHaveLength(refreshEventCount + 1)
-        expect(acknowledgements.slice(refreshAckCount)).toEqual([
-          expect.objectContaining({ threadId: "thread-gated", cursor: "7" }),
-        ])
-        thread2RestoreExpected = true
-        const restoreThread2 = yield* first.session.selectThread("thread-2").pipe(Effect.forkChild)
-        yield* pumpReconnect(thread2Restored)
-        yield* Fiber.join(restoreThread2)
-        thread2RestoreExpected = false
-        const supersededAttachmentStart = attachmentLog.length
-        const supersededSelection = yield* first.session.selectThread("thread-superseded").pipe(Effect.forkChild)
-        yield* Deferred.await(supersededAttached)
-        const newerSelection = yield* first.session.selectThread("thread-newer").pipe(Effect.forkChild)
-        yield* Effect.yieldNow
-        yield* Effect.sync(() => releaseSuperseded!())
-        expect(yield* Fiber.await(supersededSelection)).toMatchObject({ _tag: "Failure" })
-        yield* pumpReconnect(newerAttached)
-        yield* Fiber.join(newerSelection)
-        const supersededAttachments = attachmentLog.slice(supersededAttachmentStart)
-        const supersededSocket = supersededAttachments.find((entry) => entry.threadId === "thread-superseded")
-        const newerReplacement = supersededAttachments.find(
-          (entry) => entry.connection !== supersededSocket?.connection,
-        )
-        expect(newerReplacement).toMatchObject({ threadId: "thread-2" })
-        expect(
-          supersededAttachments.some(
-            (entry) => entry.connection === newerReplacement?.connection && entry.threadId === "thread-newer",
-          ),
-        ).toBe(true)
-        yield* first.session.selectThread("thread-2")
-        const queuedAttachmentStart = attachmentLog.length
-        const queuedSelection = yield* first.session.selectThread("thread-queued").pipe(Effect.forkChild)
-        yield* Deferred.await(queuedAttached)
-        const interruptedQueued = yield* first.session.selectThread("thread-interrupted-queued").pipe(Effect.forkChild)
-        yield* Effect.yieldNow
-        yield* Fiber.interrupt(interruptedQueued)
-        queuedRecoveryExpected = true
-        yield* Effect.sync(() => releaseQueued!())
-        expect(yield* Fiber.await(queuedSelection)).toMatchObject({ _tag: "Failure" })
-        yield* pumpReconnect(queuedRecovered)
-        yield* Effect.sync(() => sendQueuedRecoveryStatus!())
-        yield* Deferred.await(queuedRecoveryStatusObserved)
-        yield* Deferred.await(queuedRecoveryConnected)
-        expect(attachmentLog.slice(queuedAttachmentStart).at(-1)).toMatchObject({ threadId: "thread-2" })
-        expect(
-          attachmentLog.slice(queuedAttachmentStart).some((entry) => entry.threadId === "thread-interrupted-queued"),
-        ).toBe(false)
-        expect(
-          acknowledgements.some((acknowledgement) => acknowledgement.threadId === "thread-interrupted-queued"),
-        ).toBe(false)
-        expect(first.session.currentView()?.thread.id).toBe("thread-2")
-        expect(states.at(-1)).toMatchObject({ target: "orb", participants: 0, activity: "workspace-resuming" })
-        queuedRecoveryExpected = false
-        failureReconnectExpected = true
-        const failingSelection = yield* first.session
-          .selectThread("thread-failing")
-          .pipe(Effect.result, Effect.forkChild)
-        yield* pumpReconnect(failingAttached)
-        const failingSelectionResult = yield* Fiber.join(failingSelection)
-        expect(failingSelectionResult).toMatchObject({ _tag: "Failure" })
-        yield* pumpReconnect(failureReconnecting)
-        yield* pumpReconnect(failureReconnected)
-        expect(states.at(-1)).toMatchObject({ connectivity: "connected", target: "orb", participants: 0 })
-        malformedRecoveryExpected = true
-        const malformedSelection = yield* first.session
-          .selectThread("thread-malformed")
-          .pipe(Effect.result, Effect.forkChild)
-        yield* pumpReconnect(malformedAttached)
-        expect(yield* Fiber.join(malformedSelection)).toMatchObject({ _tag: "Failure" })
-        yield* pumpReconnect(malformedRecovered)
-        malformedRecoveryExpected = false
-        expect(firstSnapshotUpdates).not.toContain("thread-malformed:10")
-        const initialDefectSelection = yield* first.session.selectThread("thread-defect").pipe(Effect.forkChild)
-        yield* pumpReconnect(defectInitialAttached)
-        yield* Fiber.join(initialDefectSelection)
-        for (
-          let attempt = 0;
-          attempt < 20 &&
-          !acknowledgements.some(
-            (acknowledgement) => acknowledgement.threadId === "thread-defect" && acknowledgement.cursor === "1",
-          );
-          attempt += 1
-        )
-          yield* Effect.yieldNow
-        defectRecoveryExpected = true
-        defectDispatchExpected = true
-        const defectAckStart = acknowledgements.length
-        const defectSelection = yield* first.session.selectThread("thread-defect").pipe(Effect.exit, Effect.forkChild)
-        yield* Deferred.await(defectThrown)
-        expect(yield* Fiber.join(defectSelection)).toMatchObject({ _tag: "Failure" })
-        expect(acknowledgements.slice(defectAckStart)).not.toContainEqual(
-          expect.objectContaining({ threadId: "thread-defect", cursor: "2" }),
-        )
-        yield* pumpReconnect(defectRecovered)
-        yield* Deferred.await(defectReplacementPublished)
-        yield* pumpReconnect(defectConnected)
-        for (let attempt = 0; attempt < 20 && acknowledgements.length === defectAckStart; attempt += 1)
-          yield* Effect.yieldNow
-        defectRecoveryExpected = false
-        expect(defectObservations).toEqual([
-          {
-            eventThread: "thread-defect",
-            currentThread: "thread-defect",
-            checkpoint: authorizationCheckpoint,
-            target: "orb",
-            participants: 1,
-          },
-        ])
-        expect(first.session.currentView()?.thread.id).toBe("thread-defect")
-        expect(firstSnapshotUpdates.filter((update) => update === "thread-defect:2")).toHaveLength(1)
-        expect(acknowledgements.slice(defectAckStart)).toEqual([
-          expect.objectContaining({ threadId: "thread-defect", cursor: "2" }),
-        ])
-        yield* first.session.submit("defect mutation", undefined, undefined, undefined, "submission-defect")
-        expect(mutationThreads.at(-1)).toBe("thread-defect")
-        expect(mutationVersions.at(-1)).toBe("2")
-        const defectRenderCount = firstSnapshotUpdates.length
-        const defectStateCount = states.length
-        const defectAckCount = acknowledgements.length
-        yield* TestClock.adjust("500 millis")
-        yield* Effect.yieldNow
-        expect(firstSnapshotUpdates).toHaveLength(defectRenderCount)
-        expect(states).toHaveLength(defectStateCount)
-        expect(acknowledgements).toHaveLength(defectAckCount)
-        postDefectThread2RestoreExpected = true
-        const postDefectSelection = yield* first.session.selectThread("thread-2").pipe(Effect.forkChild)
-        yield* pumpReconnect(postDefectThread2Restored)
-        yield* Fiber.join(postDefectSelection)
-        postDefectThread2RestoreExpected = false
-        const interruptedAttachmentStart = attachmentLog.length
-        const slowSelection = yield* first.session.selectThread("thread-slow").pipe(Effect.forkChild)
-        yield* Deferred.await(slowAttached)
-        yield* Fiber.interrupt(slowSelection)
-        const currentSelection = yield* first.session.selectThread("thread-3").pipe(Effect.forkChild)
-        yield* pumpReconnect(thread3Attached)
-        yield* Fiber.join(currentSelection)
-        yield* Deferred.await(thread3Event)
-        const interruptedAttachments = attachmentLog.slice(interruptedAttachmentStart)
-        const interruptedSocket = interruptedAttachments.find((entry) => entry.threadId === "thread-slow")
-        const replacement = interruptedAttachments.find((entry) => entry.connection !== interruptedSocket?.connection)
-        expect(interruptedSocket).toBeDefined()
-        expect(replacement).toMatchObject({ threadId: "thread-2" })
-        expect(
-          interruptedAttachments.some(
-            (entry) => entry.connection === replacement?.connection && entry.threadId === "thread-3",
-          ),
-        ).toBe(true)
-        finalRunnerExpected = true
-        yield* Effect.sync(() => sendSlowFrames!())
-        yield* Effect.sync(() => sendThread3Setup!())
-        yield* Deferred.await(runnerSetup)
-        yield* first.session.reopenThread
-        yield* pumpReconnect(thread3Replayed)
-        expect(yield* Effect.result(first.session.readQueue("thread-1"))).toMatchObject({ _tag: "Failure" })
-        yield* first.session.submit("still on three", undefined, undefined, undefined, "submission-2")
-        const openedBeforeMismatch = opened
-        const mismatched = yield* first.session
-          .submit("quarantine mismatch", undefined, undefined, undefined, "submission-mismatch")
-          .pipe(Effect.forkChild)
-        yield* pumpReconnect(mismatchReattached)
-        yield* Fiber.join(mismatched)
-        expect(opened).toBeGreaterThan(openedBeforeMismatch)
-        secondControllerExpected = true
-        const second = yield* makeHostedInteractiveSession({
-          profile,
-          threadId: "thread-1",
-          createThread: () => Effect.succeed("thread-2"),
-          setRemoteThreadCreation: () => Effect.void,
-        }).pipe(Effect.provide(context))
-        const secondEvents: Array<string> = []
-        const secondFiber = yield* second.session
-          .events((event) => {
-            secondEvents.push(event._tag)
-            if (event._tag === "ThreadViewSnapshot") Deferred.doneUnsafe(secondSnapshot, Effect.void)
-          })
-          .pipe(Effect.forkScoped)
-        yield* Deferred.await(secondAttached)
-        yield* Deferred.await(secondSnapshot)
-        yield* first.session.quit
-        yield* second.session.quit
-        yield* Fiber.join(firstFiber)
-        yield* Fiber.join(secondFiber)
-        expect(afterCursors.slice(0, 2)).toEqual(["0", "1"])
-        expect(afterCursors[attachmentLog.findIndex((entry) => entry.threadId === "thread-2")]).toBe("0")
-        expect(firstEvents.filter((tag) => tag === "ExecutionControlled")).toEqual([])
-        expect(firstEvents.filter((tag) => tag === "ThreadTitled")).toEqual(["ThreadTitled", "ThreadTitled"])
-        expect(acknowledgements.filter((acknowledgement) => acknowledgement.connection === 1)).toEqual([
-          { connection: 1, threadId: "thread-1", cursor: "1" },
-        ])
-        expect(
-          acknowledgements
-            .filter((acknowledgement) => acknowledgement.threadId === "thread-3")
-            .map((acknowledgement) => acknowledgement.cursor)
-            .slice(0, 2),
-        ).toEqual(["1", "2"])
-        expect(firstSnapshotUpdates.filter((update) => update === "thread-1:2")).toHaveLength(1)
-        expect(firstSnapshotUpdates.filter((update) => update === "thread-1:3")).toHaveLength(1)
-        expect(firstSnapshotUpdates).not.toContain("thread-1:99")
-        expect(firstSnapshotUpdates).not.toContain("thread-superseded:8")
-        expect(firstSnapshotUpdates).not.toContain("thread-queued:9")
-        expect(states).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ connectivity: "connecting", target: "resolving", activity: "authenticating" }),
-            expect.objectContaining({ target: "runner", participants: 1 }),
-            expect.objectContaining({ connectivity: "connected", target: "runner", activity: "workspace-setup" }),
-            expect.objectContaining({ connectivity: "reconnecting", target: "runner" }),
-          ]),
-        )
-        const runnerIndex = states.findIndex((state) => state.target === "runner")
-        const resolvingIndex = states.findIndex((state, index) => index > runnerIndex && state.target === "resolving")
-        const orbIndex = states.findIndex((state, index) => index > resolvingIndex && state.target === "orb")
-        expect(runnerIndex).toBeGreaterThanOrEqual(0)
-        expect(resolvingIndex).toBeGreaterThan(runnerIndex)
-        expect(orbIndex).toBeGreaterThan(resolvingIndex)
-        expect(states.at(-1)).toMatchObject({ target: "runner", participants: 0 })
-        expect(states.filter((state) => state.activity === "workspace-resuming")).toHaveLength(1)
-        expect(secondEvents).toContain("ThreadViewSnapshot")
-        expect(commands.filter((command) => command._tag === "SubmitPrompt")).toHaveLength(5)
-        expect(commands.filter((command) => command._tag === "Approve")).toEqual([
-          expect.objectContaining({
-            threadId: "thread-1",
-            turnId: "turn-authorization",
-            authorizationId: "authorization-1",
-            checkpoint: authorizationCheckpoint,
-          }),
-        ])
-        expect(mutationThreads).toEqual(["thread-1", "thread-defect", "thread-3", "thread-3", "thread-3"])
-        for (const rejected of [
-          { threadId: "thread-1", cursor: "2" },
-          { threadId: "thread-1", cursor: "3" },
-          { threadId: "thread-1", cursor: "4" },
-          { threadId: "thread-slow", cursor: "7" },
-          { threadId: "thread-superseded", cursor: "8" },
-          { threadId: "thread-queued", cursor: "9" },
-          { threadId: "thread-malformed", cursor: "10" },
-        ])
-          expect(acknowledgements).not.toContainEqual(expect.objectContaining(rejected))
-        expect(commands.some((command) => command._tag === "Cancel")).toBe(false)
+const makeHarness = (receive: (socket: FakeWebSocket, message: Message, harness: Harness) => void): Harness => {
+  const sockets: Array<FakeWebSocket> = []
+  const messages: Array<Message> = []
+  let harness: Harness | undefined
+  const layer = Layer.mergeAll(
+    BunCrypto.layer,
+    Layer.succeed(Socket.WebSocketConstructor, () => {
+      const currentHarness = harness
+      if (currentHarness === undefined) throw new Error("Harness is not initialized")
+      const socket = new FakeWebSocket((current, message) => {
+        messages.push(message)
+        receive(current, message, currentHarness)
+      })
+      sockets.push(socket)
+      return socket
+    }),
+    Layer.succeed(
+      ProfileStore,
+      ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+    ),
+    Layer.succeed(
+      CredentialStore,
+      CredentialStore.of({
+        load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+        save: () => Effect.void,
+        remove: () => Effect.succeed(true),
+        serialized: (effect) => effect,
       }),
-    ).pipe(
-      Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
-      Effect.provideService(Metric.MetricRegistry, new Map()),
-    )
-    const completions = observations.filter((record) => String(record.message).startsWith("hosted."))
-    const count = (message: string) => completions.filter((record) => record.message === message).length
-    expect({
-      attachSuccess: count("hosted.attach.success"),
-      attachFailure: count("hosted.attach.failure"),
-      targetResolutionSuccess: count("hosted.target_resolution.success"),
-      targetResolutionFailure: count("hosted.target_resolution.failure"),
-    }).toEqual({
-      attachSuccess: 29,
-      attachFailure: 7,
-      targetResolutionSuccess: 10,
-      targetResolutionFailure: 4,
-    })
-    const threadMilestones = completions.filter(
-      (record) =>
-        record.message === "hosted.attach.success" ||
-        record.message === "hosted.attach.failure" ||
-        record.message === "hosted.target_resolution.success" ||
-        record.message === "hosted.target_resolution.failure",
-    )
-    const milestoneThreadIds = threadMilestones.map((record) => record.annotations["rika.thread.id"])
-    expect(milestoneThreadIds.every(Schema.is(Schema.String))).toBe(true)
-    expect(milestoneThreadIds).toEqual(
-      expect.arrayContaining(["thread-1", "thread-2", "thread-3", "thread-queued", "thread-malformed"]),
-    )
-    const selectedThreadIds = new Set([
-      "thread-1",
-      "thread-2",
-      "thread-3",
-      "thread-gated",
-      "thread-superseded",
-      "thread-newer",
-      "thread-queued",
-      "thread-failing",
-      "thread-malformed",
-      "thread-defect",
-    ])
-    for (const threadId of milestoneThreadIds) expect(selectedThreadIds.has(String(threadId))).toBe(true)
-    const rendered = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.Unknown)))(completions)
-    expect(rendered).toContain('"rika.thread.id"')
-    for (const forbidden of [
-      "hello",
-      "defect mutation",
-      "still on three",
-      "quarantine mismatch",
-      "payload",
-      "ownerId",
-      "defect-user",
-      "defect-client",
-      "defect-device",
-    ])
-      expect(rendered).not.toContain(forbidden)
-  }),
+    ),
+    Layer.succeed(
+      Http,
+      Http.of({
+        ...unusedHttp,
+        issueThreadTicket: () =>
+          Effect.succeed({
+            ticket: "ticket",
+            expiresAt: Timestamp.make("2026-08-25T01:00:00.000Z"),
+            websocketUrl: "ws://fake",
+            protocol: "rika.thread.v1",
+          }),
+      }),
+    ),
+  )
+  harness = {
+    sockets,
+    messages,
+    layer,
+  }
+  return harness
+}
+
+const eventually = (predicate: () => boolean): Effect.Effect<void> =>
+  predicate() ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(Effect.suspend(() => eventually(predicate))))
+
+const reconnect = (harness: Harness) =>
+  Effect.gen(function* () {
+    yield* TestClock.adjust("1 second")
+    yield* eventually(() => harness.sockets.length === 2)
+    expect(harness.sockets).toHaveLength(2)
+  })
+
+const runSession = Effect.fn("test.runSession")(function* (
+  harness: Harness,
+  onEvent: (event: InteractiveEvent) => void = () => undefined,
+) {
+  const context = yield* Layer.build(harness.layer)
+  const hosted = yield* makeHostedInteractiveSession({
+    profile,
+    threadId: "thread-1",
+    createThread: () => Effect.die("unused"),
+    setRemoteThreadCreation: () => Effect.void,
+  }).pipe(Effect.provide(context))
+  const states: Array<{ target: string; activity?: string; connectivity: string }> = []
+  const stateFiber = yield* Stream.runForEach(hosted.connection.stateChanges, (state) =>
+    Effect.sync(() => states.push(state)),
+  ).pipe(Effect.forkScoped)
+  const eventFiber = yield* hosted.session.events(onEvent).pipe(Effect.forkScoped)
+  yield* eventually(() => hosted.connection.initialState !== undefined && hosted.session.currentView() !== undefined)
+  return {
+    ...hosted,
+    states,
+    stateFiber,
+    eventFiber,
+  }
+})
+
+const defaultReceive = (socket: FakeWebSocket, message: Message) => {
+  if (message.command._tag === "AttachThread")
+    socket.frame(attached(message, snapshot(String(message.command.threadId), 0)))
+}
+
+it.effect("does not poll AttachThread while an idle WebSocket remains connected", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness(defaultReceive)
+      const hosted = yield* runSession(harness)
+      expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
+      for (let advance = 0; advance < 4; advance += 1) yield* TestClock.adjust("500 millis")
+      expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("applies and acknowledges one unsolicited contiguous ThreadEvent exactly once", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const received: Array<string> = []
+      const harness = makeHarness(defaultReceive)
+      const hosted = yield* runSession(harness, (value) => received.push(value._tag))
+      const update = event("thread-1", "1")
+      harness.sockets[0]!.frame({ _tag: "ThreadEvent", event: update })
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 1)
+      harness.sockets[0]!.frame({ _tag: "ThreadEvent", event: update })
+      yield* eventually(() => harness.messages.some((message) => message.command._tag === "AcknowledgeCursor"))
+      expect(received.filter((tag) => tag === "ThreadViewSnapshot")).toHaveLength(2)
+      expect(hosted.session.currentView()?.thread.updatedAt).toBe(1)
+      expect(
+        harness.messages.filter(
+          (message) => message.command._tag === "AcknowledgeCursor" && String(message.command.cursor) === "1",
+        ),
+      ).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("reconnects after the delivered cursor without duplicating the projection", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const received: Array<string> = []
+      const harness = makeHarness((socket, message, state) => {
+        if (message.command._tag === "SubmitPrompt") {
+          const submissions = state.messages.filter((candidate) => candidate.command._tag === "SubmitPrompt")
+          if (submissions.length === 1) socket.close()
+          else
+            socket.frame({
+              _tag: "CommandAccepted",
+              requestId: message.requestId,
+              commandId: message.command.commandId,
+              threadId: message.command.threadId,
+              threadVersion: ThreadVersion.make("1"),
+              cursor: ThreadEventCursor.make("1"),
+              result: { _tag: "Applied" },
+            })
+          return
+        }
+        if (message.command._tag !== "AttachThread") return
+        const cursor = String(message.command.afterCursor)
+        socket.frame(attached(message, snapshot("thread-1", Number(cursor)), cursor))
+        if (state.sockets.length === 1) socket.frame({ _tag: "ThreadEvent", event: event("thread-1", "1") })
+      })
+      const hosted = yield* runSession(harness, (value) => received.push(value._tag))
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 1)
+      const submitted = yield* hosted.session
+        .submit("disconnect", undefined, undefined, undefined, "disconnect")
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      yield* reconnect(harness)
+      yield* Fiber.join(submitted)
+      yield* eventually(
+        () => harness.messages.filter((message) => message.command._tag === "AttachThread").length === 2,
+      )
+      const attaches = harness.messages.filter((message) => message.command._tag === "AttachThread")
+      expect(
+        attaches.map((message) => message.command._tag === "AttachThread" && String(message.command.afterCursor)),
+      ).toEqual(["0", "1"])
+      expect(received.filter((tag) => tag === "ThreadViewSnapshot")).toHaveLength(2)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("retains the newer Thread when a superseded selection receives late frames", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag !== "AttachThread") return
+        const threadId = String(message.command.threadId)
+        socket.frame(
+          attached(
+            message,
+            snapshot(threadId, threadId === "thread-new" ? 2 : 0),
+            threadId === "thread-new" ? "2" : "0",
+          ),
+        )
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.selectThread("thread-old")
+      yield* hosted.session.selectThread("thread-new")
+      harness.sockets.at(-1)!.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-old"),
+        threadVersion: ThreadVersion.make("9"),
+        cursor: ThreadEventCursor.make("9"),
+        snapshot: snapshot("thread-old", 9),
+      })
+      harness.sockets.at(-1)!.frame({ _tag: "ThreadEvent", event: event("thread-old", "9") })
+      yield* Effect.yieldNow
+      expect(String(hosted.session.currentView()?.thread.id)).toBe("thread-new")
+      expect(hosted.session.currentView()?.thread.updatedAt).toBe(2)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("maps Runner waiting snapshots to executor-waiting with or without migration workspace data", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let attachCount = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag !== "AttachThread") return
+        attachCount += 1
+        const workspace = attachCount === 1 ? undefined : ({ _tag: "RunnerWorkspace", state: "ready" } as const)
+        socket.frame(attached(message, waitingSnapshot("runner", workspace), String(attachCount)))
+      })
+      const hosted = yield* runSession(harness)
+      expect(hosted.states.at(-1)?.activity).toBe("executor-waiting")
+      yield* hosted.session.reopenThread
+      expect(hosted.states.at(-1)?.activity).toBe("executor-waiting")
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("consumes typed OrbWorkspace preparing and failed snapshots without legacy status frames", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let attachCount = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag !== "AttachThread") return
+        attachCount += 1
+        const state = attachCount === 1 ? "preparing" : "failed"
+        const workspace: HostedThreadSnapshot["workspace"] =
+          state === "failed"
+            ? { _tag: "OrbWorkspace", state, generation: "generation-1", message: "checkout failed" }
+            : { _tag: "OrbWorkspace", state, generation: "generation-1" }
+        socket.frame(attached(message, waitingSnapshot("orb", workspace), String(attachCount)))
+      })
+      const hosted = yield* runSession(harness)
+      expect(hosted.states.at(-1)?.activity).toBe("workspace-preparing")
+      yield* hosted.session.reopenThread
+      expect(hosted.states.at(-1)?.activity).toBe("workspace-failed")
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("resends the exact admitted mutation until its authoritative outcome is known", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let version = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", version), String(version)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        const submissions = harness.messages.filter((candidate) => candidate.command._tag === "SubmitPrompt")
+        if (submissions.length === 1) {
+          version = 1
+          socket.close()
+          return
+        }
+        socket.frame({
+          _tag: "CommandAccepted",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          threadVersion: ThreadVersion.make(String(version)),
+          cursor: ThreadEventCursor.make(String(version)),
+          result: { _tag: "Applied" },
+        })
+      })
+      const hosted = yield* runSession(harness)
+      const submitted = yield* hosted.session
+        .submit("first", undefined, [], undefined, "submission-1")
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      yield* reconnect(harness)
+      yield* Fiber.join(submitted)
+      const commands = harness.messages.filter((message) => message.command._tag === "SubmitPrompt")
+      expect(commands).toHaveLength(2)
+      expect(commands[0]!.command).toEqual(commands[1]!.command)
+      expect(commands[0]!.requestId).not.toBe(commands[1]!.requestId)
+      expect(commands[0]!.command).not.toHaveProperty("attachments")
+      expect(version).toBe(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("retries the exact mutation when the server reports a transient application failure", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        const submissions = harness.messages.filter((candidate) => candidate.command._tag === "SubmitPrompt")
+        socket.frame(
+          submissions.length === 1
+            ? {
+                _tag: "CommandRejected",
+                requestId: message.requestId,
+                commandId: message.command.commandId,
+                threadId: message.command.threadId,
+                reason: "unavailable",
+                currentThreadVersion: ThreadVersion.make("1"),
+                currentCursor: ThreadEventCursor.make("0"),
+                message: "application interrupted",
+                details: {},
+              }
+            : {
+                _tag: "CommandAccepted",
+                requestId: message.requestId,
+                commandId: message.command.commandId,
+                threadId: message.command.threadId,
+                threadVersion: ThreadVersion.make("1"),
+                cursor: ThreadEventCursor.make("0"),
+                result: { _tag: "PromptAdmitted", status: "queued" },
+              },
+        )
+      })
+      const hosted = yield* runSession(harness)
+      const submitted = yield* hosted.session
+        .submit("retry transient", undefined, [], undefined, "submission-transient")
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => hosted.states.at(-1)?.activity === "unknown-operation")
+      yield* TestClock.adjust("250 millis")
+      yield* Fiber.join(submitted)
+      const commands = harness.messages.filter((message) => message.command._tag === "SubmitPrompt")
+      expect(commands).toHaveLength(2)
+      expect(commands[0]!.command).toEqual(commands[1]!.command)
+      expect(commands[0]!.requestId).not.toBe(commands[1]!.requestId)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("targets the pending submission identity when cancellation happens before a Turn exists", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let pendingSubmit: Message | undefined
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt") {
+          pendingSubmit = message
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+          return
+        }
+        if (message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAccepted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+            cursor: ThreadEventCursor.make("0"),
+            result: { _tag: "Applied" },
+          })
+      })
+      const hosted = yield* runSession(harness)
+      const cancellationFiber = yield* hosted.session
+        .cancel({ submissionId: "submission-before-turn", threadId: "thread-1" })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      const submitted = yield* hosted.session
+        .submit("cancel before admission", undefined, [], undefined, "submission-before-turn")
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => pendingSubmit !== undefined)
+      yield* Fiber.join(cancellationFiber)
+      const cancellation = harness.messages.find((message) => message.command._tag === "Cancel")
+      if (pendingSubmit === undefined || pendingSubmit.command._tag !== "SubmitPrompt")
+        return yield* Effect.die("Submission was not captured")
+      const durableSubmitCommandId = pendingSubmit.command.commandId
+      expect(pendingSubmit.command).toMatchObject({
+        _tag: "SubmitPrompt",
+        submissionId: "submission-before-turn",
+      })
+      expect(durableSubmitCommandId).not.toBe("submission-before-turn")
+      expect(cancellation?.command).toMatchObject({
+        _tag: "Cancel",
+        target: { _tag: "Command", commandId: durableSubmitCommandId },
+      })
+      yield* Fiber.join(submitted)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("keeps pending submission cancellation scoped to its Thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let pendingSubmit: Message | undefined
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot(String(message.command.threadId), 0)))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt") {
+          pendingSubmit = message
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+          return
+        }
+        if (message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("2"),
+          })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.submit("pending on first Thread", undefined, [], undefined, "submission-first")
+      yield* hosted.session.selectThread("thread-2")
+      expect(
+        yield* Effect.result(hosted.session.cancel({ submissionId: "submission-first", threadId: "thread-1" })),
+      ).toMatchObject({ _tag: "Failure" })
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
+
+      yield* hosted.session.selectThread("thread-1")
+      yield* hosted.session.cancel({ submissionId: "submission-first", threadId: "thread-1" })
+      const cancellation = harness.messages.find((message) => message.command._tag === "Cancel")
+      if (pendingSubmit === undefined || pendingSubmit.command._tag !== "SubmitPrompt")
+        return yield* Effect.die("Submission was not captured")
+      expect(cancellation?.command).toMatchObject({
+        _tag: "Cancel",
+        threadId: "thread-1",
+        target: { _tag: "Command", commandId: pendingSubmit.command.commandId },
+      })
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("rejects a mutation response with another durable command identity", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: CommandId.make("another-command"),
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+      })
+      const hosted = yield* runSession(harness)
+      const result = yield* Effect.result(
+        hosted.session.submit("wrong response", undefined, [], undefined, "submission-wrong-response"),
+      )
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { message: expect.stringContaining("response command identity") },
+      })
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("keeps UI submission identity separate from durable command identity across reopened sessions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const durableIds: Array<string> = []
+      const run = Effect.fn("HostedInteractiveSessionTest.reopen")(function* () {
+        const harness = makeHarness((socket, message) => {
+          if (message.command._tag === "AttachThread") {
+            socket.frame(attached(message, snapshot("thread-1", 0)))
+            return
+          }
+          if (message.command._tag !== "SubmitPrompt") return
+          durableIds.push(message.command.commandId)
+          expect(message.command.submissionId).toBe("submission-1")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+        })
+        const hosted = yield* runSession(harness)
+        yield* hosted.session.submit("reopened", undefined, [], undefined, "submission-1")
+        yield* hosted.session.quit
+      })
+      yield* run()
+      yield* run()
+      expect(durableIds).toHaveLength(2)
+      expect(durableIds[0]).not.toBe(durableIds[1])
+      expect(durableIds.every((id) => id.startsWith("submit:"))).toBe(true)
+    }),
+  ),
+)
+
+it.effect("ignores stale full snapshots and accepts a newer materialization at the same cursor", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness(defaultReceive)
+      const hosted = yield* runSession(harness)
+      const socket = harness.sockets[0]!
+      socket.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-1"),
+        threadVersion: ThreadVersion.make("2"),
+        cursor: ThreadEventCursor.make("2"),
+        snapshot: snapshot("thread-1", 2),
+      })
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 2)
+      socket.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-1"),
+        threadVersion: ThreadVersion.make("3"),
+        cursor: ThreadEventCursor.make("1"),
+        snapshot: snapshot("thread-1", 9),
+      })
+      yield* Effect.yieldNow
+      expect(hosted.session.currentView()?.thread.updatedAt).toBe(2)
+      socket.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-1"),
+        threadVersion: ThreadVersion.make("3"),
+        cursor: ThreadEventCursor.make("2"),
+        snapshot: snapshot("thread-1", 3),
+      })
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 3)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("rejects a full snapshot whose Thread version regresses", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness(defaultReceive)
+      const hosted = yield* runSession(harness)
+      const socket = harness.sockets[0]!
+      socket.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-1"),
+        threadVersion: ThreadVersion.make("2"),
+        cursor: ThreadEventCursor.make("2"),
+        snapshot: snapshot("thread-1", 2),
+      })
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 2)
+      socket.frame({
+        _tag: "ThreadSnapshot",
+        threadId: HostedThreadId.make("thread-1"),
+        threadVersion: ThreadVersion.make("1"),
+        cursor: ThreadEventCursor.make("3"),
+        snapshot: snapshot("thread-1", 3),
+      })
+      yield* TestClock.adjust("250 millis")
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      expect(hosted.session.currentView()?.thread.updatedAt).toBe(2)
+      yield* hosted.session.quit
+    }),
+  ),
 )

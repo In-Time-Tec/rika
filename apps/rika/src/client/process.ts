@@ -134,7 +134,7 @@ const dispatcherLayer = () =>
                         Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
                       ),
                     ),
-                  startRunner: (prepared) => Runner.runRunner(runnerInput, prepared),
+                  startRunner: (prepared, ready) => Runner.runRunner(runnerInput, prepared, ready),
                 }).pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
               }),
             )

@@ -1,11 +1,23 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
 import type { ValidatedSetup } from "@rika/github-app/authorization-state"
 import { sameAccount } from "@rika/github-app/github-model"
 import { Installation } from "@rika/github-app/installation-service"
 import { InstallationToken, type RepositoryToken } from "@rika/github-app/installation-token"
 import type { RepositoryCheckout } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
-import { OwnerId, type ActorAttribution } from "@rika/product/hosted-model"
+import {
+  OwnerId,
+  type ActorAttribution,
+  type AssignmentLeaseEpoch,
+  type FencingGeneration,
+} from "@rika/product/hosted-model"
+import {
+  layer as repositoryStoreLayer,
+  RepositoryStore,
+  type Publication as StoredPublication,
+  type PublicationTransition,
+  type RepositoryBinding,
+  RepositoryStoreError,
+} from "@rika/product-store/repositories"
 import { Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
@@ -81,8 +93,8 @@ export interface ApprovedPublication {
   readonly projectId: string
   readonly repositoryId: string
   readonly assignmentId: string
-  readonly assignmentGeneration: number
-  readonly leaseEpoch: number
+  readonly assignmentGeneration: FencingGeneration
+  readonly leaseEpoch: AssignmentLeaseEpoch
   readonly workspaceId: string
   readonly authorizationCheckpointId: string
   readonly authorizationDigest: string
@@ -152,37 +164,21 @@ export class HostedRepositories extends Context.Service<HostedRepositories, Host
   "@rika/api/hosted/repositories/HostedRepositories",
 ) {}
 
-export const testLayer = Layer.succeed(
+export const unavailableLayer = Layer.succeed(
   HostedRepositories,
   HostedRepositories.of({
     authorize: () => Effect.void,
-    resolve: () => Effect.fail(failure("configuration", "Test Project repository is not configured")),
-    credential: () => Effect.fail(failure("configuration", "Test repository credential is not configured")),
+    resolve: () => Effect.fail(failure("configuration", "Project repository is not configured")),
+    credential: () => Effect.fail(failure("configuration", "Repository credential is not configured")),
     revoke: () => Effect.void,
-    inspectTarget: () => Effect.fail(failure("configuration", "Test repository target is not configured")),
-    createPullRequest: () => Effect.fail(failure("configuration", "Test pull request creation is not configured")),
-    approvePublication: () => Effect.fail(failure("configuration", "Test publication approval is not configured")),
-    recordPush: () => Effect.fail(failure("configuration", "Test publication result is not configured")),
-    recordPullRequest: () => Effect.fail(failure("configuration", "Test pull request result is not configured")),
+    inspectTarget: () => Effect.fail(failure("configuration", "Repository target is not configured")),
+    createPullRequest: () => Effect.fail(failure("configuration", "Pull request creation is not configured")),
+    approvePublication: () => Effect.fail(failure("configuration", "Publication approval is not configured")),
+    recordPush: () => Effect.fail(failure("configuration", "Publication result is not configured")),
+    recordPullRequest: () => Effect.fail(failure("configuration", "Pull request result is not configured")),
     revokePublicationCredential: () => Effect.void,
   }),
 )
-
-interface BindingRow {
-  readonly projectId: string
-  readonly ownerId: string
-  readonly repositoryId: string
-  readonly installationId: string
-  readonly accountId: string
-  readonly accountLogin: string
-  readonly accountType: "User" | "Organization" | "Enterprise"
-  readonly repositoryOwner: string
-  readonly repositoryName: string
-  readonly defaultRef: string
-  readonly private: boolean
-  readonly gitName: string
-  readonly gitEmail: string
-}
 
 const Commit = Schema.Struct({ sha: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)) })
 const Branch = Schema.Struct({
@@ -200,6 +196,7 @@ function failure(reason: HostedRepositoryError["reason"], message: string) {
   return HostedRepositoryError.make({ reason, message })
 }
 const mapGitHubError = () => failure("github", "GitHub repository authorization failed")
+const mapStoreError = (error: RepositoryStoreError) => failure(error.reason, error.message)
 type CanonicalValue = Schema.Json | ActorAttribution
 
 const canonicalJson = (value: CanonicalValue): string => {
@@ -218,7 +215,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
   Layer.effect(
     HostedRepositories,
     Effect.gen(function* () {
-      const sql = yield* PgClient.PgClient
+      const store = yield* RepositoryStore
       const installations = yield* Installation
       const tokens = yield* InstallationToken
       const assignments = yield* ExecutorAssignments
@@ -248,26 +245,10 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
         ownerId: string,
         projectId: string,
       ) {
-        const rows = yield* sql<BindingRow>`SELECT repository.project_id AS "projectId",
-          repository.owner_id AS "ownerId", repository.repository_id AS "repositoryId",
-          repository.installation_id AS "installationId",
-          repository.installation_account_id AS "accountId",
-          repository.installation_account_login AS "accountLogin",
-          repository.installation_account_type AS "accountType",
-          repository.repository_owner AS "repositoryOwner", repository.repository_name AS "repositoryName",
-          repository.default_ref AS "defaultRef", repository.private,
-          identity.name AS "gitName", identity.email AS "gitEmail"
-          FROM rika_hosted_project_repositories repository
-          JOIN rika_hosted_git_identities identity ON identity.owner_id = repository.owner_id
-          WHERE repository.owner_id = ${ownerId} AND repository.project_id = ${projectId}`.pipe(
-          Effect.mapError(() => failure("database", "Could not load the authorized Project repository")),
-        )
-        if (rows[0] === undefined)
-          return yield* failure("configuration", "Project does not have an authorized repository and Git identity")
-        return rows[0]
+        return yield* store.loadBinding(ownerId, projectId).pipe(Effect.mapError(mapStoreError))
       })
 
-      const verifyBinding = Effect.fn("HostedRepositories.verifyBinding")(function* (binding: BindingRow) {
+      const verifyBinding = Effect.fn("HostedRepositories.verifyBinding")(function* (binding: RepositoryBinding) {
         const snapshot = yield* installations
           .reconcileInstallation(Number(binding.installationId))
           .pipe(Effect.mapError(mapGitHubError))
@@ -289,7 +270,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
         return repository
       })
 
-      const mint = (binding: BindingRow, permissions: Record<string, "read" | "write">, fresh = false) =>
+      const mint = (binding: RepositoryBinding, permissions: Record<string, "read" | "write">, fresh = false) =>
         tokens
           .mint({
             installationId: Number(binding.installationId),
@@ -299,7 +280,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           })
           .pipe(Effect.mapError(mapGitHubError))
 
-      const repositoryApiUrl = (binding: BindingRow, path: string) =>
+      const repositoryApiUrl = (binding: RepositoryBinding, path: string) =>
         `${options.baseUrl ?? "https://api.github.com"}/repos/${encodeURIComponent(binding.repositoryOwner)}/${encodeURIComponent(binding.repositoryName)}${path}`
 
       const githubRequest = (token: RepositoryToken, request: HttpClientRequest.HttpClientRequest, message: string) =>
@@ -314,7 +295,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           .pipe(Effect.mapError(() => failure("github", message)))
 
       const targetWithToken = Effect.fn("HostedRepositories.targetWithToken")(function* (
-        binding: BindingRow,
+        binding: RepositoryBinding,
         token: RepositoryToken,
         targetRef: string,
       ) {
@@ -334,7 +315,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
       })
 
       const verifySourceBranch = Effect.fn("HostedRepositories.verifySourceBranch")(function* (
-        binding: BindingRow,
+        binding: RepositoryBinding,
         token: RepositoryToken,
         sourceBranch: string,
       ) {
@@ -353,62 +334,15 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           return yield* failure("authorization", "Publication branch is protected or has a different identity")
       })
 
-      interface PublicationCredentialRow {
-        readonly actor: Schema.Json
-        readonly ownerId: string
-        readonly threadId: string
-        readonly projectId: string
-        readonly repositoryId: string
-        readonly workspaceId: string
-        readonly assignmentId: string
-        readonly assignmentGeneration: string
-        readonly leaseEpoch: string
-        readonly authorizationCheckpointId: string
-        readonly authorizationDigest: string
-        readonly sourceBranch: string
-        readonly sourceRef: string
-        readonly sourceCommitSha: string
-        readonly targetRef: string
-        readonly targetCommitSha: string
-        readonly targetProtected: boolean
-      }
-
-      interface PublicationRow {
-        readonly id: string
-        readonly idempotencyKey: string
-        readonly actor: Schema.Json
-        readonly ownerId: string
-        readonly threadId: string
-        readonly projectId: string
-        readonly repositoryId: string
-        readonly assignmentId: string
-        readonly assignmentGeneration: string
-        readonly leaseEpoch: string
-        readonly workspaceId: string
-        readonly authorizationCheckpointId: string
-        readonly authorizationDigest: string
-        readonly sourceBranch: string
-        readonly sourceRef: string
-        readonly sourceCommitSha: string
-        readonly targetRef: string
-        readonly targetCommitSha: string
-        readonly targetProtected: boolean
-        readonly title: string
-        readonly body: string
-        readonly state: PublicationState
-        readonly pushResult: object | null
-        readonly pullRequestResult: object | null
-      }
-
-      const toPublication = (row: PublicationRow): ApprovedPublication => ({
+      const toPublication = (row: StoredPublication): ApprovedPublication => ({
         id: row.id,
         ownerId: row.ownerId,
         threadId: row.threadId,
         projectId: row.projectId,
         repositoryId: row.repositoryId,
         assignmentId: row.assignmentId,
-        assignmentGeneration: Number(row.assignmentGeneration),
-        leaseEpoch: Number(row.leaseEpoch),
+        assignmentGeneration: row.assignmentGeneration,
+        leaseEpoch: row.leaseEpoch,
         workspaceId: row.workspaceId,
         authorizationCheckpointId: row.authorizationCheckpointId,
         authorizationDigest: row.authorizationDigest,
@@ -422,147 +356,35 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
         pushResult: row.pushResult,
         pullRequestResult: row.pullRequestResult,
       })
-
-      const publicationColumns = sql`publication.id, publication.idempotency_key AS "idempotencyKey",
-        publication.actor, publication.owner_id AS "ownerId",
-        publication.thread_id AS "threadId", publication.project_id AS "projectId",
-        publication.repository_id AS "repositoryId", publication.assignment_id AS "assignmentId",
-        publication.assignment_generation::text AS "assignmentGeneration",
-        publication.lease_epoch::text AS "leaseEpoch", publication.workspace_id AS "workspaceId",
-        publication.authorization_checkpoint_id AS "authorizationCheckpointId",
-        publication.authorization_digest AS "authorizationDigest",
-        publication.source_branch AS "sourceBranch", publication.source_ref AS "sourceRef",
-        publication.source_commit_sha AS "sourceCommitSha", publication.target_ref AS "targetRef",
-        publication.target_commit_sha AS "targetCommitSha", publication.target_protected AS "targetProtected",
-        publication.pull_request_title AS title, publication.pull_request_body AS body, publication.state,
-        publication.push_result AS "pushResult", publication.pull_request_result AS "pullRequestResult"`
-
-      const publicationAuthority = (publication: PublicationCredentialRow) => ({
-        ownerId: publication.ownerId,
-        threadId: publication.threadId,
-        projectId: publication.projectId,
-        repositoryId: publication.repositoryId,
-        sourceBranch: publication.sourceBranch,
-        sourceRef: publication.sourceRef,
-        sourceCommitSha: publication.sourceCommitSha,
-        targetRef: publication.targetRef,
-        targetCommitSha: publication.targetCommitSha,
-        targetProtected: publication.targetProtected,
-      })
-
-      const publicationFence = (publication: PublicationCredentialRow) => ({
-        assignmentId: publication.assignmentId,
-        assignmentGeneration: publication.assignmentGeneration,
-        leaseEpoch: publication.leaseEpoch,
-        workspaceId: publication.workspaceId,
-        authorizationCheckpointId: publication.authorizationCheckpointId,
-        authorizationDigest: publication.authorizationDigest,
+      const toPublicationTransition = (publication: ApprovedPublication): PublicationTransition => ({
+        ...publication,
+        targetRef: publication.target.ref,
+        targetCommitSha: publication.target.commitSha,
+        targetProtected: publication.target.protected,
+        title: publication.title,
+        body: publication.body,
       })
 
       const claimBranchPush = Effect.fn("HostedRepositories.claimBranchPush")(function* (
         input: Extract<CredentialRequest, { readonly purpose: "branch-push" }>,
       ) {
-        return yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const rows = yield* sql<PublicationCredentialRow>`UPDATE rika_hosted_repository_publications publication
-              SET state = 'pushing', credential_authorized_at = transaction_timestamp(),
-                updated_at = transaction_timestamp()
-              FROM rika_hosted_executor_assignments assignment,
-                rika_hosted_workspace_preparations preparation
-              WHERE publication.id = ${input.publicationId}
-                AND publication.state = 'approved' AND publication.credential_authorized_at IS NULL
-                AND publication.owner_id = ${input.ownerId}
-                AND publication.repository_id = ${input.repositoryId}
-                AND publication.workspace_id = ${input.workspaceId}
-                AND publication.source_branch = ${input.branch}
-                AND publication.source_ref = ${input.ref}
-                AND publication.source_commit_sha = ${input.commitSha}
-                AND assignment.id = publication.assignment_id
-                AND assignment.owner_id = publication.owner_id
-                AND assignment.thread_id = publication.thread_id
-                AND assignment.workspace_id = publication.workspace_id
-                AND assignment.generation = publication.assignment_generation
-                AND assignment.generation = ${input.access.assignmentGeneration}::bigint
-                AND assignment.lifecycle = 'active'
-                AND assignment.provider_instance_id = ${input.access.providerInstanceId}
-                AND assignment.executor_instance_id = ${input.access.executorInstanceId}
-                AND assignment.process_incarnation = ${input.access.processIncarnation}
-                AND assignment.lease_epoch = publication.lease_epoch
-                AND assignment.lease_epoch = ${input.access.leaseEpoch}::bigint
-                AND assignment.lease_expires_at > clock_timestamp()
-                AND assignment.session_digest = ${Redacted.value(input.access.presentedSessionCredentialDigest)}
-                AND assignment.checkout ->> 'ownerId' = publication.owner_id
-                AND assignment.checkout ->> 'projectId' = publication.project_id
-                AND assignment.checkout ->> 'repositoryId' = publication.repository_id
-                AND preparation.assignment_id = publication.assignment_id
-                AND preparation.owner_id = publication.owner_id
-                AND preparation.workspace_id = publication.workspace_id
-                AND preparation.generation = publication.assignment_generation
-                AND preparation.lease_epoch = publication.lease_epoch
-                AND preparation.state = 'ready'
-              RETURNING publication.actor, publication.owner_id AS "ownerId",
-                publication.thread_id AS "threadId", publication.project_id AS "projectId",
-                publication.repository_id AS "repositoryId", publication.workspace_id AS "workspaceId",
-                publication.assignment_id AS "assignmentId",
-                publication.assignment_generation::text AS "assignmentGeneration",
-                publication.lease_epoch::text AS "leaseEpoch",
-                publication.authorization_checkpoint_id AS "authorizationCheckpointId",
-                publication.authorization_digest AS "authorizationDigest", publication.source_branch AS "sourceBranch",
-                publication.source_ref AS "sourceRef", publication.source_commit_sha AS "sourceCommitSha",
-                publication.target_ref AS "targetRef", publication.target_commit_sha AS "targetCommitSha",
-                publication.target_protected AS "targetProtected"`
-              const publication = rows[0]
-              if (publication === undefined)
-                return yield* failure("authorization", "Branch push approval is stale or does not match this operation")
-              yield* sql`INSERT INTO rika_hosted_repository_publication_audit
-                (publication_id, owner_id, thread_id, actor, action, authority, fence, result)
-                VALUES (${input.publicationId}, ${publication.ownerId}, ${publication.threadId},
-                  ${sql.json(publication.actor)}, 'branch-push-credential-authorized',
-                  ${sql.json(publicationAuthority(publication))}, ${sql.json(publicationFence(publication))},
-                  ${sql.json({ purpose: "branch-push", permissions: { contents: "write" } })})`
-              return publication
-            }),
-          )
-          .pipe(
-            Effect.mapError((error) =>
-              Schema.is(HostedRepositoryError)(error)
-                ? error
-                : failure("database", "Could not claim the branch push approval"),
-            ),
-          )
+        return yield* store
+          .claimPush({
+            ...input,
+            access: {
+              assignmentGeneration: input.access.assignmentGeneration,
+              leaseEpoch: input.access.leaseEpoch,
+              providerInstanceId: input.access.providerInstanceId,
+              executorInstanceId: input.access.executorInstanceId,
+              processIncarnation: input.access.processIncarnation,
+              sessionDigest: Redacted.value(input.access.presentedSessionCredentialDigest),
+            },
+          })
+          .pipe(Effect.mapError(mapStoreError))
       })
 
-      const branchCredentialFailed = (publicationId: string, publication: PublicationCredentialRow) =>
-        sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const failed = yield* sql<{ readonly id: string }>`UPDATE rika_hosted_repository_publications
-                SET state = 'failed', updated_at = transaction_timestamp()
-                WHERE id = ${publicationId} AND state = 'pushing'
-                  AND owner_id = ${publication.ownerId} AND thread_id = ${publication.threadId}
-                  AND project_id = ${publication.projectId} AND repository_id = ${publication.repositoryId}
-                  AND assignment_id = ${publication.assignmentId}
-                  AND assignment_generation = ${publication.assignmentGeneration}::bigint
-                  AND lease_epoch = ${publication.leaseEpoch}::bigint
-                  AND workspace_id = ${publication.workspaceId}
-                  AND authorization_checkpoint_id = ${publication.authorizationCheckpointId}
-                  AND authorization_digest = ${publication.authorizationDigest}
-                  AND source_branch = ${publication.sourceBranch} AND source_ref = ${publication.sourceRef}
-                  AND source_commit_sha = ${publication.sourceCommitSha}
-                  AND target_ref = ${publication.targetRef} AND target_commit_sha = ${publication.targetCommitSha}
-                  AND target_protected = ${publication.targetProtected}
-                RETURNING id`
-              if (failed[0] === undefined) return
-              yield* sql`INSERT INTO rika_hosted_repository_publication_audit
-                (publication_id, owner_id, thread_id, actor, action, authority, fence, result)
-                VALUES (${publicationId}, ${publication.ownerId}, ${publication.threadId},
-                  ${sql.json(publication.actor)}, 'branch-push-credential-failed',
-                  ${sql.json(publicationAuthority(publication))}, ${sql.json(publicationFence(publication))},
-                  ${sql.json({ purpose: "branch-push", outcome: "failed" })})`
-            }),
-          )
-          .pipe(Effect.ignore)
+      const branchCredentialFailed = (_publicationId: string, publication: StoredPublication) =>
+        store.failCredential(publication)
 
       const authorize: HostedRepositoriesService["authorize"] = Effect.fn("HostedRepositories.authorize")(
         function* (input) {
@@ -574,11 +396,8 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
             !/^[^\s@]+@[^\s@]+$/.test(input.gitIdentity.email)
           )
             return yield* failure("identity", "Repository ref and Git identity are required")
-          const projects = yield* sql`SELECT id FROM rika_hosted_projects
-            WHERE id = ${input.projectId} AND owner_id = ${input.ownerId}`.pipe(
-            Effect.mapError(() => failure("database", "Could not authorize the Project repository")),
-          )
-          if (projects[0] === undefined) return yield* failure("authorization", "Project does not belong to the owner")
+          if (!(yield* store.projectBelongsTo(input.projectId, input.ownerId).pipe(Effect.mapError(mapStoreError))))
+            return yield* failure("authorization", "Project does not belong to the owner")
           const snapshot = yield* installations
             .reconcileInstallation(input.setup.installation.id)
             .pipe(Effect.mapError(mapGitHubError))
@@ -587,32 +406,23 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           const repository = snapshot.repositories.find((candidate) => candidate.id === input.repositoryId)
           if (repository === undefined || repository.archived)
             return yield* failure("authorization", "Repository is not selected for the GitHub App installation")
-          yield* sql
-            .withTransaction(
-              Effect.gen(function* () {
-                yield* sql`INSERT INTO rika_hosted_git_identities (owner_id, name, email, updated_at)
-                VALUES (${input.ownerId}, ${input.gitIdentity.name.trim()}, ${input.gitIdentity.email.trim()},
-                  transaction_timestamp())
-                ON CONFLICT (owner_id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email,
-                  updated_at = EXCLUDED.updated_at`
-                yield* sql`INSERT INTO rika_hosted_project_repositories
-                (project_id, owner_id, repository_id, installation_id, installation_account_id,
-                  installation_account_login, installation_account_type, repository_owner, repository_name,
-                  default_ref, private, created_at, updated_at)
-                VALUES (${input.projectId}, ${input.ownerId}, ${String(repository.id)}, ${String(snapshot.installation.id)},
-                  ${String(snapshot.installation.account.id)}, ${snapshot.installation.account.login},
-                  ${snapshot.installation.account.type}, ${repository.owner.login}, ${repository.name},
-                  ${input.ref.trim()}, ${repository.private}, transaction_timestamp(), transaction_timestamp())
-                ON CONFLICT (project_id) DO UPDATE SET repository_id = EXCLUDED.repository_id,
-                  installation_id = EXCLUDED.installation_id,
-                  installation_account_id = EXCLUDED.installation_account_id,
-                  installation_account_login = EXCLUDED.installation_account_login,
-                  installation_account_type = EXCLUDED.installation_account_type,
-                  repository_owner = EXCLUDED.repository_owner, repository_name = EXCLUDED.repository_name,
-                  default_ref = EXCLUDED.default_ref, private = EXCLUDED.private, updated_at = EXCLUDED.updated_at`
-              }),
-            )
-            .pipe(Effect.mapError(() => failure("database", "Could not persist the authorized Project repository")))
+          yield* store
+            .saveBinding({
+              projectId: input.projectId,
+              ownerId: input.ownerId,
+              repositoryId: String(repository.id),
+              installationId: String(snapshot.installation.id),
+              accountId: String(snapshot.installation.account.id),
+              accountLogin: snapshot.installation.account.login,
+              accountType: snapshot.installation.account.type,
+              repositoryOwner: repository.owner.login,
+              repositoryName: repository.name,
+              defaultRef: input.ref.trim(),
+              private: repository.private,
+              gitName: input.gitIdentity.name.trim(),
+              gitEmail: input.gitIdentity.email.trim(),
+            })
+            .pipe(Effect.mapError(mapStoreError))
         },
       )
 
@@ -678,7 +488,7 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
             binding.private !== checkout.private
           )
             return yield* failure("authorization", "Assigned repository is no longer the authorized Project repository")
-          let publication: PublicationCredentialRow | undefined
+          let publication: StoredPublication | undefined
           let publicationId: string | undefined
           if (input.purpose === "branch-push") {
             publicationId = input.publicationId
@@ -827,14 +637,11 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           body.length > 65_536
         )
           return yield* failure("identity", "Publication approval input is invalid")
-        const existing = yield* sql<PublicationRow>`SELECT ${publicationColumns}
-          FROM rika_hosted_repository_publications publication
-          WHERE publication.owner_id = ${input.ownerId} AND publication.thread_id = ${input.threadId}
-            AND publication.idempotency_key = ${idempotencyKey}`.pipe(
-          Effect.mapError(() => failure("database", "Could not inspect the publication approval")),
-        )
-        if (existing[0] !== undefined) {
-          const known = existing[0]
+        const existing = yield* store
+          .findPublication(input.ownerId, input.threadId, idempotencyKey)
+          .pipe(Effect.mapError(mapStoreError))
+        if (existing !== undefined) {
+          const known = existing
           if (
             known.actor !== null &&
             canonicalJson(known.actor) === canonicalJson(input.actor) &&
@@ -846,35 +653,9 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
             return toPublication(known)
           return yield* failure("authorization", "Publication approval key was already used for another operation")
         }
-        const rows = yield* sql<{
-          readonly projectId: string
-          readonly repositoryId: string
-          readonly checkoutProjectId: string
-          readonly assignmentId: string
-          readonly assignmentGeneration: string
-          readonly leaseEpoch: string
-          readonly workspaceId: string
-        }>`SELECT thread.project_id AS "projectId", repository.repository_id AS "repositoryId",
-          assignment.checkout ->> 'projectId' AS "checkoutProjectId", assignment.id AS "assignmentId",
-          assignment.generation::text AS "assignmentGeneration", assignment.lease_epoch::text AS "leaseEpoch",
-          assignment.workspace_id AS "workspaceId"
-          FROM rika_hosted_threads thread
-          JOIN rika_hosted_executor_assignments assignment ON assignment.thread_id = thread.id
-            AND assignment.owner_id = thread.owner_id
-          JOIN rika_hosted_workspace_preparations preparation ON preparation.assignment_id = assignment.id
-            AND preparation.owner_id = assignment.owner_id AND preparation.generation = assignment.generation
-            AND preparation.workspace_id = assignment.workspace_id AND preparation.lease_epoch = assignment.lease_epoch
-            AND preparation.state = 'ready'
-          JOIN rika_hosted_project_repositories repository ON repository.project_id = thread.project_id
-            AND repository.owner_id = thread.owner_id
-          WHERE thread.id = ${input.threadId} AND thread.owner_id = ${input.ownerId}
-            AND thread.executor_kind = 'orb' AND thread.project_id IS NOT NULL
-            AND assignment.lifecycle = 'active' AND assignment.lease_expires_at > clock_timestamp()
-            AND assignment.checkout ->> 'ownerId' = thread.owner_id
-            AND assignment.checkout ->> 'repositoryId' = repository.repository_id`.pipe(
-          Effect.mapError(() => failure("database", "Could not load the publication fence")),
-        )
-        const fence = rows[0]
+        const fence = yield* store
+          .loadPublicationFence(input.ownerId, input.threadId)
+          .pipe(Effect.mapError(mapStoreError))
         if (fence === undefined || fence.checkoutProjectId !== fence.projectId)
           return yield* failure("stale-fence", "Publication requires the current prepared repository workspace")
         const sourceBranch = `rika/${input.threadId}`
@@ -925,150 +706,56 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           pullRequest: { title, body },
         })
         const auditFence = { ...assignmentFence, authorizationDigest: digest }
-        const inserted = yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const created = yield* sql<PublicationRow>`INSERT INTO rika_hosted_repository_publications AS publication
-                (id, idempotency_key, owner_id, thread_id, project_id, repository_id, actor,
-                  assignment_id, assignment_generation, lease_epoch, workspace_id,
-                  authorization_checkpoint_id, authorization_digest,
-                  source_branch, source_ref, source_commit_sha, target_ref, target_commit_sha, target_protected,
-                  pull_request_title, pull_request_body, state, approved_at, updated_at)
-                SELECT ${id}, ${idempotencyKey}, ${input.ownerId}, ${input.threadId}, ${fence.projectId},
-                  ${fence.repositoryId}, ${sql.json(input.actor)}, assignment.id,
-                  ${fence.assignmentGeneration}::bigint, ${fence.leaseEpoch}::bigint, ${fence.workspaceId},
-                  ${id}, ${digest}, ${sourceBranch}, ${sourceRef}, ${sourceCommitSha}, ${target.ref},
-                  ${target.commitSha}, ${target.protected}, ${title}, ${body}, 'approved',
-                  transaction_timestamp(), transaction_timestamp()
-                FROM rika_hosted_executor_assignments assignment
-                JOIN rika_hosted_workspace_preparations preparation ON preparation.assignment_id = assignment.id
-                  AND preparation.owner_id = assignment.owner_id
-                  AND preparation.generation = assignment.generation
-                  AND preparation.workspace_id = assignment.workspace_id
-                  AND preparation.lease_epoch = assignment.lease_epoch AND preparation.state = 'ready'
-                JOIN rika_hosted_project_repositories repository ON repository.project_id = ${fence.projectId}
-                  AND repository.owner_id = assignment.owner_id
-                WHERE assignment.id = ${fence.assignmentId} AND assignment.owner_id = ${input.ownerId}
-                  AND assignment.thread_id = ${input.threadId} AND assignment.lifecycle = 'active'
-                  AND assignment.generation = ${fence.assignmentGeneration}::bigint
-                  AND assignment.lease_epoch = ${fence.leaseEpoch}::bigint
-                  AND assignment.workspace_id = ${fence.workspaceId}
-                  AND assignment.lease_expires_at > clock_timestamp()
-                  AND assignment.checkout ->> 'ownerId' = assignment.owner_id
-                  AND assignment.checkout ->> 'projectId' = ${fence.projectId}
-                  AND assignment.checkout ->> 'repositoryId' = ${fence.repositoryId}
-                  AND assignment.checkout ->> 'installationId' = repository.installation_id
-                  AND repository.repository_id = ${fence.repositoryId}
-                ON CONFLICT (owner_id, thread_id, idempotency_key) DO NOTHING
-                RETURNING ${publicationColumns}`
-              if (created[0] === undefined)
-                return yield* failure("stale-fence", "Publication assignment changed before approval")
-              yield* sql`INSERT INTO rika_hosted_repository_publication_audit
-                (publication_id, owner_id, thread_id, actor, action, authority, fence, result)
-                VALUES (${id}, ${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, 'approved',
-                  ${sql.json(authority)}, ${sql.json(auditFence)},
-                  ${sql.json({ outcome: "approved", purpose: "branch-push" })})`
-              return created[0]
-            }),
-          )
-          .pipe(
-            Effect.mapError((error) =>
-              Schema.is(HostedRepositoryError)(error)
-                ? error
-                : failure("database", "Could not persist the publication approval"),
-            ),
-          )
+        const inserted = yield* store
+          .createPublication({
+            id,
+            idempotencyKey,
+            actor: input.actor,
+            ownerId: input.ownerId,
+            threadId: input.threadId,
+            projectId: fence.projectId,
+            repositoryId: fence.repositoryId,
+            assignmentId: fence.assignmentId,
+            assignmentGeneration: fence.assignmentGeneration,
+            leaseEpoch: fence.leaseEpoch,
+            workspaceId: fence.workspaceId,
+            authorizationCheckpointId: id,
+            authorizationDigest: digest,
+            sourceBranch,
+            sourceRef,
+            sourceCommitSha,
+            targetRef: target.ref,
+            targetCommitSha: target.commitSha,
+            targetProtected: target.protected,
+            title,
+            body,
+            state: "approved",
+            pushResult: null,
+            pullRequestResult: null,
+            authority,
+            fence: auditFence,
+            auditResult: { outcome: "approved", purpose: "branch-push" },
+          })
+          .pipe(Effect.mapError(mapStoreError))
         return toPublication(inserted)
       })
 
       const recordPush: HostedRepositoriesService["recordPush"] = Effect.fn("HostedRepositories.recordPush")(
         function* (approved, result, state) {
-          return yield* sql
-            .withTransaction(
-              Effect.gen(function* () {
-                const rows = yield* sql<PublicationRow>`UPDATE rika_hosted_repository_publications publication
-                  SET state = ${state}, push_result = ${sql.json(result)}, updated_at = transaction_timestamp()
-                  WHERE publication.id = ${approved.id} AND publication.state = 'pushing'
-                    AND publication.owner_id = ${approved.ownerId} AND publication.thread_id = ${approved.threadId}
-                    AND publication.repository_id = ${approved.repositoryId}
-                    AND publication.assignment_id = ${approved.assignmentId}
-                    AND publication.assignment_generation = ${approved.assignmentGeneration}::bigint
-                    AND publication.lease_epoch = ${approved.leaseEpoch}::bigint
-                    AND publication.workspace_id = ${approved.workspaceId}
-                    AND publication.authorization_checkpoint_id = ${approved.authorizationCheckpointId}
-                    AND publication.authorization_digest = ${approved.authorizationDigest}
-                    AND publication.source_branch = ${approved.sourceBranch}
-                    AND publication.source_commit_sha = ${approved.sourceCommitSha}
-                  RETURNING ${publicationColumns}`
-                const row = rows[0]
-                if (row === undefined) return yield* failure("authorization", "Publication push result is stale")
-                let action = "branch-push-failed"
-                if (state === "pushed") action = "branch-push-succeeded"
-                if (state === "unknown") action = "branch-push-unknown"
-                yield* sql`INSERT INTO rika_hosted_repository_publication_audit
-                  (publication_id, owner_id, thread_id, actor, action, authority, fence, result)
-                  SELECT id, owner_id, thread_id, actor, ${action},
-                    jsonb_build_object('ownerId', owner_id, 'threadId', thread_id, 'projectId', project_id,
-                      'repositoryId', repository_id, 'sourceBranch', source_branch, 'sourceRef', source_ref,
-                      'sourceCommitSha', source_commit_sha, 'targetRef', target_ref,
-                      'targetCommitSha', target_commit_sha, 'targetProtected', target_protected),
-                    jsonb_build_object('assignmentId', assignment_id,
-                      'assignmentGeneration', assignment_generation::text, 'leaseEpoch', lease_epoch::text,
-                      'workspaceId', workspace_id, 'authorizationCheckpointId', authorization_checkpoint_id,
-                      'authorizationDigest', authorization_digest), ${sql.json(result)}
-                  FROM rika_hosted_repository_publications WHERE id = ${approved.id}`
-                return toPublication(row)
-              }),
-            )
-            .pipe(
-              Effect.mapError((error) =>
-                Schema.is(HostedRepositoryError)(error)
-                  ? error
-                  : failure("database", "Could not record the publication push result"),
-              ),
-            )
+          return toPublication(
+            yield* store.recordPush(toPublicationTransition(approved), result, state).pipe(Effect.mapError(mapStoreError)),
+          )
         },
       )
 
       const recordPullRequest: HostedRepositoriesService["recordPullRequest"] = Effect.fn(
         "HostedRepositories.recordPullRequest",
       )(function* (approved, result, succeeded) {
-        return yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const state = succeeded ? "completed" : "failed"
-              const rows = yield* sql<PublicationRow>`UPDATE rika_hosted_repository_publications publication
-                SET state = ${state}, pull_request_result = ${sql.json(result)}, updated_at = transaction_timestamp()
-                WHERE publication.id = ${approved.id} AND publication.state = 'pushed'
-                  AND publication.source_commit_sha = ${approved.sourceCommitSha}
-                  AND publication.target_ref = ${approved.target.ref}
-                  AND publication.target_commit_sha = ${approved.target.commitSha}
-                RETURNING ${publicationColumns}`
-              const row = rows[0]
-              if (row === undefined) return yield* failure("authorization", "Pull request result is stale")
-              yield* sql`INSERT INTO rika_hosted_repository_publication_audit
-                (publication_id, owner_id, thread_id, actor, action, authority, fence, result)
-                SELECT id, owner_id, thread_id, actor,
-                  ${succeeded ? "pull-request-succeeded" : "pull-request-failed"},
-                  jsonb_build_object('ownerId', owner_id, 'threadId', thread_id, 'projectId', project_id,
-                    'repositoryId', repository_id, 'sourceBranch', source_branch, 'sourceRef', source_ref,
-                    'sourceCommitSha', source_commit_sha, 'targetRef', target_ref,
-                    'targetCommitSha', target_commit_sha, 'targetProtected', target_protected),
-                  jsonb_build_object('assignmentId', assignment_id,
-                    'assignmentGeneration', assignment_generation::text, 'leaseEpoch', lease_epoch::text,
-                    'workspaceId', workspace_id, 'authorizationCheckpointId', authorization_checkpoint_id,
-                    'authorizationDigest', authorization_digest), ${sql.json(result)}
-                FROM rika_hosted_repository_publications WHERE id = ${approved.id}`
-              return toPublication(row)
-            }),
-          )
-          .pipe(
-            Effect.mapError((error) =>
-              Schema.is(HostedRepositoryError)(error)
-                ? error
-                : failure("database", "Could not record the pull request result"),
-            ),
-          )
+        return toPublication(
+          yield* store
+            .recordPullRequest(toPublicationTransition(approved), result, succeeded)
+            .pipe(Effect.mapError(mapStoreError)),
+        )
       })
 
       return HostedRepositories.of({
@@ -1084,4 +771,4 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
         revokePublicationCredential,
       })
     }),
-  )
+  ).pipe(Layer.provide(repositoryStoreLayer))

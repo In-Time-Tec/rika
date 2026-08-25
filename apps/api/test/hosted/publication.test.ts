@@ -1,5 +1,13 @@
 import { expect, it } from "@effect/vitest"
-import { BetterAuthUserId, ClientId, DeviceId, OwnerId, type ActorAttribution } from "@rika/product/hosted-model"
+import {
+  AssignmentLeaseEpoch,
+  BetterAuthUserId,
+  ClientId,
+  DeviceId,
+  FencingGeneration,
+  OwnerId,
+  type ActorAttribution,
+} from "@rika/product/hosted-model"
 import type { BranchPushOutcome } from "@rika/remote-execution/protocol"
 import { Context, Effect, Layer, Stream } from "effect"
 import type { Gateway } from "../../src/executor/gateway"
@@ -27,8 +35,8 @@ const approved: ApprovedPublication = {
   projectId: "project-1",
   repositoryId: "repository-1",
   assignmentId: "assignment-1",
-  assignmentGeneration: 1,
-  leaseEpoch: 1,
+  assignmentGeneration: FencingGeneration.make("1"),
+  leaseEpoch: AssignmentLeaseEpoch.make("1"),
   workspaceId: "workspace-1",
   authorizationCheckpointId: "publication-1",
   authorizationDigest: `sha256:${"a".repeat(64)}`,
@@ -96,6 +104,9 @@ it.effect("pushes an approved ref, creates the pull request through API authorit
       registerRunner: () => Effect.die("unused"),
       setRemoteThreadCreation: () => Effect.die("unused"),
       pollRunner: () => Effect.die("unused"),
+      admitAuthorizedRun: () => Effect.die("unused"),
+      cancelRunAdmission: () => Effect.die("unused"),
+      cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
       authorizeThread: () => Effect.succeed({ ownerId: OwnerId.make("owner-1"), actor }),
       threadExecutionContext: () => Effect.die("unused"),

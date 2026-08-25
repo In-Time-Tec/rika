@@ -5,7 +5,10 @@ import { handleRequest, type WebDependencies } from "./http"
 
 export const serveWeb = (input: { readonly port: number; readonly dependencies: WebDependencies }) =>
   Effect.gen(function* () {
-    const server = yield* BunHttpServer.make({ hostname: "0.0.0.0", port: input.port })
+    const server = yield* BunHttpServer.make({
+      hostname: input.dependencies.production ? "0.0.0.0" : "127.0.0.1",
+      port: input.port,
+    })
     yield* server.serve(
       Effect.gen(function* () {
         const serverRequest = yield* HttpServerRequest.HttpServerRequest

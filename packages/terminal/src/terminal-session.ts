@@ -8,6 +8,15 @@ export interface ModelTuning {
   readonly fastMode?: boolean
 }
 
+export interface CancelTarget {
+  submissionId?: string
+  threadId?: string
+}
+
+export interface CancelAction extends CancelTarget {
+  readonly _tag: "Cancel"
+}
+
 export type Action =
   | {
       readonly _tag: "Submit"
@@ -24,7 +33,7 @@ export type Action =
   | { readonly _tag: "ApproveAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "DenyAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
-  | { readonly _tag: "Cancel" }
+  | CancelAction
   | { readonly _tag: "Quit" }
   | { readonly _tag: "NewThread" }
   | { readonly _tag: "NewOrbThread" }
@@ -56,7 +65,7 @@ export interface Adapter {
   readonly approveAuthorization?: (turnId: string, authorizationId: string) => void
   readonly denyAuthorization?: (turnId: string, authorizationId: string) => void
   readonly interruptAndSend?: (prompt: string) => void
-  readonly cancel?: () => void
+  readonly cancel?: (target: CancelTarget) => void
   readonly selectThread?: (id: string) => void
 }
 
@@ -94,9 +103,13 @@ export const execute: {
     case "InterruptAndSend":
       adapter.interruptAndSend?.(action.prompt)
       return adapter.interruptAndSend !== undefined
-    case "Cancel":
-      adapter.cancel?.()
+    case "Cancel": {
+      const target: CancelTarget = {}
+      if (action.submissionId !== undefined) target.submissionId = action.submissionId
+      if (action.threadId !== undefined) target.threadId = action.threadId
+      adapter.cancel?.(target)
       return adapter.cancel !== undefined
+    }
     case "Quit":
       adapter.quit()
       return true

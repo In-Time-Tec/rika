@@ -65,6 +65,7 @@ const lifecycleStore = (
     }
   >()
   const persistedFrames = new Map<string, ReadonlyArray<CellLifecycleFrame>>()
+  const operationalWindows = new Map<string, { admittedAt: string | null; deadlineAt: string }>()
   const operation = (input: {
     readonly assignmentId: string
     readonly operationKey: string
@@ -106,20 +107,47 @@ const lifecycleStore = (
         return disposition
       }),
     load: readFrames,
+    replay: (assignmentId) =>
+      Effect.sync(() =>
+        [...operations.entries()].flatMap(([operationId, current]) => {
+          const [knownAssignmentId, operationKey, attempt] = operationId.split("\u0000")
+          return knownAssignmentId === assignmentId && current.state === "dispatched"
+            ? [
+                {
+                  operationKey: operationKey!,
+                  attempt: Number(attempt),
+                  afterCursor: persistedFrames.get(operationId)?.at(-1)?.cursor ?? 0,
+                },
+              ]
+            : []
+        }),
+      ),
     prepare: (input) =>
       readFrames(input.assignmentId, input.operationKey, input.attempt).pipe(
-        Effect.tap((frames) =>
+        Effect.flatMap((frames) =>
           Effect.sync(() => {
+            const operationId = operation(input)
             const terminal = frames.find((frame) => frame._tag === "Terminal")
-            operations.set(
-              operation(input),
-              terminal?._tag === "Terminal"
-                ? { state: "completed", started: true, response: terminal.response, outcome: terminal.outcome }
-                : { state: "accepted", started: frames.some((frame) => frame._tag === "Started") },
-            )
+            if (terminal?._tag === "Terminal")
+              operations.set(operationId, {
+                state: "completed",
+                started: true,
+                response: terminal.response,
+                outcome: terminal.outcome,
+              })
+            else if (!operations.has(operationId))
+              operations.set(operationId, {
+                state: "accepted",
+                started: frames.some((frame) => frame._tag === "Started"),
+              })
+            const operationalWindow = operationalWindows.get(operationId) ?? {
+              admittedAt: input.admittedAt,
+              deadlineAt: input.deadlineAt,
+            }
+            operationalWindows.set(operationId, operationalWindow)
+            return operationalWindow
           }),
         ),
-        Effect.asVoid,
       ),
     inspect: (input) => Effect.sync(() => operations.get(operation(input)) ?? { state: "accepted", started: false }),
     dispatch: (input, access) =>
@@ -143,12 +171,13 @@ const lifecycleStore = (
             ? { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" }
             : { kind: "timeout", message: "Cell operation deadline exceeded" },
         }
-        operations.set(operation(input), {
-          ...current,
-          state: unknown ? "unknown" : "completed",
-          response,
-          outcome: unknown ? "unknown" : "failed",
-        })
+        if (!unknown)
+          operations.set(operation(input), {
+            ...current,
+            state: "completed",
+            response,
+            outcome: "failed",
+          })
         return {
           _tag: "Resolved" as const,
           result: { response, outcome: unknown ? ("unknown" as const) : ("failed" as const) },
@@ -170,10 +199,11 @@ const makeGateway = (
   append: LifecycleStore["append"] = () => Effect.succeed({ _tag: "Appended" }),
   load: LifecycleStore["load"] = () => Effect.succeed([]),
   preparation: PreparationStore = readyPreparation,
+  retainedLifecycle?: LifecycleStore,
 ) =>
   makeGatewayService(
     service,
-    lifecycleStore(append, load),
+    retainedLifecycle ?? lifecycleStore(append, load),
     {
       activate: (_access, _phase, use) => use({ digest: environmentDigest, values: {}, redactedNames: [] }),
       publication: (_access, use) => use(),
@@ -266,45 +296,44 @@ const socket = (): Socket & {
   }
 }
 
-const controller = (overrides: Partial<Controller> = {}): Controller =>
-  ({
-    provision: () => Effect.die("unused"),
-    replace: () => Effect.die("unused"),
-    resume: () => Effect.die("unused"),
-    pause: () => Effect.die("unused"),
-    kill: () => Effect.die("unused"),
-    portal: () => Effect.die("unused"),
-    hello: () =>
-      Effect.succeed({
-        version: 1,
-        fence,
-        sessionToken: Redacted.make("session-token"),
-        leaseEpoch: 1,
-        leaseExpiresAt: 4_102_444_800_000,
-        heartbeatIntervalMillis: 20,
-        cursor: { sequence: 0, value: "" },
-      }),
-    reconnect: () => Effect.die("unused"),
-    validateAccess: () => Effect.void,
-    heartbeat: () =>
-      Effect.succeed({
-        version: 1,
-        fence,
-        leaseEpoch: 1,
-        leaseExpiresAt: 4_102_444_800_000,
-        cursor: { sequence: 1, value: "cursor-1" },
-      }),
-    checkpoint: () => Effect.die("unused"),
-    credential: () => Effect.die("unused"),
-    revokeCredential: () => Effect.die("unused"),
-    workspace: () => Effect.die("unused"),
-    ready: () => Effect.void,
-    loadSetupCache: () => Effect.succeed(null),
-    storeSetupCache: () => Effect.void,
-    activatePhase: () => Effect.die("unused"),
-    cleanupOrphans: Effect.die("unused"),
-    ...overrides,
-  })
+const controller = (overrides: Partial<Controller> = {}): Controller => ({
+  provision: () => Effect.die("unused"),
+  replace: () => Effect.die("unused"),
+  resume: () => Effect.die("unused"),
+  pause: () => Effect.die("unused"),
+  kill: () => Effect.die("unused"),
+  portal: () => Effect.die("unused"),
+  hello: () =>
+    Effect.succeed({
+      version: 1,
+      fence,
+      sessionToken: Redacted.make("session-token"),
+      leaseEpoch: 1,
+      leaseExpiresAt: 4_102_444_800_000,
+      heartbeatIntervalMillis: 20,
+      cursor: { sequence: 0, value: "" },
+    }),
+  reconnect: () => Effect.die("unused"),
+  validateAccess: () => Effect.void,
+  heartbeat: () =>
+    Effect.succeed({
+      version: 1,
+      fence,
+      leaseEpoch: 1,
+      leaseExpiresAt: 4_102_444_800_000,
+      cursor: { sequence: 1, value: "cursor-1" },
+    }),
+  checkpoint: () => Effect.die("unused"),
+  credential: () => Effect.die("unused"),
+  revokeCredential: () => Effect.die("unused"),
+  workspace: () => Effect.die("unused"),
+  ready: () => Effect.void,
+  loadSetupCache: () => Effect.succeed(null),
+  storeSetupCache: () => Effect.void,
+  activatePhase: () => Effect.die("unused"),
+  cleanupOrphans: Effect.die("unused"),
+  ...overrides,
+})
 
 const workspaceReady = (gateway: Gateway, target: ReturnType<typeof socket>, current = access) => {
   const retained = target.sent.length
@@ -820,7 +849,7 @@ describe("executor gateway", () => {
     }),
   )
 
-  it.effect("dispatches a cell and correlates its result", () =>
+  it.effect("dispatches a cell once and retains its first operational window", () =>
     Effect.gen(function* () {
       const target = socket()
       const gateway = yield* makeGateway(controller())
@@ -851,6 +880,19 @@ describe("executor gateway", () => {
           workspaceId: "workspace-1",
           sessionId: "thread-1",
           ...cellIdentity,
+          code: "echo hosted-mvp",
+        }),
+      )
+      yield* Effect.yieldNow
+      const repeated = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-1",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          admittedAt: "2026-08-25T00:00:00.000Z",
+          deadlineAt: "2026-08-25T00:02:00.000Z",
           code: "echo hosted-mvp",
         }),
       )
@@ -912,10 +954,100 @@ describe("executor gateway", () => {
         response,
         outcome: "completed",
       })
+      expect(yield* Fiber.join(repeated)).toEqual({
+        access,
+        response,
+        outcome: "completed",
+      })
+      expect(
+        target.sent.map((message) => decode(message)).filter((message) => message._tag === "CellExecute"),
+      ).toHaveLength(1)
     }),
   )
 
-  it.effect("keeps the shared executor alive after a dispatched deadline wins", () =>
+  it.effect("replays a durable Orb receipt request after API replacement", () =>
+    Effect.gen(function* () {
+      const retained = lifecycleStore()
+      const firstSocket = socket()
+      const first = yield* makeGateway(controller(), undefined, undefined, readyPreparation, retained)
+      yield* first.receive(
+        firstSocket,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(first, firstSocket)
+      const running = yield* Effect.forkChild(
+        first.execute({
+          assignmentId: "assignment-1",
+          operationKey: "operation-api-restart",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "wait for api restart",
+        }),
+      )
+      yield* Effect.yieldNow
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution("operation-api-restart"), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution("operation-api-restart"), cursor: 2 },
+      ])
+        yield* first.receive(firstSocket, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* Fiber.interrupt(running)
+      expect(firstSocket.sent.map((message) => decode(message)).some((message) => message._tag === "CellCancel")).toBe(
+        false,
+      )
+
+      const restartedSocket = socket()
+      const restarted = yield* makeGateway(controller(), undefined, undefined, readyPreparation, retained)
+      yield* restarted.receive(
+        restartedSocket,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(restarted, restartedSocket)
+      expect(
+        restartedSocket.sent
+          .map((message) => decode(message))
+          .find((message) => message._tag === "CellReplay" && message.operationKey === "operation-api-restart"),
+      ).toEqual({
+        _tag: "CellReplay",
+        access,
+        operationKey: "operation-api-restart",
+        attempt: 0,
+        afterCursor: 2,
+      })
+    }),
+  )
+
+  it.effect("keeps the late executor terminal authoritative after the caller deadline", () =>
     Effect.gen(function* () {
       const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
       const observed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -1013,7 +1145,7 @@ describe("executor gateway", () => {
       expect(target.closed).toEqual([])
       const renderedObservability = encodeUnknown(observability)
       expect(renderedObservability.match(/hosted\.terminal\.unknown/g)).toHaveLength(1)
-      expect(renderedObservability).not.toContain("hosted.terminal.interrupted")
+      expect(renderedObservability.match(/hosted\.terminal\.interrupted/g)).toHaveLength(1)
       const deadlineAcknowledgements = target.sent
         .map((message) => decode(message))
         .filter(
@@ -1023,16 +1155,11 @@ describe("executor gateway", () => {
         )
       expect(deadlineAcknowledgements).toEqual([
         {
-          _tag: "CellTerminalSuperseded",
+          _tag: "CellTerminalReceipt",
           access,
           operationKey: "operation-deadline",
           attempt: 0,
           cursor: 3,
-          outcome: "unknown",
-          response: {
-            _tag: "DomainFailure",
-            failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
-          },
         },
       ])
 

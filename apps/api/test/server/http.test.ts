@@ -23,7 +23,7 @@ import type { HostedProviderCredentialsService } from "../../src/hosted/environm
 import type { HostedEnvironmentService } from "../../src/hosted/environment/runtime"
 import type { HostedPublicationService } from "../../src/hosted/publication"
 import { EnvironmentReferenceId } from "@rika/product/environment-policy"
-import { OrganizationId } from "@rika/product/hosted-model"
+import { AssignmentLeaseEpoch, FencingGeneration, OrganizationId } from "@rika/product/hosted-model"
 
 const account: Account = {
   user: {
@@ -78,11 +78,15 @@ const product: HostedProductService = {
   pollRunner: () => Effect.die("unused"),
   createConnection: () => Effect.succeed({ threadId: "thread-1" }),
   admitRun: () => Effect.die("unused"),
+  admitAuthorizedRun: () => Effect.die("unused"),
+  cancelRunAdmission: () => Effect.die("unused"),
+  cancelAuthorizedRunAdmission: () => Effect.die("unused"),
 }
 
 const recovery: HttpDependencies["recovery"] = {
   inspect: () => Effect.die("unused"),
   resolve: () => Effect.die("unused"),
+  reconcileCompleted: Effect.die("unused"),
 }
 
 const unusedController: ControllerService = {
@@ -228,6 +232,19 @@ const cliRegistrationBody = {
 } as const
 
 describe("api HTTP", () => {
+  it.effect("does not expose an authentication bypass in development or production", () =>
+    Effect.gen(function* () {
+      const development: HttpDependencies = {
+        ...dependencies(),
+        production: false,
+      }
+      const local = yield* response("/__dev/log-me-in/rika%40local.test", development)
+      const production = yield* response("/__dev/log-me-in/rika%40local.test", dependencies())
+      expect(local.status).toBe(404)
+      expect(production.status).toBe(404)
+    }),
+  )
+
   it.effect("serves liveness without consulting identity or PostgreSQL", () =>
     Effect.gen(function* () {
       const unavailable: HttpDependencies = {
@@ -398,8 +415,8 @@ describe("api HTTP", () => {
               projectId: "project-1",
               repositoryId: "repository-1",
               assignmentId: "assignment-1",
-              assignmentGeneration: 1,
-              leaseEpoch: 1,
+              assignmentGeneration: FencingGeneration.make("1"),
+              leaseEpoch: AssignmentLeaseEpoch.make("1"),
               workspaceId: "workspace-1",
               authorizationCheckpointId: "publication-1",
               authorizationDigest: `sha256:${"a".repeat(64)}`,

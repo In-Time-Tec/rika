@@ -14,6 +14,7 @@ import {
   Effect,
   Encoding,
   Fiber,
+  FiberSet,
   FileSystem,
   Layer,
   Option,
@@ -1011,6 +1012,7 @@ const consumeApi = (
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string>,
+  runWorker: (effect: Effect.Effect<void, unknown>) => Fiber.Fiber<void, unknown>,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime
@@ -1057,29 +1059,32 @@ const consumeApi = (
         )
         if (!sameAccess(access, message.access))
           return yield* HostError.make({ message: "Machine request has a stale executor fence" })
-        yield* machine
-          .execute({
-            machineId: message.machineId,
-            requestDigest: message.requestDigest,
-            request: message.request,
-          })
-          .pipe(
-            Effect.flatMap((outcome) =>
-              writer(
-                encodeExecutorMessage({
-                  _tag: "MachineResult",
-                  access: message.access,
-                  operationKey: message.operationKey,
-                  attempt: message.attempt,
-                  machineId: message.machineId,
-                  requestDigest: message.requestDigest,
-                  outcome,
-                }),
+        yield* Effect.sync(() =>
+          runWorker(
+            machine
+              .execute({
+                machineId: message.machineId,
+                requestDigest: message.requestDigest,
+                request: message.request,
+              })
+              .pipe(
+                Effect.flatMap((outcome) =>
+                  writer(
+                    encodeExecutorMessage({
+                      _tag: "MachineResult",
+                      access: message.access,
+                      operationKey: message.operationKey,
+                      attempt: message.attempt,
+                      machineId: message.machineId,
+                      requestDigest: message.requestDigest,
+                      outcome,
+                    }),
+                  ),
+                ),
+                Effect.mapError((error) => HostError.make({ message: error.message })),
               ),
-            ),
-            Effect.mapError((error) => HostError.make({ message: error.message })),
-            Effect.forkScoped,
-          )
+          ),
+        )
       }
       if (yield* dispatchPty(message, writer, ptyDelivery)) return
       if (yield* dispatchWorkspace(message, writer)) return
@@ -1223,6 +1228,7 @@ const consumeApi = (
               (frame) => writer(encodeExecutorMessage({ _tag: "CellLifecycle", access, frame })),
               { discard: true },
             )
+            yield* cells.replayBindings(access).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
             return
           }
         }
@@ -1330,7 +1336,7 @@ const consumeApi = (
           ),
         )
         const gate = yield* Deferred.make<void>()
-        const fiber = yield* Effect.forkScoped(Deferred.await(gate).pipe(Effect.andThen(operation)))
+        const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
         yield* Ref.update(operations, (values) => new Map(values).set(key, fiber))
         yield* Deferred.succeed(gate, undefined)
       }
@@ -1352,6 +1358,7 @@ const consumeApi = (
           (frame) => writer(encodeExecutorMessage({ _tag: "CellLifecycle", access: message.access, frame })),
           { discard: true },
         )
+        yield* cells.replayBindings(access).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
       }
       if (message._tag === "CellTerminalReceipt") {
         const access = yield* runtime.access.pipe(
@@ -1460,7 +1467,7 @@ const connect = Effect.fn("Host.connect")(function* (
   lifecycle: Semaphore.Semaphore,
   cells: HostedKernel.Interface,
   inspectCapabilities: Effect.Effect<WorkspaceCapabilitySnapshot, never, Crypto.Crypto | FileSystem.FileSystem>,
-  makeMachine: Effect.Effect<Machine["Service"], never, import("effect").Scope.Scope>,
+  makeMachine: Effect.Effect<Machine["Service"]>,
   ptyDelivery: Semaphore.Semaphore,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
@@ -1468,6 +1475,7 @@ const connect = Effect.fn("Host.connect")(function* (
   appliedEnvironment: Ref.Ref<Map<string, string>>,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string>,
+  runWorker: (effect: Effect.Effect<void, unknown>) => Fiber.Fiber<void, unknown>,
   connected: Effect.Effect<void> = Effect.void,
 ) {
   const runtime = yield* Runtime
@@ -1570,6 +1578,7 @@ const connect = Effect.fn("Host.connect")(function* (
         appliedEnvironment,
         environmentAccess,
         redactedValues,
+        runWorker,
       ),
     ),
     consumePtyEvents(writer, ptyDelivery),
@@ -1579,8 +1588,6 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.ensuring(
       Effect.gen(function* () {
         yield* pty.disconnectAll.pipe(Effect.ignore)
-        const running = yield* Ref.getAndSet(operations, new Map())
-        yield* Effect.forEach(running.values(), Fiber.interrupt, { discard: true })
         yield* Ref.set(activeWriter, undefined)
       }),
     ),
@@ -1860,8 +1867,11 @@ const host = Effect.scoped(
               )
             }),
         })
-        const makeMachine = Layer.build(machineLayer({ workspace: root, read: readMachine, write: writeMachine })).pipe(
-          Effect.map((context) => Context.get(context, Machine)),
+        const hostScope = yield* Effect.scope
+        const makeMachine = yield* Effect.cached(
+          Layer.buildWithScope(machineLayer({ workspace: root, read: readMachine, write: writeMachine }), hostScope).pipe(
+            Effect.map((context) => Context.get(context, Machine)),
+          ),
         )
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)
@@ -1872,6 +1882,8 @@ const host = Effect.scoped(
         const appliedEnvironment = yield* Ref.make(new Map<string, string>())
         const environmentAccess = yield* Semaphore.make(1)
         const redactedValues = new Set<string>()
+        const workers = yield* FiberSet.make<void, unknown>()
+        const runWorker = yield* FiberSet.runtime(workers)<never>()
         return yield* Effect.scoped(
           connect(
             config,
@@ -1895,6 +1907,7 @@ const host = Effect.scoped(
             appliedEnvironment,
             environmentAccess,
             redactedValues,
+            runWorker,
             connected,
           ),
         ).pipe(

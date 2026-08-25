@@ -7,7 +7,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { productLayer, Service } from "@rika/product/product-operation-service"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
-import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
+import * as TranscriptRepository from "@rika/product-store/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -284,10 +284,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             ? submitted
             : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
         },
-        cancel:
-          options.holdCancellation === undefined
-            ? current.cancel
-            : Deferred.await(options.holdCancellation).pipe(Effect.andThen(current.cancel)),
+        cancel: (target) => {
+          const cancelled = current.cancel(target)
+          return options.holdCancellation === undefined
+            ? cancelled
+            : Deferred.await(options.holdCancellation).pipe(Effect.andThen(cancelled))
+        },
         events: (dispatch) =>
           current.events((event) => {
             const delivered = options.mapInteractiveEvent?.(event) ?? event

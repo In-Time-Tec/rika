@@ -52,6 +52,7 @@ const projectionPatchImpl = (
 })
 
 export const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: (input) =>
     Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,

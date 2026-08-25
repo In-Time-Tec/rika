@@ -23,7 +23,10 @@ export const makeProductOperationSchedule = (
 ): Effect.Effect<ProductOperationSchedule, OperationError> =>
   Effect.gen(function* () {
     const makeInteractiveSession: ProductOperationInteractiveSessionFactory = input.makeInteractiveSession
-    const owner = yield* makeInteractiveSession(input.options.defaultWorkspace, { recoveryOwner: true })
+    const owner = yield* makeInteractiveSession(input.options.defaultWorkspace, {
+      recoveryOwner: true,
+      observeExecution: input.options.executionProjectionOwner !== "external",
+    })
     yield* Effect.forkIn(owner.supervise, input.ownerScope)
     yield* owner.initialized.pipe(Effect.mapError((error) => operationError(String(error), error)))
     const repairSummariesOnce = yield* Effect.cached(

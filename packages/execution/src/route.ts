@@ -346,6 +346,107 @@ const deadlineFailure = (failure: Cell.CellFailure, deadlineMillis: number): Cel
   })
 }
 
+const infrastructureCellFailure = (
+  failure: RemoteCells.InfrastructureFailure,
+  request: RemoteCells.Request,
+): Cell.CellFailure => {
+  if (failure.kind === "fenced" || failure.kind === "workspace")
+    return Cell.KernelUnavailable.make({
+      sessionId: request.sessionId,
+      reason: failure.kind === "fenced" ? "lease-lost" : "profile-mismatch",
+      message: failure.message,
+    })
+  if (failure.kind === "cancelled")
+    return Cell.KernelUnavailable.make({
+      sessionId: request.sessionId,
+      reason: "closed",
+      message: failure.message,
+    })
+  return Cell.CellOutcomeUnknown.make({
+    sessionId: request.sessionId,
+    cellId: request.toolCallId,
+    epoch: 0,
+    reason: failure.kind === "unknown" ? "transport-lost" : "host-terminated",
+    message: failure.message,
+  })
+}
+
+type DecodedRemoteCellResponse =
+  | { readonly _tag: "Success"; readonly result: Cell.CellResult }
+  | { readonly _tag: "DomainFailure"; readonly failure: Cell.CellFailure }
+  | { readonly _tag: "Suspend"; readonly token: string }
+
+const decodeRemoteCellResponse = (
+  request: RemoteCells.Request,
+  response: RemoteCells.EncodedResponse,
+): Effect.Effect<DecodedRemoteCellResponse, ToolExecutor.FrameworkFailure> =>
+  Schema.decodeEffect(RemoteCells.Response, { onExcessProperty: "error" })(response).pipe(
+    Effect.mapError((cause) =>
+      ToolExecutor.FrameworkFailure.make({
+        stage: "placement",
+        tool: CellTool.name,
+        message: `remote cell response is invalid: ${String(cause)}`,
+      }),
+    ),
+    Effect.map((decoded): DecodedRemoteCellResponse => {
+      if (decoded._tag !== "DomainFailure") return decoded
+      return {
+        _tag: "DomainFailure",
+        failure: Schema.is(Cell.CellFailure)(decoded.failure)
+          ? decoded.failure
+          : infrastructureCellFailure(decoded.failure, request),
+      }
+    }),
+  )
+
+export type RemoteCellOperationOutcome =
+  | {
+      readonly _tag: "Success"
+      readonly result: Cell.CellResult
+      readonly encodedResult: typeof Cell.CellResult.Encoded
+    }
+  | {
+      readonly _tag: "DomainFailure"
+      readonly failure: Cell.CellFailure
+      readonly encodedFailure: typeof Cell.CellFailure.Encoded
+    }
+  | { readonly _tag: "Suspend"; readonly token: string }
+
+const remoteCellOperationOutcomeImpl = (
+  request: RemoteCells.Request,
+  response: RemoteCells.EncodedResponse,
+): Effect.Effect<RemoteCellOperationOutcome, ToolExecutor.FrameworkFailure> =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeRemoteCellResponse(request, response)
+    if (decoded._tag === "Suspend") return decoded
+    if (decoded._tag === "Success") {
+      const encodedResult = yield* Schema.encodeUnknownEffect(Cell.CellResult)(decoded.result)
+      return { ...decoded, encodedResult }
+    }
+    const encodedFailure = yield* Schema.encodeUnknownEffect(Cell.CellFailure)(decoded.failure)
+    return { ...decoded, encodedFailure }
+  }).pipe(
+    Effect.mapError((cause) =>
+      Schema.is(ToolExecutor.FrameworkFailure)(cause)
+        ? cause
+        : ToolExecutor.FrameworkFailure.make({
+            stage: "placement",
+            tool: CellTool.name,
+            message: `remote cell response is invalid: ${String(cause)}`,
+          }),
+    ),
+  )
+
+export const remoteCellOperationOutcome: {
+  (
+    response: RemoteCells.EncodedResponse,
+  ): (request: RemoteCells.Request) => Effect.Effect<RemoteCellOperationOutcome, ToolExecutor.FrameworkFailure>
+  (
+    request: RemoteCells.Request,
+    response: RemoteCells.EncodedResponse,
+  ): Effect.Effect<RemoteCellOperationOutcome, ToolExecutor.FrameworkFailure>
+} = Function.dual(2, remoteCellOperationOutcomeImpl)
+
 const deadlinePool = (pool: KernelPool.Interface, deadlineMillis: number): KernelPool.Interface => ({
   ...pool,
   execute: (request) =>
@@ -408,6 +509,7 @@ const remoteCellExecutor = (
     ToolExecutor.ToolExecutor,
     Effect.map(RemoteCells.Service, (cells) =>
       ToolExecutor.ToolExecutor.of({
+        replayPolicy: (request) => (CellTool.route.matches(request) ? "provider-idempotent" : "never"),
         execute: (request) => {
           if (!CellTool.route.matches(request)) return unsupportedCellTool(request.call.name)
           return Effect.gen(function* () {
@@ -447,35 +549,35 @@ const remoteCellExecutor = (
                       }),
                     ),
                   )
-                  const response = yield* cells.execute(
-                    RemoteCells.Request.make({
-                      operationKey,
-                      workspaceId: workspace,
-                      sessionId: placement.sessionId,
-                      threadId: identity.threadId,
-                      turnId: identity.turnId,
-                      runId,
-                      rootRunId,
-                      toolCallId: context.toolCallId ?? placement.call.id,
-                      code: parameters.code,
-                      attempt: context.attempt ?? 0,
-                      replayPolicy: "never",
-                      admittedAt: DateTime.formatIso(DateTime.makeUnsafe(admittedAtMillis)),
-                      deadlineAt,
-                    }),
-                    authority,
-                  )
-                  return yield* Schema.decodeUnknownEffect(RemoteCells.Response, {
+                  const remoteRequest = RemoteCells.Request.make({
+                    operationKey,
+                    workspaceId: workspace,
+                    sessionId: placement.sessionId,
+                    threadId: identity.threadId,
+                    turnId: identity.turnId,
+                    runId,
+                    rootRunId,
+                    toolCallId: context.toolCallId ?? placement.call.id,
+                    code: parameters.code,
+                    attempt: context.attempt ?? 0,
+                    replayPolicy: "provider-idempotent",
+                    admittedAt: DateTime.formatIso(DateTime.makeUnsafe(admittedAtMillis)),
+                    deadlineAt,
+                  })
+                  const response = yield* cells.execute(remoteRequest, authority)
+                  const decodedResponse = yield* Schema.decodeUnknownEffect(RemoteCells.Response, {
                     onExcessProperty: "error",
                   })(response).pipe(
                     Effect.mapError((cause) =>
                       ToolExecutor.FrameworkFailure.make({
                         stage: "placement",
-                        tool: placement.call.name,
+                        tool: CellTool.name,
                         message: `remote cell response is invalid: ${String(cause)}`,
                       }),
                     ),
+                    Effect.flatMap(Schema.encodeEffect(RemoteCells.Response)),
                   )
+                  return yield* decodeRemoteCellResponse(remoteRequest, decodedResponse)
                 }),
             })
             return yield* remote.execute(request)

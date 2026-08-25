@@ -79,28 +79,25 @@ export const layer = (options: { readonly product: HostedProductService; readonl
             }),
           )
         const basePublication = {
-            ownerId: authority.ownerId,
-            threadId: input.threadId,
-            actor: authority.actor,
-            idempotencyKey: input.idempotencyKey,
-            commitSha: input.commitSha,
-            title: input.title,
-            body: input.body,
+          ownerId: authority.ownerId,
+          threadId: input.threadId,
+          actor: authority.actor,
+          idempotencyKey: input.idempotencyKey,
+          commitSha: input.commitSha,
+          title: input.title,
+          body: input.body,
         }
-        const publication: Parameters<typeof repositories.approvePublication>[0] = input.targetRef === undefined
-          ? basePublication
-          : { ...basePublication, targetRef: input.targetRef }
-        let approved = yield* repositories
-          .approvePublication(publication)
-          .pipe(
-            Effect.mapError((error) => {
-              if (error.reason === "authorization") return rejected("forbidden", error.message)
-              if (error.reason === "configuration" || error.reason === "identity")
-                return rejected("invalid", error.message)
-              if (error.reason === "stale-fence") return rejected("conflict", error.message)
-              return rejected("unavailable", error.message)
-            }),
-          )
+        const publication: Parameters<typeof repositories.approvePublication>[0] =
+          input.targetRef === undefined ? basePublication : { ...basePublication, targetRef: input.targetRef }
+        let approved = yield* repositories.approvePublication(publication).pipe(
+          Effect.mapError((error) => {
+            if (error.reason === "authorization") return rejected("forbidden", error.message)
+            if (error.reason === "configuration" || error.reason === "identity")
+              return rejected("invalid", error.message)
+            if (error.reason === "stale-fence") return rejected("conflict", error.message)
+            return rejected("unavailable", error.message)
+          }),
+        )
         if (approved.state === "completed" || approved.state === "failed" || approved.state === "unknown")
           return approved
         if (approved.state === "pushing") return approved

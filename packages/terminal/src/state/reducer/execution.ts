@@ -203,7 +203,6 @@ const reduceExecutionImpl = (
             }
       return {
         ...started,
-        cancelPending: false,
         activeTurnId: message.turnId,
         busy: true,
         activity: { _tag: "Waiting" },

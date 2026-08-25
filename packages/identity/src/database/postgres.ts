@@ -1,5 +1,7 @@
+import { asc, eq } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Redacted, Schema } from "effect"
-import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg"
+import { Pool, type PoolClient, type PoolConfig } from "pg"
 import type { IdentityDatabaseConfig } from "../config"
 import {
   IdentityDirectoryError,
@@ -8,25 +10,11 @@ import {
   type IdentityDirectory,
   type OrganizationMembership,
 } from "../directory"
+import { identityMember, identityOrganization, identityUser } from "./account-schema"
 
 export class PostgresAdapterError extends Schema.TaggedError<PostgresAdapterError>()("PostgresAdapterError", {
   operation: Schema.String,
 }) {}
-
-interface AccountRow extends QueryResultRow {
-  readonly user_id: string
-  readonly user_name: string
-  readonly user_email: string
-  readonly user_email_verified: boolean
-  readonly user_image: string | null
-  readonly member_id: string | null
-  readonly member_role: string | null
-  readonly member_created_at: Date | null
-  readonly organization_id: string | null
-  readonly organization_name: string | null
-  readonly organization_slug: string | null
-  readonly organization_logo: string | null
-}
 
 const poolOptions = (config: IdentityDatabaseConfig): PoolConfig => ({
   connectionString: Redacted.value(config.databaseUrl),
@@ -45,44 +33,58 @@ export const makePostgresPool = (config: IdentityDatabaseConfig) => new Pool(poo
 
 const postgresError = (operation: string) => () => PostgresAdapterError.make({ operation })
 
-const query = <Row extends QueryResultRow>(pool: Pool, operation: string, text: string, values?: unknown[]) =>
-  Effect.tryPromise({
-    try: () => pool.query<Row>(text, values),
-    catch: () => IdentityDirectoryError.make({ operation }),
-  }).pipe(Effect.map((result) => result.rows))
+type IdentityDatabase = Pick<PgDrizzle.EffectPgDatabase, "select">
+
+const directoryQuery = <A extends object, E, R>(operation: string, statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
+  statement.pipe(Effect.mapError(() => IdentityDirectoryError.make({ operation })))
 
 const membershipFromRow = (row: AccountRow): OrganizationMembership | undefined => {
   if (
-    row.member_id === null ||
-    row.member_role === null ||
-    row.member_created_at === null ||
-    row.organization_id === null ||
-    row.organization_name === null ||
-    row.organization_slug === null
+    row.memberId === null ||
+    row.memberRole === null ||
+    row.memberCreatedAt === null ||
+    row.organizationId === null ||
+    row.organizationName === null ||
+    row.organizationSlug === null
   )
     return undefined
   return {
-    id: row.member_id,
-    role: row.member_role,
-    createdAt: row.member_created_at.toISOString(),
+    id: row.memberId,
+    role: row.memberRole,
+    createdAt: row.memberCreatedAt.toISOString(),
     organization: {
-      id: row.organization_id,
-      name: row.organization_name,
-      slug: row.organization_slug,
-      logo: row.organization_logo,
+      id: row.organizationId,
+      name: row.organizationName,
+      slug: row.organizationSlug,
+      logo: row.organizationLogo,
     },
   }
+}
+
+interface AccountRow {
+  readonly userId: string
+  readonly userName: string
+  readonly userEmail: string
+  readonly userEmailVerified: boolean
+  readonly userImage: string | null
+  readonly memberId: string | null
+  readonly memberRole: string | null
+  readonly memberCreatedAt: Date | null
+  readonly organizationId: string | null
+  readonly organizationName: string | null
+  readonly organizationSlug: string | null
+  readonly organizationLogo: string | null
 }
 
 const accountFromRows = (rows: ReadonlyArray<AccountRow>): Account | undefined => {
   const first = rows[0]
   if (first === undefined) return undefined
   const user: AccountUser = {
-    id: first.user_id,
-    name: first.user_name,
-    email: first.user_email,
-    emailVerified: first.user_email_verified,
-    image: first.user_image,
+    id: first.userId,
+    name: first.userName,
+    email: first.userEmail,
+    emailVerified: first.userEmailVerified,
+    image: first.userImage,
   }
   return {
     user,
@@ -93,31 +95,31 @@ const accountFromRows = (rows: ReadonlyArray<AccountRow>): Account | undefined =
   }
 }
 
-export const makePostgresIdentityDirectory = (pool: Pool): IdentityDirectory => ({
-  ready: query(pool, "readiness", "select 1 as ready").pipe(Effect.asVoid),
+export const makePostgresIdentityDirectory = (db: IdentityDatabase): IdentityDirectory => ({
+  ready: directoryQuery("readiness", db.select({ id: identityUser.id }).from(identityUser).limit(1)).pipe(Effect.asVoid),
   account: Effect.fn("PostgresStore.account")((userId: string) =>
-    query<AccountRow>(
-      pool,
+    directoryQuery(
       "load account",
-      `select
-        u.id as user_id,
-        u.name as user_name,
-        u.email as user_email,
-        u.email_verified as user_email_verified,
-        u.image as user_image,
-        m.id as member_id,
-        m.role as member_role,
-        m.created_at as member_created_at,
-        o.id as organization_id,
-        o.name as organization_name,
-        o.slug as organization_slug,
-        o.logo as organization_logo
-      from "user" u
-      left join member m on m.user_id = u.id
-      left join organization o on o.id = m.organization_id
-      where u.id = $1
-      order by m.created_at asc`,
-      [userId],
+      db
+        .select({
+          userId: identityUser.id,
+          userName: identityUser.name,
+          userEmail: identityUser.email,
+          userEmailVerified: identityUser.emailVerified,
+          userImage: identityUser.image,
+          memberId: identityMember.id,
+          memberRole: identityMember.role,
+          memberCreatedAt: identityMember.createdAt,
+          organizationId: identityOrganization.id,
+          organizationName: identityOrganization.name,
+          organizationSlug: identityOrganization.slug,
+          organizationLogo: identityOrganization.logo,
+        })
+        .from(identityUser)
+        .leftJoin(identityMember, eq(identityMember.userId, identityUser.id))
+        .leftJoin(identityOrganization, eq(identityOrganization.id, identityMember.organizationId))
+        .where(eq(identityUser.id, userId))
+        .orderBy(asc(identityMember.createdAt)),
     ).pipe(Effect.map(accountFromRows)),
   ),
 })

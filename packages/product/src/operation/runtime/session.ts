@@ -26,7 +26,11 @@ type ProductOperationInteractiveSessionInput = Omit<
 
 export type ProductOperationInteractiveSessionFactory = (
   workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean },
+  settings?: {
+    readonly initialThreadId?: string
+    readonly recoveryOwner?: boolean
+    readonly observeExecution?: boolean
+  },
 ) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>
 
 export const makeProductOperationInteractiveSession = (
@@ -35,7 +39,11 @@ export const makeProductOperationInteractiveSession = (
   let sequence = 0
   return (
     workspace: string,
-    settings: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean } = {},
+    settings: {
+      readonly initialThreadId?: string
+      readonly recoveryOwner?: boolean
+      readonly observeExecution?: boolean
+    } = {},
   ) => {
     const runtimeInput: InteractiveSessionInput = {
       ...input,

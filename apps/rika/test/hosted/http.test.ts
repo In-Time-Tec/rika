@@ -113,7 +113,8 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
               protocol: "rika.thread.v1",
             }),
           )
-        if (path.endsWith("/admissions")) return Effect.succeed(response(request, { _tag: "Waiting" }))
+        if (path.endsWith("/admissions"))
+          return Effect.succeed(response(request, { _tag: "Waiting", reason: "no-work" }))
         return Effect.succeed(response(request, {}))
       })
       const context = yield* Layer.build(
@@ -168,7 +169,9 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
         session,
       )
       yield* http.setRemoteThreadCreation(origin, "checkout-1", "allowed", session)
-      expect((yield* http.pollRunner(origin, "checkout-1", session))._tag).toBe("Waiting")
+      expect(
+        (yield* http.pollRunner(origin, "checkout-1", "10000000-0000-4000-8000-000000000001", [], session))._tag,
+      ).toBe("Waiting")
       expect(
         (yield* http.createProject(origin, { kind: "organization", organizationId: "org-1" }, "Remote", session)).id,
       ).toBe("project-2")
@@ -231,7 +234,9 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
       expect(bodyText(requests[8]!)).toBe("")
       expect(bodyText(requests[10]!)).toContain('"workspaceIdentity":"workspace-1"')
       expect(bodyText(requests[11]!)).toBe('{"preference":"allowed"}')
-      expect(bodyText(requests[12]!)).toBe("")
+      expect(bodyText(requests[12]!)).toBe(
+        '{"supervisorId":"10000000-0000-4000-8000-000000000001","activeAssignmentIds":[]}',
+      )
       expect(bodyText(requests[13]!)).toContain('"name":"Remote"')
       expect(bodyText(requests[14]!)).toContain('"value":"secret-value"')
       expect(bodyText(requests[15]!)).not.toContain("secret-value")

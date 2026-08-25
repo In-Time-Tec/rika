@@ -4,30 +4,33 @@ export class IdentityDirectoryError extends Schema.TaggedError<IdentityDirectory
   operation: Schema.String,
 }) {}
 
-export interface AccountUser {
-  readonly id: string
-  readonly name: string
-  readonly email: string
-  readonly emailVerified: boolean
-  readonly image: string | null
-}
+export const AccountUser = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: Schema.String,
+  emailVerified: Schema.Boolean,
+  image: Schema.NullOr(Schema.String),
+})
+export type AccountUser = typeof AccountUser.Type
 
-export interface OrganizationMembership {
-  readonly id: string
-  readonly role: string
-  readonly createdAt: string
-  readonly organization: {
-    readonly id: string
-    readonly name: string
-    readonly slug: string
-    readonly logo: string | null
-  }
-}
+export const OrganizationMembership = Schema.Struct({
+  id: Schema.String,
+  role: Schema.String,
+  createdAt: Schema.String,
+  organization: Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    slug: Schema.String,
+    logo: Schema.NullOr(Schema.String),
+  }),
+})
+export type OrganizationMembership = typeof OrganizationMembership.Type
 
-export interface Account {
-  readonly user: AccountUser
-  readonly memberships: ReadonlyArray<OrganizationMembership>
-}
+export const Account = Schema.Struct({
+  user: AccountUser,
+  memberships: Schema.Array(OrganizationMembership),
+})
+export type Account = typeof Account.Type
 
 export interface IdentityDirectory {
   readonly ready: Effect.Effect<void, IdentityDirectoryError>

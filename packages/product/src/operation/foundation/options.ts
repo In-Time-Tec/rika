@@ -18,6 +18,7 @@ export interface ProductLayerOptions<
     TranscriptError
   >
   readonly backendLayer: import("effect").Layer.Layer<import("@rika/product/execution-gateway").Service, BackendError>
+  readonly executionProjectionOwner?: "internal" | "external"
   readonly executionSessionLifecycleLayer: import("effect").Layer.Layer<
     import("@rika/product/execution-session-lifecycle").Service,
     BackendError

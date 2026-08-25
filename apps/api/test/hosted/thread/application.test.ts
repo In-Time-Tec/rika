@@ -13,8 +13,8 @@ import { ThreadId } from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
-import { layer as hostedStoreLayer } from "@rika/product-store/postgres-store"
+import * as ProductRepositories from "@rika/product-store/product-repositories"
+import { layer as hostedStoreLayer } from "@rika/product-store/store"
 import { FileSystem, Config, Context, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -67,6 +67,9 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           Layer.succeed(ThreadProtocolStore, {
             initializeThread: () => Effect.die("unused"),
             admitCommand: () => Effect.die("unused"),
+            claimNextCommand: () => Effect.die("unused"),
+            renewCommandClaim: () => Effect.die("unused"),
+            releaseCommandClaim: () => Effect.die("unused"),
             completeCommand: () => Effect.die("unused"),
             appendEvents: () => Effect.die("unused"),
             saveSnapshot: () => Effect.die("unused"),

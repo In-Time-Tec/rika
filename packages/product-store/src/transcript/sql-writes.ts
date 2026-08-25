@@ -5,8 +5,10 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { and, eq, lte, sql } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Clock, Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { rikaTranscriptCheckpoints, rikaTranscriptUnits } from "../database/schema/product"
 
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
@@ -32,61 +34,100 @@ const validateUnits = (turnId: string, units: ReadonlyArray<TranscriptUnit.Unit>
 
 export const transcriptSqlWrites = {
   make: (
-    sql: SqlClient,
+    db: PgDrizzle.EffectPgDatabase,
     get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
   ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
     commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
       const upserts = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
       yield* validateUnits(turn.id, upserts)
       const clock = yield* Clock.Clock
-      return yield* sql
-        .withTransaction(
+      return yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
             const checkpoint = change.checkpoint
             const now = clock.currentTimeMillisUnsafe()
             const rows =
               change._tag === "ProjectionSnapshot"
-                ? yield* sql`INSERT INTO rika_transcript_checkpoints (
-              turn_id, thread_id, checkpoint_generation, revision, projection_version, state_json,
-              projector_version, projector_cursor, projector_state, updated_at
-            ) VALUES (
-              ${turn.id}, ${turn.threadId}, 0, ${change.revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(change.state)},
-              ${checkpoint?.version ?? null}, ${checkpoint?.cursor ?? null}, ${checkpoint?.state ?? null}, ${now}
-            ) ON CONFLICT(turn_id) DO UPDATE SET
-              checkpoint_generation = rika_transcript_checkpoints.checkpoint_generation + 1,
-              revision = excluded.revision,
-              projection_version = excluded.projection_version,
-              state_json = excluded.state_json,
-              projector_version = excluded.projector_version,
-              projector_cursor = excluded.projector_cursor,
-              projector_state = excluded.projector_state,
-              updated_at = excluded.updated_at
-            WHERE rika_transcript_checkpoints.revision <= excluded.revision
-            RETURNING turn_id`
-                : yield* sql`UPDATE rika_transcript_checkpoints SET
-              checkpoint_generation = checkpoint_generation + 1,
-              revision = ${change.revision}, projection_version = ${ExecutionProjection.projectionVersion},
-              state_json = ${encodeState(change.state)},
-              projector_version = ${change.checkpoint.version}, projector_cursor = ${change.checkpoint.cursor},
-              projector_state = ${change.checkpoint.state}, updated_at = ${now}
-            WHERE turn_id = ${turn.id} AND revision = ${change.baseRevision}
-            RETURNING turn_id`
+                ? yield* tx
+                    .insert(rikaTranscriptCheckpoints)
+                    .values({
+                      turnId: turn.id,
+                      threadId: turn.threadId,
+                      checkpointGeneration: 0,
+                      revision: change.revision,
+                      projectionVersion: ExecutionProjection.projectionVersion,
+                      stateJson: encodeState(change.state),
+                      projectorVersion: checkpoint?.version ?? null,
+                      projectorCursor: checkpoint?.cursor ?? null,
+                      projectorState: checkpoint?.state ?? null,
+                      updatedAt: now,
+                    })
+                    .onConflictDoUpdate({
+                      target: rikaTranscriptCheckpoints.turnId,
+                      set: {
+                        checkpointGeneration: sql`${rikaTranscriptCheckpoints.checkpointGeneration} + 1`,
+                        revision: sql`excluded.revision`,
+                        projectionVersion: sql`excluded.projection_version`,
+                        stateJson: sql`excluded.state_json`,
+                        projectorVersion: sql`excluded.projector_version`,
+                        projectorCursor: sql`excluded.projector_cursor`,
+                        projectorState: sql`excluded.projector_state`,
+                        updatedAt: sql`excluded.updated_at`,
+                      },
+                      setWhere: lte(rikaTranscriptCheckpoints.revision, sql`excluded.revision`),
+                    })
+                    .returning({ turnId: rikaTranscriptCheckpoints.turnId })
+                : yield* tx
+                    .update(rikaTranscriptCheckpoints)
+                    .set({
+                      checkpointGeneration: sql`${rikaTranscriptCheckpoints.checkpointGeneration} + 1`,
+                      revision: change.revision,
+                      projectionVersion: ExecutionProjection.projectionVersion,
+                      stateJson: encodeState(change.state),
+                      projectorVersion: change.checkpoint.version,
+                      projectorCursor: change.checkpoint.cursor,
+                      projectorState: change.checkpoint.state,
+                      updatedAt: now,
+                    })
+                    .where(
+                      and(
+                        eq(rikaTranscriptCheckpoints.turnId, turn.id),
+                        eq(rikaTranscriptCheckpoints.revision, change.baseRevision),
+                      ),
+                    )
+                    .returning({ turnId: rikaTranscriptCheckpoints.turnId })
             if (rows.length === 0) return "stale" as const
             if (change._tag === "ProjectionSnapshot" && !change.hasOlder)
-              yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`
+              yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const key of change._tag === "ProjectionPatch" ? change.remove : [])
-              yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id} AND unit_key = ${key}`
+              yield* tx
+                .delete(rikaTranscriptUnits)
+                .where(and(eq(rikaTranscriptUnits.turnId, turn.id), eq(rikaTranscriptUnits.unitKey, key)))
             for (const unit of upserts) {
               const order = TranscriptOrdering.encodeUnitOrder(unit.order)
-              yield* sql`INSERT INTO rika_transcript_units (
-              turn_id, unit_key, thread_id, unit_order_key, parent_id, revision, unit_json, created_at, updated_at
-            ) VALUES (
-              ${turn.id}, ${unit.key}, ${turn.threadId}, ${order}, ${unit.parentId ?? null},
-              ${unit.revision}, ${encodeUnit(unit)}, ${turn.createdAt}, ${now}
-            ) ON CONFLICT(turn_id, unit_key) DO UPDATE SET
-              revision = excluded.revision, unit_json = excluded.unit_json,
-              parent_id = excluded.parent_id, updated_at = excluded.updated_at
-            WHERE rika_transcript_units.unit_order_key = excluded.unit_order_key`
+              yield* tx
+                .insert(rikaTranscriptUnits)
+                .values({
+                  turnId: turn.id,
+                  unitKey: unit.key,
+                  threadId: turn.threadId,
+                  unitOrderKey: order,
+                  parentId: unit.parentId ?? null,
+                  revision: unit.revision,
+                  unitJson: encodeUnit(unit),
+                  createdAt: turn.createdAt,
+                  updatedAt: now,
+                })
+                .onConflictDoUpdate({
+                  target: [rikaTranscriptUnits.turnId, rikaTranscriptUnits.unitKey],
+                  set: {
+                    revision: sql`excluded.revision`,
+                    unitJson: sql`excluded.unit_json`,
+                    parentId: sql`excluded.parent_id`,
+                    updatedAt: sql`excluded.updated_at`,
+                  },
+                  setWhere: eq(rikaTranscriptUnits.unitOrderKey, sql`excluded.unit_order_key`),
+                })
             }
             return "committed" as const
           }),
@@ -106,31 +147,54 @@ export const transcriptSqlWrites = {
         },
         steering: { steeringMessages: 0, followUpMessages: 0 },
       }
-      yield* sql
-        .withTransaction(
+      yield* db
+        .transaction((tx) =>
           Effect.gen(function* () {
             const now = clock.currentTimeMillisUnsafe()
             const revision = units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0)
-            yield* sql`INSERT INTO rika_transcript_checkpoints (
-            turn_id, thread_id, checkpoint_generation, revision, projection_version, state_json,
-            projector_version, projector_cursor, projector_state, updated_at
-          ) VALUES (
-            ${turn.id}, ${turn.threadId}, 0, ${revision}, ${ExecutionProjection.projectionVersion}, ${encodeState(state)},
-            NULL, NULL, NULL, ${now}
-          ) ON CONFLICT(turn_id) DO UPDATE SET
-            checkpoint_generation = rika_transcript_checkpoints.checkpoint_generation + 1,
-            revision = excluded.revision,
-            projection_version = excluded.projection_version, state_json = excluded.state_json,
-            projector_version = NULL, projector_cursor = NULL, projector_state = NULL, updated_at = excluded.updated_at`
-            yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`
+            yield* tx
+              .insert(rikaTranscriptCheckpoints)
+              .values({
+                turnId: turn.id,
+                threadId: turn.threadId,
+                checkpointGeneration: 0,
+                revision,
+                projectionVersion: ExecutionProjection.projectionVersion,
+                stateJson: encodeState(state),
+                projectorVersion: null,
+                projectorCursor: null,
+                projectorState: null,
+                updatedAt: now,
+              })
+              .onConflictDoUpdate({
+                target: rikaTranscriptCheckpoints.turnId,
+                set: {
+                  checkpointGeneration: sql`${rikaTranscriptCheckpoints.checkpointGeneration} + 1`,
+                  revision: sql`excluded.revision`,
+                  projectionVersion: sql`excluded.projection_version`,
+                  stateJson: sql`excluded.state_json`,
+                  projectorVersion: null,
+                  projectorCursor: null,
+                  projectorState: null,
+                  updatedAt: sql`excluded.updated_at`,
+                },
+              })
+            yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const unit of units) {
               const order = TranscriptOrdering.encodeUnitOrder(unit.order)
-              yield* sql`INSERT INTO rika_transcript_units (
-              turn_id, unit_key, thread_id, unit_order_key, parent_id, revision, unit_json, created_at, updated_at
-            ) VALUES (
-              ${turn.id}, ${unit.key}, ${turn.threadId}, ${order}, ${unit.parentId ?? null},
-              ${unit.revision}, ${encodeUnit(unit)}, ${turn.createdAt}, ${now}
-            )`
+              yield* tx
+                .insert(rikaTranscriptUnits)
+                .values({
+                  turnId: turn.id,
+                  unitKey: unit.key,
+                  threadId: turn.threadId,
+                  unitOrderKey: order,
+                  parentId: unit.parentId ?? null,
+                  revision: unit.revision,
+                  unitJson: encodeUnit(unit),
+                  createdAt: turn.createdAt,
+                  updatedAt: now,
+                })
             }
           }),
         )

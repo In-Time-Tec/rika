@@ -19,7 +19,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { isDurableThreadEvent, type HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedStore } from "@rika/product/hosted-store"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
-import * as ProductRepositories from "@rika/product-store/postgres-product-repositories"
+import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
 import type { Unit } from "@rika/transcript/transcript-unit"
@@ -67,10 +67,11 @@ export interface HostedInteractiveBatch {
   readonly failure?: ProductOperation.OperationUnavailable
 }
 
+type MutableHostedInteractiveBatch = { -readonly [Key in keyof HostedInteractiveBatch]: HostedInteractiveBatch[Key] }
+
 interface HostedInteractiveSession {
   readonly queue: Queue.Queue<InteractiveInvocation, ProductOperation.OperationUnavailable>
   readonly ready: Deferred.Deferred<void, ProductOperation.OperationUnavailable>
-  snapshot: HostedThreadSnapshot
   invocation: InteractiveInvocation | undefined
 }
 
@@ -167,6 +168,7 @@ const ownerLayer = (
         threadSummaryRepositoryLayer: Layer.succeedContext(repositoryContext),
         transcriptRepositoryLayer: Layer.succeedContext(repositoryContext),
         backendLayer: Layer.succeed(ExecutionGateway.Service, gateway),
+        executionProjectionOwner: "external",
         executionSessionLifecycleLayer: Layer.succeed(ExecutionSessionLifecycle.Service, lifecycle),
         defaultWorkspace: "hosted",
         resolveExecutionRoute,
@@ -199,7 +201,6 @@ export const layer = Layer.effect(
       readonly ownerId: OwnerId
       readonly threadId: HostedThreadId
       readonly event: InteractiveEvent
-      readonly snapshot: HostedThreadSnapshot
       readonly persisted: Deferred.Deferred<void, HostedThreadApplicationError>
     }>()
     const projectionAdmission = (key: string) => {
@@ -216,30 +217,6 @@ export const layer = Layer.effect(
         const current = projectionTails.get(key)
         return current === undefined ? Effect.void : Deferred.await(current).pipe(Effect.andThen(awaitProjection(key)))
       })
-    yield* Effect.forkIn(
-      Effect.gen(function* () {
-        while (true) {
-          const current = yield* Queue.take(backgroundEvents)
-          const key = `${current.ownerId}:${current.threadId}`
-          const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const result = yield* projectionAdmission(key)
-            .withPermits(1)(
-              store.appendEvents({
-                ownerId: current.ownerId,
-                threadId: current.threadId,
-                events: [current.event],
-                snapshot: current.snapshot,
-                createdAt,
-              }),
-            )
-            .pipe(Effect.mapError(applicationFailure), Effect.result)
-          if (result._tag === "Success") yield* Deferred.succeed(current.persisted, undefined)
-          else yield* Deferred.fail(current.persisted, result.failure)
-          if (projectionTails.get(key) === current.persisted) projectionTails.delete(key)
-        }
-      }),
-      ownerScope,
-    )
     const ownerRepositories = yield* LayerMap.make((ownerId: OwnerId) => ProductRepositories.layer(ownerId))
     const repositorySnapshot = Effect.fn("HostedThreadApplication.repositorySnapshot")(function* (
       ownerId: OwnerId,
@@ -334,13 +311,40 @@ export const layer = Layer.effect(
         ),
       )
     })
+    yield* Effect.forkIn(
+      Effect.gen(function* () {
+        while (true) {
+          const current = yield* Queue.take(backgroundEvents)
+          const key = `${current.ownerId}:${current.threadId}`
+          const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+          const result = yield* projectionAdmission(key)
+            .withPermits(1)(
+              Effect.gen(function* () {
+                const snapshot = yield* repositorySnapshot(current.ownerId, ThreadId.make(current.threadId))
+                yield* store.appendEvents({
+                  ownerId: current.ownerId,
+                  threadId: current.threadId,
+                  events: [current.event],
+                  snapshot,
+                  createdAt,
+                })
+              }),
+            )
+            .pipe(Effect.mapError(applicationFailure), Effect.result)
+          if (result._tag === "Success") yield* Deferred.succeed(current.persisted, undefined)
+          else yield* Deferred.fail(current.persisted, result.failure)
+          if (projectionTails.get(key) === current.persisted) projectionTails.delete(key)
+        }
+      }),
+      ownerScope,
+    )
     const currentSnapshot = Effect.fn("HostedThreadApplication.currentSnapshot")(function* (
       ownerId: OwnerId,
       threadId: ThreadId,
     ) {
       const key = `${ownerId}:${threadId}`
       yield* awaitProjection(key)
-      return interactiveSessions.get(key)?.snapshot ?? (yield* repositorySnapshot(ownerId, threadId))
+      return yield* repositorySnapshot(ownerId, threadId)
     })
     const runInteractive = (
       ownerId: OwnerId,
@@ -354,25 +358,6 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           yield* Effect.forkScoped(
             session.events((event) => {
-              const view = session.currentView() ?? state.snapshot.view
-              const previous = new Map(
-                state.snapshot.pendingAuthorizations.map((authorization) => [
-                  String(authorization.turnId),
-                  authorization.checkpoint,
-                ]),
-              )
-              const authorizations = pendingAuthorizations(
-                hostedThreadId,
-                view,
-                (turnId) => session.projectionCheckpoint(turnId) ?? previous.get(turnId),
-              )
-              if (authorizations === undefined)
-                throw new Error("Pending authorization has no durable execution checkpoint")
-              state.snapshot = {
-                executorKind: state.snapshot.executorKind,
-                view,
-                pendingAuthorizations: authorizations,
-              }
               const invocation = state.invocation
               if (invocation === undefined) {
                 if (isDurableThreadEvent(event)) {
@@ -382,7 +367,6 @@ export const layer = Layer.effect(
                     ownerId,
                     threadId: hostedThreadId,
                     event,
-                    snapshot: state.snapshot,
                     persisted,
                   })
                 }
@@ -402,10 +386,19 @@ export const layer = Layer.effect(
                 yield* Effect.yieldNow
                 invocations.delete(ownerId)
                 state.invocation = undefined
-                const batch: HostedInteractiveBatch =
-                  result._tag === "Failure"
-                    ? { events: invocation.events, snapshot: state.snapshot, failure: result.failure }
-                    : { events: invocation.events, snapshot: state.snapshot }
+                const snapshot = yield* repositorySnapshot(ownerId, threadId).pipe(
+                  Effect.mapError((error) =>
+                    ProductOperation.OperationUnavailable.make({
+                      operation: "InteractiveSession",
+                      message: error.message,
+                    }),
+                  ),
+                )
+                const batch: MutableHostedInteractiveBatch = {
+                  events: invocation.events,
+                  snapshot,
+                }
+                if (result._tag === "Failure") batch.failure = result.failure
                 yield* Deferred.succeed(invocation.completed, batch)
               }).pipe(
                 Effect.ensuring(
@@ -460,7 +453,6 @@ export const layer = Layer.effect(
                         state = {
                           queue: yield* Queue.unbounded<InteractiveInvocation, ProductOperation.OperationUnavailable>(),
                           ready: yield* Deferred.make<void, ProductOperation.OperationUnavailable>(),
-                          snapshot: initialSnapshot,
                           invocation: undefined,
                         }
                         interactiveSessions.set(key, state)

@@ -4,8 +4,10 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { and, asc, desc, eq, ne } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { rikaTranscriptCheckpoints, rikaTranscriptUnits, rikaTurns } from "../database/schema/product"
 import { decode } from "../turn/postgres/row-codec"
 
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
@@ -48,17 +50,42 @@ const compare = (left: PageCursor, right: PageCursor) =>
   compareText(String(left.turnId), String(right.turnId)) ||
   compareText(left.orderKey, right.orderKey)
 
-export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | "usage"> => {
+const turnSelection = {
+  id: rikaTurns.id,
+  thread_id: rikaTurns.threadId,
+  turn_kind: rikaTurns.turnKind,
+  prompt: rikaTurns.prompt,
+  status: rikaTurns.status,
+  execution_route_json: rikaTurns.executionRouteJson,
+  execution_link_json: rikaTurns.executionLinkJson,
+  prompt_parts_json: rikaTurns.promptPartsJson,
+  shell_command: rikaTurns.shellCommand,
+  shell_result_text: rikaTurns.shellResultText,
+  shell_result_truncated: rikaTurns.shellResultTruncated,
+  shell_result_exit_code: rikaTurns.shellResultExitCode,
+  author_json: rikaTurns.authorJson,
+  lineage_json: rikaTurns.lineageJson,
+  created_at: rikaTurns.createdAt,
+  updated_at: rikaTurns.updatedAt,
+}
+
+export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Interface, "page" | "usage"> => {
   const usage = Effect.fn("TranscriptRepository.usage")(function* (threadId: ThreadId) {
-    const rows = yield* sql`SELECT c.state_json, t.*
-      FROM rika_transcript_checkpoints c
-      JOIN rika_turns t ON t.id = c.turn_id
-      WHERE c.thread_id = ${threadId} AND t.status <> 'queued'
-        AND c.projection_version = ${ExecutionProjection.projectionVersion}
-      ORDER BY t.created_at ASC, t.id ASC`
+    const rows = yield* db
+      .select({ state_json: rikaTranscriptCheckpoints.stateJson, ...turnSelection })
+      .from(rikaTranscriptCheckpoints)
+      .innerJoin(rikaTurns, eq(rikaTurns.id, rikaTranscriptCheckpoints.turnId))
+      .where(
+        and(
+          eq(rikaTranscriptCheckpoints.threadId, threadId),
+          ne(rikaTurns.status, "queued"),
+          eq(rikaTranscriptCheckpoints.projectionVersion, ExecutionProjection.projectionVersion),
+        ),
+      )
+      .orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id))
     const values = yield* Effect.forEach(rows, (raw) =>
       Effect.gen(function* () {
-        const row = yield* Schema.decodeUnknownEffect(UsageRow)(raw)
+        const row = yield* Schema.decodeEffect(UsageRow)(raw)
         return {
           turn: yield* decode(row),
           state: yield* Schema.decodeEffect(StateJson)(row.state_json),
@@ -70,10 +97,12 @@ export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | 
       usage: ExecutionProjection.aggregateUsage(values.map((value) => value.state.usage)),
     }
     if (contextValue?.turn._tag === "AgentExecution")
-      Object.assign(result, { contextCapacity: {
-        contextWindow: contextValue.turn.executionRoute.main.compaction.contextWindow,
-        reserveTokens: contextValue.turn.executionRoute.main.compaction.reserveTokens,
-      } })
+      Object.assign(result, {
+        contextCapacity: {
+          contextWindow: contextValue.turn.executionRoute.main.compaction.contextWindow,
+          reserveTokens: contextValue.turn.executionRoute.main.compaction.reserveTokens,
+        },
+      })
     return result
   }, Effect.mapError(error))
   return {
@@ -83,27 +112,30 @@ export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | 
       const limit = options.limit ?? 200
       if (!Number.isInteger(limit) || limit < 1 || limit > 500)
         return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
-      const rows = yield* (
-        options.projectionVersion === undefined
-          ? sql`SELECT u.unit_json, u.unit_order_key,
-            c.revision AS projection_revision, c.projection_version, c.state_json, t.*
-          FROM rika_transcript_units u
-          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
-          JOIN rika_turns t ON t.id = u.turn_id
-          WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
-          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC`
-          : sql`SELECT u.unit_json, u.unit_order_key,
-            c.revision AS projection_revision, c.projection_version, c.state_json, t.*
-          FROM rika_transcript_units u
-          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
-          JOIN rika_turns t ON t.id = u.turn_id
-          WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
-            AND c.projection_version = ${options.projectionVersion}
-          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_order_key DESC`
-      ).pipe(Effect.mapError(error))
+      const conditions = [eq(rikaTranscriptUnits.threadId, threadId), ne(rikaTurns.status, "queued")]
+      if (options.projectionVersion !== undefined)
+        conditions.push(eq(rikaTranscriptCheckpoints.projectionVersion, options.projectionVersion))
+      const rows = yield* db
+        .select({
+          unit_json: rikaTranscriptUnits.unitJson,
+          unit_order_key: rikaTranscriptUnits.unitOrderKey,
+          projection_revision: rikaTranscriptCheckpoints.revision,
+          state_json: rikaTranscriptCheckpoints.stateJson,
+          ...turnSelection,
+        })
+        .from(rikaTranscriptUnits)
+        .innerJoin(rikaTranscriptCheckpoints, eq(rikaTranscriptCheckpoints.turnId, rikaTranscriptUnits.turnId))
+        .innerJoin(rikaTurns, eq(rikaTurns.id, rikaTranscriptUnits.turnId))
+        .where(and(...conditions))
+        .orderBy(
+          desc(rikaTranscriptUnits.createdAt),
+          desc(rikaTranscriptUnits.turnId),
+          desc(rikaTranscriptUnits.unitOrderKey),
+        )
+        .pipe(Effect.mapError(error))
       const decoded = yield* Effect.forEach(rows, (raw) =>
         Effect.gen(function* () {
-          const row = yield* Schema.decodeUnknownEffect(PageRow)(raw).pipe(Effect.mapError(error))
+          const row = yield* Schema.decodeEffect(PageRow)(raw).pipe(Effect.mapError(error))
           const turn = yield* decode(row).pipe(Effect.mapError(error))
           const unit = yield* Schema.decodeEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
           const cursor = { createdAt: turn.createdAt, turnId: turn.id, orderKey: String(row.unit_order_key) }
@@ -111,9 +143,7 @@ export const makeTranscriptSqlPage = (sql: SqlClient): Pick<Interface, "page" | 
             return yield* RepositoryError.make({
               message: `Transcript unit ${unit.key} does not match its durable identity`,
             })
-          const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(
-            Effect.mapError(error),
-          )
+          const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(Effect.mapError(error))
           return { turn, unit, cursor, revision: Number(row.projection_revision), projectionState }
         }),
       )

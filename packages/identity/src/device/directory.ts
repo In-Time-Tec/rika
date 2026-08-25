@@ -1,6 +1,8 @@
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
-import type { Pool, QueryResultRow } from "pg"
 import type { IdentityPrincipal } from "../auth/runtime"
+import { cliRegistration, oauthAccessToken, oauthClient, oauthRefreshToken } from "../database/device-schema"
 
 export const CliDeviceRegistration = Schema.Struct({
   clientId: Schema.NonEmptyString,
@@ -35,126 +37,153 @@ export interface CliDeviceDirectory {
   readonly revokeAll: (principal: IdentityPrincipal) => Effect.Effect<void, CliDeviceDirectoryError>
 }
 
-interface ListedCliDevice {
-  id: string
-  current: boolean
-  lastSeenAt?: string
-}
+type DeviceDatabase = Pick<PgDrizzle.EffectPgDatabase, "delete" | "insert" | "select" | "transaction" | "update">
 
 const failure = (operation: string) => CliDeviceDirectoryError.make({ operation })
+const query = <A extends object, E, R>(operation: string, statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
+  statement.pipe(Effect.mapError(() => failure(operation)))
+const transaction = <A, E, R>(operation: string, statement: Effect.Effect<A, E, R>) =>
+  statement.pipe(Effect.mapError(() => failure(operation)))
 
-export const makePostgresCliDeviceDirectory = (pool: Pool): CliDeviceDirectory => {
-  const query = <A extends QueryResultRow>(operation: string, text: string, values: ReadonlyArray<unknown> = []) =>
-    Effect.tryPromise({
-      try: () => pool.query<A>(text, [...values]),
-      catch: () => failure(operation),
-    }).pipe(Effect.map((result) => result.rows))
-
+export const makePostgresCliDeviceDirectory = (db: DeviceDatabase): CliDeviceDirectory => {
   const authenticate = Effect.fn("CliDeviceDirectory.authenticate")(function* (principal: IdentityPrincipal) {
     if (principal.clientId === undefined || principal.dpopJkt === undefined) return undefined
-    const rows = yield* query<{ readonly device_id: string }>(
+    const rows = yield* query(
       "authenticate CLI device",
-      `update rika_cli_registration
-       set user_id = coalesce(user_id, $1), last_seen_at = transaction_timestamp()
-       where client_id = $2
-         and jwk_thumbprint = $3
-         and revoked_at is null
-         and (user_id is null or user_id = $1)
-       returning device_id::text`,
-      [principal.userId, principal.clientId, principal.dpopJkt],
+      db
+        .update(cliRegistration)
+        .set({ userId: principal.userId, lastSeenAt: sql`transaction_timestamp()` })
+        .where(
+          and(
+            eq(cliRegistration.clientId, principal.clientId),
+            eq(cliRegistration.jwkThumbprint, principal.dpopJkt),
+            isNull(cliRegistration.revokedAt),
+            or(isNull(cliRegistration.userId), eq(cliRegistration.userId, principal.userId)),
+          ),
+        )
+        .returning({ deviceId: cliRegistration.deviceId }),
     )
-    return rows[0]?.device_id
+    return rows[0]?.deviceId
   })
 
   return {
     register: Effect.fn("CliDeviceDirectory.register")(function* (input) {
-      const rows = yield* query<{ readonly client_id: string }>(
+      const rows = yield* query(
         "register CLI device",
-        `insert into rika_cli_registration (client_id, device_id, public_jwk, jwk_thumbprint)
-         values ($1, $2::uuid, $3::jsonb, $4)
-         on conflict (client_id) do update set
-           public_jwk = excluded.public_jwk,
-           jwk_thumbprint = excluded.jwk_thumbprint
-         where rika_cli_registration.device_id = excluded.device_id
-           and rika_cli_registration.user_id is null
-           and rika_cli_registration.revoked_at is null
-         returning client_id`,
-        [input.clientId, input.deviceId, input.publicJwk, input.jwkThumbprint],
+        db
+          .insert(cliRegistration)
+          .values(input)
+          .onConflictDoUpdate({
+            target: cliRegistration.clientId,
+            set: { publicJwk: input.publicJwk, jwkThumbprint: input.jwkThumbprint },
+            setWhere: sql`${cliRegistration.deviceId} = ${input.deviceId}
+              and ${cliRegistration.userId} is null
+              and ${cliRegistration.revokedAt} is null`,
+          })
+          .returning({ clientId: cliRegistration.clientId }),
       )
       if (rows[0] === undefined) return yield* failure("register CLI device")
     }),
     discard: (clientId) =>
-      query("discard CLI registration", "delete from oauth_client where client_id = $1", [clientId]).pipe(
+      query("discard CLI registration", db.delete(oauthClient).where(eq(oauthClient.clientId, clientId)).returning()).pipe(
         Effect.asVoid,
       ),
     authenticate,
     list: Effect.fn("CliDeviceDirectory.list")(function* (principal) {
       const current = yield* authenticate(principal)
-      const rows = yield* query<{
-        readonly id: string
-        readonly current: boolean
-        readonly lastSeenAt: Date | null
-      }>(
+      const rows = yield* query(
         "list CLI devices",
-        `select device_id::text as id,
-          device_id::text = $2 as current,
-          last_seen_at as "lastSeenAt"
-         from rika_cli_registration
-         where user_id = $1 and revoked_at is null
-         order by last_seen_at desc nulls last, created_at desc`,
-        [principal.userId, current ?? ""],
+        db
+          .select({ id: cliRegistration.deviceId, lastSeenAt: cliRegistration.lastSeenAt })
+          .from(cliRegistration)
+          .where(and(eq(cliRegistration.userId, principal.userId), isNull(cliRegistration.revokedAt)))
+          .orderBy(desc(cliRegistration.lastSeenAt), desc(cliRegistration.createdAt)),
       )
       return rows.map((row) => {
-        const device: ListedCliDevice = { id: row.id, current: row.current }
-        if (row.lastSeenAt !== null) device.lastSeenAt = row.lastSeenAt.toISOString()
+        const device: CliDevice = { id: row.id, current: row.id === current }
+        if (row.lastSeenAt !== null) Object.assign(device, { lastSeenAt: row.lastSeenAt.toISOString() })
         return device
       })
     }),
     revoke: Effect.fn("CliDeviceDirectory.revoke")(function* (principal, deviceId) {
       yield* authenticate(principal)
-      const rows = yield* query<{ readonly revoked: boolean }>(
+      return yield* transaction(
         "revoke CLI device",
-        `with revoked_client as (
-           update rika_cli_registration
-           set revoked_at = transaction_timestamp()
-           where user_id = $1 and device_id = $2::uuid and revoked_at is null
-           returning client_id
-         ), revoked_access as (
-           update oauth_access_token token
-           set revoked = transaction_timestamp()
-           from revoked_client client
-           where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null
-         ), revoked_refresh as (
-           update oauth_refresh_token token
-           set revoked = transaction_timestamp()
-           from revoked_client client
-           where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null
-         )
-         select exists(select 1 from revoked_client) as revoked`,
-        [principal.userId, deviceId],
+        db.transaction((tx) =>
+          Effect.gen(function* () {
+            const clients = yield* tx
+              .update(cliRegistration)
+              .set({ revokedAt: sql`transaction_timestamp()` })
+              .where(
+                and(
+                  eq(cliRegistration.userId, principal.userId),
+                  eq(cliRegistration.deviceId, deviceId),
+                  isNull(cliRegistration.revokedAt),
+                ),
+              )
+              .returning({ clientId: cliRegistration.clientId })
+            const clientIds = clients.map((row) => row.clientId)
+            if (clientIds.length === 0) return false
+            yield* tx
+              .update(oauthAccessToken)
+              .set({ revoked: sql`transaction_timestamp()` })
+              .where(
+                and(
+                  inArray(oauthAccessToken.clientId, clientIds),
+                  eq(oauthAccessToken.userId, principal.userId),
+                  isNull(oauthAccessToken.revoked),
+                ),
+              )
+            yield* tx
+              .update(oauthRefreshToken)
+              .set({ revoked: sql`transaction_timestamp()` })
+              .where(
+                and(
+                  inArray(oauthRefreshToken.clientId, clientIds),
+                  eq(oauthRefreshToken.userId, principal.userId),
+                  isNull(oauthRefreshToken.revoked),
+                ),
+              )
+            return true
+          }),
+        ),
       )
-      return rows[0]?.revoked ?? false
     }),
     revokeAll: Effect.fn("CliDeviceDirectory.revokeAll")(function* (principal) {
       yield* authenticate(principal)
-      yield* query(
+      yield* transaction(
         "revoke all CLI devices",
-        `with revoked_clients as (
-           update rika_cli_registration
-           set revoked_at = transaction_timestamp()
-           where user_id = $1 and revoked_at is null
-           returning client_id
-         ), revoked_access as (
-           update oauth_access_token token
-           set revoked = transaction_timestamp()
-           from revoked_clients client
-           where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null
-         )
-         update oauth_refresh_token token
-         set revoked = transaction_timestamp()
-         from revoked_clients client
-         where token.client_id = client.client_id and token.user_id = $1 and token.revoked is null`,
-        [principal.userId],
+        db.transaction((tx) =>
+          Effect.gen(function* () {
+            const clients = yield* tx
+              .update(cliRegistration)
+              .set({ revokedAt: sql`transaction_timestamp()` })
+              .where(and(eq(cliRegistration.userId, principal.userId), isNull(cliRegistration.revokedAt)))
+              .returning({ clientId: cliRegistration.clientId })
+            const clientIds = clients.map((row) => row.clientId)
+            if (clientIds.length === 0) return
+            yield* tx
+              .update(oauthAccessToken)
+              .set({ revoked: sql`transaction_timestamp()` })
+              .where(
+                and(
+                  inArray(oauthAccessToken.clientId, clientIds),
+                  eq(oauthAccessToken.userId, principal.userId),
+                  isNull(oauthAccessToken.revoked),
+                ),
+              )
+            yield* tx
+              .update(oauthRefreshToken)
+              .set({ revoked: sql`transaction_timestamp()` })
+              .where(
+                and(
+                  inArray(oauthRefreshToken.clientId, clientIds),
+                  eq(oauthRefreshToken.userId, principal.userId),
+                  isNull(oauthRefreshToken.revoked),
+                ),
+              )
+          }),
+        ),
       )
     }),
   }

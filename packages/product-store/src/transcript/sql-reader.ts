@@ -3,9 +3,11 @@ import type { Projection } from "@rika/product/transcript-page"
 import { RepositoryError } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
+import { asc, eq } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { TurnId } from "@rika/product/turn-record"
+import { rikaTranscriptCheckpoints, rikaTranscriptUnits, rikaTurns } from "../database/schema/product"
 import { decode } from "../turn/postgres/row-codec"
 
 const UnitJson = Schema.fromJsonString(TranscriptUnit.Unit)
@@ -47,23 +49,57 @@ const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
 
 export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(function* (
-  sql: SqlClient,
+  db: PgDrizzle.EffectPgDatabase,
   turnId: TurnId,
 ): Effect.fn.Return<Projection | undefined, RepositoryError> {
-  const rows = yield* sql`SELECT c.checkpoint_generation, c.revision, c.projection_version,
-      c.state_json, c.projector_version, c.projector_cursor, c.projector_state, t.*
-    FROM rika_transcript_checkpoints c
-    JOIN rika_turns t ON t.id = c.turn_id
-    WHERE c.turn_id = ${turnId}`.pipe(Effect.mapError(error))
+  const rows = yield* db
+    .select({
+      checkpoint_generation: rikaTranscriptCheckpoints.checkpointGeneration,
+      revision: rikaTranscriptCheckpoints.revision,
+      projection_version: rikaTranscriptCheckpoints.projectionVersion,
+      state_json: rikaTranscriptCheckpoints.stateJson,
+      projector_version: rikaTranscriptCheckpoints.projectorVersion,
+      projector_cursor: rikaTranscriptCheckpoints.projectorCursor,
+      projector_state: rikaTranscriptCheckpoints.projectorState,
+      id: rikaTurns.id,
+      thread_id: rikaTurns.threadId,
+      turn_kind: rikaTurns.turnKind,
+      prompt: rikaTurns.prompt,
+      status: rikaTurns.status,
+      execution_route_json: rikaTurns.executionRouteJson,
+      execution_link_json: rikaTurns.executionLinkJson,
+      prompt_parts_json: rikaTurns.promptPartsJson,
+      shell_command: rikaTurns.shellCommand,
+      shell_result_text: rikaTurns.shellResultText,
+      shell_result_truncated: rikaTurns.shellResultTruncated,
+      shell_result_exit_code: rikaTurns.shellResultExitCode,
+      author_json: rikaTurns.authorJson,
+      lineage_json: rikaTurns.lineageJson,
+      created_at: rikaTurns.createdAt,
+      updated_at: rikaTurns.updatedAt,
+    })
+    .from(rikaTranscriptCheckpoints)
+    .innerJoin(rikaTurns, eq(rikaTurns.id, rikaTranscriptCheckpoints.turnId))
+    .where(eq(rikaTranscriptCheckpoints.turnId, turnId))
+    .pipe(Effect.mapError(error))
   const rawRow = rows[0]
   if (rawRow === undefined) return undefined
-  const row = yield* Schema.decodeUnknownEffect(ProjectionRow)(rawRow).pipe(Effect.mapError(error))
+  const row = yield* Schema.decodeEffect(ProjectionRow)(rawRow).pipe(Effect.mapError(error))
   const turn = yield* decode(row).pipe(Effect.mapError(error))
-  const unitRows = yield* sql`SELECT unit_key, unit_order_key, parent_id, unit_json
-    FROM rika_transcript_units WHERE turn_id = ${turnId} ORDER BY unit_order_key ASC`.pipe(Effect.mapError(error))
+  const unitRows = yield* db
+    .select({
+      unit_key: rikaTranscriptUnits.unitKey,
+      unit_order_key: rikaTranscriptUnits.unitOrderKey,
+      parent_id: rikaTranscriptUnits.parentId,
+      unit_json: rikaTranscriptUnits.unitJson,
+    })
+    .from(rikaTranscriptUnits)
+    .where(eq(rikaTranscriptUnits.turnId, turnId))
+    .orderBy(asc(rikaTranscriptUnits.unitOrderKey))
+    .pipe(Effect.mapError(error))
   const units = yield* Effect.forEach(unitRows, (raw) =>
     Effect.gen(function* () {
-      const unitRow = yield* Schema.decodeUnknownEffect(UnitRow)(raw).pipe(Effect.mapError(error))
+      const unitRow = yield* Schema.decodeEffect(UnitRow)(raw).pipe(Effect.mapError(error))
       const unit = yield* Schema.decodeEffect(UnitJson)(unitRow.unit_json).pipe(Effect.mapError(error))
       if (
         unit.key !== unitRow.unit_key ||

@@ -644,7 +644,7 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("reconciles an unknown create outcome and removes duplicate generation sandboxes", () => {
+  it.effect("adopts an existing generation after create result loss and removes duplicate sandboxes", () => {
     const harness = makeHarness()
     harness.provider.createFailure = true
     const metadata = {
@@ -672,12 +672,20 @@ describe("Controller", () => {
     ]
     return Effect.gen(function* () {
       const service = yield* controller
-      yield* createAssignment()
+      const assignment = yield* createAssignment()
+      const assignments = yield* ExecutorAssignments
+      yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("lost-bootstrap-credential"),
+        bootstrapLifetimeMillis: 60_000,
+      })
       expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
         sandboxId: "sandbox-a-adopt",
         state: "provisioning",
       })
-      expect(harness.provider.creates).toHaveLength(1)
+      expect(harness.provider.creates).toHaveLength(0)
       expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
       expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
     }).pipe(provideLayer(harness.layer))
@@ -765,6 +773,7 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* provision()
+      yield* authenticate(harness, 1)
       expect(yield* service.cleanupOrphans).toEqual([])
       yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
@@ -900,11 +909,47 @@ describe("Controller", () => {
         generation: assignment.generation,
         revision: assignment.revision,
         bootstrapCredentialDigest: Redacted.make("bootstrap-digest"),
-        bootstrapLifetimeMillis: 60_000,
+        bootstrapLifetimeMillis: 10 * 60_000,
       })
       yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual([])
       expect(harness.provider.kills).toEqual([])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("reaps a generation-matching provisioning sandbox after its bootstrap fence expires", () => {
+    const harness = makeHarness()
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-expired-provisioning",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: {
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const assignments = yield* ExecutorAssignments
+      const assignment = yield* createAssignment()
+      yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("bootstrap-digest"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("1 minute")
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-expired-provisioning"])
+      expect(harness.provider.kills).toEqual(["sandbox-expired-provisioning"])
     }).pipe(provideLayer(harness.layer))
   })
 

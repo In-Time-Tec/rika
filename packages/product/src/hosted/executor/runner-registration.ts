@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { DeviceId, ProjectId, WorkspaceId } from "../model"
+import { DeviceId, ExecutorAssignmentId, ProjectId, WorkspaceId } from "../model"
 
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
 export const CheckoutFingerprint = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,512}$/)).pipe(
@@ -59,13 +59,32 @@ export type RemoteThreadCreationPreference = typeof RemoteThreadCreationPreferen
 export const RunnerTarget = strict(Schema.Struct({ deviceId: DeviceId, checkoutFingerprint: CheckoutFingerprint }))
 export type RunnerTarget = typeof RunnerTarget.Type
 
-export const RunnerWaiting = Schema.TaggedStruct("Waiting", {})
+export const RunnerSupervisorId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+).pipe(Schema.brand("RunnerSupervisorId"))
+export type RunnerSupervisorId = typeof RunnerSupervisorId.Type
+export const RunnerPollRequest = strict(
+  Schema.Struct({
+    supervisorId: RunnerSupervisorId,
+    activeAssignmentIds: Schema.Array(ExecutorAssignmentId).check(Schema.isMaxLength(64)),
+  }),
+)
+export type RunnerPollRequest = typeof RunnerPollRequest.Type
+
+export const RunnerWaiting = Schema.TaggedStruct("Waiting", {
+  reason: Schema.Literals(["no-work", "runner-owned"]),
+})
 export const RunnerAdmitted = Schema.TaggedStruct("Admitted", {
+  assignmentId: ExecutorAssignmentId,
   admissionId: Schema.String,
   ticket: Schema.String,
   expiresAt: Schema.Finite,
   executorUrl: Schema.String,
   workspaceIdentity: Schema.String,
 })
-export const RunnerPollResult = Schema.Union([RunnerWaiting, RunnerAdmitted])
+export const RunnerResume = Schema.TaggedStruct("Resume", {
+  assignmentId: ExecutorAssignmentId,
+  leaseExpiresAt: Schema.Finite,
+})
+export const RunnerPollResult = Schema.Union([RunnerWaiting, RunnerAdmitted, RunnerResume])
 export type RunnerPollResult = typeof RunnerPollResult.Type

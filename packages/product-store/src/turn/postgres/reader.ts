@@ -1,23 +1,40 @@
+import { eq } from "drizzle-orm"
+import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect } from "effect"
-import type { SqlClient as SqlClientType } from "effect/unstable/sql/SqlClient"
 import { TurnId } from "@rika/product/turn-record"
 import type { Turn } from "@rika/product/turn-record"
 import { RepositoryError } from "@rika/product/turn-repository"
+import { rikaTurns } from "../../database/schema/product"
 import { decode } from "./row-codec"
 
-export function readTurn(sql: SqlClientType): (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
-export function readTurn(sql: SqlClientType, id: TurnId): Effect.Effect<Turn | undefined, RepositoryError>
-export function readTurn(
-  sql: SqlClientType,
-  id?: TurnId,
-):
-  | Effect.Effect<Turn | undefined, RepositoryError>
-  | ((id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>) {
-  if (id === undefined) return (nextId) => readTurn(sql, nextId)
-  return sql`SELECT * FROM rika_turns WHERE id = ${id}`.pipe(
-    Effect.mapError((cause) => RepositoryError.make({ message: String(cause) })),
-    Effect.flatMap((rows) =>
-      rows[0] === undefined ? Effect.succeed(null).pipe(Effect.as(undefined)) : decode(rows[0]),
-    ),
+export const turnRowSelection = {
+  id: rikaTurns.id,
+  thread_id: rikaTurns.threadId,
+  turn_kind: rikaTurns.turnKind,
+  prompt: rikaTurns.prompt,
+  status: rikaTurns.status,
+  execution_route_json: rikaTurns.executionRouteJson,
+  execution_link_json: rikaTurns.executionLinkJson,
+  prompt_parts_json: rikaTurns.promptPartsJson,
+  shell_command: rikaTurns.shellCommand,
+  shell_result_text: rikaTurns.shellResultText,
+  shell_result_truncated: rikaTurns.shellResultTruncated,
+  shell_result_exit_code: rikaTurns.shellResultExitCode,
+  author_json: rikaTurns.authorJson,
+  lineage_json: rikaTurns.lineageJson,
+  created_at: rikaTurns.createdAt,
+  updated_at: rikaTurns.updatedAt,
+}
+
+const readTurnImpl = (db: PgDrizzle.EffectPgDatabase, id: TurnId): Effect.Effect<Turn | undefined, RepositoryError> =>
+  db.select(turnRowSelection).from(rikaTurns).where(eq(rikaTurns.id, id)).limit(1).pipe(
+    Effect.mapError((cause) => RepositoryError.make({ message: cause.message })),
+    Effect.flatMap((rows) => Effect.all(rows.map(decode))),
+    Effect.map((turns) => turns[0]),
   )
+
+export function readTurn(db: PgDrizzle.EffectPgDatabase): (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
+export function readTurn(db: PgDrizzle.EffectPgDatabase, id: TurnId): Effect.Effect<Turn | undefined, RepositoryError>
+export function readTurn(db: PgDrizzle.EffectPgDatabase, id?: TurnId) {
+  return id === undefined ? (nextId: TurnId) => readTurnImpl(db, nextId) : readTurnImpl(db, id)
 }

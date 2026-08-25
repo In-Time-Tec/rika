@@ -4,6 +4,10 @@ import { ControllerError, type Receipt, type ReconnectWelcome, type Welcome } fr
 import { type ExecutorAssignment } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import {
+  HostedExecutionOperations,
+  layer as hostedExecutionOperationsLayer,
+} from "@rika/product-store/executor-operations"
+import {
   AssignmentLeaseEpoch,
   ExecutorAssignmentId,
   ExecutorInstanceId,
@@ -19,6 +23,7 @@ const heartbeatIntervalMillis = 20_000
 const admissionLifetimeMillis = 60_000
 
 export interface RunnerAdmission {
+  readonly assignmentId: ExecutorAssignmentId
   readonly admissionId: string
   readonly ticket: string
   readonly expiresAt: number
@@ -60,23 +65,12 @@ const version = (assignment: ExecutorAssignment) => ({
   revision: assignment.revision,
 })
 
-interface AdmissionRow {
-  readonly id: string
-  readonly assignmentId: string
-  readonly ownerId: string
-  readonly deviceId: string
-  readonly clientId: string
-  readonly userId: string
-  readonly generation: string
-  readonly workspaceFingerprint: string
-  readonly expiresAt: string
-}
-
-export const layer = Layer.effect(
+const runnerExecutorLayer = Layer.effect(
   RunnerExecutor,
   Effect.gen(function* () {
     const sql = yield* PgClient.PgClient
     const assignments = yield* ExecutorAssignments
+    const operations = yield* HostedExecutionOperations
     const crypto = yield* Crypto.Crypto
 
     const digest = Effect.fn("RunnerExecutor.digest")(function* (secret: string) {
@@ -116,52 +110,27 @@ export const layer = Layer.effect(
       principal: AuthenticatedPrincipal,
       ownerId: string,
     ) {
-      const valid = yield* sql<{ readonly ownerId: string }>`SELECT owner_record.id AS "ownerId"
-        FROM rika_hosted_owners owner_record
-        WHERE owner_record.id = ${ownerId}
-          AND (
-            (owner_record.kind = 'personal' AND owner_record.user_id = ${principal.userId})
-            OR (owner_record.kind = 'organization' AND EXISTS (
-              SELECT 1 FROM member membership
-              WHERE membership.organization_id = owner_record.organization_id
-                AND membership.user_id = ${principal.userId}
-            ))
-          )
-          AND (
-            EXISTS (
-              SELECT 1 FROM rika_cli_registration registration
-              WHERE registration.client_id = ${principal.clientId}
-                AND registration.device_id::text = ${principal.deviceId}
-                AND registration.user_id = ${principal.userId}
-                AND registration.revoked_at IS NULL
-                AND (${principal.dpopJkt ?? null}::text IS NULL OR registration.jwk_thumbprint = ${principal.dpopJkt ?? null})
-            )
-          )
-        LIMIT 1`.pipe(Effect.mapError(() => failure("repository", "Local device authority is unavailable")))
-      if (valid.length === 0)
+      const valid = yield* operations
+        .verifyRunnerAuthority({ ownerId, ...principal })
+        .pipe(Effect.mapError(() => failure("repository", "Local device authority is unavailable")))
+      if (!valid)
         return yield* failure("authentication", "Local principal or owner authority is no longer active")
     })
 
     const principalFor = Effect.fn("RunnerExecutor.principalFor")(function* (input: ProtocolAccess) {
-      const rows = yield* sql<{
-        readonly deviceId: string
-        readonly clientId: string
-        readonly userId: string
-      }>`SELECT device_id AS "deviceId", client_id AS "clientId", user_id AS "userId"
-        FROM rika_hosted_runner_admissions
-        WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
-          AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
-          AND consumed_at IS NOT NULL AND revoked_at IS NULL
-        ORDER BY consumed_at DESC LIMIT 1`.pipe(
+      const principal = yield* operations
+        .runnerPrincipal({
+          assignmentId: input.fence.assignmentId,
+          generation: input.fence.assignmentGeneration,
+          deviceId: input.fence.instanceId,
+          processIncarnation: input.fence.processIncarnation,
+        })
+        .pipe(
         Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")),
       )
-      const row = rows[0]
-      if (row === undefined) return yield* failure("authentication", "Runner admission binding is unavailable")
-      return {
-        deviceId: row.deviceId,
-        clientId: row.clientId,
-        userId: row.userId,
-      } satisfies AuthenticatedPrincipal
+      if (principal === undefined)
+        return yield* failure("authentication", "Runner admission binding is unavailable")
+      return principal satisfies AuthenticatedPrincipal
     })
     const access = Effect.fn("RunnerExecutor.access")(function* (
       input: ProtocolAccess,
@@ -175,12 +144,16 @@ export const layer = Layer.effect(
         return yield* failure("fenced", "Assignment generation is stale")
       if (input.fence.instanceId !== placement.deviceId)
         return yield* failure("fenced", "Executor instance is not the assigned device")
-      const admitted = yield* sql<{ readonly id: string }>`SELECT id FROM rika_hosted_runner_admissions
-        WHERE assignment_id = ${assignment.id} AND owner_id = ${assignment.ownerId}
-          AND device_id = ${principal.deviceId} AND client_id = ${principal.clientId}
-          AND generation = ${assignment.generation} AND consumed_at IS NOT NULL AND revoked_at IS NULL
-        LIMIT 1`.pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
-      if (admitted.length === 0)
+      const admitted = yield* operations
+        .hasConsumedRunnerAdmission({
+          assignmentId: assignment.id,
+          ownerId: assignment.ownerId,
+          generation: number(assignment.generation),
+          deviceId: principal.deviceId,
+          clientId: principal.clientId,
+        })
+        .pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
+      if (!admitted)
         return yield* failure("authentication", "Authenticated client has no consumed Runner admission")
       return {
         assignmentId: ExecutorAssignmentId.make(input.fence.assignmentId),
@@ -208,12 +181,12 @@ export const layer = Layer.effect(
             if (placement.checkoutFingerprint !== input.workspaceFingerprint)
               return yield* failure("fenced", "Authenticated checkout is not assigned to this executor")
             if (placement.requestingDeviceId !== placement.deviceId) {
-              const allowed = yield* sql`SELECT device_id FROM rika_hosted_runner_registrations
-                WHERE device_id = ${placement.deviceId} AND checkout_fingerprint = ${placement.checkoutFingerprint}
-                  AND remote_thread_creation_allowed = TRUE FOR UPDATE`.pipe(
+              const allowed = yield* operations
+                .lockRemoteCreationAdmission(placement.deviceId, placement.checkoutFingerprint)
+                .pipe(
                 Effect.mapError(() => failure("repository", "Runner preference is unavailable")),
               )
-              if (allowed.length === 0) return yield* failure("fenced", "Remote Thread creation is no longer allowed")
+              if (!allowed) return yield* failure("fenced", "Remote Thread creation is no longer allowed")
             }
 
             let preparing: ExecutorAssignment
@@ -259,28 +232,29 @@ export const layer = Layer.effect(
             const awaiting = yield* assignments
               .bindProviderInstance({ ...version(preparing), providerInstanceId: input.principal.deviceId })
               .pipe(Effect.mapError(assignmentFailure))
-            const persisted = yield* sql<{
-              readonly expiresAt: string
-            }>`INSERT INTO rika_hosted_runner_admissions (
-            id, assignment_id, owner_id, device_id, client_id, user_id, generation,
-            workspace_fingerprint, ticket_digest, expires_at
-          ) VALUES (
-            ${admissionId}, ${awaiting.id}, ${awaiting.ownerId}, ${input.principal.deviceId},
-            ${input.principal.clientId}, ${input.principal.userId}, ${awaiting.generation},
-            ${input.workspaceFingerprint}, ${Redacted.value(ticketDigest)},
-            clock_timestamp() + (${admissionLifetimeMillis} * interval '1 millisecond')
-          )
-          RETURNING extract(epoch FROM expires_at) * 1000 AS "expiresAt"`.pipe(
+            const expiresAt = yield* operations
+              .createRunnerAdmission({
+                id: admissionId,
+                assignmentId: awaiting.id,
+                ownerId: awaiting.ownerId,
+                deviceId: input.principal.deviceId,
+                clientId: input.principal.clientId,
+                userId: input.principal.userId,
+                generation: number(awaiting.generation),
+                workspaceFingerprint: input.workspaceFingerprint,
+                ticketDigest: Redacted.value(ticketDigest),
+                lifetimeMillis: admissionLifetimeMillis,
+              })
+              .pipe(
               Effect.mapError(() => failure("repository", "Runner admission could not be persisted")),
             )
-            const expiry = persisted[0]
-            if (expiry === undefined) return yield* failure("repository", "Runner admission expiry was not persisted")
             return {
+              assignmentId: awaiting.id,
               admissionId,
               ticket: Redacted.value(ticket),
-              expiresAt: Math.floor(number(expiry.expiresAt)),
+              expiresAt: Math.floor(expiresAt),
               executorUrl: input.executorUrl,
-              workspaceIdentity: input.workspaceFingerprint,
+              workspaceIdentity: awaiting.workspaceId,
             }
           }),
         )
@@ -296,19 +270,9 @@ export const layer = Layer.effect(
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            const rows = yield* sql<AdmissionRow & { readonly ticketDigest: string }>`SELECT
-            id, assignment_id AS "assignmentId", owner_id AS "ownerId",
-            device_id AS "deviceId", client_id AS "clientId", user_id AS "userId",
-            generation::text AS generation, workspace_fingerprint AS "workspaceFingerprint",
-            ticket_digest AS "ticketDigest",
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
-            FROM rika_hosted_runner_admissions
-            WHERE id = ${input.admissionId} AND consumed_at IS NULL
-              AND revoked_at IS NULL AND expires_at > clock_timestamp()
-            FOR UPDATE`.pipe(
+            const admission = yield* operations.lockRunnerAdmission(input.admissionId).pipe(
               Effect.mapError(() => failure("authentication", "Runner admission is invalid, expired, or consumed")),
             )
-            const admission = rows[0]
             if (admission === undefined || admission.ticketDigest !== Redacted.value(presented))
               return yield* failure("authentication", "Runner admission is invalid, expired, or consumed")
             const principal: AuthenticatedPrincipal = {
@@ -322,7 +286,7 @@ export const layer = Layer.effect(
               return yield* failure("fenced", "Runner admission owner binding is no longer current")
             yield* verifyPrincipal(principal, assignment.ownerId)
             if (
-              number(assignment.generation) !== number(admission.generation) ||
+              number(assignment.generation) !== admission.generation ||
               assignment.lifecycle._tag !== "AwaitingBootstrap"
             )
               return yield* failure("fenced", "Runner admission assignment is no longer current")
@@ -343,11 +307,10 @@ export const layer = Layer.effect(
               .pipe(Effect.mapError(assignmentFailure))
             if (active.lifecycle._tag !== "Active")
               return yield* failure("repository", "Runner session did not become active")
-            const consumed = yield* sql`UPDATE rika_hosted_runner_admissions
-            SET consumed_at = transaction_timestamp(), process_incarnation = ${input.processIncarnation}
-            WHERE id = ${input.admissionId} AND consumed_at IS NULL AND expires_at > clock_timestamp()
-            RETURNING id`.pipe(Effect.mapError(() => failure("repository", "Runner admission could not be consumed")))
-            if (consumed[0] === undefined)
+            const consumed = yield* operations.consumeRunnerAdmission(input.admissionId, input.processIncarnation).pipe(
+              Effect.mapError(() => failure("repository", "Runner admission could not be consumed")),
+            )
+            if (!consumed)
               return yield* failure("authentication", "Runner admission is invalid, expired, or consumed")
             return {
               version: 1 as const,
@@ -381,20 +344,10 @@ export const layer = Layer.effect(
     })
     const workspaceIdentity = Effect.fn("RunnerExecutor.workspaceIdentity")(function* (input: ProtocolAccess) {
       yield* validateAccess(input)
-      const rows = yield* sql<{ readonly fingerprint: string }>`SELECT workspace_fingerprint AS fingerprint
-        FROM rika_hosted_runner_admissions
-        WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
-          AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
-          AND consumed_at IS NOT NULL AND revoked_at IS NULL
-        ORDER BY consumed_at DESC LIMIT 1`.pipe(
-        Effect.mapError(() => failure("repository", "Local workspace identity is unavailable")),
-      )
-      if (rows[0] === undefined) return yield* failure("fenced", "Local workspace identity is unavailable")
-      return rows[0].fingerprint
+      return (yield* load(input.fence.assignmentId)).workspaceId
     })
     const reconnect = Effect.fn("RunnerExecutor.reconnect")(function* (input: ProtocolAccess) {
       const persisted = yield* access(input, yield* principalFor(input))
-      yield* assignments.authenticate(persisted).pipe(Effect.mapError(assignmentFailure))
       const active = yield* assignments
         .reconnect({ access: persisted, leaseLifetimeMillis })
         .pipe(Effect.mapError(assignmentFailure))
@@ -433,3 +386,5 @@ export const layer = Layer.effect(
     return RunnerExecutor.of({ admit, hello, reconnect, validateAccess, workspaceIdentity, heartbeat, release })
   }),
 )
+
+export const layer = runnerExecutorLayer.pipe(Layer.provide(hostedExecutionOperationsLayer))

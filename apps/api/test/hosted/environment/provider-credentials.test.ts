@@ -5,7 +5,7 @@ import { BetterAuthUserId, OrganizationId, OwnerId } from "@rika/product/hosted-
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { layer as postgresLayer } from "@rika/product-store/postgres-layer"
+import { layer as postgresLayer } from "@rika/product-store/layer"
 import { FileSystem, Config, Context, Effect, Layer, Option, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -119,7 +119,7 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         )
         const context = Context.merge(
           credentialContext,
-          yield* Layer.build(modelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(credentialContext)))),
+          yield* Layer.build(modelRegistryLayer().pipe(Layer.provide(Layer.succeedContext(credentialContext)))),
         )
         const credentials = Context.get(context, HostedProviderCredentials)
         const store = Context.get(context, ProviderCredentialStore)

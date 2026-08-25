@@ -1,4 +1,4 @@
-import { expect, it } from "@effect/vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { ApiConfigError, loadApiConfig } from "../../src/config/api"
 
@@ -37,13 +37,53 @@ const failure = (input: Record<string, string | undefined>) =>
     }),
   )
 
-it.effect("reports missing database and executor provider configuration as typed startup errors", () =>
-  Effect.gen(function* () {
-    expect((yield* failure({ ...environment, DATABASE_URL: "" })).dependency).toBe("database")
-    expect((yield* failure({ ...environment, E2B_API_KEY: "" })).dependency).toBe("executor-provider")
-    expect((yield* failure({ ...environment, GITHUB_APP_PRIVATE_KEY: "" })).dependency).toBe("github-app")
-    expect((yield* failure({ ...environment, RIKA_PROVIDER_CREDENTIAL_KEY: "invalid" })).dependency).toBe(
-      "model-provider",
-    )
-  }),
-)
+describe("API configuration", () => {
+  it.effect("reports missing production dependencies as typed startup errors", () =>
+    Effect.gen(function* () {
+      expect((yield* failure({ ...environment, DATABASE_URL: "" })).dependency).toBe("database")
+      expect((yield* failure({ ...environment, E2B_API_KEY: "" })).dependency).toBe("executor-provider")
+      expect((yield* failure({ ...environment, GITHUB_APP_PRIVATE_KEY: "" })).dependency).toBe("github-app")
+      expect((yield* failure({ ...environment, RIKA_PROVIDER_CREDENTIAL_KEY: "invalid" })).dependency).toBe(
+        "model-provider",
+      )
+    }),
+  )
+
+  it.effect("loads Runner-only development with the free OpenRouter route", () =>
+    Effect.gen(function* () {
+      const development = Object.fromEntries(
+        Object.entries({ ...environment, NODE_ENV: "development", BETTER_AUTH_URL: "http://127.0.0.1:3000" }).filter(
+          ([name]) =>
+            !name.startsWith("E2B_") &&
+            !name.startsWith("RIKA_EXECUTOR_") &&
+            !name.startsWith("RIKA_WORKSPACE_") &&
+            !name.startsWith("GITHUB_") &&
+            name !== "RESEND_API_KEY" &&
+            name !== "EMAIL_FROM",
+        ),
+      )
+      const loaded = yield* loadApiConfig(development)
+      expect(loaded.executor).toBeUndefined()
+      expect(loaded.github).toBeUndefined()
+      expect(loaded.developmentModel).toBe("minimax/minimax-m2.7:free")
+      expect(loaded.developmentSeedEnabled).toBe(false)
+      expect((yield* loadApiConfig({ ...development, RIKA_DEV_SEED: "1" })).developmentSeedEnabled).toBe(true)
+    }),
+  )
+
+  it.effect("rejects partial development E2B and GitHub App tuples", () =>
+    Effect.gen(function* () {
+      const development = {
+        ...environment,
+        NODE_ENV: "development",
+        BETTER_AUTH_URL: "http://127.0.0.1:3000",
+        GITHUB_CLIENT_ID: undefined,
+        GITHUB_CLIENT_SECRET: undefined,
+        RESEND_API_KEY: undefined,
+        EMAIL_FROM: undefined,
+      }
+      expect((yield* failure({ ...development, E2B_API_KEY: undefined })).dependency).toBe("executor-provider")
+      expect((yield* failure({ ...development, GITHUB_APP_PRIVATE_KEY: undefined })).dependency).toBe("github-app")
+    }),
+  )
+})

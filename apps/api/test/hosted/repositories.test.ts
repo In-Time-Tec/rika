@@ -221,9 +221,9 @@ it.effect.skipIf(databaseUrl === "")(
         yield* Effect.tryPromise(() =>
           pool.query(`INSERT INTO rika_hosted_workspace_preparations
               (assignment_id, owner_id, workspace_id, generation, lease_epoch, attempt, state, phase,
-                evidence, started_at, updated_at)
+                evidence, deadline_at, started_at, updated_at)
               VALUES ('assignment-personal', 'owner-personal', 'workspace-personal', 1, 1, 1, 'ready',
-                'capabilities', '{}'::jsonb, now(), now())`),
+                'capabilities', '{}'::jsonb, now() + interval '5 minutes', now(), now())`),
         )
         const publication = yield* service.approvePublication({
           ownerId: "owner-personal",

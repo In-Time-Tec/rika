@@ -19,10 +19,8 @@ const config: IdentityConfig = {
   baseUrl: "http://127.0.0.1",
   trustedOrigins: ["http://127.0.0.1"],
   authSecret: Redacted.make("abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEF"),
-  githubClientId: "test",
-  githubClientSecret: Redacted.make("test"),
-  resendApiKey: Redacted.make("test"),
-  emailFrom: "test@example.test",
+  github: { clientId: "test", clientSecret: Redacted.make("test") },
+  mail: { resendApiKey: Redacted.make("test"), emailFrom: "test@example.test" },
   resource: "http://127.0.0.1/api/v1",
   databaseUrl: Redacted.make("postgresql://unused"),
   databaseSsl: "disable",
@@ -80,6 +78,9 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     pollRunner: () => Effect.die("unused"),
     createConnection: () => Effect.die("unused"),
     admitRun: () => Effect.die("unused"),
+    admitAuthorizedRun: () => Effect.die("unused"),
+    cancelRunAdmission: () => Effect.die("unused"),
+    cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const executor: ExecutorRuntime = {
     controller: unusedController,
@@ -107,7 +108,11 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     product,
     toolPolicy: testToolPolicy,
     executor,
-    recovery: { inspect: () => Effect.die("unused"), resolve: () => Effect.die("unused") },
+    recovery: {
+      inspect: () => Effect.die("unused"),
+      resolve: () => Effect.die("unused"),
+      reconcileCompleted: Effect.die("unused"),
+    },
     execution: {
       check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),
       status: Effect.succeed({
@@ -167,31 +172,31 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
   Effect.gen(function* () {
     const bindingStarted = yield* Deferred.make<void>()
     const machineStarted = yield* Deferred.make<void>()
-    const bindingCleanup = yield* Deferred.make<void>()
-    const machineCleanup = yield* Deferred.make<void>()
-    const releaseCleanup = yield* Deferred.make<void>()
+    const bindingCompleted = yield* Deferred.make<void>()
+    const machineCompleted = yield* Deferred.make<void>()
+    const releaseReverse = yield* Deferred.make<void>()
     const oldDisconnected = yield* Deferred.make<void>()
     const disconnected: Array<Socket> = []
     let oldSocket: Socket | undefined
-    let resumedOldReceive = false
-    const reverseReceive = (started: Deferred.Deferred<void>, cleanup: Deferred.Deferred<void>) =>
+    let interrupted = false
+    const reverseReceive = (started: Deferred.Deferred<void>, completed: Deferred.Deferred<void>) =>
       Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Effect.never),
-        Effect.tap(() =>
+        Effect.andThen(Deferred.await(releaseReverse)),
+        Effect.andThen(Deferred.succeed(completed, undefined)),
+        Effect.onInterrupt(() =>
           Effect.sync(() => {
-            resumedOldReceive = true
+            interrupted = true
           }),
         ),
-        Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.andThen(Deferred.await(releaseCleanup)))),
       )
     const gateway: Gateway = {
       receive: (socket, message) => {
         const current = tag(message)
         if (current === "BindingInvoke") {
           oldSocket ??= socket
-          return reverseReceive(bindingStarted, bindingCleanup)
+          return reverseReceive(bindingStarted, bindingCompleted)
         }
-        if (current === "MachineResult") return reverseReceive(machineStarted, machineCleanup)
+        if (current === "MachineResult") return reverseReceive(machineStarted, machineCompleted)
         return Effect.sync(() => socket.send("replacement-active"))
       },
       disconnected: (socket) =>
@@ -220,18 +225,20 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
     yield* Deferred.await(bindingStarted)
     yield* Deferred.await(machineStarted)
     yield* original.close
-    yield* Deferred.await(bindingCleanup)
-    yield* Deferred.await(machineCleanup)
+    yield* Deferred.await(oldDisconnected)
+    expect(interrupted).toBe(false)
+    expect((yield* Deferred.poll(bindingCompleted))._tag).toBe("None")
+    expect((yield* Deferred.poll(machineCompleted))._tag).toBe("None")
 
     const replacement = yield* connect(url)
     yield* replacement.send('{"_tag":"CurrentSession"}')
     expect(yield* Deferred.await(replacement.firstMessage)).toBe("replacement-active")
-    expect((yield* Deferred.poll(oldDisconnected))._tag).toBe("None")
     expect(replacement.messages).toEqual(["replacement-active"])
 
-    yield* Deferred.succeed(releaseCleanup, undefined)
-    yield* Deferred.await(oldDisconnected)
-    expect(resumedOldReceive).toBe(false)
+    yield* Deferred.succeed(releaseReverse, undefined)
+    yield* Deferred.await(bindingCompleted)
+    yield* Deferred.await(machineCompleted)
+    expect(interrupted).toBe(false)
     expect(disconnected).toEqual([oldSocket])
     expect(replacement.messages).toEqual(["replacement-active"])
 
@@ -239,15 +246,15 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
     yield* Scope.close(resourceScope, Exit.void)
   })
 
-it.effect("owns executor reverse receives by their originating WebSocket session", () =>
+it.effect("keeps executor reverse receives alive after their WebSocket disconnects", () =>
   verifiesSessionReplacement("executors"),
 )
 
-it.effect("owns Runner reverse receives by their originating WebSocket session", () =>
+it.effect("keeps Runner reverse receives alive after their WebSocket disconnects", () =>
   verifiesSessionReplacement("runners"),
 )
 
-it.effect("interrupts reverse-channel receives before Bun server shutdown closes their sockets", () =>
+it.effect("gives reverse-channel receives a bounded graceful server shutdown", () =>
   Effect.gen(function* () {
     const terminalized = yield* Deferred.make<void>()
     const cleanupStarted = yield* Deferred.make<void>()
@@ -287,6 +294,11 @@ it.effect("interrupts reverse-channel receives before Bun server shutdown closes
       Effect.ensuring(Deferred.succeed(closed, undefined)),
       Effect.forkChild,
     )
+    yield* Effect.yieldNow
+    expect((yield* Deferred.poll(cleanupStarted))._tag).toBe("None")
+    expect((yield* Deferred.poll(closed))._tag).toBe("None")
+
+    yield* TestClock.adjust("5 seconds")
     yield* Deferred.await(cleanupStarted)
     expect((yield* Deferred.poll(closed))._tag).toBe("None")
     expect(connected.messages).toEqual([])
@@ -360,18 +372,20 @@ it.effect("race-closes admission and forces bounded shutdown after session clean
       Effect.forkChild,
     )
     yield* Deferred.await(serialCleanup)
-    yield* Deferred.await(reverseCleanup)
+    expect((yield* Deferred.poll(reverseCleanup))._tag).toBe("None")
     const lateUpgrade = yield* Effect.exit(connect(`${baseUrl.replace("http", "ws")}/api/v1/executors`))
     expect(lateUpgrade._tag).toBe("Failure")
     expect((yield* Deferred.poll(closed))._tag).toBe("None")
     expect(queuedSerialStarted).toBe(false)
 
     yield* TestClock.adjust("5 seconds")
-    yield* Deferred.await(closed)
+    yield* Deferred.await(reverseCleanup)
+    expect((yield* Deferred.poll(closed))._tag).toBe("None")
     expect(receiveResumed).toBe(false)
     expect(queuedSerialStarted).toBe(false)
 
     yield* Deferred.succeed(releaseCleanup, undefined)
+    yield* Deferred.await(closed)
     yield* Deferred.succeed(releaseHttp, undefined)
     yield* Fiber.await(request)
     yield* Fiber.join(closing)

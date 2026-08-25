@@ -11,7 +11,7 @@ import * as UnitOrder from "@rika/transcript/transcript-unit-order"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
 import { fileURLToPath } from "node:url"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Pool } from "pg"
@@ -20,7 +20,7 @@ import { runMigration } from "../../../identity/src/database/postgres"
 import * as ProductRepositories from "../../src/database/product-repositories"
 import { migrations } from "../../src/hosted/migrations"
 
-const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const readFileString = (url: URL) =>
   Effect.scoped(
     Layer.build(BunServices.layer).pipe(
@@ -68,7 +68,7 @@ const repositoryLayer = (url: string, ownerId: OwnerId) => {
   return ProductRepositories.layer(ownerId).pipe(Layer.provideMerge(postgres))
 }
 
-it.effect.skipIf(databaseUrl === undefined)(
+it.effect.skipIf(databaseUrl === "")(
   "runs product repository contracts against owner-scoped PostgreSQL state",
   () =>
     Effect.scoped(
@@ -76,7 +76,7 @@ it.effect.skipIf(databaseUrl === undefined)(
         const database = `rika_product_${Math.abs(yield* Random.nextInt)}`
         const admin = new Pool({ connectionString: databaseUrl })
         yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
-        const parsed = new URL(databaseUrl!)
+        const parsed = new URL(databaseUrl)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         let migrated: Pool | undefined

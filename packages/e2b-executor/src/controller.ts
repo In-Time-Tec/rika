@@ -31,7 +31,7 @@ import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/worksp
 import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
 import { StoredArchive, Vault } from "./checkpoint"
 import { Credentials, type Credential } from "./checkout"
-import { Provider, type CreateRequest, type ProviderError } from "./provider"
+import { Provider, type CreateRequest, type Handle, type ProviderError } from "./provider"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const Generation = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
@@ -491,15 +491,12 @@ export const layer = (
         templateId === options.templateId &&
         templateBuildId === assignment.placement.templateBuildId
 
-      const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
+      const findCreatedSandbox = Effect.fn("Controller.findCreatedSandbox")(function* (assignment: ExecutorAssignment) {
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
         const matches = inventory.filter((entry) =>
           matchesGeneration(assignment, entry.templateId, entry.templateBuildId, entry.metadata),
         )
-        if (matches.length === 0) {
-          yield* HostedObservability.unknownOutcome(assignmentCorrelation(assignment))
-          return yield* failure("provider", "create outcome is unknown and no sandbox exists")
-        }
+        if (matches.length === 0) return Option.none()
         const [adopt, ...duplicates] = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
         yield* Effect.forEach(
           duplicates,
@@ -508,10 +505,19 @@ export const layer = (
               "attach",
               { ...assignmentCorrelation(assignment), sandboxId: entry.sandboxId },
               provider.kill(entry.sandboxId).pipe(Effect.mapError(providerFailure)),
-            ),
+            ).pipe(Effect.ignore),
           { discard: true },
         )
-        return adopt!
+        return Option.some(
+          yield* provider.connect(adopt!.sandboxId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure)),
+        )
+      })
+
+      const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
+        const created = yield* findCreatedSandbox(assignment)
+        if (Option.isSome(created)) return created.value
+        yield* HostedObservability.unknownOutcome(assignmentCorrelation(assignment))
+        return yield* failure("provider", "create outcome is unknown and no sandbox exists")
       })
 
       const createAndBootstrap = Effect.fn("Controller.createAndBootstrap")(function* (
@@ -524,12 +530,17 @@ export const layer = (
         if (provisioning.lifecycle._tag !== "Provisioning")
           return yield* failure("assignment-conflict", "Assignment is not provisioning")
         const existingProviderId = provisioning.lifecycle.providerInstanceId
-        const sandbox =
-          existingProviderId === null
-            ? yield* provider
+        let sandbox: Handle
+        if (existingProviderId !== null)
+          sandbox = yield* provider.connect(existingProviderId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
+        else {
+          const created = yield* findCreatedSandbox(provisioning)
+          sandbox = Option.isSome(created)
+            ? created.value
+            : yield* provider
                 .create(yield* createRequest(provisioning, authorization))
                 .pipe(Effect.catch(() => reconcileCreate(provisioning)))
-            : yield* provider.connect(existingProviderId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
+        }
         const bound = yield* assignments
           .bindProviderInstance({
             ...version(provisioning),
@@ -1134,10 +1145,26 @@ export const layer = (
 
       const cleanupOrphans = Effect.gen(function* () {
         const durable = yield* assignments.listManaged.pipe(Effect.mapError(assignmentFailure))
+        const livePreparing = new Set(
+          yield* Effect.forEach(
+            durable,
+            (assignment) =>
+              assignment.lifecycle._tag !== "Provisioning" && assignment.lifecycle._tag !== "AwaitingBootstrap"
+                ? Effect.void.pipe(Effect.as(undefined))
+                : assignments
+                    .isBootstrapLive({ assignmentId: assignment.id, generation: assignment.generation })
+                    .pipe(
+                      Effect.mapError(assignmentFailure),
+                      Effect.map((live) => (live ? String(assignment.id) : undefined)),
+                    ),
+          ),
+        )
         const active = new Set(
           durable.flatMap((assignment) => {
             const id = providerInstanceId(assignment)
-            return assignment.lifecycle._tag === "Terminated" || id === undefined ? [] : [id]
+            return (assignment.lifecycle._tag !== "Active" && assignment.lifecycle._tag !== "Paused") || id === undefined
+              ? []
+              : [id]
           }),
         )
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
@@ -1147,6 +1174,7 @@ export const layer = (
             (assignment) =>
               assignment.lifecycle._tag !== "Terminated" &&
               (assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap") &&
+              livePreparing.has(String(assignment.id)) &&
               matchesGeneration(assignment, sandbox.templateId, sandbox.templateBuildId, sandbox.metadata),
           )
         const candidates = inventory.filter(

@@ -3,10 +3,10 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ConfigOperations from "@rika/product/configuration-operation"
 import { executionSessionLifecycleLayerTest, productLayer, Service } from "../../support/product-operation.harness"
-import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
+import * as ThreadRepository from "@rika/product-store/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
-import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
+import * as TranscriptRepository from "@rika/product-store/transcript-repository"
+import * as TurnRepository from "@rika/product-store/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
@@ -17,6 +17,7 @@ import { expect, it } from "@effect/vitest"
 import { run } from "../../../src/command/root/rika"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: (input) =>
     Effect.succeed({ runId: `opaque-run:${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,

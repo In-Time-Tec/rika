@@ -4,11 +4,11 @@ import { Service } from "@rika/product/product-operation-service"
 import { productLayer } from "@rika/product/product-operation-service"
 import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime"
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/postgres-thread-repository"
+import * as ThreadRepository from "@rika/product-store/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadSummaryRepository from "@rika/product-store/postgres-thread-summary-repository"
-import * as TranscriptRepository from "@rika/product-store/postgres-transcript-repository"
-import * as TurnRepository from "@rika/product-store/postgres-turn-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/thread-summary-repository"
+import * as TranscriptRepository from "@rika/product-store/transcript-repository"
+import * as TurnRepository from "@rika/product-store/turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
@@ -17,6 +17,7 @@ import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { executionSessionLifecycleLayerTest } from "./repository.harness"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),

@@ -1,12 +1,11 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Inspectable, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { watch } from "../../../src/execution/projection/watch"
 
@@ -24,43 +23,29 @@ const turn: Turn.AgentExecutionTurn = {
   updatedAt: 2,
 }
 
-const projection = (units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>) => ({
-  turn,
-  units,
-  checkpointGeneration: 0,
-  revision: 0,
-  state: {
-    status: "completed" as const,
-    usage: ExecutionProjection.emptyUsageState(),
-    steering: { steeringMessages: 0, followUpMessages: 0 },
-  },
-  projectionVersion: ExecutionProjection.projectionVersion,
-})
-
-it.effect("uses terminal execution authority after the progress watchdog expires", () =>
+it.effect("keeps a silent projection isolated from execution authority", () =>
   Effect.gen(function* () {
-    let units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit> = []
-    let cancelled = false
+    const started = yield* Deferred.make<void>()
+    let replacements = 0
+    let cancellations = 0
+    const memoryTranscripts = Context.get(
+      yield* Layer.build(TranscriptRepository.productMemoryLayerWithTurns),
+      TranscriptRepository.Service,
+    )
     const transcripts = TranscriptRepository.Service.of({
-      get: () => Effect.as(Effect.void, undefined),
-      replaceUnits: (_candidate: Turn.Turn, replacement: typeof units) =>
+      ...memoryTranscripts,
+      replaceUnits: () =>
         Effect.sync(() => {
-          units = replacement
-          return projection(units)
-        }),
+          replacements += 1
+        }).pipe(Effect.andThen(Effect.die("unexpected transcript replacement"))),
     })
-    const backend = ExecutionGateway.Service.of({
-      watchTurn: () => Stream.never,
+    const backend = ExecutionGateway.makeTest({
+      watchTurn: () => Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))),
       cancelTurn: () =>
         Effect.sync(() => {
-          cancelled = true
+          cancellations += 1
         }),
-      inspectTurn: () =>
-        Effect.sync(() =>
-          cancelled
-            ? { status: "completed", cursor: "completed" }
-            : { status: "running", cursor: "running" },
-        ),
+      inspectTurn: () => Effect.succeed({ status: "running", cursor: "running" }),
     })
     const fiber = yield* Effect.forkChild(
       watch({
@@ -71,65 +56,62 @@ it.effect("uses terminal execution authority after the progress watchdog expires
         stallSilenceMs: 1_000,
       }),
     )
+    yield* Deferred.await(started)
     yield* TestClock.adjust("2 seconds")
-    const result = yield* Fiber.join(fiber)
+    yield* Effect.yieldNow
 
-    expect(result.status).toBe("completed")
-    expect(result.state.status).toBe("completed")
-    expect(cancelled).toBe(true)
-    expect(units).toHaveLength(1)
-    expect(units[0]?.executionOutcome).toMatchObject({
-      status: "complete",
-      reason: "The durable Execution stopped reporting progress.",
-    })
-    expect(units[0]?.content).toMatchObject({
-      _tag: "Block",
-      block: { _tag: "Error", category: "execution-stalled" },
-    })
-    expect(Inspectable.toStringUnknown(units[0]?.content)).not.toContain("settled this Turn as failed")
-    expect(result.state.usage).toEqual(ExecutionProjection.emptyUsageState())
+    expect(cancellations).toBe(0)
+    expect(replacements).toBe(0)
+    expect(fiber.pollUnsafe()).toBeUndefined()
+    yield* Fiber.interrupt(fiber)
   }),
 )
 
-it.effect("does not settle a stalled turn when terminal inspection is unavailable after cancellation", () =>
+it.effect("retries deterministic projection defects without cancelling or settling execution", () =>
   Effect.gen(function* () {
     let replacements = 0
     let cancellations = 0
-    const started = yield* Deferred.make<void>()
+    let attempts = 0
+    const memoryTranscripts = Context.get(
+      yield* Layer.build(TranscriptRepository.productMemoryLayerWithTurns),
+      TranscriptRepository.Service,
+    )
     const fiber = yield* Effect.forkChild(
       watch({
         turnId: turn.id,
         turns: TurnRepository.Service.of({ get: () => Effect.succeed(turn) }),
         transcripts: TranscriptRepository.Service.of({
-          get: () => Effect.void,
+          ...memoryTranscripts,
           replaceUnits: () =>
             Effect.sync(() => {
               replacements += 1
-              return projection([])
-            }),
+            }).pipe(Effect.andThen(Effect.die("unexpected transcript replacement"))),
         }),
-        backend: ExecutionGateway.Service.of({
-          watchTurn: () => Stream.fromEffect(Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))),
+        backend: ExecutionGateway.makeTest({
+          watchTurn: () =>
+            Stream.fromEffect(
+              Effect.sync(() => {
+                attempts += 1
+              }).pipe(Effect.andThen(Effect.die("projection defect"))),
+            ),
           cancelTurn: () =>
             Effect.sync(() => {
               cancellations += 1
             }),
-          inspectTurn: () =>
-            Effect.sync(() =>
-              cancellations === 0
-                ? { status: "running", cursor: "running" }
-                : { status: "unavailable" },
-            ),
+          inspectTurn: () => Effect.succeed({ status: "running", cursor: "running" }),
         }),
-        stallSilenceMs: 1_000,
       }),
     )
-    yield* Deferred.await(started)
-    yield* TestClock.adjust("2 seconds")
-    const failure = yield* Effect.flip(Fiber.join(fiber))
+    yield* Effect.yieldNow
+    yield* TestClock.adjust("100 millis")
+    yield* TestClock.adjust("200 millis")
+    yield* TestClock.adjust("400 millis")
+    yield* Effect.yieldNow
 
-    expect(cancellations).toBe(1)
+    expect(attempts).toBeGreaterThanOrEqual(3)
+    expect(cancellations).toBe(0)
     expect(replacements).toBe(0)
-    expect(failure._tag).toBe("WatchTurnFailure")
+    expect(fiber.pollUnsafe()).toBeUndefined()
+    yield* Fiber.interrupt(fiber)
   }),
 )

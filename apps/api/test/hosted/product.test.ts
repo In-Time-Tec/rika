@@ -10,7 +10,13 @@ import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { FileSystem, Config, Effect, Layer, Random, Redacted, Ref, Schema } from "effect"
 import { Pool, type QueryResult } from "pg"
 import { live as livePlatform } from "../support/live-platform"
-import { HostedProduct, HostedProductError, postgresTest, type AuthenticatedPrincipal } from "../../src/hosted/product"
+import {
+  HostedProduct,
+  HostedProductError,
+  postgresTest,
+  type AdmittedRun,
+  type AuthenticatedPrincipal,
+} from "../../src/hosted/product"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
@@ -24,7 +30,10 @@ const principal = (userId: string): AuthenticatedPrincipal => ({
   clientId: `client-${userId}`,
 })
 
-const personal = (userId: string) => ({ _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make(userId) })
+const personal = (userId: string) => ({
+  _tag: "PersonalOwner" as const,
+  userId: BetterAuthUserId.make(userId),
+})
 const organization = (organizationId: string) => ({
   _tag: "OrganizationOwner" as const,
   organizationId: OrganizationId.make(organizationId),
@@ -58,6 +67,13 @@ const failureKind = <A>(effect: Effect.Effect<A, HostedProductError>) =>
     Effect.map((error) => error.kind),
   )
 
+const requireAdmitted = <E, R>(effect: Effect.Effect<AdmittedRun, E, R>) =>
+  effect.pipe(
+    Effect.flatMap((result) =>
+      result._tag === "Admitted" ? Effect.succeed(result) : Effect.die("Prompt was cancelled unexpectedly"),
+    ),
+  )
+
 const withDatabase = <A, E, R>(
   label: string,
   use: (pool: Pool) => Effect.Effect<A, E, R | HostedProduct>,
@@ -80,7 +96,12 @@ const withDatabase = <A, E, R>(
           const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.readFileString(migration.url.pathname),
           )
-          yield* runMigration({ pool: activePool, id: migration.id, checksum: migration.checksum, sql })
+          yield* runMigration({
+            pool: activePool,
+            id: migration.id,
+            checksum: migration.checksum,
+            sql,
+          })
         }
         const context = yield* Layer.build(
           postgresTest({
@@ -100,6 +121,47 @@ const withDatabase = <A, E, R>(
     }),
   ).pipe(livePlatform)
 
+it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost response", () =>
+  withDatabase("create-retry", (pool) =>
+    Effect.gen(function* () {
+      const authenticated = principal("create-retry-user")
+      yield* user(pool, authenticated.userId)
+      const product = yield* HostedProduct
+      const input = {
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        executorKind: "orb" as const,
+        threadId: "create-retry-thread",
+      }
+      const first = yield* product.createConnection(input)
+      expect(yield* product.createConnection(input)).toEqual(first)
+      expect(
+        yield* Effect.all(
+          Array.from({ length: 8 }, () => product.createConnection(input)),
+          {
+            concurrency: "unbounded",
+          },
+        ),
+      ).toEqual(Array.from({ length: 8 }, () => first))
+      const records = yield* query(
+        pool,
+        `SELECT
+          (SELECT count(*)::int FROM rika_hosted_threads WHERE id = $1) AS threads,
+          (SELECT count(*)::int FROM rika_hosted_workspaces WHERE id = $2) AS workspaces,
+          (SELECT count(*)::int FROM rika_hosted_executor_assignments WHERE thread_id = $1) AS assignments`,
+        [input.threadId, `${input.threadId}-workspace`],
+      )
+      expect(records.rows).toEqual([{ threads: 1, workspaces: 1, assignments: 1 }])
+      const project = yield* product.createProject({
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        name: "Divergent retry",
+      })
+      expect(yield* failureKind(product.createConnection({ ...input, projectId: project.id }))).toBe("conflict")
+    }),
+  ),
+)
+
 it.effect.skipIf(!live)("supports a projectless personal connection for a user with no organizations", () =>
   withDatabase("personal", (pool) =>
     Effect.gen(function* () {
@@ -117,7 +179,7 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         operationKey: "personal-operation",
         prompt: "personal prompt",
       } as const
-      const admitted = yield* product.admitRun(admissionInput)
+      const admitted = yield* requireAdmitted(product.admitRun(admissionInput))
       expect(admitted.status).toBe("accepted")
       expect(yield* product.admitRun(admissionInput)).toEqual(admitted)
       expect(yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" }))).toBe("conflict")
@@ -148,13 +210,19 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
         prompt: "personal prompt",
         turn_count: 1,
         queued_count: 0,
-        actor: { _tag: "PersonalActor", userId: "personal-user", owner: personal("personal-user") },
+        actor: {
+          _tag: "PersonalActor",
+          userId: "personal-user",
+          owner: personal("personal-user"),
+        },
       })
-      const queued = yield* product.admitRun({
-        ...admissionInput,
-        operationKey: "personal-operation-queued",
-        prompt: "queued prompt",
-      })
+      const queued = yield* requireAdmitted(
+        product.admitRun({
+          ...admissionInput,
+          operationKey: "personal-operation-queued",
+          prompt: "queued prompt",
+        }),
+      )
       expect(queued.status).toBe("queued")
       expect(
         yield* query(
@@ -165,7 +233,65 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
             WHERE turn.id = $1`,
           [queued.turnId],
         ),
-      ).toMatchObject({ rows: [{ id: queued.turnId, status: "queued", queued_count: 1 }] })
+      ).toMatchObject({
+        rows: [{ id: queued.turnId, status: "queued", queued_count: 1 }],
+      })
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("serializes prompt admission against cancellation in both commit orders", () =>
+  withDatabase("prompt-cancellation", (pool) =>
+    Effect.gen(function* () {
+      yield* user(pool, "cancellation-user")
+      const authenticated = principal("cancellation-user")
+      const product = yield* HostedProduct
+      const connection = yield* product.createConnection({
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        executorKind: "orb",
+      })
+      expect(
+        yield* product.cancelRunAdmission({
+          principal: authenticated,
+          threadId: connection.threadId,
+          cancelCommandId: "cancel-first",
+          targetCommandId: "submit-cancelled",
+        }),
+      ).toEqual({})
+      expect(
+        yield* product.admitRun({
+          principal: authenticated,
+          threadId: connection.threadId,
+          operationKey: "submit-cancelled",
+          prompt: "must never execute",
+        }),
+      ).toEqual({ _tag: "Cancelled", commandId: "submit-cancelled" })
+      const admitted = yield* requireAdmitted(
+        product.admitRun({
+          principal: authenticated,
+          threadId: connection.threadId,
+          operationKey: "submit-admitted",
+          prompt: "cancel this exact Turn",
+        }),
+      )
+      expect(
+        yield* product.cancelRunAdmission({
+          principal: authenticated,
+          threadId: connection.threadId,
+          cancelCommandId: "cancel-second",
+          targetCommandId: "submit-admitted",
+        }),
+      ).toEqual({ turnId: admitted.turnId })
+      expect(
+        yield* query(
+          pool,
+          `SELECT command_id, turn_id FROM rika_hosted_thread_commands WHERE thread_id = $1 ORDER BY command_id`,
+          [connection.threadId],
+        ),
+      ).toMatchObject({
+        rows: [{ command_id: "submit-admitted", turn_id: admitted.turnId }],
+      })
     }),
   ),
 )
@@ -205,11 +331,18 @@ it.effect.skipIf(!live)("rejects new prompts without mutation and replays them t
           const admitted = yield* product.admitRun(input)
           yield* Ref.set(ready, false)
           expect(yield* product.admitRun(input)).toEqual(admitted)
-          expect(yield* failureKind(product.admitRun({ ...input, operationKey: "new-during-outage" }))).toBe(
-            "unavailable",
-          )
+          expect(
+            yield* failureKind(
+              product.admitRun({
+                ...input,
+                operationKey: "new-during-outage",
+              }),
+            ),
+          ).toBe("unavailable")
           yield* Ref.set(ready, true)
-          expect((yield* product.admitRun({ ...input, operationKey: "after-recovery" })).status).toBe("queued")
+          expect((yield* requireAdmitted(product.admitRun({ ...input, operationKey: "after-recovery" }))).status).toBe(
+            "queued",
+          )
         }),
       Ref.get(ready),
     )
@@ -268,7 +401,7 @@ it.effect.skipIf(!live)("serializes the first prompt lane without queue-count dr
         prompt: `concurrent prompt ${index}`,
       }))
       const admitted = yield* Effect.all(
-        inputs.map((input) => product.admitRun(input)),
+        inputs.map((input) => requireAdmitted(product.admitRun(input))),
         { concurrency: "unbounded" },
       )
       const lanes = yield* query(
@@ -316,7 +449,11 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
         registration: {
           workspaceIdentity,
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
-          kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+          kernel: {
+            runtime: "bun",
+            runtimeVersion: Bun.version,
+            trustMode: "trusted-local",
+          },
           capabilities: { cells: true, checkpoints: false, pty: false },
         },
       })
@@ -329,12 +466,14 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
           runnerTarget: { deviceId, checkoutFingerprint: fingerprint },
         })
       const staleThread = yield* createLocal()
-      const staleRun = yield* product.admitRun({
-        principal: authenticated,
-        threadId: staleThread.threadId,
-        operationKey: "stale-operation",
-        prompt: "stale prompt",
-      })
+      const staleRun = yield* requireAdmitted(
+        product.admitRun({
+          principal: authenticated,
+          threadId: staleThread.threadId,
+          operationKey: "stale-operation",
+          prompt: "stale prompt",
+        }),
+      )
       const staleRows = yield* query(
         pool,
         `SELECT hosted.workspace_id, turn.execution_route_json
@@ -363,16 +502,23 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
 
       const currentThread = yield* createLocal()
       const promptParts = [
-        { type: "image" as const, mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" },
+        {
+          type: "image" as const,
+          mediaType: "image/png",
+          data: "aW1hZ2U=",
+          filename: "evidence.png",
+        },
       ]
-      const currentRun = yield* product.admitRun({
-        principal: authenticated,
-        threadId: currentThread.threadId,
-        operationKey: "current-operation",
-        prompt: "current prompt",
-        promptParts,
-        mode: "high",
-      })
+      const currentRun = yield* requireAdmitted(
+        product.admitRun({
+          principal: authenticated,
+          threadId: currentThread.threadId,
+          operationKey: "current-operation",
+          prompt: "current prompt",
+          promptParts,
+          mode: "high",
+        }),
+      )
       const turns = yield* query(
         pool,
         `SELECT id, status, prompt_parts_json, execution_route_json

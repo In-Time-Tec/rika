@@ -1,4 +1,3 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
 import {
   BindingResponse,
   type AccessWire,
@@ -7,8 +6,25 @@ import {
 } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
-import { ActorAttribution, BetterAuthUserId, OrganizationId, type HostedOwner } from "@rika/product/hosted-model"
+import { approvalTarget } from "@rika/execution"
+import {
+  ActorAttribution,
+  BetterAuthUserId,
+  ExecutorAssignmentId,
+  ExecutorInstanceId,
+  OrganizationId,
+  OwnerId,
+  ThreadId,
+  WorkspaceId,
+  type HostedOwner,
+} from "@rika/product/hosted-model"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
+import {
+  ToolPolicyStore,
+  type AuditAppend,
+  type AuditRecord,
+  layer as toolPolicyStoreLayer,
+} from "@rika/product-store/execution-tool-policy"
 import { Cause, Context, Crypto, Effect, Encoding, Exit, Layer, Match, Option, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
 
@@ -38,7 +54,6 @@ export const ToolPolicy = Schema.Struct({
 })
 export type ToolPolicy = typeof ToolPolicy.Type
 
-const ToolCapabilitiesJson = Schema.fromJsonString(Schema.Array(Schema.NonEmptyString))
 const ProcessStartInput = Schema.Struct({ command: Schema.String })
 
 export const ToolAuditCheckpoint = Schema.Struct({
@@ -241,7 +256,14 @@ const decodeBindingResponse: (
     ? Effect.succeed(decoded.value)
     : Effect.fail(HostedToolPolicyError.make({ kind: "unavailable", message: "Tool response is invalid" }))
 }
-const canonical = (value: Schema.Json): string =>
+interface AuthorizationTarget {
+  readonly runId: string
+  readonly approvalId: string
+}
+
+type CanonicalValue = Schema.Json | ActorAttribution | ToolAuditCheckpoint | AuthorizationTarget
+
+const canonical = (value: CanonicalValue): string =>
   Match.value(value).pipe(
     Match.when(Schema.is(Schema.Array(Schema.Json)), (items) => `[${items.map(canonical).join(",")}]`),
     Match.when(
@@ -334,11 +356,7 @@ export interface RecordDecisionInput {
   readonly actor: ActorAttribution
   readonly authorizationId: string
   readonly checkpoint: ExecutionProjection.Checkpoint
-  readonly operation: string
-  readonly capability: string
-  readonly authorizationRequest: string
   readonly decision: "approved" | "denied"
-  readonly outcome: "admitted" | "succeeded" | "failed"
 }
 
 export interface HostedToolPolicyService {
@@ -475,46 +493,6 @@ export const invokeAdmittedTool: (
   }
 })
 
-interface AdmissionRow {
-  readonly ownerId: string
-  readonly actor: unknown
-  readonly executorKind: "runner" | "orb"
-  readonly repositoryIdentity: string | null
-  readonly branch: string | null
-}
-
-interface AuditRow {
-  readonly sequence: string
-  readonly auditGroupId: string
-  readonly phase: ToolAuditRecord["phase"]
-  readonly ownerId: string
-  readonly threadId: string
-  readonly turnId: string
-  readonly actor: unknown
-  readonly decisionActor: unknown
-  readonly policyId: string
-  readonly policyVersion: number
-  readonly capability: string
-  readonly capabilities: unknown
-  readonly sideEffect: ToolSideEffect
-  readonly approval: ToolApproval
-  readonly replayPolicy: ToolPolicy["replayPolicy"]
-  readonly authorizationId: string | null
-  readonly authorizationCheckpoint: unknown
-  readonly module: string
-  readonly operation: string
-  readonly operationKey: string
-  readonly callId: string
-  readonly argumentsDigest: string
-  readonly workspaceId: string
-  readonly repository: unknown
-  readonly branch: string | null
-  readonly executor: unknown
-  readonly decision: ToolAuditRecord["decision"]
-  readonly outcome: ToolAuditRecord["outcome"]
-  readonly occurredAt: string
-}
-
 const unavailable = () => HostedToolPolicyError.make({ kind: "unavailable", message: "Tool audit is unavailable" })
 
 const executorOf = (access: AccessWire, kind: "runner" | "orb"): ToolAuditExecutor => ({
@@ -527,53 +505,26 @@ const executorOf = (access: AccessWire, kind: "runner" | "orb"): ToolAuditExecut
   processIncarnation: access.fence.processIncarnation,
 })
 
-const decodeRecord = (row: AuditRow) =>
-  Schema.decodeUnknownEffect(ToolAuditRecord)({
-    sequence: row.sequence,
-    auditGroupId: row.auditGroupId,
-    phase: row.phase,
-    ownerId: row.ownerId,
-    threadId: row.threadId,
-    turnId: row.turnId,
-    actor: row.actor,
-    decisionActor: row.decisionActor,
-    policy: {
-      id: row.policyId,
-      version: row.policyVersion,
-      capability: row.capability,
-      capabilities: row.capabilities,
-      sideEffect: row.sideEffect,
-      approval: row.approval,
-      replayPolicy: row.replayPolicy,
-    },
-    authorizationId: row.authorizationId,
-    authorizationCheckpoint: row.authorizationCheckpoint,
-    module: row.module,
-    operation: row.operation,
-    operationKey: row.operationKey,
-    callId: row.callId,
-    argumentsDigest: row.argumentsDigest,
-    workspaceId: row.workspaceId,
-    repository: row.repository,
-    branch: row.branch,
-    executor: row.executor,
-    decision: row.decision,
-    outcome: row.outcome,
-    occurredAt: row.occurredAt,
-  }).pipe(Effect.mapError(unavailable))
+const decodeStoreRecord = (record: AuditRecord) =>
+  Schema.decodeUnknownEffect(ToolAuditRecord)(record).pipe(Effect.mapError(unavailable))
 
-export const layer = Layer.effect(
+interface AuditOptional {
+  decisionActor?: ActorAttribution
+  authorizationId?: string
+  authorizationCheckpoint?: ToolAuditCheckpoint
+}
+
+const hostedToolPolicyLayer = Layer.effect(
   HostedToolPolicy,
   Effect.gen(function* () {
-    const sql = yield* PgClient.PgClient
+    const store = yield* ToolPolicyStore
     const crypto = yield* Crypto.Crypto
     const digest = Effect.fn("HostedToolPolicy.digest")(function* (value: string) {
       return Encoding.encodeHex(yield* crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(Effect.orDie))
     })
-
-    const insert = Effect.fn("HostedToolPolicy.insert")(function* (input: {
+    const append = Effect.fn("HostedToolPolicy.append")(function* <Phase extends AuditAppend["phase"]>(input: {
       readonly context: ToolAdmissionContext
-      readonly phase: "admission" | "decision" | "outcome"
+      readonly phase: Phase
       readonly decisionActor?: ActorAttribution
       readonly authorizationId?: string
       readonly checkpoint?: ToolAuditCheckpoint
@@ -581,117 +532,75 @@ export const layer = Layer.effect(
       readonly outcome: ToolAuditRecord["outcome"]
     }) {
       const value = input.context
-      const capabilities = yield* Schema.encodeEffect(ToolCapabilitiesJson)(value.policy.capabilities)
-      yield* sql`INSERT INTO rika_hosted_tool_audit_records
-          (audit_group_id, phase, owner_id, thread_id, turn_id, actor, decision_actor,
-            policy_id, policy_version, capability, capabilities, side_effect, approval, replay_policy,
-            authorization_id, authorization_checkpoint, module, operation, operation_key, call_id,
-            arguments_digest, workspace_id, repository, branch, executor, decision, outcome)
-          VALUES (${value.auditGroupId}, ${input.phase}, ${value.ownerId}, ${value.threadId}, ${value.turnId},
-            ${sql.json(value.actor)}, ${input.decisionActor === undefined ? null : sql.json(input.decisionActor)},
-            ${value.policy.id}, ${value.policy.version}, ${value.policy.capability}, ${capabilities}::jsonb,
-            ${value.policy.sideEffect}, ${value.policy.approval}, ${value.policy.replayPolicy}, ${input.authorizationId ?? null},
-            ${input.checkpoint === undefined ? null : sql.json(input.checkpoint)}, ${value.module}, ${value.operation},
-            ${value.operationKey}, ${value.callId}, ${value.argumentsDigest}, ${value.workspaceId},
-            ${value.repository === null ? null : sql.json(value.repository)}, ${value.branch}, ${sql.json(value.executor)},
-            ${input.decision}, ${input.outcome})`
+      const optional: AuditOptional = {}
+      if (input.decisionActor !== undefined) optional.decisionActor = input.decisionActor
+      if (input.authorizationId !== undefined) optional.authorizationId = input.authorizationId
+      if (input.checkpoint !== undefined) optional.authorizationCheckpoint = input.checkpoint
+      return {
+        auditGroupId: value.auditGroupId,
+        phase: input.phase,
+        ownerId: yield* Schema.decodeEffect(OwnerId)(value.ownerId),
+        threadId: yield* Schema.decodeEffect(ThreadId)(value.threadId),
+        turnId: value.turnId,
+        actor: value.actor,
+        ...optional,
+        policy: value.policy,
+        module: value.module,
+        operation: value.operation,
+        operationKey: value.operationKey,
+        callId: value.callId,
+        argumentsDigest: value.argumentsDigest,
+        workspaceId: yield* Schema.decodeEffect(WorkspaceId)(value.workspaceId),
+        repository: value.repository,
+        branch: value.branch,
+        executor: {
+          ...value.executor,
+          assignmentId: yield* Schema.decodeEffect(ExecutorAssignmentId)(value.executor.assignmentId),
+          executorId: yield* Schema.decodeEffect(ExecutorInstanceId)(value.executor.executorId),
+        },
+        decision: input.decision,
+        outcome: input.outcome,
+      }
     }, Effect.mapError(unavailable))
 
+    const insert = Effect.fn("HostedToolPolicy.insert")(function* (input: Parameters<typeof append>[0]) {
+      yield* store.insertAudit(yield* append(input)).pipe(Effect.mapError(unavailable))
+    })
+
     const begin: HostedToolPolicyService["begin"] = Effect.fn("HostedToolPolicy.begin")(function* (input) {
-      const rows = yield* sql<AdmissionRow>`SELECT thread.owner_id AS "ownerId",
-          COALESCE(legacy.actor, protocol.actor) AS actor,
-          assignment.executor_kind AS "executorKind",
-          CASE WHEN assignment.executor_kind = 'runner'
-            THEN registration.repository ->> 'identity'
-            WHEN assignment.checkout IS NOT NULL
-            THEN assignment.checkout ->> 'repositoryId'
-            ELSE NULL END AS "repositoryIdentity",
-          CASE WHEN assignment.executor_kind = 'runner'
-            THEN COALESCE(
-              registration.repository ->> 'branch',
-              CASE WHEN registration.repository ? 'headRevision'
-                THEN concat('detached:', registration.repository ->> 'headRevision') END
-            )
-            WHEN assignment.checkout IS NOT NULL
-            THEN concat('detached:', assignment.checkout ->> 'commitSha')
-            ELSE NULL END AS branch
-        FROM rika_hosted_threads thread
-        JOIN rika_hosted_owners owner_record ON owner_record.id = thread.owner_id
-        JOIN rika_hosted_workspaces workspace ON workspace.id = thread.workspace_id AND workspace.owner_id = thread.owner_id
-        JOIN rika_hosted_executor_assignments assignment
-          ON assignment.thread_id = thread.id AND assignment.owner_id = thread.owner_id
-        LEFT JOIN rika_hosted_runner_registrations registration
-          ON assignment.executor_kind = 'runner'
-          AND registration.device_id = assignment.placement ->> 'deviceId'
-          AND registration.checkout_fingerprint = assignment.placement ->> 'checkoutFingerprint'
-        LEFT JOIN LATERAL (
-          SELECT command.actor FROM rika_hosted_thread_commands command
-          WHERE command.owner_id = thread.owner_id AND command.thread_id = thread.id AND command.turn_id = ${input.turnId}
-          LIMIT 1
-        ) legacy ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT command.actor FROM rika_hosted_thread_protocol_commands command
-          WHERE command.owner_id = thread.owner_id AND command.thread_id = thread.id
-            AND command.command_id = ${input.turnId} AND command.command ->> '_tag' = 'SubmitPrompt'
-          LIMIT 1
-        ) protocol ON TRUE
-        LEFT JOIN rika_hosted_clients client
-          ON client.id = COALESCE(legacy.actor, protocol.actor) ->> 'clientId'
-          AND client.user_id = COALESCE(legacy.actor, protocol.actor) ->> 'userId'
-          AND client.revoked_at IS NULL AND client.expires_at > clock_timestamp()
-        LEFT JOIN rika_hosted_client_authorities client_authority
-          ON client_authority.client_id = client.id AND client_authority.owner_id = thread.owner_id
-          AND client_authority.revoked_at IS NULL AND client_authority.expires_at > clock_timestamp()
-        LEFT JOIN rika_hosted_devices device
-          ON device.id = COALESCE(legacy.actor, protocol.actor) ->> 'deviceId'
-          AND device.user_id = COALESCE(legacy.actor, protocol.actor) ->> 'userId' AND device.revoked_at IS NULL
-        LEFT JOIN "member" membership
-          ON owner_record.kind = 'organization' AND membership.id = COALESCE(legacy.actor, protocol.actor) ->> 'membershipId'
-          AND membership.organization_id = owner_record.organization_id
-          AND membership.user_id = COALESCE(legacy.actor, protocol.actor) ->> 'userId'
-        LEFT JOIN rika_hosted_thread_grants thread_grant
-          ON thread_grant.owner_id = thread.owner_id AND thread_grant.thread_id = thread.id
-          AND thread_grant.membership_id = membership.id
-        LEFT JOIN rika_hosted_project_grants project_grant
-          ON project_grant.owner_id = thread.owner_id AND project_grant.project_id = thread.project_id
-          AND project_grant.membership_id = membership.id
-        WHERE thread.id = ${input.threadId} AND workspace.id = ${input.workspaceId}
-          AND assignment.id = ${input.access.fence.assignmentId}
-          AND assignment.executor_kind = ${input.access.fence.target}
-          AND assignment.generation = ${input.access.fence.assignmentGeneration}::bigint
-          AND assignment.lease_epoch = ${input.access.leaseEpoch}::bigint
-          AND assignment.provider_instance_id = ${input.access.fence.instanceId}
-          AND assignment.executor_instance_id = ${input.access.fence.executorId}
-          AND assignment.process_incarnation = ${input.access.fence.processIncarnation}
-          AND assignment.lifecycle = 'active' AND assignment.lease_expires_at > clock_timestamp()
-          AND COALESCE(legacy.actor, protocol.actor) IS NOT NULL
-          AND client.id IS NOT NULL AND client_authority.client_id IS NOT NULL AND device.id IS NOT NULL
-          AND (
-            (owner_record.kind = 'personal'
-              AND owner_record.user_id = COALESCE(legacy.actor, protocol.actor) ->> 'userId')
-            OR
-            (owner_record.kind = 'organization' AND membership.id IS NOT NULL AND (
-              thread.created_by_user_id = membership.user_id
-              OR thread_grant.role IN ('operator', 'owner')
-              OR (thread.executor_kind = 'orb' AND thread.inherit_project_grants
-                AND project_grant.role IN ('operator', 'owner'))
-            ))
-          )`.pipe(Effect.mapError(unavailable))
-      const row = rows[0]
-      if (row === undefined)
+      const admission = yield* store
+        .loadAdmissionContext({
+          threadId: yield* Schema.decodeEffect(ThreadId)(input.threadId).pipe(Effect.mapError(unavailable)),
+          turnId: input.turnId,
+          workspaceId: yield* Schema.decodeEffect(WorkspaceId)(input.workspaceId).pipe(Effect.mapError(unavailable)),
+          fence: {
+            assignmentId: yield* Schema.decodeEffect(ExecutorAssignmentId)(input.access.fence.assignmentId).pipe(
+              Effect.mapError(unavailable),
+            ),
+            target: input.access.fence.target,
+            generation: input.access.fence.assignmentGeneration,
+            leaseEpoch: input.access.leaseEpoch,
+            providerInstanceId: input.access.fence.instanceId,
+            executorInstanceId: yield* Schema.decodeEffect(ExecutorInstanceId)(input.access.fence.executorId).pipe(
+              Effect.mapError(unavailable),
+            ),
+            processIncarnation: input.access.fence.processIncarnation,
+          },
+        })
+        .pipe(Effect.mapError(unavailable))
+      if (admission === undefined)
         return yield* HostedToolPolicyError.make({
           kind: "forbidden",
           message: "Tool admission no longer has authenticated Thread and executor authority",
         })
-      const actor = yield* Schema.decodeUnknownEffect(ActorAttribution)(row.actor).pipe(Effect.mapError(unavailable))
-      const repository = row.repositoryIdentity === null ? null : { identity: row.repositoryIdentity }
-      const executor = executorOf(input.access, row.executorKind)
+      const repository = admission.repositoryIdentity === null ? null : { identity: admission.repositoryIdentity }
+      const executor = executorOf(input.access, admission.executorKind)
       const auditGroupId = yield* digest(
         canonical({
-          ownerId: row.ownerId,
+          ownerId: admission.ownerId,
           threadId: input.threadId,
           turnId: input.turnId,
-          actor,
+          actor: admission.actor,
           policy: input.policy,
           module: input.request.module,
           operation: input.request.operation,
@@ -700,16 +609,16 @@ export const layer = Layer.effect(
           argumentsDigest: input.argumentsDigest,
           workspaceId: input.workspaceId,
           repository,
-          branch: row.branch,
+          branch: admission.branch,
           executor,
         }),
       )
       const context: ToolAdmissionContext = {
         auditGroupId,
-        ownerId: row.ownerId,
+        ownerId: admission.ownerId,
         threadId: input.threadId,
         turnId: input.turnId,
-        actor,
+        actor: admission.actor,
         policy: input.policy,
         module: input.request.module,
         operation: input.request.operation,
@@ -718,7 +627,7 @@ export const layer = Layer.effect(
         argumentsDigest: input.argumentsDigest,
         workspaceId: input.workspaceId,
         repository,
-        branch: row.branch,
+        branch: admission.branch,
         executor,
       }
       yield* insert({
@@ -731,18 +640,14 @@ export const layer = Layer.effect(
     })
 
     const outcome: HostedToolPolicyService["outcome"] = Effect.fn("HostedToolPolicy.outcome")(function* (input) {
+      const decision = input.policy.approval === "exact" ? "pending" : "not-required"
       yield* input.authorizationId === undefined
-        ? insert({
-            context: input,
-            phase: "outcome",
-            decision: input.policy.approval === "exact" ? "pending" : "not-required",
-            outcome: input.outcome,
-          })
+        ? insert({ context: input, phase: "outcome", decision, outcome: input.outcome })
         : insert({
             context: input,
             phase: "outcome",
             authorizationId: input.authorizationId,
-            decision: input.policy.approval === "exact" ? "pending" : "not-required",
+            decision,
             outcome: input.outcome,
           })
     })
@@ -750,55 +655,28 @@ export const layer = Layer.effect(
     const checkpoint = Effect.fn("HostedToolPolicy.checkpoint")(function* (
       value: ExecutionProjection.Checkpoint,
     ): Effect.fn.Return<ToolAuditCheckpoint> {
-      return {
-        version: value.version,
-        cursor: value.cursor,
-        digest: yield* digest(canonical(value)),
-      }
+      return { version: value.version, cursor: value.cursor, digest: yield* digest(canonical(value)) }
     })
 
     const recordDecision: HostedToolPolicyService["recordDecision"] = Effect.fn("HostedToolPolicy.recordDecision")(
       function* (input) {
-        const request = yield* Schema.decodeEffect(Schema.fromJsonString(ToolAuthorizationRequest))(
-          input.authorizationRequest,
-        ).pipe(
-          Effect.mapError(() =>
-            HostedToolPolicyError.make({ kind: "conflict", message: "Authorization request is not exact" }),
-          ),
-        )
-        if (input.operation !== `rika.tool.${request.operation.module}.${request.operation.name}`)
-          return yield* HostedToolPolicyError.make({
-            kind: "conflict",
-            message: "Authorization operation does not match its exact request",
+        const ownerId = yield* Schema.decodeEffect(OwnerId)(input.ownerId).pipe(Effect.mapError(unavailable))
+        const threadId = yield* Schema.decodeEffect(ThreadId)(input.threadId).pipe(Effect.mapError(unavailable))
+        const records = yield* store
+          .listAuthorizationRecords({
+            ownerId,
+            threadId,
+            turnId: input.turnId,
+            authorizationId: input.authorizationId,
           })
-        const rows = yield* sql<AuditRow>`SELECT sequence::text AS sequence, audit_group_id AS "auditGroupId", phase,
-          owner_id AS "ownerId", thread_id AS "threadId", turn_id AS "turnId", actor,
-          decision_actor AS "decisionActor", policy_id AS "policyId", policy_version AS "policyVersion",
-          capability, capabilities, side_effect AS "sideEffect", approval, replay_policy AS "replayPolicy",
-          authorization_id AS "authorizationId",
-          authorization_checkpoint AS "authorizationCheckpoint", module, operation, operation_key AS "operationKey",
-          call_id AS "callId", arguments_digest AS "argumentsDigest", workspace_id AS "workspaceId", repository,
-          branch, executor, decision, outcome,
-          to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt"
-        FROM rika_hosted_tool_audit_records
-        WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND turn_id = ${input.turnId}
-          AND phase = 'outcome' AND outcome = 'suspended'
-          AND authorization_id = ${input.authorizationId}
-          AND policy_id = ${request.policy.id} AND policy_version = ${request.policy.version}
-          AND module = ${request.operation.module} AND operation = ${request.operation.name}
-          AND capability = ${input.capability}
-          AND arguments_digest = ${request.argumentsDigest} AND workspace_id = ${request.workspace}
-          AND repository IS NOT DISTINCT FROM ${request.repository === null ? null : sql.json(request.repository)}
-          AND branch IS NOT DISTINCT FROM ${request.branch}
-          AND executor = ${sql.json(request.executor)} AND actor = ${sql.json(request.actor)}
-        ORDER BY sequence DESC LIMIT 1`.pipe(Effect.mapError(unavailable))
-        const row = rows[0]
-        if (row === undefined)
+          .pipe(Effect.mapError(unavailable))
+        const source = records[0]
+        if (source === undefined)
           return yield* HostedToolPolicyError.make({
             kind: "conflict",
             message: "Authorization has no matching admitted tool operation",
           })
-        const record = yield* decodeRecord(row)
+        const record = yield* decodeStoreRecord(source)
         const context: ToolAdmissionContext = {
           auditGroupId: record.auditGroupId,
           ownerId: record.ownerId,
@@ -816,67 +694,63 @@ export const layer = Layer.effect(
           branch: record.branch,
           executor: record.executor,
         }
-        yield* insert({
-          context,
-          phase: "decision",
-          decisionActor: input.actor,
-          authorizationId: input.authorizationId,
-          checkpoint: yield* checkpoint(input.checkpoint),
-          decision: input.decision,
-          outcome: input.outcome,
-        })
+        const expectedCheckpoint = yield* checkpoint(input.checkpoint)
+        const expectedTarget = approvalTarget(input.checkpoint, input.authorizationId)
+        if (expectedTarget === undefined)
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization checkpoint does not contain the admitted operation",
+          })
+        const result = yield* store
+          .appendDecision({
+            record: {
+              ...(yield* append({
+                context,
+                phase: "decision",
+                decisionActor: input.actor,
+                authorizationId: input.authorizationId,
+                checkpoint: expectedCheckpoint,
+                decision: input.decision,
+                outcome: "admitted",
+              })),
+              phase: "decision",
+              authorizationId: input.authorizationId,
+            },
+            expectedProjector: {
+              version: input.checkpoint.version,
+              runId: expectedTarget.runId,
+              approvalId: expectedTarget.approvalId,
+            },
+          })
+          .pipe(Effect.mapError(unavailable))
+        if (result === "conflict")
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization already has a different decision",
+          })
       },
     )
 
     const list: HostedToolPolicyService["list"] = Effect.fn("HostedToolPolicy.list")(function* (input) {
-      const ownerIdRows = yield* sql<{ readonly id: string }>`SELECT owner_record.id
-        FROM rika_hosted_owners owner_record
-        LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-          AND membership.organization_id = owner_record.organization_id AND membership.user_id = ${input.principal.userId}
-        WHERE (owner_record.kind = 'personal' AND owner_record.user_id = ${
-          input.owner._tag === "PersonalOwner" ? input.owner.userId : null
-        } AND owner_record.user_id = ${input.principal.userId})
-          OR (owner_record.kind = 'organization' AND owner_record.organization_id = ${
-            input.owner._tag === "OrganizationOwner" ? input.owner.organizationId : null
-          } AND membership.id IS NOT NULL)`.pipe(Effect.mapError(unavailable))
-      const ownerId = ownerIdRows[0]?.id
-      if (ownerId === undefined)
-        return yield* HostedToolPolicyError.make({ kind: "forbidden", message: "Audit owner is unavailable" })
-      const rows = yield* sql<AuditRow>`SELECT record.sequence::text AS sequence,
-          record.audit_group_id AS "auditGroupId", record.phase, record.owner_id AS "ownerId",
-          record.thread_id AS "threadId", record.turn_id AS "turnId", record.actor,
-          record.decision_actor AS "decisionActor", record.policy_id AS "policyId",
-          record.policy_version AS "policyVersion", record.capability, record.capabilities,
-          record.side_effect AS "sideEffect", record.approval, record.replay_policy AS "replayPolicy",
-          record.authorization_id AS "authorizationId",
-          record.authorization_checkpoint AS "authorizationCheckpoint", record.module, record.operation,
-          record.operation_key AS "operationKey", record.call_id AS "callId",
-          record.arguments_digest AS "argumentsDigest", record.workspace_id AS "workspaceId", record.repository,
-          record.branch, record.executor, record.decision, record.outcome,
-          to_char(record.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt"
-        FROM rika_hosted_tool_audit_records record
-        JOIN rika_hosted_threads thread ON thread.id = record.thread_id AND thread.owner_id = record.owner_id
-        JOIN rika_hosted_owners owner_record ON owner_record.id = record.owner_id
-        LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-          AND membership.organization_id = owner_record.organization_id AND membership.user_id = ${input.principal.userId}
-        LEFT JOIN rika_hosted_thread_grants thread_grant ON thread_grant.owner_id = thread.owner_id
-          AND thread_grant.thread_id = thread.id AND thread_grant.membership_id = membership.id
-        LEFT JOIN rika_hosted_project_grants project_grant ON project_grant.owner_id = thread.owner_id
-          AND project_grant.project_id = thread.project_id AND project_grant.membership_id = membership.id
-        WHERE record.owner_id = ${ownerId} AND (
-          owner_record.kind = 'personal' OR membership.role IN ('owner', 'admin')
-          OR thread.created_by_user_id = ${input.principal.userId}
-          OR thread_grant.role IS NOT NULL
-          OR (thread.executor_kind = 'orb' AND thread.inherit_project_grants AND project_grant.role IS NOT NULL)
-        ) ORDER BY record.sequence DESC LIMIT ${Math.min(Math.max(input.limit, 1), 500)}`.pipe(
+      const principalUserId = yield* Schema.decodeEffect(BetterAuthUserId)(input.principal.userId).pipe(
         Effect.mapError(unavailable),
       )
-      return yield* Effect.forEach(rows, decodeRecord)
+      const ownerId = yield* store
+        .resolveOwner({ principalUserId, owner: input.owner })
+        .pipe(Effect.mapError(unavailable))
+      if (ownerId === undefined)
+        return yield* HostedToolPolicyError.make({ kind: "forbidden", message: "Audit owner is unavailable" })
+      const records = yield* store
+        .listInspectionRecords({ ownerId, principalUserId, limit: input.limit })
+        .pipe(Effect.mapError(unavailable))
+      return yield* Effect.forEach(records, decodeStoreRecord)
     })
 
     return HostedToolPolicy.of({ begin, outcome, recordDecision, list })
   }),
 )
+
+export const layer = hostedToolPolicyLayer.pipe(Layer.provide(toolPolicyStoreLayer))
 
 export const personalOwner = (userId: string): HostedOwner => ({
   _tag: "PersonalOwner",

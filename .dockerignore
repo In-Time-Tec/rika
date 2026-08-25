@@ -2,6 +2,7 @@
 .github
 .amp
 .agents
+.alchemy
 .env
 .env.*
 !.env.example
@@ -14,9 +15,15 @@
 **/*.pem
 .rika
 .turbo
+**/.turbo/**
 artifacts
 coverage
+**/coverage/**
 dist
+**/dist/**
 node_modules
+**/node_modules/**
+**/CLAUDE.md
 repos
 *.log
+**/*.log

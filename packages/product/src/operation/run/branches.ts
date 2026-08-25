@@ -62,7 +62,7 @@ const runInteractiveOperationImpl = (
       factory.dependencyContext
     const typedMakeInteractiveSession: (
       workspace: string,
-      settings: { readonly initialThreadId?: string },
+      settings: { readonly initialThreadId?: string; readonly observeExecution?: boolean },
     ) => Effect.Effect<
       { readonly session: InteractiveSession; readonly close: Effect.Effect<void, never, never> },
       OperationError,
@@ -84,10 +84,10 @@ const runInteractiveOperationImpl = (
         .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
       if (thread === undefined) return yield* unavailable(factory, input, `Thread ${initialThreadId} does not exist`)
     }
-    const made = yield* typedMakeInteractiveSession(
-      input.workspace ?? factory.options.defaultWorkspace,
-      initialThreadId === undefined ? {} : { initialThreadId },
-    )
+    const observeExecution = factory.options.executionProjectionOwner !== "external"
+    const settings: { readonly initialThreadId?: string; readonly observeExecution?: boolean } =
+      initialThreadId === undefined ? { observeExecution } : { initialThreadId, observeExecution }
+    const made = yield* typedMakeInteractiveSession(input.workspace ?? factory.options.defaultWorkspace, settings)
     yield* typedInteractiveRun(input, made.session).pipe(Effect.ensuring(made.close))
   })
 
