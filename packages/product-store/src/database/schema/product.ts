@@ -52,6 +52,7 @@ export const rikaHostedRepositoryPublicationState = pgEnum("rika_hosted_reposito
   "failed",
   "unknown",
 ])
+
 export const rikaGoals = pgTable(
   "rika_goals",
   {
@@ -571,7 +572,7 @@ export const rikaHostedExecutorOperations = pgTable(
     toolCallId: text("tool_call_id").notNull(),
     admittedAt: text("admitted_at"),
     deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
-    replayPolicy: text("replay_policy").default("never").notNull(),
+    replayPolicy: text("replay_policy").$type<"pure" | "provider-idempotent" | "never">().default("never").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }),
   },
   (table) => [
@@ -714,7 +715,7 @@ export const rikaHostedOwners = pgTable(
   "rika_hosted_owners",
   {
     id: text().primaryKey(),
-    kind: text().notNull(),
+    kind: text().$type<"personal" | "organization">().notNull(),
     userId: text("user_id"),
     organizationId: text("organization_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -1158,10 +1159,7 @@ export const rikaHostedRunnerRegistrations = pgTable(
       sql`(jsonb_typeof(kernel_profile) = 'object'::text)`,
     ),
     check("rika_hosted_runner_registrations_repository_check", sql`(jsonb_typeof(repository) = 'object'::text)`),
-    check(
-      "rika_hosted_runner_supervisor_pair",
-      sql`((supervisor_id IS NULL) = (supervisor_expires_at IS NULL))`,
-    ),
+    check("rika_hosted_runner_supervisor_pair", sql`((supervisor_id IS NULL) = (supervisor_expires_at IS NULL))`),
   ],
 )
 
@@ -1449,10 +1447,7 @@ export const rikaHostedThreadProtocolCommands = pgTable(
       sql`(state = ANY (ARRAY['admitted'::text, 'completed'::text]))`,
     ),
     check("rika_hosted_thread_protocol_commands_thread_version_check", sql`(thread_version > 0)`),
-    check(
-      "rika_hosted_thread_protocol_commands_claim_pair",
-      sql`((claim_token IS NULL) = (claim_expires_at IS NULL))`,
-    ),
+    check("rika_hosted_thread_protocol_commands_claim_pair", sql`((claim_token IS NULL) = (claim_expires_at IS NULL))`),
     check("rika_hosted_thread_protocol_commands_claim_state", sql`((state = 'admitted') OR (claim_token IS NULL))`),
     index("rika_hosted_thread_protocol_commands_claims")
       .on(table.claimExpiresAt)
@@ -2159,7 +2154,9 @@ export const rikaTurnAdmissionOutbox = pgTable(
     admittedAt: doublePrecision("admitted_at"),
     activationRequestedAt: doublePrecision("activation_requested_at"),
   },
-  (table) => [index("rika_turn_admission_outbox_activation").on(table.activationRequestedAt, table.preparedAt, table.turnId)],
+  (table) => [
+    index("rika_turn_admission_outbox_activation").on(table.activationRequestedAt, table.preparedAt, table.turnId),
+  ],
 )
 
 export const rikaTurnSteeringOutbox = pgTable(

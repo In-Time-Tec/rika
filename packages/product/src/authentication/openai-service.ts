@@ -17,9 +17,7 @@ interface HostInterface {
     expectedState: Redacted.Redacted<string>,
   ) => Effect.Effect<AuthorizationResult, Contract.AuthError>
 }
-export class Host extends Context.Service<Host, HostInterface>()(
-  "@rika/product/authentication/openai-service/Host",
-) {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/product/authentication/openai-service/Host") {}
 interface PresenterInterface {
   readonly device: (prompt: DevicePrompt) => Effect.Effect<void, Contract.AuthError>
 }
@@ -41,9 +39,7 @@ export interface HttpInterface {
     userCode: string,
   ) => Effect.Effect<Option.Option<typeof Contract.DevicePollResponse.Type>, Contract.AuthError>
 }
-export class Http extends Context.Service<Http, HttpInterface>()(
-  "@rika/product/authentication/openai-service/Http",
-) {}
+export class Http extends Context.Service<Http, HttpInterface>()("@rika/product/authentication/openai-service/Http") {}
 export interface StoreInterface {
   readonly load: Effect.Effect<Option.Option<typeof Contract.CredentialDisk.Type>, Contract.StoreError>
   readonly save: (credential: typeof Contract.CredentialDisk.Type) => Effect.Effect<void, Contract.StoreError>

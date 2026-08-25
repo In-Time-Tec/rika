@@ -1,0 +1,3 @@
+CREATE TRIGGER rika_hosted_transcript_projection_notification
+AFTER INSERT OR UPDATE ON rika_transcript_checkpoints
+FOR EACH ROW EXECUTE FUNCTION rika_hosted_notify_thread_change();

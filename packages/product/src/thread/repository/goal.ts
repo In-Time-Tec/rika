@@ -12,9 +12,7 @@ export interface Interface {
   readonly replace: (goal: Goal) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/repository/goal/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/goal/Service") {}
 
 const clone = (goal: Goal): Goal => structuredClone(goal)
 

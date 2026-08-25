@@ -88,7 +88,8 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           prompt: prepared.prompt,
           executionRoute: turn.executionRoute,
         }
-        const startWithParts = prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
+        const startWithParts =
+          prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
         const startWithTitle = titleIntent === undefined ? startWithParts : { ...startWithParts, titleIntent }
         const startInput = isReviewRouteMode(turn.executionRoute.mode)
           ? { ...startWithTitle, reviewIntent: reviewIntent(turn.prompt) }

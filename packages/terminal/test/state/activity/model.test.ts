@@ -29,8 +29,14 @@ const card = (id: string, status: string) => ({
 
 type ActivityBlock = ReturnType<typeof cell> | ReturnType<typeof card>
 
-const model = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<TranscriptItem>): Model =>
-  ({ ...initial("/work"), blocks: [...blocks], entries: [], items: [...items], width: 100, expandedRowKeys: [] })
+const model = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<TranscriptItem>): Model => ({
+  ...initial("/work"),
+  blocks: [...blocks],
+  entries: [],
+  items: [...items],
+  width: 100,
+  expandedRowKeys: [],
+})
 
 const block = (index: number, id: string, parentId?: string) =>
   parentId === undefined

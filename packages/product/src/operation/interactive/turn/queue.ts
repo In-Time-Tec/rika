@@ -311,7 +311,8 @@ export const promotePendingTurns = (input: {
           prompt: prepared.prompt,
           executionRoute: turn.executionRoute,
         }
-        const startWithParts = prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
+        const startWithParts =
+          prepared.promptParts === undefined ? startBase : { ...startBase, promptParts: prepared.promptParts }
         const startInput = isReviewRouteMode(turn.executionRoute.mode)
           ? { ...startWithParts, reviewIntent: reviewIntent(turn.prompt) }
           : startWithParts

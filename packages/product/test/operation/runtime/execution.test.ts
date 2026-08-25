@@ -94,15 +94,12 @@ describe("linked Turn settlement authority", () => {
           settleThread: () => Effect.sync(() => (settlements += 1)),
           emit: (_dispatch, event) => events.push(event),
         })
-        const result = yield* settleInteractiveSubmission(
-          submissions,
-          {
-            thread,
-            turn: admitted,
-            outcome,
-            dispatch: () => undefined,
-          },
-        ).pipe(Effect.provideService(TurnRepository.Service, turns))
+        const result = yield* settleInteractiveSubmission(submissions, {
+          thread,
+          turn: admitted,
+          outcome,
+          dispatch: () => undefined,
+        }).pipe(Effect.provideService(TurnRepository.Service, turns))
 
         expect(result).toEqual({ _tag: "settled" })
         expect(statusWrites).toEqual([])
@@ -143,11 +140,7 @@ describe("linked Turn settlement authority", () => {
           }),
       })
       const owner = {
-        ...(yield* RootTurnOwner.make(
-          turns,
-          TranscriptRepository.Service.of({}),
-          ExecutionGateway.Service.of({}),
-        )),
+        ...(yield* RootTurnOwner.make(turns, TranscriptRepository.Service.of({}), ExecutionGateway.Service.of({}))),
         startTurn: (input: ExecutionGateway.StartTurn) =>
           Effect.sync(() => {
             const current = persisted.get(input.turnId)!
@@ -233,11 +226,7 @@ describe("linked Turn settlement authority", () => {
           backend: ExecutionGateway.Service.of({}),
           pendingCapacity: 1,
           prepareExecution: () => Effect.die("promotion defect"),
-          owner: yield* RootTurnOwner.make(
-            turns,
-            TranscriptRepository.Service.of({}),
-            ExecutionGateway.Service.of({}),
-          ),
+          owner: yield* RootTurnOwner.make(turns, TranscriptRepository.Service.of({}), ExecutionGateway.Service.of({})),
           notifyThreadSummaries: Effect.void,
           notifyTurnChanged: () => Effect.void,
           setTurnStatus: () => Effect.die("unused"),
@@ -299,11 +288,7 @@ describe("linked Turn settlement authority", () => {
           }),
         publishInteractiveActivity: (_origin, event) => event,
         rootTurnOwner: {
-          ...(yield* RootTurnOwner.make(
-            turns,
-            TranscriptRepository.Service.of({}),
-            ExecutionGateway.Service.of({}),
-          )),
+          ...(yield* RootTurnOwner.make(turns, TranscriptRepository.Service.of({}), ExecutionGateway.Service.of({}))),
           startTurn: () =>
             Effect.sync(() => {
               starts += 1

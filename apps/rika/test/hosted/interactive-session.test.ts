@@ -669,9 +669,7 @@ it.effect("forgets submission cancellation rendezvous after admission or rejecti
         ),
       )
       expect(
-        yield* Effect.result(
-          hosted.session.cancel({ submissionId: "submission-admitted", threadId: "thread-1" }),
-        ),
+        yield* Effect.result(hosted.session.cancel({ submissionId: "submission-admitted", threadId: "thread-1" })),
       ).toMatchObject({ _tag: "Failure" })
 
       yield* hosted.session.submit("rejected", undefined, [], undefined, "submission-rejected")
@@ -696,11 +694,273 @@ it.effect("forgets submission cancellation rendezvous after admission or rejecti
         ),
       )
       expect(
+        yield* Effect.result(hosted.session.cancel({ submissionId: "submission-rejected", threadId: "thread-1" })),
+      ).toMatchObject({ _tag: "Failure" })
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("forgets submission cancellation rendezvous after a definitive command rejection", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        socket.frame({
+          _tag: "CommandRejected",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          reason: "forbidden",
+          currentCursor: ThreadEventCursor.make("0"),
+          message: "Submission rejected",
+          details: {},
+        })
+      })
+      const hosted = yield* runSession(harness)
+      expect(
         yield* Effect.result(
-          hosted.session.cancel({ submissionId: "submission-rejected", threadId: "thread-1" }),
+          hosted.session.submit("rejected", undefined, [], undefined, "submission-command-rejected"),
+        ),
+      ).toMatchObject({ _tag: "Failure" })
+      expect(
+        yield* Effect.result(
+          hosted.session.cancel({ submissionId: "submission-command-rejected", threadId: "thread-1" }),
         ),
       ).toMatchObject({ _tag: "Failure" })
       expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("retires a definitive rejection before cancellation can observe its command", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        socket.frame({
+          _tag: "CommandRejected",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          reason: "forbidden",
+          currentCursor: ThreadEventCursor.make("0"),
+          message: "Submission rejected",
+          details: {},
+        })
+      })
+      const hosted = yield* runSession(harness)
+      const submitted = yield* hosted.session
+        .submit("rejected", undefined, [], undefined, "submission-rejection-race")
+        .pipe(Effect.result, Effect.forkScoped)
+      yield* eventually(() => harness.messages.some((message) => message.command._tag === "SubmitPrompt"))
+      yield* Effect.yieldNow
+      expect(
+        yield* Effect.result(
+          hosted.session.cancel({ submissionId: "submission-rejection-race", threadId: "thread-1" }),
+        ),
+      ).toMatchObject({ _tag: "Failure" })
+      expect((yield* Fiber.join(submitted))._tag).toBe("Failure")
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("releases a submission identity interrupted before any connection can send it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        socket.frame({
+          _tag: "CommandAdmitted",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          threadVersion: ThreadVersion.make("1"),
+        })
+      })
+      const hosted = yield* runSession(harness)
+      harness.sockets[0]!.close()
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      const abandoned = yield* hosted.session
+        .submit("abandoned", undefined, [], undefined, "submission-before-send")
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(abandoned)
+      expect(
+        yield* Effect.result(hosted.session.cancel({ submissionId: "submission-before-send", threadId: "thread-1" })),
+      ).toMatchObject({ _tag: "Failure" })
+      yield* reconnect(harness)
+      yield* hosted.session.submit("retry", undefined, [], undefined, "submission-before-send")
+      expect(harness.messages.filter((message) => message.command._tag === "SubmitPrompt")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("rejects a duplicate in-flight submission identity without sending another command", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let pending: Message | undefined
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt") pending = message
+      })
+      const hosted = yield* runSession(harness)
+      const first = yield* hosted.session
+        .submit("first", undefined, [], undefined, "submission-duplicate")
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => pending !== undefined)
+      expect(
+        yield* Effect.result(hosted.session.submit("duplicate", undefined, [], undefined, "submission-duplicate")),
+      ).toMatchObject({ _tag: "Failure" })
+      expect(harness.messages.filter((message) => message.command._tag === "SubmitPrompt")).toHaveLength(1)
+      if (pending === undefined || pending.command._tag !== "SubmitPrompt")
+        return yield* Effect.die("Submission was not captured")
+      harness.sockets[0]!.frame({
+        _tag: "CommandAdmitted",
+        requestId: pending.requestId,
+        commandId: pending.command.commandId,
+        threadId: pending.command.threadId,
+        threadVersion: ThreadVersion.make("1"),
+      })
+      yield* Fiber.join(first)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("keeps pending submission cancellation across an unrelated newer reattachment snapshot", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let threadOneAttachments = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          const threadId = String(message.command.threadId)
+          if (threadId === "thread-1") threadOneAttachments += 1
+          socket.frame(
+            attached(
+              message,
+              snapshot(threadId, threadId === "thread-1" && threadOneAttachments === 2 ? 1 : 0),
+              threadId === "thread-1" && threadOneAttachments === 2 ? "1" : "0",
+            ),
+          )
+          return
+        }
+        if (message.command._tag === "SubmitPrompt")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+        if (message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("2"),
+          })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.submit("pending", undefined, [], undefined, "submission-compacted")
+      yield* hosted.session.selectThread("thread-2")
+      yield* hosted.session.selectThread("thread-1")
+      yield* hosted.session.cancel({ submissionId: "submission-compacted", threadId: "thread-1" })
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("keeps pending cancellation when a reconnect attachment is rejected as stale", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let attachments = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          attachments += 1
+          if (attachments === 1) {
+            socket.frame(attached(message, snapshot("thread-1", 0)))
+            return
+          }
+          if (attachments === 2) {
+            socket.frame({
+              ...attached(message, snapshot("thread-1", 0), "1"),
+              snapshotThreadVersion: ThreadVersion.make("0"),
+              snapshotCursor: ThreadEventCursor.make("0"),
+              events: [
+                {
+                  threadId: HostedThreadId.make("thread-1"),
+                  sequence: Sequence.make("1"),
+                  cursor: ThreadEventCursor.make("1"),
+                  threadVersion: ThreadVersion.make("1"),
+                  event: {
+                    _tag: "SubmissionAdmitted",
+                    threadId: Thread.ThreadId.make("thread-1"),
+                    turnId: Turn.TurnId.make("turn-stale"),
+                    status: "active",
+                    submissionId: "submission-stale-attachment",
+                  },
+                  createdAt: Timestamp.make("2026-08-25T00:00:00.000Z"),
+                },
+              ],
+            })
+            return
+          }
+          socket.frame(attached(message, snapshot("thread-1", 2), "2"))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+        if (message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("3"),
+          })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.submit("pending", undefined, [], undefined, "submission-stale-attachment")
+      harness.sockets[0]!.frame({ _tag: "ThreadEvent", event: event("thread-1", "1") })
+      harness.sockets[0]!.frame({ _tag: "ThreadEvent", event: event("thread-1", "2") })
+      yield* eventually(() => hosted.session.currentView()?.thread.updatedAt === 2)
+      harness.sockets[0]!.close()
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      yield* reconnect(harness)
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      yield* TestClock.adjust("1 second")
+      yield* eventually(() => harness.sockets.length === 3)
+      yield* hosted.session.cancel({ submissionId: "submission-stale-attachment", threadId: "thread-1" })
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(1)
       yield* hosted.session.quit
     }),
   ),

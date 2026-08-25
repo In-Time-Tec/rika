@@ -5,12 +5,7 @@ import { Surface } from "../../../../src/opentui/surface/service"
 import { initial } from "../../../../src/state/model"
 import { ready } from "../../../../src/state/loadable"
 import { update } from "../../../../src/state/reducer/model"
-import {
-  openTui,
-  _streamingShell,
-  _giantSubagentModel,
-  _collapsedSubagentModel,
-} from "./controller.fixture"
+import { openTui, _streamingShell, _giantSubagentModel, _collapsedSubagentModel } from "./controller.fixture"
 test("loads the workspace file tree with Opt+T and keeps it separate from changed files", () =>
   Effect.runPromise(
     Effect.gen(function* () {

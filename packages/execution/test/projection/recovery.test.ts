@@ -49,9 +49,9 @@ it.effect("keeps the plain prompt when structured prompt parts are empty", () =>
         promptParts: [],
         executionRoute: testExecutionRoute(),
       })
-      const admission = yield* Schema.decodeEffect(
-        Schema.fromJsonString(Schema.Struct({ prompt: Prompt.Prompt })),
-      )(prepared.rootAdmissionJson)
+      const admission = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Struct({ prompt: Prompt.Prompt })))(
+        prepared.rootAdmissionJson,
+      )
       expect(requestText([{ prompt: admission.prompt }])).toContain("plain text survives")
     }),
   ),

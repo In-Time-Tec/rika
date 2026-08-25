@@ -55,10 +55,7 @@ export const _windowUnitToolCall: {
   ): ReturnType<typeof _windowUnitToolCallImpl>
 } = Function.dual(2, _windowUnitToolCallImpl)
 
-const agentToolBlockImpl = (
-  status: "running" | "complete" | "failed" | "cancelled",
-  detail: string | undefined,
-) => ({
+const agentToolBlockImpl = (status: "running" | "complete" | "failed" | "cancelled", detail: string | undefined) => ({
   _tag: "ToolCall" as const,
   id: "agent",
   name: "task",
@@ -75,7 +72,9 @@ const agentToolBlockImpl = (
 })
 
 export const agentToolBlock: {
-  (detail: string | undefined): (status: Parameters<typeof agentToolBlockImpl>[0]) => ReturnType<typeof agentToolBlockImpl>
+  (
+    detail: string | undefined,
+  ): (status: Parameters<typeof agentToolBlockImpl>[0]) => ReturnType<typeof agentToolBlockImpl>
   (status: Parameters<typeof agentToolBlockImpl>[0], detail: string | undefined): ReturnType<typeof agentToolBlockImpl>
 } = Function.dual(2, agentToolBlockImpl)
 

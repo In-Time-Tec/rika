@@ -357,23 +357,38 @@ export const layer = Layer.effect(
       return Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.forkScoped(
-            session.events((event) => {
-              const invocation = state.invocation
-              if (invocation === undefined) {
-                if (isDurableThreadEvent(event)) {
-                  const persisted = Deferred.makeUnsafe<void, HostedThreadApplicationError>()
-                  projectionTails.set(`${ownerId}:${threadId}`, persisted)
-                  Queue.offerUnsafe(backgroundEvents, {
-                    ownerId,
-                    threadId: hostedThreadId,
-                    event,
-                    persisted,
-                  })
-                }
-              } else invocation.events.push(event)
-            }),
+            session
+              .events((event) => {
+                const invocation = state.invocation
+                if (invocation === undefined) {
+                  if (event._tag === "ThreadViewSnapshot" && event.snapshot.thread.id === threadId)
+                    Deferred.doneUnsafe(state.ready, Effect.void)
+                  else if (event._tag === "ExecutionFailed")
+                    Deferred.doneUnsafe(
+                      state.ready,
+                      Effect.fail(
+                        ProductOperation.OperationUnavailable.make({
+                          operation: "InteractiveSession.selectThread",
+                          message: event.failure.message,
+                        }),
+                      ),
+                    )
+                  if (isDurableThreadEvent(event)) {
+                    const persisted = Deferred.makeUnsafe<void, HostedThreadApplicationError>()
+                    projectionTails.set(`${ownerId}:${threadId}`, persisted)
+                    Queue.offerUnsafe(backgroundEvents, {
+                      ownerId,
+                      threadId: hostedThreadId,
+                      event,
+                      persisted,
+                    })
+                  }
+                } else invocation.events.push(event)
+              })
+              .pipe(Effect.tapError((error) => Deferred.fail(state.ready, error))),
           )
-          yield* Deferred.succeed(state.ready, undefined)
+          yield* session.selectThread(input.threadId!)
+          yield* Deferred.await(state.ready)
           while (true) {
             const invocation = yield* Queue.take(state.queue)
             const admission = interactiveAdmissions.get(ownerId) ?? Semaphore.makeUnsafe(1)

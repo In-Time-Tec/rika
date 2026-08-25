@@ -70,27 +70,25 @@ export const watch = (input: {
           if (projection !== undefined) watchInput = { ...watchInput, units: projection.units }
           if (projection?.projectorCheckpoint !== undefined)
             watchInput = { ...watchInput, checkpoint: projection.projectorCheckpoint }
-          yield* backend
-            .watchTurn(executionLink, watchInput)
-            .pipe(
-              Stream.timeout(stallSilenceMs),
-              Stream.runForEach((event) => {
-                if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared")
-                  return notify(() => {
-                    previewed = true
-                    onPreview?.(event)
-                  })
-                if (pendingTerminal.length > 0 && !ExecutionStatus.isTerminalStatus(event.state.status))
-                  return TranscriptRepository.RepositoryError.make({
-                    message: `Turn ${turnId} projected a nonterminal change after terminal revision ${pendingTerminal.at(-1)!.revision}`,
-                  })
-                if (ExecutionStatus.isTerminalStatus(event.state.status)) {
-                  pendingTerminal.push(event)
-                  return Effect.void
-                }
-                return commit(event)
-              }),
-            )
+          yield* backend.watchTurn(executionLink, watchInput).pipe(
+            Stream.timeout(stallSilenceMs),
+            Stream.runForEach((event) => {
+              if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared")
+                return notify(() => {
+                  previewed = true
+                  onPreview?.(event)
+                })
+              if (pendingTerminal.length > 0 && !ExecutionStatus.isTerminalStatus(event.state.status))
+                return TranscriptRepository.RepositoryError.make({
+                  message: `Turn ${turnId} projected a nonterminal change after terminal revision ${pendingTerminal.at(-1)!.revision}`,
+                })
+              if (ExecutionStatus.isTerminalStatus(event.state.status)) {
+                pendingTerminal.push(event)
+                return Effect.void
+              }
+              return commit(event)
+            }),
+          )
           const inspection = yield* backend.inspectTurn(executionLink)
           if (
             pendingTerminal.length > 0 &&

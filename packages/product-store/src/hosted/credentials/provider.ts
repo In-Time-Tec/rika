@@ -1,7 +1,8 @@
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { and, asc, eq, sql as expression } from "drizzle-orm"
+import { and, asc, eq, exists, inArray, sql as expression } from "drizzle-orm"
 import { Effect, Schema } from "effect"
+import { identityMember } from "@rika/identity"
 import {
   rikaHostedCredentialReferences,
   rikaHostedOpenaiAccountCredentials,
@@ -184,28 +185,40 @@ const operations = (db: Executor): ProviderCredentialOperations => {
         .where(
           and(eq(rikaHostedProviderCredentials.ownerId, ownerId), eq(rikaHostedProviderCredentials.provider, provider)),
         ),
-    ).pipe(Effect.flatMap(credentialRecords), Effect.map((rows) => rows[0]))
+    ).pipe(
+      Effect.flatMap(credentialRecords),
+      Effect.map((rows) => rows[0]),
+    )
   const credentialByIdentity = (credentialIdentity: string) =>
     query(
       db
         .select()
         .from(rikaHostedProviderCredentials)
         .where(eq(rikaHostedProviderCredentials.credentialReferenceId, credentialIdentity)),
-    ).pipe(Effect.flatMap(credentialRecords), Effect.map((rows) => rows[0]))
+    ).pipe(
+      Effect.flatMap(credentialRecords),
+      Effect.map((rows) => rows[0]),
+    )
   const openAiAccountByOwner = (ownerId: string) =>
     query(
       db
         .select()
         .from(rikaHostedOpenaiAccountCredentials)
         .where(eq(rikaHostedOpenaiAccountCredentials.ownerId, ownerId)),
-    ).pipe(Effect.flatMap(accountRecords), Effect.map((rows) => rows[0]))
+    ).pipe(
+      Effect.flatMap(accountRecords),
+      Effect.map((rows) => rows[0]),
+    )
   const openAiAccountByIdentity = (credentialIdentity: string) =>
     query(
       db
         .select()
         .from(rikaHostedOpenaiAccountCredentials)
         .where(eq(rikaHostedOpenaiAccountCredentials.credentialReferenceId, credentialIdentity)),
-    ).pipe(Effect.flatMap(accountRecords), Effect.map((rows) => rows[0]))
+    ).pipe(
+      Effect.flatMap(accountRecords),
+      Effect.map((rows) => rows[0]),
+    )
   const service: ProviderCredentialOperations = {
     authorizedOwnerId: (principalUserId, owner) => {
       if (owner.kind === "personal" && owner.userId !== principalUserId)
@@ -222,8 +235,19 @@ const operations = (db: Executor): ProviderCredentialOperations => {
             and(
               ownerPredicate,
               owner.kind === "organization"
-                ? expression`exists (select 1 from "member" where organization_id = ${owner.organizationId} and user_id = ${principalUserId} and role in ('owner', 'admin'))`
-                : expression`true`,
+                ? exists(
+                    db
+                      .select({ id: identityMember.id })
+                      .from(identityMember)
+                      .where(
+                        and(
+                          eq(identityMember.organizationId, owner.organizationId),
+                          eq(identityMember.userId, principalUserId),
+                          inArray(identityMember.role, ["owner", "admin"]),
+                        ),
+                      ),
+                  )
+                : undefined,
             ),
           ),
       ).pipe(
@@ -328,7 +352,10 @@ const operations = (db: Executor): ProviderCredentialOperations => {
             ),
           )
           .returning(),
-      ).pipe(Effect.flatMap(credentialRecords), Effect.map((rows) => rows[0])),
+      ).pipe(
+        Effect.flatMap(credentialRecords),
+        Effect.map((rows) => rows[0]),
+      ),
     openAiAccountByOwner,
     openAiAccountByIdentity,
     putOpenAiAccount: (input) =>
@@ -430,7 +457,10 @@ const operations = (db: Executor): ProviderCredentialOperations => {
           })
           .where(eq(rikaHostedOpenaiAccountCredentials.ownerId, ownerId))
           .returning(),
-      ).pipe(Effect.flatMap(accountRecords), Effect.map((rows) => rows[0])),
+      ).pipe(
+        Effect.flatMap(accountRecords),
+        Effect.map((rows) => rows[0]),
+      ),
     revokeOpenAiAccountByIdentity: (credentialIdentity) =>
       query(
         db
@@ -453,10 +483,7 @@ const operations = (db: Executor): ProviderCredentialOperations => {
           )
           .returning({ id: rikaHostedOpenaiAccountCredentials.credentialReferenceId }),
       ).pipe(Effect.map((rows) => rows[0] !== undefined)),
-    serializedOpenAiAccount: <A, E, R>(
-      credentialIdentity: string,
-      use: () => Effect.Effect<A, E, R>,
-    ) =>
+    serializedOpenAiAccount: <A, E, R>(credentialIdentity: string, use: () => Effect.Effect<A, E, R>) =>
       db
         .transaction<A, E | ProviderCredentialsError, R>((tx) =>
           Effect.gen(function* () {
@@ -466,8 +493,7 @@ const operations = (db: Executor): ProviderCredentialOperations => {
               .where(eq(rikaHostedOpenaiAccountCredentials.credentialReferenceId, credentialIdentity))
               .for("update")
               .pipe(Effect.mapError(database))
-            if (rows[0] === undefined)
-              return yield* failure("missing", "OpenAI account credential is unavailable")
+            if (rows[0] === undefined) return yield* failure("missing", "OpenAI account credential is unavailable")
             return yield* use()
           }),
         )

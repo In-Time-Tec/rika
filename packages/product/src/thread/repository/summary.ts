@@ -35,9 +35,7 @@ export interface Interface {
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/repository/summary/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/summary/Service") {}
 
 interface Activity {
   readonly turnId: TurnId
@@ -136,18 +134,22 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
       yield* Ref.update(activities, (current) =>
         (current.get(input.turnId)?.updatedAt ?? Number.NEGATIVE_INFINITY) > input.now
           ? current
-          : new Map(current).set(input.turnId, (() => {
-              let activity: Activity = {
-              turnId: input.turnId,
-              threadId: input.threadId,
-              complete: input.complete,
-              editTotals: structuredClone(input.editTotals),
-              updatedAt: input.now,
-              }
-              if (input.projectedCursor !== undefined) activity = { ...activity, projectedCursor: input.projectedCursor }
-              if (input.lastEventAt !== undefined) activity = { ...activity, lastEventAt: input.lastEventAt }
-              return activity
-            })()),
+          : new Map(current).set(
+              input.turnId,
+              (() => {
+                let activity: Activity = {
+                  turnId: input.turnId,
+                  threadId: input.threadId,
+                  complete: input.complete,
+                  editTotals: structuredClone(input.editTotals),
+                  updatedAt: input.now,
+                }
+                if (input.projectedCursor !== undefined)
+                  activity = { ...activity, projectedCursor: input.projectedCursor }
+                if (input.lastEventAt !== undefined) activity = { ...activity, lastEventAt: input.lastEventAt }
+                return activity
+              })(),
+            ),
       )
     }),
     markRead: Effect.fn("ThreadSummaryRepository.markRead")(function* (threadId, now) {

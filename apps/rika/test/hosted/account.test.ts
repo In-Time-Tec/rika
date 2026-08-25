@@ -666,12 +666,14 @@ it.effect("creates for Personal with zero organizations and fails closed for a s
                 projects: [],
               }),
             issueThreadTicket: () =>
-              Effect.succeed(Schema.decodeSync(ClientTicketResponse)({
-                ticket: "ticket-1",
-                expiresAt: "2026-08-21T06:00:00.000Z",
-                websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
-                protocol: "rika.thread.v1",
-              })),
+              Effect.succeed(
+                Schema.decodeSync(ClientTicketResponse)({
+                  ticket: "ticket-1",
+                  expiresAt: "2026-08-21T06:00:00.000Z",
+                  websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
+                  protocol: "rika.thread.v1",
+                }),
+              ),
           }),
         ),
         Layer.succeed(

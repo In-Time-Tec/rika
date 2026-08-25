@@ -8,7 +8,10 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptStore from "@rika/product-store/transcript-repository"
 import * as TurnStore from "@rika/product-store/turn-repository"
 import { Context, Deferred, Effect, Layer } from "effect"
-import { HostedExecutionReconciler, layer as hostedExecutionReconcilerLayer } from "../src/hosted-execution-reconciler"
+import {
+  HostedExecutionReconciler,
+  layer as hostedExecutionReconcilerLayer,
+} from "../../../src/hosted/execution/reconciler"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")

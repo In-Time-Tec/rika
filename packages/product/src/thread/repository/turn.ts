@@ -119,9 +119,7 @@ export interface Interface {
   readonly cancelUnlinked: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/repository/turn/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/turn/Service") {}
 
 export const PageCursor = Schema.Struct({ createdAt: Schema.Finite, id: TurnId })
 export const defaultPageSize = 50

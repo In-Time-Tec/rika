@@ -61,6 +61,8 @@ export const escapeControlCharacters = (text: string): string =>
     })
     .join("")
 
+export const formatCliError = (message: string): string => `ERROR\n  ${escapeControlCharacters(message)}`
+
 const homeRoot = /^(?:\/Users|\/home|\/var\/home)\/[^/]+(?=\/|$)/
 
 export const homeRelativePath = (path: string): string => path.replace(homeRoot, "~")

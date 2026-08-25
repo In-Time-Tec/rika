@@ -49,10 +49,7 @@ export const dropSubmittedDrafts: {
   ): ReturnType<typeof dropSubmittedDraftsImpl>
 } = Function.dual(2, dropSubmittedDraftsImpl)
 
-const takeSubmittedDraftImpl = (
-  drafts: ReadonlyArray<SubmittedDraft>,
-  turnId: string | undefined,
-) => {
+const takeSubmittedDraftImpl = (drafts: ReadonlyArray<SubmittedDraft>, turnId: string | undefined) => {
   const index = drafts.findIndex((draft) => turnId === undefined || draft.turnId === turnId)
   if (index < 0) return { draft: undefined, rest: drafts }
   return { draft: drafts[index], rest: drafts.filter((_, position) => position !== index) }

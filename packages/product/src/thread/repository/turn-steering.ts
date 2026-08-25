@@ -1,10 +1,5 @@
 import { Schema } from "effect"
-import {
-  ExecutionLink,
-  SteeringFailure,
-  SteeringInput,
-  SteeringReceipt,
-} from "../../execution/gateway/service"
+import { ExecutionLink, SteeringFailure, SteeringInput, SteeringReceipt } from "../../execution/gateway/service"
 import { ThreadId } from "../model/record"
 import { AgentExecutionTurn, TurnId } from "../turn/record"
 

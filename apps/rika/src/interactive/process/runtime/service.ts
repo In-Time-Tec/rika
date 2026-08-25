@@ -389,7 +389,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   const resumeOrb = session.resumeOrb
   if (resumeOrb !== undefined) adapter.resumeOrb = () => run(resumeOrb)
   const enableRemoteThreadCreation = session.enableRemoteThreadCreation
-  if (enableRemoteThreadCreation !== undefined) adapter.enableRemoteThreadCreation = () => run(enableRemoteThreadCreation)
+  if (enableRemoteThreadCreation !== undefined)
+    adapter.enableRemoteThreadCreation = () => run(enableRemoteThreadCreation)
   const disableRemoteThreadCreation = session.disableRemoteThreadCreation
   if (disableRemoteThreadCreation !== undefined)
     adapter.disableRemoteThreadCreation = () => run(disableRemoteThreadCreation)
@@ -413,14 +414,25 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     Schema.TaggedStruct("EditQueued", { id: Schema.String, prompt: Schema.String }),
     Schema.TaggedStruct("SteerQueued", { id: Schema.String, prompt: Schema.String, requestId: Schema.String }),
     Schema.TaggedStruct("Dequeue", { id: Schema.String }),
-    Schema.TaggedStruct("Steer", { prompt: Schema.String, requestId: Schema.String, turnId: Schema.optionalKey(Schema.String) }),
+    Schema.TaggedStruct("Steer", {
+      prompt: Schema.String,
+      requestId: Schema.String,
+      turnId: Schema.optionalKey(Schema.String),
+    }),
     Schema.TaggedStruct("ApproveAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
     Schema.TaggedStruct("DenyAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
     Schema.TaggedStruct("InterruptAndSend", { prompt: Schema.String }),
-    Schema.TaggedStruct("Cancel", { submissionId: Schema.optionalKey(Schema.String), threadId: Schema.optionalKey(Schema.String) }),
-    Schema.TaggedStruct("Quit", {}), Schema.TaggedStruct("NewThread", {}), Schema.TaggedStruct("NewOrbThread", {}),
-    Schema.TaggedStruct("PauseOrb", {}), Schema.TaggedStruct("ResumeOrb", {}),
-    Schema.TaggedStruct("EnableRemoteThreadCreation", {}), Schema.TaggedStruct("DisableRemoteThreadCreation", {}),
+    Schema.TaggedStruct("Cancel", {
+      submissionId: Schema.optionalKey(Schema.String),
+      threadId: Schema.optionalKey(Schema.String),
+    }),
+    Schema.TaggedStruct("Quit", {}),
+    Schema.TaggedStruct("NewThread", {}),
+    Schema.TaggedStruct("NewOrbThread", {}),
+    Schema.TaggedStruct("PauseOrb", {}),
+    Schema.TaggedStruct("ResumeOrb", {}),
+    Schema.TaggedStruct("EnableRemoteThreadCreation", {}),
+    Schema.TaggedStruct("DisableRemoteThreadCreation", {}),
     Schema.TaggedStruct("SelectThread", { id: Schema.String }),
   ])
   const consumePendingAction = () => {

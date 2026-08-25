@@ -33,7 +33,7 @@ const router = Effect.gen(function* () {
     refreshTerminalTitle: () => undefined,
     requestSelectionResync: () => undefined,
   })
-  return { ...eventRouter, showToast, close: () => setup.renderer.destroy() }
+  return { ...eventRouter, loop, showToast, close: () => setup.renderer.destroy() }
 })
 
 describe("approval control failures", () => {
@@ -41,9 +41,9 @@ describe("approval control failures", () => {
     ["approve", "Approval"],
     ["deny", "Denial"],
   ] as const)
-    it.effect(`shows a nonterminal red toast when ${action} fails`, () =>
+    it.effect(`shows a nonterminal structured error when ${action} fails`, () =>
       Effect.gen(function* () {
-        const { dispatch, showToast, close } = yield* router
+        const { dispatch, loop, showToast, close } = yield* router
         dispatch({
           _tag: "ExecutionControlFailed",
           threadId: Thread.ThreadId.make("thread"),
@@ -58,7 +58,12 @@ describe("approval control failures", () => {
             actor: "user",
           },
         })
-        expect(showToast).toHaveBeenCalledWith(`${label} failed: Authorization is no longer pending`, "#e06c75")
+        expect(showToast).not.toHaveBeenCalled()
+        expect(loop.model.blocks).toContainEqual({
+          _tag: "Error",
+          title: `${label} failed`,
+          detail: "Authorization is no longer pending",
+        })
         close()
       }),
     )

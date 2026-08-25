@@ -16,11 +16,7 @@ import { renderToolSummary } from "../diff-text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
 import { renderCellBody, renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./bodies"
 import { toolDetail, toolDetails } from "../../../presentation/transcript/tool/detail"
-import {
-  isExpandableUnit,
-  orderedTranscriptItems,
-  transcriptUnitId,
-} from "../../../presentation/transcript/row"
+import { isExpandableUnit, orderedTranscriptItems, transcriptUnitId } from "../../../presentation/transcript/row"
 import type {
   AgentOutcome,
   AgentResponseState,

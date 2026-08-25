@@ -3,7 +3,7 @@
 	auto_https off
 }
 
-127.0.0.1:{$PUBLIC_PORT} {
+http://127.0.0.1:{$PUBLIC_PORT} {
 	@api path /api/* /healthz /readyz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
 	handle @api {
 		reverse_proxy 127.0.0.1:{$API_PORT}
@@ -14,7 +14,17 @@
 	}
 }
 
-127.0.0.1:{$EXECUTOR_PORT} {
+http://:{$EXECUTOR_PORT} {
+	bind 127.0.0.1
+
+	@ready {
+		path /.rika-ready
+		header X-Rika-Readiness {$READINESS_TOKEN:unconfigured}
+	}
+	handle @ready {
+		respond "{$READINESS_TOKEN:unconfigured}" 200
+	}
+
 	@executor path /api/v1/executors
 	handle @executor {
 		reverse_proxy 127.0.0.1:{$API_PORT}

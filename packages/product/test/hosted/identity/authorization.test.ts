@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { type AuthorizationAction, type AuthorizationSubject, isAuthorized } from "../../../src/hosted/identity/authorization"
+import {
+  type AuthorizationAction,
+  type AuthorizationSubject,
+  isAuthorized,
+} from "../../../src/hosted/identity/authorization"
 import { BetterAuthMemberId, type GrantRole } from "../../../src/hosted/model"
 
 const memberId = BetterAuthMemberId.make("member")

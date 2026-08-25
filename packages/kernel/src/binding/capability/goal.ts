@@ -11,7 +11,10 @@ const Failure = Schema.Union([GoalUnavailable, GoalAlreadyActive, GoalNotActive,
 
 const Empty = Schema.Struct({})
 const Current = Schema.Struct({ goal: Schema.optionalKey(Goal) })
-const GoalBudget = Schema.Struct({ tokens: Schema.optionalKey(Schema.Int), wallClockMillis: Schema.optionalKey(Schema.Int) })
+const GoalBudget = Schema.Struct({
+  tokens: Schema.optionalKey(Schema.Int),
+  wallClockMillis: Schema.optionalKey(Schema.Int),
+})
 
 const CreateInput = Schema.Struct({
   objective: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
@@ -50,9 +53,10 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<GoalServ
             if (input.tokenBudget === undefined)
               budget = input.wallClockMillis === undefined ? {} : { wallClockMillis: input.wallClockMillis }
             else
-              budget = input.wallClockMillis === undefined
-                ? { tokens: input.tokenBudget }
-                : { tokens: input.tokenBudget, wallClockMillis: input.wallClockMillis }
+              budget =
+                input.wallClockMillis === undefined
+                  ? { tokens: input.tokenBudget }
+                  : { tokens: input.tokenBudget, wallClockMillis: input.wallClockMillis }
             return goals.create({
               threadId: thread,
               objective: input.objective,
@@ -72,9 +76,8 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<GoalServ
         { kind: "goal.complete", payload: input, replayPolicy: "never" },
         Effect.flatMap(GoalService, (goals) =>
           Effect.flatMap(threadId, (thread) => {
-            const completion: Parameters<typeof goals.complete>[0] = input.summary === undefined
-              ? { threadId: thread }
-              : { threadId: thread, summary: input.summary }
+            const completion: Parameters<typeof goals.complete>[0] =
+              input.summary === undefined ? { threadId: thread } : { threadId: thread, summary: input.summary }
             return goals.complete(completion)
           }),
         ),

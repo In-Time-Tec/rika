@@ -56,6 +56,15 @@ export interface BootstrapFence {
   readonly generation: FencingGeneration
 }
 
+export interface ClaimOrphanInput {
+  readonly providerInstanceId: string
+  readonly assignmentId?: ExecutorAssignmentId
+  readonly generation?: FencingGeneration
+}
+
+export type OrphanStatus = "candidate" | "preserved"
+export type OrphanClaim = "claimed" | "preserved"
+
 export interface BeginProvisioningInput extends Version {
   readonly bootstrapCredentialDigest: Redacted.Redacted<string>
   readonly bootstrapLifetimeMillis: number
@@ -135,6 +144,8 @@ export interface AssignmentsService {
   readonly get: (assignmentId: ExecutorAssignmentId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
   readonly getForThread: (threadId: ThreadId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
   readonly isBootstrapLive: (input: BootstrapFence) => Effect.Effect<boolean, AssignmentError>
+  readonly inspectOrphan: (input: ClaimOrphanInput) => Effect.Effect<OrphanStatus, AssignmentError>
+  readonly claimOrphan: (input: ClaimOrphanInput) => Effect.Effect<OrphanClaim, AssignmentError>
   readonly beginProvisioning: (input: BeginProvisioningInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly beginReplacement: (input: BeginReplacementInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly bindProviderInstance: (

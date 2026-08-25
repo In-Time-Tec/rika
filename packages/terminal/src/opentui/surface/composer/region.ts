@@ -7,10 +7,7 @@ import { displayInput } from "../../../state/composer/model"
 import { truncateToWidth } from "../../../presentation/terminal/format"
 import type { Command } from "../../../presentation/terminal/command-palette"
 import type { ModeRouteLabel } from "../../../state/mode/route"
-import {
-  modeSelectorLabels,
-  modeSelectorNotchAtPosition,
-} from "../../../presentation/terminal/mode-selector-layout"
+import { modeSelectorLabels, modeSelectorNotchAtPosition } from "../../../presentation/terminal/mode-selector-layout"
 const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
   for (const attachment of model.pastedText) {
@@ -162,12 +159,14 @@ const paletteContentImpl = (
 
 const routeLabel = (route: ModeRouteLabel | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
-const modeDescription = new Map<string, string>(Object.entries({
-  low: "Fast, low-cost mode for small, well-defined tasks",
-  medium: "Balanced default for everyday work",
-  high: "Deep reasoning for hard tasks",
-  ultra: "The most capable mode for hard, open-ended tasks",
-}))
+const modeDescription = new Map<string, string>(
+  Object.entries({
+    low: "Fast, low-cost mode for small, well-defined tasks",
+    medium: "Balanced default for everyday work",
+    high: "Deep reasoning for hard tasks",
+    ultra: "The most capable mode for hard, open-ended tasks",
+  }),
+)
 
 export const paletteContent: {
   (

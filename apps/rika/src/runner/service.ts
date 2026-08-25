@@ -18,10 +18,7 @@ const statusLine = (status: RunnerStatus) => {
   return "Runner stopped"
 }
 
-const runnerProfile = (
-  registration: Parameters<RunnerAdmission["Service"]["awaitAdmission"]>[0],
-  profile: Profile,
-) => {
+const runnerProfile = (registration: Parameters<RunnerAdmission["Service"]["awaitAdmission"]>[0], profile: Profile) => {
   const result = {
     workspaceIdentity: registration.workspaceIdentity,
     repository: registration.repository,

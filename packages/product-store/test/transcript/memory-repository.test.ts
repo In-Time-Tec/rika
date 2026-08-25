@@ -58,9 +58,8 @@ describe("Operation thread actions", () => {
         "cancelled",
       ]
       const turns = yield* TurnRepository.makeMemory(
-        statuses.map(
-          (status, index): Turn.AgentExecutionTurn => {
-            const turn = {
+        statuses.map((status, index): Turn.AgentExecutionTurn => {
+          const turn = {
             _tag: "AgentExecution",
             id: Turn.TurnId.make(status),
             threadId: alpha.id,
@@ -71,12 +70,11 @@ describe("Operation thread actions", () => {
             status,
             createdAt: index + 1,
             updatedAt: index + 1,
-            } satisfies Turn.AgentExecutionTurn
-            return status !== "queued" && !ExecutionStatus.isTerminalStatus(status)
-              ? { ...turn, executionLink: { runId: `${status}-run`, turnId: status, threadId: alpha.id } }
-              : turn
-          },
-        ),
+          } satisfies Turn.AgentExecutionTurn
+          return status !== "queued" && !ExecutionStatus.isTerminalStatus(status)
+            ? { ...turn, executionLink: { runId: `${status}-run`, turnId: status, threadId: alpha.id } }
+            : turn
+        }),
       )
       const layer = Layer.merge(
         TestConsole.layer,

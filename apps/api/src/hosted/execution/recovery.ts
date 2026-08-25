@@ -1,11 +1,22 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import { identityMember } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { BetterAuthMemberId } from "@rika/product/hosted-model"
+import {
+  rikaHostedExecutorOperations,
+  rikaHostedOwners,
+  rikaHostedProjectGrants,
+  rikaHostedThreadGrants,
+  rikaHostedThreads,
+} from "@rika/product-store/database-schema"
 import { remoteCellOperationOutcome } from "@rika/execution/route"
 import * as RemoteCells from "@rika/execution/remote-cells"
+import { and, asc, eq, isNotNull, or } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { OperationResolution as TenetOperationResolution, Runtime } from "tenetkit/runtime"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
+import { runOperations, runs } from "./tenetkit-schema"
 
 export const RecoveryResolution = Schema.Union([
   Schema.TaggedStruct("Retry", {}),
@@ -36,29 +47,20 @@ interface OperationRow {
   readonly operationId: string
   readonly operationKey: string
   readonly runId: string
-  readonly attempt: string
+  readonly attempt: number
   readonly replayPolicy: "pure" | "provider-idempotent" | "never"
   readonly started: boolean
   readonly resolution: TenetOperationResolution.OperationResolution | null
 }
-type PersistedOperationRow = Omit<OperationRow, "resolution"> & { readonly resolution: unknown }
 
-interface CompletedOperationRow {
+interface PersistedOperationRow {
   readonly operationId: string
   readonly operationKey: string
-  readonly workspaceId: string
-  readonly sessionId: string
-  readonly threadId: string
-  readonly turnId: string
   readonly runId: string
-  readonly rootRunId: string
-  readonly toolCallId: string
-  readonly code: string
-  readonly attempt: string
+  readonly attempt: number
   readonly replayPolicy: "pure" | "provider-idempotent" | "never"
-  readonly admittedAt: string | null
-  readonly deadlineAt: string
-  readonly response: unknown
+  readonly startedAt: Date | null
+  readonly resolutionJson: string | null
 }
 
 export interface HostedRecoveryService {
@@ -84,10 +86,20 @@ export class HostedRecovery extends Context.Service<HostedRecovery, HostedRecove
 
 const unavailable = (message: string) => HostedRecoveryError.make({ kind: "unavailable", message })
 const decodeOperationRow = (row: PersistedOperationRow): Effect.Effect<OperationRow, HostedRecoveryError> =>
-  row.resolution === null
-    ? Effect.succeed({ ...row, resolution: null })
-    : Schema.decodeUnknownEffect(TenetOperationResolution.OperationResolution)(row.resolution).pipe(
-        Effect.map((resolution): OperationRow => ({ ...row, resolution })),
+  row.resolutionJson === null
+    ? Effect.succeed({ ...row, started: row.startedAt !== null, resolution: null })
+    : Schema.decodeEffect(Schema.fromJsonString(TenetOperationResolution.OperationResolution))(row.resolutionJson).pipe(
+        Effect.map(
+          (resolution): OperationRow => ({
+            operationId: row.operationId,
+            operationKey: row.operationKey,
+            runId: row.runId,
+            attempt: row.attempt,
+            replayPolicy: row.replayPolicy,
+            started: row.startedAt !== null,
+            resolution,
+          }),
+        ),
         Effect.mapError(() => unavailable("TenetKit recovery resolution is invalid")),
       )
 
@@ -112,7 +124,7 @@ const project = (row: OperationRow): RecoveryOperation => {
     operationId: row.operationId,
     operationKey: row.operationKey,
     runId: row.runId,
-    attempt: Number(row.attempt),
+    attempt: row.attempt,
     replayPolicy: row.replayPolicy,
     started: row.started,
     state,
@@ -124,7 +136,8 @@ const project = (row: OperationRow): RecoveryOperation => {
 export const layer = Layer.effect(
   HostedRecovery,
   Effect.gen(function* () {
-    const sql = yield* PgClient.PgClient
+    yield* PgClient.PgClient
+    const db = yield* PgDrizzle.makeWithDefaults()
     const policy = yield* AuthorizationPolicy
     const runtime = yield* Runtime.Runtime
 
@@ -132,28 +145,44 @@ export const layer = Layer.effect(
       principal: AuthenticatedPrincipal,
       threadId: string,
     ) {
-      const rows = yield* sql<{
-        readonly kind: "personal" | "organization"
-        readonly userId: string | null
-        readonly membershipId: string | null
-        readonly createdByUserId: string
-        readonly executorKind: "runner" | "orb"
-        readonly inheritProjectGrants: boolean
-        readonly threadRole: "viewer" | "controller" | "operator" | "owner" | null
-        readonly projectRole: "viewer" | "controller" | "operator" | "owner" | null
-      }>`SELECT owner_record.kind, owner_record.user_id AS "userId", membership.id AS "membershipId",
-          thread.created_by_user_id AS "createdByUserId", thread.executor_kind AS "executorKind",
-          thread.inherit_project_grants AS "inheritProjectGrants",
-          thread_grant.role AS "threadRole", project_grant.role AS "projectRole"
-        FROM rika_hosted_threads thread
-        JOIN rika_hosted_owners owner_record ON owner_record.id = thread.owner_id
-        LEFT JOIN "member" membership ON membership.organization_id = owner_record.organization_id
-          AND membership.user_id = ${principal.userId}
-        LEFT JOIN rika_hosted_thread_grants thread_grant ON thread_grant.owner_id = thread.owner_id
-          AND thread_grant.thread_id = thread.id AND thread_grant.membership_id = membership.id
-        LEFT JOIN rika_hosted_project_grants project_grant ON project_grant.owner_id = thread.owner_id
-          AND project_grant.project_id = thread.project_id AND project_grant.membership_id = membership.id
-        WHERE thread.id = ${threadId}`.pipe(Effect.mapError(() => unavailable("Recovery authorization is unavailable")))
+      const rows = yield* db
+        .select({
+          kind: rikaHostedOwners.kind,
+          userId: rikaHostedOwners.userId,
+          membershipId: identityMember.id,
+          createdByUserId: rikaHostedThreads.createdByUserId,
+          executorKind: rikaHostedThreads.executorKind,
+          inheritProjectGrants: rikaHostedThreads.inheritProjectGrants,
+          threadRole: rikaHostedThreadGrants.role,
+          projectRole: rikaHostedProjectGrants.role,
+        })
+        .from(rikaHostedThreads)
+        .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedThreads.ownerId))
+        .leftJoin(
+          identityMember,
+          and(
+            eq(identityMember.organizationId, rikaHostedOwners.organizationId),
+            eq(identityMember.userId, principal.userId),
+          ),
+        )
+        .leftJoin(
+          rikaHostedThreadGrants,
+          and(
+            eq(rikaHostedThreadGrants.ownerId, rikaHostedThreads.ownerId),
+            eq(rikaHostedThreadGrants.threadId, rikaHostedThreads.id),
+            eq(rikaHostedThreadGrants.membershipId, identityMember.id),
+          ),
+        )
+        .leftJoin(
+          rikaHostedProjectGrants,
+          and(
+            eq(rikaHostedProjectGrants.ownerId, rikaHostedThreads.ownerId),
+            eq(rikaHostedProjectGrants.projectId, rikaHostedThreads.projectId),
+            eq(rikaHostedProjectGrants.membershipId, identityMember.id),
+          ),
+        )
+        .where(eq(rikaHostedThreads.id, threadId))
+        .pipe(Effect.mapError(() => unavailable("Recovery authorization is unavailable")))
       const row = rows[0]
       if (row === undefined)
         return yield* HostedRecoveryError.make({ kind: "not-found", message: "Thread is unavailable" })
@@ -186,26 +215,43 @@ export const layer = Layer.effect(
     })
 
     const operations = (threadId: string, runId: string) =>
-      sql<PersistedOperationRow>`SELECT
-          tenet.operation_id AS "operationId", operation.operation_key AS "operationKey",
-          operation.run_id AS "runId", operation.attempt::text AS attempt,
-          operation.replay_policy AS "replayPolicy", operation.started_at IS NOT NULL AS started,
-          CASE WHEN tenet.resolution_json IS NULL THEN NULL ELSE tenet.resolution_json::jsonb END AS resolution
-        FROM rika_hosted_executor_operations operation
-        JOIN tenetkit_run_operations tenet ON tenet.run_id = operation.run_id
-          AND tenet.operation_key = operation.operation_key AND tenet.attempt = operation.attempt
-        WHERE operation.thread_id = ${threadId} AND operation.run_id = ${runId}
-          AND (
-            operation.state = 'unknown'
-            OR (
-              operation.state = 'dispatched'
-              AND (tenet.status = 'unknown' OR tenet.resolution_json IS NOT NULL)
-            )
-          )
-        ORDER BY operation.created_at, operation.attempt`.pipe(
-        Effect.mapError(() => unavailable("Could not inspect recovery operations")),
-        Effect.flatMap((rows) => Effect.forEach(rows, decodeOperationRow)),
-      )
+      db
+        .select({
+          operationId: runOperations.operationId,
+          operationKey: rikaHostedExecutorOperations.operationKey,
+          runId: rikaHostedExecutorOperations.runId,
+          attempt: rikaHostedExecutorOperations.attempt,
+          replayPolicy: rikaHostedExecutorOperations.replayPolicy,
+          startedAt: rikaHostedExecutorOperations.startedAt,
+          resolutionJson: runOperations.resolutionJson,
+        })
+        .from(rikaHostedExecutorOperations)
+        .innerJoin(
+          runOperations,
+          and(
+            eq(runOperations.runId, rikaHostedExecutorOperations.runId),
+            eq(runOperations.operationKey, rikaHostedExecutorOperations.operationKey),
+            eq(runOperations.attempt, rikaHostedExecutorOperations.attempt),
+          ),
+        )
+        .where(
+          and(
+            eq(rikaHostedExecutorOperations.threadId, threadId),
+            eq(rikaHostedExecutorOperations.runId, runId),
+            or(
+              eq(rikaHostedExecutorOperations.state, "unknown"),
+              and(
+                eq(rikaHostedExecutorOperations.state, "dispatched"),
+                or(eq(runOperations.status, "unknown"), isNotNull(runOperations.resolutionJson)),
+              ),
+            ),
+          ),
+        )
+        .orderBy(asc(rikaHostedExecutorOperations.createdAt), asc(rikaHostedExecutorOperations.attempt))
+        .pipe(
+          Effect.mapError(() => unavailable("Could not inspect recovery operations")),
+          Effect.flatMap((rows) => Effect.forEach(rows, decodeOperationRow)),
+        )
 
     const inspect: HostedRecoveryService["inspect"] = Effect.fn("HostedRecovery.inspect")(function* (input) {
       yield* authorize(input.principal, input.threadId)
@@ -249,22 +295,45 @@ export const layer = Layer.effect(
     })
 
     const reconcileCompleted = Effect.gen(function* () {
-      const rows = yield* sql<CompletedOperationRow>`SELECT tenet.operation_id AS "operationId",
-          operation.operation_key AS "operationKey", operation.workspace_id AS "workspaceId",
-          operation.session_id AS "sessionId", operation.thread_id AS "threadId",
-          operation.turn_id AS "turnId", operation.run_id AS "runId", operation.root_run_id AS "rootRunId",
-          operation.tool_call_id AS "toolCallId", operation.code, operation.attempt::text AS attempt,
-          operation.replay_policy AS "replayPolicy", operation.admitted_at AS "admittedAt",
-          to_char(operation.deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "deadlineAt",
-          operation.response
-        FROM rika_hosted_executor_operations operation
-        JOIN tenetkit_run_operations tenet ON tenet.run_id = operation.run_id
-          AND tenet.operation_key = operation.operation_key AND tenet.attempt = operation.attempt
-        JOIN tenetkit_runs run ON run.run_id = operation.run_id
-        WHERE operation.state = 'completed' AND operation.response IS NOT NULL
-          AND tenet.status = 'unknown' AND run.status = 'needs-resolution'
-        ORDER BY operation.updated_at, operation.operation_key
-        LIMIT 32`.pipe(Effect.mapError(() => unavailable("Could not inspect completed recovery operations")))
+      const rows = yield* db
+        .select({
+          operationId: runOperations.operationId,
+          operationKey: rikaHostedExecutorOperations.operationKey,
+          workspaceId: rikaHostedExecutorOperations.workspaceId,
+          sessionId: rikaHostedExecutorOperations.sessionId,
+          threadId: rikaHostedExecutorOperations.threadId,
+          turnId: rikaHostedExecutorOperations.turnId,
+          runId: rikaHostedExecutorOperations.runId,
+          rootRunId: rikaHostedExecutorOperations.rootRunId,
+          toolCallId: rikaHostedExecutorOperations.toolCallId,
+          code: rikaHostedExecutorOperations.code,
+          attempt: rikaHostedExecutorOperations.attempt,
+          replayPolicy: rikaHostedExecutorOperations.replayPolicy,
+          admittedAt: rikaHostedExecutorOperations.admittedAt,
+          deadlineAt: rikaHostedExecutorOperations.deadlineAt,
+          response: rikaHostedExecutorOperations.response,
+        })
+        .from(rikaHostedExecutorOperations)
+        .innerJoin(
+          runOperations,
+          and(
+            eq(runOperations.runId, rikaHostedExecutorOperations.runId),
+            eq(runOperations.operationKey, rikaHostedExecutorOperations.operationKey),
+            eq(runOperations.attempt, rikaHostedExecutorOperations.attempt),
+          ),
+        )
+        .innerJoin(runs, eq(runs.runId, rikaHostedExecutorOperations.runId))
+        .where(
+          and(
+            eq(rikaHostedExecutorOperations.state, "completed"),
+            isNotNull(rikaHostedExecutorOperations.response),
+            eq(runOperations.status, "unknown"),
+            eq(runs.status, "needs-resolution"),
+          ),
+        )
+        .orderBy(asc(rikaHostedExecutorOperations.updatedAt), asc(rikaHostedExecutorOperations.operationKey))
+        .limit(32)
+        .pipe(Effect.mapError(() => unavailable("Could not inspect completed recovery operations")))
       yield* Effect.forEach(
         rows,
         (row) =>
@@ -282,10 +351,10 @@ export const layer = Layer.effect(
                   rootRunId: row.rootRunId,
                   toolCallId: row.toolCallId,
                   code: row.code,
-                  attempt: Number(row.attempt),
+                  attempt: row.attempt,
                   replayPolicy: row.replayPolicy,
                   admittedAt: row.admittedAt,
-                  deadlineAt: row.deadlineAt,
+                  deadlineAt: row.deadlineAt.toISOString(),
                 }),
                 response,
               ),

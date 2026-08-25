@@ -31,13 +31,21 @@ const run = (request: typeof CodingToolRuntime.Request.Type) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const applyOne = (replacement: typeof Replacement.Type) => {
-  const request: typeof CodingToolRuntime.Request.Type = replacement.replaceAll === undefined
-    ? { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr }
-    : { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr, replaceAll: replacement.replaceAll }
+  const request: typeof CodingToolRuntime.Request.Type =
+    replacement.replaceAll === undefined
+      ? { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr }
+      : {
+          _tag: "Edit",
+          path: replacement.path,
+          oldStr: replacement.oldStr,
+          newStr: replacement.newStr,
+          replaceAll: replacement.replaceAll,
+        }
   return Effect.map(run(request), (result) => {
-    const edit: typeof AppliedEdit.Type = result.diff === undefined
-      ? { path: replacement.path, text: result.text }
-      : { path: replacement.path, text: result.text, diff: result.diff }
+    const edit: typeof AppliedEdit.Type =
+      result.diff === undefined
+        ? { path: replacement.path, text: result.text }
+        : { path: replacement.path, text: result.text, diff: result.diff }
     return { edit, truncated: result.truncated }
   })
 }

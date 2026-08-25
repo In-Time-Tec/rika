@@ -96,9 +96,9 @@ const reduceOverlayImpl = (
       return { ...model, pendingAction: undefined }
     case "AssistantStreamed": {
       const entries = [...model.entries]
-      const lastItem = model.items.filter(isTranscriptItem).findLast(
-        (item) => message.turnId === undefined || item.turnId === message.turnId,
-      )
+      const lastItem = model.items
+        .filter(isTranscriptItem)
+        .findLast((item) => message.turnId === undefined || item.turnId === message.turnId)
       const index =
         lastItem?._tag === "Entry" &&
         entries[lastItem.index]?.role === "assistant" &&
@@ -117,22 +117,16 @@ const reduceOverlayImpl = (
       return {
         ...model,
         entries,
-        items:
-          index >= 0
-            ? model.items
-            : [
-                ...model.items,
-                turned,
-              ],
+        items: index >= 0 ? model.items : [...model.items, turned],
         busy: true,
         activity: streamActivity(model.activity, "Streaming", message.text, undefined),
       }
     }
     case "AssistantCompleted": {
       const entries = [...model.entries]
-      const lastItem = model.items.filter(isTranscriptItem).findLast(
-        (item) => message.turnId === undefined || item.turnId === message.turnId,
-      )
+      const lastItem = model.items
+        .filter(isTranscriptItem)
+        .findLast((item) => message.turnId === undefined || item.turnId === message.turnId)
       const index =
         lastItem?._tag === "Entry" &&
         entries[lastItem.index]?.role === "assistant" &&
@@ -154,13 +148,7 @@ const reduceOverlayImpl = (
       return {
         ...model,
         entries,
-        items:
-          index >= 0
-            ? model.items
-            : [
-                ...model.items,
-                identified,
-              ],
+        items: index >= 0 ? model.items : [...model.items, identified],
         busy: model.busy,
         activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Waiting" } : undefined,
       }

@@ -56,9 +56,7 @@ export const aggregateUsage = (values: ReadonlyArray<UsageState>): UsageState =>
   let active: UsageState["active"] = { _tag: "Unavailable" }
   if (availableActive.length > 0) {
     const accumulatedMillis = availableActive.reduce((total, value) => total + value.accumulatedMillis, 0)
-    const activeSince = availableActive.flatMap((value) =>
-      value.activeSince === undefined ? [] : [value.activeSince],
-    )
+    const activeSince = availableActive.flatMap((value) => (value.activeSince === undefined ? [] : [value.activeSince]))
     active =
       activeSince.length === 0
         ? { _tag: "Available", accumulatedMillis }

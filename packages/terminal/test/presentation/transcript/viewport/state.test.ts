@@ -227,10 +227,7 @@ it.effect("rebases an anchor removed by collapse to a surviving transcript row",
       const items = orderedTranscriptItems(source)
       const collapsed = {
         ...source,
-        items: [
-          ...items.filter((item) => item._tag === "Block"),
-          ...items.filter((item) => item._tag === "Entry"),
-        ],
+        items: [...items.filter((item) => item._tag === "Block"), ...items.filter((item) => item._tag === "Entry")],
       }
       surface.update({ ...collapsed, expandedRowKeys: ["tool:root-tool"] })
       yield* openTui(() => setup.flush())

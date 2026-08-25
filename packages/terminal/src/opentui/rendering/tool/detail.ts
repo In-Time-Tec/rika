@@ -60,11 +60,13 @@ export const exploreChildLabel = (unit: ToolUnit): string => {
   return `${unit.block.presentation.action === "grep" ? "Grep" : "Searched"} ${unit.block.detail || pattern || ""}`.trimEnd()
 }
 const toolUnitsForImpl = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
-  indices.map((index) => {
-    const block = decodeTranscriptBlocks(model.blocks)[index]
-    if (block?._tag !== "ToolCall") return undefined
-    return { kind: toolKind(block.name, undefined), block, index }
-  }).filter((unit): unit is ToolUnit => unit !== undefined)
+  indices
+    .map((index) => {
+      const block = decodeTranscriptBlocks(model.blocks)[index]
+      if (block?._tag !== "ToolCall") return undefined
+      return { kind: toolKind(block.name, undefined), block, index }
+    })
+    .filter((unit): unit is ToolUnit => unit !== undefined)
 
 export const toolUnitsFor: {
   (

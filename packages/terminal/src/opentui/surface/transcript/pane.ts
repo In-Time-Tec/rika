@@ -24,11 +24,7 @@ import { maxMountedTranscriptEntries } from "../../rendering/transcript/window"
 import { toOpenColor } from "../../rendering/text-adapter"
 import { prependedTranscriptItems } from "./lifecycle"
 import { cutoutBackground } from "../renderables"
-import type {
-  PendingTranscriptPosition,
-  TranscriptRenderableRecord,
-  TranscriptRenderInput,
-} from "./types"
+import type { PendingTranscriptPosition, TranscriptRenderableRecord, TranscriptRenderInput } from "./types"
 import {
   TranscriptPaneGeometry,
   TranscriptPaneFrame,

@@ -57,10 +57,7 @@ export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean 
     entry.unit.content.block._tag === "Cell" ||
     entry.unit.executionOutcome !== undefined)
 
-const boundTurnEntriesImpl = (
-  entries: ReadonlyArray<TranscriptPage.Entry>,
-  detail: number,
-): BoundedTurnEntries => {
+const boundTurnEntriesImpl = (entries: ReadonlyArray<TranscriptPage.Entry>, detail: number): BoundedTurnEntries => {
   if (detail >= entries.length) return { entries, contiguousFrom: 0 }
   const semantic = entries.filter(isSemanticTranscriptEntry).length
   const selection = selectTranscriptWindow({
@@ -74,7 +71,10 @@ const boundTurnEntriesImpl = (
   const contiguousFrom =
     contiguousStart === undefined
       ? entries.length
-      : Math.max(0, entries.findIndex((entry) => entry.unit.key === contiguousStart.unit.key))
+      : Math.max(
+          0,
+          entries.findIndex((entry) => entry.unit.key === contiguousStart.unit.key),
+        )
   return { entries: selection.values, contiguousFrom }
 }
 
@@ -106,13 +106,8 @@ const boundTranscriptEntriesImpl = (
 }
 
 export const boundTranscriptEntries: {
-  (
-    arg1: JsonEncoder,
-  ): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTranscriptEntriesImpl>
-  (
-    arg0: ReadonlyArray<TranscriptPage.Entry>,
-    arg1: JsonEncoder,
-  ): ReturnType<typeof boundTranscriptEntriesImpl>
+  (arg1: JsonEncoder): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTranscriptEntriesImpl>
+  (arg0: ReadonlyArray<TranscriptPage.Entry>, arg1: JsonEncoder): ReturnType<typeof boundTranscriptEntriesImpl>
 } = Function.dual(2, boundTranscriptEntriesImpl)
 
 const boundPartialTranscriptEntries = (
@@ -134,7 +129,8 @@ const boundPartialTranscriptEntries = (
       newest === undefined ? -1 : entries.findIndex((entry) => entry.unit.key === `turn:${newest.turn.id}:user`)
     if (userBoundary >= 0) {
       const userEntry = entries[userBoundary]
-      if (userEntry === undefined) return { entries: entries.slice(boundedStart), truncated: true, oversizedEntry: false }
+      if (userEntry === undefined)
+        return { entries: entries.slice(boundedStart), truncated: true, oversizedEntry: false }
       const semanticIndexes = new Set([userBoundary])
       let semanticBytes = transcriptPageEncoder.encode(encodeJson(userEntry)).byteLength
       for (let index = entries.length - 1; index >= 0; index -= 1) {

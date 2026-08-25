@@ -113,8 +113,7 @@ const runnerExecutorLayer = Layer.effect(
       const valid = yield* operations
         .verifyRunnerAuthority({ ownerId, ...principal })
         .pipe(Effect.mapError(() => failure("repository", "Local device authority is unavailable")))
-      if (!valid)
-        return yield* failure("authentication", "Local principal or owner authority is no longer active")
+      if (!valid) return yield* failure("authentication", "Local principal or owner authority is no longer active")
     })
 
     const principalFor = Effect.fn("RunnerExecutor.principalFor")(function* (input: ProtocolAccess) {
@@ -125,11 +124,8 @@ const runnerExecutorLayer = Layer.effect(
           deviceId: input.fence.instanceId,
           processIncarnation: input.fence.processIncarnation,
         })
-        .pipe(
-        Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")),
-      )
-      if (principal === undefined)
-        return yield* failure("authentication", "Runner admission binding is unavailable")
+        .pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
+      if (principal === undefined) return yield* failure("authentication", "Runner admission binding is unavailable")
       return principal satisfies AuthenticatedPrincipal
     })
     const access = Effect.fn("RunnerExecutor.access")(function* (
@@ -153,8 +149,7 @@ const runnerExecutorLayer = Layer.effect(
           clientId: principal.clientId,
         })
         .pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
-      if (!admitted)
-        return yield* failure("authentication", "Authenticated client has no consumed Runner admission")
+      if (!admitted) return yield* failure("authentication", "Authenticated client has no consumed Runner admission")
       return {
         assignmentId: ExecutorAssignmentId.make(input.fence.assignmentId),
         assignmentGeneration: FencingGeneration.make(String(input.fence.assignmentGeneration)),
@@ -183,9 +178,7 @@ const runnerExecutorLayer = Layer.effect(
             if (placement.requestingDeviceId !== placement.deviceId) {
               const allowed = yield* operations
                 .lockRemoteCreationAdmission(placement.deviceId, placement.checkoutFingerprint)
-                .pipe(
-                Effect.mapError(() => failure("repository", "Runner preference is unavailable")),
-              )
+                .pipe(Effect.mapError(() => failure("repository", "Runner preference is unavailable")))
               if (!allowed) return yield* failure("fenced", "Remote Thread creation is no longer allowed")
             }
 
@@ -245,9 +238,7 @@ const runnerExecutorLayer = Layer.effect(
                 ticketDigest: Redacted.value(ticketDigest),
                 lifetimeMillis: admissionLifetimeMillis,
               })
-              .pipe(
-              Effect.mapError(() => failure("repository", "Runner admission could not be persisted")),
-            )
+              .pipe(Effect.mapError(() => failure("repository", "Runner admission could not be persisted")))
             return {
               assignmentId: awaiting.id,
               admissionId,
@@ -270,9 +261,11 @@ const runnerExecutorLayer = Layer.effect(
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            const admission = yield* operations.lockRunnerAdmission(input.admissionId).pipe(
-              Effect.mapError(() => failure("authentication", "Runner admission is invalid, expired, or consumed")),
-            )
+            const admission = yield* operations
+              .lockRunnerAdmission(input.admissionId)
+              .pipe(
+                Effect.mapError(() => failure("authentication", "Runner admission is invalid, expired, or consumed")),
+              )
             if (admission === undefined || admission.ticketDigest !== Redacted.value(presented))
               return yield* failure("authentication", "Runner admission is invalid, expired, or consumed")
             const principal: AuthenticatedPrincipal = {
@@ -307,11 +300,10 @@ const runnerExecutorLayer = Layer.effect(
               .pipe(Effect.mapError(assignmentFailure))
             if (active.lifecycle._tag !== "Active")
               return yield* failure("repository", "Runner session did not become active")
-            const consumed = yield* operations.consumeRunnerAdmission(input.admissionId, input.processIncarnation).pipe(
-              Effect.mapError(() => failure("repository", "Runner admission could not be consumed")),
-            )
-            if (!consumed)
-              return yield* failure("authentication", "Runner admission is invalid, expired, or consumed")
+            const consumed = yield* operations
+              .consumeRunnerAdmission(input.admissionId, input.processIncarnation)
+              .pipe(Effect.mapError(() => failure("repository", "Runner admission could not be consumed")))
+            if (!consumed) return yield* failure("authentication", "Runner admission is invalid, expired, or consumed")
             return {
               version: 1 as const,
               fence: {

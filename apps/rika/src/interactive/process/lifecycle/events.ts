@@ -8,13 +8,7 @@ import type { InteractiveLoop } from "../runtime/context"
 
 type EventLoop = Pick<
   InteractiveLoop,
-  | "closed"
-  | "model"
-  | "renderer"
-  | "submittedSinceIdle"
-  | "threadView"
-  | "modelPreview"
-  | "requestedThreadId"
+  "closed" | "model" | "renderer" | "submittedSinceIdle" | "threadView" | "modelPreview" | "requestedThreadId"
 > &
   Partial<Pick<InteractiveLoop, "newThreadSelectionGeneration" | "ctrlCMenuVisible">>
 
@@ -118,8 +112,13 @@ export const makeEventRouter = (runtime: Runtime) => {
         _tag: "ThreadsReplaced",
         threads: event.threads.map((thread) => {
           const item = {
-            id: thread.id, title: thread.title, workspace: thread.workspace, pinned: thread.pinned,
-            archived: thread.archived, status: thread.status, unread: thread.unread,
+            id: thread.id,
+            title: thread.title,
+            workspace: thread.workspace,
+            pinned: thread.pinned,
+            archived: thread.archived,
+            status: thread.status,
+            unread: thread.unread,
             lastActivityAt: thread.lastActivityAt,
           }
           return thread.editTotals === undefined ? item : { ...item, editTotals: thread.editTotals }
@@ -153,10 +152,14 @@ export const makeEventRouter = (runtime: Runtime) => {
         loop.model = update(loop.model, action)
       }
       if (event.action === "approve" || event.action === "deny")
-        loop.renderer?.surface.showToast(
-          `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.failure.message}`,
-          "#e06c75",
-        )
+        loop.model = update(loop.model, {
+          _tag: "BlockAdded",
+          block: {
+            _tag: "Error",
+            title: `${event.action === "approve" ? "Approval" : "Denial"} failed`,
+            detail: event.failure.message,
+          },
+        })
     } else if (event._tag === "ContextDiagnostics") {
       if (loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {

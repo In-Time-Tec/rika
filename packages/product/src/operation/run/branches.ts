@@ -50,8 +50,7 @@ const unavailable = (
   factory: ProductOperationRunFactory,
   input: Input,
   message?: string,
-): import("../contract/product").OperationUnavailable =>
-  factory.unavailable(input, message ?? "Operation unavailable")
+): import("../contract/product").OperationUnavailable => factory.unavailable(input, message ?? "Operation unavailable")
 
 const runInteractiveOperationImpl = (
   factory: ProductOperationRunFactory,

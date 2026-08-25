@@ -166,7 +166,16 @@ const renderPlainBodyImpl = (model: Model, block: TranscriptBlock, width: number
   }
   let color = colors.text
   if (block._tag === "ContextUsage") color = colors.muted
-  else if (block._tag === "Error") color = colors.red
+  else if (block._tag === "Error") {
+    const rendered = renderBlock(block, width)
+    const lineBreak = rendered.indexOf("\n")
+    if (lineBreak < 0) append(bold(fg(colors.red)(rendered)))
+    else {
+      append(bold(fg(colors.red)(rendered.slice(0, lineBreak))))
+      append(fg(colors.red)(rendered.slice(lineBreak)))
+    }
+    return
+  }
   append(fg(color)(renderBlock(block, width)))
 }
 

@@ -140,7 +140,7 @@ const reduceExecutionImpl = (
         steeringRequests,
         input: restoreInput ? rejected.text : model.input,
         cursor: restoreInput ? rejected.text.length : model.cursor,
-        blocks: [...model.blocks, { _tag: "Notification", title: "Steering not delivered", detail: message.message }],
+        blocks: [...model.blocks, { _tag: "Error", title: "Steering not delivered", detail: message.message }],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
     }
@@ -149,10 +149,7 @@ const reduceExecutionImpl = (
       return {
         ...model,
         cancelPending: false,
-        blocks: [
-          ...model.blocks,
-          { _tag: "Notification", title: "Cancellation not completed", detail: message.message },
-        ],
+        blocks: [...model.blocks, { _tag: "Error", title: "Cancellation not completed", detail: message.message }],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
     case "CompactionChanged": {

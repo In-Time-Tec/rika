@@ -202,10 +202,7 @@ it.effect("keeps polling after a transient hosted outage", () =>
         registration,
         supervisorId,
         (status) =>
-          Ref.update(statuses, (values) => [
-            ...values,
-            status._tag === "Waiting" ? status.message : status._tag,
-          ]),
+          Ref.update(statuses, (values) => [...values, status._tag === "Waiting" ? status.message : status._tag]),
         Effect.succeed([]),
       )
       .pipe(Effect.forkChild)
@@ -265,10 +262,7 @@ it.effect("keeps the Runner alive when registration overlaps a hosted restart", 
         registration,
         supervisorId,
         (status) =>
-          Ref.update(statuses, (values) => [
-            ...values,
-            status._tag === "Waiting" ? status.message : status._tag,
-          ]),
+          Ref.update(statuses, (values) => [...values, status._tag === "Waiting" ? status.message : status._tag]),
         Effect.succeed([]),
       )
       .pipe(Effect.forkChild)

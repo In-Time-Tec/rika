@@ -78,9 +78,9 @@ const run = (input: { readonly command: ReadonlyArray<string>; readonly cwd?: st
       const command =
         input.cwd === undefined
           ? ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
-            stdin: input.stdin === undefined ? "ignore" : Stream.fromIterable([input.stdin]),
-            stdout: "pipe",
-            stderr: "pipe",
+              stdin: input.stdin === undefined ? "ignore" : Stream.fromIterable([input.stdin]),
+              stdout: "pipe",
+              stderr: "pipe",
             })
           : ChildProcess.make(input.command[0]!, [...input.command.slice(1)], {
               cwd: input.cwd,

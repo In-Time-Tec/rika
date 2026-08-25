@@ -71,23 +71,23 @@ describe("ThreadQuery", () => {
       const transcripts = yield* Fixtures.TranscriptRepository.Service
       const card = (id: string, sequence: number, parentId?: string): Fixtures.TranscriptUnit.Unit => {
         const unit = {
-        key: `subagent:${id}`,
-        turnId: storedTurn.id,
-        order: Fixtures.TranscriptOrdering.unitOrder(`subagent:${id}`, sequence),
-        revision: sequence,
-        content: {
-          _tag: "Block",
-          block: {
-            _tag: "SubagentCard",
-            id,
-            name: id,
-            prompt: `inspect ${id}`,
-            promptTruncated: false,
-            summary: `completed ${id}`,
-            status: "complete",
-            activity: [],
+          key: `subagent:${id}`,
+          turnId: storedTurn.id,
+          order: Fixtures.TranscriptOrdering.unitOrder(`subagent:${id}`, sequence),
+          revision: sequence,
+          content: {
+            _tag: "Block",
+            block: {
+              _tag: "SubagentCard",
+              id,
+              name: id,
+              prompt: `inspect ${id}`,
+              promptTruncated: false,
+              summary: `completed ${id}`,
+              status: "complete",
+              activity: [],
+            },
           },
-        },
         } satisfies Fixtures.TranscriptUnit.Unit
         return parentId === undefined ? unit : { ...unit, parentId }
       }

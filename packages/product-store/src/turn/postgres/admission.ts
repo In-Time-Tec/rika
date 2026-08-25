@@ -138,11 +138,7 @@ export const makeTurnSqlAdmission = (
             .update(rikaTurns)
             .set({ executionLinkJson: encoded, updatedAt: now })
             .where(
-              and(
-                eq(rikaTurns.id, id),
-                eq(rikaTurns.turnKind, "AgentExecution"),
-                isNull(rikaTurns.executionLinkJson),
-              ),
+              and(eq(rikaTurns.id, id), eq(rikaTurns.turnKind, "AgentExecution"), isNull(rikaTurns.executionLinkJson)),
             )
             .returning(turnFields)
           if (rows[0] === undefined)

@@ -1,4 +1,5 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import { identityMember } from "@rika/identity"
 import {
   EnvironmentReferenceId,
   EnvironmentValueDigest,
@@ -18,6 +19,14 @@ import {
 } from "@rika/product/environment-policy"
 import { EnvironmentStore, EnvironmentStoreError } from "@rika/product/environment-store"
 import { BetterAuthUserId, OwnerId, ProjectId, type HostedOwner } from "@rika/product/hosted-model"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedOwners,
+  rikaHostedProjects,
+  rikaHostedThreads,
+} from "@rika/product-store/database-schema"
+import { and, eq, inArray, isNotNull } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Context, Crypto, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
 import * as SecretCipher from "../../security/secret-cipher"
@@ -123,7 +132,8 @@ export const layer = (options: {
   Layer.effect(
     HostedEnvironment,
     Effect.gen(function* () {
-      const sql = yield* PgClient.PgClient
+      yield* PgClient.PgClient
+      const db = yield* PgDrizzle.makeWithDefaults()
       const crypto = yield* Crypto.Crypto
       const store = yield* EnvironmentStore
       const cipher = SecretCipher.makeSecretCipher({ encodedKey: options.encryptionKey, domain: "environment" })
@@ -131,28 +141,39 @@ export const layer = (options: {
       const authority = Effect.fn("HostedEnvironment.authority")(function* (input: OwnerInput) {
         if (input.owner._tag === "PersonalOwner" && input.owner.userId !== input.principal.userId)
           return yield* rejected("forbidden", "Owner is unavailable")
-        const rows = yield* sql<{
-          readonly ownerId: string
-          readonly kind: "personal" | "organization"
-          readonly projectId: string | null
-        }>`SELECT owner_record.id AS "ownerId", owner_record.kind, project.id AS "projectId"
-          FROM rika_hosted_owners owner_record
-          LEFT JOIN "member" membership ON membership.organization_id = owner_record.organization_id
-            AND membership.user_id = ${input.principal.userId}
-            AND membership.role IN ('owner', 'admin')
-          LEFT JOIN rika_hosted_projects project ON project.owner_id = owner_record.id
-            AND project.id = ${input.projectId ?? null}
-          WHERE ((${input.owner._tag === "PersonalOwner"} AND owner_record.kind = 'personal'
-              AND owner_record.user_id = ${input.principal.userId})
-            OR (${input.owner._tag === "OrganizationOwner"} AND owner_record.kind = 'organization'
-              AND owner_record.organization_id = ${input.owner._tag === "OrganizationOwner" ? input.owner.organizationId : null}
-              AND membership.id IS NOT NULL))
-            AND (${input.projectId ?? null}::text IS NULL OR project.id IS NOT NULL)`.pipe(Effect.mapError(unavailable))
+        const rows = yield* db
+          .select({ ownerId: rikaHostedOwners.id, projectId: rikaHostedProjects.id })
+          .from(rikaHostedOwners)
+          .leftJoin(
+            identityMember,
+            and(
+              eq(identityMember.organizationId, rikaHostedOwners.organizationId),
+              eq(identityMember.userId, input.principal.userId),
+              inArray(identityMember.role, ["owner", "admin"]),
+            ),
+          )
+          .leftJoin(
+            rikaHostedProjects,
+            and(eq(rikaHostedProjects.ownerId, rikaHostedOwners.id), eq(rikaHostedProjects.id, input.projectId ?? "")),
+          )
+          .where(
+            and(
+              input.owner._tag === "PersonalOwner"
+                ? and(eq(rikaHostedOwners.kind, "personal"), eq(rikaHostedOwners.userId, input.principal.userId))
+                : and(
+                    eq(rikaHostedOwners.kind, "organization"),
+                    eq(rikaHostedOwners.organizationId, input.owner.organizationId),
+                    isNotNull(identityMember.id),
+                  ),
+              input.projectId === undefined ? undefined : isNotNull(rikaHostedProjects.id),
+            ),
+          )
+          .pipe(Effect.mapError(unavailable))
         const row = rows[0]
         if (row === undefined) return yield* rejected("forbidden", "Owner or Project is unavailable")
         const common: ResolvedOwner = {
           ownerId: OwnerId.make(row.ownerId),
-          kind: row.kind,
+          kind: input.owner._tag === "PersonalOwner" ? "personal" : "organization",
           userId: BetterAuthUserId.make(input.principal.userId),
         }
         return row.projectId === null ? common : { ...common, projectId: ProjectId.make(row.projectId) }
@@ -312,21 +333,27 @@ export const layer = (options: {
 
       const usePhase: HostedEnvironmentService["usePhase"] = Effect.fn("HostedEnvironment.usePhase")(
         function* (input, use) {
-          return yield* sql
-            .withTransaction(
+          return yield* db
+            .transaction((tx) =>
               Effect.gen(function* () {
-                const assignments = yield* sql<{
-                  readonly ownerId: string
-                  readonly projectId: string | null
-                  readonly userId: string
-                  readonly checkout: unknown
-                }>`SELECT assignment.owner_id AS "ownerId", thread.project_id AS "projectId",
-                    thread.created_by_user_id AS "userId", assignment.checkout
-                  FROM rika_hosted_executor_assignments assignment
-                  JOIN rika_hosted_threads thread ON thread.id = assignment.thread_id
-                    AND thread.owner_id = assignment.owner_id
-                  WHERE assignment.id = ${input.assignmentId}
-                  FOR SHARE OF assignment, thread`.pipe(Effect.mapError(unavailable))
+                const assignments = yield* tx
+                  .select({
+                    ownerId: rikaHostedExecutorAssignments.ownerId,
+                    projectId: rikaHostedThreads.projectId,
+                    userId: rikaHostedThreads.createdByUserId,
+                    checkout: rikaHostedExecutorAssignments.checkout,
+                  })
+                  .from(rikaHostedExecutorAssignments)
+                  .innerJoin(
+                    rikaHostedThreads,
+                    and(
+                      eq(rikaHostedThreads.id, rikaHostedExecutorAssignments.threadId),
+                      eq(rikaHostedThreads.ownerId, rikaHostedExecutorAssignments.ownerId),
+                    ),
+                  )
+                  .where(eq(rikaHostedExecutorAssignments.id, input.assignmentId))
+                  .for("share", { of: [rikaHostedExecutorAssignments, rikaHostedThreads] })
+                  .pipe(Effect.mapError(unavailable))
                 const assignment = assignments[0]
                 if (assignment === undefined) return yield* rejected("missing", "Executor assignment is unavailable")
                 const checkout = Option.getOrUndefined(decodeCheckout(assignment.checkout))

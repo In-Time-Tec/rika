@@ -49,9 +49,7 @@ export const makeProductOperationService = (input: ProductOperationServiceInput)
   return Service.of({
     stopActiveExecutionWork: stopActiveExecutionWorkWithProjection.pipe(
       Effect.provide(typedExecutionDependencies),
-      Effect.mapError((error) =>
-        OperationUnavailable.make({ operation: "ExecutionShutdown", message: String(error) }),
-      ),
+      Effect.mapError((error) => OperationUnavailable.make({ operation: "ExecutionShutdown", message: String(error) })),
     ),
     closeAdmissions,
     run: ProductOperationProgram.makeProductOperationRun({

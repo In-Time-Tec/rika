@@ -5,12 +5,7 @@ import { Surface } from "../../../src/opentui/surface/service"
 import { colors } from "../../../src/presentation/terminal/theme"
 import { initial, type Model } from "../../../src/state/model"
 import { update } from "../../../src/state/reducer/model"
-import {
-  openTui,
-  _insertText,
-  _giantSubagentModel,
-  _collapsedSubagentModel,
-} from "./window.fixture"
+import { openTui, _insertText, _giantSubagentModel, _collapsedSubagentModel } from "./window.fixture"
 test("toggles expandable transcript headers without selecting them and keeps bodies selectable", () =>
   Effect.runPromise(
     Effect.gen(function* () {

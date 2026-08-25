@@ -19,9 +19,7 @@ export interface Interface {
     input: ReadInput,
   ) => Effect.Effect<ReadSuccess, QueryError | ThreadNotFoundError | ArchivedThreadError>
 }
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/query/service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/query/service") {}
 export class Factory extends Context.Service<
   Factory,
   { readonly forWorkspace: (workspace: string) => Effect.Effect<Interface> }
@@ -186,7 +184,11 @@ const makeForWorkspace = (workspace: string) =>
       yield* rebuildWorkspaceSearch().pipe(Effect.mapError(mapError))
       const searchInput = { workspace, query: input.query, limit }
       const page = yield* searches
-        .search(input.includeArchived === undefined ? searchInput : { ...searchInput, includeArchived: input.includeArchived })
+        .search(
+          input.includeArchived === undefined
+            ? searchInput
+            : { ...searchInput, includeArchived: input.includeArchived },
+        )
         .pipe(Effect.mapError(mapError))
       const results = yield* Effect.forEach(
         page.results,

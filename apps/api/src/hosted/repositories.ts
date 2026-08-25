@@ -743,7 +743,9 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
       const recordPush: HostedRepositoriesService["recordPush"] = Effect.fn("HostedRepositories.recordPush")(
         function* (approved, result, state) {
           return toPublication(
-            yield* store.recordPush(toPublicationTransition(approved), result, state).pipe(Effect.mapError(mapStoreError)),
+            yield* store
+              .recordPush(toPublicationTransition(approved), result, state)
+              .pipe(Effect.mapError(mapStoreError)),
           )
         },
       )

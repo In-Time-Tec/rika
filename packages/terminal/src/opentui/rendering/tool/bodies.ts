@@ -5,12 +5,7 @@ import { decodeTranscriptBlocks, type TranscriptBlock } from "../../../state/tra
 import { colors } from "../../../presentation/terminal/theme"
 import { plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
-import {
-  renderDiffStyled,
-  renderPartialDiffStyled,
-  renderPierreDiff,
-  renderToolSummary,
-} from "../diff-text-adapter"
+import { renderDiffStyled, renderPartialDiffStyled, renderPierreDiff, renderToolSummary } from "../diff-text-adapter"
 import { transcriptWrapWidth } from "../transcript/window"
 import { wrapTextToWidth, wrapBodyText, iconChar, markerText } from "../window"
 import {

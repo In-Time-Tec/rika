@@ -18,7 +18,7 @@ import {
 import * as TurnStore from "@rika/product-store/turn-repository"
 import { Clock, Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { layer as executionReconcilerLayer } from "../../../src/hosted-execution-reconciler"
+import { layer as executionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as projectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
 import { layer as turnWorkerLayer } from "../../../src/hosted/thread/turn-worker"
 

@@ -123,8 +123,7 @@ test("trimTranscriptTimeline never splits a parent-child subtree at the boundary
   expect(keptKeys.filter((key) => key?.startsWith("child-"))).toHaveLength(8)
   expect(keptKeys.filter((key) => key?.startsWith("leading-"))).toHaveLength(1)
   expect(keptKeys).toHaveLength(10)
-  for (const item of keptItems)
-    if (item.parentId !== undefined) expect(keptKeys).toContain(item.parentId)
+  for (const item of keptItems) if (item.parentId !== undefined) expect(keptKeys).toContain(item.parentId)
 })
 
 test("trimTranscriptTimeline is a no-op at or below the cap", () => {

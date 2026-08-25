@@ -65,10 +65,7 @@ const cancelledUnit = (unit: Unit): Unit => {
   }
 }
 
-const normalizeCancellation = (
-  units: ReadonlyArray<Unit>,
-  parentId?: string,
-) => {
+const normalizeCancellation = (units: ReadonlyArray<Unit>, parentId?: string) => {
   const cancelledTurns = new Set(units.filter(isCancellationNotice).map((unit) => unit.turnId))
   if (cancelledTurns.size === 0) return { units, parentIds: new Set<string>() }
   const markerTurns = new Set(
@@ -122,7 +119,12 @@ const cancelParentRows = (model: Model, parentIds: ReadonlySet<string>): Model =
   if (parentIds.size === 0) return model
   let changed = false
   const blocks = model.blocks.map((candidate) => {
-    if (!isBlock(candidate) || candidate._tag !== "ToolCall" || candidate.status !== "running" || !parentIds.has(candidate.id))
+    if (
+      !isBlock(candidate) ||
+      candidate._tag !== "ToolCall" ||
+      candidate.status !== "running" ||
+      !parentIds.has(candidate.id)
+    )
       return candidate
     changed = true
     const cancelled: Block = { ...candidate, status: "cancelled" }
@@ -170,9 +172,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   const modelBlocks = model.blocks.filter(isBlock)
   const parentCancelled =
     parentId !== undefined &&
-    modelBlocks.some(
-      (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
-    )
+    modelBlocks.some((block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled")
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
   const projectedModel = cancelParentRows(model, cancellation.parentIds)
@@ -385,19 +385,12 @@ export const projectRootUnits: {
 )
 
 export const projectUnits: {
-  (
-    model: import("../../state/model").Model,
-    units: ReadonlyArray<Unit>,
-  ): import("../../state/model").Model
-  (
-    units: ReadonlyArray<Unit>,
-  ): (model: import("../../state/model").Model) => import("../../state/model").Model
+  (model: import("../../state/model").Model, units: ReadonlyArray<Unit>): import("../../state/model").Model
+  (units: ReadonlyArray<Unit>): (model: import("../../state/model").Model) => import("../../state/model").Model
 } = Function.dual(
   2,
-  (
-    model: import("../../state/model").Model,
-    units: ReadonlyArray<Unit>,
-  ): import("../../state/model").Model => projectUnitsImpl(model, units),
+  (model: import("../../state/model").Model, units: ReadonlyArray<Unit>): import("../../state/model").Model =>
+    projectUnitsImpl(model, units),
 )
 
 export const projectChildUnits: {
@@ -410,34 +403,31 @@ export const projectChildUnits: {
     parentId: string,
     units: ReadonlyArray<Unit>,
   ): (model: import("../../state/model").Model) => import("../../state/model").Model
-} = Function.dual(
-  3,
-  (model: import("../../state/model").Model, parentId: string, units: ReadonlyArray<Unit>) => {
-    const projected = projectUnitsImpl(model, units, parentId)
-    const parentCancelled = projected.blocks.filter(isBlock).some(
-      (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
+} = Function.dual(3, (model: import("../../state/model").Model, parentId: string, units: ReadonlyArray<Unit>) => {
+  const projected = projectUnitsImpl(model, units, parentId)
+  const parentCancelled = projected.blocks
+    .filter(isBlock)
+    .some((block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled")
+  if (!parentCancelled) return projected
+  const childIndexes = new Set(
+    projected.items
+      .filter(isTranscriptItem)
+      .flatMap((item) => (item._tag === "Block" && item.parentId === parentId ? [item.index] : [])),
+  )
+  const blocks = projected.blocks.filter(isBlock)
+  for (const index of childIndexes) {
+    const block = blocks[index]
+    if (block === undefined) continue
+    if (
+      (block._tag !== "ToolCall" && block._tag !== "SubagentCard") ||
+      (block.status !== "queued" && block.status !== "running")
     )
-    if (!parentCancelled) return projected
-    const childIndexes = new Set(
-      projected.items.filter(isTranscriptItem).flatMap((item) =>
-        item._tag === "Block" && item.parentId === parentId ? [item.index] : [],
-      ),
-    )
-    const blocks = projected.blocks.filter(isBlock)
-    for (const index of childIndexes) {
-      const block = blocks[index]
-      if (block === undefined) continue
-      if (
-        (block._tag !== "ToolCall" && block._tag !== "SubagentCard") ||
-        (block.status !== "queued" && block.status !== "running")
-      )
-        continue
-      const cancelled: Block = { ...block, status: "cancelled" }
-      blocks[index] = cancelled
-    }
-    return {
-      ...projected,
-      blocks,
-    }
-  },
-)
+      continue
+    const cancelled: Block = { ...block, status: "cancelled" }
+    blocks[index] = cancelled
+  }
+  return {
+    ...projected,
+    blocks,
+  }
+})

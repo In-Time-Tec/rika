@@ -56,9 +56,7 @@ export interface Interface {
   >
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/execution/gateway/service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/execution/gateway/service") {}
 
 export const makeTest = (overrides: Partial<Interface> = {}): Interface =>
   Service.of({

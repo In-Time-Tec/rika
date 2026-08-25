@@ -3,6 +3,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import { appJwtJoseLayer } from "@rika/github-app/app-jwt"
 import { installationLayer } from "@rika/github-app/installation-service"
 import { installationTokenLayer } from "@rika/github-app/installation-token"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Config, Context, Effect, Layer, Redacted } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Runtime as TenetRuntime } from "tenetkit/runtime"
@@ -26,7 +27,7 @@ import {
 } from "../executor/service"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./environment/runtime"
 import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "./thread/application"
-import { HostedThreadCommandWorker, layer as hostedThreadCommandWorkerLayer } from "../hosted-thread-command-worker"
+import { HostedThreadCommandWorker, layer as hostedThreadCommandWorkerLayer } from "./thread/command-worker"
 import { HostedThreadProtocol, layerWithOptions as hostedThreadProtocolLayer } from "./thread/protocol"
 import { HostedModelRegistry, layer as hostedModelRegistryLayer } from "./environment/model-registry"
 import { HostedProduct, layer as hostedProductLayer } from "./product"
@@ -36,7 +37,7 @@ import {
   layer as hostedProviderCredentialsLayer,
   storeLayer as providerCredentialStoreLayer,
 } from "./environment/provider-credentials"
-import { HostedExecutionReconciler, layer as hostedExecutionReconcilerLayer } from "../hosted-execution-reconciler"
+import { HostedExecutionReconciler, layer as hostedExecutionReconcilerLayer } from "./execution/reconciler"
 import { HostedProjectionWorker, layer as hostedProjectionWorkerLayer } from "./execution/projection-worker"
 import { HostedRecovery, type HostedRecoveryService, layer as hostedRecoveryLayer } from "./execution/recovery"
 import {
@@ -46,7 +47,7 @@ import {
 } from "./repositories"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./thread/turn-worker"
 import { layer as hostedWorkspaceLayer } from "./environment/workspace"
-import { workspacePlacement } from "../hosted-workspace-placement"
+import { workspacePlacement } from "./environment/placement"
 import { layer as runnerExecutorLayer } from "../runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
 
@@ -290,11 +291,11 @@ export const layer = (options: {
         ),
       )
       const threadCommandWorker = Context.get(threadCommandWorkerContext, HostedThreadCommandWorker)
-      const placementSql = Context.get(data, PgClient.PgClient)
+      const placementDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(data))
       const threadProtocolContext = yield* Layer.build(
         hostedThreadProtocolLayer({
           databaseUrl: options.databaseUrl,
-          workspacePlacement: workspacePlacement(placementSql),
+          workspacePlacement: workspacePlacement(placementDatabase),
         }).pipe(
           Layer.provide(
             Layer.succeedContext(

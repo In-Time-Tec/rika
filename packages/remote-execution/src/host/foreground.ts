@@ -359,7 +359,9 @@ const consumeApi = (
             }
             next.set(
               operationKey,
-              terminal === undefined ? nextReceipt : { ...nextReceipt, state: "completed", response: terminal.response },
+              terminal === undefined
+                ? nextReceipt
+                : { ...nextReceipt, state: "completed", response: terminal.response },
             )
             return next
           })
@@ -723,9 +725,7 @@ const connected = (
         const delay = current.leaseExpiresAt - current.heartbeatIntervalMillis - now
         if (delay <= 0) return yield* failure("Runner controller stopped renewing the executor lease")
         yield* Effect.sleep(delay)
-      }).pipe(
-        Effect.forever,
-      )
+      }).pipe(Effect.forever)
       return yield* Effect.raceFirst(
         Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
         Effect.raceFirst(

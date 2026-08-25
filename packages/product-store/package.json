@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./database-schema": "./src/database/schema/product.ts",
     "./memory-assignments": "./src/hosted/memory-assignments.ts",
     "./memory-store": "./src/hosted/memory-store.ts",
     "./assignments": "./src/hosted/assignments.ts",
@@ -46,6 +47,8 @@
     "./migrations/postgres/0029-command-application-and-prompt-cancellation.sql": "./migrations/postgres/0029-command-application-and-prompt-cancellation.sql",
     "./migrations/postgres/0030-tenetkit-recovery-authority.sql": "./migrations/postgres/0030-tenetkit-recovery-authority.sql",
     "./migrations/postgres/0031-transactional-thread-notifications.sql": "./migrations/postgres/0031-transactional-thread-notifications.sql",
+    "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql": "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql",
+    "./migrations/postgres/0033-transcript-projection-notifications.sql": "./migrations/postgres/0033-transcript-projection-notifications.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
     "./goal-repository": "./src/goal/repository.ts",
     "./memory-thread-search-repository": "./src/search/memory-repository.ts",

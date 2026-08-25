@@ -32,12 +32,13 @@ const set = Command.make("set", { name: nameArgument, scope: scopeFlag, phase: p
 const revoke = Command.make("revoke", { name: nameArgument, scope: scopeFlag }, ({ name, scope }) =>
   Option.match(scope, {
     onNone: () => dispatch({ _tag: "Secret", action: "revoke", name }),
-    onSome: (selectedScope) => dispatch({
-    _tag: "Secret",
-    action: "revoke",
-    name,
-    scope: selectedScope,
-    }),
+    onSome: (selectedScope) =>
+      dispatch({
+        _tag: "Secret",
+        action: "revoke",
+        name,
+        scope: selectedScope,
+      }),
   }),
 )
 

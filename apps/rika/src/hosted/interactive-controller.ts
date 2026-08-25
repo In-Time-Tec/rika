@@ -54,11 +54,14 @@ const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right
     }),
   )
 
-export const makeDeferredSession = (ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>) => {
+export const makeDeferredSession = (
+  ready: Deferred.Deferred<InteractiveSession.InteractiveSession, OperationUnavailable>,
+) => {
   let attached: InteractiveSession.InteractiveSession | undefined
   const unavailable = () => Effect.fail(operationFailure("Interactive session is still initializing"))
-  const deferredEffect = (select: (session: InteractiveSession.InteractiveSession) => Effect.Effect<void, OperationUnavailable>) =>
-    Deferred.await(ready).pipe(Effect.flatMap(select))
+  const deferredEffect = (
+    select: (session: InteractiveSession.InteractiveSession) => Effect.Effect<void, OperationUnavailable>,
+  ) => Deferred.await(ready).pipe(Effect.flatMap(select))
   const session: InteractiveSession.InteractiveSession = {
     events: (dispatch) => Deferred.await(ready).pipe(Effect.flatMap((value) => value.events(dispatch))),
     currentView: () => attached?.currentView(),

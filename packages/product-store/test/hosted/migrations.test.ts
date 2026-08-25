@@ -62,6 +62,8 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0029_command_application_and_prompt_cancellation",
       "product/0030_tenetkit_recovery_authority",
       "product/0031_transactional_thread_notifications",
+      "product/0032_terminalize_unrecoverable_turns",
+      "product/0033_transcript_projection_notifications",
     ])
     for (const migration of migrations) {
       const sql = yield* readFile(migration.url)
@@ -78,5 +80,26 @@ it.effect("removes obsolete assignment and Thread identity constraints", () =>
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_executor_assignments_id_thread_id")
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_thread_events_assignment_thread_id")
     expect(sql).toContain("DROP CONSTRAINT rika_hosted_checkpoints_assignment_thread_id")
+  }),
+)
+
+it.effect("terminalizes only legacy Turns without a recoverable staged admission", () =>
+  Effect.gen(function* () {
+    const migration = migrations.find(({ id }) => id === "product/0032_terminalize_unrecoverable_turns")
+    expect(migration).toBeDefined()
+    const sql = yield* readFileString(migration!.url)
+    expect(sql).toContain("turn_record.execution_link_json IS NULL")
+    expect(sql).toContain("admission.prepared_turn_json IS NOT NULL")
+    expect(sql).toContain("status = 'failed'")
+  }),
+)
+
+it.effect("notifies Thread sockets after a transcript projection commits", () =>
+  Effect.gen(function* () {
+    const migration = migrations.find(({ id }) => id === "product/0033_transcript_projection_notifications")
+    expect(migration).toBeDefined()
+    const sql = yield* readFileString(migration!.url)
+    expect(sql).toContain("AFTER INSERT OR UPDATE ON rika_transcript_checkpoints")
+    expect(sql).toContain("rika_hosted_notify_thread_change()")
   }),
 )

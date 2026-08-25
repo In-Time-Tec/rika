@@ -36,8 +36,12 @@ export const layer = Layer.effect(
         ReadonlyArray<import("@rika/product/turn-record").Turn>,
         import("@rika/product/turn-repository").RepositoryError
       > {
-        const rows = yield* db.select(turnRowSelection).from(rikaTurns).where(eq(rikaTurns.threadId, threadId))
-          .orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id)).pipe(Effect.mapError(repositoryError))
+        const rows = yield* db
+          .select(turnRowSelection)
+          .from(rikaTurns)
+          .where(eq(rikaTurns.threadId, threadId))
+          .orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id))
+          .pipe(Effect.mapError(repositoryError))
         return yield* Effect.all(rows.map(decode))
       }),
       listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(
@@ -48,11 +52,13 @@ export const layer = Layer.effect(
           ReadonlyArray<import("@rika/product/turn-record").Turn>,
           import("@rika/product/turn-repository").RepositoryError
         > {
-          const rows = yield* db.select(turnRowSelection).from(rikaTurns).where(and(
-            eq(rikaTurns.threadId, threadId), ne(rikaTurns.status, "queued"),
-          )).orderBy(desc(rikaTurns.createdAt), desc(rikaTurns.id)).limit(Math.max(0, Math.floor(limit))).pipe(
-            Effect.mapError(repositoryError),
-          )
+          const rows = yield* db
+            .select(turnRowSelection)
+            .from(rikaTurns)
+            .where(and(eq(rikaTurns.threadId, threadId), ne(rikaTurns.status, "queued")))
+            .orderBy(desc(rikaTurns.createdAt), desc(rikaTurns.id))
+            .limit(Math.max(0, Math.floor(limit)))
+            .pipe(Effect.mapError(repositoryError))
           return (yield* Effect.all(rows.map(decode))).toReversed()
         },
       ),
@@ -62,15 +68,23 @@ export const layer = Layer.effect(
       ): Effect.fn.Return<PageResult, import("@rika/product/turn-repository").RepositoryError> {
         const limit = pageSize(options.limit)
         const cursor = options.before
-        const rows = yield* db.select(turnRowSelection).from(rikaTurns).where(and(
-          eq(rikaTurns.threadId, threadId),
-          cursor === undefined ? undefined : or(
-            lt(rikaTurns.createdAt, cursor.createdAt),
-            and(eq(rikaTurns.createdAt, cursor.createdAt), lt(rikaTurns.id, cursor.id)),
-          ),
-        )).orderBy(desc(rikaTurns.createdAt), desc(rikaTurns.id)).limit(limit + 1).pipe(
-          Effect.mapError(repositoryError),
-        )
+        const rows = yield* db
+          .select(turnRowSelection)
+          .from(rikaTurns)
+          .where(
+            and(
+              eq(rikaTurns.threadId, threadId),
+              cursor === undefined
+                ? undefined
+                : or(
+                    lt(rikaTurns.createdAt, cursor.createdAt),
+                    and(eq(rikaTurns.createdAt, cursor.createdAt), lt(rikaTurns.id, cursor.id)),
+                  ),
+            ),
+          )
+          .orderBy(desc(rikaTurns.createdAt), desc(rikaTurns.id))
+          .limit(limit + 1)
+          .pipe(Effect.mapError(repositoryError))
         const turns = (yield* Effect.all(rows.slice(0, limit).map(decode))).toReversed()
         return {
           turns,
@@ -83,11 +97,19 @@ export const layer = Layer.effect(
         import("@rika/product/turn-record").AgentExecutionTurn | undefined,
         import("@rika/product/turn-repository").RepositoryError
       > {
-        const rows = yield* db.select(turnRowSelection).from(rikaTurns).where(and(
-          eq(rikaTurns.threadId, threadId),
-          eq(rikaTurns.turnKind, "AgentExecution"),
-          inArray(rikaTurns.status, ["accepted", "running", "waiting", "cancelling"]),
-        )).orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id)).limit(1).pipe(Effect.mapError(repositoryError))
+        const rows = yield* db
+          .select(turnRowSelection)
+          .from(rikaTurns)
+          .where(
+            and(
+              eq(rikaTurns.threadId, threadId),
+              eq(rikaTurns.turnKind, "AgentExecution"),
+              inArray(rikaTurns.status, ["accepted", "running", "waiting", "cancelling"]),
+            ),
+          )
+          .orderBy(asc(rikaTurns.createdAt), asc(rikaTurns.id))
+          .limit(1)
+          .pipe(Effect.mapError(repositoryError))
         return rows[0] === undefined ? undefined : yield* decodeAgent(rows[0])
       }),
       listNonterminal: listAgentTurns(db, repositoryError).pipe(Effect.withSpan("TurnRepository.listNonterminal")),

@@ -46,6 +46,4 @@ export interface Interface {
   readonly discard: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/repository/record/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread/repository/record/Service") {}

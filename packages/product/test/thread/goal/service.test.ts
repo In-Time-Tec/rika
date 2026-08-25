@@ -16,9 +16,7 @@ const goalChanged = {
 
 describe("the Goal indicator is fed live server state", () => {
   it("encodes and decodes over the interactive wire", () => {
-    const decoded = Schema.decodeSync(InteractiveEventSchema)(
-      Schema.encodeSync(InteractiveEventSchema)(goalChanged),
-    )
+    const decoded = Schema.decodeSync(InteractiveEventSchema)(Schema.encodeSync(InteractiveEventSchema)(goalChanged))
     expect(decoded).toEqual(goalChanged)
   })
 

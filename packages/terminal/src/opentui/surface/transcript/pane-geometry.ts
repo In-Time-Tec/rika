@@ -7,18 +7,11 @@ import {
 } from "@opentui/core"
 import { Effect as EffectRuntime } from "effect"
 import { topmostVisibleAnchor } from "../../../presentation/transcript/viewport/anchor-geometry"
-import {
-  mountedTranscriptRowBudget,
-  transcriptOverscanRows,
-} from "../../../presentation/transcript/window"
+import { mountedTranscriptRowBudget, transcriptOverscanRows } from "../../../presentation/transcript/window"
 import { clampScrollTop } from "../../../presentation/transcript/viewport/model"
 import { atBottomWithin, type ViewportMetrics } from "../../../presentation/transcript/viewport/metrics"
 import type { ViewportAnchor } from "../../../presentation/transcript/viewport/state"
-import type {
-  TranscriptAnchor,
-  TranscriptAnchorTarget,
-  TranscriptRenderableRecord,
-} from "./types"
+import type { TranscriptAnchor, TranscriptAnchorTarget, TranscriptRenderableRecord } from "./types"
 
 interface TranscriptAnchorRestoration {
   readonly scrollTop: number

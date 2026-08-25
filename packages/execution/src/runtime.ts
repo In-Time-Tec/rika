@@ -22,7 +22,7 @@ import { ProviderCredentialStore } from "@rika/product/provider-credential-store
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type ProviderCredentialStoreService = ProviderCredentialStore["Service"]
-import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { type ConfigureOptions, type KernelOptions, type RemoteCellRoute, configure, resolveCellRoute } from "./route"
 import * as Route from "./route"
@@ -324,49 +324,6 @@ const make = (
 ) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
-    const resolveParkedOperations = (runId: string, reason: string) =>
-      Effect.gen(function* () {
-        const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
-        const parked = inspection.runs.filter(({ run }) => run.status === "needs-resolution")
-        if (parked.length === 0) return
-        yield* Effect.forEach(
-          parked,
-          ({ run }) =>
-            runtime.history({ runId: run.runId, limit: 512 }).pipe(
-              Effect.map((events) =>
-                events.flatMap((event) => (event._tag === "OperationUnknown" ? [event.operationId] : [])),
-              ),
-              Effect.flatMap((operationIds) =>
-                Effect.forEach(
-                  [...new Set(operationIds)],
-                  (operationId) =>
-                    runtime.resolveOperation({
-                      runId: run.runId,
-                      operationId,
-                      idempotencyKey: `${operationId}:cancelled`,
-                      resolution: {
-                        _tag: "Failed",
-                        error: { _tag: "OperationInterrupted", message: reason },
-                      },
-                    }),
-                  { discard: true },
-                ),
-              ),
-            ),
-          { discard: true },
-        )
-      }).pipe(Effect.ignore)
-
-    const awaitSettledCancellation = (runId: string, reason: string) =>
-      resolveParkedOperations(runId, reason).pipe(
-        Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
-        Effect.map((inspection) =>
-          inspection.runs.some(({ run }) => run.status === "needs-resolution" || run.status === "cancelling"),
-        ),
-        Effect.flatMap((pending) => (pending ? Effect.fail("pending" as const) : Effect.void)),
-        Effect.retry({ times: 40, schedule: Schedule.spaced("100 millis") }),
-      )
-
     const respondToApproval = (
       decision: "approve" | "deny",
       link: ExecutionGateway.ExecutionLink,
@@ -565,7 +522,10 @@ const make = (
           [
             runtime
               .cancel({ runId: link.runId, reason })
-              .pipe(Effect.andThen(awaitSettledCancellation(link.runId, reason))),
+              .pipe(
+                Effect.andThen(RunTree.awaitTerminal(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
+                Effect.asVoid,
+              ),
             link.titleRunId === undefined
               ? Effect.void
               : runtime.cancel({ runId: link.titleRunId, reason }).pipe(Effect.ignore),

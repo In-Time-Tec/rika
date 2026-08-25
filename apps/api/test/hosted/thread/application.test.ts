@@ -23,6 +23,7 @@ import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
+const JsonExecutionLink = Schema.fromJsonString(ExecutionGateway.ExecutionLink)
 
 const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
   Effect.tryPromise(() => pool.query(text, [...values]))
@@ -56,12 +57,24 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
               ('personal-owner', 'personal', 'owner-user'),
               ('other-owner', 'personal', 'other-user')`,
         )
+        const cancellations: Array<{ readonly runId: string; readonly reason: string }> = []
+        const gateway = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
         const databaseLayer = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const dependencies = Layer.mergeAll(
           databaseLayer,
           hostedStoreLayer.pipe(Layer.provide(databaseLayer)),
           BunCrypto.layer,
-          ExecutionGateway.layerTest(),
+          Layer.succeed(ExecutionGateway.Service, {
+            ...gateway,
+            cancelTurn: (link, reason) =>
+              Effect.sync(() => {
+                cancellations.push({ runId: link.runId, reason })
+              }).pipe(
+                Effect.andThen(
+                  Effect.fail(ExecutionGateway.CancelTurnFailure.make({ message: "Cancellation backend unavailable" })),
+                ),
+              ),
+          }),
           ExecutionSessionLifecycle.layerTest(),
           hostedModelRegistryTestLayer,
           Layer.succeed(ThreadProtocolStore, {
@@ -247,6 +260,29 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
               checkpoint,
             },
           ],
+        })
+        const executionLink = yield* Schema.encodeEffect(JsonExecutionLink)({
+          runId: "authorization-run",
+          turnId: turn.id,
+          threadId: turn.threadId,
+        })
+        yield* query(pool, `UPDATE rika_turns SET execution_link_json = $1 WHERE id = $2`, [executionLink, turn.id])
+        const cancellation = yield* application.interactive(
+          {
+            ownerId: OwnerId.make("other-owner"),
+            threadId: ThreadId.make("read-only-thread"),
+            commandId: "cancel-authorization-turn",
+            command: { _tag: "Cancel", targetTurnId: turn.id },
+          },
+          Effect.succeed,
+        )
+        expect(cancellations).toEqual([{ runId: "authorization-run", reason: "Cancelled by user" }])
+        expect(cancellation.events).toContainEqual({
+          _tag: "ExecutionControlFailed",
+          threadId: "read-only-thread",
+          turnId: "authorization-turn",
+          action: "cancel",
+          failure: expect.objectContaining({ message: "Cancellation backend unavailable" }),
         })
       } finally {
         yield* Effect.tryPromise(() => pool.end())

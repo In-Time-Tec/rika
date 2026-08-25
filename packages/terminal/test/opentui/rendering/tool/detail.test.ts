@@ -3,13 +3,7 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
-import {
-  openTui,
-  _insertText,
-  _streamingShell,
-  _giantSubagentModel,
-  _collapsedSubagentModel,
-} from "./detail.fixture"
+import { openTui, _insertText, _streamingShell, _giantSubagentModel, _collapsedSubagentModel } from "./detail.fixture"
 test("mounts entries appended below a detached transcript that fits the mount budget", () =>
   Effect.runPromise(
     Effect.gen(function* () {

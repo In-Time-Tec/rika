@@ -5,7 +5,12 @@ import { Surface } from "../../../../src/opentui/surface/service"
 import { maxMountedTranscriptEntries } from "../../../../src/opentui/rendering/transcript/window"
 import { maxMountedTranscriptRows } from "../../../../src/presentation/transcript/window"
 
-import { openTui, _insertText, _streamingShell, giantSubagentModel } from "../../../support/surface/transcript/pane-geometry.fixture"
+import {
+  openTui,
+  _insertText,
+  _streamingShell,
+  giantSubagentModel,
+} from "../../../support/surface/transcript/pane-geometry.fixture"
 test("keeps a large expanded subagent tree in one mounted row window", () =>
   Effect.runPromise(
     Effect.gen(function* () {

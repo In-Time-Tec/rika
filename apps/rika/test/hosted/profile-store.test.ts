@@ -23,9 +23,7 @@ it.effect("persists the current owner format and rejects stale profiles", () =>
       yield* store.save(profile)
       expect(Option.getOrThrow(yield* store.load)).toEqual(profile)
       expect(
-        yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
-          yield* fileSystem.readFileString(filename),
-        ),
+        yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(yield* fileSystem.readFileString(filename)),
       ).toEqual({
         formatVersion: 3,
         origin: profile.origin,

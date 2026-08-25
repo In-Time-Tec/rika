@@ -1,4 +1,4 @@
-import { Crypto, Effect, Layer, Option, Redacted } from "effect"
+import { Crypto, Deferred, Effect, Layer, Option, Redacted } from "effect"
 import { AssignmentError, ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
@@ -30,9 +30,12 @@ export interface FakeProviderState {
   createFailure: boolean
   bootstrapFailure: boolean
   connectFailure: boolean
+  readonly connectFailures: Set<string>
   pauseFailure: boolean
   killFailure: boolean
   killResult: boolean
+  killGate: Deferred.Deferred<void> | null
+  readonly killStarted: Deferred.Deferred<void>
   inventory: Array<InventoryEntry>
 }
 
@@ -43,6 +46,9 @@ export interface Harness {
   checkpointLoadFailure: CheckpointError | null
   checkpointCommitFailures: number
   checkpointCommitAttempts: number
+  bindResponseFailures: number
+  failReadAfterBind: boolean
+  assignmentReadFailures: number
   readonly checkoutRequests: Array<{
     readonly installationId: string
     readonly owner: string
@@ -73,7 +79,7 @@ const providerLayer = (state: FakeProviderState) =>
       },
       connect: (sandboxId, timeoutMillis) => {
         state.connects.push({ sandboxId, timeoutMillis })
-        return state.connectFailure
+        return state.connectFailure || state.connectFailures.has(sandboxId)
           ? Effect.fail(ProviderError.make({ operation: "connect", message: "cold wake failed" }))
           : Effect.succeed({ sandboxId, state: "running" })
       },
@@ -90,9 +96,14 @@ const providerLayer = (state: FakeProviderState) =>
       },
       kill: (sandboxId) => {
         state.kills.push(sandboxId)
-        return state.killFailure
-          ? Effect.fail(ProviderError.make({ operation: "kill", message: "kill failed" }))
-          : Effect.succeed(state.killResult)
+        Deferred.doneUnsafe(state.killStarted, Effect.void)
+        return (state.killGate === null ? Effect.void : Deferred.await(state.killGate)).pipe(
+          Effect.andThen(
+            state.killFailure
+              ? Effect.fail(ProviderError.make({ operation: "kill", message: "kill failed" }))
+              : Effect.succeed(state.killResult),
+          ),
+        )
       },
       touch: (sandboxId, timeoutMillis) => {
         state.touches.push({ sandboxId, timeoutMillis })
@@ -125,9 +136,12 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     createFailure: false,
     bootstrapFailure: false,
     connectFailure: false,
+    connectFailures: new Set(),
     pauseFailure: false,
     killFailure: false,
     killResult: true,
+    killGate: null,
+    killStarted: Deferred.makeUnsafe<void>(),
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
@@ -139,6 +153,9 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     checkpointLoadFailure: null,
     checkpointCommitFailures: 0,
     checkpointCommitAttempts: 0,
+    bindResponseFailures: 0,
+    failReadAfterBind: false,
+    assignmentReadFailures: 0,
     checkoutRequests: [],
     get layer() {
       return layer
@@ -241,6 +258,21 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
       Effect.map((repository) =>
         ExecutorAssignments.of({
           ...repository,
+          get: (assignmentId) =>
+            Effect.suspend(() => {
+              if (harness.assignmentReadFailures === 0) return repository.get(assignmentId)
+              harness.assignmentReadFailures -= 1
+              return Effect.fail(AssignmentError.make({ reason: "database", message: "assignment read failed" }))
+            }),
+          bindProviderInstance: (input) =>
+            repository.bindProviderInstance(input).pipe(
+              Effect.flatMap((assignment) => {
+                if (harness.bindResponseFailures === 0) return Effect.succeed(assignment)
+                harness.bindResponseFailures -= 1
+                if (harness.failReadAfterBind) harness.assignmentReadFailures += 1
+                return Effect.fail(AssignmentError.make({ reason: "database", message: "bind response lost" }))
+              }),
+            ),
           commitCheckpoint: (input) =>
             Effect.suspend(() => {
               harness.checkpointCommitAttempts += 1

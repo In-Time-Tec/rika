@@ -6,7 +6,11 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as ViewState from "@rika/terminal/terminal-state"
 import * as Reducer from "@rika/terminal/terminal-state-reducer"
 import * as Session from "@rika/terminal/terminal-session"
-import { defaultOpenArguments, parseChangedFiles, resolveLocalFile } from "../../../../src/interactive/process/workspace/files"
+import {
+  defaultOpenArguments,
+  parseChangedFiles,
+  resolveLocalFile,
+} from "../../../../src/interactive/process/workspace/files"
 import { materializePromptParts } from "../../../../src/interactive/process/input/prompt"
 import {
   pasteClipboardPng,

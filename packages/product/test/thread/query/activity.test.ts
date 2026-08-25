@@ -10,15 +10,15 @@ const threadId = Thread.ThreadId.make("thread-a")
 
 const toolUnit = (key: string, output: string | undefined): Unit => {
   const block = {
-      _tag: "ToolCall",
-      id: key,
-      name: "edit",
-      input: "{}",
-      status: "complete",
-      presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
-      detail: "src/a.ts",
-      files: [],
-    } satisfies Extract<Unit["content"], { _tag: "Block" }>["block"]
+    _tag: "ToolCall",
+    id: key,
+    name: "edit",
+    input: "{}",
+    status: "complete",
+    presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+    detail: "src/a.ts",
+    files: [],
+  } satisfies Extract<Unit["content"], { _tag: "Block" }>["block"]
   return {
     key,
     turnId,

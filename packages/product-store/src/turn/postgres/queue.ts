@@ -1,25 +1,10 @@
 import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
-import {
-  and,
-  asc,
-  count,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  ne,
-  notExists,
-  sql as expression,
-} from "drizzle-orm"
+import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notExists, sql as expression } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Random } from "effect"
-import {
-  rikaThreadQueueState,
-  rikaTurnSteeringOutbox,
-  rikaTurns,
-} from "../../database/schema/product"
+import { rikaThreadQueueState, rikaTurnSteeringOutbox, rikaTurns } from "../../database/schema/product"
 import { decodeAgent, decodeQueueState } from "./row-codec"
 import { repositoryError, submissionError } from "../memory/errors"
 
@@ -61,10 +46,7 @@ const eligibleQueued = (executor: PgDrizzle.EffectPgDatabase) =>
         .select({ requestId: rikaTurnSteeringOutbox.requestId })
         .from(rikaTurnSteeringOutbox)
         .where(
-          and(
-            eq(rikaTurnSteeringOutbox.sourceTurnId, rikaTurns.id),
-            ne(rikaTurnSteeringOutbox.status, "rejected"),
-          ),
+          and(eq(rikaTurnSteeringOutbox.sourceTurnId, rikaTurns.id), ne(rikaTurnSteeringOutbox.status, "rejected")),
         ),
     ),
   )

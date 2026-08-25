@@ -16,6 +16,9 @@ export const makeProductOperationRuntimeState = (
 ): Effect.Effect<ProductOperationRuntimeState, Error, never> =>
   Effect.gen(function* () {
     const runtime = yield* buildProductOperationExecutionState({ ...input, queueMutationEvent })
-    const makeInteractiveSession = ProductOperationSession.makeProductOperationInteractiveSession({ ...input, ...runtime })
+    const makeInteractiveSession = ProductOperationSession.makeProductOperationInteractiveSession({
+      ...input,
+      ...runtime,
+    })
     return { ...runtime, makeInteractiveSession }
   })

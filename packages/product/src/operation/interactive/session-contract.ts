@@ -229,8 +229,12 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure
     readonly admit: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["admit"]
-    readonly admitLocal: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["admitLocal"]
-    readonly attachFeed: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["attachFeed"]
+    readonly admitLocal: ReturnType<
+      typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition
+    >["admitLocal"]
+    readonly attachFeed: ReturnType<
+      typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition
+    >["attachFeed"]
   }
 
 export type InteractiveSupervisionError =

@@ -18,9 +18,9 @@ export function queueState(
 }
 
 const withQueueStateImpl = (state: MemoryState, threadId: ThreadId, queue: MemoryQueueState): MemoryState => ({
-    ...state,
-    queues: new Map(state.queues).set(threadId, queue),
-  })
+  ...state,
+  queues: new Map(state.queues).set(threadId, queue),
+})
 
 export const withQueueState: {
   (threadId: ThreadId, queue: MemoryQueueState): (state: MemoryState) => MemoryState

@@ -80,10 +80,11 @@ describe("mcp binding", () => {
       const response = yield* mounted.invoke({ module: "mcp", operation: "tools", input: { server: "files" } })
       expect(response._tag).toBe("Success")
       if (response._tag === "Success")
-        expect((yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))(response.output)).map((entry) => entry.name)).toEqual([
-          "read",
-          "write",
-        ])
+        expect(
+          (yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String })))(
+            response.output,
+          )).map((entry) => entry.name),
+        ).toEqual(["read", "write"])
     }),
   )
 

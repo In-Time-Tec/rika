@@ -27,19 +27,19 @@ export const styledTextValue = (value: StyledText | string) =>
 
 const streamingShellImpl = (id: string, output: string | undefined) => {
   const block = {
-  _tag: "ToolCall" as const,
-  id,
-  name: "bash",
-  input: `{"command":"printf ${id}"}`,
-  status: "running" as const,
-  presentation: {
-    family: "shell" as const,
-    action: "shell",
-    activeLabel: "Running",
-    completeLabel: "Ran",
-  },
-  detail: `printf ${id}`,
-  files: [],
+    _tag: "ToolCall" as const,
+    id,
+    name: "bash",
+    input: `{"command":"printf ${id}"}`,
+    status: "running" as const,
+    presentation: {
+      family: "shell" as const,
+      action: "shell",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
+    detail: `printf ${id}`,
+    files: [],
   }
   return output === undefined ? block : { ...block, output }
 }

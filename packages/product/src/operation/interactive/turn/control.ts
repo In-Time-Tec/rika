@@ -48,22 +48,30 @@ export const makeInteractiveControl = (input: {
     Effect.gen(function* () {
       input.dispatch(input.queueMutation(yield* input.turns.dequeue(Turn.TurnId.make(id))))
     })
-  const steeringFailed = <ErrorValue>(error: ErrorValue, requestId: string, turn?: Pick<Turn.Turn, "id" | "threadId">) =>
-    input.dispatch(turn === undefined ? {
-      _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
-      action: "steer",
-      failure: OperationFailure.makeFailure(error),
-      steeringRequestId: requestId,
-    } : {
-      _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
-      threadId: turn.threadId,
-      turnId: turn.id,
-      action: "steer",
-      failure: OperationFailure.makeFailure(error),
-      steeringRequestId: requestId,
-    })
+  const steeringFailed = <ErrorValue>(
+    error: ErrorValue,
+    requestId: string,
+    turn?: Pick<Turn.Turn, "id" | "threadId">,
+  ) =>
+    input.dispatch(
+      turn === undefined
+        ? {
+            _tag: "ExecutionControlFailed",
+            selectionEpoch: 0,
+            action: "steer",
+            failure: OperationFailure.makeFailure(error),
+            steeringRequestId: requestId,
+          }
+        : {
+            _tag: "ExecutionControlFailed",
+            selectionEpoch: 0,
+            threadId: turn.threadId,
+            turnId: turn.id,
+            action: "steer",
+            failure: OperationFailure.makeFailure(error),
+            steeringRequestId: requestId,
+          },
+    )
   const steer = (text: string, requestId: string, targetTurnId?: string) =>
     Effect.suspend(() => {
       let target: Pick<Turn.Turn, "id" | "threadId"> | undefined
@@ -293,21 +301,26 @@ export const makeInteractiveSessionControls = (
       }),
     )
   const cancel: InteractiveSession["cancel"] = (target = {}) =>
-    safe(
-      sessionDispatch,
-      Effect.gen(function* () {
+    Effect.suspend(() => {
+      let turn: Turn.Turn | undefined
+      return Effect.gen(function* () {
         const selectedThread = yield* Ref.get(interactiveThread)
-        if (selectedThread === undefined)
+        if (selectedThread === undefined) {
+          if (target.turnId !== undefined || target.threadId !== undefined)
+            return yield* operationError("Cancellation target Thread is not selected")
           return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+        }
         if (target.threadId !== undefined && target.threadId !== selectedThread.id)
           return yield* operationError(`Thread ${target.threadId} is not selected`)
         const turns = yield* TurnRepository.Service
-        const turn =
+        turn =
           target.turnId === undefined
             ? yield* turns.findActive(selectedThread.id)
             : yield* turns.get(Turn.TurnId.make(target.turnId))
-        if (turn === undefined)
+        if (turn === undefined) {
+          if (target.turnId !== undefined) return yield* operationError(`Turn ${target.turnId} is unavailable`)
           return sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+        }
         if (turn.threadId !== selectedThread.id)
           return yield* operationError(`Turn ${turn.id} does not belong to the selected Thread`)
         if (terminal(turn.status))
@@ -332,8 +345,32 @@ export const makeInteractiveSessionControls = (
         })
         const thread = yield* threadForTurn(turn)
         yield* drainQueued(thread, sessionDispatch)
-      }),
-    )
+      }).pipe(
+        Effect.provide(executionDependencies),
+        Effect.scoped,
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            if (turn === undefined) {
+              sessionDispatch({
+                _tag: "ExecutionControlFailed",
+                selectionEpoch: 0,
+                action: "cancel",
+                failure: OperationFailure.makeFailure(error),
+              })
+              return
+            }
+            sessionDispatch({
+              _tag: "ExecutionControlFailed",
+              selectionEpoch: 0,
+              threadId: turn.threadId,
+              turnId: turn.id,
+              action: "cancel",
+              failure: OperationFailure.makeFailure(error),
+            })
+          }),
+        ),
+      )
+    })
   return {
     steer: (text, requestId, targetTurnId) => safe(sessionDispatch, control.steer(text, requestId, targetTurnId)),
     interruptAndSend,

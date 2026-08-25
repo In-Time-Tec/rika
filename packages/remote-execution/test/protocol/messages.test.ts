@@ -245,8 +245,7 @@ describe("executor protocol v1", () => {
       }
       expect(yield* Schema.decodeEffect(CellLifecycleFrame)(output)).toEqual(output)
       expect(
-        (yield* Effect.flip(Schema.decodeEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) })))
-          .issue,
+        (yield* Effect.flip(Schema.decodeEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) }))).issue,
       ).toBeDefined()
       expect(
         (yield* Effect.flip(Schema.decodeUnknownEffect(CellLifecycleFrame)({ ...output, redacted: false }))).issue,

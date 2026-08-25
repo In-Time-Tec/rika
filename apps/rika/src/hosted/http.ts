@@ -361,9 +361,7 @@ export const layer = Layer.effect(
         return authenticatedJson(
           "POST",
           url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ supervisorId, activeAssignmentIds }),
-          ),
+          HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ supervisorId, activeAssignmentIds })),
           session,
           RunnerPollResult,
           "Runner admission",

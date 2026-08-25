@@ -302,13 +302,15 @@ describe("binding proxy", () => {
         yield* proxy.enter(cell)
         const completed = yield* Deferred.make<void>()
         const running = yield* Effect.forkScoped(
-          proxy.registry.invoke({
-            module: "context",
-            operation: "current",
-            input: {},
-            sessionId: cell.sessionId,
-            cellId: cell.toolCallId,
-          }).pipe(Effect.ensuring(Deferred.succeed(completed, undefined))),
+          proxy.registry
+            .invoke({
+              module: "context",
+              operation: "current",
+              input: {},
+              sessionId: cell.sessionId,
+              cellId: cell.toolCallId,
+            })
+            .pipe(Effect.ensuring(Deferred.succeed(completed, undefined))),
         )
         yield* Effect.yieldNow
         expect((yield* Deferred.poll(completed))._tag).toBe("None")

@@ -92,9 +92,9 @@ it.effect("refuses a binding request raised outside any executing cell", () =>
     const response = yield* bound.invoke(request("session-a"))
     expect(response._tag).toBe("Failure")
     if (response._tag === "Failure")
-      expect((yield* Schema.decodeUnknownEffect(Schema.Struct({ message: Schema.String }))(response.failure)).message).toContain(
-        "outside an executing cell",
-      )
+      expect(
+        (yield* Schema.decodeUnknownEffect(Schema.Struct({ message: Schema.String }))(response.failure)).message,
+      ).toContain("outside an executing cell")
     expect(observed).toEqual([])
   }).pipe(Effect.scoped),
 )
@@ -196,9 +196,7 @@ it.effect("captures the exact per-cell authority objects without reconstructing 
         Context.add(ToolContext.ToolContext, context),
         Context.add(Approvals.Approvals, approvals),
       )
-      const captured = yield* ExecutorRuntime.capture.pipe(
-        Effect.provide(authority),
-      )
+      const captured = yield* ExecutorRuntime.capture.pipe(Effect.provide(authority))
 
       expect(Context.get(captured, CodingToolRuntime.Service)).toBe(codingTools)
       expect(Context.get(captured, ShellProcessRegistry.Service)).toBe(processes)

@@ -2,10 +2,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
 import { Surface } from "../../../src/opentui/surface/service"
-import {
-  mountedTranscriptRowBudget,
-  transcriptRenderableBandRows,
-} from "../../../src/presentation/transcript/window"
+import { mountedTranscriptRowBudget, transcriptRenderableBandRows } from "../../../src/presentation/transcript/window"
 import { initial, type Model } from "../../../src/state/model"
 import { openTui } from "../transcript/projection.fixture"
 

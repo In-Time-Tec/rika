@@ -148,6 +148,7 @@ const expected = {
     "workspace-preparation",
   ],
   "@rika/product-store": [
+    "database-schema",
     "memory-assignments",
     "memory-store",
     "assignments",
@@ -184,6 +185,8 @@ const expected = {
     "migrations/postgres/0029-command-application-and-prompt-cancellation.sql",
     "migrations/postgres/0030-tenetkit-recovery-authority.sql",
     "migrations/postgres/0031-transactional-thread-notifications.sql",
+    "migrations/postgres/0032-terminalize-unrecoverable-turns.sql",
+    "migrations/postgres/0033-transcript-projection-notifications.sql",
     "product-repositories",
     "product-repository",
     "provider-credentials",

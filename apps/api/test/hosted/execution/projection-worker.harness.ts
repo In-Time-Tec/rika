@@ -11,7 +11,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
-import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted-execution-reconciler"
+import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))

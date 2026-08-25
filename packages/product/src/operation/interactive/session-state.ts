@@ -149,13 +149,7 @@ export interface InteractiveSessionStateInput {
   readonly activitySequence: number
   readonly initialThreadId: string | undefined
   readonly recoveryOwner: boolean
-  readonly options: import("../foundation/options").ProductLayerOptions<
-    Error,
-    Error,
-    Error,
-    Error,
-    Error
-  >
+  readonly options: import("../foundation/options").ProductLayerOptions<Error, Error, Error, Error, Error>
 }
 
 export const makeInteractiveSessionState = (

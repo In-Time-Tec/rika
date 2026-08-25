@@ -1,8 +1,6 @@
 import { Option, Schema } from "effect"
 
-const JsonLine = Schema.fromJsonString(
-  Schema.Union([Schema.String, Schema.Struct({ prompt: Schema.String })]),
-)
+const JsonLine = Schema.fromJsonString(Schema.Union([Schema.String, Schema.Struct({ prompt: Schema.String })]))
 
 export const parseJsonLines = (input: string): ReadonlyArray<string> =>
   input.split("\n").flatMap((line, index) => {

@@ -188,18 +188,16 @@ const fence = (p: Publication) => ({
   authorizationDigest: p.authorizationDigest,
 })
 const audit = (tx: PgDrizzle.EffectPgDatabase, p: Publication, action: string, result: JsonObject) =>
-  tx
-    .insert(rikaHostedRepositoryPublicationAudit)
-    .values({
-      publicationId: p.id,
-      ownerId: p.ownerId,
-      threadId: p.threadId,
-      actor: p.actor,
-      action,
-      authority: authority(p),
-      fence: fence(p),
-      result,
-    })
+  tx.insert(rikaHostedRepositoryPublicationAudit).values({
+    publicationId: p.id,
+    ownerId: p.ownerId,
+    threadId: p.threadId,
+    actor: p.actor,
+    action,
+    authority: authority(p),
+    fence: fence(p),
+    result,
+  })
 
 const make = Effect.gen(function* () {
   yield* PgClient.PgClient
@@ -443,18 +441,16 @@ const make = Effect.gen(function* () {
           const created = rows[0]
           if (created === undefined)
             return yield* failure("stale-fence", "Publication assignment changed before approval")
-          yield* tx
-            .insert(rikaHostedRepositoryPublicationAudit)
-            .values({
-              publicationId: created.id,
-              ownerId: created.ownerId,
-              threadId: created.threadId,
-              actor: created.actor,
-              action: "approved",
-              authority: input.authority,
-              fence: input.fence,
-              result: input.auditResult,
-            })
+          yield* tx.insert(rikaHostedRepositoryPublicationAudit).values({
+            publicationId: created.id,
+            ownerId: created.ownerId,
+            threadId: created.threadId,
+            actor: created.actor,
+            action: "approved",
+            authority: input.authority,
+            fence: input.fence,
+            result: input.auditResult,
+          })
           return created
         }),
       )

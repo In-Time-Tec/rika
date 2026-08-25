@@ -1,10 +1,6 @@
 import { TextRenderable } from "@opentui/core"
 import type { Model } from "../../../state/model"
-import {
-  contentColumnWidth,
-  fileSidebarLayoutWidth,
-  threadSidebarLayoutWidth,
-} from "../../../state/layout/model"
+import { contentColumnWidth, fileSidebarLayoutWidth, threadSidebarLayoutWidth } from "../../../state/layout/model"
 import { spacing, modeColor } from "../../../presentation/terminal/theme"
 import { cutoutBackground } from "../renderables"
 import { welcomeContent } from "../content"
@@ -13,10 +9,7 @@ import { composerHeight } from "../../../state/layout/composer"
 import { SurfaceModeLabel } from "../mode-label"
 
 export abstract class SurfaceTranscriptMount extends SurfaceModeLabel {
-  protected renderTranscript(
-    model: Model,
-    preserveAnchor = false,
-  ) {
+  protected renderTranscript(model: Model, preserveAnchor = false) {
     this.model = model
     this.queueHint.bg = cutoutBackground(this.renderer)
     this.modeLabel.bg = cutoutBackground(this.renderer)

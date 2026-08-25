@@ -70,7 +70,11 @@ const sessionStore = (entries: ReadonlyArray<Session.Entry>): Recorder => {
       },
       appendCheckpoint: (checkpoint) => {
         appended.push(checkpoint)
-        return Effect.succeed({ _tag: "Appended", checkpoint: compaction("checkpoint", checkpoint.summary ?? ""), leafId: "leaf" })
+        return Effect.succeed({
+          _tag: "Appended",
+          checkpoint: compaction("checkpoint", checkpoint.summary ?? ""),
+          leafId: "leaf",
+        })
       },
       path: () => Effect.succeed(entries),
       setLeaf: () => Effect.void,

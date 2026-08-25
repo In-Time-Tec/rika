@@ -30,7 +30,7 @@ export interface ThreadProtocolNotificationGeneration {
 export class ThreadProtocolNotificationService extends Context.Service<
   ThreadProtocolNotificationService,
   ThreadProtocolNotifications
->()("@rika/api/thread-protocol-notifications/ThreadProtocolNotificationService") {
+>()("@rika/api/hosted/thread/notifications/ThreadProtocolNotificationService") {
   static readonly layer = Layer.sync(this, makeThreadProtocolNotifications)
 }
 

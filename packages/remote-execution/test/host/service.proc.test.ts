@@ -8,7 +8,12 @@ import { provideLayer } from "../support/layer"
 const packageRoot = new URL("../..", import.meta.url).pathname
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 const decodeProof = (output: string) =>
-  decodeJson(output.trim().split("\n").findLast((line) => line.startsWith("{")) ?? output)
+  decodeJson(
+    output
+      .trim()
+      .split("\n")
+      .findLast((line) => line.startsWith("{")) ?? output,
+  )
 
 const bootstrapProof = `
 import { Effect, Redacted, Schema } from "effect"

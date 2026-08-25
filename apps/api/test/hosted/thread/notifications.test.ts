@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
-import { makeThreadProtocolNotifications } from "../src/thread-protocol-notifications"
+import { makeThreadProtocolNotifications } from "../../../src/hosted/thread/notifications"
 
 it.effect("wakes only the changed Thread and uses recovery to sweep every waiter", () =>
   Effect.gen(function* () {

@@ -27,7 +27,13 @@ const registry = HostBindingRegistry.make([
         input: Schema.Struct({}),
         output: Schema.Never,
         failure: Failure,
-        handle: () => Effect.fail(Schema.decodeSync(Schema.Struct({ _tag: Schema.tag("Failure"), retry: Schema.String }))({ _tag: "Failure", retry: "later" })),
+        handle: () =>
+          Effect.fail(
+            Schema.decodeSync(Schema.Struct({ _tag: Schema.tag("Failure"), retry: Schema.String }))({
+              _tag: "Failure",
+              retry: "later",
+            }),
+          ),
       },
     ],
   },

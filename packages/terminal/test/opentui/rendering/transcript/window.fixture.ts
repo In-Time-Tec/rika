@@ -56,10 +56,7 @@ export const windowUnitToolCall: {
   ): ReturnType<typeof windowUnitToolCallImpl>
 } = Function.dual(2, windowUnitToolCallImpl)
 
-const agentToolBlockImpl = (
-  status: "running" | "complete" | "failed" | "cancelled",
-  detail: string,
-) => ({
+const agentToolBlockImpl = (status: "running" | "complete" | "failed" | "cancelled", detail: string) => ({
   _tag: "ToolCall" as const,
   id: "agent",
   name: "task",

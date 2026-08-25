@@ -43,10 +43,7 @@ test("accepts a user scrollbar change immediately after synchronizing geometry",
         yield* openTui(() => setup.flush())
         expect(surface.transcriptDiagnostics().following).toBe(true)
         yield* openTui(() =>
-          setup.mockMouse.click(
-            surface.transcriptScrollbar.slider.screenX,
-            surface.transcriptScrollbar.slider.screenY,
-          ),
+          setup.mockMouse.click(surface.transcriptScrollbar.slider.screenX, surface.transcriptScrollbar.slider.screenY),
         )
         yield* openTui(() => setup.flush())
         expect(surface.transcriptDiagnostics().following).toBe(false)

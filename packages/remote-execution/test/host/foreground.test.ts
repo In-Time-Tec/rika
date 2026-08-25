@@ -112,7 +112,9 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTi
 const eventuallyLive = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTimeout> =>
   Effect.suspend(() => {
     const value = read()
-    return value === undefined ? Effect.sleep("10 millis").pipe(Effect.andThen(eventuallyLive(read))) : Effect.succeed(value)
+    return value === undefined
+      ? Effect.sleep("10 millis").pipe(Effect.andThen(eventuallyLive(read)))
+      : Effect.succeed(value)
   }).pipe(
     Effect.timeoutOrElse({
       duration: "2 seconds",
@@ -602,9 +604,10 @@ describe.sequential("foreground Runner", () => {
               yield* TestClock.adjust("250 millis")
             }
             expect(FakeWebSocket.instances).toHaveLength(2)
-            expect(
-              FakeWebSocket.instances[1]?.messages("ExecutorReconnect")[0],
-            ).toMatchObject({ _tag: "ExecutorReconnect", access })
+            expect(FakeWebSocket.instances[1]?.messages("ExecutorReconnect")[0]).toMatchObject({
+              _tag: "ExecutorReconnect",
+              access,
+            })
             yield* Fiber.interrupt(runner)
           }),
         ),
@@ -674,8 +677,10 @@ describe.sequential("foreground Runner", () => {
             const manifest = yield* bindingManifest([{ module: "context", operations: ["current"] }]).pipe(
               Effect.provide(foregroundContext),
             )
-            const firstBindingSent = yield* Deferred.make<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>>()
-            const replayedBindingSent = yield* Deferred.make<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>>()
+            const firstBindingSent =
+              yield* Deferred.make<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>>()
+            const replayedBindingSent =
+              yield* Deferred.make<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>>()
             const terminalSent = yield* Deferred.make<
               CellLifecycleMessage & {
                 readonly frame: Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>
@@ -785,8 +790,7 @@ describe.sequential("foreground Runner", () => {
             ).toHaveLength(1)
             expect(
               [...firstSocket.sent, ...secondSocket.sent].filter(
-                (message) =>
-                  message._tag === "BindingInvoke" && message.callId === firstBinding.callId,
+                (message) => message._tag === "BindingInvoke" && message.callId === firstBinding.callId,
               ),
             ).toHaveLength(2)
             yield* Fiber.interrupt(runner)

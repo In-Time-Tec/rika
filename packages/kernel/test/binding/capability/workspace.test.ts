@@ -166,7 +166,9 @@ describe("workspace binding", () => {
       })
       expect(response._tag).toBe("Failure")
       if (response._tag === "Failure")
-        expect((yield* Schema.decodeUnknownEffect(Schema.Struct({ _tag: Schema.String }))(response.failure))._tag).toBe("ToolError")
+        expect((yield* Schema.decodeUnknownEffect(Schema.Struct({ _tag: Schema.String }))(response.failure))._tag).toBe(
+          "ToolError",
+        )
     }),
   )
 

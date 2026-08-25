@@ -8,10 +8,7 @@ import { toOpenColor } from "../rendering/text-adapter"
 import { fitOverlayHints, overlayHintWidth } from "../../presentation/terminal/overlay-hints"
 import { filteredFiles } from "../../state/thread/navigation"
 import { paletteContent, modePickerContent } from "./composer/region"
-import {
-  modeSelectorIndexAtColumn,
-  modeSelectorLabels,
-} from "../../presentation/terminal/mode-selector-layout"
+import { modeSelectorIndexAtColumn, modeSelectorLabels } from "../../presentation/terminal/mode-selector-layout"
 import { filePickerContent } from "./overlay-content"
 import { type ProjectedEditorRenderable } from "./renderables"
 import { SurfacePointer } from "./pointer/model"

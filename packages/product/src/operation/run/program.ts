@@ -1,11 +1,7 @@
 import { Effect, Schema } from "effect"
 import { OperationUnavailable } from "../contract/product"
 import type { Input } from "../contract/product"
-import {
-  runInteractiveOperation,
-  runNoninteractiveOperation,
-  runSystemOperation,
-} from "./branches"
+import { runInteractiveOperation, runNoninteractiveOperation, runSystemOperation } from "./branches"
 import type { ProductOperationRunFactory } from "./branches"
 
 export const makeProductOperationRun = (

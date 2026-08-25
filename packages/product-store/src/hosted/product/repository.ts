@@ -108,7 +108,10 @@ export interface ProductRepositoryService {
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: { readonly deviceId: string; readonly checkoutFingerprint: string }
     readonly threadId: string
-  }) => Effect.Effect<Extract<CreateConnectionResult, { readonly _tag: "Existing" | "Incompatible" }> | undefined, ProductRepositoryError>
+  }) => Effect.Effect<
+    Extract<CreateConnectionResult, { readonly _tag: "Existing" | "Incompatible" }> | undefined,
+    ProductRepositoryError
+  >
   readonly createConnection: (input: {
     readonly authority: OwnerAuthority
     readonly projectId: string | null
@@ -360,10 +363,7 @@ const make = Effect.gen(function* () {
           placement: rikaHostedExecutorAssignments.placement,
         })
         .from(rikaHostedThreads)
-        .innerJoin(
-          rikaHostedExecutorAssignments,
-          eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id),
-        )
+        .innerJoin(rikaHostedExecutorAssignments, eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id))
         .where(eq(rikaHostedThreads.id, input.threadId))
         .limit(1),
     ).pipe(

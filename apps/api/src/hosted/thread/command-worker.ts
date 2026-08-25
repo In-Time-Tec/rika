@@ -4,13 +4,14 @@ import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { CreateThreadCommand, MutatingThreadCommand, isDurableThreadEvent } from "@rika/product/client-protocol"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import { InteractiveCommand } from "@rika/product/interactive-command"
-import { HostedProduct, HostedProductError, type ThreadAuthority } from "./hosted/product"
-import { HostedThreadApplication, HostedThreadApplicationError } from "./hosted/thread/application"
-import { HostedToolPolicy, HostedToolPolicyError } from "./hosted/execution/tool-policy"
-import { HostedWorkspace, HostedWorkspaceError } from "./hosted/environment/workspace"
+import { HostedProduct, HostedProductError, type ThreadAuthority } from "../product"
+import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
+import { HostedToolPolicy, HostedToolPolicyError } from "../execution/tool-policy"
+import { HostedWorkspace, HostedWorkspaceError } from "../environment/workspace"
 
 export class HostedThreadCommandWorkerError extends Schema.TaggedError<HostedThreadCommandWorkerError>()(
   "HostedThreadCommandWorkerError",
@@ -25,7 +26,7 @@ export interface HostedThreadCommandWorkerService {
 export class HostedThreadCommandWorker extends Context.Service<
   HostedThreadCommandWorker,
   HostedThreadCommandWorkerService
->()("@rika/api/hosted-thread-command-worker/HostedThreadCommandWorker") {}
+>()("@rika/api/hosted/thread/command-worker/HostedThreadCommandWorker") {}
 
 type PollStatus =
   | { readonly _tag: "Starting" }
@@ -53,6 +54,7 @@ class CommandApplicationError extends Schema.TaggedError<CommandApplicationError
 }) {}
 
 const DurableThreadCommand = Schema.Union([CreateThreadCommand, MutatingThreadCommand])
+const checkpointEquivalent = Schema.toEquivalence(ExecutionProjection.Checkpoint)
 type Command = typeof DurableThreadCommand.Type
 type InteractiveMutatingCommand = Exclude<
   Command,
@@ -65,6 +67,22 @@ type CommandFailure =
   | HostedWorkspaceError
   | HostedToolPolicyError
   | HostedThreadApplicationError
+
+const commandControlFailure = (
+  command: Pick<InteractiveMutatingCommand, "_tag">,
+  events: ReadonlyArray<InteractiveEvent>,
+) => {
+  let expectedAction: "approve" | "deny" | "cancel" | undefined
+  if (command._tag === "Approve") expectedAction = "approve"
+  else if (command._tag === "Deny") expectedAction = "deny"
+  else if (command._tag === "Cancel") expectedAction = "cancel"
+  return expectedAction === undefined
+    ? undefined
+    : events.find(
+        (event): event is Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> =>
+          event._tag === "ExecutionControlFailed" && event.action === expectedAction,
+      )
+}
 
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 const commandFailure = (error: CommandFailure) => {
@@ -307,7 +325,22 @@ export const layer = (options: {
           return yield* complete(record, claimToken, { _tag: "Applied" }, [])
         }
 
-        if (command._tag === "Approve" || command._tag === "Deny")
+        if (command._tag === "Approve" || command._tag === "Deny") {
+          const snapshot = yield* operations.snapshot(record.ownerId, ProductThreadId.make(record.threadId))
+          const pending = snapshot.pendingAuthorizations.find(
+            (authorization) =>
+              authorization.threadId === record.threadId &&
+              authorization.turnId === command.turnId &&
+              authorization.authorizationId === command.authorizationId &&
+              checkpointEquivalent(authorization.checkpoint, command.checkpoint),
+          )
+          if (pending === undefined)
+            return yield* complete(
+              record,
+              claimToken,
+              { _tag: "Rejected", reason: "conflict", message: "Authorization is no longer pending" },
+              [],
+            )
           yield* toolPolicy.recordDecision({
             ownerId: record.ownerId,
             threadId: record.threadId,
@@ -317,6 +350,7 @@ export const layer = (options: {
             checkpoint: command.checkpoint,
             decision: command._tag === "Approve" ? "approved" : "denied",
           })
+        }
 
         const interactiveCommand =
           command._tag === "Cancel" && command.target._tag === "Command"
@@ -360,14 +394,7 @@ export const layer = (options: {
               if (batch.failure !== undefined)
                 return yield* CommandApplicationError.make({ kind: "unavailable", message: batch.failure.message })
               const events = batch.events.filter(isDurableThreadEvent)
-              let rejection: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
-              if (command._tag === "Approve" || command._tag === "Deny") {
-                const expectedAction = command._tag === "Approve" ? "approve" : "deny"
-                rejection = events.find(
-                  (event): event is Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> =>
-                    event._tag === "ExecutionControlFailed" && event.action === expectedAction,
-                )
-              }
+              const rejection = commandControlFailure(command, events)
               return yield* protocol.completeCommand({
                 ownerId: record.ownerId,
                 threadId: record.threadId,
@@ -448,6 +475,12 @@ export const layer = (options: {
           claimToken,
           claimMillis: options.claimMillis,
         })
+        const succeededAt = yield* Clock.currentTimeMillis
+        yield* SubscriptionRef.update(health, (state) => ({
+          ...state,
+          poll: { _tag: "Succeeded", at: succeededAt } as const,
+          lastSuccessfulPollAt: succeededAt,
+        }))
         if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
         else
           yield* FiberMap.run(
@@ -468,12 +501,6 @@ export const layer = (options: {
               }),
             ),
           )
-        const succeededAt = yield* Clock.currentTimeMillis
-        yield* SubscriptionRef.update(health, (state) => ({
-          ...state,
-          poll: { _tag: "Succeeded", at: succeededAt } as const,
-          lastSuccessfulPollAt: succeededAt,
-        }))
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)

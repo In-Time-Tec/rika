@@ -92,10 +92,7 @@ test("never decodes binary paste as text without an image handler", () =>
       const callbacks = { key: vi.fn(), paste: vi.fn(), resize: vi.fn() }
       const surface = new Surface(setup.renderer, callbacks)
       try {
-        setup.renderer.keyInput.emit(
-          "paste",
-          new PasteEvent(Uint8Array.from([0xff, 0xfe]), { kind: "binary" }),
-        )
+        setup.renderer.keyInput.emit("paste", new PasteEvent(Uint8Array.from([0xff, 0xfe]), { kind: "binary" }))
         expect(callbacks.paste).not.toHaveBeenCalled()
       } finally {
         surface.destroy()
@@ -118,7 +115,9 @@ test("opens a clicked changed file through the host callback", () =>
           }),
         )
         yield* openTui(() => setup.renderOnce())
-        yield* openTui(() => setup.mockMouse.click(surface.changedFilesText.screenX + 1, surface.changedFilesText.screenY + 3))
+        yield* openTui(() =>
+          setup.mockMouse.click(surface.changedFilesText.screenX + 1, surface.changedFilesText.screenY + 3),
+        )
         expect(callbacks.openPath).toHaveBeenCalledWith({ path: "apps/rika/src/main.ts" })
       } finally {
         surface.destroy()

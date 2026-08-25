@@ -306,6 +306,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-pg": "catalog:",
+        "@rika/identity": "workspace:*",
         "@rika/product": "workspace:*",
         "@rika/remote-execution": "workspace:*",
         "@rika/transcript": "workspace:*",
@@ -381,6 +382,9 @@
       },
     },
   },
+  "trustedDependencies": [
+    "@ast-grep/cli",
+  ],
   "overrides": {
     "fast-xml-parser": "5.5.6",
   },

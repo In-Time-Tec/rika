@@ -66,9 +66,8 @@ const moduleOptions = (options: Options): ModuleOptions => ({
  * kernel never runs cells against a skill set or server set the epoch was not reconstructed from.
  */
 const profileOptions = (options: Options): ProfileOptions => {
-  const environment: ProfileOptions["environment"] = options.skills === undefined
-    ? { servers: options.servers }
-    : { servers: options.servers, skills: options.skills }
+  const environment: ProfileOptions["environment"] =
+    options.skills === undefined ? { servers: options.servers } : { servers: options.servers, skills: options.skills }
   return { ...options, environment }
 }
 
@@ -101,22 +100,18 @@ export const pool = (
   (() => {
     const stateStore = state(options.dataRoot)
     const basePoolOptions = {
-        profile: makeProfile(profileOptions(options)),
-        runtimeCommand: options.runtimeCommand ?? "bun",
-        workerModule: options.workerModule ?? workerModule,
-        startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
-        interruptGraceMillis: options.interruptGraceMillis ?? 250,
-        maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
-        idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
-        environment: options.environment ?? {},
+      profile: makeProfile(profileOptions(options)),
+      runtimeCommand: options.runtimeCommand ?? "bun",
+      workerModule: options.workerModule ?? workerModule,
+      startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
+      interruptGraceMillis: options.interruptGraceMillis ?? 250,
+      maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
+      idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
+      environment: options.environment ?? {},
     }
-    const poolOptions: Parameters<typeof BunKernelPool.layer>[0] = options.bootstrap === false
-      ? basePoolOptions
-      : { ...basePoolOptions, bootstrap: KernelBootstrap.source() }
-    return Layer.merge(
-      BunKernelPool.layer(poolOptions).pipe(Layer.provide(stateStore)),
-      stateStore,
-    )
+    const poolOptions: Parameters<typeof BunKernelPool.layer>[0] =
+      options.bootstrap === false ? basePoolOptions : { ...basePoolOptions, bootstrap: KernelBootstrap.source() }
+    return Layer.merge(BunKernelPool.layer(poolOptions).pipe(Layer.provide(stateStore)), stateStore)
   })()
 
 /**

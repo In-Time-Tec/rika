@@ -333,16 +333,8 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             restore(recoverSteeringAdmission(steeringAdmission)),
           )
           return {
-            rejected: outcomes.flatMap((outcome) =>
-              outcome._tag === "Rejected"
-                ? [outcome]
-                : [],
-            ),
-            completed: outcomes.flatMap((outcome) =>
-              outcome._tag === "Completed"
-                ? [outcome]
-                : [],
-            ),
+            rejected: outcomes.flatMap((outcome) => (outcome._tag === "Rejected" ? [outcome] : [])),
+            completed: outcomes.flatMap((outcome) => (outcome._tag === "Completed" ? [outcome] : [])),
             pending: outcomes.some((outcome) => outcome._tag === "Pending" || outcome._tag === "Rejected"),
           } satisfies SteeringAdmissionRecovery
         }),

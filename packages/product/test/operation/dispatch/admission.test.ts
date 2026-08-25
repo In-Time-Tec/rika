@@ -2,10 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Deferred, Effect, Fiber, Stream } from "effect"
 import { makeProductOperationAdmission } from "../../../src/operation/dispatch/admission"
-import {
-  makeProductOperationSchedule,
-  type ProductOperationScheduleInput,
-} from "../../../src/operation/run/schedule"
+import { makeProductOperationSchedule, type ProductOperationScheduleInput } from "../../../src/operation/run/schedule"
 import { OperationError } from "../../../src/operation/error"
 
 const link = { runId: "run", turnId: "turn", threadId: "thread" }

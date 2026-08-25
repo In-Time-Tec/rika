@@ -23,9 +23,8 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<Artifact
     output: Stored,
     failure: Failure,
     handle: (input) => {
-      const stored: typeof PutInput.Type = input.mediaType === undefined
-        ? { value: input.value }
-        : { value: input.value, mediaType: input.mediaType }
+      const stored: typeof PutInput.Type =
+        input.mediaType === undefined ? { value: input.value } : { value: input.value, mediaType: input.mediaType }
       return nested(
         { kind: "artifacts.put", payload: input, replayPolicy: "provider-idempotent" },
         Effect.flatMap(ArtifactStore, (store) => store.put(stored)),

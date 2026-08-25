@@ -153,8 +153,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
         blocks: [item.index],
         diffs: [],
       }
-      if (children.length === 0)
-        return agentResponse === undefined ? [base] : [{ ...base, agentResponse }]
+      if (children.length === 0) return agentResponse === undefined ? [base] : [{ ...base, agentResponse }]
       return agentResponse === undefined ? [{ ...base, children }] : [{ ...base, children, agentResponse }]
     })
   let toolRun: Array<{ readonly index: number; readonly kind: ToolKind }> = []
@@ -238,10 +237,7 @@ export const isExpandableUnit: {
   if (unit.kind !== "tool") {
     if (unit.kind === "block") {
       const block = decodeTranscriptBlock(model.blocks[unit.block])
-      return (
-        (block._tag === "Error" && block.detail.length > 0) ||
-        (block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0))
-      )
+      return block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0)
     }
     if (unit.kind === "cell") {
       const block = decodeTranscriptBlock(model.blocks[unit.block])

@@ -1,6 +1,5 @@
 import { Schema } from "effect"
 
-
 export const ThreadRow = Schema.Struct({
   id: Schema.String,
   workspace: Schema.String,

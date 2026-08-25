@@ -96,7 +96,9 @@ const accountFromRows = (rows: ReadonlyArray<AccountRow>): Account | undefined =
 }
 
 export const makePostgresIdentityDirectory = (db: IdentityDatabase): IdentityDirectory => ({
-  ready: directoryQuery("readiness", db.select({ id: identityUser.id }).from(identityUser).limit(1)).pipe(Effect.asVoid),
+  ready: directoryQuery("readiness", db.select({ id: identityUser.id }).from(identityUser).limit(1)).pipe(
+    Effect.asVoid,
+  ),
   account: Effect.fn("PostgresStore.account")((userId: string) =>
     directoryQuery(
       "load account",

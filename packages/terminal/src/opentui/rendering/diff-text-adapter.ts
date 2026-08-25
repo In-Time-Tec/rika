@@ -64,8 +64,7 @@ export const renderPierreDiff: {
 const renderToolSummaryImpl = (
   summary: Parameters<typeof toolSummary>[0],
   options?: Parameters<typeof toolSummary>[1],
-): ReadonlyArray<ReadonlyArray<TextChunk>> =>
-  toolSummary(summary, options).map((line) => line.map(toOpenChunk))
+): ReadonlyArray<ReadonlyArray<TextChunk>> => toolSummary(summary, options).map((line) => line.map(toOpenChunk))
 
 export const renderToolSummary: {
   (

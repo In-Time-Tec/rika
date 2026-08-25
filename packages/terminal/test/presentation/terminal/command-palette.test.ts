@@ -2,11 +2,7 @@ import { expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Duration, Effect } from "effect"
 import { commands, filter } from "../../../src/presentation/terminal/command-palette"
-import {
-  formatActivity,
-  formatActivityCounter,
-  runningToolsActivity,
-} from "../../../src/state/activity/model"
+import { formatActivity, formatActivityCounter, runningToolsActivity } from "../../../src/state/activity/model"
 import { activeTimeAt } from "../../../src/state/activity/time"
 import { classifyPrompt, promptParts } from "../../../src/state/composer/model"
 import { composerHeight, inputRows, wrappedRowCount } from "../../../src/state/layout/composer"

@@ -588,10 +588,7 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
                   `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
                 ),
                 fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
-                fileSystem.writeFileString(
-                  path.join(directory, `${name}.styles.json`),
-                  `${prettyJson(styles)}\n`,
-                ),
+                fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
               ],
               { concurrency: 3 },
             )

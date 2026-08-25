@@ -85,9 +85,10 @@ export const makePostgresCliDeviceDirectory = (db: DeviceDatabase): CliDeviceDir
       if (rows[0] === undefined) return yield* failure("register CLI device")
     }),
     discard: (clientId) =>
-      query("discard CLI registration", db.delete(oauthClient).where(eq(oauthClient.clientId, clientId)).returning()).pipe(
-        Effect.asVoid,
-      ),
+      query(
+        "discard CLI registration",
+        db.delete(oauthClient).where(eq(oauthClient.clientId, clientId)).returning(),
+      ).pipe(Effect.asVoid),
     authenticate,
     list: Effect.fn("CliDeviceDirectory.list")(function* (principal) {
       const current = yield* authenticate(principal)

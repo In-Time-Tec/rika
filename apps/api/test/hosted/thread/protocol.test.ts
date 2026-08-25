@@ -44,7 +44,7 @@ import {
   layer as hostedThreadProtocolLayer,
   layerWithOptions as hostedThreadProtocolLayerWithOptions,
 } from "../../../src/hosted/thread/protocol"
-import { makeThreadProtocolNotifications } from "../../../src/thread-protocol-notifications"
+import { makeThreadProtocolNotifications } from "../../../src/hosted/thread/notifications"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
 import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../../../src/hosted/environment/workspace"
@@ -101,6 +101,7 @@ const memoryStore = () => {
   let latestSnapshot: HostedThreadSnapshot | undefined
   let latestSnapshotCursor = 0n
   let latestSnapshotVersion = 0n
+  let snapshotSaves = 0
   const claims = new Map<string, string>()
   const acknowledgements: Array<{
     readonly threadId: string
@@ -196,6 +197,7 @@ const memoryStore = () => {
       }),
     saveSnapshot: (input) =>
       Effect.sync(() => {
+        snapshotSaves += 1
         latestSnapshot = input.snapshot
         latestSnapshotCursor = BigInt(input.cursor)
         latestSnapshotVersion = BigInt(input.threadVersion)
@@ -263,6 +265,7 @@ const memoryStore = () => {
     admissions: () => admissions,
     acknowledgements: () => acknowledgements,
     command: (id: string) => commands.get(id),
+    snapshotSaves: () => snapshotSaves,
     dropSnapshot: () => {
       latestSnapshot = undefined
       latestSnapshotCursor = 0n
@@ -1143,7 +1146,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "1",
             threadVersion: "0",
-            snapshot: durableAhead,
+            snapshot: currentSnapshot,
           },
         },
       ])
@@ -1164,7 +1167,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "2",
             threadVersion: "0",
-            snapshot: durableBehind,
+            snapshot: currentSnapshot,
           },
         },
       ])
@@ -1185,10 +1188,26 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "3",
             threadVersion: "0",
-            snapshot: durableCompacted,
+            snapshot: currentSnapshot,
           },
         },
       ])
+
+      currentSnapshot = snapshotWithTitle("Projection at the same cursor")
+      const savesBeforeProjection = store.snapshotSaves()
+      expect(yield* pollOutbound(connection)).toMatchObject([
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            cursor: "3",
+            threadVersion: "0",
+            snapshot: currentSnapshot,
+          },
+        },
+      ])
+      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
+      expect(yield* pollOutbound(connection)).toEqual([])
+      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
     }),
   )
 })

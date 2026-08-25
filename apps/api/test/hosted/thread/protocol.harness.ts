@@ -31,7 +31,7 @@ import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { HostedThreadApplication, type HostedThreadApplicationService } from "../../../src/hosted/thread/application"
-import { layer as hostedThreadCommandWorkerLayer } from "../../../src/hosted-thread-command-worker"
+import { layer as hostedThreadCommandWorkerLayer } from "../../../src/hosted/thread/command-worker"
 import { HostedProduct, type HostedProductService } from "../../../src/hosted/product"
 import {
   HostedThreadProtocol,
@@ -1131,9 +1131,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
           })
         })
       const eventCursors = (frames: ReadonlyArray<ServerFrame>) =>
-        frames.flatMap((frame) =>
-          frame.payload._tag === "ThreadEvent" ? [String(frame.payload.event.cursor)] : [],
-        )
+        frames.flatMap((frame) => (frame.payload._tag === "ThreadEvent" ? [String(frame.payload.event.cursor)] : []))
       yield* publish(2)
       expect(eventCursors(yield* connectionA.outbound)).toEqual(["1"])
       expect(
@@ -1197,7 +1195,8 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       }
       let currentSnapshot: HostedThreadSnapshot = snapshot
       const effects: Array<InteractiveCommand> = []
-      const runs: Array<Pick<Parameters<HostedProductService["admitRun"]>[0], "threadId" | "operationKey" | "prompt">> = []
+      const runs: Array<Pick<Parameters<HostedProductService["admitRun"]>[0], "threadId" | "operationKey" | "prompt">> =
+        []
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -1555,7 +1554,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         ],
       }
       expect(
-        yield* approvalController.receive({
+        yield* awaitCompletion(approvalController, {
           ...approval,
           requestId: RequestId.make("cross-thread-approval"),
           command: {
@@ -1593,13 +1592,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
             threadId,
             commandId: CommandId.make("denial-command"),
             idempotencyKey: IdempotencyKey.make("denial-key"),
-            expectedThreadVersion: ThreadVersion.make("4"),
+            expectedThreadVersion: ThreadVersion.make("5"),
             turnId: TurnId.make("denial-turn"),
             authorizationId: "authorization-2",
             checkpoint: denialCheckpoint,
           },
         }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "5" } }])
+      ).toMatchObject([{ payload: { _tag: "CommandAccepted", threadVersion: "6" } }])
       expect(
         effects.filter((input) => input._tag === "DenyAuthorization" && input.authorizationId === "authorization-2"),
       ).toHaveLength(1)
@@ -1635,7 +1634,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       yield* protocolStore.saveSnapshot({
         ownerId,
         threadId,
-        threadVersion: ThreadVersion.make("5"),
+        threadVersion: ThreadVersion.make("6"),
         cursor: ThreadEventCursor.make("3"),
         snapshot: currentSnapshot,
         createdAt: later,
@@ -1648,13 +1647,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         actor,
         commandId: replayCommandId,
         idempotencyKey: replayIdempotencyKey,
-        expectedThreadVersion: ThreadVersion.make("5"),
+        expectedThreadVersion: ThreadVersion.make("6"),
         command: {
           _tag: "SubmitPrompt",
           threadId,
           commandId: replayCommandId,
           idempotencyKey: replayIdempotencyKey,
-          expectedThreadVersion: "5",
+          expectedThreadVersion: "6",
           text: "exercise cursor replay",
         },
         admittedAt: later,
@@ -1696,7 +1695,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       expect(attachedReplay).toMatchObject({
         _tag: "ThreadAttached",
         snapshotCursor: "1005",
-        threadVersion: "6",
+        threadVersion: "7",
         cursor: "1005",
         participants: expect.any(Array),
       })
@@ -1751,7 +1750,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           threadId,
           commandId: CommandId.make("duplicate-control"),
           idempotencyKey: IdempotencyKey.make("duplicate-control-key"),
-          expectedThreadVersion: ThreadVersion.make("6"),
+          expectedThreadVersion: ThreadVersion.make("7"),
           target: {
             _tag: "Turn" as const,
             turnId: TurnId.make("denial-turn"),
@@ -1771,7 +1770,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const duplicateControlFrames = duplicateControlResponses.flat()
       expect(duplicateControlFrames.filter((frame) => frame.payload._tag === "CommandAdmitted")).toHaveLength(2)
       expect(yield* awaitCompletion(controllerA, duplicateControl)).toMatchObject([
-        { payload: { _tag: "CommandAccepted", threadVersion: "7" } },
+        { payload: { _tag: "CommandAccepted", threadVersion: "8" } },
       ])
     }),
   ),

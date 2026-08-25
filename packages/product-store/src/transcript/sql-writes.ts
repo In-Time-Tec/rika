@@ -182,19 +182,17 @@ export const transcriptSqlWrites = {
             yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const unit of units) {
               const order = TranscriptOrdering.encodeUnitOrder(unit.order)
-              yield* tx
-                .insert(rikaTranscriptUnits)
-                .values({
-                  turnId: turn.id,
-                  unitKey: unit.key,
-                  threadId: turn.threadId,
-                  unitOrderKey: order,
-                  parentId: unit.parentId ?? null,
-                  revision: unit.revision,
-                  unitJson: encodeUnit(unit),
-                  createdAt: turn.createdAt,
-                  updatedAt: now,
-                })
+              yield* tx.insert(rikaTranscriptUnits).values({
+                turnId: turn.id,
+                unitKey: unit.key,
+                threadId: turn.threadId,
+                unitOrderKey: order,
+                parentId: unit.parentId ?? null,
+                revision: unit.revision,
+                unitJson: encodeUnit(unit),
+                createdAt: turn.createdAt,
+                updatedAt: now,
+              })
             }
           }),
         )

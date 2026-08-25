@@ -142,9 +142,7 @@ describe("hosted Thread client protocol", () => {
       expect(() => Schema.decodeSync(ClientMessage)(forged)).toThrow()
     }
     expect(() => Schema.decodeSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
-    expect(() =>
-      Schema.decodeSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true })),
-    ).toThrow()
+    expect(() => Schema.decodeSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true }))).toThrow()
     expect(() =>
       Schema.decodeSync(ClientMessage)(
         envelope({ _tag: "CreateThread", ...admitted, owner: { kind: "personal" }, placement: "local" }),

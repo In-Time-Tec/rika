@@ -77,11 +77,7 @@ it.effect("delivers completion only through the live projection callback", () =>
     let settlements = 0
     const turns = TurnRepository.Service.of({ get: () => Effect.succeed(turn) })
     const owner = {
-      ...(yield* RootTurnOwner.make(
-        turns,
-        TranscriptRepository.Service.of({}),
-        ExecutionGateway.Service.of({}),
-      )),
+      ...(yield* RootTurnOwner.make(turns, TranscriptRepository.Service.of({}), ExecutionGateway.Service.of({}))),
       watchTurn: (
         _turnId: Turn.TurnId,
         onChange?: (value: ExecutionProjection.Change) => void,
@@ -117,10 +113,7 @@ it.effect("delivers completion only through the live projection callback", () =>
       Effect.provideService(ResolvedContext.Service, ResolvedContext.Service.of({})),
       Effect.provideService(ThreadRepository.Service, ThreadRepository.Service.of({})),
       Effect.provideService(TurnRepository.Service, turns),
-      Effect.provideService(
-        ThreadSummaryRepository.Service,
-        ThreadSummaryRepository.Service.of({}),
-      ),
+      Effect.provideService(ThreadSummaryRepository.Service, ThreadSummaryRepository.Service.of({})),
       Effect.provideService(
         ExecutionExtensions.ExecutionExtensionService,
         ExecutionExtensions.ExecutionExtensionService.of({}),

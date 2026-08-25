@@ -155,9 +155,7 @@ test("keeps the active turn running and restores text when steering fails", () =
   expect(failed.activeTurnId).toBe("turn-a")
   expect(failed.steeringRequests).toEqual([])
   expect(failed.input).toBe("focus on the fixture")
-  expect(failed.blocks).toContainEqual(
-    expect.objectContaining({ _tag: "Notification", title: "Steering not delivered" }),
-  )
+  expect(failed.blocks).toContainEqual(expect.objectContaining({ _tag: "Error", title: "Steering not delivered" }))
 })
 test("ignores steering failures for an unknown request identity", () => {
   const active: Model = {

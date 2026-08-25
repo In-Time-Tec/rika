@@ -12,10 +12,7 @@ import {
 import stringWidth from "string-width"
 import { Option, Schema } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import {
-  mountedTranscriptRowBudget,
-  transcriptRenderableBandRows,
-} from "../../../presentation/transcript/window"
+import { mountedTranscriptRowBudget, transcriptRenderableBandRows } from "../../../presentation/transcript/window"
 import { mergePinnedRecords } from "../../../presentation/transcript/record-order"
 import { transcriptUnitId, transcriptUnits } from "../../../presentation/transcript/row"
 import { escapePathTarget } from "../../../presentation/transcript/tool/detail"
@@ -35,11 +32,7 @@ import { wrapTextToWidth } from "../../rendering/window"
 import { splitStyledLines } from "../../rendering/transcript/styled-lines"
 import { renderMarkdownLines, toOpenColor } from "../../rendering/text-adapter"
 import type { Model } from "../../../state/model"
-import type {
-  TranscriptRenderableDescriptor,
-  TranscriptRenderableRecord,
-  TranscriptRenderInput,
-} from "./types"
+import type { TranscriptRenderableDescriptor, TranscriptRenderableRecord, TranscriptRenderInput } from "./types"
 
 export type TranscriptRowsCache = Map<string, TranscriptUnitCacheEntry>
 export type TranscriptPathTarget = PathTarget

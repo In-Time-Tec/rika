@@ -1228,7 +1228,9 @@ const consumeApi = (
               (frame) => writer(encodeExecutorMessage({ _tag: "CellLifecycle", access, frame })),
               { discard: true },
             )
-            yield* cells.replayBindings(access).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+            yield* cells
+              .replayBindings(access)
+              .pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
             return
           }
         }
@@ -1869,9 +1871,10 @@ const host = Effect.scoped(
         })
         const hostScope = yield* Effect.scope
         const makeMachine = yield* Effect.cached(
-          Layer.buildWithScope(machineLayer({ workspace: root, read: readMachine, write: writeMachine }), hostScope).pipe(
-            Effect.map((context) => Context.get(context, Machine)),
-          ),
+          Layer.buildWithScope(
+            machineLayer({ workspace: root, read: readMachine, write: writeMachine }),
+            hostScope,
+          ).pipe(Effect.map((context) => Context.get(context, Machine))),
         )
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)

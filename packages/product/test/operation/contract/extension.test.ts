@@ -9,10 +9,7 @@ import { provideLayer } from "../../support/product-layer"
 
 const McpDocument = Schema.Struct({ servers: Schema.Record(Schema.String, Schema.Unknown) })
 const ExtensionDocument = Schema.Struct({
-  extensions: Schema.Record(
-    Schema.String,
-    Schema.Struct({ enabled: Schema.Boolean, generation: Schema.Finite }),
-  ),
+  extensions: Schema.Record(Schema.String, Schema.Struct({ enabled: Schema.Boolean, generation: Schema.Finite })),
 })
 const decodeMcpDocument = Schema.decodeSync(Schema.fromJsonString(McpDocument))
 const decodeExtensionDocument = Schema.decodeSync(Schema.fromJsonString(ExtensionDocument))

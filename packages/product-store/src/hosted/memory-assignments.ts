@@ -118,6 +118,42 @@ const make = Effect.gen(function* () {
     revision: AssignmentRevision.make(increment(assignment.revision)),
     updatedAt: now,
   })
+  const orphanAuthority = (
+    current: State,
+    input: { readonly providerInstanceId: string; readonly assignmentId?: string; readonly generation?: string },
+    now: string,
+  ) => {
+    const bound = [...current.assignments.values()].find((assignment) => {
+      const lifecycle = assignment.lifecycle
+      return (
+        (lifecycle._tag === "Provisioning" ||
+          lifecycle._tag === "AwaitingBootstrap" ||
+          lifecycle._tag === "Active" ||
+          lifecycle._tag === "Paused") &&
+        lifecycle.providerInstanceId === input.providerInstanceId
+      )
+    })
+    const identified =
+      input.assignmentId === undefined || input.generation === undefined
+        ? undefined
+        : current.assignments.get(input.assignmentId)
+    const matched = identified?.generation === input.generation ? identified : undefined
+    const assignment = bound ?? matched
+    if (assignment === undefined)
+      return identified === undefined ? ({ status: "preserved" } as const) : ({ status: "candidate" } as const)
+    const lifecycle = assignment.lifecycle
+    if (lifecycle._tag === "Active" || lifecycle._tag === "Paused")
+      return bound === undefined ? ({ status: "candidate" } as const) : ({ status: "preserved" } as const)
+    if (lifecycle._tag === "Terminated") return { status: "candidate" } as const
+    if (
+      (lifecycle._tag === "Provisioning" || lifecycle._tag === "AwaitingBootstrap") &&
+      lifecycle.bootstrapExpiresAt > now
+    )
+      return lifecycle.providerInstanceId === null || bound !== undefined
+        ? ({ status: "preserved" } as const)
+        : ({ status: "candidate" } as const)
+    return { status: "candidate", retire: assignment } as const
+  }
 
   return ExecutorAssignments.of({
     create: (input) =>
@@ -156,12 +192,35 @@ const make = Effect.gen(function* () {
     isBootstrapLive: (input) =>
       Effect.gen(function* () {
         const assignment = load(yield* Ref.get(state), input.assignmentId)
-        if (assignment === undefined) return yield* AssignmentError.make({ reason: "not-found", message: "Executor assignment does not exist" })
+        if (assignment === undefined)
+          return yield* AssignmentError.make({ reason: "not-found", message: "Executor assignment does not exist" })
         if (assignment.generation !== input.generation)
           return yield* AssignmentError.make({ reason: "stale-fence", message: "Executor assignment fence is stale" })
         const lifecycle = assignment.lifecycle
         if (lifecycle._tag !== "Provisioning" && lifecycle._tag !== "AwaitingBootstrap") return false
-        return DateTime.toEpochMillis(DateTime.makeUnsafe(lifecycle.bootstrapExpiresAt)) > (yield* Clock.currentTimeMillis)
+        return (
+          DateTime.toEpochMillis(DateTime.makeUnsafe(lifecycle.bootstrapExpiresAt)) > (yield* Clock.currentTimeMillis)
+        )
+      }),
+    inspectOrphan: (input) =>
+      Effect.gen(function* () {
+        const current = yield* Ref.get(state)
+        const now = timestamp(yield* Clock.currentTimeMillis)
+        return orphanAuthority(current, input, now).status
+      }),
+    claimOrphan: (input) =>
+      mutation((current, now) => {
+        const authority = orphanAuthority(current, input, now)
+        if (authority.status === "preserved") return succeed("preserved" as const, current)
+        if (!("retire" in authority)) return succeed("claimed" as const, current)
+        const next = revised(authority.retire, now, {
+          generation: FencingGeneration.make(increment(authority.retire.generation)),
+          lastLeaseEpoch: Sequence.make("0"),
+          lifecycle: { _tag: "Pending" },
+          capabilityGeneration: null,
+          capabilities: null,
+        })
+        return succeed("claimed" as const, saveCredentials(save(current, next), next.id, {}))
       }),
     beginProvisioning: (input) =>
       mutation((current, now) => {

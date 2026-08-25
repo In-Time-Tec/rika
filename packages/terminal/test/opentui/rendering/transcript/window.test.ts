@@ -37,9 +37,16 @@ test("reflows mounted assistant markdown when the terminal width shrinks", () =>
         })
         surface.update(wide)
         const rows = () => surface.transcriptDiagnostics().rows
-        const text = () => rows().map((row) => styledTextValue(row.content)).join("\n")
+        const text = () =>
+          rows()
+            .map((row) => styledTextValue(row.content))
+            .join("\n")
         const mounted = [...rows()]
-        expect(text().split("\n").some((line) => stringWidth(line) > 100)).toBe(true)
+        expect(
+          text()
+            .split("\n")
+            .some((line) => stringWidth(line) > 100),
+        ).toBe(true)
 
         surface.update(update(wide, { _tag: "Resized", width: 100, height: 30 }))
         const narrowed = text()
@@ -71,8 +78,10 @@ test("keeps a 4000-chunk transcript resize reflow bounded", () =>
       const setup = yield* openTui(() => createTestRenderer({ width: 200, height: 66 }))
       const surface = new Surface(setup.renderer, handlers())
       try {
-        const source = Array.from({ length: 4_000 }, (_, index) =>
-          `LONG_CHUNK_${String(index).padStart(4, "0")};`).join("")
+        const source = Array.from(
+          { length: 4_000 },
+          (_, index) => `LONG_CHUNK_${String(index).padStart(4, "0")};`,
+        ).join("")
         const wide = model({
           width: 200,
           height: 66,
@@ -83,7 +92,10 @@ test("keeps a 4000-chunk transcript resize reflow bounded", () =>
         const startedAt = yield* Clock.currentTimeMillis
         surface.update(update(wide, { _tag: "Resized", width: 100, height: 30 }))
         const elapsed = (yield* Clock.currentTimeMillis) - startedAt
-        const text = surface.transcriptDiagnostics().rows.map((row) => styledTextValue(row.content)).join("")
+        const text = surface
+          .transcriptDiagnostics()
+          .rows.map((row) => styledTextValue(row.content))
+          .join("")
 
         expect(text).toContain("LONG_CHUNK_3999")
         expect(elapsed).toBeLessThan(1_000)
@@ -131,12 +143,15 @@ test("limits transcript formatting input before reconciliation", () => {
       text: `answer ${index}`,
       turnId: `turn-${index}`,
     })),
-    items: Array.from({ length: historySize }, (_, index): TranscriptItem => ({
-      _tag: "Entry",
-      index,
-      id: `answer-${index}`,
-      turnId: `turn-${index}`,
-    })),
+    items: Array.from(
+      { length: historySize },
+      (_, index): TranscriptItem => ({
+        _tag: "Entry",
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }),
+    ),
   })
 
   const bounded = boundedTranscriptModel(state)
@@ -167,33 +182,38 @@ test("keeps a subagent parent within the bounded suffix when its children exceed
     detail: "Review the code",
     files: [],
   }
-  const children = Array.from({ length: maxMountedTranscriptEntries + 5 }, (_, index): TranscriptBlock => ({
-    _tag: "ToolCall",
-    id: `child-${index}`,
-    name: "read",
-    input: `{"path":"src/${index}.ts"}`,
-    status: "complete",
-    presentation: {
-      family: "explore",
-      action: "read",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "file",
-    },
-    detail: `src/${index}.ts`,
-    files: [],
-  }))
+  const children = Array.from(
+    { length: maxMountedTranscriptEntries + 5 },
+    (_, index): TranscriptBlock => ({
+      _tag: "ToolCall",
+      id: `child-${index}`,
+      name: "read",
+      input: `{"path":"src/${index}.ts"}`,
+      status: "complete",
+      presentation: {
+        family: "explore",
+        action: "read",
+        activeLabel: "Exploring",
+        completeLabel: "Explored",
+        counter: "file",
+      },
+      detail: `src/${index}.ts`,
+      files: [],
+    }),
+  )
   const state = model({
     blocks: [parent, ...children],
     items: [
       { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
-      ...children.map((_, index): TranscriptItem => ({
-        _tag: "Block",
-        index: index + 1,
-        id: `tool:child-${index}`,
-        turnId: "child",
-        parentId: "agent",
-      })),
+      ...children.map(
+        (_, index): TranscriptItem => ({
+          _tag: "Block",
+          index: index + 1,
+          id: `tool:child-${index}`,
+          turnId: "child",
+          parentId: "agent",
+        }),
+      ),
     ],
   })
 

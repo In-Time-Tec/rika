@@ -14,8 +14,7 @@ const decode = (row: typeof rikaGoals.$inferSelect) =>
     const value = row
     let budget: Goal["budget"]
     if (value.budgetTokens === null)
-      budget =
-        value.budgetWallClockMillis === null ? {} : { wallClockMillis: value.budgetWallClockMillis }
+      budget = value.budgetWallClockMillis === null ? {} : { wallClockMillis: value.budgetWallClockMillis }
     else
       budget =
         value.budgetWallClockMillis === null
@@ -50,26 +49,37 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const db = yield* PgDrizzle.makeWithDefaults()
     const get = Effect.fn("GoalRepository.get")(function* (threadId: string) {
-      const rows = yield* db.select().from(rikaGoals).where(eq(rikaGoals.threadId, threadId)).pipe(
-        Effect.mapError(repositoryError),
-      )
+      const rows = yield* db
+        .select()
+        .from(rikaGoals)
+        .where(eq(rikaGoals.threadId, threadId))
+        .pipe(Effect.mapError(repositoryError))
       return rows[0] === undefined ? undefined : yield* decode(rows[0])
     })
     const write = (goal: Goal, guardActive: boolean) => {
       const values = {
-        threadId: goal.threadId, objective: goal.objective, status: goal.status,
-        budgetTokens: goal.budget.tokens ?? null, budgetWallClockMillis: goal.budget.wallClockMillis ?? null,
-        usageTokens: goal.usage.tokens, usageElapsedMillis: goal.usage.elapsedMillis, usageTurns: goal.usage.turns,
-        startedAt: goal.startedAtMillis, updatedAt: goal.updatedAtMillis,
-        completedAt: goal.completedAtMillis ?? null, summary: goal.summary ?? null,
+        threadId: goal.threadId,
+        objective: goal.objective,
+        status: goal.status,
+        budgetTokens: goal.budget.tokens ?? null,
+        budgetWallClockMillis: goal.budget.wallClockMillis ?? null,
+        usageTokens: goal.usage.tokens,
+        usageElapsedMillis: goal.usage.elapsedMillis,
+        usageTurns: goal.usage.turns,
+        startedAt: goal.startedAtMillis,
+        updatedAt: goal.updatedAtMillis,
+        completedAt: goal.completedAtMillis ?? null,
+        summary: goal.summary ?? null,
       }
       const conflict = {
         target: rikaGoals.threadId,
         set: values,
       }
-      return db.insert(rikaGoals).values(values).onConflictDoUpdate(
-        guardActive ? { ...conflict, setWhere: ne(rikaGoals.status, "active") } : conflict,
-      ).returning({ threadId: rikaGoals.threadId })
+      return db
+        .insert(rikaGoals)
+        .values(values)
+        .onConflictDoUpdate(guardActive ? { ...conflict, setWhere: ne(rikaGoals.status, "active") } : conflict)
+        .returning({ threadId: rikaGoals.threadId })
     }
     return Service.of({
       get,

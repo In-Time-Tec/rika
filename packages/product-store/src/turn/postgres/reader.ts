@@ -27,13 +27,20 @@ export const turnRowSelection = {
 }
 
 const readTurnImpl = (db: PgDrizzle.EffectPgDatabase, id: TurnId): Effect.Effect<Turn | undefined, RepositoryError> =>
-  db.select(turnRowSelection).from(rikaTurns).where(eq(rikaTurns.id, id)).limit(1).pipe(
-    Effect.mapError((cause) => RepositoryError.make({ message: cause.message })),
-    Effect.flatMap((rows) => Effect.all(rows.map(decode))),
-    Effect.map((turns) => turns[0]),
-  )
+  db
+    .select(turnRowSelection)
+    .from(rikaTurns)
+    .where(eq(rikaTurns.id, id))
+    .limit(1)
+    .pipe(
+      Effect.mapError((cause) => RepositoryError.make({ message: cause.message })),
+      Effect.flatMap((rows) => Effect.all(rows.map(decode))),
+      Effect.map((turns) => turns[0]),
+    )
 
-export function readTurn(db: PgDrizzle.EffectPgDatabase): (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
+export function readTurn(
+  db: PgDrizzle.EffectPgDatabase,
+): (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
 export function readTurn(db: PgDrizzle.EffectPgDatabase, id: TurnId): Effect.Effect<Turn | undefined, RepositoryError>
 export function readTurn(db: PgDrizzle.EffectPgDatabase, id?: TurnId) {
   return id === undefined ? (nextId: TurnId) => readTurnImpl(db, nextId) : readTurnImpl(db, id)

@@ -54,8 +54,7 @@ const transcriptUnitRevisionImpl = (
     if (response?.kind === "answer") {
       const entry = model.entries[response.entry]
       if (entry !== undefined) ids.push(identityRevision(entry))
-    }
-    else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
+    } else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
   const walkBlock = (index: number) => {
     const block = blockAt(model, index)
@@ -82,8 +81,7 @@ const transcriptUnitRevisionImpl = (
     if (response?.kind === "answer") {
       const entry = model.entries[response.entry]
       if (entry !== undefined) ids.push(identityRevision(entry))
-    }
-    else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
+    } else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
   switch (unit.kind) {
     case "entry":

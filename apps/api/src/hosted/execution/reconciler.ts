@@ -28,7 +28,7 @@ export interface HostedExecutionReconcilerService {
 export class HostedExecutionReconciler extends Context.Service<
   HostedExecutionReconciler,
   HostedExecutionReconcilerService
->()("@rika/api/hosted-execution-reconciler/HostedExecutionReconciler") {}
+>()("@rika/api/hosted/execution/reconciler/HostedExecutionReconciler") {}
 
 interface WorkerState {
   readonly poll: PollStatus

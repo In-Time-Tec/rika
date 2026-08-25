@@ -940,52 +940,86 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const cancelPrompt: StoreService["cancelPrompt"] = Effect.fn("HostedStore.cancelPrompt")(function* (input) {
-    return yield* db.transaction((tx) =>
-      Effect.gen(function* () {
-        const locked = yield* query(tx.select({ id: rikaHostedThreads.id }).from(rikaHostedThreads).where(and(
-          eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId),
-        )).for("update"))
-        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
-        yield* requireThreadAccess(tx, input, "thread:control", input.cancelledAt)
-        const cancellations = yield* query(tx.select({
-          targetCommandId: rikaHostedPromptCancellations.targetCommandId,
-          cancelCommandId: rikaHostedPromptCancellations.cancelCommandId,
-          actor: rikaHostedPromptCancellations.actor,
-        }).from(rikaHostedPromptCancellations).where(and(
-          eq(rikaHostedPromptCancellations.threadId, input.threadId),
-          or(eq(rikaHostedPromptCancellations.targetCommandId, input.targetCommandId),
-            eq(rikaHostedPromptCancellations.cancelCommandId, input.cancelCommandId)),
-        )).for("update"))
-        if (cancellations.length > 1)
-          return yield* failure("conflict", "Cancellation identities refer to different submissions")
-        const existing = cancellations[0]
-        if (existing !== undefined) {
-          const actor = yield* Schema.decodeUnknownEffect(ActorAttribution)(existing.actor).pipe(Effect.mapError(databaseError))
-          if (
-            existing.targetCommandId !== input.targetCommandId ||
-            existing.cancelCommandId !== input.cancelCommandId ||
-            !actorEquivalent(actor, input.actor)
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const locked = yield* query(
+            tx
+              .select({ id: rikaHostedThreads.id })
+              .from(rikaHostedThreads)
+              .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId)))
+              .for("update"),
           )
-            return yield* failure("conflict", "Cancellation identity was reused with incompatible input")
-        } else {
-          yield* query(tx.insert(rikaHostedPromptCancellations).values({
-            ownerId: input.ownerId, threadId: input.threadId, targetCommandId: input.targetCommandId,
-            cancelCommandId: input.cancelCommandId, actor: input.actor, cancelledAt: timestamp(input.cancelledAt),
-          }))
-        }
-        const targets = yield* query(tx.select({
-          turnId: rikaHostedThreadCommands.turnId,
-          tag: expression<string | null>`${rikaHostedThreadCommands.command} ->> '_tag'`,
-        }).from(rikaHostedThreadCommands).where(and(eq(rikaHostedThreadCommands.ownerId, input.ownerId),
-          eq(rikaHostedThreadCommands.threadId, input.threadId),
-          eq(rikaHostedThreadCommands.commandId, input.targetCommandId))))
-        const target = targets[0]
-        if (target !== undefined && (target.tag !== "SubmitPrompt" || target.turnId === null))
-          return yield* failure("conflict", "Cancellation target is not a prompt submission")
-        return target?.turnId === undefined || target.turnId === null
-          ? { _tag: "Pending" as const, targetCommandId: input.targetCommandId }
-          : { _tag: "Turn" as const, targetCommandId: input.targetCommandId, turnId: TurnId.make(target.turnId) }
-      })).pipe(Effect.catchTag("SqlError", databaseError))
+          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
+          yield* requireThreadAccess(tx, input, "thread:control", input.cancelledAt)
+          const cancellations = yield* query(
+            tx
+              .select({
+                targetCommandId: rikaHostedPromptCancellations.targetCommandId,
+                cancelCommandId: rikaHostedPromptCancellations.cancelCommandId,
+                actor: rikaHostedPromptCancellations.actor,
+              })
+              .from(rikaHostedPromptCancellations)
+              .where(
+                and(
+                  eq(rikaHostedPromptCancellations.threadId, input.threadId),
+                  or(
+                    eq(rikaHostedPromptCancellations.targetCommandId, input.targetCommandId),
+                    eq(rikaHostedPromptCancellations.cancelCommandId, input.cancelCommandId),
+                  ),
+                ),
+              )
+              .for("update"),
+          )
+          if (cancellations.length > 1)
+            return yield* failure("conflict", "Cancellation identities refer to different submissions")
+          const existing = cancellations[0]
+          if (existing !== undefined) {
+            const actor = yield* Schema.decodeUnknownEffect(ActorAttribution)(existing.actor).pipe(
+              Effect.mapError(databaseError),
+            )
+            if (
+              existing.targetCommandId !== input.targetCommandId ||
+              existing.cancelCommandId !== input.cancelCommandId ||
+              !actorEquivalent(actor, input.actor)
+            )
+              return yield* failure("conflict", "Cancellation identity was reused with incompatible input")
+          } else {
+            yield* query(
+              tx.insert(rikaHostedPromptCancellations).values({
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                targetCommandId: input.targetCommandId,
+                cancelCommandId: input.cancelCommandId,
+                actor: input.actor,
+                cancelledAt: timestamp(input.cancelledAt),
+              }),
+            )
+          }
+          const targets = yield* query(
+            tx
+              .select({
+                turnId: rikaHostedThreadCommands.turnId,
+                tag: expression<string | null>`${rikaHostedThreadCommands.command} ->> '_tag'`,
+              })
+              .from(rikaHostedThreadCommands)
+              .where(
+                and(
+                  eq(rikaHostedThreadCommands.ownerId, input.ownerId),
+                  eq(rikaHostedThreadCommands.threadId, input.threadId),
+                  eq(rikaHostedThreadCommands.commandId, input.targetCommandId),
+                ),
+              ),
+          )
+          const target = targets[0]
+          if (target !== undefined && (target.tag !== "SubmitPrompt" || target.turnId === null))
+            return yield* failure("conflict", "Cancellation target is not a prompt submission")
+          return target?.turnId === undefined || target.turnId === null
+            ? { _tag: "Pending" as const, targetCommandId: input.targetCommandId }
+            : { _tag: "Turn" as const, targetCommandId: input.targetCommandId, turnId: TurnId.make(target.turnId) }
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const admitPrompt = Effect.fn("HostedStore.admitPrompt")(function* (input: AdmitPromptInput) {
@@ -1078,8 +1112,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
                 ),
               ),
           )
-          if (cancellation[0] !== undefined)
-            return { _tag: "Cancelled" as const, targetCommandId: input.commandId }
+          if (cancellation[0] !== undefined) return { _tag: "Cancelled" as const, targetCommandId: input.commandId }
           if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
           const productThread = yield* query(
             tx
@@ -1574,9 +1607,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
-  const renewTerminalWriter = Effect.fn("HostedStore.renewTerminalWriter")(function* (
-    input: RenewTerminalWriterInput,
-  ) {
+  const renewTerminalWriter = Effect.fn("HostedStore.renewTerminalWriter")(function* (input: RenewTerminalWriterInput) {
     return yield* db
       .transaction((tx) =>
         Effect.gen(function* () {

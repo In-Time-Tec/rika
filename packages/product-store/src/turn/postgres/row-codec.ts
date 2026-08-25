@@ -90,9 +90,7 @@ export const decode = <Row>(row: Row) =>
       return yield* RepositoryError.make({ message: `Agent execution turn ${id} has no execution route` })
     const status = yield* Schema.decodeUnknownEffect(Status)(value.status)
     const promptParts =
-      value.prompt_parts_json == null
-        ? undefined
-        : yield* Schema.decodeEffect(PromptPartsJson)(value.prompt_parts_json)
+      value.prompt_parts_json == null ? undefined : yield* Schema.decodeEffect(PromptPartsJson)(value.prompt_parts_json)
     const executionRoute = yield* Schema.decodeEffect(ExecutionRouteJson)(value.execution_route_json)
     const executionLink =
       value.execution_link_json == null

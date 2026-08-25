@@ -41,11 +41,7 @@ const boundsOf = (ast: SchemaAST.AST): string | undefined => {
     if (tag === "effect/schema/isLessThan" && payload.exclusiveMaximum !== undefined)
       maximum = payload.exclusiveMaximum - 1
     if (tag === "effect/schema/isLessThanOrEqualTo" && payload.maximum !== undefined) maximum = payload.maximum
-    if (
-      tag === "effect/schema/isLengthBetween" &&
-      payload.minimum === payload.maximum &&
-      payload.minimum !== undefined
-    )
+    if (tag === "effect/schema/isLengthBetween" && payload.minimum === payload.maximum && payload.minimum !== undefined)
       length = payload.minimum
   }
   if (ast._tag === "Arrays")
@@ -109,7 +105,8 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
              * thing that tells one member of a union from another. Reading only the list left a
              * model shown four alternatives with nothing to choose between them.
              */
-            const members = value._tag === "Union" ? value.types.filter((member) => member._tag !== "Undefined") : [value]
+            const members =
+              value._tag === "Union" ? value.types.filter((member) => member._tag !== "Undefined") : [value]
             const literals = members.flatMap((member) => (member._tag === "Literal" ? [member.literal] : []))
             // A literal is written the way a cell writes it, so a number stays a number rather than
             // arriving quoted and being sent as a string.

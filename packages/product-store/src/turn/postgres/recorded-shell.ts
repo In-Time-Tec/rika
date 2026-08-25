@@ -13,21 +13,24 @@ const insert = (
   turn: Parameters<Interface["copyRecordedShell"]>[0] | Parameters<Interface["createRecordedShell"]>[0],
 ) => {
   const result = turn.status === "running" ? undefined : turn.result
-  return db.insert(rikaTurns).values({
-    id: turn.id,
-    threadId: turn.threadId,
-    turnKind: "RecordedShell",
-    prompt: turn.prompt,
-    shellCommand: turn.command,
-    shellResultText: result?.text ?? null,
-    shellResultTruncated: result === undefined ? null : Number(result.truncated),
-    shellResultExitCode: result?.exitCode ?? null,
-    authorJson: JSON.stringify(turn.author),
-    lineageJson: JSON.stringify(turn.lineage),
-    status: turn.status,
-    createdAt: turn.createdAt,
-    updatedAt: turn.updatedAt,
-  }).returning(turnRowSelection)
+  return db
+    .insert(rikaTurns)
+    .values({
+      id: turn.id,
+      threadId: turn.threadId,
+      turnKind: "RecordedShell",
+      prompt: turn.prompt,
+      shellCommand: turn.command,
+      shellResultText: result?.text ?? null,
+      shellResultTruncated: result === undefined ? null : Number(result.truncated),
+      shellResultExitCode: result?.exitCode ?? null,
+      authorJson: JSON.stringify(turn.author),
+      lineageJson: JSON.stringify(turn.lineage),
+      status: turn.status,
+      createdAt: turn.createdAt,
+      updatedAt: turn.updatedAt,
+    })
+    .returning(turnRowSelection)
 }
 
 export const makeTurnSqlRecordedShell = (
@@ -48,20 +51,27 @@ export const makeTurnSqlRecordedShell = (
     return decoded
   }),
   settleRecordedShell: Effect.fn("TurnRepository.settleRecordedShell")(function* (expected, turn) {
-    const rows = yield* db.update(rikaTurns).set({
-      status: turn.status,
-      shellResultText: turn.result.text,
-      shellResultTruncated: Number(turn.result.truncated),
-      shellResultExitCode: turn.result.exitCode ?? null,
-      updatedAt: turn.updatedAt,
-    }).where(and(
-      eq(rikaTurns.id, expected.id),
-      eq(rikaTurns.threadId, expected.threadId),
-      eq(rikaTurns.turnKind, "RecordedShell"),
-      eq(rikaTurns.status, "running"),
-      eq(rikaTurns.prompt, expected.prompt),
-      eq(rikaTurns.shellCommand, expected.command),
-    )).returning(turnRowSelection).pipe(Effect.mapError(repositoryError))
+    const rows = yield* db
+      .update(rikaTurns)
+      .set({
+        status: turn.status,
+        shellResultText: turn.result.text,
+        shellResultTruncated: Number(turn.result.truncated),
+        shellResultExitCode: turn.result.exitCode ?? null,
+        updatedAt: turn.updatedAt,
+      })
+      .where(
+        and(
+          eq(rikaTurns.id, expected.id),
+          eq(rikaTurns.threadId, expected.threadId),
+          eq(rikaTurns.turnKind, "RecordedShell"),
+          eq(rikaTurns.status, "running"),
+          eq(rikaTurns.prompt, expected.prompt),
+          eq(rikaTurns.shellCommand, expected.command),
+        ),
+      )
+      .returning(turnRowSelection)
+      .pipe(Effect.mapError(repositoryError))
     if (rows[0] === undefined) return undefined
     const decoded = yield* decode(rows[0])
     if (!TurnResult.isTerminalRecordedShell(decoded))

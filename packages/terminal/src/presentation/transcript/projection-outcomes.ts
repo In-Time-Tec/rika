@@ -2,11 +2,7 @@ import { Function, Schema } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import type { Model } from "../../state/model"
-import {
-  isDeliveredDelegationOutput,
-  isFailedDelegationOutput,
-  isSucceededDelegationOutput,
-} from "./agent-response"
+import { isDeliveredDelegationOutput, isFailedDelegationOutput, isSucceededDelegationOutput } from "./agent-response"
 
 type ExecutionOutcome = NonNullable<Unit["executionOutcome"]>
 interface ExecutionOutcomeSource {

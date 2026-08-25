@@ -1,5 +1,10 @@
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
-import { HostedExecutionOperations, HostedExecutionOperationsError, layer as hostedExecutionOperationsLayer, type FinalizeOperationInput } from "@rika/product-store/executor-operations"
+import {
+  HostedExecutionOperations,
+  HostedExecutionOperationsError,
+  layer as hostedExecutionOperationsLayer,
+  type FinalizeOperationInput,
+} from "@rika/product-store/executor-operations"
 import {
   ApiMessage,
   RunnerMessage,
@@ -178,9 +183,9 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
         replayPolicy: input.replayPolicy,
       }),
     )
-    const row = yield* operations.upsertOperation({ ...input, requestDigest: digest }).pipe(
-      Effect.mapError(() => failure("transport", "Could not persist Runner operation")),
-    )
+    const row = yield* operations
+      .upsertOperation({ ...input, requestDigest: digest })
+      .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner operation")))
     if (row === undefined) return yield* failure("transport", "Runner operation is unavailable")
     if (
       row.requestDigest !== digest ||
@@ -205,17 +210,30 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     readonly attempt: number
   }) {
     const sessionDigest = yield* requestDigest(input.session.access.sessionToken)
-    const operation = yield* operations.findOperation({ assignmentId: input.session.access.fence.assignmentId, operationKey: input.operationKey, attempt: input.attempt }).pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
+    const operation = yield* operations
+      .findOperation({
+        assignmentId: input.session.access.fence.assignmentId,
+        operationKey: input.operationKey,
+        attempt: input.attempt,
+      })
+      .pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
     if (operation === undefined) return yield* failure("transport", "Runner operation is unavailable")
-    const disposition = yield* operations.claimDispatch(operation, {
-      assignmentGeneration: input.session.access.fence.assignmentGeneration,
-      leaseEpoch: input.session.access.leaseEpoch,
-      providerInstanceId: input.session.access.fence.instanceId,
-      executorInstanceId: input.session.access.fence.executorId,
-      processIncarnation: input.session.access.fence.processIncarnation,
-    }, sessionDigest).pipe(Effect.mapError(() => failure("transport", "Could not claim Runner fence")))
+    const disposition = yield* operations
+      .claimDispatch(
+        operation,
+        {
+          assignmentGeneration: input.session.access.fence.assignmentGeneration,
+          leaseEpoch: input.session.access.leaseEpoch,
+          providerInstanceId: input.session.access.fence.instanceId,
+          executorInstanceId: input.session.access.fence.executorId,
+          processIncarnation: input.session.access.fence.processIncarnation,
+        },
+        sessionDigest,
+      )
+      .pipe(Effect.mapError(() => failure("transport", "Could not claim Runner fence")))
     if (disposition === "missing") return yield* failure("transport", "Runner operation is unavailable")
-    if (disposition !== "claimed" && disposition !== "same-fence") return yield* failure("fenced", "Runner fence is no longer current")
+    if (disposition !== "claimed" && disposition !== "same-fence")
+      return yield* failure("fenced", "Runner fence is no longer current")
   })
 
   const register = Effect.fn("RunnerGateway.register")(function* (session: Session) {
@@ -257,9 +275,9 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   })
 
   const replayPending = Effect.fn("RunnerGateway.replayPending")(function* (session: Session) {
-    const queuedOperations = yield* operations.replayQueue(session.access.fence.assignmentId).pipe(
-      Effect.mapError(() => failure("transport", "Could not load Runner replay queue")),
-    )
+    const queuedOperations = yield* operations
+      .replayQueue(session.access.fence.assignmentId)
+      .pipe(Effect.mapError(() => failure("transport", "Could not load Runner replay queue")))
     for (const queued of queuedOperations)
       session.socket.send(
         encode({
@@ -482,12 +500,15 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     const assignmentId = input.access?.fence.assignmentId ?? input.assignmentId
     if (assignmentId === undefined) return yield* failure("fenced", "Runner assignment is unavailable")
     const recovering = input.access === undefined
-    const completionFence = input.access === undefined ? undefined : {
-      assignmentGeneration: input.access.fence.assignmentGeneration,
-      leaseEpoch: input.access.leaseEpoch,
-      executorInstanceId: input.access.fence.executorId,
-      processIncarnation: input.access.fence.processIncarnation,
-    }
+    const completionFence =
+      input.access === undefined
+        ? undefined
+        : {
+            assignmentGeneration: input.access.fence.assignmentGeneration,
+            leaseEpoch: input.access.leaseEpoch,
+            executorInstanceId: input.access.fence.executorId,
+            processIncarnation: input.access.fence.processIncarnation,
+          }
     const finalizeInput: MutableFinalizeOperationInput = {
       assignmentId,
       operationKey: input.operationKey,
@@ -496,26 +517,48 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
       state: input.state,
     }
     if (completionFence !== undefined) finalizeInput.completionFence = completionFence
-    if (input.dispatchedFence !== undefined) finalizeInput.expectedFence = { ...input.dispatchedFence, assignmentGeneration: Number(input.dispatchedFence.assignmentGeneration), leaseEpoch: Number(input.dispatchedFence.leaseEpoch) }
+    if (input.dispatchedFence !== undefined)
+      finalizeInput.expectedFence = {
+        ...input.dispatchedFence,
+        assignmentGeneration: Number(input.dispatchedFence.assignmentGeneration),
+        leaseEpoch: Number(input.dispatchedFence.leaseEpoch),
+      }
     finalizeInput.onFinalize = (persisted) => {
       const event: Parameters<typeof store.appendEvent>[0] = {
         eventId: EventId.make(input.operationKey),
         idempotencyKey: IdempotencyKey.make(input.operationKey),
         assignmentId: ExecutorAssignmentId.make(assignmentId),
         assignmentGeneration: FencingGeneration.make(String(persisted.fence.assignmentGeneration)),
-        leaseEpoch: AssignmentLeaseEpoch.make(input.access === undefined ? String(persisted.fence.leaseEpoch) : String(input.access.leaseEpoch)),
+        leaseEpoch: AssignmentLeaseEpoch.make(
+          input.access === undefined ? String(persisted.fence.leaseEpoch) : String(input.access.leaseEpoch),
+        ),
         commandSequence: Sequence.make(String(persisted.commandSequence)),
         event: { _tag: "CellResult", operationKey: input.operationKey, response: persisted.response },
       }
-      if (recovering) return store.appendRecoveredEvent({ ...event, assignmentGeneration: FencingGeneration.make(String(persisted.fence.assignmentGeneration)), leaseEpoch: AssignmentLeaseEpoch.make(String(persisted.fence.leaseEpoch)), executorInstanceId: persisted.fence.executorInstanceId, processIncarnation: persisted.fence.processIncarnation }).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
-      return store.appendEvent(event).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
+      if (recovering)
+        return store
+          .appendRecoveredEvent({
+            ...event,
+            assignmentGeneration: FencingGeneration.make(String(persisted.fence.assignmentGeneration)),
+            leaseEpoch: AssignmentLeaseEpoch.make(String(persisted.fence.leaseEpoch)),
+            executorInstanceId: persisted.fence.executorInstanceId,
+            processIncarnation: persisted.fence.processIncarnation,
+          })
+          .pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
+      return store
+        .appendEvent(event)
+        .pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))
     }
-    const persisted = yield* operations.finalizeOperation(finalizeInput).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner result")))
+    const persisted = yield* operations
+      .finalizeOperation(finalizeInput)
+      .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner result")))
     if (persisted._tag === "already-terminal") return finalResult(persisted.response, persisted.outcome, input.access)
-    if (persisted._tag === "response-conflict") return yield* failure("fenced", "Runner operation already has a different terminal result")
+    if (persisted._tag === "response-conflict")
+      return yield* failure("fenced", "Runner operation already has a different terminal result")
     if (persisted._tag === "missing") return yield* failure("transport", "Runner operation is unavailable")
     if (persisted._tag === "command-missing") return yield* failure("transport", "Runner command is unavailable")
-    if (persisted._tag !== "finalized") return yield* failure("fenced", "Runner operation was not dispatched to this fence")
+    if (persisted._tag !== "finalized")
+      return yield* failure("fenced", "Runner operation was not dispatched to this fence")
     return finalResult(persisted.response, persisted.outcome, input.access)
   })
 
@@ -545,15 +588,17 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   })
 
   const recoverTerminals = Effect.fn("RunnerGateway.recoverTerminals")(function* () {
-    const rows = yield* operations.terminalRecoveryScan.pipe(Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipts")))
+    const rows = yield* operations.terminalRecoveryScan.pipe(
+      Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipts")),
+    )
     return yield* Effect.forEach(rows, (row) =>
       finalize({
-                assignmentId: row.assignmentId,
-                operationKey: row.operationKey,
-                attempt: row.attempt,
-                response: row.frame.response,
-                state: row.frame.outcome === "unknown" ? "unknown" : "completed",
-              }).pipe(
+        assignmentId: row.assignmentId,
+        operationKey: row.operationKey,
+        attempt: row.attempt,
+        response: row.frame.response,
+        state: row.frame.outcome === "unknown" ? "unknown" : "completed",
+      }).pipe(
         Effect.flatMap((result) => settlePending(row.assignmentId, row.operationKey, row.attempt, result)),
         Effect.as<GatewayError | undefined>(undefined),
         Effect.catch((error) => Effect.succeed<GatewayError | undefined>(error)),
@@ -618,19 +663,20 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
           return yield* failure("fenced", "Runner result attempt is stale")
       }),
     )
-    const persisted = yield* operations.findOperation({ assignmentId: access.fence.assignmentId, operationKey, attempt }).pipe(
-      Effect.mapError(() => failure("transport", "Could not read Runner operation")),
-    )
+    const persisted = yield* operations
+      .findOperation({ assignmentId: access.fence.assignmentId, operationKey, attempt })
+      .pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
     if (persisted === undefined) return yield* failure("fenced", "Runner operation is unavailable")
     if (persisted.state === "completed" || persisted.state === "unknown") {
       const result = yield* finalize({ access, operationKey, attempt, response, state: "completed" })
       if (pendingCurrent !== undefined) yield* Deferred.succeed(pendingCurrent.result, result)
       return result
     }
-    const terminalFrame = yield* operations.terminalFrame({ assignmentId: access.fence.assignmentId, operationKey, attempt }).pipe(
-      Effect.mapError(() => failure("transport", "Could not read Runner terminal receipt")),
-    )
-    if (terminalFrame === undefined) return yield* failure("fenced", "Runner result arrived before its terminal receipt")
+    const terminalFrame = yield* operations
+      .terminalFrame({ assignmentId: access.fence.assignmentId, operationKey, attempt })
+      .pipe(Effect.mapError(() => failure("transport", "Could not read Runner terminal receipt")))
+    if (terminalFrame === undefined)
+      return yield* failure("fenced", "Runner result arrived before its terminal receipt")
     const result = yield* finalize({ access, operationKey, attempt, response, state: "completed" }).pipe(
       Effect.tapError((error) =>
         pendingCurrent === undefined ? Effect.void : Deferred.fail(pendingCurrent.result, error).pipe(Effect.asVoid),
@@ -655,8 +701,11 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
         if (assignmentId === undefined || session?.socket !== socket || !same(session.access, access))
           return yield* failure("fenced", "Runner lifecycle frame has a stale session")
         const attribution = frame.attribution
-        const disposition = yield* operations.appendFrame(assignmentId, frame).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner lifecycle frame")))
-        if (disposition === "invalid-sequence") return yield* failure("fenced", "Runner lifecycle sequence or attribution is invalid")
+        const disposition = yield* operations
+          .appendFrame(assignmentId, frame)
+          .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner lifecycle frame")))
+        if (disposition === "invalid-sequence")
+          return yield* failure("fenced", "Runner lifecycle sequence or attribution is invalid")
         if (frame._tag === "Terminal") {
           if (disposition === "appended") {
             const result = yield* finalize({
@@ -811,22 +860,31 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     )
 
   const timeoutAccepted = Effect.fn("RunnerGateway.timeoutAccepted")(function* (input: LocalExecuteInput) {
-    const current = yield* operations.findOperation(input).pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
+    const current = yield* operations
+      .findOperation(input)
+      .pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
     if (current === undefined) return yield* failure("transport", "Runner operation is unavailable")
     if (current.state === "completed" || current.state === "unknown") {
-      if (current.response === null || current.terminalOutcome === null) return yield* failure("transport", "Persisted Runner terminal outcome is missing")
+      if (current.response === null || current.terminalOutcome === null)
+        return yield* failure("transport", "Persisted Runner terminal outcome is missing")
       return { response: current.response, outcome: current.terminalOutcome, eventPersisted: true }
     }
     if (current.state === "dispatched") return undefined
-    const timedOut = yield* operations.timeoutAccepted(input, timeoutResponse, (result) => store.appendEvent({
-      eventId: EventId.make(input.operationKey),
-      idempotencyKey: IdempotencyKey.make(input.operationKey),
-      assignmentId: ExecutorAssignmentId.make(input.assignmentId),
-      assignmentGeneration: FencingGeneration.make(String(result.assignmentGeneration)),
-      leaseEpoch: AssignmentLeaseEpoch.make(String(result.leaseEpoch)),
-      commandSequence: Sequence.make(String(result.commandSequence)),
-      event: { _tag: "CellResult", operationKey: input.operationKey, response: timeoutResponse },
-    }).pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message })))).pipe(Effect.mapError(() => failure("transport", "Could not persist Runner deadline")))
+    const timedOut = yield* operations
+      .timeoutAccepted(input, timeoutResponse, (result) =>
+        store
+          .appendEvent({
+            eventId: EventId.make(input.operationKey),
+            idempotencyKey: IdempotencyKey.make(input.operationKey),
+            assignmentId: ExecutorAssignmentId.make(input.assignmentId),
+            assignmentGeneration: FencingGeneration.make(String(result.assignmentGeneration)),
+            leaseEpoch: AssignmentLeaseEpoch.make(String(result.leaseEpoch)),
+            commandSequence: Sequence.make(String(result.commandSequence)),
+            event: { _tag: "CellResult", operationKey: input.operationKey, response: timeoutResponse },
+          })
+          .pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message }))),
+      )
+      .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner deadline")))
     if (timedOut === undefined) return undefined
     const result: FinalResult = { response: timeoutResponse, outcome: "failed", eventPersisted: true }
     return result
@@ -835,9 +893,9 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   const waitForTerminal = (input: LocalExecuteInput): Effect.Effect<FinalResult, GatewayError> =>
     Effect.gen(function* () {
       yield* recoverTerminals().pipe(Effect.ignore)
-      const row = yield* operations.findOperation(input).pipe(
-        Effect.mapError(() => failure("transport", "Could not read Runner operation")),
-      )
+      const row = yield* operations
+        .findOperation(input)
+        .pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
       if (row === undefined) return yield* failure("transport", "Runner operation is unavailable")
       if (row.state === "completed" || row.state === "unknown") {
         if (row.response === null || row.terminalOutcome === null)
@@ -1150,7 +1208,10 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   return { receive, disconnected, active, execute, cancel, machine }
 })
 
-export const makeRunnerGateway = Effect.fn("RunnerGateway.makeLive")(function* (authority: RunnerExecutorAuthority, toolPolicy: HostedToolPolicyService) {
+export const makeRunnerGateway = Effect.fn("RunnerGateway.makeLive")(function* (
+  authority: RunnerExecutorAuthority,
+  toolPolicy: HostedToolPolicyService,
+) {
   const context = yield* Layer.build(hostedExecutionOperationsLayer)
   return yield* makeRunnerGatewayWithOperations(authority, toolPolicy).pipe(Effect.provideContext(context))
 })

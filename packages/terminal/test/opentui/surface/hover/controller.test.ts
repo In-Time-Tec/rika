@@ -35,18 +35,17 @@ const longDiff = [
 const toolCall = (
   id: string,
   changes: Partial<Extract<TranscriptBlock, { _tag: "ToolCall" }>>,
-): Extract<TranscriptBlock, { _tag: "ToolCall" }> =>
-  ({
-    _tag: "ToolCall",
-    id,
-    name: "tool",
-    input: "{}",
-    status: "complete",
-    presentation: { family: "direct", action: "other", activeLabel: "Running", completeLabel: "Ran" },
-    detail: "",
-    files: [],
-    ...changes,
-  })
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> => ({
+  _tag: "ToolCall",
+  id,
+  name: "tool",
+  input: "{}",
+  status: "complete",
+  presentation: { family: "direct", action: "other", activeLabel: "Running", completeLabel: "Ran" },
+  detail: "",
+  files: [],
+  ...changes,
+})
 
 const nestedCommand = `git show --format=fuller ${"a".repeat(180)} -- packages/terminal/src/opentui/surface/opentui-surface.ts packages/terminal/test/transcript-bounds.test.ts`
 

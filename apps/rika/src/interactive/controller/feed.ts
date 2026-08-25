@@ -18,9 +18,11 @@ const agentResponseArrived = (units: ReadonlyArray<Unit>): boolean =>
   units.some((unit) => unit.content._tag === "Block" || unit.content.role !== "user")
 
 const latestErrorBlock = (units: ReadonlyArray<Unit>) =>
-  units.flatMap((unit) =>
-    unit.content._tag === "Block" && unit.content.block._tag === "Error" ? [unit.content.block] : [],
-  ).at(-1)
+  units
+    .flatMap((unit) =>
+      unit.content._tag === "Block" && unit.content.block._tag === "Error" ? [unit.content.block] : [],
+    )
+    .at(-1)
 
 const activeUnitActivity = (
   entry: ThreadView.ThreadViewTurnState | undefined,

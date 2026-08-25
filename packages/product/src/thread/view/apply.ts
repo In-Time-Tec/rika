@@ -1,13 +1,7 @@
 import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Result } from "effect"
-import {
-  duplicateKey,
-  limits,
-  type ThreadViewHeader,
-  type ThreadViewPatch,
-  type ThreadViewSnapshot,
-} from "./shape"
+import { duplicateKey, limits, type ThreadViewHeader, type ThreadViewPatch, type ThreadViewSnapshot } from "./shape"
 import {
   ResyncRequired,
   ThreadViewDuplicateItem,

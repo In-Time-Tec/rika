@@ -29,9 +29,7 @@ describe("E2B template", () => {
         expect(startup.indexOf("/run/e2b/.E2B_SANDBOX_ID")).toBeLessThan(
           startup.indexOf('E2B_SANDBOX_ID="template-readiness"'),
         )
-        expect(startup).toContain(
-          "sudo -n /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika",
-        )
+        expect(startup).toContain("sudo -n /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika")
         expect(startup).toContain("export E2B_SANDBOX_ID")
         expect(startup).toContain("exec bun run /opt/rika/packages/remote-execution/src/host/service.ts")
         expect(startup).not.toContain("executor-host.ts")

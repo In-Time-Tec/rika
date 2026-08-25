@@ -20,8 +20,7 @@ interface Sandbox {
 
 const server = (sandbox: Sandbox): Record<string, Call> => sandbox.rika.mcp.files
 const flat = (sandbox: Sandbox): Call => sandbox.rika.mcp.servers
-const invoke = (call: Call, input: Schema.Json): Effect.Effect<Schema.Json> =>
-  Effect.tryPromise(() => call(input))
+const invoke = (call: Call, input: Schema.Json): Effect.Effect<Schema.Json> => Effect.tryPromise(() => call(input))
 
 const discovered = [
   { name: "read", rawName: "raw_read" },

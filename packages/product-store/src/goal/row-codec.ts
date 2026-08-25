@@ -1,6 +1,5 @@
 import { Schema } from "effect"
 
-
 export const GoalRow = Schema.Struct({
   thread_id: Schema.String,
   objective: Schema.String,

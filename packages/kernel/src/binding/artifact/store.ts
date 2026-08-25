@@ -40,9 +40,8 @@ const make = (dataRoot: string): Effect.Effect<Interface, never, FileSystem.File
     return {
       put: (input) =>
         Effect.gen(function* () {
-          const persisted: typeof Persisted.Type = input.mediaType === undefined
-            ? { value: input.value }
-            : { value: input.value, mediaType: input.mediaType }
+          const persisted: typeof Persisted.Type =
+            input.mediaType === undefined ? { value: input.value } : { value: input.value, mediaType: input.mediaType }
           const encoded = yield* encodeStored(persisted).pipe(
             Effect.mapError(() => unavailable("", "corrupt", "artifact value is not JSON")),
           )

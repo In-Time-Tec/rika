@@ -171,18 +171,15 @@ export const layer = Layer.effect(
               commandId: CommandId.make(input.commandId),
               idempotencyKey: IdempotencyKey.make(input.commandId),
               expectedThreadVersion: ThreadVersion.make("0"),
-              owner: input.owner.kind === "personal"
-                ? { kind: "personal" }
-                : { kind: "organization", organizationId: input.owner.organizationId },
+              owner:
+                input.owner.kind === "personal"
+                  ? { kind: "personal" }
+                  : { kind: "organization", organizationId: input.owner.organizationId },
               executorKind: input.executorKind,
             }
             if (input.project !== undefined) command.projectId = ProjectId.make(input.project)
             if (input.runnerTarget !== undefined) command.runnerTarget = input.runnerTarget
-            const accepted = yield* applyCommand(
-              connection,
-              envelope(requestId, command),
-              input.commandId,
-            )
+            const accepted = yield* applyCommand(connection, envelope(requestId, command), input.commandId)
             if (accepted.result._tag !== "ThreadCreated")
               return yield* failure("protocol", "Hosted Thread creation returned the wrong result")
             if (String(accepted.threadId) !== String(accepted.result.threadId))

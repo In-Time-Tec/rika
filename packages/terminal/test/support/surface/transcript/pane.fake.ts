@@ -28,7 +28,10 @@ export const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readon
     Match.orElse((styled) => styled.chunks.map((chunk) => chunk.text).join("")),
   )
 
-const _streamingShellImpl = (id: string, output: string | undefined): Extract<TranscriptBlock, { _tag: "ToolCall" }> => {
+const _streamingShellImpl = (
+  id: string,
+  output: string | undefined,
+): Extract<TranscriptBlock, { _tag: "ToolCall" }> => {
   const block: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
     _tag: "ToolCall" as const,
     id,

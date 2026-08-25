@@ -141,21 +141,24 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "rm", "--force", doctorContainer]).pipe(Effect.ignore),
             )
-            const doctorId = (yield* run([
-              ...containerCommand!,
-              "run",
-              "--detach",
-              "--name",
-              doctorContainer,
-              "--entrypoint",
-              "rika",
-              "--env",
-              "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
-              tag,
-              "executor",
-              "doctor",
-              "--json",
-            ])).stdout
+            const doctorId = (yield* run(
+              [
+                ...containerCommand!,
+                "run",
+                "--detach",
+                "--name",
+                doctorContainer,
+                "--entrypoint",
+                "rika",
+                "--env",
+                "RIKA_DOCTOR_NETWORK_URL=https://example.com/",
+                tag,
+                "executor",
+                "doctor",
+                "--json",
+              ],
+              120_000,
+            )).stdout
             if (doctorId.length === 0)
               return yield* CommandError.make({ message: "executor image doctor container did not start" })
             yield* Effect.gen(function* () {
@@ -202,7 +205,7 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             ])
               expect(names).toContain(name)
 
-            const container = (yield* run([...containerCommand!, "run", "--detach", "--rm", tag])).stdout
+            const container = (yield* run([...containerCommand!, "run", "--detach", "--rm", tag], 120_000)).stdout
             yield* Effect.addFinalizer(() =>
               run([...containerCommand!, "rm", "--force", container]).pipe(Effect.ignore),
             )

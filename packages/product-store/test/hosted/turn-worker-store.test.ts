@@ -212,7 +212,7 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         const durable = yield* Effect.tryPromise(() =>
           pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-1'`),
         )
-        expect(durable.rows[0]).toMatchObject({ status: "running" })
+        expect(durable.rows[0]).toMatchObject({ status: "accepted" })
         const executionLink = yield* Schema.decodeEffect(Schema.fromJsonString(ExecutionGateway.ExecutionLink))(
           String(durable.rows[0].execution_link_json),
         )
@@ -252,9 +252,9 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
           pool.query(`SELECT worker_id, claim_token FROM rika_hosted_turn_claims WHERE turn_id = 'turn-2'`),
         )
         expect(authority.rows[0]).toEqual({ worker_id: "worker-b", claim_token: "second-b" })
-        expect(yield* store.prepare(replacement, { ...preparedExecution, turnId: "turn-2", runId: "turn-2" }, 301)).toBe(
-          true,
-        )
+        expect(
+          yield* store.prepare(replacement, { ...preparedExecution, turnId: "turn-2", runId: "turn-2" }, 301),
+        ).toBe(true)
         yield* Effect.tryPromise(() =>
           pool.query(`UPDATE rika_turns SET status = 'cancelled', updated_at = 302 WHERE id = 'turn-2';
             UPDATE rika_hosted_executor_assignments

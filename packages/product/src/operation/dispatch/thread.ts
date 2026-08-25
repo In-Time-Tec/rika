@@ -99,9 +99,7 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             if (thread === undefined) return yield* operationError("No threads exist")
             selected = thread
           } else {
-            selected = yield* Effect.forEach(input.threadIds, (id) =>
-              dependencies.requireThread(repository, id),
-            )
+            selected = yield* Effect.forEach(input.threadIds, (id) => dependencies.requireThread(repository, id))
           }
           const selectedThreads = Array.isArray(selected) ? selected : [selected]
           const continued = yield* Effect.forEach(selectedThreads, (thread) =>
@@ -183,7 +181,11 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
           contextUsage =
             usageSummary.contextCapacity === undefined
               ? { inputTokens: usage.context.inputTokens, pending: usage.contextPending }
-              : { inputTokens: usage.context.inputTokens, ...usageSummary.contextCapacity, pending: usage.contextPending }
+              : {
+                  inputTokens: usage.context.inputTokens,
+                  ...usageSummary.contextCapacity,
+                  pending: usage.contextPending,
+                }
         yield* Console.log(
           dependencies.encodeJson({
             threadId: thread.id,

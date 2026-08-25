@@ -99,18 +99,23 @@ export const productLayer = <
           ? Effect.void
           : options.goals.get(threadId).pipe(
               Effect.map((goal) =>
-                publishInteractiveActivity(systemActivityOrigin, goal === undefined ? {
-                  _tag: "GoalChanged",
-                  threadId,
-                } : {
-                  _tag: "GoalChanged",
-                  threadId,
-                  goal: {
-                    objective: goal.objective,
-                    status: goal.status,
-                    startedAtMillis: goal.startedAtMillis,
-                  },
-                }),
+                publishInteractiveActivity(
+                  systemActivityOrigin,
+                  goal === undefined
+                    ? {
+                        _tag: "GoalChanged",
+                        threadId,
+                      }
+                    : {
+                        _tag: "GoalChanged",
+                        threadId,
+                        goal: {
+                          objective: goal.objective,
+                          status: goal.status,
+                          startedAtMillis: goal.startedAtMillis,
+                        },
+                      },
+                ),
               ),
               Effect.asVoid,
               Effect.ignore,

@@ -33,7 +33,7 @@ import {
   ThreadProtocolNotificationService,
   type ThreadProtocolNotificationGeneration,
   type ThreadProtocolNotifications,
-} from "../../thread-protocol-notifications"
+} from "./notifications"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
@@ -291,6 +291,55 @@ export const layerWithOptions = (
             return [frame(rejection)]
           })
 
+          const materializeSnapshot = Effect.fn("HostedThreadProtocol.materializeSnapshot")(function* (
+            authority: ThreadAuthority,
+            threadId: ThreadId,
+            afterCursor: ThreadEventCursor,
+          ) {
+            const readReplay = store
+              .replay({
+                ownerId: authority.ownerId,
+                threadId,
+                actor: authority.actor,
+                afterCursor,
+                limit: 1_000,
+              })
+              .pipe(Effect.mapError(storeFailure))
+            while (true) {
+              const currentSnapshot = yield* operations
+                .snapshot(authority.ownerId, ProductThreadId.make(threadId))
+                .pipe(Effect.mapError(operationFailure))
+              const materializedSnapshot =
+                options.workspacePlacement === undefined
+                  ? currentSnapshot
+                  : {
+                      ...currentSnapshot,
+                      workspace: yield* options.workspacePlacement(authority.ownerId, threadId),
+                    }
+              let replay = yield* readReplay
+              if (
+                replay.snapshot !== undefined &&
+                replay.snapshot.threadVersion === replay.threadVersion &&
+                replay.snapshot.cursor === replay.cursor &&
+                encodeThreadSnapshotJson(replay.snapshot.snapshot) === encodeThreadSnapshotJson(materializedSnapshot)
+              )
+                return replay
+              const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+              const saved = yield* store
+                .saveSnapshot({
+                  ownerId: authority.ownerId,
+                  threadId,
+                  threadVersion: replay.threadVersion,
+                  cursor: replay.cursor,
+                  snapshot: materializedSnapshot,
+                  createdAt,
+                })
+                .pipe(Effect.result)
+              if (saved._tag === "Success") return yield* readReplay
+              if (saved.failure.reason !== "conflict") return yield* storeFailure(saved.failure)
+            }
+          })
+
           const receiveUnsafe = Effect.fn("HostedThreadProtocol.receive")(function* (
             message: ClientMessage,
           ): Effect.fn.Return<ReadonlyArray<ServerFrame>, HostedThreadProtocolError> {
@@ -363,52 +412,7 @@ export const layerWithOptions = (
                 .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
                 .pipe(Effect.mapError(storeFailure))
               const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
-              const readReplay = store
-                .replay({
-                  ownerId: authority.ownerId,
-                  threadId: command.threadId,
-                  actor: authority.actor,
-                  afterCursor: command.afterCursor,
-                  limit: 1_000,
-                })
-                .pipe(Effect.mapError(storeFailure))
-              let replay: ThreadReplay
-              while (true) {
-                const currentSnapshot = yield* operations
-                  .snapshot(authority.ownerId, ProductThreadId.make(command.threadId))
-                  .pipe(Effect.mapError(operationFailure))
-                const attachmentSnapshot =
-                  options.workspacePlacement === undefined
-                    ? currentSnapshot
-                    : {
-                        ...currentSnapshot,
-                        workspace: yield* options.workspacePlacement(authority.ownerId, command.threadId),
-                      }
-                replay = yield* readReplay
-                if (
-                  replay.snapshot !== undefined &&
-                  replay.snapshot.threadVersion === replay.threadVersion &&
-                  replay.snapshot.cursor === replay.cursor &&
-                  encodeThreadSnapshotJson(replay.snapshot.snapshot) === encodeThreadSnapshotJson(attachmentSnapshot)
-                )
-                  break
-                const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-                const saved = yield* store
-                  .saveSnapshot({
-                    ownerId: authority.ownerId,
-                    threadId: command.threadId,
-                    threadVersion: replay.threadVersion,
-                    cursor: replay.cursor,
-                    snapshot: attachmentSnapshot,
-                    createdAt,
-                  })
-                  .pipe(Effect.result)
-                if (saved._tag === "Success") {
-                  replay = yield* readReplay
-                  break
-                }
-                if (saved.failure.reason !== "conflict") return yield* storeFailure(saved.failure)
-              }
+              let replay = yield* materializeSnapshot(authority, command.threadId, command.afterCursor)
               const replayLag = replayDistance(replay.cursor, command.afterCursor)
               yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
               if (replayLag >= HostedObservability.replayLagAlertEvents)
@@ -764,6 +768,7 @@ export const layerWithOptions = (
                     }
                   }
                   if (current === undefined || attached !== current) return commandFrames
+                  yield* materializeSnapshot(current.authority, current.threadId, current.cursor)
                   let replay = yield* store
                     .replay({
                       ownerId: current.authority.ownerId,

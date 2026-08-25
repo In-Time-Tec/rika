@@ -62,6 +62,9 @@
   "overrides": {
     "fast-xml-parser": "5.5.6"
   },
+  "trustedDependencies": [
+    "@ast-grep/cli"
+  ],
   "scripts": {
     "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",
     "build": "bun turbo build",

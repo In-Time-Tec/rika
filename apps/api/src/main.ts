@@ -15,7 +15,7 @@ import {
 } from "@rika/identity"
 import { serveApi } from "./server/bun"
 import { loadApiConfig } from "./config/api"
-import { seedDevelopment } from "./development-seed"
+import { seedDevelopment } from "./development/seed"
 import { HostedApplication, layer as hostedApplicationLayer } from "./hosted/application"
 
 type MutableHostedApplicationOptions = {
@@ -81,6 +81,7 @@ const program = Effect.scoped(
         return yield* Effect.die("RIKA_DEV_OPENROUTER_API_KEY is required in development")
       yield* seedDevelopment({
         baseUrl: config.baseUrl,
+        database: identityDatabase,
         identity,
         pool,
         product: application.product,

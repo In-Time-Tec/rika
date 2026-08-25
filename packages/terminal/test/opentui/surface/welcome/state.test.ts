@@ -5,13 +5,7 @@ import { Surface } from "../../../../src/opentui/surface/service"
 import { maxMountedTranscriptEntries } from "../../../../src/opentui/rendering/transcript/window"
 import { initial, type Model } from "../../../../src/state/model"
 import { update } from "../../../../src/state/reducer/model"
-import {
-  openTui,
-  _insertText,
-  _streamingShell,
-  _giantSubagentModel,
-  _collapsedSubagentModel,
-} from "./state.fixture"
+import { openTui, _insertText, _streamingShell, _giantSubagentModel, _collapsedSubagentModel } from "./state.fixture"
 test("coalesces rapid wheel offsets into one report per frame", () =>
   Effect.runPromise(
     Effect.gen(function* () {
