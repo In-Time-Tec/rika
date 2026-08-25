@@ -1146,18 +1146,19 @@ export const layer = (
       const cleanupOrphans = Effect.gen(function* () {
         const durable = yield* assignments.listManaged.pipe(Effect.mapError(assignmentFailure))
         const livePreparing = new Set(
-          yield* Effect.forEach(
-            durable,
-            (assignment) =>
-              assignment.lifecycle._tag !== "Provisioning" && assignment.lifecycle._tag !== "AwaitingBootstrap"
-                ? Effect.void.pipe(Effect.as(undefined))
-                : assignments
-                    .isBootstrapLive({ assignmentId: assignment.id, generation: assignment.generation })
-                    .pipe(
-                      Effect.mapError(assignmentFailure),
-                      Effect.map((live) => (live ? String(assignment.id) : undefined)),
-                    ),
-          ),
+          (
+            yield* Effect.forEach(
+              durable.filter(
+                (assignment) =>
+                  assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap",
+              ),
+              (assignment) =>
+                assignments.isBootstrapLive({ assignmentId: assignment.id, generation: assignment.generation }).pipe(
+                  Effect.mapError(assignmentFailure),
+                  Effect.map((live) => (live ? String(assignment.id) : undefined)),
+                ),
+            )
+          ).flatMap((assignmentId) => (assignmentId === undefined ? [] : [assignmentId])),
         )
         const active = new Set(
           durable.flatMap((assignment) => {

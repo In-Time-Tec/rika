@@ -648,6 +648,28 @@ it.effect("derives personal authority, admits a retried submission once, and res
         threadId,
         commandId: "submit-1",
       })
+      const submitCompletion = yield* Effect.forkChild(second.outbound, { startImmediately: true })
+      yield* store.completeCommand({
+        ownerId,
+        threadId,
+        commandId: CommandId.make("submit-1"),
+        claimToken: "submit-claim",
+        result: { _tag: "PromptAdmitted", status: "queued" },
+        events: [],
+        completedAt: timestamp,
+      })
+      notifications.publish(threadId)
+      expect(yield* Fiber.join(submitCompletion)).toMatchObject([
+        {
+          payload: {
+            _tag: "CommandAccepted",
+            requestId: "request-submit-while-attached-thread-2",
+            commandId: "submit-1",
+            threadId,
+            result: { _tag: "PromptAdmitted", status: "queued" },
+          },
+        },
+      ])
       expect(
         (yield* second.receive({
           ...submit,
@@ -1071,7 +1093,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
     view: { ...snapshot.view, thread: { ...snapshot.view.thread, title } },
   })
   const notifications = makeThreadProtocolNotifications()
-  const pollOutbound = (connection: HostedThreadConnection) =>
+  const pollOutbound = (connection: Pick<HostedThreadConnection, "outbound">) =>
     Effect.gen(function* () {
       const polling = yield* Effect.forkChild(connection.outbound, {
         startImmediately: true,

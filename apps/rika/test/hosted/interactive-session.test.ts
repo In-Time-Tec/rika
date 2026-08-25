@@ -598,14 +598,13 @@ it.effect("targets the pending submission identity when cancellation happens bef
           })
       })
       const hosted = yield* runSession(harness)
-      const cancellationFiber = yield* hosted.session
-        .cancel({ submissionId: "submission-before-turn", threadId: "thread-1" })
-        .pipe(Effect.forkScoped)
-      yield* Effect.yieldNow
       const submitted = yield* hosted.session
         .submit("cancel before admission", undefined, [], undefined, "submission-before-turn")
         .pipe(Effect.forkScoped)
       yield* eventually(() => pendingSubmit !== undefined)
+      const cancellationFiber = yield* hosted.session
+        .cancel({ submissionId: "submission-before-turn", threadId: "thread-1" })
+        .pipe(Effect.forkScoped)
       yield* Fiber.join(cancellationFiber)
       const cancellation = harness.messages.find((message) => message.command._tag === "Cancel")
       if (pendingSubmit === undefined || pendingSubmit.command._tag !== "SubmitPrompt")
@@ -621,6 +620,87 @@ it.effect("targets the pending submission identity when cancellation happens bef
         target: { _tag: "Command", commandId: durableSubmitCommandId },
       })
       yield* Fiber.join(submitted)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("forgets submission cancellation rendezvous after admission or rejection", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let version = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        version += 1
+        socket.frame({
+          _tag: "CommandAdmitted",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          threadVersion: ThreadVersion.make(String(version)),
+        })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.submit("admitted", undefined, [], undefined, "submission-admitted")
+      harness.sockets[0]!.frame({
+        _tag: "ThreadEvent",
+        event: {
+          threadId: HostedThreadId.make("thread-1"),
+          sequence: Sequence.make("1"),
+          cursor: ThreadEventCursor.make("1"),
+          threadVersion: ThreadVersion.make("1"),
+          event: {
+            _tag: "SubmissionAdmitted",
+            threadId: Thread.ThreadId.make("thread-1"),
+            turnId: Turn.TurnId.make("turn-1"),
+            status: "active",
+            submissionId: "submission-admitted",
+          },
+          createdAt: Timestamp.make("2026-08-25T00:00:00.000Z"),
+        },
+      })
+      yield* eventually(() =>
+        harness.messages.some(
+          (message) => message.command._tag === "AcknowledgeCursor" && String(message.command.cursor) === "1",
+        ),
+      )
+      expect(
+        yield* Effect.result(
+          hosted.session.cancel({ submissionId: "submission-admitted", threadId: "thread-1" }),
+        ),
+      ).toMatchObject({ _tag: "Failure" })
+
+      yield* hosted.session.submit("rejected", undefined, [], undefined, "submission-rejected")
+      harness.sockets[0]!.frame({
+        _tag: "ThreadEvent",
+        event: {
+          threadId: HostedThreadId.make("thread-1"),
+          sequence: Sequence.make("2"),
+          cursor: ThreadEventCursor.make("2"),
+          threadVersion: ThreadVersion.make("2"),
+          event: {
+            _tag: "SubmissionRejected",
+            message: "rejected",
+            submissionId: "submission-rejected",
+          },
+          createdAt: Timestamp.make("2026-08-25T00:00:00.000Z"),
+        },
+      })
+      yield* eventually(() =>
+        harness.messages.some(
+          (message) => message.command._tag === "AcknowledgeCursor" && String(message.command.cursor) === "2",
+        ),
+      )
+      expect(
+        yield* Effect.result(
+          hosted.session.cancel({ submissionId: "submission-rejected", threadId: "thread-1" }),
+        ),
+      ).toMatchObject({ _tag: "Failure" })
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
       yield* hosted.session.quit
     }),
   ),

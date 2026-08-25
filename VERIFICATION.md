@@ -29,7 +29,7 @@ Focused tests must prove:
 - A command-targeted cancellation may overtake only the exact earlier admitted SubmitPrompt it targets; it cannot overtake workspace, service, approval, or other control commands.
 - Thread creation uses a deterministic command-derived identity. Exact sequential and concurrent retries create one Thread, workspace, assignment, and completion, while incompatible identity reuse conflicts.
 - A TUI process restart may reuse UI `submissionId = submission-1`, but each attempt receives a distinct random durable `submit:<UUID>` command identity and cancellation targets that durable identity before a Turn exists.
-- Ctrl+C before Turn allocation waits only for the exact submission's durable command identity, is interrupted by session close, rejects a wrong-Thread target, and remains latched if a concurrent `TurnStarted` frame arrives. The first Ctrl+C durably cancels; the second remains the explicit quit gesture.
+- Ctrl+C before Turn allocation waits only for an already-started exact submission's durable command identity, is interrupted by session close, rejects a missing or wrong-Thread target without creating a waiter, and remains latched if a concurrent `TurnStarted` frame arrives. `SubmissionAdmitted` and `SubmissionRejected` both remove the rendezvous. The first Ctrl+C durably cancels; the second remains the explicit quit gesture.
 - Every mutation response must match its transport request, Thread, and durable command identities. A stale or mismatched frame fails as a protocol error instead of completing or indefinitely blocking another mutation.
 - Submission replay with one command identity creates one Turn and one immutable start input.
 - Distinct submit, cancel, and target identities settle both possible database orderings deterministically.
@@ -47,8 +47,10 @@ Focused tests must prove:
 - Atomic attachment during concurrent publication yields a contiguous event cursor without missing or double-applied events.
 - If compaction removed the next required event for a client with no acknowledgement row, replay sends a newer durable full snapshot as the reset baseline and only contiguous events after it; it never skips a cursor gap.
 - The snapshot/live handoff represents snapshot cursor H followed by exactly the contiguous `(H,T]` event range while publication races with attachment. A current materialized snapshot may replace an older full snapshot at the same nondecreasing cursor, but it cannot regress Thread version or overtake a newer frame on one socket.
-- Transactional PostgreSQL triggers notify protocol events, snapshots, Turn status, and workspace placement with the exact Thread ID. Thread A does not wake Thread B; a dropped notification and a restarted `LISTEN` connection still converge through the cursor-derived replica sweep.
+- Transactional PostgreSQL triggers notify protocol events, snapshots, Turn status, and workspace placement with the exact Thread ID. Thread A does not wake Thread B. A notification committed while one replica is disconnected converges when its supervised `LISTEN` connection re-establishes and issues one cursor-derived recovery wake; no periodic replica sweep runs.
 - Unattached Thread sockets block on inbound work rather than polling, and attached Thread sockets are absent from Runner/Executor authority-session polling. Push delivery therefore has no per-Thread-socket timer.
+- After `CommandAdmitted`, the server pushes the terminal `CommandAccepted` or `CommandRejected` without client completion polling. A command admitted for Thread A still completes if that socket subsequently attaches Thread B.
+- A replay/store failure closes the Thread socket and reconnects from the last durable cursor instead of spinning inside the connection.
 - Slow consumers are disconnected and resume from the durable cursor without unbounded process memory.
 - Unknown Executor operation receipt remains `unknown` and is not blindly replayed.
 - A hosted remote cell is journaled as `provider-idempotent` only when its gateway durably deduplicates the exact `ToolContext.operationKey`; direct/local tools remain `never`.
@@ -56,7 +58,8 @@ Focused tests must prove:
 - TenetKit re-enters the retry-safe tool with the same operation key, Rika attaches fresh binding authority to the existing dispatch, and the executor replays the pending binding and terminal receipt without executing the cell twice.
 - Re-entry with newly generated admission timestamps adopts the first durable `admittedAt` and `deadlineAt`; it neither conflicts nor extends the execution window.
 - Executor process loss never reruns a persisted running cell and produces an executor-authored unknown result that remains operator-visible.
-- If an E2B create result is lost, recovery inventories the exact assignment generation, app, deployment, template, and build, adopts the matching sandbox, and deterministically removes duplicates without issuing another create.
+- If an E2B create result is lost, recovery inventories the exact assignment generation, app, deployment, template, and build, reconnects and adopts the matching sandbox without issuing another create, and attempts deterministic duplicate removal without rejecting the usable candidate when cleanup fails.
+- E2B orphan cleanup asks the authoritative assignment store whether a provisioning bootstrap is live. PostgreSQL uses its own `clock_timestamp()` rather than an API-host timestamp; an expired generation-matching preparation is reaped only after the additional orphan grace period, while Active and Paused sandboxes remain preserved.
 
 The required repository checks are:
 

@@ -1109,7 +1109,10 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         else {
           let targetCommandId = latestSubmitCommandId
           if (requestedTarget.submissionId !== undefined) {
-            const pendingCommandId = pendingSubmitCommandId(selectedThreadId, requestedTarget.submissionId)
+            const pendingCommandId = pendingSubmitCommandIds
+              .get(selectedThreadId)
+              ?.get(requestedTarget.submissionId)
+            if (pendingCommandId === undefined) return yield* unsupported("InteractiveSession.cancel")
             targetCommandId = yield* Effect.raceFirst(
               Deferred.await(pendingCommandId),
               Deferred.await(closed).pipe(Effect.andThen(unsupported("InteractiveSession.cancel"))),

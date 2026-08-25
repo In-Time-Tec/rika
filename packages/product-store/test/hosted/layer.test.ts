@@ -577,6 +577,28 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               bootstrapCredentialDigest: Redacted.make("bootstrap"),
               bootstrapLifetimeMillis: 60_000,
             })
+            expect(
+              yield* assignments.isBootstrapLive({
+                assignmentId: provisioning.id,
+                generation: provisioning.generation,
+              }),
+            ).toBe(true)
+            yield* Effect.tryPromise(() =>
+              migrated!.query(`UPDATE rika_hosted_executor_assignments
+                SET bootstrap_expires_at = clock_timestamp() - interval '1 second'
+                WHERE id = 'assignment-live'`),
+            )
+            expect(
+              yield* assignments.isBootstrapLive({
+                assignmentId: provisioning.id,
+                generation: provisioning.generation,
+              }),
+            ).toBe(false)
+            yield* Effect.tryPromise(() =>
+              migrated!.query(`UPDATE rika_hosted_executor_assignments
+                SET bootstrap_expires_at = clock_timestamp() + interval '1 minute'
+                WHERE id = 'assignment-live'`),
+            )
             const bound = yield* assignments.bindProviderInstance({
               ...version(provisioning),
               providerInstanceId: "sandbox",
