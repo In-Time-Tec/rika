@@ -97,7 +97,7 @@ The API will derive WebSocket URLs by mapping `http:` to `ws:` and `https:` to `
 
 Runner registration and assignment admission will establish a current fenced connection before the TUI enables submission. Local execution has no workspace-preparation row. A disconnected Runner makes the Thread visibly wait for its local workspace; it does not become Orb preparation and does not move automatically.
 
-Creating an Orb Thread persists only a pending assignment; it does not call E2B. Once prompt admission durably creates an executable Turn, the Turn worker claims it and remote-cell admission starts Executor provisioning. The assignment transaction persists its generation, provisioning lifecycle, and bootstrap deadline before the E2B call, so the UI can project that bounded state as workspace preparation while the sandbox starts. The Executor then persists the finer preparation attempt and phase before setup work. A database compare-and-set expiry operation fails overdue attempts. Completion from an expired attempt or stale generation cannot make the workspace ready. Retry or replacement increments the relevant attempt or generation and fences old work.
+Creating an Orb Thread persists only a pending assignment; it does not call E2B. Once prompt admission durably creates an executable Turn, the Turn worker claims it and remote-cell admission starts Executor provisioning. The assignment transaction persists its generation, provisioning lifecycle, and bootstrap deadline before the E2B call, so the UI can project that bounded state as workspace preparation while the sandbox starts. PostgreSQL evaluates bootstrap liveness with `clock_timestamp()`; API-host clock skew cannot preserve or reap a sandbox. The Executor then persists the finer preparation attempt and phase before setup work. A database compare-and-set expiry operation fails overdue attempts. Completion from an expired attempt or stale generation cannot make the workspace ready. Retry or replacement increments the relevant attempt or generation and fences old work.
 
 Operation dispatch still validates the current assignment generation and lease because that independently prevents stale side effects. It will not rerun provisioning or preparation.
 
@@ -149,11 +149,11 @@ Each submission has a stable `submitCommandId`. Each cancellation has its own st
 
 - A cancellation tombstone committed first prevents a later delayed submission from being admitted.
 - A submission committed first creates the Turn, after which cancellation targets that Turn.
-- A disconnected client queries or resends the exact same command identity and payload until it receives the authoritative result.
+- A client disconnected before durable admission resends the exact same command identity and payload after reconnect. Once `CommandAdmitted` arrives, PostgreSQL owns completion and the server pushes the terminal result without a status query.
 
-There is no retry under a new command identity or changed payload and no global client permit held across network recovery. The TUI keeps the exact durable command pending across reconnect, resends it with a fresh transport request identity, and does not report cancellation before durable acknowledgement.
+There is no retry under a new command identity or changed payload and no global client permit held across network recovery. The TUI keeps the exact durable command pending while its terminal outcome is unknown, may resend it after transport interruption with a fresh transport request identity, and does not report cancellation before durable acknowledgement. After admission on a live socket, the server tracks the pending command independently of its current Thread attachment and pushes `CommandAccepted` or `CommandRejected` when the worker commits.
 
-Before a Turn frame exists, Ctrl+C targets the exact optimistic submission, Thread, and durable submit command. The hosted session keeps only an in-memory submission-to-command rendezvous long enough for the interrupted submit fiber to publish its command identity; cancellation races that rendezvous with session close and fails a wrong-Thread target immediately. A Turn arriving concurrently does not clear the cancellation latch or retarget the command. This is correlation, not a second lifecycle store: PostgreSQL still decides whether submission or cancellation won, and a second Ctrl+C remains the explicit quit gesture.
+Before a Turn frame exists, Ctrl+C targets the exact optimistic submission, Thread, and durable submit command. The hosted session creates an in-memory submission-to-command rendezvous when submission begins and keeps it only long enough for the submit fiber to publish its command identity. Cancellation races that rendezvous with session close, and a missing or wrong-Thread submission fails immediately instead of creating a waiter that can hang. `SubmissionAdmitted` and `SubmissionRejected` both delete the rendezvous. A Turn arriving concurrently does not clear the cancellation latch or retarget the command. This is correlation, not a second lifecycle store: PostgreSQL still decides whether submission or cancellation won, and a second Ctrl+C remains the explicit quit gesture.
 
 ### Transfer admitted command ownership to the server
 
@@ -163,7 +163,7 @@ Admission now commits the immutable command, actor attribution, expected Thread 
 
 The client does not confuse UI correlation with durable identity. `submissionId` identifies the optimistic composer row and may restart at `submission-1` in every TUI process. `commandId` is a random `submit:<UUID>` that never repeats across reopened sessions. `SubmissionAdmitted` carries the UI correlation value, while cancellation before Turn allocation targets the durable submit command. This directly removes the collision that made the first submission in a reopened TUI remain at `Sending`.
 
-Prompt submission and cancellation stop showing transport progress when `CommandAdmitted` arrives because ownership has transferred. A later application failure is pushed as `SubmissionRejected` or `ExecutionControlFailed`; it is not hidden in a response on the old socket. Other mutations may poll, but they resend the exact already-built command until its terminal result and never rebuild it with a newer expected version.
+Prompt submission and cancellation stop showing transport progress when `CommandAdmitted` arrives because ownership has transferred. A later application failure is pushed as `SubmissionRejected` or `ExecutionControlFailed`; it is not hidden in a response on the old socket. Other mutations wait on that same server push and never poll for completion. A transport failure before an authoritative result may resend the exact already-built command after reconnect, but it never rebuilds the command with a newer expected version.
 
 Thread creation uses its durable command ID as the deterministic Thread ID. The initial Thread, workspace, and pending assignment transaction is serialized on that identity and exact retries return the same target without reprovisioning; incompatible reuse conflicts. The CreateThread command is then admitted and completed by the same server worker as every other mutation, so a lost creation response or worker crash does not require more client traffic to finish.
 
@@ -179,7 +179,7 @@ Thread interaction uses one authenticated WebSocket from ticket redemption throu
 
 Each server connection owns a bounded inbound command queue, a bounded encoded-byte outbound sink, and one live attachment. It installs a generation-counted wake subscription before reading a durable protocol baseline. Attachment sends a saved full snapshot at cursor H and every contiguous event after H through the captured head T, paging until T is represented. It then drains `(T,currentHead]` until the observed wake generation and durable event cursor are both current. A Boolean that can be cleared is insufficient because publication can race with clearing.
 
-PostgreSQL triggers issue `NOTIFY(threadId)` in the same transaction as protocol events, event-backed snapshots, Turn status transitions, and workspace placement transitions. Every API replica owns one supervised `LISTEN` connection and preserves the payload: a notification wakes only sockets attached to that Thread. The attachment captures its Thread generation before reading durable state, so publication racing the read cannot be missed. Listener reconnection wakes all attached cursors once, and one replica-wide thirty-second sweep repairs a commit whose best-effort notification was lost without giving every socket a two-second polling loop or adding a durable notification log.
+PostgreSQL triggers issue `NOTIFY(threadId)` in the same transaction as protocol events, event-backed snapshots, Turn status transitions, and workspace placement transitions. Every API replica owns one supervised `LISTEN` connection and preserves the payload: a notification wakes only sockets attached to that Thread. The attachment captures its Thread generation before reading durable state, so publication racing the read cannot be missed. Listener establishment and re-establishment wake every local cursor once, so a notification committed while that replica was not listening converges through durable cursor replay. There is no periodic replica sweep and no per-socket timer.
 
 Thread sockets never participate in authority-session polling. While unattached, their outbound side is dormant and inbound attach or command frames wake the connection; once attached, transactional notification plus cursor replay drives delivery. Runner and Executor authority sessions retain their separate connection-authority supervision because assignment fencing is a different contract. This avoids disguising a per-socket timer as WebSocket push.
 
@@ -189,7 +189,7 @@ The event cursor orders durable interactive events. Every full transcript view c
 
 Compaction may legitimately remove the next event required by a client that never established an acknowledgement row. Outbound replay validates contiguity rather than silently skipping the gap. If the required event no longer exists, it loads and sends a newer durable full snapshot as a reset point, then emits only the contiguous events after that snapshot cursor. Compaction therefore changes the replay baseline, never the meaning of a cursor.
 
-The connection closes a slow consumer with a resumable overload reason before its bounded queue or byte budget is exceeded. The client owns one socket, one local cursor, and stable command identities. The 500 millisecond attachment loop, independent attachment fallback, recursive mutation retry, and competing `ExecutorStatus`/`WorkspaceStatus` projections are deleted after the typed snapshot/live feed is authoritative.
+The connection closes a slow consumer with a resumable overload reason before its bounded queue or byte budget is exceeded. A replay or store failure closes the socket with an internal-error code rather than entering a tight in-socket replay loop; the client reconnects from its last durable cursor. The client owns one socket, one local cursor, and stable command identities. The 500 millisecond attachment loop, independent attachment fallback, recursive completion polling, and competing `ExecutorStatus`/`WorkspaceStatus` projections are deleted after the typed snapshot/live feed is authoritative.
 
 The snapshot exposes one typed placement state rather than inferring preparation from Turn activity:
 
@@ -221,7 +221,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 - Remove local preparation mapping and records.
 - Require Runner connection readiness before input becomes available.
 - Add Orb preparation deadlines, expiry compare-and-set, attempt fencing, and explicit failure projection.
-- Before creating an E2B sandbox, inventory the exact app, deployment, assignment generation, template, and build. Adopt one matching sandbox and terminate deterministic duplicates so process death after provider creation but before result persistence cannot create another workspace.
+- Before creating an E2B sandbox, inventory the exact app, deployment, assignment generation, template, and build. Reconnect the deterministic matching sandbox so a paused candidate resumes, attempt best-effort removal of deterministic duplicates, and adopt the usable candidate even when duplicate removal fails. PostgreSQL-clock bootstrap liveness decides whether generation-matching provisioning sandboxes remain protected from orphan cleanup.
 - Keep dispatch-time assignment fencing and remove duplicate preparation checks from Turn and remote-cell admission.
 
 ### Lifecycle cutover
@@ -240,7 +240,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 ### Live transport cutover
 
 - Add the server outbound sink and atomic baseline/catch-up operation.
-- Add transaction-coupled PostgreSQL notification, one supervised listener per replica, local generation wakeups, and the convergence sweep.
+- Add transaction-coupled PostgreSQL notification, one supervised listener per replica, local generation wakeups, and one cursor recovery wake whenever the listener establishes.
 - Run the new feed in passive fingerprint comparison while polling remains the only client applicator.
 - Cut the client to the live feed after no divergence under concurrent publication and reconnect tests.
 - Delete polling, recursive retry, independent snapshot fallback, competing untyped statuses, and obsolete protocol APIs. Keep event-backed snapshots transactional with event append, and permit explicit same-cursor replacement only for current materialized projection or placement state.
@@ -257,7 +257,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 
 ## Risks introduced by the repair
 
-- A lost PostgreSQL notification could delay delivery. Transactional triggers eliminate the commit-before-notify gap for owned state, while the durable event cursor and low-frequency replica sweep recover listener loss without making notification authoritative.
+- A replica disconnected from PostgreSQL can miss notifications. Its supervised listener reconnects and issues one recovery wake; durable cursor replay then catches up every local socket without making notification authoritative or running a periodic sweep.
 - An admission or activation result can still be lost. The persisted prepared envelope, deterministic identity, staged TenetKit contract, and runtime inspection make recovery converge; external tool effects remain `accepted`, `dispatched`, `completed`, or `unknown`, never falsely exactly-once.
 - A quick tunnel URL can change. Alchemy input dependency restarts the API with the new immutable URL; current Executor generations fence old connections.
 - A free OpenRouter route can be rate-limited or removed from the catalog. It proves external integration only; deterministic assertions use a scripted model, while the development default pins one currently available tool-capable model instead of introducing random routing into every diagnosis.

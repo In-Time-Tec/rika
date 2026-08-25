@@ -70,6 +70,8 @@ test(
         const edited = yield* app.nextFrame
         expect(edited).toContain("│ OPTIMISTIC_ECHO_PROMPT_EDITED")
         expect(edited).not.toContain("OPTIMISTIC_ECHO_COMPLETE")
+        yield* Deferred.succeed(admission, undefined)
+        yield* app.waitFrame("OPTIMISTIC_ECHO_COMPLETE")
         yield* app.quit
       }),
     ),

@@ -686,8 +686,61 @@ describe("Controller", () => {
         state: "provisioning",
       })
       expect(harness.provider.creates).toHaveLength(0)
+      expect(harness.provider.connects).toEqual([
+        { sandboxId: "sandbox-a-adopt", timeoutMillis: Controller.IdleTimeoutMillis },
+      ])
       expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
       expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("adopts the usable sandbox when duplicate cleanup fails", () => {
+    const harness = makeHarness()
+    harness.provider.createFailure = true
+    harness.provider.killFailure = true
+    const metadata = {
+      "rika.managed": "e2b-executor",
+      "rika.app-id": "rika",
+      "rika.deployment-id": "test",
+      "rika.assignment-id": "assignment-1",
+      "rika.generation": "1",
+    }
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-z-duplicate",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+      {
+        sandboxId: "sandbox-a-adopt",
+        state: "paused",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const assignment = yield* createAssignment()
+      const assignments = yield* ExecutorAssignments
+      yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("lost-bootstrap-credential"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
+        sandboxId: "sandbox-a-adopt",
+        state: "provisioning",
+      })
+      expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
+      expect(harness.provider.connects).toEqual([
+        { sandboxId: "sandbox-a-adopt", timeoutMillis: Controller.IdleTimeoutMillis },
+      ])
+      expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
     }).pipe(provideLayer(harness.layer))
   })
 

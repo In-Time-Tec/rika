@@ -1,7 +1,6 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, Fiber, Layer } from "effect"
-import { TestClock } from "effect/testing"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
@@ -39,6 +38,7 @@ import {
 } from "../src/hosted-product"
 import {
   HostedThreadProtocol,
+  type HostedThreadConnection,
   layer as hostedThreadProtocolLayer,
   layerWithOptions as hostedThreadProtocolLayerWithOptions,
 } from "../src/hosted-thread-protocol"
@@ -568,6 +568,28 @@ it.effect("derives personal authority, admits a retried submission once, and res
           ?.payload,
       ).toMatchObject({ _tag: "CommandAdmitted", threadId })
       expect(store.admissions().at(-1)).toEqual({ threadId, commandId: "submit-1" })
+      const submitCompletion = yield* Effect.forkChild(second.outbound, { startImmediately: true })
+      yield* store.completeCommand({
+        ownerId,
+        threadId,
+        commandId: CommandId.make("submit-1"),
+        claimToken: "submit-claim",
+        result: { _tag: "PromptAdmitted", status: "queued" },
+        events: [],
+        completedAt: timestamp,
+      })
+      notifications.publish(threadId)
+      expect(yield* Fiber.join(submitCompletion)).toMatchObject([
+        {
+          payload: {
+            _tag: "CommandAccepted",
+            requestId: "request-submit-while-attached-thread-2",
+            commandId: "submit-1",
+            threadId,
+            result: { _tag: "PromptAdmitted", status: "queued" },
+          },
+        },
+      ])
       expect(
         (yield* second.receive({
           ...submit,
@@ -948,7 +970,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
     view: { ...snapshot.view, thread: { ...snapshot.view.thread, title } },
   })
   const notifications = makeThreadProtocolNotifications()
-  const pollOutbound = (connection: { readonly outbound: Effect.Effect<ReadonlyArray<unknown>, unknown, never> }) =>
+  const pollOutbound = (connection: Pick<HostedThreadConnection, "outbound">) =>
     Effect.gen(function* () {
       const polling = yield* Effect.forkChild(connection.outbound, { startImmediately: true })
       notifications.recover()
