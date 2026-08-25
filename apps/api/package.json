@@ -23,6 +23,7 @@
     "@rika/execution": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/remote-execution": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "4.0.0-rc.111",
     "tenetkit": "catalog:"
   },

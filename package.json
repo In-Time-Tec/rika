@@ -42,6 +42,7 @@
       "@types/prismjs": "1.26.6",
       "@vitest/coverage-v8": "4.1.11",
       "cli-spinners": "3.4.0",
+      "drizzle-orm": "1.0.0-rc.5-169397b",
       "foldkit": "0.148.2",
       "happy-dom": "20.10.6",
       "effect": "4.0.0-rc.111",
@@ -96,7 +97,7 @@
     "@rika/kernel": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/transcript": "workspace:*",
-    "drizzle-orm": "1.0.0-rc.3",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "pg": "8.21.0"
   },

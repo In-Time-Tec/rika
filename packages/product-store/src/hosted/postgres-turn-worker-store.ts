@@ -1,10 +1,21 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
+import { and, asc, eq, exists, gt, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { PromptPart } from "@rika/product/execution-request"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { Context, Effect, Layer, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedThreads,
+  rikaHostedTurnClaims,
+  rikaHostedWorkspacePreparations,
+  rikaThreadQueueState,
+  rikaThreads,
+  rikaTurnAdmissionOutbox,
+  rikaTurns,
+} from "../database/schema/product"
 
 export class HostedTurnWorkerStoreError extends Schema.TaggedError<HostedTurnWorkerStoreError>()(
   "HostedTurnWorkerStoreError",
@@ -53,8 +64,10 @@ const failure = (cause: unknown) =>
   HostedTurnWorkerStoreError.make({ message: `Hosted Turn worker store failed: ${String(cause)}` })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(failure))
-const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, HostedTurnWorkerStoreError>) =>
-  sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", failure))
+const transaction = <A>(
+  db: PgDrizzle.EffectPgDatabase,
+  effect: (tx: PgDrizzle.EffectPgDatabase) => Effect.Effect<A, HostedTurnWorkerStoreError>,
+) => db.transaction(effect).pipe(Effect.mapError(failure))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const StartTurnJson = Schema.fromJsonString(ExecutionGateway.StartTurn)
@@ -64,16 +77,16 @@ interface TurnRow {
   readonly ownerId: string
   readonly threadId: string
   readonly turnId: string
-  readonly status: "accepted" | "queued"
   readonly workspaceId: string
   readonly prompt: string
   readonly promptPartsJson: string | null
-  readonly executionRouteJson: string
-  readonly queuedAt: string
+  readonly executionRouteJson: string | null
+  readonly queuedAt: number
 }
 
 const decodeInput = (row: TurnRow) =>
   Effect.gen(function* () {
+    if (row.executionRouteJson === null) return yield* failure("Turn execution route is missing")
     const executionRoute = yield* Schema.decodeEffect(ExecutionRouteJson)(row.executionRouteJson)
     const promptParts =
       row.promptPartsJson === null ? undefined : yield* Schema.decodeEffect(PromptPartsJson)(row.promptPartsJson)
@@ -89,28 +102,67 @@ const decodeInput = (row: TurnRow) =>
     )
   }).pipe(Effect.mapError(failure))
 
+const readyExecutor = (db: PgDrizzle.EffectPgDatabase) =>
+  exists(
+    db
+      .select({ value: rikaHostedExecutorAssignments.id })
+      .from(rikaHostedExecutorAssignments)
+      .innerJoin(
+        rikaHostedWorkspacePreparations,
+        and(
+          eq(rikaHostedWorkspacePreparations.assignmentId, rikaHostedExecutorAssignments.id),
+          eq(rikaHostedWorkspacePreparations.generation, rikaHostedExecutorAssignments.generation),
+          eq(rikaHostedWorkspacePreparations.leaseEpoch, rikaHostedExecutorAssignments.leaseEpoch),
+          eq(rikaHostedWorkspacePreparations.state, "ready"),
+        ),
+      )
+      .where(
+        and(
+          eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id),
+          eq(rikaHostedExecutorAssignments.lifecycle, "active"),
+          gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql`clock_timestamp()`),
+        ),
+      ),
+  )
+
 const claim = (
-  sql: SqlClient,
+  db: PgDrizzle.EffectPgDatabase,
   request: ClaimRequest,
-  source: Effect.Effect<ReadonlyArray<TurnRow>, HostedTurnWorkerStoreError>,
+  source: (tx: PgDrizzle.EffectPgDatabase) => Effect.Effect<ReadonlyArray<TurnRow>, HostedTurnWorkerStoreError>,
   prepared: boolean,
 ) =>
-  transaction(
-    sql,
+  transaction(db, (tx) =>
     Effect.gen(function* () {
-      const row = (yield* source)[0]
+      const row = (yield* source(tx))[0]
       if (row === undefined) return undefined
-      const queuedAt = Number(row.queuedAt)
-      if (!Number.isFinite(queuedAt)) return yield* failure("Turn queue timestamp is invalid")
-      yield* query(sql`DELETE FROM rika_hosted_turn_claims
-            WHERE thread_id = ${row.threadId} AND expires_at <= ${request.now}`)
-      const claims = yield* query(sql`INSERT INTO rika_hosted_turn_claims
-            (turn_id, owner_id, thread_id, worker_id, claim_token, claimed_at, heartbeat_at, expires_at)
-            VALUES (${row.turnId}, ${row.ownerId}, ${row.threadId}, ${request.workerId}, ${request.claimToken},
-              ${request.now}, ${request.now}, ${request.now + request.leaseMillis})
-            ON CONFLICT DO NOTHING RETURNING turn_id`)
-      const claimed = claims[0]
-      if (claimed === undefined) return undefined
+      if (!Number.isFinite(row.queuedAt)) return yield* failure("Turn queue timestamp is invalid")
+      yield* query(
+        tx
+          .delete(rikaHostedTurnClaims)
+          .where(
+            and(
+              eq(rikaHostedTurnClaims.threadId, row.threadId),
+              sql`${rikaHostedTurnClaims.expiresAt} <= ${request.now}`,
+            ),
+          ),
+      )
+      const claims = yield* query(
+        tx
+          .insert(rikaHostedTurnClaims)
+          .values({
+            turnId: row.turnId,
+            ownerId: row.ownerId,
+            threadId: row.threadId,
+            workerId: request.workerId,
+            claimToken: request.claimToken,
+            claimedAt: request.now,
+            heartbeatAt: request.now,
+            expiresAt: request.now + request.leaseMillis,
+          })
+          .onConflictDoNothing()
+          .returning({ turnId: rikaHostedTurnClaims.turnId }),
+      )
+      if (claims[0] === undefined) return undefined
       return {
         workerId: request.workerId,
         claimToken: request.claimToken,
@@ -119,7 +171,7 @@ const claim = (
         ownerId: row.ownerId,
         claimedAt: request.now,
         input: yield* decodeInput(row),
-        queueWaitMillis: request.now - queuedAt,
+        queueWaitMillis: request.now - row.queuedAt,
       }
     }),
   ).pipe(
@@ -148,109 +200,197 @@ const claim = (
 export const layer = Layer.effect(
   HostedTurnWorkerStore,
   Effect.gen(function* () {
-    const sql = yield* PgClient.PgClient
+    const db = yield* PgDrizzle.makeWithDefaults()
     const claimNext: HostedTurnWorkerStoreService["claimNext"] = (request) =>
       claim(
-        sql,
+        db,
         request,
-        query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
-          turn_record.id AS "turnId", turn_record.status, hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
-          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson",
-          turn_record.created_at::text AS "queuedAt"
-        FROM rika_turns turn_record
-        JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id
-        JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
-          AND hosted_thread.owner_id = thread_record.owner_id
-        WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status IN ('accepted', 'queued')
-          AND (hosted_thread.executor_kind = 'runner' OR EXISTS (
-            SELECT 1 FROM rika_hosted_executor_assignments assignment
-            JOIN rika_hosted_workspace_preparations preparation
-              ON preparation.assignment_id = assignment.id
-              AND preparation.generation = assignment.generation
-              AND preparation.lease_epoch = assignment.lease_epoch
-              AND preparation.state = 'ready'
-            WHERE assignment.thread_id = hosted_thread.id AND assignment.lifecycle = 'active'
-              AND assignment.lease_expires_at > clock_timestamp()
-          ))
-          AND NOT EXISTS (
-            SELECT 1 FROM rika_hosted_turn_claims active_claim
-            JOIN rika_turns active_turn ON active_turn.id = active_claim.turn_id
-            WHERE active_turn.thread_id = turn_record.thread_id AND active_claim.expires_at > ${request.now}
+        (tx) => {
+          const claimedTurn = alias(rikaTurns, "claimed_turn")
+          const activeClaim = tx
+            .select({ value: rikaHostedTurnClaims.turnId })
+            .from(rikaHostedTurnClaims)
+            .innerJoin(claimedTurn, eq(claimedTurn.id, rikaHostedTurnClaims.turnId))
+            .where(and(eq(claimedTurn.threadId, rikaTurns.threadId), gt(rikaHostedTurnClaims.expiresAt, request.now)))
+          const activeTurn = alias(rikaTurns, "active_turn")
+          const activeLane = tx
+            .select({ value: activeTurn.id })
+            .from(activeTurn)
+            .where(
+              and(
+                eq(activeTurn.threadId, rikaTurns.threadId),
+                eq(activeTurn.turnKind, "AgentExecution"),
+                ne(activeTurn.id, rikaTurns.id),
+                inArray(activeTurn.status, ["accepted", "running", "waiting", "cancelling"]),
+              ),
+            )
+          return query(
+            tx
+              .select({
+                ownerId: rikaThreads.ownerId,
+                threadId: rikaTurns.threadId,
+                turnId: rikaTurns.id,
+                workspaceId: rikaHostedThreads.workspaceId,
+                prompt: rikaTurns.prompt,
+                promptPartsJson: rikaTurns.promptPartsJson,
+                executionRouteJson: rikaTurns.executionRouteJson,
+                queuedAt: rikaTurns.createdAt,
+              })
+              .from(rikaTurns)
+              .innerJoin(rikaThreads, eq(rikaThreads.id, rikaTurns.threadId))
+              .innerJoin(
+                rikaHostedThreads,
+                and(eq(rikaHostedThreads.id, rikaTurns.threadId), eq(rikaHostedThreads.ownerId, rikaThreads.ownerId)),
+              )
+              .where(
+                and(
+                  eq(rikaTurns.turnKind, "AgentExecution"),
+                  inArray(rikaTurns.status, ["accepted", "queued"]),
+                  or(eq(rikaHostedThreads.executorKind, "runner"), readyExecutor(tx)),
+                  notExists(activeClaim),
+                  notExists(activeLane),
+                ),
+              )
+              .orderBy(
+                sql`case ${rikaTurns.status} when 'accepted' then 0 else 1 end`,
+                asc(rikaTurns.createdAt),
+                asc(rikaTurns.id),
+              )
+              .limit(1)
+              .for("update", { of: rikaTurns, skipLocked: true }),
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM rika_turns active_turn
-            WHERE active_turn.thread_id = turn_record.thread_id AND active_turn.turn_kind = 'AgentExecution'
-              AND active_turn.id <> turn_record.id
-              AND active_turn.status IN ('accepted', 'running', 'waiting', 'cancelling')
-          )
-        ORDER BY CASE turn_record.status WHEN 'accepted' THEN 0 ELSE 1 END, turn_record.created_at, turn_record.id
-        FOR UPDATE OF turn_record SKIP LOCKED LIMIT 1`),
+        },
         false,
       )
     const claimRecovery: HostedTurnWorkerStoreService["claimRecovery"] = (request) =>
       claim(
-        sql,
+        db,
         request,
-        query(sql<TurnRow>`SELECT thread_record.owner_id AS "ownerId", turn_record.thread_id AS "threadId",
-          turn_record.id AS "turnId", 'accepted' AS status, hosted_thread.workspace_id AS "workspaceId", turn_record.prompt,
-          turn_record.prompt_parts_json AS "promptPartsJson", turn_record.execution_route_json AS "executionRouteJson",
-          admission.prepared_at::text AS "queuedAt"
-        FROM rika_turn_admission_outbox admission
-        JOIN rika_turns turn_record ON turn_record.id = admission.turn_id
-        JOIN rika_threads thread_record ON thread_record.id = turn_record.thread_id
-        JOIN rika_hosted_threads hosted_thread ON hosted_thread.id = turn_record.thread_id
-          AND hosted_thread.owner_id = thread_record.owner_id
-        WHERE turn_record.turn_kind = 'AgentExecution' AND turn_record.status = 'running'
-          AND turn_record.execution_link_json IS NULL
-          AND (hosted_thread.executor_kind = 'runner' OR EXISTS (
-            SELECT 1 FROM rika_hosted_executor_assignments assignment
-            JOIN rika_hosted_workspace_preparations preparation
-              ON preparation.assignment_id = assignment.id
-              AND preparation.generation = assignment.generation
-              AND preparation.lease_epoch = assignment.lease_epoch
-              AND preparation.state = 'ready'
-            WHERE assignment.thread_id = hosted_thread.id AND assignment.lifecycle = 'active'
-              AND assignment.lease_expires_at > clock_timestamp()
-          ))
-          AND NOT EXISTS (
-            SELECT 1 FROM rika_hosted_turn_claims active_claim
-            WHERE active_claim.turn_id = turn_record.id AND active_claim.expires_at > ${request.now}
-          )
-        ORDER BY admission.prepared_at, admission.turn_id
-        FOR UPDATE OF turn_record SKIP LOCKED LIMIT 1`),
+        (tx) =>
+          query(
+            tx
+              .select({
+                ownerId: rikaThreads.ownerId,
+                threadId: rikaTurns.threadId,
+                turnId: rikaTurns.id,
+                workspaceId: rikaHostedThreads.workspaceId,
+                prompt: rikaTurns.prompt,
+                promptPartsJson: rikaTurns.promptPartsJson,
+                executionRouteJson: rikaTurns.executionRouteJson,
+                queuedAt: rikaTurnAdmissionOutbox.preparedAt,
+              })
+              .from(rikaTurnAdmissionOutbox)
+              .innerJoin(rikaTurns, eq(rikaTurns.id, rikaTurnAdmissionOutbox.turnId))
+              .innerJoin(rikaThreads, eq(rikaThreads.id, rikaTurns.threadId))
+              .innerJoin(
+                rikaHostedThreads,
+                and(eq(rikaHostedThreads.id, rikaTurns.threadId), eq(rikaHostedThreads.ownerId, rikaThreads.ownerId)),
+              )
+              .where(
+                and(
+                  eq(rikaTurns.turnKind, "AgentExecution"),
+                  eq(rikaTurns.status, "running"),
+                  isNull(rikaTurns.executionLinkJson),
+                  or(eq(rikaHostedThreads.executorKind, "runner"), readyExecutor(tx)),
+                  notExists(
+                    tx
+                      .select({ value: rikaHostedTurnClaims.turnId })
+                      .from(rikaHostedTurnClaims)
+                      .where(
+                        and(
+                          eq(rikaHostedTurnClaims.turnId, rikaTurns.id),
+                          gt(rikaHostedTurnClaims.expiresAt, request.now),
+                        ),
+                      ),
+                  ),
+                ),
+              )
+              .orderBy(asc(rikaTurnAdmissionOutbox.preparedAt), asc(rikaTurnAdmissionOutbox.turnId))
+              .limit(1)
+              .for("update", { of: rikaTurns, skipLocked: true }),
+          ),
         true,
       )
     const prepare: HostedTurnWorkerStoreService["prepare"] = Effect.fn("HostedTurnWorkerStore.prepare")(
       function* (turnClaim, now) {
         const encoded = yield* Schema.encodeEffect(StartTurnJson)(turnClaim.input).pipe(Effect.mapError(failure))
-        return yield* transaction(
-          sql,
+        return yield* transaction(db, (tx) =>
           Effect.gen(function* () {
-            const authority = yield* query(sql`SELECT 1 FROM rika_hosted_turn_claims
-              WHERE turn_id = ${turnClaim.input.turnId} AND worker_id = ${turnClaim.workerId}
-                AND claim_token = ${turnClaim.claimToken} AND expires_at > ${now} FOR UPDATE`)
+            const authority = yield* query(
+              tx
+                .select({ turnId: rikaHostedTurnClaims.turnId })
+                .from(rikaHostedTurnClaims)
+                .where(
+                  and(
+                    eq(rikaHostedTurnClaims.turnId, turnClaim.input.turnId),
+                    eq(rikaHostedTurnClaims.workerId, turnClaim.workerId),
+                    eq(rikaHostedTurnClaims.claimToken, turnClaim.claimToken),
+                    gt(rikaHostedTurnClaims.expiresAt, now),
+                  ),
+                )
+                .for("update"),
+            )
             if (authority[0] === undefined) return false
-            const lane = yield* query(sql<{ readonly status: "accepted" | "queued" }>`SELECT status FROM rika_turns
-              WHERE id = ${turnClaim.input.turnId} AND thread_id = ${turnClaim.input.threadId}
-                AND turn_kind = 'AgentExecution' AND status IN ('accepted', 'queued') FOR UPDATE`)
+            const lane = yield* query(
+              tx
+                .select({ status: rikaTurns.status })
+                .from(rikaTurns)
+                .where(
+                  and(
+                    eq(rikaTurns.id, turnClaim.input.turnId),
+                    eq(rikaTurns.threadId, turnClaim.input.threadId),
+                    eq(rikaTurns.turnKind, "AgentExecution"),
+                    inArray(rikaTurns.status, ["accepted", "queued"]),
+                  ),
+                )
+                .for("update"),
+            )
             if (lane[0] === undefined) {
-              const prepared = yield* query(sql`SELECT 1 FROM rika_turn_admission_outbox
-                WHERE turn_id = ${turnClaim.input.turnId}`)
+              const prepared = yield* query(
+                tx
+                  .select({ turnId: rikaTurnAdmissionOutbox.turnId })
+                  .from(rikaTurnAdmissionOutbox)
+                  .where(eq(rikaTurnAdmissionOutbox.turnId, turnClaim.input.turnId)),
+              )
               return prepared[0] !== undefined
             }
-            const transitioned = yield* query(sql`UPDATE rika_turns
-              SET status = 'running', updated_at = ${now}, queue_claim_token = NULL
-              WHERE id = ${turnClaim.input.turnId} AND thread_id = ${turnClaim.input.threadId}
-                AND turn_kind = 'AgentExecution' AND status = ${lane[0].status} RETURNING thread_id`)
+            const transitioned = yield* query(
+              tx
+                .update(rikaTurns)
+                .set({ status: "running", updatedAt: now, queueClaimToken: null })
+                .where(
+                  and(
+                    eq(rikaTurns.id, turnClaim.input.turnId),
+                    eq(rikaTurns.threadId, turnClaim.input.threadId),
+                    eq(rikaTurns.turnKind, "AgentExecution"),
+                    eq(rikaTurns.status, lane[0].status),
+                  ),
+                )
+                .returning({ threadId: rikaTurns.threadId }),
+            )
             if (transitioned[0] === undefined) return false
             if (lane[0].status === "queued") {
-              const queue = yield* query(sql`UPDATE rika_thread_queue_state
-                SET revision = revision + 1, queued_count = CASE WHEN queued_count > 0 THEN queued_count - 1 ELSE 0 END
-                WHERE thread_id = ${turnClaim.input.threadId} RETURNING thread_id`)
+              const queue = yield* query(
+                tx
+                  .update(rikaThreadQueueState)
+                  .set({
+                    revision: sql`${rikaThreadQueueState.revision} + 1`,
+                    queuedCount: sql`case when ${rikaThreadQueueState.queuedCount} > 0 then ${rikaThreadQueueState.queuedCount} - 1 else 0 end`,
+                  })
+                  .where(eq(rikaThreadQueueState.threadId, turnClaim.input.threadId))
+                  .returning({
+                    threadId: rikaThreadQueueState.threadId,
+                  }),
+              )
               if (queue[0] === undefined) return yield* failure("Turn queue state is missing")
             }
-            yield* query(sql`INSERT INTO rika_turn_admission_outbox (turn_id, start_input_json, prepared_at)
-              VALUES (${turnClaim.input.turnId}, ${encoded}, ${now})`)
+            yield* query(
+              tx.insert(rikaTurnAdmissionOutbox).values({
+                turnId: turnClaim.input.turnId,
+                startInputJson: encoded,
+                preparedAt: now,
+              }),
+            )
             return true
           }),
         )
@@ -258,11 +398,20 @@ export const layer = Layer.effect(
     )
     const renew: HostedTurnWorkerStoreService["renew"] = Effect.fn("HostedTurnWorkerStore.renew")(
       function* (turnClaim, now, leaseMillis) {
-        const rows = yield* query(sql`UPDATE rika_hosted_turn_claims
-          SET heartbeat_at = ${now}, expires_at = ${now + leaseMillis}
-          WHERE turn_id = ${turnClaim.input.turnId} AND worker_id = ${turnClaim.workerId}
-            AND claim_token = ${turnClaim.claimToken} AND expires_at > ${now}
-          RETURNING turn_id`)
+        const rows = yield* query(
+          db
+            .update(rikaHostedTurnClaims)
+            .set({ heartbeatAt: now, expiresAt: now + leaseMillis })
+            .where(
+              and(
+                eq(rikaHostedTurnClaims.turnId, turnClaim.input.turnId),
+                eq(rikaHostedTurnClaims.workerId, turnClaim.workerId),
+                eq(rikaHostedTurnClaims.claimToken, turnClaim.claimToken),
+                gt(rikaHostedTurnClaims.expiresAt, now),
+              ),
+            )
+            .returning({ turnId: rikaHostedTurnClaims.turnId }),
+        )
         return rows[0] !== undefined
       },
     )
@@ -271,16 +420,29 @@ export const layer = Layer.effect(
         if (link.turnId !== turnClaim.input.turnId || link.threadId !== turnClaim.input.threadId)
           return yield* failure("Execution link does not identify the claimed Turn")
         const encoded = yield* Schema.encodeEffect(ExecutionLinkJson)(link).pipe(Effect.mapError(failure))
-        yield* transaction(
-          sql,
+        yield* transaction(db, (tx) =>
           Effect.gen(function* () {
-            const authority = yield* query(sql`SELECT 1 FROM rika_hosted_turn_claims
-              WHERE turn_id = ${turnClaim.input.turnId} AND worker_id = ${turnClaim.workerId}
-                AND claim_token = ${turnClaim.claimToken} FOR UPDATE`)
+            const authority = yield* query(
+              tx
+                .select({ turnId: rikaHostedTurnClaims.turnId })
+                .from(rikaHostedTurnClaims)
+                .where(
+                  and(
+                    eq(rikaHostedTurnClaims.turnId, turnClaim.input.turnId),
+                    eq(rikaHostedTurnClaims.workerId, turnClaim.workerId),
+                    eq(rikaHostedTurnClaims.claimToken, turnClaim.claimToken),
+                  ),
+                )
+                .for("update"),
+            )
             if (authority[0] === undefined) return yield* failure("Turn claim is no longer owned by this worker")
-            const rows = yield* query(sql<{ readonly executionLinkJson: string | null }>`SELECT
-              execution_link_json AS "executionLinkJson" FROM rika_turns
-              WHERE id = ${turnClaim.input.turnId} AND thread_id = ${turnClaim.input.threadId} FOR UPDATE`)
+            const rows = yield* query(
+              tx
+                .select({ executionLinkJson: rikaTurns.executionLinkJson })
+                .from(rikaTurns)
+                .where(and(eq(rikaTurns.id, turnClaim.input.turnId), eq(rikaTurns.threadId, turnClaim.input.threadId)))
+                .for("update"),
+            )
             const existing = rows[0]
             if (existing === undefined) return yield* failure("Claimed Turn does not exist")
             if (existing.executionLinkJson !== null) {
@@ -290,23 +452,49 @@ export const layer = Layer.effect(
               if (!Schema.toEquivalence(ExecutionGateway.ExecutionLink)(persisted, link))
                 return yield* failure("Claimed Turn already has a different execution link")
             } else {
-              yield* query(sql`UPDATE rika_turns SET execution_link_json = ${encoded}, updated_at = ${now}
-                WHERE id = ${turnClaim.input.turnId}`)
+              yield* query(
+                tx
+                  .update(rikaTurns)
+                  .set({ executionLinkJson: encoded, updatedAt: now })
+                  .where(eq(rikaTurns.id, turnClaim.input.turnId)),
+              )
             }
-            yield* query(sql`DELETE FROM rika_turn_admission_outbox WHERE turn_id = ${turnClaim.input.turnId}`)
-            yield* query(sql`DELETE FROM rika_hosted_turn_claims
-              WHERE turn_id = ${turnClaim.input.turnId} AND claim_token = ${turnClaim.claimToken}`)
+            yield* query(
+              tx.delete(rikaTurnAdmissionOutbox).where(eq(rikaTurnAdmissionOutbox.turnId, turnClaim.input.turnId)),
+            )
+            yield* query(
+              tx
+                .delete(rikaHostedTurnClaims)
+                .where(
+                  and(
+                    eq(rikaHostedTurnClaims.turnId, turnClaim.input.turnId),
+                    eq(rikaHostedTurnClaims.claimToken, turnClaim.claimToken),
+                  ),
+                ),
+            )
           }),
         )
       },
     )
     const release: HostedTurnWorkerStoreService["release"] = Effect.fn("HostedTurnWorkerStore.release")(
       function* (turnClaim) {
-        yield* query(sql`DELETE FROM rika_hosted_turn_claims
-          WHERE turn_id = ${turnClaim.input.turnId} AND worker_id = ${turnClaim.workerId}
-            AND claim_token = ${turnClaim.claimToken}
-            AND EXISTS (SELECT 1 FROM rika_turns WHERE id = ${turnClaim.input.turnId}
-              AND status IN ('accepted', 'queued'))`).pipe(Effect.asVoid)
+        yield* query(
+          db.delete(rikaHostedTurnClaims).where(
+            and(
+              eq(rikaHostedTurnClaims.turnId, turnClaim.input.turnId),
+              eq(rikaHostedTurnClaims.workerId, turnClaim.workerId),
+              eq(rikaHostedTurnClaims.claimToken, turnClaim.claimToken),
+              exists(
+                db
+                  .select({ value: rikaTurns.id })
+                  .from(rikaTurns)
+                  .where(
+                    and(eq(rikaTurns.id, turnClaim.input.turnId), inArray(rikaTurns.status, ["accepted", "queued"])),
+                  ),
+              ),
+            ),
+          ),
+        ).pipe(Effect.asVoid)
       },
     )
     return HostedTurnWorkerStore.of({ claimNext, claimRecovery, prepare, renew, complete, release })

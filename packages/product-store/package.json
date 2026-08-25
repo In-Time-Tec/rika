@@ -43,6 +43,7 @@
     "@effect/sql-pg": "catalog:",
     "@rika/product": "workspace:*",
     "@rika/transcript": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

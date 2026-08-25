@@ -1,6 +1,21 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Effect, Layer, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
+import {
+  aliasedTable,
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql as expression,
+  type SQLWrapper,
+} from "drizzle-orm"
+import { pgTable, text } from "drizzle-orm/pg-core"
 import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
@@ -19,7 +34,7 @@ import {
   JsonObject,
   ExecutorInstanceId,
   OrganizationOwner,
-  type OwnerId,
+  OwnerId,
   PersonalOwner,
   Presence,
   Project,
@@ -30,7 +45,7 @@ import {
   ThreadCommand,
   ThreadEvent,
   ThreadGrant,
-  type ThreadId,
+  ThreadId,
 } from "@rika/product/hosted-model"
 import { TurnId } from "@rika/product/turn-record"
 import {
@@ -57,6 +72,40 @@ import {
   type UpsertPresenceInput,
 } from "@rika/product/hosted-store"
 import { requireActiveClient, requireThreadAccess } from "./postgres-authority"
+import {
+  rikaHostedClientAuthorities,
+  rikaHostedClientCursors,
+  rikaHostedClients,
+  rikaHostedCredentialReferences,
+  rikaHostedDevices,
+  rikaHostedAuditEvents,
+  rikaHostedExecutorAssignments,
+  rikaHostedExecutorOperations,
+  rikaHostedOwnerCounters,
+  rikaHostedOwners,
+  rikaHostedPresence,
+  rikaHostedProjectGrants,
+  rikaHostedProjects,
+  rikaHostedTerminalWriterLeases,
+  rikaHostedThreadCommands,
+  rikaHostedThreadEvents,
+  rikaHostedThreadGrants,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
+  rikaThreadQueueState,
+  rikaThreads,
+  rikaTurns,
+} from "../database/schema/product"
+
+const identityMembers = pgTable("member", {
+  id: text().primaryKey(),
+  organizationId: text("organization_id").notNull(),
+  userId: text("user_id").notNull(),
+})
+const timestamp = (value: string) => expression<Date>`${value}::timestamptz`
+const timestampText = (column: SQLWrapper) =>
+  expression<string>`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+type DatabaseExecutor = Pick<PgDrizzle.EffectPgDatabase, "insert" | "select" | "update">
 
 const databaseError = (cause: unknown) =>
   StoreError.make({ reason: "database", message: `Hosted PostgreSQL operation failed: ${String(cause)}` })
@@ -66,8 +115,6 @@ const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>
 const decode = <S extends Schema.Top>(schema: S, value: SqlRow | undefined) =>
   Schema.decodeEffect(schema)(value).pipe(Effect.mapError(databaseError))
 const limit = (value: number) => Math.min(Math.max(Math.trunc(value), 1), 1_000)
-const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
-  sql.withTransaction(effect).pipe(Effect.catchTag("SqlError", databaseError))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const AdmissionStatus = Schema.Literals(["accepted", "queued"])
@@ -110,6 +157,32 @@ const CredentialReferenceRow = Schema.Struct({
   updatedAt: Schema.String,
 })
 const ExistingAdmissionRow = Schema.Struct({ turnId: Schema.String, admissionStatus: AdmissionStatus })
+const commandFields = {
+  ownerId: rikaHostedThreadCommands.ownerId,
+  threadId: rikaHostedThreadCommands.threadId,
+  commandId: rikaHostedThreadCommands.commandId,
+  idempotencyKey: rikaHostedThreadCommands.idempotencyKey,
+  actor: rikaHostedThreadCommands.actor,
+  sequence: expression<string>`${rikaHostedThreadCommands.sequence}::text`,
+  commitCursor: expression<string>`${rikaHostedThreadCommands.commitCursor}::text`,
+  command: rikaHostedThreadCommands.command,
+  admittedAt: timestampText(rikaHostedThreadCommands.admittedAt),
+}
+const eventFields = {
+  ownerId: rikaHostedThreadEvents.ownerId,
+  threadId: rikaHostedThreadEvents.threadId,
+  eventId: rikaHostedThreadEvents.eventId,
+  idempotencyKey: rikaHostedThreadEvents.idempotencyKey,
+  assignmentId: rikaHostedThreadEvents.assignmentId,
+  executorInstanceId: rikaHostedThreadEvents.executorInstanceId,
+  assignmentGeneration: expression<string>`${rikaHostedThreadEvents.assignmentGeneration}::text`,
+  leaseEpoch: expression<string>`${rikaHostedThreadEvents.leaseEpoch}::text`,
+  sequence: expression<string>`${rikaHostedThreadEvents.sequence}::text`,
+  commitCursor: expression<string>`${rikaHostedThreadEvents.commitCursor}::text`,
+  commandSequence: expression<string | null>`${rikaHostedThreadEvents.commandSequence}::text`,
+  event: rikaHostedThreadEvents.event,
+  createdAt: timestampText(rikaHostedThreadEvents.createdAt),
+}
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -136,149 +209,248 @@ const eventEquivalent = Schema.toEquivalence(
 )
 
 const allocateCommitCursor = Effect.fn("PostgresStore.allocateCommitCursor")(function* (
-  sql: SqlClient,
+  db: DatabaseExecutor,
   ownerId: string,
 ) {
-  const rows = yield* query(sql<{ readonly cursor: string }>`UPDATE rika_hosted_owner_counters
-    SET next_commit_cursor = next_commit_cursor + 1
-    WHERE owner_id = ${ownerId}
-    RETURNING (next_commit_cursor - 1)::text AS cursor`)
+  const rows = yield* query(
+    db
+      .update(rikaHostedOwnerCounters)
+      .set({
+        nextCommitCursor: expression`${rikaHostedOwnerCounters.nextCommitCursor} + 1`,
+      })
+      .where(eq(rikaHostedOwnerCounters.ownerId, ownerId))
+      .returning({
+        cursor: expression<string>`(${rikaHostedOwnerCounters.nextCommitCursor} - 1)::text`,
+      }),
+  )
   if (rows[0] === undefined) return yield* failure("invalid-authority", "Owner authority is not initialized")
   return CommitCursor.make(rows[0].cursor)
 })
 
 const requireOwnerCreator = Effect.fn("PostgresStore.requireOwnerCreator")(function* (
-  sql: SqlClient,
+  db: DatabaseExecutor,
   input: { readonly ownerId: string; readonly userId: string },
 ) {
-  const rows = yield* query(sql`SELECT 1 FROM rika_hosted_owners owner_record
-    LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-      AND membership.organization_id = owner_record.organization_id AND membership.user_id = ${input.userId}
-    WHERE owner_record.id = ${input.ownerId}
-      AND ((owner_record.kind = 'personal' AND owner_record.user_id = ${input.userId})
-        OR (owner_record.kind = 'organization' AND membership.id IS NOT NULL))
-    FOR KEY SHARE OF owner_record`)
+  const rows = yield* query(
+    db
+      .select({ present: expression<number>`1` })
+      .from(rikaHostedOwners)
+      .leftJoin(
+        identityMembers,
+        and(
+          eq(rikaHostedOwners.kind, "organization"),
+          eq(identityMembers.organizationId, rikaHostedOwners.organizationId),
+          eq(identityMembers.userId, input.userId),
+        ),
+      )
+      .where(
+        and(
+          eq(rikaHostedOwners.id, input.ownerId),
+          or(
+            and(eq(rikaHostedOwners.kind, "personal"), eq(rikaHostedOwners.userId, input.userId)),
+            and(eq(rikaHostedOwners.kind, "organization"), isNotNull(identityMembers.id)),
+          ),
+        ),
+      )
+      .for("key share", { of: rikaHostedOwners }),
+  )
   if (rows[0] === undefined) return yield* failure("invalid-authority", "Owner is unavailable to the user")
 })
 
 const requireOrganizationGrantAuthority = Effect.fn("PostgresStore.requireOrganizationGrantAuthority")(function* (
-  sql: SqlClient,
+  db: DatabaseExecutor,
   input: { readonly ownerId: string; readonly userId: string; readonly membershipId: string },
 ) {
-  const rows = yield* query(sql`SELECT 1 FROM rika_hosted_owners owner_record
-    JOIN "member" actor_membership ON actor_membership.organization_id = owner_record.organization_id
-      AND actor_membership.user_id = ${input.userId}
-    JOIN "member" target_membership ON target_membership.organization_id = owner_record.organization_id
-      AND target_membership.id = ${input.membershipId}
-    WHERE owner_record.id = ${input.ownerId} AND owner_record.kind = 'organization'
-    FOR KEY SHARE OF owner_record`)
+  const actorMembership = aliasedTable(identityMembers, "actor_membership")
+  const targetMembership = aliasedTable(identityMembers, "target_membership")
+  const rows = yield* query(
+    db
+      .select({ present: expression<number>`1` })
+      .from(rikaHostedOwners)
+      .innerJoin(
+        actorMembership,
+        and(
+          eq(actorMembership.organizationId, rikaHostedOwners.organizationId),
+          eq(actorMembership.userId, input.userId),
+        ),
+      )
+      .innerJoin(
+        targetMembership,
+        and(
+          eq(targetMembership.organizationId, rikaHostedOwners.organizationId),
+          eq(targetMembership.id, input.membershipId),
+        ),
+      )
+      .where(and(eq(rikaHostedOwners.id, input.ownerId), eq(rikaHostedOwners.kind, "organization")))
+      .for("key share", { of: rikaHostedOwners }),
+  )
   if (rows[0] === undefined)
     return yield* failure("invalid-authority", "Grants require active organization memberships")
 })
 
 const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgClient.PgClient> {
-  const sql = yield* PgClient.PgClient
+  yield* PgClient.PgClient
+  const db = yield* PgDrizzle.makeWithDefaults()
 
   const putOwner = Effect.fn("PostgresStore.putOwner")(function* (input: PutOwnerInput) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        const existing = yield* query(sql<{
-          readonly id: string
-          readonly kind: string
-          readonly userId: string | null
-          readonly organizationId: string | null
-          readonly createdAt: string
-        }>`SELECT id, kind, user_id AS "userId", organization_id AS "organizationId",
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-          FROM rika_hosted_owners
-          WHERE id = ${input.id}
-            OR user_id = ${input.identity._tag === "PersonalOwner" ? input.identity.userId : null}
-            OR organization_id = ${input.identity._tag === "OrganizationOwner" ? input.identity.organizationId : null}
-          FOR UPDATE`)
-        const matching = existing.find((row) => row.id === input.id)
-        if (existing.length > 0) {
-          if (
-            matching === undefined ||
-            matching.kind !== (input.identity._tag === "PersonalOwner" ? "personal" : "organization") ||
-            matching.userId !== (input.identity._tag === "PersonalOwner" ? input.identity.userId : null) ||
-            matching.organizationId !==
-              (input.identity._tag === "OrganizationOwner" ? input.identity.organizationId : null)
-          ) {
-            return yield* failure("conflict", "Owner identity cannot be reassigned")
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const userId = input.identity._tag === "PersonalOwner" ? input.identity.userId : null
+          const organizationId = input.identity._tag === "OrganizationOwner" ? input.identity.organizationId : null
+          const kind = input.identity._tag === "PersonalOwner" ? "personal" : "organization"
+          const existing = yield* query(
+            tx
+              .select({
+                id: rikaHostedOwners.id,
+                kind: rikaHostedOwners.kind,
+                userId: rikaHostedOwners.userId,
+                organizationId: rikaHostedOwners.organizationId,
+                createdAt: timestampText(rikaHostedOwners.createdAt),
+              })
+              .from(rikaHostedOwners)
+              .where(
+                or(
+                  eq(rikaHostedOwners.id, input.id),
+                  userId === null ? undefined : eq(rikaHostedOwners.userId, userId),
+                  organizationId === null ? undefined : eq(rikaHostedOwners.organizationId, organizationId),
+                ),
+              )
+              .for("update"),
+          )
+          const matching = existing.find((row) => row.id === input.id)
+          if (existing.length > 0) {
+            if (
+              matching === undefined ||
+              matching.kind !== kind ||
+              matching.userId !== userId ||
+              matching.organizationId !== organizationId
+            ) {
+              return yield* failure("conflict", "Owner identity cannot be reassigned")
+            }
+            let identity: HostedOwner
+            if (matching.kind === "personal") {
+              if (matching.userId === null) return yield* failure("database", "Personal owner has no user identity")
+              identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: matching.userId })
+            } else {
+              if (matching.organizationId === null)
+                return yield* failure("database", "Organization owner has no organization identity")
+              identity = yield* decode(OrganizationOwner, {
+                _tag: "OrganizationOwner",
+                organizationId: matching.organizationId,
+              })
+            }
+            return yield* decode(HostedOwnerRecord, { id: matching.id, identity, createdAt: matching.createdAt })
           }
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedOwners)
+              .values({ id: input.id, kind, userId, organizationId, createdAt: timestamp(input.now) })
+              .onConflictDoUpdate({
+                target: rikaHostedOwners.id,
+                set: { id: expression`excluded.id` },
+                setWhere: and(
+                  eq(rikaHostedOwners.kind, expression<string>`excluded.kind`),
+                  expression`${rikaHostedOwners.userId} is not distinct from excluded.user_id`,
+                  expression`${rikaHostedOwners.organizationId} is not distinct from excluded.organization_id`,
+                )!,
+              })
+              .returning({
+                id: rikaHostedOwners.id,
+                kind: rikaHostedOwners.kind,
+                userId: rikaHostedOwners.userId,
+                organizationId: rikaHostedOwners.organizationId,
+                createdAt: timestampText(rikaHostedOwners.createdAt),
+              }),
+          )
+          if (rows[0] === undefined) return yield* failure("conflict", "Owner identity cannot be reassigned")
+          yield* query(tx.insert(rikaHostedOwnerCounters).values({ ownerId: input.id }).onConflictDoNothing())
+          const row = yield* decode(OwnerRow, rows[0])
           let identity: HostedOwner
-          if (matching.kind === "personal") {
-            if (matching.userId === null) return yield* failure("database", "Personal owner has no user identity")
-            identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: matching.userId })
+          if (row.kind === "personal") {
+            if (row.userId === null) return yield* failure("database", "Personal owner has no user identity")
+            identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: row.userId })
           } else {
-            if (matching.organizationId === null)
+            if (row.organizationId === null)
               return yield* failure("database", "Organization owner has no organization identity")
             identity = yield* decode(OrganizationOwner, {
               _tag: "OrganizationOwner",
-              organizationId: matching.organizationId,
+              organizationId: row.organizationId,
             })
           }
-          return yield* decode(HostedOwnerRecord, { id: matching.id, identity, createdAt: matching.createdAt })
-        }
-        const rows = yield* query(sql`INSERT INTO rika_hosted_owners (id, kind, user_id, organization_id, created_at)
-        VALUES (${input.id}, ${input.identity._tag === "PersonalOwner" ? "personal" : "organization"},
-          ${input.identity._tag === "PersonalOwner" ? input.identity.userId : null},
-          ${input.identity._tag === "OrganizationOwner" ? input.identity.organizationId : null}, ${input.now})
-        ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
-        WHERE rika_hosted_owners.kind = EXCLUDED.kind
-          AND rika_hosted_owners.user_id IS NOT DISTINCT FROM EXCLUDED.user_id
-          AND rika_hosted_owners.organization_id IS NOT DISTINCT FROM EXCLUDED.organization_id
-        RETURNING id, kind, user_id AS "userId", organization_id AS "organizationId",
-          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
-        if (rows[0] === undefined) return yield* failure("conflict", "Owner identity cannot be reassigned")
-        yield* query(sql`INSERT INTO rika_hosted_owner_counters (owner_id) VALUES (${input.id}) ON CONFLICT DO NOTHING`)
-        const row = yield* decode(OwnerRow, rows[0])
-        let identity: HostedOwner
-        if (row.kind === "personal") {
-          if (row.userId === null) return yield* failure("database", "Personal owner has no user identity")
-          identity = yield* decode(PersonalOwner, { _tag: "PersonalOwner", userId: row.userId })
-        } else {
-          if (row.organizationId === null)
-            return yield* failure("database", "Organization owner has no organization identity")
-          identity = yield* decode(OrganizationOwner, {
-            _tag: "OrganizationOwner",
-            organizationId: row.organizationId,
-          })
-        }
-        return yield* decode(HostedOwnerRecord, { id: row.id, identity, createdAt: row.createdAt })
-      }).pipe(Effect.catchTag("HostedStoreError", Effect.fail)),
-    )
+          return yield* decode(HostedOwnerRecord, { id: row.id, identity, createdAt: row.createdAt })
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const createProject = Effect.fn("PostgresStore.createProject")(function* (input: CreateProjectInput) {
-    yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
-    const rows = yield* query(sql`INSERT INTO rika_hosted_projects
-      (id, owner_id, name, created_by_user_id, created_at, updated_at)
-      VALUES (${input.id}, ${input.ownerId}, ${input.name}, ${input.createdByUserId}, ${input.now}, ${input.now})
-      RETURNING id, owner_id AS "ownerId", name, created_by_user_id AS "createdByUserId",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
+    yield* requireOwnerCreator(db, { ownerId: input.ownerId, userId: input.createdByUserId })
+    const rows = yield* query(
+      db
+        .insert(rikaHostedProjects)
+        .values({
+          id: input.id,
+          ownerId: input.ownerId,
+          name: input.name,
+          createdByUserId: input.createdByUserId,
+          createdAt: timestamp(input.now),
+          updatedAt: timestamp(input.now),
+        })
+        .returning({
+          id: rikaHostedProjects.id,
+          ownerId: rikaHostedProjects.ownerId,
+          name: rikaHostedProjects.name,
+          createdByUserId: rikaHostedProjects.createdByUserId,
+          createdAt: timestampText(rikaHostedProjects.createdAt),
+          updatedAt: timestampText(rikaHostedProjects.updatedAt),
+        }),
+    )
     return yield* decode(Project, rows[0])
   })
 
   const putProjectGrant = Effect.fn("PostgresStore.putProjectGrant")(function* (input: PutProjectGrantInput) {
-    yield* requireOrganizationGrantAuthority(sql, {
+    yield* requireOrganizationGrantAuthority(db, {
       ownerId: input.ownerId,
       userId: input.grantedByUserId,
       membershipId: input.membershipId,
     })
-    const rows = yield* query(sql`INSERT INTO rika_hosted_project_grants
-      (owner_id, project_id, membership_id, role, granted_by_user_id, created_at, updated_at)
-      SELECT ${input.ownerId}, project.id, ${input.membershipId}, ${input.role}, ${input.grantedByUserId}, ${input.now}, ${input.now}
-      FROM rika_hosted_projects project WHERE project.id = ${input.projectId} AND project.owner_id = ${input.ownerId}
-      ON CONFLICT (project_id, membership_id) DO UPDATE SET role = EXCLUDED.role,
-        granted_by_user_id = EXCLUDED.granted_by_user_id, updated_at = EXCLUDED.updated_at
-      WHERE rika_hosted_project_grants.owner_id = EXCLUDED.owner_id
-      RETURNING owner_id AS "ownerId", project_id AS "projectId", membership_id AS "membershipId", role,
-        granted_by_user_id AS "grantedByUserId",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
+    const rows = yield* query(
+      db
+        .insert(rikaHostedProjectGrants)
+        .select(
+          db
+            .select({
+              ownerId: expression<string>`${input.ownerId}`.as("owner_id"),
+              projectId: rikaHostedProjects.id,
+              membershipId: expression<string>`${input.membershipId}`.as("membership_id"),
+              role: expression<typeof input.role>`${input.role}`.as("role"),
+              grantedByUserId: expression<string>`${input.grantedByUserId}`.as("granted_by_user_id"),
+              createdAt: timestamp(input.now).as("created_at"),
+              updatedAt: timestamp(input.now).as("updated_at"),
+            })
+            .from(rikaHostedProjects)
+            .where(and(eq(rikaHostedProjects.id, input.projectId), eq(rikaHostedProjects.ownerId, input.ownerId))),
+        )
+        .onConflictDoUpdate({
+          target: [rikaHostedProjectGrants.projectId, rikaHostedProjectGrants.membershipId],
+          set: {
+            role: expression`excluded.role`,
+            grantedByUserId: expression`excluded.granted_by_user_id`,
+            updatedAt: expression`excluded.updated_at`,
+          },
+          setWhere: eq(rikaHostedProjectGrants.ownerId, expression<string>`excluded.owner_id`),
+        })
+        .returning({
+          ownerId: rikaHostedProjectGrants.ownerId,
+          projectId: rikaHostedProjectGrants.projectId,
+          membershipId: rikaHostedProjectGrants.membershipId,
+          role: rikaHostedProjectGrants.role,
+          grantedByUserId: rikaHostedProjectGrants.grantedByUserId,
+          createdAt: timestampText(rikaHostedProjectGrants.createdAt),
+          updatedAt: timestampText(rikaHostedProjectGrants.updatedAt),
+        }),
+    )
     if (rows[0] === undefined) return yield* failure("not-found", "Project does not exist for the owner")
     return yield* decode(ProjectGrant, rows[0])
   })
@@ -286,20 +458,39 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   const createWorkspace = Effect.fn("PostgresStore.createWorkspace")(function* (input: CreateWorkspaceInput) {
     if (input.executorKind === "runner" && input.inheritProjectGrants === true)
       return yield* failure("invalid-authority", "Local workspaces cannot inherit project grants")
-    yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
+    yield* requireOwnerCreator(db, { ownerId: input.ownerId, userId: input.createdByUserId })
     if (input.projectId !== undefined) {
       const project = yield* query(
-        sql`SELECT 1 FROM rika_hosted_projects WHERE id = ${input.projectId} AND owner_id = ${input.ownerId}`,
+        db
+          .select({ present: expression<number>`1` })
+          .from(rikaHostedProjects)
+          .where(and(eq(rikaHostedProjects.id, input.projectId), eq(rikaHostedProjects.ownerId, input.ownerId))),
       )
       if (project[0] === undefined) return yield* failure("not-found", "Project does not exist for the owner")
     }
     const inherit = input.executorKind === "orb" ? (input.inheritProjectGrants ?? true) : false
-    const rows = yield* query(sql`INSERT INTO rika_hosted_workspaces
-      (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES (${input.id}, ${input.ownerId}, ${input.projectId ?? null}, ${input.createdByUserId}, ${input.executorKind}, ${inherit}, ${input.now})
-      RETURNING id, owner_id AS "ownerId", project_id AS "projectId", created_by_user_id AS "createdByUserId",
-        executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
+    const rows = yield* query(
+      db
+        .insert(rikaHostedWorkspaces)
+        .values({
+          id: input.id,
+          ownerId: input.ownerId,
+          projectId: input.projectId ?? null,
+          createdByUserId: input.createdByUserId,
+          executorKind: input.executorKind,
+          inheritProjectGrants: inherit,
+          createdAt: timestamp(input.now),
+        })
+        .returning({
+          id: rikaHostedWorkspaces.id,
+          ownerId: rikaHostedWorkspaces.ownerId,
+          projectId: rikaHostedWorkspaces.projectId,
+          createdByUserId: rikaHostedWorkspaces.createdByUserId,
+          executorKind: rikaHostedWorkspaces.executorKind,
+          inheritProjectGrants: rikaHostedWorkspaces.inheritProjectGrants,
+          createdAt: timestampText(rikaHostedWorkspaces.createdAt),
+        }),
+    )
     const row = yield* decode(WorkspaceRow, rows[0])
     const workspace = {
       id: row.id,
@@ -318,16 +509,46 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   const createThread = Effect.fn("PostgresStore.createThread")(function* (input: CreateThreadInput) {
     if (input.executorKind === "runner" && input.inheritProjectGrants === true)
       return yield* failure("invalid-authority", "Local threads cannot inherit project grants")
-    yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
-    const rows = yield* query(sql`INSERT INTO rika_hosted_threads
-      (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      SELECT ${input.id}, ${input.ownerId}, ${input.projectId ?? null}, workspace.id, ${input.createdByUserId}, ${input.executorKind},
-        CASE WHEN ${input.executorKind} = 'orb' THEN COALESCE(${input.inheritProjectGrants ?? null}, workspace.inherit_project_grants) ELSE false END, ${input.now}
-      FROM rika_hosted_workspaces workspace WHERE workspace.id = ${input.workspaceId} AND workspace.owner_id = ${input.ownerId}
-        AND workspace.project_id IS NOT DISTINCT FROM ${input.projectId ?? null} AND workspace.executor_kind = ${input.executorKind}
-      RETURNING id, owner_id AS "ownerId", project_id AS "projectId", workspace_id AS "workspaceId",
-        created_by_user_id AS "createdByUserId", executor_kind AS "executorKind", inherit_project_grants AS "inheritProjectGrants",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
+    yield* requireOwnerCreator(db, { ownerId: input.ownerId, userId: input.createdByUserId })
+    const rows = yield* query(
+      db
+        .insert(rikaHostedThreads)
+        .select(
+          db
+            .select({
+              id: expression<string>`${input.id}`.as("id"),
+              ownerId: expression<string>`${input.ownerId}`.as("owner_id"),
+              projectId: expression<string | null>`${input.projectId ?? null}`.as("project_id"),
+              workspaceId: rikaHostedWorkspaces.id,
+              createdByUserId: expression<string>`${input.createdByUserId}`.as("created_by_user_id"),
+              executorKind: expression<typeof input.executorKind>`${input.executorKind}`.as("executor_kind"),
+              inheritProjectGrants: (input.executorKind === "orb"
+                ? expression<boolean>`coalesce(${input.inheritProjectGrants ?? null}, ${rikaHostedWorkspaces.inheritProjectGrants})`
+                : expression<boolean>`false`
+              ).as("inherit_project_grants"),
+              createdAt: timestamp(input.now).as("created_at"),
+            })
+            .from(rikaHostedWorkspaces)
+            .where(
+              and(
+                eq(rikaHostedWorkspaces.id, input.workspaceId),
+                eq(rikaHostedWorkspaces.ownerId, input.ownerId),
+                expression`${rikaHostedWorkspaces.projectId} is not distinct from ${input.projectId ?? null}`,
+                eq(rikaHostedWorkspaces.executorKind, input.executorKind),
+              ),
+            ),
+        )
+        .returning({
+          id: rikaHostedThreads.id,
+          ownerId: rikaHostedThreads.ownerId,
+          projectId: rikaHostedThreads.projectId,
+          workspaceId: rikaHostedThreads.workspaceId,
+          createdByUserId: rikaHostedThreads.createdByUserId,
+          executorKind: rikaHostedThreads.executorKind,
+          inheritProjectGrants: rikaHostedThreads.inheritProjectGrants,
+          createdAt: timestampText(rikaHostedThreads.createdAt),
+        }),
+    )
     if (rows[0] === undefined) return yield* failure("not-found", "Workspace does not belong to the owner and project")
     const row = yield* decode(ThreadRow, rows[0])
     const thread = {
@@ -343,12 +564,21 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const readThread = Effect.fn("PostgresStore.readThread")(function* (input: ReadThreadInput) {
-    const rows = yield* query(sql`SELECT id, owner_id AS "ownerId", project_id AS "projectId",
-      workspace_id AS "workspaceId", created_by_user_id AS "createdByUserId", executor_kind AS "executorKind",
-      inherit_project_grants AS "inheritProjectGrants",
-      to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-      FROM rika_hosted_threads
-      WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}`)
+    const rows = yield* query(
+      db
+        .select({
+          id: rikaHostedThreads.id,
+          ownerId: rikaHostedThreads.ownerId,
+          projectId: rikaHostedThreads.projectId,
+          workspaceId: rikaHostedThreads.workspaceId,
+          createdByUserId: rikaHostedThreads.createdByUserId,
+          executorKind: rikaHostedThreads.executorKind,
+          inheritProjectGrants: rikaHostedThreads.inheritProjectGrants,
+          createdAt: timestampText(rikaHostedThreads.createdAt),
+        })
+        .from(rikaHostedThreads)
+        .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId))),
+    )
     if (rows[0] === undefined) return undefined
     const row = yield* decode(ThreadRow, rows[0])
     const thread = {
@@ -364,169 +594,347 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const putThreadGrant = Effect.fn("PostgresStore.putThreadGrant")(function* (input: PutThreadGrantInput) {
-    yield* requireOrganizationGrantAuthority(sql, {
+    yield* requireOrganizationGrantAuthority(db, {
       ownerId: input.ownerId,
       userId: input.grantedByUserId,
       membershipId: input.membershipId,
     })
-    const rows = yield* query(sql`INSERT INTO rika_hosted_thread_grants
-      (owner_id, thread_id, membership_id, role, granted_by_user_id, created_at, updated_at)
-      SELECT ${input.ownerId}, thread.id, ${input.membershipId}, ${input.role}, ${input.grantedByUserId}, ${input.now}, ${input.now}
-      FROM rika_hosted_threads thread WHERE thread.id = ${input.threadId} AND thread.owner_id = ${input.ownerId}
-      ON CONFLICT (thread_id, membership_id) DO UPDATE SET role = EXCLUDED.role,
-        granted_by_user_id = EXCLUDED.granted_by_user_id, updated_at = EXCLUDED.updated_at
-      WHERE rika_hosted_thread_grants.owner_id = EXCLUDED.owner_id
-      RETURNING owner_id AS "ownerId", thread_id AS "threadId", membership_id AS "membershipId", role,
-        granted_by_user_id AS "grantedByUserId",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
+    const rows = yield* query(
+      db
+        .insert(rikaHostedThreadGrants)
+        .select(
+          db
+            .select({
+              ownerId: expression<string>`${input.ownerId}`.as("owner_id"),
+              threadId: rikaHostedThreads.id,
+              membershipId: expression<string>`${input.membershipId}`.as("membership_id"),
+              role: expression<typeof input.role>`${input.role}`.as("role"),
+              grantedByUserId: expression<string>`${input.grantedByUserId}`.as("granted_by_user_id"),
+              createdAt: timestamp(input.now).as("created_at"),
+              updatedAt: timestamp(input.now).as("updated_at"),
+            })
+            .from(rikaHostedThreads)
+            .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId))),
+        )
+        .onConflictDoUpdate({
+          target: [rikaHostedThreadGrants.threadId, rikaHostedThreadGrants.membershipId],
+          set: {
+            role: expression`excluded.role`,
+            grantedByUserId: expression`excluded.granted_by_user_id`,
+            updatedAt: expression`excluded.updated_at`,
+          },
+          setWhere: eq(rikaHostedThreadGrants.ownerId, expression<string>`excluded.owner_id`),
+        })
+        .returning({
+          ownerId: rikaHostedThreadGrants.ownerId,
+          threadId: rikaHostedThreadGrants.threadId,
+          membershipId: rikaHostedThreadGrants.membershipId,
+          role: rikaHostedThreadGrants.role,
+          grantedByUserId: rikaHostedThreadGrants.grantedByUserId,
+          createdAt: timestampText(rikaHostedThreadGrants.createdAt),
+          updatedAt: timestampText(rikaHostedThreadGrants.updatedAt),
+        }),
+    )
     if (rows[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
     return yield* decode(ThreadGrant, rows[0])
   })
 
   const registerDevice = Effect.fn("PostgresStore.registerDevice")(function* (input: RegisterDeviceInput) {
-    const rows = yield* query(sql`INSERT INTO rika_hosted_devices
-      (id, user_id, display_name, public_key_fingerprint, created_at, last_seen_at)
-      VALUES (${input.id}, ${input.userId}, ${input.displayName}, ${input.publicKeyFingerprint}, ${input.now}, ${input.now})
-      ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name,
-        public_key_fingerprint = EXCLUDED.public_key_fingerprint, last_seen_at = EXCLUDED.last_seen_at
-      WHERE rika_hosted_devices.user_id = EXCLUDED.user_id AND rika_hosted_devices.revoked_at IS NULL
-      RETURNING id, user_id AS "userId", display_name AS "displayName", public_key_fingerprint AS "publicKeyFingerprint",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt", NULL AS "revokedAt"`)
+    const rows = yield* query(
+      db
+        .insert(rikaHostedDevices)
+        .values({
+          id: input.id,
+          userId: input.userId,
+          displayName: input.displayName,
+          publicKeyFingerprint: input.publicKeyFingerprint,
+          createdAt: timestamp(input.now),
+          lastSeenAt: timestamp(input.now),
+        })
+        .onConflictDoUpdate({
+          target: rikaHostedDevices.id,
+          set: {
+            displayName: expression`excluded.display_name`,
+            publicKeyFingerprint: expression`excluded.public_key_fingerprint`,
+            lastSeenAt: expression`excluded.last_seen_at`,
+          },
+          setWhere: and(
+            eq(rikaHostedDevices.userId, expression<string>`excluded.user_id`),
+            isNull(rikaHostedDevices.revokedAt),
+          )!,
+        })
+        .returning({
+          id: rikaHostedDevices.id,
+          userId: rikaHostedDevices.userId,
+          displayName: rikaHostedDevices.displayName,
+          publicKeyFingerprint: rikaHostedDevices.publicKeyFingerprint,
+          createdAt: timestampText(rikaHostedDevices.createdAt),
+          lastSeenAt: timestampText(rikaHostedDevices.lastSeenAt),
+          revokedAt: expression<null>`NULL`,
+        }),
+    )
     if (rows[0] === undefined) return yield* failure("invalid-authority", "Device identity cannot be reassigned")
     return yield* decode(AuthenticatedDevice, rows[0])
   })
 
   const authenticateClient = Effect.fn("PostgresStore.authenticateClient")(function* (input: AuthenticateClientInput) {
-    const rows = yield* query(sql`INSERT INTO rika_hosted_clients
-          (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
-          SELECT ${input.id}, ${input.userId}, device.id, ${input.now}, ${input.now}, ${input.expiresAt}
-          FROM rika_hosted_devices device
-          WHERE device.id = ${input.deviceId} AND device.user_id = ${input.userId}
-            AND device.revoked_at IS NULL
-            AND ${input.expiresAt}::timestamptz > ${input.now}::timestamptz
-            AND ${input.expiresAt}::timestamptz <= ${input.now}::timestamptz + interval '5 minutes'
-          ON CONFLICT (id) DO UPDATE SET authenticated_at = EXCLUDED.authenticated_at,
-            last_seen_at = EXCLUDED.last_seen_at, expires_at = EXCLUDED.expires_at
-          WHERE rika_hosted_clients.user_id = EXCLUDED.user_id
-            AND rika_hosted_clients.device_id = EXCLUDED.device_id
-            AND rika_hosted_clients.revoked_at IS NULL
-          RETURNING id, user_id AS "userId", device_id AS "deviceId",
-            to_char(authenticated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "authenticatedAt",
-            to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt", NULL AS "revokedAt"`)
+    const now = timestamp(input.now)
+    const expiresAt = timestamp(input.expiresAt)
+    const deviceRecord = aliasedTable(rikaHostedDevices, "device_record")
+    const rows = yield* query(
+      db
+        .insert(rikaHostedClients)
+        .select(
+          db
+            .select({
+              id: expression<string>`${input.id}`.as("id"),
+              userId: expression<string>`${input.userId}`.as("user_id"),
+              deviceId: expression<string>`"device_record"."id"`.as("device_id"),
+              authenticatedAt: expression<Date>`${now}`.as("authenticated_at"),
+              lastSeenAt: expression<Date>`${now}`.as("last_seen_at"),
+              expiresAt: expression<Date>`${expiresAt}`.as("expires_at"),
+              revokedAt: expression<null>`null`.as("revoked_at"),
+            })
+            .from(deviceRecord)
+            .where(
+              and(
+                eq(deviceRecord.id, input.deviceId),
+                eq(deviceRecord.userId, input.userId),
+                isNull(deviceRecord.revokedAt),
+                expression`${expiresAt} > ${now}`,
+                expression`${expiresAt}::timestamptz <= ${now}::timestamptz + interval '5 minutes'`,
+              ),
+            ),
+        )
+        .onConflictDoUpdate({
+          target: rikaHostedClients.id,
+          set: {
+            authenticatedAt: expression`excluded.authenticated_at`,
+            lastSeenAt: expression`excluded.last_seen_at`,
+            expiresAt: expression`excluded.expires_at`,
+          },
+          setWhere: and(
+            eq(rikaHostedClients.userId, expression<string>`excluded.user_id`),
+            eq(rikaHostedClients.deviceId, expression<string>`excluded.device_id`),
+            isNull(rikaHostedClients.revokedAt),
+          )!,
+        })
+        .returning({
+          id: rikaHostedClients.id,
+          userId: rikaHostedClients.userId,
+          deviceId: rikaHostedClients.deviceId,
+          authenticatedAt: timestampText(rikaHostedClients.authenticatedAt),
+          lastSeenAt: timestampText(rikaHostedClients.lastSeenAt),
+          expiresAt: timestampText(rikaHostedClients.expiresAt),
+          revokedAt: expression<null>`null`,
+        }),
+    )
     if (rows[0] === undefined)
       return yield* failure("invalid-authority", "Client device is inactive, foreign, or exceeds five minutes")
     return yield* decode(AuthenticatedClient, rows[0])
   })
 
   const validateClient: StoreService["validateClient"] = Effect.fn("PostgresStore.validateClient")(function* (input) {
-    const rows = yield* query(sql`SELECT 1
-      FROM rika_hosted_clients client_record
-      JOIN rika_hosted_devices device
-        ON device.id = client_record.device_id AND device.user_id = client_record.user_id
-      WHERE client_record.id = ${input.clientId} AND client_record.user_id = ${input.userId}
-        AND client_record.device_id = ${input.deviceId}
-        AND client_record.revoked_at IS NULL AND device.revoked_at IS NULL
-        AND client_record.expires_at > ${input.at}::timestamptz
-      FOR KEY SHARE OF client_record, device`)
+    const rows = yield* query(
+      db
+        .select({ present: expression<number>`1` })
+        .from(rikaHostedClients)
+        .innerJoin(
+          rikaHostedDevices,
+          and(
+            eq(rikaHostedDevices.id, rikaHostedClients.deviceId),
+            eq(rikaHostedDevices.userId, rikaHostedClients.userId),
+          ),
+        )
+        .where(
+          and(
+            eq(rikaHostedClients.id, input.clientId),
+            eq(rikaHostedClients.userId, input.userId),
+            eq(rikaHostedClients.deviceId, input.deviceId),
+            isNull(rikaHostedClients.revokedAt),
+            isNull(rikaHostedDevices.revokedAt),
+            gt(rikaHostedClients.expiresAt, timestamp(input.at)),
+          ),
+        )
+        .for("key share", { of: [rikaHostedClients, rikaHostedDevices] }),
+    )
     if (rows[0] === undefined) return yield* failure("invalid-authority", "Client authority is inactive or foreign")
   })
 
   const grantClientAuthority: StoreService["grantClientAuthority"] = Effect.fn("PostgresStore.grantClientAuthority")(
     function* (input) {
-      const authority = yield* query(sql`INSERT INTO rika_hosted_client_authorities
-          (client_id, owner_id, issued_at, expires_at)
-          SELECT client_record.id, owner_record.id, ${input.now},
-            LEAST(${input.expiresAt}::timestamptz, client_record.expires_at)
-          FROM rika_hosted_owners owner_record
-          JOIN rika_hosted_clients client_record ON client_record.id = ${input.actor.clientId}
-            AND client_record.user_id = ${input.actor.userId}
-            AND client_record.device_id = ${input.actor.deviceId}
-            AND client_record.revoked_at IS NULL
-            AND client_record.expires_at > ${input.now}::timestamptz
-          JOIN rika_hosted_devices device ON device.id = client_record.device_id
-            AND device.user_id = client_record.user_id AND device.revoked_at IS NULL
-          LEFT JOIN "member" membership ON owner_record.kind = 'organization'
-            AND membership.organization_id = owner_record.organization_id
-            AND membership.id = ${input.actor._tag === "OrganizationActor" ? input.actor.membershipId : null}
-            AND membership.user_id = client_record.user_id
-          WHERE owner_record.id = ${input.ownerId}
-            AND ${input.expiresAt}::timestamptz > ${input.now}::timestamptz
-            AND ${input.expiresAt}::timestamptz <= ${input.now}::timestamptz + interval '5 minutes'
-            AND ((owner_record.kind = 'personal'
-                AND ${input.actor._tag} = 'PersonalActor'
-                AND owner_record.user_id = client_record.user_id)
-              OR (owner_record.kind = 'organization'
-                AND ${input.actor._tag} = 'OrganizationActor'
-                AND membership.id IS NOT NULL))
-          ON CONFLICT (client_id, owner_id) DO UPDATE SET
-            issued_at = EXCLUDED.issued_at,
-            expires_at = EXCLUDED.expires_at,
-            revoked_at = NULL
-          RETURNING client_id`)
+      const now = timestamp(input.now)
+      const expiresAt = timestamp(input.expiresAt)
+      const membershipId = input.actor._tag === "OrganizationActor" ? input.actor.membershipId : null
+      const authority = yield* query(
+        db
+          .insert(rikaHostedClientAuthorities)
+          .select(
+            db
+              .select({
+                clientId: rikaHostedClients.id,
+                ownerId: rikaHostedOwners.id,
+                issuedAt: expression<Date>`${now}`.as("issued_at"),
+                expiresAt: expression<Date>`least(${expiresAt}, ${rikaHostedClients.expiresAt})`.as("expires_at"),
+                revokedAt: expression<null>`null`.as("revoked_at"),
+              })
+              .from(rikaHostedOwners)
+              .innerJoin(
+                rikaHostedClients,
+                and(
+                  eq(rikaHostedClients.id, input.actor.clientId),
+                  eq(rikaHostedClients.userId, input.actor.userId),
+                  eq(rikaHostedClients.deviceId, input.actor.deviceId),
+                  isNull(rikaHostedClients.revokedAt),
+                  gt(rikaHostedClients.expiresAt, now),
+                ),
+              )
+              .innerJoin(
+                rikaHostedDevices,
+                and(
+                  eq(rikaHostedDevices.id, rikaHostedClients.deviceId),
+                  eq(rikaHostedDevices.userId, rikaHostedClients.userId),
+                  isNull(rikaHostedDevices.revokedAt),
+                ),
+              )
+              .leftJoin(
+                identityMembers,
+                and(
+                  eq(rikaHostedOwners.kind, "organization"),
+                  eq(identityMembers.organizationId, rikaHostedOwners.organizationId),
+                  membershipId === null ? undefined : eq(identityMembers.id, membershipId),
+                  eq(identityMembers.userId, rikaHostedClients.userId),
+                ),
+              )
+              .where(
+                and(
+                  eq(rikaHostedOwners.id, input.ownerId),
+                  expression`${expiresAt} > ${now}`,
+                  expression`${expiresAt}::timestamptz <= ${now}::timestamptz + interval '5 minutes'`,
+                  or(
+                    and(
+                      eq(rikaHostedOwners.kind, "personal"),
+                      eq(expression<string>`${input.actor._tag}`, "PersonalActor"),
+                      eq(rikaHostedOwners.userId, rikaHostedClients.userId),
+                    ),
+                    and(
+                      eq(rikaHostedOwners.kind, "organization"),
+                      eq(expression<string>`${input.actor._tag}`, "OrganizationActor"),
+                      isNotNull(identityMembers.id),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .onConflictDoUpdate({
+            target: [rikaHostedClientAuthorities.clientId, rikaHostedClientAuthorities.ownerId],
+            set: {
+              issuedAt: expression`excluded.issued_at`,
+              expiresAt: expression`excluded.expires_at`,
+              revokedAt: null,
+            },
+          })
+          .returning({ clientId: rikaHostedClientAuthorities.clientId }),
+      )
       if (authority[0] === undefined)
         return yield* failure("invalid-authority", "Client owner authority is inactive or foreign")
     },
   )
 
   const authorizeThread: StoreService["authorizeThread"] = Effect.fn("PostgresStore.authorizeThread")((input) =>
-    transaction(sql, requireThreadAccess(sql, input, input.action, input.at)),
+    db
+      .transaction((tx) => requireThreadAccess(tx, input, input.action, input.at))
+      .pipe(Effect.catchTag("SqlError", databaseError)),
   )
 
   const admitCommand = Effect.fn("PostgresStore.admitCommand")(function* (input: AdmitCommandInput) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
-          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
-        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
-        yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
-        const existingRows =
-          yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
-          idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
-          commit_cursor::text AS "commitCursor", command,
-          to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
-          FROM rika_hosted_thread_commands
-          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-            AND (command_id = ${input.commandId} OR idempotency_key = ${input.idempotencyKey})`)
-        if (existingRows.length > 1)
-          return yield* failure("conflict", "Command identity or idempotency key collides with multiple commands")
-        if (existingRows[0] !== undefined) {
-          const existing = yield* decode(ThreadCommand, existingRows[0])
-          if (!commandEquivalent(existing, input)) {
-            return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const locked = yield* query(
+            tx
+              .select({ id: rikaHostedThreads.id })
+              .from(rikaHostedThreads)
+              .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId)))
+              .for("update"),
+          )
+          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
+          yield* requireThreadAccess(tx, input, "thread:control", input.admittedAt)
+          const existingRows = yield* query(
+            tx
+              .select(commandFields)
+              .from(rikaHostedThreadCommands)
+              .where(
+                and(
+                  eq(rikaHostedThreadCommands.ownerId, input.ownerId),
+                  eq(rikaHostedThreadCommands.threadId, input.threadId),
+                  or(
+                    eq(rikaHostedThreadCommands.commandId, input.commandId),
+                    eq(rikaHostedThreadCommands.idempotencyKey, input.idempotencyKey),
+                  ),
+                ),
+              ),
+          )
+          if (existingRows.length > 1)
+            return yield* failure("conflict", "Command identity or idempotency key collides with multiple commands")
+          if (existingRows[0] !== undefined) {
+            const existing = yield* decode(ThreadCommand, existingRows[0])
+            if (!commandEquivalent(existing, input)) {
+              return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
+            }
+            return existing
           }
-          return existing
-        }
-        if (input.command._tag === "TerminalInput") {
-          const writer = yield* query(sql`SELECT 1 FROM rika_hosted_terminal_writer_leases
-            WHERE owner_id = ${input.ownerId}
-              AND thread_id = ${input.threadId}
-              AND actor = ${sql.json(input.actor)}
-              AND lease_id = ${input.command.writerLeaseId}
-              AND generation = ${input.command.writerGeneration}::bigint
-              AND expires_at > ${input.admittedAt}::timestamptz`)
-          if (writer[0] === undefined)
-            return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
-        }
-        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
-          SET next_command_sequence = next_command_sequence + 1
-          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
-          RETURNING (next_command_sequence - 1)::text AS sequence`)
-        const sequence = Sequence.make(sequences[0]!.sequence)
-        const commitCursor = yield* allocateCommitCursor(sql, input.ownerId)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_commands
-          (owner_id, thread_id, command_id, idempotency_key, actor, sequence, commit_cursor, command, admitted_at)
-          VALUES (${input.ownerId}, ${input.threadId}, ${input.commandId}, ${input.idempotencyKey}, ${sql.json(input.actor)}, ${sequence}::bigint,
-            ${commitCursor}::bigint, ${sql.json(input.command)}, ${input.admittedAt})
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId", idempotency_key AS "idempotencyKey",
-            actor, sequence::text AS sequence, commit_cursor::text AS "commitCursor", command,
-            to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
-        return yield* decode(ThreadCommand, rows[0])
-      }),
-    )
+          if (input.command._tag === "TerminalInput") {
+            const writer = yield* query(
+              tx
+                .select({ present: expression<number>`1` })
+                .from(rikaHostedTerminalWriterLeases)
+                .where(
+                  and(
+                    eq(rikaHostedTerminalWriterLeases.ownerId, input.ownerId),
+                    eq(rikaHostedTerminalWriterLeases.threadId, input.threadId),
+                    eq(rikaHostedTerminalWriterLeases.actor, input.actor),
+                    eq(rikaHostedTerminalWriterLeases.leaseId, input.command.writerLeaseId),
+                    eq(
+                      rikaHostedTerminalWriterLeases.generation,
+                      expression<number>`${input.command.writerGeneration}::bigint`,
+                    ),
+                    gt(rikaHostedTerminalWriterLeases.expiresAt, timestamp(input.admittedAt)),
+                  ),
+                ),
+            )
+            if (writer[0] === undefined)
+              return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
+          }
+          const sequences = yield* query(
+            tx
+              .update(rikaHostedThreads)
+              .set({ nextCommandSequence: expression`${rikaHostedThreads.nextCommandSequence} + 1` })
+              .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId)))
+              .returning({ sequence: expression<string>`(${rikaHostedThreads.nextCommandSequence} - 1)::text` }),
+          )
+          const sequence = Sequence.make(sequences[0]!.sequence)
+          const commitCursor = yield* allocateCommitCursor(tx, input.ownerId)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedThreadCommands)
+              .values({
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                commandId: input.commandId,
+                idempotencyKey: input.idempotencyKey,
+                actor: input.actor,
+                sequence: expression<number>`${sequence}::bigint`,
+                commitCursor: expression<number>`${commitCursor}::bigint`,
+                command: input.command,
+                admittedAt: timestamp(input.admittedAt),
+              })
+              .returning(commandFields),
+          )
+          return yield* decode(ThreadCommand, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const admitPrompt = Effect.fn("PostgresStore.admitPrompt")(function* (input: AdmitPromptInput) {
@@ -545,7 +953,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     const command: AdmitCommandInput["command"] =
       input.promptParts === undefined
         ? { _tag: "SubmitPrompt", prompt: input.prompt, mode: input.executionRoute.mode }
-        : { _tag: "SubmitPrompt", prompt: input.prompt, promptParts: input.promptParts, mode: input.executionRoute.mode }
+        : {
+            _tag: "SubmitPrompt",
+            prompt: input.prompt,
+            promptParts: input.promptParts,
+            mode: input.executionRoute.mode,
+          }
     const commandInput: AdmitCommandInput = {
       ownerId: input.ownerId,
       threadId: input.threadId,
@@ -556,78 +969,145 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
       admittedAt: input.admittedAt,
     }
     let inserted = false
-    const admitted = yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
-          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
-        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
-        yield* requireThreadAccess(sql, input, "thread:control", input.admittedAt)
-        const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-          command_id AS "commandId", idempotency_key AS "idempotencyKey", turn_id AS "turnId",
-          admission_status AS "admissionStatus",
-          actor, sequence::text AS sequence, commit_cursor::text AS "commitCursor", command,
-          to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
-          FROM rika_hosted_thread_commands
-          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-            AND (command_id = ${input.commandId} OR idempotency_key = ${input.idempotencyKey})`)
-        if (existingRows.length > 1)
-          return yield* failure("conflict", "Command identity or idempotency key collides with multiple commands")
-        if (existingRows[0] !== undefined) {
-          const existing = yield* decode(ThreadCommand, existingRows[0])
-          if (!commandEquivalent(existing, commandInput))
-            return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
-          const admission = yield* decode(ExistingAdmissionRow, existingRows[0]).pipe(
-            Effect.catch(() => failure("conflict", "Command identity was admitted without a Turn")),
+    const admitted = yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const locked = yield* query(
+            tx
+              .select({ id: rikaHostedThreads.id })
+              .from(rikaHostedThreads)
+              .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId)))
+              .for("update"),
           )
-          return { command: existing, turnId: TurnId.make(admission.turnId), status: admission.admissionStatus }
-        }
-        if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
-        const productThread = yield* query(sql`SELECT 1 FROM rika_threads
-          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR KEY SHARE`)
-        if (productThread[0] === undefined)
-          return yield* failure("invalid-authority", "Thread has no product state for the owner")
-        const collidingTurn = yield* query(sql`SELECT 1 FROM rika_turns WHERE id = ${input.turnId}`)
-        if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
-        const occupied = yield* query(sql<{ readonly occupied: boolean }>`SELECT EXISTS (
-          SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND turn_kind = 'AgentExecution'
-            AND status IN ('queued', 'accepted', 'running', 'waiting', 'cancelling')
-        ) AS occupied`)
-        const status = occupied[0]?.occupied === true ? ("queued" as const) : ("accepted" as const)
-        yield* query(sql`INSERT INTO rika_turns
-          (id, thread_id, turn_kind, prompt, prompt_parts_json, execution_route_json, author_json, lineage_json,
-            status, created_at, updated_at)
-          VALUES (${input.turnId}, ${input.threadId}, 'AgentExecution', ${input.prompt}, ${promptParts}, ${executionRoute},
-            '{"_tag":"Human"}', '{"_tag":"Original"}', ${status}, ${admittedAtMillis}, ${admittedAtMillis})`)
-        yield* query(sql`INSERT INTO rika_thread_queue_state (thread_id)
-          VALUES (${input.threadId}) ON CONFLICT (thread_id) DO NOTHING`)
-        if (status === "queued") {
-          const queueRows = yield* query(sql`UPDATE rika_thread_queue_state
-            SET revision = revision + 1, queued_count = queued_count + 1
-            WHERE thread_id = ${input.threadId} AND queued_count < ${queueCapacity}
-            RETURNING queued_count`)
-          if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
-        }
-        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
-          SET next_command_sequence = next_command_sequence + 1
-          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId}
-          RETURNING (next_command_sequence - 1)::text AS sequence`)
-        const sequence = Sequence.make(sequences[0]!.sequence)
-        const commitCursor = yield* allocateCommitCursor(sql, input.ownerId)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_commands
-          (owner_id, thread_id, command_id, idempotency_key, turn_id, admission_status, actor, sequence, commit_cursor,
-            command, admitted_at)
-          VALUES (${input.ownerId}, ${input.threadId}, ${input.commandId}, ${input.idempotencyKey}, ${input.turnId},
-            ${status}, ${sql.json(input.actor)}, ${sequence}::bigint, ${commitCursor}::bigint,
-            ${sql.json(commandInput.command)}, ${input.admittedAt})
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
-            idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
-            commit_cursor::text AS "commitCursor", command,
-            to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
-        inserted = true
-        return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId, status }
-      }),
-    )
+          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
+          yield* requireThreadAccess(tx, input, "thread:control", input.admittedAt)
+          const existingRows = yield* query(
+            tx
+              .select({
+                ...commandFields,
+                turnId: rikaHostedThreadCommands.turnId,
+                admissionStatus: rikaHostedThreadCommands.admissionStatus,
+              })
+              .from(rikaHostedThreadCommands)
+              .where(
+                and(
+                  eq(rikaHostedThreadCommands.ownerId, input.ownerId),
+                  eq(rikaHostedThreadCommands.threadId, input.threadId),
+                  or(
+                    eq(rikaHostedThreadCommands.commandId, input.commandId),
+                    eq(rikaHostedThreadCommands.idempotencyKey, input.idempotencyKey),
+                  ),
+                ),
+              ),
+          )
+          if (existingRows.length > 1)
+            return yield* failure("conflict", "Command identity or idempotency key collides with multiple commands")
+          if (existingRows[0] !== undefined) {
+            const existing = yield* decode(ThreadCommand, existingRows[0])
+            if (!commandEquivalent(existing, commandInput))
+              return yield* failure("conflict", "Command identity or idempotency key was reused with different content")
+            const admission = yield* decode(ExistingAdmissionRow, existingRows[0]).pipe(
+              Effect.catch(() => failure("conflict", "Command identity was admitted without a Turn")),
+            )
+            return { command: existing, turnId: TurnId.make(admission.turnId), status: admission.admissionStatus }
+          }
+          if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
+          const productThread = yield* query(
+            tx
+              .select({ present: expression<number>`1` })
+              .from(rikaThreads)
+              .where(and(eq(rikaThreads.id, input.threadId), eq(rikaThreads.ownerId, input.ownerId)))
+              .for("key share"),
+          )
+          if (productThread[0] === undefined)
+            return yield* failure("invalid-authority", "Thread has no product state for the owner")
+          const collidingTurn = yield* query(
+            tx
+              .select({ present: expression<number>`1` })
+              .from(rikaTurns)
+              .where(eq(rikaTurns.id, input.turnId)),
+          )
+          if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
+          const occupied = yield* query(
+            tx
+              .select({ present: expression<number>`1` })
+              .from(rikaTurns)
+              .where(
+                and(
+                  eq(rikaTurns.threadId, input.threadId),
+                  eq(rikaTurns.turnKind, "AgentExecution"),
+                  inArray(rikaTurns.status, ["queued", "accepted", "running", "waiting", "cancelling"]),
+                ),
+              )
+              .limit(1),
+          )
+          const status = occupied[0] === undefined ? ("accepted" as const) : ("queued" as const)
+          yield* query(
+            tx.insert(rikaTurns).values({
+              id: input.turnId,
+              threadId: input.threadId,
+              turnKind: "AgentExecution",
+              prompt: input.prompt,
+              promptPartsJson: promptParts ?? null,
+              executionRouteJson: executionRoute,
+              authorJson: '{"_tag":"Human"}',
+              lineageJson: '{"_tag":"Original"}',
+              status,
+              createdAt: admittedAtMillis,
+              updatedAt: admittedAtMillis,
+            }),
+          )
+          yield* query(tx.insert(rikaThreadQueueState).values({ threadId: input.threadId }).onConflictDoNothing())
+          if (status === "queued") {
+            const queueRows = yield* query(
+              tx
+                .update(rikaThreadQueueState)
+                .set({
+                  revision: expression`${rikaThreadQueueState.revision} + 1`,
+                  queuedCount: expression`${rikaThreadQueueState.queuedCount} + 1`,
+                })
+                .where(
+                  and(
+                    eq(rikaThreadQueueState.threadId, input.threadId),
+                    expression`${rikaThreadQueueState.queuedCount} < ${queueCapacity}`,
+                  ),
+                )
+                .returning({ queuedCount: rikaThreadQueueState.queuedCount }),
+            )
+            if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
+          }
+          const sequences = yield* query(
+            tx
+              .update(rikaHostedThreads)
+              .set({ nextCommandSequence: expression`${rikaHostedThreads.nextCommandSequence} + 1` })
+              .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId)))
+              .returning({ sequence: expression<string>`(${rikaHostedThreads.nextCommandSequence} - 1)::text` }),
+          )
+          const sequence = Sequence.make(sequences[0]!.sequence)
+          const commitCursor = yield* allocateCommitCursor(tx, input.ownerId)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedThreadCommands)
+              .values({
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                commandId: input.commandId,
+                idempotencyKey: input.idempotencyKey,
+                turnId: input.turnId,
+                admissionStatus: status,
+                actor: input.actor,
+                sequence: expression<number>`${sequence}::bigint`,
+                commitCursor: expression<number>`${commitCursor}::bigint`,
+                command: commandInput.command,
+                admittedAt: timestamp(input.admittedAt),
+              })
+              .returning(commandFields),
+          )
+          inserted = true
+          return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId, status }
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
     if (inserted)
       yield* HostedObservability.event("admission", "success", {
         threadId: input.threadId,
@@ -637,93 +1117,133 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   })
 
   const readCommands: StoreService["readCommands"] = Effect.fn("PostgresStore.readCommands")(function* (input) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "thread:view")
-        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-          command_id AS "commandId", idempotency_key AS "idempotencyKey", actor, sequence::text AS sequence,
-          commit_cursor::text AS "commitCursor", command,
-          to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"
-          FROM rika_hosted_thread_commands
-          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-            AND commit_cursor > ${input.afterCommitCursor}::bigint
-          ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
-        return yield* Effect.forEach(rows, (row) => decode(ThreadCommand, row))
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "thread:view")
+          const rows = yield* query(
+            tx
+              .select(commandFields)
+              .from(rikaHostedThreadCommands)
+              .where(
+                and(
+                  eq(rikaHostedThreadCommands.ownerId, input.ownerId),
+                  eq(rikaHostedThreadCommands.threadId, input.threadId),
+                  gt(rikaHostedThreadCommands.commitCursor, expression<number>`${input.afterCommitCursor}::bigint`),
+                ),
+              )
+              .orderBy(asc(rikaHostedThreadCommands.commitCursor))
+              .limit(limit(input.limit)),
+          )
+          return yield* Effect.forEach(rows, (row) => decode(ThreadCommand, row))
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const appendEvent = Effect.fn("PostgresStore.appendEvent")(function* (input: AppendEventInput) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        const assignments = yield* query(sql<{
-          readonly ownerId: OwnerId
-          readonly threadId: ThreadId
-          readonly executorInstanceId: ExecutorInstanceId
-        }>`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-            executor_instance_id AS "executorInstanceId"
-          FROM rika_hosted_executor_assignments
-          WHERE id = ${input.assignmentId}
-            AND generation = ${input.assignmentGeneration}::bigint
-            AND lease_epoch = ${input.leaseEpoch}::bigint
-            AND lifecycle = 'active'
-            AND lease_expires_at > transaction_timestamp()
-          FOR SHARE`)
-        const assignment = assignments[0]
-        if (assignment === undefined) return yield* failure("stale-fence", "Executor assignment is expired or fenced")
-        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
-          WHERE id = ${assignment.threadId} AND owner_id = ${assignment.ownerId} FOR UPDATE`)
-        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
-        const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-          event_id AS "eventId", idempotency_key AS "idempotencyKey",
-          assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
-          assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
-          sequence::text AS sequence, commit_cursor::text AS "commitCursor",
-          command_sequence::text AS "commandSequence", event,
-          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-          FROM rika_hosted_thread_events
-          WHERE thread_id = ${assignment.threadId}
-            AND (event_id = ${input.eventId} OR idempotency_key = ${input.idempotencyKey})`)
-        if (existingRows.length > 1)
-          return yield* failure("conflict", "Event identity or idempotency key collides with multiple events")
-        const comparable = {
-          ...input,
-          ownerId: assignment.ownerId,
-          threadId: assignment.threadId,
-          executorInstanceId: assignment.executorInstanceId,
-        }
-        if (existingRows[0] !== undefined) {
-          const existing = yield* decode(ThreadEvent, existingRows[0])
-          if (!eventEquivalent(existing, comparable)) {
-            return yield* failure("conflict", "Event identity or idempotency key was reused with different content")
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const assignments = yield* query(
+            tx
+              .select({
+                ownerId: rikaHostedExecutorAssignments.ownerId,
+                threadId: rikaHostedExecutorAssignments.threadId,
+                executorInstanceId: rikaHostedExecutorAssignments.executorInstanceId,
+              })
+              .from(rikaHostedExecutorAssignments)
+              .where(
+                and(
+                  eq(rikaHostedExecutorAssignments.id, input.assignmentId),
+                  eq(
+                    rikaHostedExecutorAssignments.generation,
+                    expression<number>`${input.assignmentGeneration}::bigint`,
+                  ),
+                  eq(rikaHostedExecutorAssignments.leaseEpoch, expression<number>`${input.leaseEpoch}::bigint`),
+                  eq(rikaHostedExecutorAssignments.lifecycle, "active"),
+                  gt(rikaHostedExecutorAssignments.leaseExpiresAt, expression<Date>`transaction_timestamp()`),
+                ),
+              )
+              .for("share"),
+          )
+          const assignment = assignments[0]
+          if (assignment === undefined || assignment.executorInstanceId === null)
+            return yield* failure("stale-fence", "Executor assignment is expired or fenced")
+          const locked = yield* query(
+            tx
+              .select({ id: rikaHostedThreads.id })
+              .from(rikaHostedThreads)
+              .where(
+                and(eq(rikaHostedThreads.id, assignment.threadId), eq(rikaHostedThreads.ownerId, assignment.ownerId)),
+              )
+              .for("update"),
+          )
+          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
+          const existingRows = yield* query(
+            tx
+              .select(eventFields)
+              .from(rikaHostedThreadEvents)
+              .where(
+                and(
+                  eq(rikaHostedThreadEvents.threadId, assignment.threadId),
+                  or(
+                    eq(rikaHostedThreadEvents.eventId, input.eventId),
+                    eq(rikaHostedThreadEvents.idempotencyKey, input.idempotencyKey),
+                  ),
+                ),
+              ),
+          )
+          if (existingRows.length > 1)
+            return yield* failure("conflict", "Event identity or idempotency key collides with multiple events")
+          const comparable = {
+            ...input,
+            ownerId: OwnerId.make(assignment.ownerId),
+            threadId: ThreadId.make(assignment.threadId),
+            executorInstanceId: ExecutorInstanceId.make(assignment.executorInstanceId),
           }
-          return existing
-        }
-        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
-          SET next_event_sequence = next_event_sequence + 1
-          WHERE id = ${assignment.threadId} AND owner_id = ${assignment.ownerId}
-          RETURNING (next_event_sequence - 1)::text AS sequence`)
-        const sequence = Sequence.make(sequences[0]!.sequence)
-        const commitCursor = yield* allocateCommitCursor(sql, assignment.ownerId)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_events
-          (owner_id, thread_id, event_id, idempotency_key, assignment_id, executor_instance_id,
-            assignment_generation, lease_epoch, sequence, commit_cursor, command_sequence, event)
-          VALUES (${assignment.ownerId}, ${assignment.threadId}, ${input.eventId}, ${input.idempotencyKey},
-            ${input.assignmentId}, ${assignment.executorInstanceId}, ${input.assignmentGeneration}::bigint,
-            ${input.leaseEpoch}::bigint, ${sequence}::bigint, ${commitCursor}::bigint,
-            ${input.commandSequence === null ? null : input.commandSequence}::bigint, ${sql.json(input.event)})
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", event_id AS "eventId",
-            idempotency_key AS "idempotencyKey", assignment_id AS "assignmentId",
-            executor_instance_id AS "executorInstanceId", assignment_generation::text AS "assignmentGeneration",
-            lease_epoch::text AS "leaseEpoch", sequence::text AS sequence,
-            commit_cursor::text AS "commitCursor",
-            command_sequence::text AS "commandSequence", event,
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
-        return yield* decode(ThreadEvent, rows[0])
-      }),
-    )
+          if (existingRows[0] !== undefined) {
+            const existing = yield* decode(ThreadEvent, existingRows[0])
+            if (!eventEquivalent(existing, comparable)) {
+              return yield* failure("conflict", "Event identity or idempotency key was reused with different content")
+            }
+            return existing
+          }
+          const sequences = yield* query(
+            tx
+              .update(rikaHostedThreads)
+              .set({ nextEventSequence: expression`${rikaHostedThreads.nextEventSequence} + 1` })
+              .where(
+                and(eq(rikaHostedThreads.id, assignment.threadId), eq(rikaHostedThreads.ownerId, assignment.ownerId)),
+              )
+              .returning({ sequence: expression<string>`(${rikaHostedThreads.nextEventSequence} - 1)::text` }),
+          )
+          const sequence = Sequence.make(sequences[0]!.sequence)
+          const commitCursor = yield* allocateCommitCursor(tx, assignment.ownerId)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedThreadEvents)
+              .values({
+                ownerId: assignment.ownerId,
+                threadId: assignment.threadId,
+                eventId: input.eventId,
+                idempotencyKey: input.idempotencyKey,
+                assignmentId: input.assignmentId,
+                executorInstanceId: assignment.executorInstanceId,
+                assignmentGeneration: expression<number>`${input.assignmentGeneration}::bigint`,
+                leaseEpoch: expression<number>`${input.leaseEpoch}::bigint`,
+                sequence: expression<number>`${sequence}::bigint`,
+                commitCursor: expression<number>`${commitCursor}::bigint`,
+                commandSequence:
+                  input.commandSequence === null ? null : expression<number>`${input.commandSequence}::bigint`,
+                event: input.event,
+              })
+              .returning(eventFields),
+          )
+          return yield* decode(ThreadEvent, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const appendRecoveredEvent = Effect.fn("PostgresStore.appendRecoveredEvent")(function* (
@@ -731,275 +1251,466 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
   ) {
     if (String(input.eventId) !== String(input.idempotencyKey))
       return yield* failure("conflict", "Recovered event identity must equal its operation key")
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        const assignments = yield* query(sql<{
-          readonly ownerId: OwnerId
-          readonly threadId: ThreadId
-        }>`SELECT owner_id AS "ownerId", thread_id AS "threadId"
-          FROM rika_hosted_executor_assignments
-          WHERE id = ${input.assignmentId}
-          FOR SHARE`)
-        const assignment = assignments[0]
-        if (assignment === undefined) return yield* failure("not-found", "Executor assignment does not exist")
-        const operations = yield* query(sql`SELECT operation.operation_key AS "operationKey"
-          FROM rika_hosted_executor_operations operation
-          WHERE operation.assignment_id = ${input.assignmentId}
-            AND operation.operation_key = ${input.idempotencyKey}
-            AND operation.state = 'unknown'
-            AND operation.dispatched_generation = ${input.assignmentGeneration}::bigint
-            AND operation.dispatched_lease_epoch = ${input.leaseEpoch}::bigint
-            AND operation.dispatched_executor_instance_id = ${input.executorInstanceId}
-            AND operation.dispatched_process_incarnation = ${input.processIncarnation}
-          FOR UPDATE`)
-        if (operations[0] === undefined)
-          return yield* failure("stale-fence", "Recovered event does not match the dispatched operation fence")
-        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
-          WHERE id = ${assignment.threadId} AND owner_id = ${assignment.ownerId} FOR UPDATE`)
-        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
-        const existingRows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-          event_id AS "eventId", idempotency_key AS "idempotencyKey",
-          assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
-          assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
-          sequence::text AS sequence, commit_cursor::text AS "commitCursor",
-          command_sequence::text AS "commandSequence", event,
-          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-          FROM rika_hosted_thread_events
-          WHERE thread_id = ${assignment.threadId}
-            AND (event_id = ${input.eventId} OR idempotency_key = ${input.idempotencyKey})`)
-        if (existingRows.length > 1)
-          return yield* failure("conflict", "Recovered event identity collides with multiple events")
-        const comparable = {
-          ...input,
-          ownerId: assignment.ownerId,
-          threadId: assignment.threadId,
-          executorInstanceId: ExecutorInstanceId.make(input.executorInstanceId),
-        }
-        const existingRow = existingRows[0]
-        if (existingRow !== undefined) {
-          const existing = yield* decode(ThreadEvent, existingRow)
-          if (!eventEquivalent(existing, comparable))
-            return yield* failure("conflict", "Event identity or idempotency key was reused with different content")
-          return existing
-        }
-        const sequences = yield* query(sql<{ readonly sequence: string }>`UPDATE rika_hosted_threads
-          SET next_event_sequence = next_event_sequence + 1
-          WHERE id = ${assignment.threadId} AND owner_id = ${assignment.ownerId}
-          RETURNING (next_event_sequence - 1)::text AS sequence`)
-        const sequence = Sequence.make(sequences[0]!.sequence)
-        const commitCursor = yield* allocateCommitCursor(sql, assignment.ownerId)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_thread_events
-          (owner_id, thread_id, event_id, idempotency_key, assignment_id, executor_instance_id,
-            assignment_generation, lease_epoch, sequence, commit_cursor, command_sequence, event)
-          VALUES (${assignment.ownerId}, ${assignment.threadId}, ${input.eventId}, ${input.idempotencyKey},
-            ${input.assignmentId}, ${input.executorInstanceId}, ${input.assignmentGeneration}::bigint,
-            ${input.leaseEpoch}::bigint, ${sequence}::bigint, ${commitCursor}::bigint,
-            ${input.commandSequence === null ? null : input.commandSequence}::bigint, ${sql.json(input.event)})
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", event_id AS "eventId",
-            idempotency_key AS "idempotencyKey", assignment_id AS "assignmentId",
-            executor_instance_id AS "executorInstanceId", assignment_generation::text AS "assignmentGeneration",
-            lease_epoch::text AS "leaseEpoch", sequence::text AS sequence,
-            commit_cursor::text AS "commitCursor", command_sequence::text AS "commandSequence", event,
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"`)
-        return yield* decode(ThreadEvent, rows[0])
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          const assignments = yield* query(
+            tx
+              .select({
+                ownerId: rikaHostedExecutorAssignments.ownerId,
+                threadId: rikaHostedExecutorAssignments.threadId,
+              })
+              .from(rikaHostedExecutorAssignments)
+              .where(eq(rikaHostedExecutorAssignments.id, input.assignmentId))
+              .for("share"),
+          )
+          const assignment = assignments[0]
+          if (assignment === undefined) return yield* failure("not-found", "Executor assignment does not exist")
+          const operations = yield* query(
+            tx
+              .select({ operationKey: rikaHostedExecutorOperations.operationKey })
+              .from(rikaHostedExecutorOperations)
+              .where(
+                and(
+                  eq(rikaHostedExecutorOperations.assignmentId, input.assignmentId),
+                  eq(rikaHostedExecutorOperations.operationKey, input.idempotencyKey),
+                  eq(rikaHostedExecutorOperations.state, "unknown"),
+                  eq(
+                    rikaHostedExecutorOperations.dispatchedGeneration,
+                    expression<number>`${input.assignmentGeneration}::bigint`,
+                  ),
+                  eq(
+                    rikaHostedExecutorOperations.dispatchedLeaseEpoch,
+                    expression<number>`${input.leaseEpoch}::bigint`,
+                  ),
+                  eq(rikaHostedExecutorOperations.dispatchedExecutorInstanceId, input.executorInstanceId),
+                  eq(rikaHostedExecutorOperations.dispatchedProcessIncarnation, input.processIncarnation),
+                ),
+              )
+              .for("update"),
+          )
+          if (operations[0] === undefined)
+            return yield* failure("stale-fence", "Recovered event does not match the dispatched operation fence")
+          const locked = yield* query(
+            tx
+              .select({ id: rikaHostedThreads.id })
+              .from(rikaHostedThreads)
+              .where(
+                and(eq(rikaHostedThreads.id, assignment.threadId), eq(rikaHostedThreads.ownerId, assignment.ownerId)),
+              )
+              .for("update"),
+          )
+          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
+          const existingRows = yield* query(
+            tx
+              .select(eventFields)
+              .from(rikaHostedThreadEvents)
+              .where(
+                and(
+                  eq(rikaHostedThreadEvents.threadId, assignment.threadId),
+                  or(
+                    eq(rikaHostedThreadEvents.eventId, input.eventId),
+                    eq(rikaHostedThreadEvents.idempotencyKey, input.idempotencyKey),
+                  ),
+                ),
+              ),
+          )
+          if (existingRows.length > 1)
+            return yield* failure("conflict", "Recovered event identity collides with multiple events")
+          const comparable = {
+            ...input,
+            ownerId: OwnerId.make(assignment.ownerId),
+            threadId: ThreadId.make(assignment.threadId),
+            executorInstanceId: ExecutorInstanceId.make(input.executorInstanceId),
+          }
+          const existingRow = existingRows[0]
+          if (existingRow !== undefined) {
+            const existing = yield* decode(ThreadEvent, existingRow)
+            if (!eventEquivalent(existing, comparable))
+              return yield* failure("conflict", "Event identity or idempotency key was reused with different content")
+            return existing
+          }
+          const sequences = yield* query(
+            tx
+              .update(rikaHostedThreads)
+              .set({ nextEventSequence: expression`${rikaHostedThreads.nextEventSequence} + 1` })
+              .where(
+                and(eq(rikaHostedThreads.id, assignment.threadId), eq(rikaHostedThreads.ownerId, assignment.ownerId)),
+              )
+              .returning({ sequence: expression<string>`(${rikaHostedThreads.nextEventSequence} - 1)::text` }),
+          )
+          const sequence = Sequence.make(sequences[0]!.sequence)
+          const commitCursor = yield* allocateCommitCursor(tx, assignment.ownerId)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedThreadEvents)
+              .values({
+                ownerId: assignment.ownerId,
+                threadId: assignment.threadId,
+                eventId: input.eventId,
+                idempotencyKey: input.idempotencyKey,
+                assignmentId: input.assignmentId,
+                executorInstanceId: input.executorInstanceId,
+                assignmentGeneration: expression<number>`${input.assignmentGeneration}::bigint`,
+                leaseEpoch: expression<number>`${input.leaseEpoch}::bigint`,
+                sequence: expression<number>`${sequence}::bigint`,
+                commitCursor: expression<number>`${commitCursor}::bigint`,
+                commandSequence:
+                  input.commandSequence === null ? null : expression<number>`${input.commandSequence}::bigint`,
+                event: input.event,
+              })
+              .returning(eventFields),
+          )
+          return yield* decode(ThreadEvent, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const readEvents: StoreService["readEvents"] = Effect.fn("PostgresStore.readEvents")(function* (input) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "thread:view")
-        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId",
-            event_id AS "eventId", idempotency_key AS "idempotencyKey",
-            assignment_id AS "assignmentId", executor_instance_id AS "executorInstanceId",
-            assignment_generation::text AS "assignmentGeneration", lease_epoch::text AS "leaseEpoch",
-            sequence::text AS sequence, commit_cursor::text AS "commitCursor",
-            command_sequence::text AS "commandSequence", event,
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
-            FROM rika_hosted_thread_events
-            WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-              AND commit_cursor > ${input.afterCommitCursor}::bigint
-            ORDER BY commit_cursor ASC LIMIT ${limit(input.limit)}`)
-        return yield* Effect.forEach(rows, (row) => decode(ThreadEvent, row))
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "thread:view")
+          const rows = yield* query(
+            tx
+              .select(eventFields)
+              .from(rikaHostedThreadEvents)
+              .where(
+                and(
+                  eq(rikaHostedThreadEvents.ownerId, input.ownerId),
+                  eq(rikaHostedThreadEvents.threadId, input.threadId),
+                  gt(rikaHostedThreadEvents.commitCursor, expression<number>`${input.afterCommitCursor}::bigint`),
+                ),
+              )
+              .orderBy(asc(rikaHostedThreadEvents.commitCursor))
+              .limit(limit(input.limit)),
+          )
+          return yield* Effect.forEach(rows, (row) => decode(ThreadEvent, row))
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const acknowledgeCursor: StoreService["acknowledgeCursor"] = Effect.fn("PostgresStore.acknowledgeCursor")(
     function* (input) {
-      return yield* transaction(
-        sql,
-        Effect.gen(function* () {
-          yield* requireThreadAccess(sql, input, "thread:view", input.now)
-          const events = yield* query(sql`SELECT 1 FROM rika_hosted_thread_events
-            WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-              AND commit_cursor = ${input.commitCursor}::bigint`)
-          if (events[0] === undefined)
-            return yield* failure("conflict", "Cursor must reference a persisted thread event")
-          const rows = yield* query(sql`INSERT INTO rika_hosted_client_cursors
-            (owner_id, thread_id, actor, commit_cursor, updated_at)
-            VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)},
-              ${input.commitCursor}::bigint, ${input.now})
-            ON CONFLICT (thread_id, actor) DO UPDATE SET
-              commit_cursor = GREATEST(rika_hosted_client_cursors.commit_cursor, EXCLUDED.commit_cursor),
-              updated_at = EXCLUDED.updated_at
-            RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
-              commit_cursor::text AS "commitCursor",
-              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
-          return yield* decode(ResumableCursor, rows[0])
-        }),
-      )
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* requireThreadAccess(tx, input, "thread:view", input.now)
+            const events = yield* query(
+              tx
+                .select({ present: expression<number>`1` })
+                .from(rikaHostedThreadEvents)
+                .where(
+                  and(
+                    eq(rikaHostedThreadEvents.ownerId, input.ownerId),
+                    eq(rikaHostedThreadEvents.threadId, input.threadId),
+                    eq(rikaHostedThreadEvents.commitCursor, expression<number>`${input.commitCursor}::bigint`),
+                  ),
+                ),
+            )
+            if (events[0] === undefined)
+              return yield* failure("conflict", "Cursor must reference a persisted thread event")
+            const rows = yield* query(
+              tx
+                .insert(rikaHostedClientCursors)
+                .values({
+                  ownerId: input.ownerId,
+                  threadId: input.threadId,
+                  actor: input.actor,
+                  commitCursor: expression`${input.commitCursor}::bigint`,
+                  updatedAt: timestamp(input.now),
+                })
+                .onConflictDoUpdate({
+                  target: [rikaHostedClientCursors.threadId, rikaHostedClientCursors.actor],
+                  set: {
+                    commitCursor: expression`greatest(${rikaHostedClientCursors.commitCursor}, excluded.commit_cursor)`,
+                    updatedAt: expression`excluded.updated_at`,
+                  },
+                  setWhere: eq(rikaHostedClientCursors.ownerId, expression<string>`excluded.owner_id`),
+                })
+                .returning({
+                  ownerId: rikaHostedClientCursors.ownerId,
+                  threadId: rikaHostedClientCursors.threadId,
+                  actor: rikaHostedClientCursors.actor,
+                  commitCursor: expression<string>`${rikaHostedClientCursors.commitCursor}::text`,
+                  updatedAt: timestampText(rikaHostedClientCursors.updatedAt),
+                }),
+            )
+            return yield* decode(ResumableCursor, rows[0])
+          }),
+        )
+        .pipe(Effect.catchTag("SqlError", databaseError))
     },
   )
 
   const acquireTerminalWriter = Effect.fn("PostgresStore.acquireTerminalWriter")(function* (
     input: AcquireTerminalWriterInput,
   ) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "terminal:input", input.now)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_terminal_writer_leases
-          (owner_id, thread_id, actor, lease_id, generation, acquired_at, renewed_at, expires_at)
-          VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)}, ${input.leaseId}, 1,
-            ${input.now}, ${input.now}, ${input.expiresAt})
-          ON CONFLICT (thread_id) DO UPDATE SET
-            owner_id = EXCLUDED.owner_id,
-            actor = EXCLUDED.actor,
-            lease_id = EXCLUDED.lease_id,
-            generation = rika_hosted_terminal_writer_leases.generation + 1,
-            acquired_at = EXCLUDED.acquired_at,
-            renewed_at = EXCLUDED.renewed_at,
-            expires_at = EXCLUDED.expires_at
-          WHERE rika_hosted_terminal_writer_leases.owner_id = EXCLUDED.owner_id
-            AND rika_hosted_terminal_writer_leases.expires_at <= ${input.now}::timestamptz
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
-            lease_id AS "leaseId", generation::text AS generation,
-            to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
-            to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-        if (rows[0] === undefined)
-          return yield* failure("lease-unavailable", "Thread already has an active terminal writer")
-        return yield* decode(TerminalWriterLease, rows[0])
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "terminal:input", input.now)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedTerminalWriterLeases)
+              .values({
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                actor: input.actor,
+                leaseId: input.leaseId,
+                generation: 1,
+                acquiredAt: timestamp(input.now),
+                renewedAt: timestamp(input.now),
+                expiresAt: timestamp(input.expiresAt),
+              })
+              .onConflictDoUpdate({
+                target: rikaHostedTerminalWriterLeases.threadId,
+                set: {
+                  ownerId: expression`excluded.owner_id`,
+                  actor: expression`excluded.actor`,
+                  leaseId: expression`excluded.lease_id`,
+                  generation: expression`${rikaHostedTerminalWriterLeases.generation} + 1`,
+                  acquiredAt: expression`excluded.acquired_at`,
+                  renewedAt: expression`excluded.renewed_at`,
+                  expiresAt: expression`excluded.expires_at`,
+                },
+                setWhere: and(
+                  eq(rikaHostedTerminalWriterLeases.ownerId, expression<string>`excluded.owner_id`),
+                  lte(rikaHostedTerminalWriterLeases.expiresAt, timestamp(input.now)),
+                )!,
+              })
+              .returning({
+                ownerId: rikaHostedTerminalWriterLeases.ownerId,
+                threadId: rikaHostedTerminalWriterLeases.threadId,
+                actor: rikaHostedTerminalWriterLeases.actor,
+                leaseId: rikaHostedTerminalWriterLeases.leaseId,
+                generation: expression<string>`${rikaHostedTerminalWriterLeases.generation}::text`,
+                acquiredAt: timestampText(rikaHostedTerminalWriterLeases.acquiredAt),
+                renewedAt: timestampText(rikaHostedTerminalWriterLeases.renewedAt),
+                expiresAt: timestampText(rikaHostedTerminalWriterLeases.expiresAt),
+              }),
+          )
+          if (rows[0] === undefined)
+            return yield* failure("lease-unavailable", "Thread already has an active terminal writer")
+          return yield* decode(TerminalWriterLease, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const renewTerminalWriter = Effect.fn("PostgresStore.renewTerminalWriter")(function* (
     input: RenewTerminalWriterInput,
   ) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "terminal:input", input.now)
-        const rows = yield* query(sql`UPDATE rika_hosted_terminal_writer_leases SET
-          renewed_at = ${input.now}, expires_at = ${input.expiresAt}
-          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-            AND actor = ${sql.json(input.actor)}
-            AND lease_id = ${input.leaseId}
-            AND generation = ${input.generation}::bigint
-            AND expires_at > ${input.now}::timestamptz
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor,
-            lease_id AS "leaseId", generation::text AS generation,
-            to_char(acquired_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "acquiredAt",
-            to_char(renewed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "renewedAt",
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-        if (rows[0] === undefined) return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
-        return yield* decode(TerminalWriterLease, rows[0])
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "terminal:input", input.now)
+          const rows = yield* query(
+            tx
+              .update(rikaHostedTerminalWriterLeases)
+              .set({ renewedAt: timestamp(input.now), expiresAt: timestamp(input.expiresAt) })
+              .where(
+                and(
+                  eq(rikaHostedTerminalWriterLeases.ownerId, input.ownerId),
+                  eq(rikaHostedTerminalWriterLeases.threadId, input.threadId),
+                  eq(rikaHostedTerminalWriterLeases.actor, input.actor),
+                  eq(rikaHostedTerminalWriterLeases.leaseId, input.leaseId),
+                  eq(rikaHostedTerminalWriterLeases.generation, expression<number>`${input.generation}::bigint`),
+                  gt(rikaHostedTerminalWriterLeases.expiresAt, timestamp(input.now)),
+                ),
+              )
+              .returning({
+                ownerId: rikaHostedTerminalWriterLeases.ownerId,
+                threadId: rikaHostedTerminalWriterLeases.threadId,
+                actor: rikaHostedTerminalWriterLeases.actor,
+                leaseId: rikaHostedTerminalWriterLeases.leaseId,
+                generation: expression<string>`${rikaHostedTerminalWriterLeases.generation}::text`,
+                acquiredAt: timestampText(rikaHostedTerminalWriterLeases.acquiredAt),
+                renewedAt: timestampText(rikaHostedTerminalWriterLeases.renewedAt),
+                expiresAt: timestampText(rikaHostedTerminalWriterLeases.expiresAt),
+              }),
+          )
+          if (rows[0] === undefined) return yield* failure("stale-fence", "Terminal writer lease is expired or fenced")
+          return yield* decode(TerminalWriterLease, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const upsertPresence = Effect.fn("PostgresStore.upsertPresence")(function* (input: UpsertPresenceInput) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "presence:update", input.now)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_presence
-          (owner_id, thread_id, actor, status, last_seen_at, expires_at)
-          VALUES (${input.ownerId}, ${input.threadId}, ${sql.json(input.actor)},
-            ${input.status}, ${input.now}, ${input.expiresAt})
-          ON CONFLICT (thread_id, actor) DO UPDATE SET
-            status = EXCLUDED.status,
-            last_seen_at = EXCLUDED.last_seen_at,
-            expires_at = EXCLUDED.expires_at
-          RETURNING owner_id AS "ownerId", thread_id AS "threadId", actor, status,
-            to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-            to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"`)
-        return yield* decode(Presence, rows[0])
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "presence:update", input.now)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedPresence)
+              .values({
+                ownerId: input.ownerId,
+                threadId: input.threadId,
+                actor: input.actor,
+                status: input.status,
+                lastSeenAt: timestamp(input.now),
+                expiresAt: timestamp(input.expiresAt),
+              })
+              .onConflictDoUpdate({
+                target: [rikaHostedPresence.threadId, rikaHostedPresence.actor],
+                set: {
+                  status: expression`excluded.status`,
+                  lastSeenAt: expression`excluded.last_seen_at`,
+                  expiresAt: expression`excluded.expires_at`,
+                },
+                setWhere: eq(rikaHostedPresence.ownerId, expression<string>`excluded.owner_id`),
+              })
+              .returning({
+                ownerId: rikaHostedPresence.ownerId,
+                threadId: rikaHostedPresence.threadId,
+                actor: rikaHostedPresence.actor,
+                status: rikaHostedPresence.status,
+                lastSeenAt: timestampText(rikaHostedPresence.lastSeenAt),
+                expiresAt: timestampText(rikaHostedPresence.expiresAt),
+              }),
+          )
+          return yield* decode(Presence, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const listPresence: StoreService["listPresence"] = Effect.fn("PostgresStore.listPresence")(function* (input) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireThreadAccess(sql, input, "presence:view", input.now)
-        const rows = yield* query(sql`SELECT owner_id AS "ownerId", thread_id AS "threadId", actor, status,
-          to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt",
-          to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "expiresAt"
-          FROM rika_hosted_presence
-          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
-            AND expires_at > ${input.now}::timestamptz
-          ORDER BY actor`)
-        return yield* Effect.forEach(rows, (row) => decode(Presence, row))
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "presence:view", input.now)
+          const rows = yield* query(
+            tx
+              .select({
+                ownerId: rikaHostedPresence.ownerId,
+                threadId: rikaHostedPresence.threadId,
+                actor: rikaHostedPresence.actor,
+                status: rikaHostedPresence.status,
+                lastSeenAt: timestampText(rikaHostedPresence.lastSeenAt),
+                expiresAt: timestampText(rikaHostedPresence.expiresAt),
+              })
+              .from(rikaHostedPresence)
+              .where(
+                and(
+                  eq(rikaHostedPresence.ownerId, input.ownerId),
+                  eq(rikaHostedPresence.threadId, input.threadId),
+                  gt(rikaHostedPresence.expiresAt, timestamp(input.now)),
+                ),
+              )
+              .orderBy(asc(rikaHostedPresence.actor)),
+          )
+          return yield* Effect.forEach(rows, (row) => decode(Presence, row))
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const recordAuditEvent = Effect.fn("PostgresStore.recordAuditEvent")(function* (input: RecordAuditEventInput) {
-    return yield* transaction(
-      sql,
-      Effect.gen(function* () {
-        yield* requireActiveClient(sql, input, input.occurredAt)
-        const commitCursor = yield* allocateCommitCursor(sql, input.ownerId)
-        const rows = yield* query(sql`INSERT INTO rika_hosted_audit_events
-          (id, owner_id, actor, action, resource_kind, resource_id,
-            commit_cursor, attributes, occurred_at)
-          VALUES (${input.id}, ${input.ownerId}, ${sql.json(input.actor)}, ${input.action}, ${input.resourceKind},
-            ${input.resourceId}, ${commitCursor}::bigint,
-            ${sql.json(input.attributes)}, ${input.occurredAt})
-          RETURNING id, owner_id AS "ownerId", actor, action, resource_kind AS "resourceKind",
-            resource_id AS "resourceId", commit_cursor::text AS "commitCursor", attributes,
-            to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt"`)
-        return yield* decode(AuditEvent, rows[0])
-      }),
-    )
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireActiveClient(tx, input, input.occurredAt)
+          const commitCursor = yield* allocateCommitCursor(tx, input.ownerId)
+          const rows = yield* query(
+            tx
+              .insert(rikaHostedAuditEvents)
+              .values({
+                id: input.id,
+                ownerId: input.ownerId,
+                actor: input.actor,
+                action: input.action,
+                resourceKind: input.resourceKind,
+                resourceId: input.resourceId,
+                commitCursor: expression`${commitCursor}::bigint`,
+                attributes: input.attributes,
+                occurredAt: timestamp(input.occurredAt),
+              })
+              .returning({
+                id: rikaHostedAuditEvents.id,
+                ownerId: rikaHostedAuditEvents.ownerId,
+                actor: rikaHostedAuditEvents.actor,
+                action: rikaHostedAuditEvents.action,
+                resourceKind: rikaHostedAuditEvents.resourceKind,
+                resourceId: rikaHostedAuditEvents.resourceId,
+                commitCursor: expression<string>`${rikaHostedAuditEvents.commitCursor}::text`,
+                attributes: rikaHostedAuditEvents.attributes,
+                occurredAt: timestampText(rikaHostedAuditEvents.occurredAt),
+              }),
+          )
+          return yield* decode(AuditEvent, rows[0])
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
   const putCredentialReference = Effect.fn("PostgresStore.putCredentialReference")(function* (
     input: PutCredentialReferenceInput,
   ) {
-    yield* requireOwnerCreator(sql, { ownerId: input.ownerId, userId: input.createdByUserId })
-    if (input.projectId !== undefined) {
-      const project = yield* query(
-        sql`SELECT 1 FROM rika_hosted_projects WHERE owner_id = ${input.ownerId} AND id = ${input.projectId}`,
+    const rows = yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireOwnerCreator(tx, { ownerId: input.ownerId, userId: input.createdByUserId })
+          if (input.projectId !== undefined) {
+            const project = yield* query(
+              tx
+                .select({ present: expression<number>`1` })
+                .from(rikaHostedProjects)
+                .where(and(eq(rikaHostedProjects.ownerId, input.ownerId), eq(rikaHostedProjects.id, input.projectId))),
+            )
+            if (project[0] === undefined)
+              return yield* failure("not-found", "Credential project does not exist for the owner")
+          }
+          return yield* query(
+            tx
+              .insert(rikaHostedCredentialReferences)
+              .values({
+                id: input.id,
+                ownerId: input.ownerId,
+                projectId: input.projectId ?? null,
+                provider: input.provider,
+                purpose: input.purpose,
+                externalReference: input.externalReference,
+                metadata: input.metadata,
+                createdByUserId: input.createdByUserId,
+                createdAt: timestamp(input.now),
+                updatedAt: timestamp(input.now),
+              })
+              .onConflictDoUpdate({
+                target: rikaHostedCredentialReferences.id,
+                set: {
+                  purpose: expression`excluded.purpose`,
+                  externalReference: expression`excluded.external_reference`,
+                  metadata: expression`excluded.metadata`,
+                  updatedAt: expression`excluded.updated_at`,
+                },
+                setWhere: and(
+                  eq(rikaHostedCredentialReferences.ownerId, expression<string>`excluded.owner_id`),
+                  expression`${rikaHostedCredentialReferences.projectId} is not distinct from excluded.project_id`,
+                  eq(rikaHostedCredentialReferences.provider, expression<string>`excluded.provider`),
+                  eq(rikaHostedCredentialReferences.createdByUserId, expression<string>`excluded.created_by_user_id`),
+                )!,
+              })
+              .returning({
+                id: rikaHostedCredentialReferences.id,
+                ownerId: rikaHostedCredentialReferences.ownerId,
+                projectId: rikaHostedCredentialReferences.projectId,
+                provider: rikaHostedCredentialReferences.provider,
+                purpose: rikaHostedCredentialReferences.purpose,
+                externalReference: rikaHostedCredentialReferences.externalReference,
+                metadata: rikaHostedCredentialReferences.metadata,
+                createdByUserId: rikaHostedCredentialReferences.createdByUserId,
+                createdAt: timestampText(rikaHostedCredentialReferences.createdAt),
+                updatedAt: timestampText(rikaHostedCredentialReferences.updatedAt),
+              }),
+          )
+        }),
       )
-      if (project[0] === undefined)
-        return yield* failure("not-found", "Credential project does not exist for the owner")
-    }
-    const rows = yield* query(sql`INSERT INTO rika_hosted_credential_references
-      (id, owner_id, project_id, provider, purpose, external_reference, metadata,
-        created_by_user_id, created_at, updated_at)
-      VALUES (${input.id}, ${input.ownerId}, ${input.projectId ?? null}, ${input.provider}, ${input.purpose},
-        ${input.externalReference}, ${sql.json(input.metadata)}, ${input.createdByUserId}, ${input.now}, ${input.now})
-      ON CONFLICT (id) DO UPDATE SET
-        purpose = EXCLUDED.purpose,
-        external_reference = EXCLUDED.external_reference,
-        metadata = EXCLUDED.metadata,
-        updated_at = EXCLUDED.updated_at
-      WHERE rika_hosted_credential_references.owner_id = EXCLUDED.owner_id
-        AND rika_hosted_credential_references.project_id IS NOT DISTINCT FROM EXCLUDED.project_id
-        AND rika_hosted_credential_references.provider = EXCLUDED.provider
-        AND rika_hosted_credential_references.created_by_user_id = EXCLUDED.created_by_user_id
-      RETURNING id, owner_id AS "ownerId", project_id AS "projectId", provider, purpose,
-        external_reference AS "externalReference", metadata, created_by_user_id AS "createdByUserId",
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",
-        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"`)
+      .pipe(Effect.catchTag("SqlError", databaseError))
     if (rows[0] === undefined)
       return yield* failure("invalid-authority", "Credential reference identity cannot be reassigned")
     const row = yield* decode(CredentialReferenceRow, rows[0])
