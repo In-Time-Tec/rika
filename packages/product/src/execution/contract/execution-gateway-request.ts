@@ -24,6 +24,17 @@ export const StartTurn = Schema.Struct({
 })
 export type StartTurn = typeof StartTurn.Type
 
+export const PreparedTurn = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  runId: Schema.String,
+  titleRunId: Schema.optionalKey(Schema.String),
+  rootAdmissionJson: Schema.NonEmptyString,
+  titleAdmissionJson: Schema.optionalKey(Schema.NonEmptyString),
+  reviewIntent: Schema.optionalKey(ReviewIntent),
+})
+export type PreparedTurn = typeof PreparedTurn.Type
+
 export const AuthorizationResponse = Schema.Struct({
   authorizationId: Schema.String,
   checkpoint: Checkpoint,

@@ -45,7 +45,10 @@ export interface HostedProjectionWorkerStatus extends WorkerState {
 
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 
-export const layer = (options: { readonly concurrency: number; readonly pollIntervalMillis: number }) =>
+export const layer = (options: {
+  readonly concurrency: number
+  readonly pollIntervalMillis: number
+}) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const turns = yield* TurnRepository.Service
@@ -64,14 +67,12 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
         HostedObservability.observe(
           "attach",
           { turnId: candidate.turnId },
-          ExecutionProjectionWatch.watch({ turnId: candidate.turnId, turns, transcripts, backend }).pipe(
-            Effect.flatMap((result) =>
-              Clock.currentTimeMillis.pipe(
-                Effect.flatMap((now) => turns.setStatus(candidate.turnId, result.status, now)),
-              ),
-            ),
-            Effect.asVoid,
-          ),
+          ExecutionProjectionWatch.watch({
+            turnId: candidate.turnId,
+            turns,
+            transcripts,
+            backend,
+          }).pipe(Effect.asVoid),
         ).pipe(
           Effect.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)

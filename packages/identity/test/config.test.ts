@@ -36,6 +36,8 @@ describe("IdentityConfig", () => {
       expect(config.trustedOrigins).toEqual(["https://api.example.com", "https://console.example.com"])
       expect(Redacted.value(config.databaseUrl)).toBe(productionEnvironment.DATABASE_URL)
       expect(String(config.authSecret)).not.toContain(productionEnvironment.BETTER_AUTH_SECRET)
+      expect(config.github?.clientId).toBe("github-client")
+      expect(config.mail?.emailFrom).toBe("Rika <no-reply@example.com>")
     }),
   )
 
@@ -71,6 +73,40 @@ describe("IdentityConfig", () => {
         EMAIL_FROM: "Rika\nBcc: recipient@example.com <no-reply@example.com>",
       })
       expect(error.message).toContain("EMAIL_FROM")
+    }),
+  )
+
+  it.effect("allows development without external login and mail providers", () =>
+    Effect.gen(function* () {
+      const config = yield* loadIdentityConfig({
+        NODE_ENV: "development",
+        PORT: "3000",
+        BETTER_AUTH_URL: "http://127.0.0.1:3000",
+        BETTER_AUTH_SECRET: productionEnvironment.BETTER_AUTH_SECRET,
+        DATABASE_URL: "postgresql://rika:rika@127.0.0.1:15432/rika",
+      })
+      expect(config.github).toBeUndefined()
+      expect(config.mail).toBeUndefined()
+      expect(config.databaseSsl).toBe("disable")
+    }),
+  )
+
+  it.effect("rejects partial development provider configuration", () =>
+    Effect.gen(function* () {
+      expect(
+        (yield* configFailure({
+          ...productionEnvironment,
+          NODE_ENV: "development",
+          GITHUB_CLIENT_SECRET: undefined,
+        })).message,
+      ).toContain("configured together")
+      expect(
+        (yield* configFailure({
+          ...productionEnvironment,
+          NODE_ENV: "development",
+          EMAIL_FROM: undefined,
+        })).message,
+      ).toContain("configured together")
     }),
   )
 })

@@ -56,7 +56,7 @@ describe("Operation", () => {
         yield* session.dequeue("missing")
         yield* session.steer("direction", "request-direction")
         yield* session.interruptAndSend("next")
-        yield* session.cancel
+        yield* session.cancel()
         yield* session.selectThread("missing")
         yield* session.reopenThread
         yield* Effect.yieldNow
@@ -345,7 +345,7 @@ describe("Operation", () => {
         yield* TestClock.adjust("200 millis")
         while ((yield* turns.listSteeringAdmissions).some((admission) => admission.outcome._tag === "Pending"))
           yield* Effect.yieldNow
-        yield* session.cancel
+        yield* session.cancel()
         while ((yield* turns.get(Turn.TurnId.make("submitted-control")))?.status !== "completed") yield* Effect.yieldNow
         yield* session.reopenThread
         yield* settleEvents
@@ -380,7 +380,175 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("force-settles a timed-out cancellation and drains the queued successor", () =>
+  it.effect("replays a targeted cancellation without cancelling the promoted successor", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("targeted-cancel-replay"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Targeted cancel replay",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const targetId = Turn.TurnId.make("targeted-cancel-original")
+      const successorId = Turn.TurnId.make("targeted-cancel-successor")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: targetId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "original",
+          executionRoute: executionRoute(),
+          executionLink: { runId: "targeted-cancel-run", turnId: targetId, threadId: thread.id },
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: successorId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "successor",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
+      const started = yield* Ref.make<ReadonlyArray<string>>([])
+      const replayBackend = ExecutionGateway.Service.of({
+        ...backend,
+        inspectTurn: (link) =>
+          link.turnId === targetId
+            ? Effect.succeed({ status: "running", cursor: "targeted-cancel-running" })
+            : backend.inspectTurn(link),
+        watchTurn: (link, cursor) => (link.turnId === targetId ? Stream.never : backend.watchTurn(link, cursor)),
+        cancelTurn: (link) =>
+          Ref.update(cancelled, (ids) => [...ids, link.turnId]).pipe(
+            Effect.andThen(turns.setStatus(targetId, "cancelled", 3).pipe(Effect.orDie)),
+            Effect.asVoid,
+          ),
+        startTurn: (input) =>
+          Ref.update(started, (ids) => [...ids, input.turnId]).pipe(
+            Effect.as({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
+          ),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.selectThread(thread.id)
+        yield* session.cancel({ turnId: targetId, threadId: thread.id })
+        yield* session.cancel({ turnId: targetId, threadId: thread.id })
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, replayBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* Ref.get(cancelled)).toEqual([targetId])
+      expect(yield* Ref.get(started)).toEqual([successorId])
+      expect(yield* turns.get(targetId)).toMatchObject({ status: "cancelled" })
+      expect(yield* turns.get(successorId)).toMatchObject({ status: "completed" })
+    }),
+  )
+
+  it.effect("resumes an interrupted submission after cancellation without redispatching either side effect", () =>
+    Effect.gen(function* () {
+      const thread: Thread.Thread = {
+        id: Thread.ThreadId.make("interrupt-replay"),
+        lineage: threadLineage,
+        workspace: "/work",
+        title: "Interrupt replay",
+        labels: [],
+        pinned: false,
+        archived: false,
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const targetId = Turn.TurnId.make("interrupt-replay-original")
+      const pendingId = Turn.TurnId.make("interrupt-replay-pending")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: targetId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "original",
+          executionRoute: executionRoute(),
+          executionLink: { runId: "interrupt-replay-run", turnId: targetId, threadId: thread.id },
+          status: "cancelled",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        {
+          id: pendingId,
+          ...turnProvenance,
+          threadId: thread.id,
+          prompt: "replacement",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<InteractiveSession>>([])
+      const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
+      const started = yield* Ref.make<ReadonlyArray<string>>([])
+      const replayBackend = ExecutionGateway.Service.of({
+        ...backend,
+        cancelTurn: (link) => Ref.update(cancelled, (ids) => [...ids, link.turnId]),
+        startTurn: (input) =>
+          Ref.update(started, (ids) => [...ids, input.turnId]).pipe(
+            Effect.as({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
+          ),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.selectThread(thread.id)
+        yield* session.interruptAndSend("replacement", targetId)
+        yield* session.interruptAndSend("replacement", targetId)
+      }).pipe(
+        provideLayer(
+          productLayer({
+            executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionGateway.Service, replayBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.succeed(pendingId),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* Ref.get(cancelled)).toEqual([])
+      expect(yield* Ref.get(started)).toEqual([pendingId])
+      expect(yield* turns.get(targetId)).toMatchObject({ status: "cancelled" })
+      expect(yield* turns.get(pendingId)).toMatchObject({ status: "completed" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0 })
+    }),
+  )
+
+  it.effect("does not invent cancellation after the execution gateway stops responding", () =>
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("timed-out-cancellation"),
@@ -436,7 +604,7 @@ describe("Operation", () => {
           ephemeral: false,
         })
         yield* session.selectThread(thread.id)
-        const cancellation = yield* Effect.forkChild(session.cancel)
+        const cancellation = yield* Effect.forkChild(session.cancel())
         yield* Deferred.await(cancellationStarted)
         yield* TestClock.adjust("11 seconds")
         yield* Fiber.join(cancellation)
@@ -456,9 +624,9 @@ describe("Operation", () => {
       )
 
       yield* scenario
-      expect(yield* turns.get(activeId)).toMatchObject({ status: "cancelled" })
-      expect(yield* turns.get(queuedId)).toMatchObject({ status: "completed" })
-      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0 })
+      expect(yield* turns.get(activeId)).toMatchObject({ status: "running" })
+      expect(yield* turns.get(queuedId)).toMatchObject({ status: "queued" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 1 })
     }),
   )
 

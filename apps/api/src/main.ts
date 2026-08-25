@@ -1,6 +1,6 @@
 import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import { Console, Context, Effect, Layer } from "effect"
+import { Console, Context, Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
   closePostgresPool,
@@ -9,9 +9,11 @@ import {
   makePostgresIdentityDirectory,
   makePostgresPool,
   makeResendMailSender,
+  noOpMailSender,
 } from "@rika/identity"
 import { serveApi } from "./adapters/bun-server"
 import { loadApiConfig } from "./api-config"
+import { seedDevelopment } from "./development-seed"
 import { HostedApplication, layer as hostedApplicationLayer } from "./hosted-application"
 
 const provideLayerScoped =
@@ -30,14 +32,23 @@ const provideLayerScoped =
 const program = Effect.scoped(
   Effect.gen(function* () {
     const loaded = yield* loadApiConfig(Bun.env)
-    const { environment, identity: config, executor: executorOptions, github, providerCredentialKey } = loaded
+    const {
+      developmentSeedEnabled,
+      developmentModel,
+      environment,
+      identity: config,
+      executor: executorOptions,
+      github,
+      providerCredentialKey,
+    } = loaded
     const httpClient = yield* HttpClient.HttpClient
     const pool = makePostgresPool(config)
     yield* Effect.addFinalizer(() => closePostgresPool(pool).pipe(Effect.ignore))
     const identity = makeBetterAuthIdentityRuntime({
       config,
       pool,
-      mail: makeResendMailSender({ config, client: httpClient }),
+      mail:
+        config.mail === undefined ? noOpMailSender : makeResendMailSender({ config: config.mail, client: httpClient }),
     })
     const postgres = {
       url: config.databaseUrl,
@@ -50,13 +61,27 @@ const program = Effect.scoped(
           database: postgres,
           databaseUrl: config.databaseUrl,
           providerCredentialKey,
-          executor: executorOptions,
-          github,
-          workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions.deploymentId,
+          ...(executorOptions === undefined ? {} : { executor: executorOptions }),
+          ...(github === undefined ? {} : { github }),
+          ...(developmentModel === undefined ? {} : { developmentModel }),
+          workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions?.deploymentId ?? "rika-development",
         }),
       ),
       HostedApplication,
     )
+    if (developmentSeedEnabled) {
+      const openRouterApiKey = environment.RIKA_DEV_OPENROUTER_API_KEY?.trim()
+      if (openRouterApiKey === undefined || openRouterApiKey.length === 0)
+        return yield* Effect.die("RIKA_DEV_OPENROUTER_API_KEY is required in development")
+      yield* seedDevelopment({
+        baseUrl: config.baseUrl,
+        identity,
+        pool,
+        product: application.product,
+        credentials: application.credentials,
+        openRouterApiKey: Redacted.make(openRouterApiKey),
+      })
+    }
     yield* serveApi({
       config,
       dependencies: {

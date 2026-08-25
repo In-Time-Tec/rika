@@ -14,6 +14,8 @@ export const statuses = [
 export const Status = Schema.Literals(statuses)
 export type Status = typeof Status.Type
 
+export type ActivationStatus = Exclude<Status, "accepted" | "queued">
+
 export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
 type TerminalStatus = (typeof terminalStatuses)[number]
 

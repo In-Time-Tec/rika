@@ -1,4 +1,3 @@
-import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -8,7 +7,7 @@ import { ServerFrame } from "@rika/product/client-protocol"
 import type { HostedProductService } from "../src/hosted-product"
 import type { Runtime as ExecutorRuntime } from "../src/executor"
 import type { HttpDependencies } from "../src/http"
-import { canonicalPublicRequest, pollAuthority, serveApi } from "../src/adapters/bun-server"
+import { canonicalPublicRequest, pollAuthority, sendThreadFrames, serveApi } from "../src/adapters/bun-server"
 import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const config: IdentityConfig = {
@@ -17,10 +16,8 @@ const config: IdentityConfig = {
   baseUrl: "http://127.0.0.1",
   trustedOrigins: ["http://127.0.0.1"],
   authSecret: Redacted.make("abcdefghijklmnopqrstuvwxyz-0123456789-ABCDEF"),
-  githubClientId: "test",
-  githubClientSecret: Redacted.make("test"),
-  resendApiKey: Redacted.make("test"),
-  emailFrom: "test@example.test",
+  github: { clientId: "test", clientSecret: Redacted.make("test") },
+  mail: { resendApiKey: Redacted.make("test"), emailFrom: "test@example.test" },
   resource: "http://127.0.0.1/api/v1",
   databaseUrl: Redacted.make("postgresql://unused"),
   databaseSsl: "disable",
@@ -29,6 +26,7 @@ const config: IdentityConfig = {
 const recovery: HttpDependencies["recovery"] = {
   inspect: () => Effect.die("unused"),
   resolve: () => Effect.die("unused"),
+  reconcileCompleted: Effect.die("unused"),
 }
 
 it.effect("stops accepting work but lets an in-flight request drain", () =>
@@ -47,6 +45,9 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       pollRunner: () => Effect.die("unused"),
       createConnection: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
+      admitAuthorizedRun: () => Effect.die("unused"),
+      cancelRunAdmission: () => Effect.die("unused"),
+      cancelAuthorizedRunAdmission: () => Effect.die("unused"),
     }
     const identity: IdentityRuntime = {
       handle: () => Effect.die("unused"),
@@ -194,6 +195,9 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         pollRunner: () => Effect.die("unused"),
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
+        admitAuthorizedRun: () => Effect.die("unused"),
+        cancelRunAdmission: () => Effect.die("unused"),
+        cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       },
       toolPolicy: testToolPolicy,
       executor: {
@@ -278,10 +282,37 @@ it.effect("closes inactive sessions with a policy violation on the authority sch
   }),
 )
 
-it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges canonical frames", () =>
+it.effect("closes a slow Thread consumer before buffering another frame", () =>
+  Effect.gen(function* () {
+    const sent: Array<string> = []
+    const closed: Array<readonly [number | undefined, string | undefined]> = []
+    const socket = {
+      getBufferedAmount: () => 32 * 1024 * 1024,
+      send: (message: string) => sent.push(message),
+      close: (code?: number, reason?: string) => closed.push([code, reason]),
+    }
+    yield* sendThreadFrames(socket as never, [
+      {
+        protocolVersion: 1,
+        payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" as never },
+      },
+    ])
+    expect(sent).toEqual([])
+    expect(closed).toEqual([[1013, "slow Thread consumer"]])
+  }),
+)
+
+it.effect("exchanges canonical Thread frames and finishes accepted commands after socket disconnect", () =>
   Effect.gen(function* () {
     let connected: ReadonlyArray<string> | undefined
     let received: unknown
+    let receiveStartedAfterOutboundStopped = false
+    const outboundStarted = yield* Deferred.make<void>()
+    const outboundStopped = yield* Deferred.make<void>()
+    const detachedReceiveEntered = yield* Deferred.make<void>()
+    const releaseDetachedReceive = yield* Deferred.make<void>()
+    const detachedReceiveCompleted = yield* Deferred.make<void>()
+    let connectionCount = 0
     const dependencies: HttpDependencies = {
       identity: {
         handle: () => Effect.die("unused"),
@@ -309,22 +340,48 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         pollRunner: () => Effect.die("unused"),
         createConnection: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
+        admitAuthorizedRun: () => Effect.die("unused"),
+        cancelRunAdmission: () => Effect.die("unused"),
+        cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       },
       toolPolicy: testToolPolicy,
       threads: {
         issueTicket: () => Effect.die("unused"),
         connect: (ticket, audience) => {
           connected = [ticket, audience]
+          connectionCount += 1
+          if (connectionCount === 2)
+            return Effect.succeed({
+              receive: () =>
+                Deferred.succeed(detachedReceiveEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDetachedReceive)),
+                  Effect.andThen(Deferred.succeed(detachedReceiveCompleted, undefined)),
+                  Effect.as([]),
+                ),
+              outbound: Effect.never,
+              detach: Effect.void,
+              active: Effect.succeed(true),
+            })
           return Effect.succeed({
-            receive: (message) => {
-              received = message
-              return Effect.succeed([
-                {
-                  protocolVersion: 1 as const,
-                  payload: { _tag: "Heartbeat" as const, at: "2026-08-21T00:00:00.000Z" as never },
-                },
-              ])
-            },
+            receive: (message) =>
+              Deferred.isDone(outboundStopped).pipe(
+                Effect.tap((stopped) =>
+                  Effect.sync(() => {
+                    received = message
+                    receiveStartedAfterOutboundStopped = stopped
+                  }),
+                ),
+                Effect.as([
+                  {
+                    protocolVersion: 1 as const,
+                    payload: { _tag: "Heartbeat" as const, at: "2026-08-21T00:00:00.000Z" as never },
+                  },
+                ]),
+              ),
+            outbound: Deferred.succeed(outboundStarted, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Deferred.succeed(outboundStopped, undefined)),
+            ),
             detach: Effect.void,
             active: Effect.succeed(true),
           })
@@ -376,7 +433,7 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
     expect(queryCredential.status).toBe(401)
 
     const reply = yield* Effect.scoped(
-      Layer.build(BunSocket.layerWebSocketConstructor).pipe(
+      Layer.build(Socket.layerWebSocketConstructorGlobal).pipe(
         Effect.flatMap((context) =>
           Effect.provide(
             Effect.gen(function* () {
@@ -384,14 +441,16 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
                 protocols: ["rika.thread.v1", "rika.ticket.secret"],
               })
               const writer = yield* socket.writer
+              const opened = yield* Deferred.make<void>()
               const response = yield* Deferred.make<string>()
               yield* socket
                 .runString((message) => Deferred.succeed(response, message), {
-                  onOpen: writer(
-                    '{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}',
-                  ).pipe(Effect.orDie),
+                  onOpen: Deferred.succeed(opened, undefined),
                 })
                 .pipe(Effect.forkScoped)
+              yield* Deferred.await(opened)
+              yield* Deferred.await(outboundStarted)
+              yield* writer('{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}')
               return yield* Deferred.await(response)
             }),
             context,
@@ -399,10 +458,28 @@ it.effect("redeems a Thread ticket from the WebSocket subprotocol and exchanges 
         ),
       ),
     )
+    const detachedSocket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, [
+      "rika.thread.v1",
+      "rika.ticket.secret",
+    ])
+    yield* Effect.callback<void, "detached socket failed">((resume) => {
+      detachedSocket.onopen = () => resume(Effect.void)
+      detachedSocket.onerror = () => resume(Effect.fail("detached socket failed"))
+    })
+    detachedSocket.send('{"protocolVersion":1,"requestId":"request-detached","command":{"_tag":"Detach"}}')
+    yield* Deferred.await(detachedReceiveEntered)
+    const detachedClosed = Effect.callback<void>((resume) => {
+      detachedSocket.onclose = () => resume(Effect.void)
+      detachedSocket.close()
+    })
+    yield* detachedClosed
+    yield* Deferred.succeed(releaseDetachedReceive, undefined)
+    yield* Deferred.await(detachedReceiveCompleted)
     yield* Effect.tryPromise(() => running.server.stop(true))
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
     expect(received).toEqual({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })
+    expect(receiveStartedAfterOutboundStopped).toBe(true)
     expect(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
       protocolVersion: 1,
       payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },

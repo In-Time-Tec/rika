@@ -26,7 +26,9 @@ it.effect("pins every hosted mode to the owner's OpenAI account", () =>
         }),
       openAiAccountAccess: () => ({ acquire: Effect.die("unused"), refreshRejected: () => Effect.die("unused") }),
     })
-    const context = yield* Layer.build(layer.pipe(Layer.provide(Layer.succeed(HostedProviderCredentials, credentials))))
+    const context = yield* Layer.build(
+      layer().pipe(Layer.provide(Layer.succeed(HostedProviderCredentials, credentials))),
+    )
     const registry = Context.get(context, HostedModelRegistry)
     expect(registry.modes).toEqual(["low", "medium", "high", "ultra"])
     for (const mode of registry.modes) {
@@ -48,5 +50,56 @@ it.effect("pins every hosted mode to the owner's OpenAI account", () =>
       }
     }
     expect(required).toEqual(["owner-1", "owner-1", "owner-1", "owner-1"])
+  }),
+)
+
+it.effect("pins development routes to the owner's encrypted OpenRouter credential", () =>
+  Effect.gen(function* () {
+    const required: Array<readonly [string, string]> = []
+    const credentials = HostedProviderCredentials.of({
+      put: () => Effect.die("unused"),
+      revoke: () => Effect.die("unused"),
+      list: () => Effect.die("unused"),
+      require: (ownerId, provider) =>
+        Effect.sync(() => {
+          required.push([ownerId, provider])
+          return {
+            provider,
+            state: "active" as const,
+            revision: "1",
+            credentialIdentity: `credential:${ownerId}:${provider}`,
+          }
+        }),
+      putOpenAiAccount: () => Effect.die("unused"),
+      revokeOpenAiAccount: () => Effect.die("unused"),
+      openAiAccountStatus: () => Effect.die("unused"),
+      requireOpenAiAccount: () => Effect.die("unused"),
+      openAiAccountAccess: () => ({ acquire: Effect.die("unused"), refreshRejected: () => Effect.die("unused") }),
+    })
+    const context = yield* Layer.build(
+      layer({ developmentModel: "openrouter/free" }).pipe(
+        Layer.provide(Layer.succeed(HostedProviderCredentials, credentials)),
+      ),
+    )
+    const registry = Context.get(context, HostedModelRegistry)
+    const route = yield* registry.resolve("owner-1", "medium")
+    const models = [
+      route.main,
+      route.oracle,
+      route.title,
+      route.compactionSummary,
+      ...Object.values(route.agents ?? {}),
+    ]
+    for (const resolved of models) {
+      for (const candidate of resolved.candidates) {
+        expect(candidate.model).toBe("openrouter/free")
+        expect(candidate.providerConnection).toMatchObject({
+          provider: "openrouter",
+          authentication: "api-key",
+          credentialIdentity: "credential:owner-1:openrouter",
+        })
+      }
+    }
+    expect(required).toEqual([["owner-1", "openrouter"]])
   }),
 )

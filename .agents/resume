@@ -3,9 +3,25 @@ set -euo pipefail
 
 export PATH="${BUN_INSTALL:-$HOME/.local}/bin:$PATH"
 
-if ! command -v bun >/dev/null; then
-  echo "Bun is unavailable; rerun .agents/setup" >&2
+if ! command -v bun >/dev/null || ! command -v docker >/dev/null; then
+  echo "Rika development tools are unavailable; rerun .agents/setup" >&2
   exit 1
 fi
 
-echo "Rika orb ready (Bun $(bun --version)); no local services to reconnect"
+if ! sudo docker info >/dev/null 2>&1; then
+  amp orb service start docker-daemon --command 'sudo dockerd'
+fi
+
+for _ in $(seq 1 240); do
+  if sudo docker info >/dev/null 2>&1; then
+    sudo chgrp "$(id -gn)" /var/run/docker.sock
+    sudo chmod g+rw /var/run/docker.sock
+    amp orb services ensure
+    echo "Rika orb services ready"
+    exit 0
+  fi
+  sleep 0.25
+done
+
+echo "Docker did not become ready; inspect with: amp orb service logs docker-daemon" >&2
+exit 1

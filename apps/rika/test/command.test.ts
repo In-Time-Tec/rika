@@ -129,9 +129,9 @@ it.effect("maps stdin failures and dispatch failures", () =>
         }),
       ),
     )
-    expect(
-      (yield* Effect.exit(execute(run([]).pipe(Effect.mapError((error) => String(error))), layer)))._tag,
-    ).toBe("Failure")
+    expect((yield* Effect.exit(execute(run([]).pipe(Effect.mapError((error) => String(error))), layer)))._tag).toBe(
+      "Failure",
+    )
   }),
 )
 

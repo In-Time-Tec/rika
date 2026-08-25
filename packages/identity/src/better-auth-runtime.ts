@@ -140,12 +140,15 @@ export const makeBetterAuthIdentityRuntime = (input: {
         return sendMail(verificationEmail({ to: user.email, url: verificationUrl.href }))
       },
     },
-    socialProviders: {
-      github: {
-        clientId: config.githubClientId,
-        clientSecret: Redacted.value(config.githubClientSecret),
-      },
-    },
+    socialProviders:
+      config.github === undefined
+        ? {}
+        : {
+            github: {
+              clientId: config.github.clientId,
+              clientSecret: Redacted.value(config.github.clientSecret),
+            },
+          },
     advanced: {
       useSecureCookies: config.production,
     },

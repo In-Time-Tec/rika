@@ -101,19 +101,29 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
   const service = Service.of({
     get,
     listProjectionRecoveryCandidates: (projectionVersion) =>
-      Ref.get(state).pipe(
-        Effect.map((entries) =>
-          [...entries.values()]
-            .filter(
-              (projection) =>
-                projection.turn._tag === "AgentExecution" &&
-                (projection.turn.status === "running" || projection.turn.status === "cancelling") &&
-                projection.turn.executionLink !== undefined &&
-                projection.projectionVersion <= projectionVersion,
-            )
-            .map((projection) => ({ threadId: projection.turn.threadId, turnId: projection.turn.id })),
-        ),
-      ),
+      Effect.gen(function* () {
+        const candidates = new Array<import("@rika/product/transcript-repository").ProjectionRecoveryCandidate>()
+        for (const projection of (yield* Ref.get(state)).values()) {
+          const turn =
+            initialOptions.turns === undefined
+              ? projection.turn
+              : yield* initialOptions.turns
+                  .get(projection.turn.id)
+                  .pipe(Effect.mapError((cause) => RepositoryError.make({ message: cause.message })))
+          if (
+            turn?._tag !== "AgentExecution" ||
+            turn.executionLink === undefined ||
+            projection.projectionVersion > projectionVersion
+          )
+            continue
+          const active = turn.status === "running" || turn.status === "cancelling"
+          const terminalProjectionMissing =
+            (turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled") &&
+            projection.state.status !== turn.status
+          if (active || terminalProjectionMissing) candidates.push({ threadId: turn.threadId, turnId: turn.id })
+        }
+        return candidates
+      }),
     commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
       const upsert = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
       yield* validateUnits(turn.id, upsert)

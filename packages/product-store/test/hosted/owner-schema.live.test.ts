@@ -1,13 +1,13 @@
 import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, FileSystem, Layer, Random } from "effect"
+import { Config, Effect, FileSystem, Layer, Random } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
 import { runMigration } from "../../../identity/src/postgres"
 import { migrations } from "../../src/hosted/migrations"
 
-const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const readFileString = (url: URL) =>
   Effect.scoped(
     Layer.build(BunServices.layer).pipe(
@@ -20,12 +20,12 @@ const readFileString = (url: URL) =>
     ),
   )
 
-it.effect.skipIf(databaseUrl === undefined)("creates fresh personal and organization owner authority", () =>
+it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization owner authority", () =>
   Effect.gen(function* () {
     const database = `rika_owner_schema_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
     yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl!)
+    const parsed = new URL(databaseUrl)
     parsed.pathname = `/${database}`
     const pool = new Pool({ connectionString: parsed.toString() })
     const rejects = (sql: string, code: string) =>

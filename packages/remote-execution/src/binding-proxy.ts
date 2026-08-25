@@ -1,7 +1,7 @@
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Schema } from "effect"
-import type { AccessWire, BindingManifest, BindingOutcome, BindingRequest, CellRequest } from "./protocol"
-import { bindingManifest, BindingRequest as BindingRequestSchema } from "./protocol"
+import type { AccessWire, BindingManifest, BindingRequest, CellRequest } from "./protocol"
+import { bindingManifest, BindingOutcome, BindingRequest as BindingRequestSchema } from "./protocol"
 
 export class BindingProxyError extends Schema.TaggedError<BindingProxyError>()("BindingProxyError", {
   message: Schema.String,
@@ -18,6 +18,7 @@ interface ActiveCell {
 }
 
 interface PendingCall {
+  readonly ordinal: number
   readonly callId: string
   readonly operationKey: string
   readonly attempt: number
@@ -25,7 +26,12 @@ interface PendingCall {
   readonly request: BindingRequest
   readonly deadlineAtMillis: number
   readonly result: Deferred.Deferred<BindingOutcome, BindingProxyError>
+  readonly outcome: Ref.Ref<BindingOutcome | undefined>
 }
+
+type OutcomeResolution =
+  | { readonly _tag: "New" }
+  | { readonly _tag: "Known"; readonly outcome: BindingOutcome }
 
 export interface Transport {
   readonly send: (message: {
@@ -57,6 +63,7 @@ export interface Interface {
 const requestKey = (sessionId: string | undefined, cellId: string | undefined) =>
   `${sessionId ?? ""}\u0000${cellId ?? ""}`
 const encodeRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequestSchema))
+const equivalentOutcome = Schema.toEquivalence(BindingOutcome)
 
 export const make: (options: {
   readonly manifest: BindingManifest
@@ -123,8 +130,10 @@ export const make: (options: {
           ),
         )
         const result = yield* Deferred.make<BindingOutcome, BindingProxyError>()
+        const outcomeState = yield* Ref.make<BindingOutcome | undefined>(undefined)
         yield* Ref.update(pending, (current) =>
           new Map(current).set(callId, {
+            ordinal,
             callId,
             operationKey: cell.operationKey,
             attempt: cell.attempt,
@@ -132,6 +141,7 @@ export const make: (options: {
             request: wireRequest,
             deadlineAtMillis: cell.deadlineAtMillis,
             result,
+            outcome: outcomeState,
           }),
         )
         const remaining = Math.max(0, cell.deadlineAtMillis - (yield* Clock.currentTimeMillis))
@@ -145,6 +155,7 @@ export const make: (options: {
             request: wireRequest,
           })
           .pipe(
+            Effect.ignore,
             Effect.andThen(
               Deferred.await(result).pipe(
                 Effect.timeoutOrElse({
@@ -159,13 +170,6 @@ export const make: (options: {
                 operation: request.operation,
                 stage: "decode-input",
                 message: error.message,
-              }),
-            ),
-            Effect.ensuring(
-              Ref.update(pending, (current) => {
-                const next = new Map(current)
-                next.delete(callId)
-                return next
               }),
             ),
           )
@@ -214,11 +218,23 @@ export const make: (options: {
           )
         })
   const leave = (request: CellRequest) =>
-    Ref.update(active, (current) => {
-      const next = new Map(current)
-      next.delete(requestKey(request.sessionId, request.toolCallId))
-      return next
-    })
+    Effect.all(
+      [
+        Ref.update(active, (current) => {
+          const next = new Map(current)
+          next.delete(requestKey(request.sessionId, request.toolCallId))
+          return next
+        }),
+        Ref.update(pending, (current) =>
+          new Map(
+            Array.from(current).filter(
+              ([, call]) => call.operationKey !== request.operationKey || call.attempt !== request.attempt,
+            ),
+          ),
+        ),
+      ],
+      { discard: true },
+    )
   const suspended = (request: CellRequest) =>
     Ref.get(active).pipe(
       Effect.flatMap((current) => {
@@ -247,48 +263,58 @@ export const make: (options: {
   const replay = (access: AccessWire) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
-      const calls = yield* Ref.get(pending)
+      yield* Ref.update(active, (current) =>
+        new Map(Array.from(current, ([key, cell]) => [key, { ...cell, access }] as const)),
+      )
+      const calls = Array.from((yield* Ref.get(pending)).values()).sort((left, right) => left.ordinal - right.ordinal)
       yield* Effect.forEach(
-        calls.values(),
+        calls,
         (call) =>
-          call.deadlineAtMillis <= now
-            ? removePending(call).pipe(
-                Effect.flatMap((removed) =>
-                  removed
-                    ? Deferred.fail(call.result, BindingProxyError.make({ message: "cell binding deadline exceeded" }))
-                    : Effect.void,
-                ),
-              )
-            : transport.send({
-                access,
-                operationKey: call.operationKey,
-                attempt: call.attempt,
-                callId: call.callId,
-                requestDigest: call.requestDigest,
-                request: call.request,
-              }),
+          Effect.gen(function* () {
+            if (call.deadlineAtMillis <= now) {
+              const removed = yield* removePending(call)
+              if (removed)
+                yield* Deferred.fail(
+                  call.result,
+                  BindingProxyError.make({ message: "cell binding deadline exceeded" }),
+                )
+              return
+            }
+            const outcome = yield* Ref.get(call.outcome)
+            if (outcome?._tag === "Unknown" || outcome?._tag === "Suspend") return
+            yield* transport.send({
+              access,
+              operationKey: call.operationKey,
+              attempt: call.attempt,
+              callId: call.callId,
+              requestDigest: call.requestDigest,
+              request: call.request,
+            })
+          }),
         { discard: true },
       )
     })
   const complete: Interface["complete"] = (input) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
-      const call = yield* Ref.modify(pending, (current) => {
-        const pendingCall = current.get(input.callId)
-        if (
-          pendingCall === undefined ||
-          pendingCall.operationKey !== input.operationKey ||
-          pendingCall.attempt !== input.attempt ||
-          pendingCall.requestDigest !== input.requestDigest ||
-          pendingCall.deadlineAtMillis <= now
-        )
-          return [undefined, current] as const
-        const next = new Map(current)
-        next.delete(input.callId)
-        return [pendingCall, next] as const
-      })
-      if (call === undefined)
+      const call = (yield* Ref.get(pending)).get(input.callId)
+      if (
+        call === undefined ||
+        call.operationKey !== input.operationKey ||
+        call.attempt !== input.attempt ||
+        call.requestDigest !== input.requestDigest ||
+        call.deadlineAtMillis <= now
+      )
         return yield* BindingProxyError.make({ message: "binding result conflicts with its request identity" })
+      const resolution = yield* Ref.modify(call.outcome, (current): readonly [OutcomeResolution, BindingOutcome] => {
+        if (current !== undefined) return [{ _tag: "Known", outcome: current }, current]
+        return [{ _tag: "New" }, input.outcome]
+      })
+      if (resolution._tag === "Known") {
+        if (!equivalentOutcome(resolution.outcome, input.outcome))
+          return yield* BindingProxyError.make({ message: "binding result conflicts with its recorded outcome" })
+        return resolution.outcome
+      }
       yield* Deferred.succeed(call.result, input.outcome)
       if (input.outcome._tag === "Suspend") {
         const cell = Array.from((yield* Ref.get(active)).values()).find(

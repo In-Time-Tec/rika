@@ -3,19 +3,24 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Clock, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../src/foreground"
-import type { AccessWire } from "../src/protocol"
+import { bindingManifest, type AccessWire } from "../src/protocol"
 import { provideLayer } from "./support/layer"
 
 class FakeWebSocket {
   static current: FakeWebSocket | undefined
   static readonly instances: Array<FakeWebSocket> = []
   static onSend: ((socket: FakeWebSocket, message: unknown) => void) | undefined
-  readonly readyState = 1
+  static failedOpens = 0
+  readonly readyState: number
   readonly sent: Array<unknown> = []
   closed = false
+  private readonly failOpen: boolean
   private readonly listeners = new Map<string, Set<(event: any) => void>>()
 
   constructor(_url: string) {
+    this.failOpen = FakeWebSocket.failedOpens > 0
+    this.readyState = this.failOpen ? 0 : 1
+    if (this.failOpen) FakeWebSocket.failedOpens -= 1
     FakeWebSocket.current = this
     FakeWebSocket.instances.push(this)
   }
@@ -45,6 +50,14 @@ class FakeWebSocket {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 
+  listensFor(type: string) {
+    return (this.listeners.get(type)?.size ?? 0) > 0
+  }
+
+  failOpening() {
+    this.emit("error", new Event("error"))
+  }
+
   message(value: unknown) {
     this.emit("message", { data: Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(value) })
   }
@@ -61,6 +74,17 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTi
   }).pipe(
     Effect.timeoutOrElse({
       duration: "1 second",
+      orElse: () => Effect.fail(EventuallyTimeout.make({ message: "timed out" })),
+    }),
+  )
+
+const eventuallyLive = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTimeout> =>
+  Effect.suspend(() => {
+    const value = read()
+    return value === undefined ? Effect.sleep("10 millis").pipe(Effect.andThen(eventuallyLive(read))) : Effect.succeed(value)
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "2 seconds",
       orElse: () => Effect.fail(EventuallyTimeout.make({ message: "timed out" })),
     }),
   )
@@ -114,6 +138,7 @@ describe.sequential("foreground Runner", () => {
             const runner = yield* Effect.forkScoped(
               runForegroundRunner({
                 admission: {
+                  assignmentId: "assignment-1",
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
                   executorUrl: "wss://controller.example.test/api/v1/runners",
@@ -173,7 +198,7 @@ describe.sequential("foreground Runner", () => {
                 fence: access.fence,
                 leaseEpoch: 1,
                 sessionToken: "session-1",
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -402,6 +427,376 @@ describe.sequential("foreground Runner", () => {
           FakeWebSocket.current = undefined
           FakeWebSocket.instances.length = 0
           FakeWebSocket.onSend = undefined
+          FakeWebSocket.failedOpens = 0
+        }),
+    ),
+  )
+
+  it.effect("retries reconnects while the controller is unavailable before the WebSocket opens", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const original = globalThis.WebSocket
+        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        return original
+      }),
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
+            const runner = yield* Effect.forkScoped(
+              runForegroundRunner({
+                admission: {
+                  assignmentId: "assignment-open-retry",
+                  admissionId: "admission-open-retry",
+                  ticket: "one-use-ticket",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
+                  workspaceIdentity: "workspace-binding-1",
+                  expiresAt: 9_999_999_999_999,
+                },
+                workspacePath: "/tmp",
+                ready,
+              }).pipe(Effect.provide(foregroundContext)),
+            )
+            const initial = yield* eventually(() => FakeWebSocket.instances[0])
+            const hello = yield* eventually(
+              () => initial.sent.find((message: any) => message._tag === "RunnerHello") as any,
+            )
+            const access: AccessWire = {
+              version: 1,
+              fence: {
+                target: "runner",
+                assignmentId: "assignment-open-retry",
+                assignmentGeneration: 1,
+                instanceId: "device-1",
+                executorId: "executor-1",
+                processIncarnation: hello.hello.processIncarnation,
+              },
+              leaseEpoch: 1,
+              sessionToken: "session-1",
+            }
+            initial.message({
+              _tag: "ExecutorWelcome",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: 1,
+                sessionToken: access.sessionToken,
+                leaseExpiresAt: 120_000,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            yield* Deferred.await(ready)
+            FakeWebSocket.failedOpens = 2
+            initial.close()
+            yield* TestClock.adjust("250 millis")
+            const first = yield* eventually(() => {
+              const socket = FakeWebSocket.instances[1]
+              return socket?.listensFor("error") === true ? socket : undefined
+            })
+            first.failOpening()
+            yield* TestClock.adjust("250 millis")
+            const second = yield* eventually(() => {
+              const socket = FakeWebSocket.instances[2]
+              return socket?.listensFor("error") === true ? socket : undefined
+            })
+            second.failOpening()
+            yield* TestClock.adjust("250 millis")
+            const connected = yield* eventually(() => FakeWebSocket.instances[3])
+            expect(FakeWebSocket.instances).toHaveLength(4)
+            const reconnect = yield* eventually(
+              () => connected.sent.find((message: any) => message._tag === "ExecutorReconnect") as any,
+            )
+            expect(reconnect).toEqual({ _tag: "ExecutorReconnect", access })
+            connected.message({
+              _tag: "ExecutorReconnected",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: 2,
+                leaseExpiresAt: 120_000,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            yield* Effect.yieldNow
+            yield* Fiber.interrupt(runner)
+          }),
+        ),
+      (original) =>
+        Effect.sync(() => {
+          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          FakeWebSocket.current = undefined
+          FakeWebSocket.instances.length = 0
+          FakeWebSocket.failedOpens = 0
+        }),
+    ),
+  )
+
+  it.effect("reconnects before the lease expires when heartbeat receipts stop", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const original = globalThis.WebSocket
+        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        return original
+      }),
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
+            const runner = yield* Effect.forkScoped(
+              runForegroundRunner({
+                admission: {
+                  assignmentId: "assignment-watchdog",
+                  admissionId: "admission-watchdog",
+                  ticket: "one-use-ticket",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
+                  workspaceIdentity: "workspace-binding-1",
+                  expiresAt: 9_999_999_999_999,
+                },
+                workspacePath: "/tmp",
+                ready,
+              }).pipe(Effect.provide(foregroundContext)),
+            )
+            const socket = yield* eventually(() => FakeWebSocket.instances[0])
+            const hello = yield* eventually(
+              () => socket.sent.find((message: any) => message._tag === "RunnerHello") as any,
+            )
+            const access: AccessWire = {
+              version: 1,
+              fence: {
+                target: "runner",
+                assignmentId: "assignment-watchdog",
+                assignmentGeneration: 1,
+                instanceId: "device-1",
+                executorId: "executor-1",
+                processIncarnation: hello.hello.processIncarnation,
+              },
+              leaseEpoch: 1,
+              sessionToken: "session-1",
+            }
+            socket.message({
+              _tag: "ExecutorWelcome",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: 1,
+                sessionToken: access.sessionToken,
+                leaseExpiresAt: 60_000,
+                heartbeatIntervalMillis: 20_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            yield* Deferred.await(ready)
+            yield* Effect.yieldNow
+            yield* TestClock.adjust("40 seconds")
+            for (let index = 0; index < 10 && FakeWebSocket.instances.length < 2; index += 1) {
+              yield* Effect.yieldNow
+              yield* TestClock.adjust("250 millis")
+            }
+            expect(FakeWebSocket.instances).toHaveLength(2)
+            expect(
+              FakeWebSocket.instances[1]?.sent.find((message: any) => message._tag === "ExecutorReconnect"),
+            ).toMatchObject({ _tag: "ExecutorReconnect", access })
+            yield* Fiber.interrupt(runner)
+          }),
+        ),
+      (original) =>
+        Effect.sync(() => {
+          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          FakeWebSocket.current = undefined
+          FakeWebSocket.instances.length = 0
+        }),
+    ),
+  )
+
+  it.live("keeps an in-flight binding pending and completes it after reconnect", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const original = globalThis.WebSocket
+        ;(globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket
+        return original
+      }),
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            const ready = yield* Deferred.make<void, import("../src/foreground").ForegroundRunnerError>()
+            const runner = yield* Effect.forkScoped(
+              runForegroundRunner({
+                admission: {
+                  assignmentId: "assignment-binding-reconnect",
+                  admissionId: "admission-binding-reconnect",
+                  ticket: "one-use-ticket",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
+                  workspaceIdentity: "workspace-binding-1",
+                  expiresAt: 9_999_999_999_999,
+                },
+                workspacePath: "/tmp",
+                ready,
+              }).pipe(Effect.provide(foregroundContext)),
+            )
+            const firstSocket = yield* eventually(() => FakeWebSocket.instances[0])
+            const hello = yield* eventually(
+              () => firstSocket.sent.find((message: any) => message._tag === "RunnerHello") as any,
+            )
+            const access: AccessWire = {
+              version: 1,
+              fence: {
+                target: "runner",
+                assignmentId: "assignment-binding-reconnect",
+                assignmentGeneration: 1,
+                instanceId: "device-1",
+                executorId: "executor-1",
+                processIncarnation: hello.hello.processIncarnation,
+              },
+              leaseEpoch: 1,
+              sessionToken: "session-1",
+            }
+            firstSocket.message({
+              _tag: "ExecutorWelcome",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: 1,
+                sessionToken: access.sessionToken,
+                leaseExpiresAt: 9_999_999_999_999,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            yield* Deferred.await(ready)
+            const manifest = yield* bindingManifest([{ module: "context", operations: ["current"] }]).pipe(
+              Effect.provide(foregroundContext),
+            )
+            const firstBindingSent = yield* Deferred.make<any>()
+            const replayedBindingSent = yield* Deferred.make<any>()
+            const terminalSent = yield* Deferred.make<any>()
+            FakeWebSocket.onSend = (socket, message: any) => {
+              if (message._tag === "BindingInvoke" && message.operationKey === "operation-binding-reconnect") {
+                Deferred.doneUnsafe(
+                  socket === firstSocket ? firstBindingSent : replayedBindingSent,
+                  Effect.succeed(message),
+                )
+              }
+              if (
+                message._tag === "CellLifecycle" &&
+                message.frame._tag === "Terminal" &&
+                message.frame.attribution.operationKey === "operation-binding-reconnect"
+              )
+                Deferred.doneUnsafe(terminalSent, Effect.succeed(message))
+            }
+            firstSocket.message({
+              _tag: "CellExecute",
+              request: {
+                access,
+                operationKey: "operation-binding-reconnect",
+                workspaceId: "workspace-binding-1",
+                sessionId: "session-binding-reconnect",
+                threadId: "thread-1",
+                turnId: "turn-1",
+                runId: "run-1",
+                rootRunId: "run-1",
+                toolCallId: "call-binding-reconnect",
+                code: "await rika.context.current({})",
+                attempt: 0,
+                replayPolicy: "never",
+                admittedAt: null,
+                deadlineAt: "2999-01-01T00:00:00.000Z",
+                bindings: manifest,
+              },
+            })
+            const firstBinding = yield* Deferred.await(firstBindingSent)
+            expect(firstBinding.access).toEqual(access)
+            firstSocket.close()
+            const secondSocket = yield* eventuallyLive(() => FakeWebSocket.instances[1])
+            yield* eventuallyLive(() => secondSocket.sent.find((message: any) => message._tag === "ExecutorReconnect"))
+            const renewed: AccessWire = { ...access, leaseEpoch: 2 }
+            secondSocket.message({
+              _tag: "ExecutorReconnected",
+              welcome: {
+                version: 1,
+                fence: renewed.fence,
+                leaseEpoch: renewed.leaseEpoch,
+                leaseExpiresAt: 9_999_999_999_999,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            const replayed = yield* Deferred.await(replayedBindingSent)
+            expect(replayed).toMatchObject({
+              access: renewed,
+              callId: firstBinding.callId,
+              requestDigest: firstBinding.requestDigest,
+            })
+            yield* Effect.sleep("10 millis")
+            secondSocket.message({
+              _tag: "BindingResult",
+              access: renewed,
+              operationKey: replayed.operationKey,
+              attempt: replayed.attempt,
+              callId: replayed.callId,
+              requestDigest: replayed.requestDigest,
+              outcome: {
+                _tag: "Returned",
+                response: { _tag: "Success", output: { threadId: "thread-1" } },
+              },
+            })
+            const followup = yield* eventuallyLive(
+              () =>
+                secondSocket.sent.find(
+                  (message: any) => message._tag === "BindingInvoke" && message.callId !== replayed.callId,
+                ) as any,
+            )
+            secondSocket.message({
+              _tag: "BindingResult",
+              access: renewed,
+              operationKey: followup.operationKey,
+              attempt: followup.attempt,
+              callId: followup.callId,
+              requestDigest: followup.requestDigest,
+              outcome: {
+                _tag: "Returned",
+                response: { _tag: "Success", output: { threadId: "thread-1" } },
+              },
+            })
+            const completed = yield* Deferred.await(terminalSent)
+            secondSocket.message({
+              _tag: "CellTerminalReceipt",
+              access: renewed,
+              operationKey: "operation-binding-reconnect",
+              attempt: completed.frame.attribution.attempt,
+              cursor: completed.frame.cursor,
+            })
+            expect(completed.frame.response).toMatchObject({
+              _tag: "Success",
+              result: { value: "{ threadId: 'thread-1' }" },
+            })
+            expect(
+              [...firstSocket.sent, ...secondSocket.sent].filter(
+                (message: any) =>
+                  message._tag === "CellLifecycle" &&
+                  message.frame._tag === "Started" &&
+                  message.frame.attribution.operationKey === "operation-binding-reconnect",
+              ),
+            ).toHaveLength(1)
+            expect(
+              [...firstSocket.sent, ...secondSocket.sent].filter(
+                (message: any) =>
+                  message._tag === "BindingInvoke" && message.callId === firstBinding.callId,
+              ),
+            ).toHaveLength(2)
+            yield* Fiber.interrupt(runner)
+          }),
+        ),
+      (original) =>
+        Effect.sync(() => {
+          ;(globalThis as { WebSocket: unknown }).WebSocket = original
+          FakeWebSocket.current = undefined
+          FakeWebSocket.instances.length = 0
+          FakeWebSocket.onSend = undefined
         }),
     ),
   )
@@ -421,6 +816,7 @@ describe.sequential("foreground Runner", () => {
             const runner = yield* Effect.forkScoped(
               runForegroundRunner({
                 admission: {
+                  assignmentId: "assignment-1",
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
                   executorUrl: "wss://controller.example.test/api/v1/runners",
@@ -455,7 +851,7 @@ describe.sequential("foreground Runner", () => {
                 fence: access.fence,
                 leaseEpoch: 1,
                 sessionToken: access.sessionToken,
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -498,7 +894,7 @@ describe.sequential("foreground Runner", () => {
                 version: 1,
                 fence: renewed.fence,
                 leaseEpoch: 2,
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -592,7 +988,7 @@ describe.sequential("foreground Runner", () => {
                   workspaceIdentity: "workspace-binding-1",
                   executorUrl: "wss://controller.example.test/api/v1/runners",
                   access,
-                  leaseExpiresAt: 10_000,
+                  leaseExpiresAt: 120_000,
                   heartbeatIntervalMillis: 60_000,
                   cursor: { sequence: 0, value: "" },
                   cells: [
@@ -645,7 +1041,7 @@ describe.sequential("foreground Runner", () => {
                 version: 1,
                 fence: renewed.fence,
                 leaseEpoch: 2,
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -706,7 +1102,7 @@ describe.sequential("foreground Runner", () => {
     ),
   )
 
-  it.effect("sends goodbye on shutdown and keeps unacknowledged receipts until the controller receipts them", () =>
+  it.effect("closes the socket on shutdown and keeps unacknowledged receipts until the controller receipts them", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket
@@ -722,6 +1118,7 @@ describe.sequential("foreground Runner", () => {
             const runner = yield* Effect.forkScoped(
               runForegroundRunner({
                 admission: {
+                  assignmentId: "assignment-1",
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
                   executorUrl: "wss://controller.example.test/api/v1/runners",
@@ -763,7 +1160,7 @@ describe.sequential("foreground Runner", () => {
                 fence: access.fence,
                 leaseEpoch: 1,
                 sessionToken: access.sessionToken,
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -824,7 +1221,7 @@ describe.sequential("foreground Runner", () => {
                 version: 1,
                 fence: access.fence,
                 leaseEpoch: 1,
-                leaseExpiresAt: 10_000,
+                leaseExpiresAt: 120_000,
                 heartbeatIntervalMillis: 60_000,
                 cursor: { sequence: 0, value: "" },
               },
@@ -864,13 +1261,7 @@ describe.sequential("foreground Runner", () => {
               )).receipts,
             ).toEqual([])
             yield* Fiber.interrupt(runner)
-            expect(
-              yield* eventually(() =>
-                reconnectedSocket.sent.find((message: any) => message._tag === "RunnerGoodbye") === undefined
-                  ? undefined
-                  : true,
-              ),
-            ).toBe(true)
+            expect(reconnectedSocket.closed).toBe(true)
           }),
         ),
       (original) =>
@@ -889,6 +1280,7 @@ describe.sequential("foreground Runner", () => {
         const exit = yield* Effect.exit(
           runForegroundRunner({
             admission: {
+              assignmentId: "assignment-1",
               admissionId: "admission-1",
               ticket: "one-use-ticket",
               executorUrl: "ws://controller.example.test/api/v1/runners",

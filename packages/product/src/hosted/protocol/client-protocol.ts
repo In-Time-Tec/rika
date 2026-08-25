@@ -84,12 +84,17 @@ const admitted = {
   expectedThreadVersion: ThreadVersion,
 } as const
 const mutating = { threadId: ThreadId, ...admitted } as const
+const CancellationTarget = Schema.Union([
+  strict(Schema.TaggedStruct("Turn", { turnId: Turn.TurnId })),
+  strict(Schema.TaggedStruct("Command", { commandId: CommandId })),
+])
 
 export const MutatingThreadCommand = Schema.Union([
   strict(
     Schema.TaggedStruct("SubmitPrompt", {
       ...mutating,
       text: Schema.NonEmptyString,
+      submissionId: Schema.optionalKey(Schema.NonEmptyString),
       mode: Schema.optionalKey(Schema.NonEmptyString),
       attachments: Schema.optionalKey(Schema.Array(Attachment)),
     }),
@@ -98,16 +103,17 @@ export const MutatingThreadCommand = Schema.Union([
     Schema.TaggedStruct("Steer", {
       ...mutating,
       text: Schema.NonEmptyString,
-      targetTurnId: Schema.optionalKey(Turn.TurnId),
+      targetTurnId: Turn.TurnId,
     }),
   ),
   strict(
     Schema.TaggedStruct("InterruptAndSend", {
       ...mutating,
       text: Schema.NonEmptyString,
+      targetTurnId: Turn.TurnId,
     }),
   ),
-  strict(Schema.TaggedStruct("Cancel", mutating)),
+  strict(Schema.TaggedStruct("Cancel", { ...mutating, target: CancellationTarget })),
   strict(
     Schema.TaggedStruct("Approve", {
       ...mutating,
@@ -141,7 +147,7 @@ export const MutatingThreadCommand = Schema.Union([
 ])
 export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 
-const CreateThread = strict(
+export const CreateThreadCommand = strict(
   Schema.TaggedStruct("CreateThread", {
     ...admitted,
     owner: OwnerSelection,
@@ -157,9 +163,10 @@ const CreateThread = strict(
       : [{ path: ["runnerTarget"], issue: "runner requires exactly one Runner target" }],
   ),
 )
+export type CreateThreadCommand = typeof CreateThreadCommand.Type
 
 export const ClientCommand = Schema.Union([
-  CreateThread,
+  CreateThreadCommand,
   strict(
     Schema.TaggedStruct("AttachThread", {
       threadId: ThreadId,
@@ -214,9 +221,29 @@ export const PendingAuthorization = strict(
 )
 export type PendingAuthorization = typeof PendingAuthorization.Type
 
+export const WorkspacePlacement = Schema.Union([
+  strict(
+    Schema.TaggedStruct("RunnerWorkspace", {
+      state: Schema.Literals(["disconnected", "ready"]),
+    }),
+  ),
+  strict(
+    Schema.TaggedStruct("OrbWorkspace", {
+      state: Schema.Literals(["unassigned", "preparing", "ready", "failed"]),
+      generation: Schema.String,
+      attempt: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+      phase: Schema.optionalKey(Schema.Literals(["checkout", "setup", "resume", "capabilities"])),
+      deadlineAt: Schema.optionalKey(Schema.Finite),
+      message: Schema.optionalKey(Schema.String),
+    }),
+  ),
+])
+export type WorkspacePlacement = typeof WorkspacePlacement.Type
+
 export const HostedThreadSnapshot = strict(
   Schema.Struct({
     executorKind: ExecutorKind,
+    workspace: Schema.optionalKey(WorkspacePlacement),
     view: ThreadView.ThreadViewSnapshot,
     pendingAuthorizations: Schema.Array(PendingAuthorization),
   }),
@@ -258,6 +285,14 @@ export type CommandResult = typeof CommandResult.Type
 const PresenceParticipant = Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })
 
 const ServerPayload = Schema.Union([
+  strict(
+    Schema.TaggedStruct("CommandAdmitted", {
+      requestId: RequestId,
+      commandId: CommandId,
+      threadId: ThreadId,
+      threadVersion: ThreadVersion,
+    }),
+  ),
   strict(
     Schema.TaggedStruct("CommandAccepted", {
       requestId: RequestId,
@@ -303,8 +338,6 @@ const ServerPayload = Schema.Union([
     }),
   ),
   strict(Schema.TaggedStruct("ThreadEvent", { event: ThreadProtocolEvent })),
-  strict(Schema.TaggedStruct("ExecutorStatus", { threadId: ThreadId, status: JsonObject })),
-  strict(Schema.TaggedStruct("WorkspaceStatus", { threadId: ThreadId, status: JsonObject })),
   strict(
     Schema.TaggedStruct("WorkspaceFileInspected", {
       requestId: RequestId,

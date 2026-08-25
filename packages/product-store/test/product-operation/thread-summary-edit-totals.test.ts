@@ -90,6 +90,7 @@ const answerSnapshot = (id: Turn.TurnId): ExecutionProjection.Snapshot => ({
 
 const backendFor = (snapshot: (id: Turn.TurnId) => ExecutionProjection.Snapshot) =>
   ExecutionGateway.Service.of({
+    ...ExecutionGateway.makeTest(),
     startTurn: (input) =>
       Effect.succeed({ runId: `${input.turnId}-run`, turnId: input.turnId, threadId: input.threadId }),
     cancelTurn: () => Effect.void,

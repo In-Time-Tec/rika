@@ -62,7 +62,7 @@ const runInteractiveOperationImpl = (
       factory.dependencyContext
     const typedMakeInteractiveSession: (
       workspace: string,
-      settings: { readonly initialThreadId?: string },
+      settings: { readonly initialThreadId?: string; readonly observeExecution?: boolean },
     ) => Effect.Effect<
       { readonly session: InteractiveSession; readonly close: Effect.Effect<void, never, never> },
       OperationError,
@@ -86,7 +86,10 @@ const runInteractiveOperationImpl = (
     }
     const made = yield* typedMakeInteractiveSession(
       input.workspace ?? factory.options.defaultWorkspace,
-      initialThreadId === undefined ? {} : { initialThreadId },
+      {
+        ...(initialThreadId === undefined ? {} : { initialThreadId }),
+        observeExecution: factory.options.executionProjectionOwner !== "external",
+      },
     )
     yield* typedInteractiveRun(input, made.session).pipe(Effect.ensuring(made.close))
   })

@@ -119,7 +119,10 @@ describe("HostedObservability", () => {
         "rika.model_attempt.id": "attempt-01",
       })
 
-      const rendered = Inspectable.toStringUnknown({ logs, spans: spans.map((span) => Object.fromEntries(span.attributes)) })
+      const rendered = Inspectable.toStringUnknown({
+        logs,
+        spans: spans.map((span) => Object.fromEntries(span.attributes)),
+      })
       const immediateNames = [
         "hosted.process_start.success",
         "hosted.first_draw.success",
@@ -142,8 +145,18 @@ describe("HostedObservability", () => {
       ]
       for (const name of [...immediateNames, ...completionNames]) assert.include(rendered, name)
       for (const stage of ["target_resolution", "attach", "model_terminal", "cell_execution", "binding_terminal"])
-        assert.isNumber(spans.find((span) => span.name === `rika.hosted.${stage}`)?.attributes.get("rika.duration.millis"))
-      for (const stage of ["process_start", "first_draw", "admission", "turn_claim", "run_created", "run_claim", "model_start"])
+        assert.isNumber(
+          spans.find((span) => span.name === `rika.hosted.${stage}`)?.attributes.get("rika.duration.millis"),
+        )
+      for (const stage of [
+        "process_start",
+        "first_draw",
+        "admission",
+        "turn_claim",
+        "run_created",
+        "run_claim",
+        "model_start",
+      ])
         assert.notInclude(rendered, `rika.hosted.${stage}","rika.duration.millis`)
       for (const sensitive of [
         "user supplied prose must not survive",
@@ -158,8 +171,21 @@ describe("HostedObservability", () => {
       ])
         assert.notInclude(rendered, sensitive)
       assert.deepStrictEqual(Observability.stages, [
-        "process_start", "first_draw", "target_resolution", "attach", "admission", "turn_claim", "run_created", "run_claim",
-        "model_start", "model_terminal", "cell_admission", "cell_execution", "binding_send", "binding_terminal", "terminal",
+        "process_start",
+        "first_draw",
+        "target_resolution",
+        "attach",
+        "admission",
+        "turn_claim",
+        "run_created",
+        "run_claim",
+        "model_start",
+        "model_terminal",
+        "cell_admission",
+        "cell_execution",
+        "binding_send",
+        "binding_terminal",
+        "terminal",
       ])
     }).pipe(
       Effect.provideService(Logger.CurrentLoggers, new Set([logger])),

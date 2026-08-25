@@ -17,6 +17,7 @@ import { expect, it } from "@effect/vitest"
 import { run } from "../src/command/root/rika-command"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: (input) =>
     Effect.succeed({ runId: `opaque-run:${input.turnId}`, turnId: input.turnId, threadId: input.threadId }),
   cancelTurn: () => Effect.void,

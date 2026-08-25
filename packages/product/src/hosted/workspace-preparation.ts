@@ -54,15 +54,20 @@ export const WorkspacePreparation = Schema.Struct({
   ),
   startedAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   updatedAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  deadlineAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 })
 export type WorkspacePreparation = typeof WorkspacePreparation.Type
 
-export interface PreparationStart {
+export interface PreparationAttempt {
   readonly access: Access
   readonly workspaceId: string
   readonly phase: WorkspacePreparationPhase
   readonly attempt: number
   readonly now: number
+}
+
+export interface PreparationStart extends PreparationAttempt {
+  readonly deadlineAt: number
 }
 
 export interface PreparationOutput {
@@ -80,13 +85,14 @@ export interface WorkspacePreparationsService {
   readonly start: (input: PreparationStart) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
   readonly appendOutput: (input: PreparationOutput) => Effect.Effect<void, WorkspacePreparationError>
   readonly complete: (
-    input: PreparationStart & { readonly evidence: WorkspacePreparationEvidence },
+    input: PreparationAttempt & { readonly evidence: WorkspacePreparationEvidence },
   ) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
   readonly fail: (
-    input: PreparationStart & { readonly message: string; readonly retryable: boolean },
+    input: PreparationAttempt & { readonly message: string; readonly retryable: boolean },
   ) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
   readonly retryAttempt: (access: Access) => Effect.Effect<number, WorkspacePreparationError>
   readonly requireReady: (access: Access) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
+  readonly expireOverdue: (now: number) => Effect.Effect<number, WorkspacePreparationError>
 }
 
 export class WorkspacePreparationError extends Schema.TaggedError<WorkspacePreparationError>()(

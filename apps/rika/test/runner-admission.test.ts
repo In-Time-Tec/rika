@@ -3,6 +3,7 @@ import { Context, Effect, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import {
   CredentialStore,
+  HostedError,
   Http,
   ProfileStore,
   type Credential,
@@ -22,6 +23,7 @@ const profile: Profile = {
   project: "project-1",
 }
 const credential: Credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
+const supervisorId = "10000000-0000-4000-8000-000000000001"
 const registration: RunnerRegistration = {
   deviceId: "device-1" as never,
   checkoutFingerprint: "checkout-1" as never,
@@ -66,6 +68,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
     const registrations = yield* Ref.make<ReadonlyArray<unknown>>([])
     const preferences = yield* Ref.make<ReadonlyArray<string>>([])
     const polls = yield* Ref.make(0)
+    const activeAssignments = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([])
     const statuses = yield* Ref.make<ReadonlyArray<string>>([])
     const http = Http.of({
       ...unusedHttp,
@@ -73,13 +76,15 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
         Ref.update(registrations, (values) => [...values, { fingerprint, runner }]),
       setRemoteThreadCreation: (_origin, _fingerprint, preference) =>
         Ref.update(preferences, (values) => [...values, preference]),
-      pollRunner: () =>
-        Ref.getAndUpdate(polls, (value) => value + 1).pipe(
+      pollRunner: (_origin, _fingerprint, _supervisorId, active) =>
+        Ref.update(activeAssignments, (values) => [...values, active]).pipe(
+          Effect.andThen(Ref.getAndUpdate(polls, (value) => value + 1)),
           Effect.map((attempt) =>
             attempt === 0
-              ? ({ _tag: "Waiting" } as const)
+              ? ({ _tag: "Waiting", reason: "no-work" } as const)
               : ({
                   _tag: "Admitted",
+                  assignmentId: "assignment-1" as never,
                   admissionId: "admission-1",
                   ticket: "ticket-1",
                   executorUrl: "wss://hosted.example.test/executor",
@@ -108,7 +113,12 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
     const context = yield* Layer.build(liveAdmissionLayer.pipe(Layer.provide(dependencies)))
     const admission = Context.get(context, RunnerAdmission)
     const fiber = yield* admission
-      .awaitAdmission(registration, (status) => Ref.update(statuses, (values) => [...values, status._tag]))
+      .awaitAdmission(
+        registration,
+        supervisorId,
+        (status) => Ref.update(statuses, (values) => [...values, status._tag]),
+        Effect.succeed(["assignment-local"]),
+      )
       .pipe(Effect.forkChild)
     yield* TestClock.adjust("1 second")
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-1", ticket: "ticket-1" })
@@ -116,6 +126,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
     expect(yield* Ref.get(preferences)).toEqual(["allowed", "denied"])
     expect(yield* Ref.get(statuses)).toEqual(["Waiting"])
     expect(yield* Ref.get(polls)).toBe(2)
+    expect(yield* Ref.get(activeAssignments)).toEqual([["assignment-local"], ["assignment-local"]])
     expect(yield* Ref.get(registrations)).toEqual([
       {
         fingerprint: "checkout-1",
@@ -138,5 +149,130 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
         },
       },
     ])
+  }),
+)
+
+it.effect("keeps polling after a transient hosted outage", () =>
+  Effect.gen(function* () {
+    const polls = yield* Ref.make(0)
+    const statuses = yield* Ref.make<ReadonlyArray<string>>([])
+    const http = Http.of({
+      ...unusedHttp,
+      registerRunner: () => Effect.void,
+      setRemoteThreadCreation: () => Effect.void,
+      pollRunner: () =>
+        Ref.getAndUpdate(polls, (value) => value + 1).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 0
+              ? Effect.fail(HostedError.make({ kind: "network", message: "hosted service restarting" }))
+              : Effect.succeed({
+                  _tag: "Admitted" as const,
+                  assignmentId: "assignment-after-restart" as never,
+                  admissionId: "admission-after-restart",
+                  ticket: "ticket-after-restart",
+                  executorUrl: "wss://hosted.example.test/executor",
+                  workspaceIdentity: "workspace-1",
+                  expiresAt: 2_000_000_000_000,
+                }),
+          ),
+        ),
+    })
+    const dependencies = Layer.mergeAll(
+      Layer.succeed(Http, http),
+      Layer.succeed(
+        ProfileStore,
+        ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+      ),
+      Layer.succeed(
+        CredentialStore,
+        CredentialStore.of({
+          load: () => Effect.succeed(Option.some(credential)),
+          save: () => Effect.void,
+          remove: () => Effect.succeed(true),
+          serialized: (effect) => effect,
+        }),
+      ),
+    )
+    const context = yield* Layer.build(liveAdmissionLayer.pipe(Layer.provide(dependencies)))
+    const admission = Context.get(context, RunnerAdmission)
+    const fiber = yield* admission
+      .awaitAdmission(
+        registration,
+        supervisorId,
+        (status) =>
+          Ref.update(statuses, (values) => [
+            ...values,
+            status._tag === "Waiting" ? status.message : status._tag,
+          ]),
+        Effect.succeed([]),
+      )
+      .pipe(Effect.forkChild)
+    yield* TestClock.adjust("1 second")
+    expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-restart" })
+    expect(yield* Ref.get(polls)).toBe(2)
+    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting"])
+  }),
+)
+
+it.effect("keeps the Runner alive when registration overlaps a hosted restart", () =>
+  Effect.gen(function* () {
+    const registrations = yield* Ref.make(0)
+    const statuses = yield* Ref.make<ReadonlyArray<string>>([])
+    const http = Http.of({
+      ...unusedHttp,
+      registerRunner: () =>
+        Ref.getAndUpdate(registrations, (value) => value + 1).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 0
+              ? Effect.fail(HostedError.make({ kind: "network", message: "hosted service restarting" }))
+              : Effect.void,
+          ),
+        ),
+      setRemoteThreadCreation: () => Effect.void,
+      pollRunner: () =>
+        Effect.succeed({
+          _tag: "Admitted" as const,
+          assignmentId: "assignment-after-registration" as never,
+          admissionId: "admission-after-registration",
+          ticket: "ticket-after-registration",
+          executorUrl: "wss://hosted.example.test/executor",
+          workspaceIdentity: "workspace-1",
+          expiresAt: 2_000_000_000_000,
+        }),
+    })
+    const dependencies = Layer.mergeAll(
+      Layer.succeed(Http, http),
+      Layer.succeed(
+        ProfileStore,
+        ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+      ),
+      Layer.succeed(
+        CredentialStore,
+        CredentialStore.of({
+          load: () => Effect.succeed(Option.some(credential)),
+          save: () => Effect.void,
+          remove: () => Effect.succeed(true),
+          serialized: (effect) => effect,
+        }),
+      ),
+    )
+    const context = yield* Layer.build(liveAdmissionLayer.pipe(Layer.provide(dependencies)))
+    const admission = Context.get(context, RunnerAdmission)
+    const fiber = yield* admission
+      .awaitAdmission(
+        registration,
+        supervisorId,
+        (status) =>
+          Ref.update(statuses, (values) => [
+            ...values,
+            status._tag === "Waiting" ? status.message : status._tag,
+          ]),
+        Effect.succeed([]),
+      )
+      .pipe(Effect.forkChild)
+    yield* TestClock.adjust("1 second")
+    expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-registration" })
+    expect(yield* Ref.get(registrations)).toBe(2)
+    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting"])
   }),
 )

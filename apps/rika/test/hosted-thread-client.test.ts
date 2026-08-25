@@ -37,6 +37,18 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                     encode({
                       protocolVersion: 1,
                       payload: {
+                        _tag: "CommandAdmitted",
+                        requestId: message.requestId,
+                        commandId: message.command.commandId,
+                        threadId: "thread-1" as never,
+                        threadVersion: "1" as never,
+                      },
+                    }),
+                  )
+                  socket.send(
+                    encode({
+                      protocolVersion: 1,
+                      payload: {
                         _tag: "CommandAccepted",
                         requestId: message.requestId,
                         commandId: message.command.commandId,
@@ -299,6 +311,68 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
         }),
       )
       expect(result).toMatchObject({ _tag: "Failure", failure: { kind: "denied", message: "owner denied" } })
+    }),
+  ),
+)
+
+it.effect("rejects a command response with another durable command identity", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve<{ readonly authenticated: true }>({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch: (request, upgradeServer) =>
+              upgradeServer.upgrade(request, {
+                data: { authenticated: true },
+                headers: { "sec-websocket-protocol": "rika.thread.v1" },
+              })
+                ? undefined
+                : new Response("upgrade failed", { status: 500 }),
+            websocket: {
+              message: (socket, value) => {
+                const message = decode(String(value))
+                if (message.command._tag !== "CreateThread") return
+                socket.send(
+                  encode({
+                    protocolVersion: 1,
+                    payload: {
+                      _tag: "CommandAccepted",
+                      requestId: message.requestId,
+                      commandId: "another-command" as never,
+                      threadId: "thread-1" as never,
+                      threadVersion: "1" as never,
+                      cursor: "0" as never,
+                      result: { _tag: "ThreadCreated", threadId: "thread-1" as never },
+                    },
+                  }),
+                )
+              },
+            },
+          }),
+        ),
+        (runningServer) => Effect.tryPromise(() => runningServer.stop(true)),
+      )
+      const context = yield* Layer.build(layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)))
+      const threads = Context.get(context, ThreadClient)
+      const result = yield* Effect.result(
+        threads.create({
+          ticket: {
+            ticket: "single-use-ticket",
+            expiresAt: "2026-08-21T07:00:00.000Z" as never,
+            websocketUrl: `ws://127.0.0.1:${server.port}`,
+            protocol: "rika.thread.v1",
+          },
+          commandId: "create-1",
+          owner: { kind: "personal" },
+          executorKind: "orb",
+        }),
+      )
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { kind: "protocol", message: expect.stringContaining("command identity") },
+      })
     }),
   ),
 )

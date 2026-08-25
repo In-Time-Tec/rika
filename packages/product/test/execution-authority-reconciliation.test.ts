@@ -1,7 +1,6 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { expect, it } from "@effect/vitest"
@@ -21,41 +20,47 @@ const turn: Turn.AgentExecutionTurn = {
   updatedAt: 2,
 }
 
-it.effect("fails a link-less nonterminal turn and releases its thread for queue draining", () =>
+it.effect("leaves a link-less nonterminal Turn blocked without inventing a terminal outcome", () =>
   Effect.gen(function* () {
-    let settled: Turn.AgentExecutionTurn | undefined
-    let units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit> = []
     const turns = {
       listNonterminal: Effect.succeed([turn]),
       listSteeringAdmissions: Effect.succeed([]),
     } as unknown as TurnRepository.Interface
-    const transcripts = {
-      get: () => Effect.as(Effect.void, undefined),
-      replaceUnits: (candidate: Turn.Turn, replacement: typeof units) =>
-        Effect.sync(() => {
-          settled = candidate as Turn.AgentExecutionTurn
-          units = replacement
-          return undefined as never
-        }),
-    } as unknown as TranscriptRepository.Interface
     const result = yield* make({
       turns,
-      transcripts,
       backend: {} as ExecutionGateway.Interface,
+      setTurnStatus: () => Effect.die("missing execution evidence settled the Turn"),
+    })
+
+    expect(result.active).toEqual([])
+    expect(result.settledThreads).toEqual([])
+  }),
+)
+
+it.effect("settles a Turn from terminal execution authority without consulting transcript projection", () =>
+  Effect.gen(function* () {
+    const linked: Turn.AgentExecutionTurn = {
+      ...turn,
+      executionLink: { runId: "terminal-run", threadId: turn.threadId, turnId: turn.id },
+    }
+    let settled: Turn.AgentExecutionTurn | undefined
+    const result = yield* make({
+      turns: {
+        listNonterminal: Effect.succeed([linked]),
+        listSteeringAdmissions: Effect.succeed([]),
+      } as unknown as TurnRepository.Interface,
+      backend: {
+        inspectTurn: () => Effect.succeed({ status: "completed", cursor: "terminal" }),
+      } as unknown as ExecutionGateway.Interface,
       setTurnStatus: (_id, status, now) =>
         Effect.sync(() => {
-          settled = { ...turn, status, updatedAt: now }
+          settled = { ...linked, status, updatedAt: now }
           return settled
         }),
     })
 
     expect(result.active).toEqual([])
     expect(result.settledThreads).toEqual([turn.threadId])
-    expect(settled?.status).toBe("failed")
-    expect(units).toHaveLength(1)
-    expect(units[0]?.content).toMatchObject({
-      _tag: "Block",
-      block: { _tag: "Error", category: "execution-unavailable" },
-    })
+    expect(settled).toMatchObject({ status: "completed" })
   }),
 )

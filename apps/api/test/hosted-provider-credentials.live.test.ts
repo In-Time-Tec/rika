@@ -118,7 +118,7 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         )
         const context = Context.merge(
           credentialContext,
-          yield* Layer.build(modelRegistryLayer.pipe(Layer.provide(Layer.succeedContext(credentialContext)))),
+          yield* Layer.build(modelRegistryLayer().pipe(Layer.provide(Layer.succeedContext(credentialContext)))),
         )
         const credentials = Context.get(context, HostedProviderCredentials)
         const store = Context.get(context, ProviderCredentialStore)

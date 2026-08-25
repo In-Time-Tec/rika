@@ -18,6 +18,7 @@ import { executionSessionLifecycleLayerTest } from "../support/operation-layer-h
 import { provideLayer } from "../support/product-test-layer"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),

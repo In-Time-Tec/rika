@@ -13,8 +13,7 @@ interface Sandbox {
 
 const server = (sandbox: Sandbox, name: string): Record<string, Call> => sandbox.rika.mcp[name]!
 const flat = (sandbox: Sandbox, name: string): Call => (sandbox.rika.mcp as unknown as Record<string, Call>)[name]!
-const invoke = (call: Call, input: unknown): Effect.Effect<unknown> =>
-  Effect.tryPromise(() => call(input))
+const invoke = (call: Call, input: unknown): Effect.Effect<unknown> => Effect.tryPromise(() => call(input))
 
 const discovered = [
   { name: "read", rawName: "raw_read" },

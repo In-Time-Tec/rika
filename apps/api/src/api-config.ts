@@ -14,6 +14,20 @@ const failure = (dependency: ApiConfigError["dependency"], error: unknown) =>
     message: error instanceof Error ? error.message : String(error),
   })
 
+const configured = (environment: RuntimeEnvironment, name: string) => (environment[name]?.trim() ?? "").length > 0
+
+const executorVariables = [
+  "E2B_API_KEY",
+  "E2B_APP_ID",
+  "E2B_DEPLOYMENT_ID",
+  "E2B_TEMPLATE_ID",
+  "E2B_TEMPLATE_BUILD_ID",
+  "RIKA_EXECUTOR_API_URL",
+  "RIKA_WORKSPACE_CHECKPOINT_BUCKET",
+  "RIKA_WORKSPACE_CHECKPOINT_REGION",
+  "RIKA_WORKSPACE_ENCRYPTION_KEY",
+] as const
+
 export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: RuntimeEnvironment) {
   const environment = yield* Effect.try({
     try: () => runtimeEnvironment(input),
@@ -22,22 +36,26 @@ export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: Runti
   const identity = yield* loadIdentityConfig(environment).pipe(
     Effect.mapError((error) => failure(error.message.startsWith("DATABASE_") ? "database" : "identity", error)),
   )
-  const executor = yield* loadExecutorConfig(environment).pipe(
-    Effect.mapError((error) => failure("executor-provider", error)),
-  )
-  const githubAppId = Number(environment.GITHUB_APP_ID)
+  const configuredExecutorVariables = executorVariables.filter((name) => configured(environment, name))
+  const executor =
+    !identity.production && configuredExecutorVariables.length === 0
+      ? undefined
+      : yield* loadExecutorConfig(environment).pipe(Effect.mapError((error) => failure("executor-provider", error)))
+  const githubAppIdValue = environment.GITHUB_APP_ID?.trim()
   const githubPrivateKey = environment.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n").trim()
-  if (
-    !Number.isSafeInteger(githubAppId) ||
-    githubAppId <= 0 ||
-    githubPrivateKey === undefined ||
-    githubPrivateKey.length === 0
-  ) {
+  const hasGithubAppId = githubAppIdValue !== undefined && githubAppIdValue.length > 0
+  const hasGithubPrivateKey = githubPrivateKey !== undefined && githubPrivateKey.length > 0
+  if (hasGithubAppId !== hasGithubPrivateKey || (identity.production && !hasGithubAppId)) {
     return yield* ApiConfigError.make({
       dependency: "github-app",
-      message: "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required",
+      message: identity.production
+        ? "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required"
+        : "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be configured together",
     })
   }
+  const githubAppId = Number(githubAppIdValue)
+  if (hasGithubAppId && (!Number.isSafeInteger(githubAppId) || githubAppId <= 0))
+    return yield* ApiConfigError.make({ dependency: "github-app", message: "GITHUB_APP_ID must be a positive integer" })
   const encodedCredentialKey = environment.RIKA_PROVIDER_CREDENTIAL_KEY
   if (
     encodedCredentialKey === undefined ||
@@ -52,8 +70,12 @@ export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: Runti
   return {
     environment,
     identity,
-    executor,
-    github: { appId: githubAppId, privateKey: Redacted.make(githubPrivateKey) },
+    developmentSeedEnabled: !identity.production && environment.RIKA_DEV_SEED?.trim() === "1",
+    ...(executor === undefined ? {} : { executor }),
+    ...(hasGithubAppId ? { github: { appId: githubAppId, privateKey: Redacted.make(githubPrivateKey!) } } : {}),
+    ...(identity.production
+      ? {}
+      : { developmentModel: environment.RIKA_DEV_MODEL?.trim() || "minimax/minimax-m2.7:free" }),
     providerCredentialKey: Redacted.make(encodedCredentialKey),
   }
 })

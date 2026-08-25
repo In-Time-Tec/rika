@@ -152,8 +152,19 @@ const reduceKeyboardPickerImpl = (
     return model.modePicker.open
       ? update(model, { _tag: "ModeTurned", offset: 1 })
       : update(model, { _tag: "ModeSelectorOpened" })
-  if (key.ctrl && key.name === "c" && !model.cancelPending && model.busy)
-    return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
+  const unresolvedDraft = model.submittedDrafts.find((draft) => draft.turnId === undefined)
+  const cancellable = model.busy || unresolvedDraft !== undefined
+  if (key.ctrl && key.name === "c" && !model.cancelPending && cancellable)
+    return {
+      ...model,
+      activity: { _tag: "Waiting" },
+      cancelPending: true,
+      pendingAction: {
+        _tag: "Cancel",
+        ...(unresolvedDraft?.submissionId === undefined ? {} : { submissionId: unresolvedDraft.submissionId }),
+        ...(model.currentThreadId === undefined ? {} : { threadId: model.currentThreadId }),
+      },
+    }
   if (key.ctrl && key.name === "return" && model.busy && model.input.length > 0)
     return { ...model, pendingAction: { _tag: "InterruptAndSend", prompt: model.input }, input: "", cursor: 0 }
   if (key.alt && key.name === "t") {

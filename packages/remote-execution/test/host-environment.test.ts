@@ -350,9 +350,7 @@ describe("hosted phase environment", () => {
     ).pipe(
       Effect.provideServiceEffect(
         Crypto.Crypto,
-        Effect.scoped(Layer.build(BunCrypto.layer)).pipe(
-          Effect.map((context) => Context.get(context, Crypto.Crypto)),
-        ),
+        Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
       ),
     ),
   )

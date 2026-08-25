@@ -30,12 +30,7 @@ export type ImmediateStage =
   | "cell_admission"
   | "binding_send"
   | "terminal"
-export type CompletionStage =
-  | "target_resolution"
-  | "attach"
-  | "model_terminal"
-  | "cell_execution"
-  | "binding_terminal"
+export type CompletionStage = "target_resolution" | "attach" | "model_terminal" | "cell_execution" | "binding_terminal"
 export const outcomes = ["success", "failure", "interrupted", "unknown"] as const
 export type Outcome = (typeof outcomes)[number]
 export const tokenKinds = ["input", "output"] as const

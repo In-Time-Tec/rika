@@ -329,7 +329,11 @@ const consumeApi = (
         message.receipt.cursor.value !== current.cursor.value
       )
         return yield* failure("Runner receipt conflicts at the current cursor")
-      yield* Ref.set(session, { ...current, cursor: message.receipt.cursor })
+      yield* Ref.set(session, {
+        ...current,
+        leaseExpiresAt: message.receipt.leaseExpiresAt,
+        cursor: message.receipt.cursor,
+      })
       yield* persist()
     }
     const writeLifecycle = (frame: CellLifecycleFrame) =>
@@ -411,6 +415,7 @@ const consumeApi = (
           writeLifecycle,
           { discard: true },
         )
+      yield* cells.replayBindings(access(current)).pipe(Effect.mapError((error) => failure(error.message)))
     }
     if (message._tag === "CellCancel") {
       const current = yield* Ref.get(session)
@@ -490,6 +495,7 @@ const consumeApi = (
       if (known !== undefined && attempt < known.attempt) return
       if (known !== undefined && (known.state !== "running" || (yield* Ref.get(liveOperations)).has(key))) {
         yield* Effect.forEach(known.frames, writeLifecycle, { discard: true })
+        yield* cells.replayBindings(access(current)).pipe(Effect.mapError((error) => failure(error.message)))
         return
       }
       const identity = known?.attribution ?? attribution(message.request)
@@ -613,105 +619,131 @@ const connected = (
   lifecycle: Semaphore.Semaphore,
   runWorker: (effect: Effect.Effect<void, ForegroundRunnerError>) => Fiber.Fiber<void, ForegroundRunnerError>,
 ) =>
-  Effect.gen(function* () {
-    const previous = yield* Ref.get(sessions)
-    const socket = yield* Socket.makeWebSocket(url)
-    const writer = yield* socket.writer
-    const incoming = yield* Queue.make<IncomingMessage>()
-    const reader = yield* socket
-      .runString((frame) =>
-        decodeApiMessage(frame).pipe(
-          Effect.mapError(() => failure("Controller sent an invalid Runner frame")),
-          Effect.flatMap((message) => Queue.offer(incoming, message)),
+  Effect.scoped(
+    Effect.gen(function* () {
+      const previous = yield* Ref.get(sessions)
+      const socket = yield* Socket.makeWebSocket(url)
+      const writer = yield* socket.writer
+      const incoming = yield* Queue.make<IncomingMessage>()
+      const handshakeResult = yield* Deferred.make<void, ForegroundRunnerError>()
+      const handshake =
+        previous === undefined
+          ? Effect.gen(function* () {
+              const admission = options.admission
+              if (admission === undefined) return yield* failure("Runner admission is unavailable")
+              yield* writer(
+                encodeRunnerMessage({
+                  _tag: "RunnerHello",
+                  hello: {
+                    admissionId: admission.admissionId,
+                    ticket: admission.ticket,
+                    processIncarnation,
+                    capabilities: localCapabilities,
+                    workspaceCapabilities,
+                    cursors: initialCursors,
+                  },
+                }),
+              ).pipe(Effect.mapError(() => failure("Could not write Runner hello")))
+            })
+          : writer(encodeRunnerMessage({ _tag: "ExecutorReconnect", access: access(previous) })).pipe(
+              Effect.mapError(() => failure("Could not write Runner reconnect")),
+            )
+      const onOpen = handshake.pipe(
+        Effect.matchEffect({
+          onFailure: (error) => Deferred.fail(handshakeResult, error),
+          onSuccess: () => Deferred.succeed(handshakeResult, undefined),
+        }),
+        Effect.asVoid,
+      )
+      const reader = yield* socket
+        .runString(
+          (frame) =>
+            decodeApiMessage(frame).pipe(
+              Effect.mapError(() => failure("Controller sent an invalid Runner frame")),
+              Effect.flatMap((message) => Queue.offer(incoming, message)),
+            ),
+          { onOpen },
+        )
+        .pipe(Effect.forkScoped)
+      const session =
+        previous === undefined
+          ? yield* Effect.raceFirst(
+              Deferred.await(handshakeResult).pipe(Effect.andThen(waitForWelcome(incoming, processIncarnation))),
+              Fiber.join(reader).pipe(
+                Effect.flatMap(() => failure("Runner controller connection closed before welcome")),
+                Effect.catch(() => failure("Runner controller connection failed before welcome")),
+              ),
+            ).pipe(
+              Effect.timeoutOrElse({
+                duration: "30 seconds",
+                orElse: () => failure("Runner controller did not welcome the executor"),
+              }),
+            )
+          : yield* Effect.raceFirst(
+              Deferred.await(handshakeResult).pipe(
+                Effect.andThen(waitForReconnect(incoming, previous, processIncarnation)),
+              ),
+              Fiber.join(reader).pipe(
+                Effect.flatMap(() => failure("Runner controller connection closed before reconnect")),
+                Effect.catch(() => failure("Runner controller connection failed before reconnect")),
+              ),
+            ).pipe(
+              Effect.timeoutOrElse({
+                duration: "30 seconds",
+                orElse: () => failure("Runner controller did not accept the reconnect"),
+              }),
+            )
+      yield* Ref.set(sessions, session)
+      yield* Ref.set(activeWriter, writer)
+      yield* cells.replayBindings(access(session)).pipe(Effect.mapError((error) => failure(error.message)))
+      yield* persist()
+      if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
+      const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const current = yield* Ref.get(sessions)
+            if (current === undefined) return
+            yield* writer(
+              encodeRunnerMessage({
+                _tag: "ExecutorHeartbeat",
+                heartbeat: { version: 1, access: access(current), cursor: current.cursor },
+              }),
+            ).pipe(Effect.mapError(() => failure("Could not write Runner heartbeat")))
+          }),
+        ),
+        Effect.forever,
+      )
+      const leaseWatchdog = Effect.gen(function* () {
+        const current = yield* Ref.get(sessions)
+        if (current === undefined) return yield* failure("Runner session is unavailable")
+        const now = yield* Clock.currentTimeMillis
+        const delay = current.leaseExpiresAt - current.heartbeatIntervalMillis - now
+        if (delay <= 0) return yield* failure("Runner controller stopped renewing the executor lease")
+        yield* Effect.sleep(delay)
+      }).pipe(
+        Effect.forever,
+      )
+      return yield* Effect.raceFirst(
+        Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
+        Effect.raceFirst(
+          consumeApi(
+            incoming,
+            writer,
+            sessions,
+            receipts,
+            liveOperations,
+            activeWriter,
+            cells,
+            machine,
+            persist,
+            lifecycle,
+            runWorker,
+          ),
+          Effect.raceFirst(heartbeat, leaseWatchdog),
         ),
       )
-      .pipe(Effect.forkScoped)
-    if (previous === undefined) {
-      const admission = options.admission
-      if (admission === undefined) return yield* failure("Runner admission is unavailable")
-      yield* writer(
-        encodeRunnerMessage({
-          _tag: "RunnerHello",
-          hello: {
-            admissionId: admission.admissionId,
-            ticket: admission.ticket,
-            processIncarnation,
-            capabilities: localCapabilities,
-            workspaceCapabilities,
-            cursors: initialCursors,
-          },
-        }),
-      ).pipe(Effect.mapError(() => failure("Could not write Runner hello")))
-    } else {
-      yield* writer(encodeRunnerMessage({ _tag: "ExecutorReconnect", access: access(previous) })).pipe(
-        Effect.mapError(() => failure("Could not write Runner reconnect")),
-      )
-    }
-    const session =
-      previous === undefined
-        ? yield* Effect.raceFirst(
-            waitForWelcome(incoming, processIncarnation),
-            Fiber.join(reader).pipe(
-              Effect.flatMap(() => failure("Runner controller connection closed before welcome")),
-              Effect.catch(() => failure("Runner controller connection failed before welcome")),
-            ),
-          ).pipe(
-            Effect.timeoutOrElse({
-              duration: "30 seconds",
-              orElse: () => failure("Runner controller did not welcome the executor"),
-            }),
-          )
-        : yield* Effect.raceFirst(
-            waitForReconnect(incoming, previous, processIncarnation),
-            Fiber.join(reader).pipe(
-              Effect.flatMap(() => failure("Runner controller connection closed before reconnect")),
-              Effect.catch(() => failure("Runner controller connection failed before reconnect")),
-            ),
-          ).pipe(
-            Effect.timeoutOrElse({
-              duration: "30 seconds",
-              orElse: () => failure("Runner controller did not accept the reconnect"),
-            }),
-          )
-    yield* Ref.set(sessions, session)
-    yield* Ref.set(activeWriter, writer)
-    yield* cells.replayBindings(access(session)).pipe(Effect.mapError((error) => failure(error.message)))
-    yield* persist()
-    if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
-    const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
-      Effect.andThen(
-        Effect.gen(function* () {
-          const current = yield* Ref.get(sessions)
-          if (current === undefined) return
-          yield* writer(
-            encodeRunnerMessage({
-              _tag: "ExecutorHeartbeat",
-              heartbeat: { version: 1, access: access(current), cursor: current.cursor },
-            }),
-          ).pipe(Effect.mapError(() => failure("Could not write Runner heartbeat")))
-        }),
-      ),
-      Effect.forever,
-      Effect.forkScoped,
-    )
-    yield* heartbeat
-    return yield* Effect.raceFirst(
-      Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
-      consumeApi(
-        incoming,
-        writer,
-        sessions,
-        receipts,
-        liveOperations,
-        activeWriter,
-        cells,
-        machine,
-        persist,
-        lifecycle,
-        runWorker,
-      ),
-    )
-  })
+    }).pipe(Effect.ensuring(Ref.set(activeWriter, undefined))),
+  )
 
 /**
  * Run one foreground Runner executor for the lifetime of the calling scope.
@@ -862,14 +894,6 @@ export const runForegroundRunner = (
       return yield* Effect.forever(connection).pipe(
         Effect.tapError((error) =>
           options.ready === undefined ? Effect.void : Deferred.fail(options.ready, error).pipe(Effect.asVoid),
-        ),
-        Effect.ensuring(
-          Effect.gen(function* () {
-            const session = yield* Ref.get(sessions)
-            const writer = yield* Ref.get(activeWriter)
-            if (session === undefined || writer === undefined) return
-            yield* writer(encodeRunnerMessage({ _tag: "RunnerGoodbye", access: access(session) })).pipe(Effect.ignore)
-          }),
         ),
       )
     }),

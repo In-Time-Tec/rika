@@ -4,7 +4,7 @@ import { Cell, CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
-import { configure } from "../src/route"
+import { configure, remoteCellOperationOutcome } from "../src/route"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as RemoteCells from "../src/remote-cells"
 
@@ -43,6 +43,22 @@ const result = (cellId: string, value = "2") => ({
   stderr: "",
   durationMillis: 1,
   truncation: [],
+})
+
+const remoteRequest = RemoteCells.Request.make({
+  operationKey: "operation-recovery",
+  workspaceId: "workspace-1",
+  sessionId: "session-recovery",
+  threadId: "thread-1",
+  turnId: "turn-1",
+  runId: "run-1",
+  rootRunId: "run-1",
+  toolCallId: "call-recovery",
+  code: "1 + 1",
+  attempt: 0,
+  replayPolicy: "provider-idempotent",
+  admittedAt: "2026-08-25T00:00:00.000Z",
+  deadlineAt: "2026-08-25T00:01:00.000Z",
 })
 
 /** The per-call context TenetKit installs around one tool execution, with the fiber's own signal. */
@@ -193,9 +209,122 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
         toolCallId: "call-session-a",
         attempt: 0,
         code: "1",
-        replayPolicy: "never",
+        replayPolicy: "provider-idempotent",
       }),
     ])
+  }).pipe(Effect.scoped),
+)
+
+it.effect("reconstructs the exact durable tool outcome from a retained remote completion", () =>
+  Effect.gen(function* () {
+    const cell = result("operation-recovery", "42")
+    expect(yield* remoteCellOperationOutcome(remoteRequest, { _tag: "Success", result: cell })).toEqual({
+      _tag: "Success",
+      result: cell,
+      encodedResult: cell,
+    })
+    expect(
+      yield* remoteCellOperationOutcome(remoteRequest, {
+        _tag: "DomainFailure",
+        failure: { kind: "unknown", message: "delivery acknowledgement was lost" },
+      }),
+    ).toMatchObject({
+      _tag: "DomainFailure",
+      failure: {
+        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        sessionId: "session-recovery",
+        cellId: "call-recovery",
+        reason: "transport-lost",
+      },
+      encodedFailure: {
+        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        sessionId: "session-recovery",
+        cellId: "call-recovery",
+        reason: "transport-lost",
+      },
+    })
+  }),
+)
+
+it.effect("decodes an encoded remote cell failure before returning it to TenetKit", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      executionIdentity,
+      kernel,
+      cell: {
+        _tag: "Remote",
+        cells: RemoteCells.layer({
+          execute: () =>
+            Effect.succeed({
+              _tag: "DomainFailure",
+              failure: {
+                _tag: "tenetkit/repl/CellExecutionFailed",
+                cellId: "call-session-failed",
+                epoch: 0,
+                sequence: 1,
+                name: "Error",
+                message: "The requested operation failed",
+                stack: "Error: The requested operation failed",
+                stdout: "",
+                stderr: "",
+                durationMillis: 250,
+                truncation: [],
+              },
+            }),
+        }),
+        admit: () => Effect.void,
+      },
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const outcome = yield* executor
+      .execute(request("throw new Error()", "session-failed"))
+      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-failed")))
+    expect(outcome).toMatchObject({
+      _tag: "DomainFailure",
+      failure: {
+        _tag: "tenetkit/repl/CellExecutionFailed",
+        message: "The requested operation failed",
+      },
+    })
+  }).pipe(Effect.scoped),
+)
+
+it.effect("turns a remote transport loss into a model-visible uncertain cell outcome", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      executionIdentity,
+      kernel,
+      cell: {
+        _tag: "Remote",
+        cells: RemoteCells.layer({
+          execute: () =>
+            Effect.succeed({
+              _tag: "DomainFailure",
+              failure: { kind: "unknown", message: "Executor disconnected after accepting the cell" },
+            }),
+        }),
+        admit: () => Effect.void,
+      },
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const outcome = yield* executor
+      .execute(request("work()", "session-lost"))
+      .pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-lost")))
+    expect(outcome).toMatchObject({
+      _tag: "DomainFailure",
+      failure: {
+        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        sessionId: "session-lost",
+        cellId: "call-session-lost",
+        reason: "transport-lost",
+      },
+    })
   }).pipe(Effect.scoped),
 )
 
@@ -223,8 +352,8 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
     )
     expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
     if (failure._tag === "tenetkit/core/FrameworkFailure") {
-      expect(failure.stage).toBe("encode-success")
-      expect(failure.message).toContain("remote result")
+      expect(failure.stage).toBe("placement")
+      expect(failure.message).toContain("remote cell response is invalid")
     }
   }).pipe(Effect.scoped),
 )
@@ -262,7 +391,7 @@ it.effect("does not blindly retry a remote cell whose outcome is unknown", () =>
     expect(dispatched).toHaveLength(1)
     expect(dispatched[0]).toMatchObject({
       operationKey: "operation-session-unknown",
-      replayPolicy: "never",
+      replayPolicy: "provider-idempotent",
     })
   }).pipe(Effect.scoped),
 )

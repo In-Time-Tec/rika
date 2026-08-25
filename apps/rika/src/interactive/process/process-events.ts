@@ -40,14 +40,21 @@ export const makeEventRouter = (runtime: Runtime) => {
       event._tag === "ThreadRefolding" ||
       event._tag === "ExecutionModelPreviewChanged"
     ) {
+      const acceptsCreatedThread =
+        event._tag === "ThreadViewSnapshot" &&
+        loop.newThreadSelectionGeneration !== undefined &&
+        loop.requestedThreadId !== String(event.snapshot.thread.id) &&
+        loop.model.currentThreadId !== String(event.snapshot.thread.id)
       if (
         event._tag === "ThreadViewSnapshot" &&
         loop.requestedThreadId !== undefined &&
-        loop.requestedThreadId !== String(event.snapshot.thread.id)
+        loop.requestedThreadId !== String(event.snapshot.thread.id) &&
+        !acceptsCreatedThread
       )
         return
       const previousThreadId = loop.model.currentThreadId
       const previousThreadTitle = loop.model.currentThreadTitle
+      const submittedDrafts = acceptsCreatedThread ? loop.model.submittedDrafts : undefined
       const controlled = InteractiveController.update(
         {
           model: loop.model,
@@ -59,8 +66,10 @@ export const makeEventRouter = (runtime: Runtime) => {
       loop.model = controlled.state.model
       loop.threadView = controlled.state.view
       loop.modelPreview = controlled.state.modelPreview
+      if (submittedDrafts !== undefined) loop.model = { ...loop.model, submittedDrafts }
       if (event._tag === "ThreadViewSnapshot") {
         loop.requestedThreadId = String(event.snapshot.thread.id)
+        if (loop.model.currentThreadId !== previousThreadId) loop.newThreadSelectionGeneration = undefined
         loop.model = update(loop.model, { _tag: "ThreadOpenCompleted" })
         if (loop.model.currentThreadId !== previousThreadId || loop.model.currentThreadTitle !== previousThreadTitle)
           refreshTerminalTitle()
@@ -177,6 +186,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       })
     } else if (event._tag === "ThreadActivated") {
       loop.requestedThreadId = event.threadId
+      loop.newThreadSelectionGeneration = undefined
       loop.model = update(loop.model, { _tag: "ThreadActivated", threadId: event.threadId, title: event.title })
       if (loop.model.currentThreadId === event.threadId) refreshTerminalTitle()
     } else if (event._tag === "ThreadPreviewLoaded") {

@@ -3,7 +3,8 @@ import { ModelRegistry } from "tenetkit"
 import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { Context, Effect, Layer, Random, Stream } from "effect"
+import { Context, Effect, Layer, Random, Schema, Stream } from "effect"
+import { Prompt } from "effect/unstable/ai"
 import { memoryLayer as layer } from "./test-adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
@@ -47,6 +48,29 @@ const requestText = (requests: ReadonlyArray<unknown>): string =>
       return (prompt?.content ?? []).flatMap(messageText)
     })
     .join("\n")
+
+it.effect("keeps the plain prompt when structured prompt parts are empty", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        testLayer({ dataRoot: `/tmp/rika-empty-prompt-parts-${yield* Random.nextInt}.db` }),
+      )
+      const gateway = Context.get(context, ExecutionGateway.Service)
+      const prepared = yield* gateway.prepareTurn({
+        threadId: "thread-empty-parts",
+        turnId: "turn-empty-parts",
+        workspaceId: "/workspace",
+        prompt: "plain text survives",
+        promptParts: [],
+        executionRoute: testExecutionRoute(),
+      })
+      const admission = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ prompt: Prompt.Prompt })),
+      )(prepared.rootAdmissionJson)
+      expect(requestText([{ prompt: admission.prompt }])).toBe("plain text survives")
+    }),
+  ),
+)
 
 it.live(
   "continues a thread so each in-memory turn carries the prior conversation",

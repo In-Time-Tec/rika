@@ -8,10 +8,14 @@ import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcri
 import type { Model, ThreadItem } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
 import { overlayPendingSubmissions } from "@rika/terminal/terminal-submission-state"
+import type { Unit } from "@rika/transcript/transcript-unit"
 import type { State, TranscriptEvent, Update } from "./interactive-controller"
 import * as ModelPreview from "./interactive-model-preview"
 
 const unchanged = (state: State): Update => ({ state, preserveAnchor: false })
+
+const agentResponseArrived = (units: ReadonlyArray<Unit>): boolean =>
+  units.some((unit) => unit.content._tag === "Block" || unit.content.role !== "user")
 
 const activeUnitActivity = (
   entry: ThreadView.ThreadViewTurnState | undefined,
@@ -103,7 +107,8 @@ const project = (
   if (preserveOptimisticState) next = overlayPendingSubmissions(next, model)
   next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
   if (active === undefined && model.activeTurnId !== undefined) {
-    const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)?.turn
+    const settledEntry = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)
+    const settled = settledEntry?.turn
     if (settled?.status === "completed") next = updateModel(next, { _tag: "ExecutionCompleted", turnId: settled.id })
     if (settled?.status === "failed") {
       // The snapshot carries the run's real failure in the last Error unit; a generic status
@@ -137,7 +142,14 @@ const project = (
       })
     }
     if (settled?.status === "cancelled")
-      next = updateModel(next, { _tag: "ExecutionCancelled", turnId: settled.id, agentResponseArrived: false })
+      next = updateModel(
+        { ...next, activeTurnId: model.activeTurnId, busy: model.busy },
+        {
+          _tag: "ExecutionCancelled",
+          turnId: settled.id,
+          agentResponseArrived: agentResponseArrived(settledEntry?.units ?? []),
+        },
+      )
   }
   const usage = snapshot.usage.state
   const contextUsage = ((): NonNullable<Model["contextUsage"]> => {
@@ -276,7 +288,14 @@ const projectPatch = (
       })
     }
     if (settled?.status === "cancelled")
-      next = updateModel(next, { _tag: "ExecutionCancelled", turnId: settled.id, agentResponseArrived: false })
+      next = updateModel(
+        { ...next, activeTurnId: model.activeTurnId, busy: model.busy },
+        {
+          _tag: "ExecutionCancelled",
+          turnId: settled.id,
+          agentResponseArrived: agentResponseArrived(view.units(previousActiveTurnId)),
+        },
+      )
   }
   const usage = view.usage.state
   const contextUsage = ((): NonNullable<Model["contextUsage"]> => {

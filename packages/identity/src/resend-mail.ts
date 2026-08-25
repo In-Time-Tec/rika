@@ -4,7 +4,7 @@ import type { IdentityConfig } from "./config"
 import { MailDeliveryError, type MailMessage, type MailSender } from "./mail"
 
 const sendMail = Effect.fn("ResendMail.send")(function* (
-  config: IdentityConfig,
+  config: NonNullable<IdentityConfig["mail"]>,
   client: HttpClient.HttpClient,
   message: MailMessage,
 ) {
@@ -27,7 +27,7 @@ const sendMail = Effect.fn("ResendMail.send")(function* (
 })
 
 export const makeResendMailSender = (input: {
-  readonly config: IdentityConfig
+  readonly config: NonNullable<IdentityConfig["mail"]>
   readonly client: HttpClient.HttpClient
 }): MailSender => ({
   send: (message) =>

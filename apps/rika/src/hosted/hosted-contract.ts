@@ -262,6 +262,8 @@ export interface HttpInterface {
   readonly pollRunner: (
     origin: string,
     checkoutFingerprint: string,
+    supervisorId: string,
+    activeAssignmentIds: ReadonlyArray<string>,
     session: Session,
   ) => Effect.Effect<RunnerPollResult, HostedError>
   readonly putProviderCredential: (

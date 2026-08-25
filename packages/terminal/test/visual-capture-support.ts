@@ -470,7 +470,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         connection: {
           connectivity: "connected",
           target: "orb",
-          activity: "workspace-setup",
+          activity: "workspace-preparing",
           ownership: "organization",
           participants: 2,
         },

@@ -173,6 +173,7 @@ const expected: Record<string, ReadonlyArray<string>> = {
     "migrations/postgres/0018-workspace-preparation.sql",
     "migrations/postgres/0019-approved-repository-publication.sql",
     "migrations/postgres/0020-tool-policy-audit.sql",
+    "migrations/postgres/0024-workspace-preparation-deadline.sql",
     "postgres-product-repositories",
     "postgres-workspace-preparations",
     "memory-thread-search-repository",

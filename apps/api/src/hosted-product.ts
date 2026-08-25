@@ -29,7 +29,7 @@ import {
   HostedModelRegistryError,
   testLayer as hostedModelRegistryTestLayer,
 } from "./hosted-model-registry"
-import { HostedRepositories, testLayer as hostedRepositoriesTestLayer } from "./hosted-repositories"
+import { HostedRepositories, unavailableLayer as hostedRepositoriesUnavailableLayer } from "./hosted-repositories"
 
 export interface AuthenticatedPrincipal {
   readonly userId: string
@@ -48,11 +48,9 @@ export interface ProjectContext {
   readonly role: "viewer" | "controller" | "operator" | "owner"
 }
 
-export interface AdmittedRun {
-  readonly commandId: string
-  readonly turnId: string
-  readonly status: "accepted" | "queued"
-}
+export type AdmittedRun =
+  | { readonly _tag: "Admitted"; readonly commandId: string; readonly turnId: string; readonly status: "accepted" | "queued" }
+  | { readonly _tag: "Cancelled"; readonly commandId: string }
 
 export interface ThreadAuthority {
   readonly ownerId: OwnerId
@@ -122,7 +120,21 @@ export interface HostedProductService {
   readonly pollRunner: (input: {
     readonly principal: AuthenticatedPrincipal
     readonly checkoutFingerprint: string
-  }) => Effect.Effect<{ readonly threadId: string; readonly workspaceId: string } | undefined, HostedProductError>
+    readonly supervisorId: string
+    readonly activeAssignmentIds: ReadonlyArray<string>
+  }) => Effect.Effect<
+    {
+      readonly claimed: boolean
+      readonly assignment?: {
+        readonly assignmentId: string
+        readonly threadId: string
+        readonly workspaceId: string
+        readonly resume: boolean
+        readonly leaseExpiresAt: number | null
+      }
+    },
+    HostedProductError
+  >
   readonly admitRun: (input: {
     readonly principal: AuthenticatedPrincipal
     readonly threadId: string
@@ -131,6 +143,26 @@ export interface HostedProductService {
     readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
   }) => Effect.Effect<AdmittedRun, HostedProductError>
+  readonly admitAuthorizedRun: (input: {
+    readonly authority: ThreadAuthority
+    readonly threadId: string
+    readonly operationKey: string
+    readonly prompt: string
+    readonly promptParts?: ReadonlyArray<PromptPart>
+    readonly mode?: string
+  }) => Effect.Effect<AdmittedRun, HostedProductError>
+  readonly cancelRunAdmission: (input: {
+    readonly principal: AuthenticatedPrincipal
+    readonly threadId: string
+    readonly cancelCommandId: string
+    readonly targetCommandId: string
+  }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
+  readonly cancelAuthorizedRunAdmission: (input: {
+    readonly authority: ThreadAuthority
+    readonly threadId: string
+    readonly cancelCommandId: string
+    readonly targetCommandId: string
+  }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
   readonly authorizeThread: (
     principal: AuthenticatedPrincipal,
     threadId: string,
@@ -148,9 +180,10 @@ export class HostedProduct extends Context.Service<HostedProduct, HostedProductS
 ) {}
 
 export const layer = (options: {
-  readonly templateBuildId: string
-  readonly providerScope: string
-  readonly provision: (assignmentId: string) => Effect.Effect<void, HostedProductError>
+  readonly orb?: {
+    readonly templateBuildId: string
+    readonly providerScope: string
+  }
   readonly promptAdmissionReadiness: Effect.Effect<boolean>
 }) =>
   Layer.effect(
@@ -307,8 +340,6 @@ export const layer = (options: {
               Effect.gen(function* () {
                 const authority = yield* resolveOwner(input.principal, input.owner)
                 const membershipId = "membershipId" in authority ? authority.membershipId : undefined
-                const currentTime = yield* Clock.currentTimeMillis
-                const timestamp = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
                 const selected =
                   input.projectId === undefined
                     ? undefined
@@ -332,10 +363,61 @@ export const layer = (options: {
                     })
                     .pipe(Effect.mapError(() => forbidden()))
                 }
+                const executorKind = input.executorKind
+                if ((executorKind === "runner") !== (input.runnerTarget !== undefined))
+                  return yield* HostedProductError.make({
+                    kind: "invalid",
+                    message: "Runner target is required only for Runner execution",
+                  })
+                const projectId = input.projectId === undefined ? undefined : ProjectId.make(input.projectId)
+                const threadId = ThreadId.make(input.threadId ?? (yield* crypto.randomUUIDv4))
+                yield* sql`SELECT pg_advisory_xact_lock(hashtextextended(${threadId}, 0))`.pipe(
+                  Effect.mapError(unavailable),
+                )
+                const existingRows = yield* sql<{
+                  readonly ownerId: string
+                  readonly projectId: string | null
+                  readonly createdByUserId: string
+                  readonly executorKind: "runner" | "orb"
+                  readonly runnerDeviceId: string | null
+                  readonly runnerCheckoutFingerprint: string | null
+                }>`SELECT thread.owner_id AS "ownerId", thread.project_id AS "projectId",
+                    thread.created_by_user_id AS "createdByUserId", thread.executor_kind AS "executorKind",
+                    assignment.placement ->> 'deviceId' AS "runnerDeviceId",
+                    assignment.placement ->> 'checkoutFingerprint' AS "runnerCheckoutFingerprint"
+                  FROM rika_hosted_threads thread
+                  JOIN rika_hosted_executor_assignments assignment ON assignment.thread_id = thread.id
+                  WHERE thread.id = ${threadId}`.pipe(Effect.mapError(unavailable))
+                const existing = existingRows[0]
+                if (existing !== undefined) {
+                  if (
+                    existing.ownerId !== authority.owner.id ||
+                    existing.projectId !== (projectId ?? null) ||
+                    existing.createdByUserId !== authority.userId ||
+                    existing.executorKind !== executorKind ||
+                    (input.runnerTarget !== undefined &&
+                      (existing.runnerDeviceId !== input.runnerTarget.deviceId ||
+                        existing.runnerCheckoutFingerprint !== input.runnerTarget.checkoutFingerprint))
+                  ) {
+                    return yield* HostedProductError.make({
+                      kind: "conflict",
+                      message: "Thread identity was reused with incompatible input",
+                    })
+                  }
+                  return { threadId: String(threadId) }
+                }
+                const orb = executorKind === "orb" ? options.orb : undefined
+                if (executorKind === "orb" && orb === undefined)
+                  return yield* HostedProductError.make({
+                    kind: "unavailable",
+                    message: "Orb execution is not configured",
+                  })
                 const checkout =
-                  input.executorKind === "orb" && input.projectId !== undefined
+                  executorKind === "orb" && input.projectId !== undefined
                     ? yield* repositories.resolve({ ownerId: authority.owner.id, projectId: input.projectId })
                     : null
+                const currentTime = yield* Clock.currentTimeMillis
+                const timestamp = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
                 const deviceId = yield* activateClient(input.principal, authority.userId)
                 const actor =
                   authority.owner.identity._tag === "PersonalOwner"
@@ -360,12 +442,6 @@ export const layer = (options: {
                   now: timestamp,
                   expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
                 })
-                const executorKind = input.executorKind
-                if ((executorKind === "runner") !== (input.runnerTarget !== undefined))
-                  return yield* HostedProductError.make({
-                    kind: "invalid",
-                    message: "Runner target is required only for Runner execution",
-                  })
                 const runner =
                   input.runnerTarget === undefined
                     ? undefined
@@ -393,31 +469,6 @@ export const layer = (options: {
                   !runner.allowed
                 )
                   return yield* forbidden("Remote Thread creation is denied by the Runner")
-                const projectId = input.projectId === undefined ? undefined : ProjectId.make(input.projectId)
-                const threadId = ThreadId.make(input.threadId ?? (yield* crypto.randomUUIDv4))
-                const existingRows = yield* sql<{
-                  readonly ownerId: string
-                  readonly projectId: string | null
-                  readonly createdByUserId: string
-                  readonly executorKind: "runner" | "orb"
-                }>`SELECT owner_id AS "ownerId", project_id AS "projectId",
-                    created_by_user_id AS "createdByUserId", executor_kind AS "executorKind"
-                  FROM rika_hosted_threads WHERE id = ${threadId}`.pipe(Effect.mapError(unavailable))
-                const existing = existingRows[0]
-                if (existing !== undefined) {
-                  if (
-                    existing.ownerId !== authority.owner.id ||
-                    existing.projectId !== (projectId ?? null) ||
-                    existing.createdByUserId !== authority.userId ||
-                    existing.executorKind !== executorKind
-                  ) {
-                    return yield* HostedProductError.make({
-                      kind: "conflict",
-                      message: "Thread identity was reused with incompatible input",
-                    })
-                  }
-                  return { threadId: String(threadId), assignmentId: undefined, remote: false as const }
-                }
                 const workspaceId = WorkspaceId.make(
                   runner?.workspaceId ??
                     (input.threadId === undefined ? yield* crypto.randomUUIDv4 : `${input.threadId}-workspace`),
@@ -472,31 +523,25 @@ export const layer = (options: {
                   threadId: thread.id,
                   workspaceId,
                   placement:
-                    executorKind === "orb"
+                    orb === undefined
                       ? {
-                          _tag: "OrbPlacement",
-                          templateBuildId: options.templateBuildId,
-                          providerScope: options.providerScope,
-                        }
-                      : {
                           _tag: "RunnerPlacement",
                           deviceId: input.runnerTarget!.deviceId,
                           checkoutFingerprint: input.runnerTarget!.checkoutFingerprint,
                           requestingDeviceId: deviceId,
+                        }
+                      : {
+                          _tag: "OrbPlacement",
+                          templateBuildId: orb.templateBuildId,
+                          providerScope: orb.providerScope,
                         },
                   checkout,
                 })
-                return {
-                  threadId: String(thread.id),
-                  assignmentId: String(assignmentId),
-                  remote: executorKind === "orb",
-                }
+                return { threadId: String(thread.id) }
               }),
             )
             .pipe(Effect.mapError(storeFailure))
-          if (created.remote === true && created.assignmentId !== undefined)
-            yield* options.provision(created.assignmentId)
-          return { threadId: created.threadId }
+          return created
         },
       )
 
@@ -534,22 +579,56 @@ export const layer = (options: {
 
       const pollRunner: HostedProductService["pollRunner"] = Effect.fn("HostedProduct.pollRunner")(function* (input) {
         yield* activateClient(input.principal, BetterAuthUserId.make(input.principal.userId))
-        const rows = yield* sql<{ readonly threadId: string; readonly workspaceId: string }>`SELECT
-              assignment.thread_id AS "threadId", assignment.workspace_id AS "workspaceId"
-            FROM rika_hosted_executor_assignments assignment
-            JOIN rika_hosted_runner_registrations registration
-              ON registration.device_id = ${input.principal.deviceId}
-              AND registration.checkout_fingerprint = ${input.checkoutFingerprint}
-              AND registration.user_id = ${input.principal.userId}
-            WHERE assignment.executor_kind = 'runner' AND assignment.lifecycle = 'pending'
-              AND assignment.placement ->> 'deviceId' = registration.device_id
-              AND assignment.placement ->> 'checkoutFingerprint' = registration.checkout_fingerprint
-              AND (assignment.placement ->> 'requestingDeviceId' = registration.device_id
-                OR registration.remote_thread_creation_allowed = TRUE)
-            ORDER BY assignment.created_at, assignment.id LIMIT 1 FOR UPDATE OF assignment SKIP LOCKED`.pipe(
-          Effect.mapError(unavailable),
+        return yield* sql.withTransaction(
+          Effect.gen(function* () {
+            const claimed = yield* sql`UPDATE rika_hosted_runner_registrations
+              SET supervisor_id = ${input.supervisorId},
+                supervisor_expires_at = clock_timestamp() + interval '10 seconds',
+                updated_at = transaction_timestamp()
+              WHERE device_id = ${input.principal.deviceId}
+                AND checkout_fingerprint = ${input.checkoutFingerprint}
+                AND user_id = ${input.principal.userId}
+                AND (supervisor_id = ${input.supervisorId}
+                  OR supervisor_expires_at IS NULL
+                  OR supervisor_expires_at <= clock_timestamp())
+              RETURNING device_id`
+            if (claimed.length === 0) return { claimed: false as const }
+            const rows = yield* sql<{
+              readonly assignmentId: string
+              readonly threadId: string
+              readonly workspaceId: string
+              readonly resume: boolean
+              readonly leaseExpiresAt: number | null
+            }>`SELECT assignment.id AS "assignmentId", assignment.thread_id AS "threadId",
+                  assignment.workspace_id AS "workspaceId",
+                  assignment.lifecycle = 'active' AND assignment.lease_expires_at > clock_timestamp() AS resume,
+                  (extract(epoch FROM assignment.lease_expires_at) * 1000)::float8 AS "leaseExpiresAt"
+                FROM rika_hosted_executor_assignments assignment
+                JOIN rika_hosted_runner_registrations registration
+                  ON registration.device_id = ${input.principal.deviceId}
+                  AND registration.checkout_fingerprint = ${input.checkoutFingerprint}
+                  AND registration.user_id = ${input.principal.userId}
+                WHERE assignment.executor_kind = 'runner'
+                  AND NOT (${sql.in("assignment.id", input.activeAssignmentIds)})
+                  AND (
+                    assignment.lifecycle IN ('pending', 'paused')
+                    OR (assignment.lifecycle IN ('provisioning', 'awaiting_bootstrap')
+                      AND assignment.bootstrap_expires_at <= clock_timestamp())
+                    OR assignment.lifecycle = 'active'
+                  )
+                  AND assignment.placement ->> 'deviceId' = registration.device_id
+                  AND assignment.placement ->> 'checkoutFingerprint' = registration.checkout_fingerprint
+                  AND (assignment.placement ->> 'requestingDeviceId' = registration.device_id
+                    OR registration.remote_thread_creation_allowed = TRUE)
+                ORDER BY
+                  CASE WHEN assignment.lifecycle = 'active' AND assignment.lease_expires_at > clock_timestamp()
+                    THEN 1 ELSE 0 END,
+                  CASE WHEN assignment.lifecycle = 'active' THEN assignment.last_active_at ELSE assignment.created_at END,
+                  assignment.id
+                LIMIT 1 FOR UPDATE OF assignment SKIP LOCKED`
+            return { claimed: true as const, ...(rows[0] === undefined ? {} : { assignment: rows[0] }) }
+          }).pipe(Effect.mapError(unavailable)),
         )
-        return rows[0]
       }, Effect.mapError(storeFailure))
 
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
@@ -697,22 +776,23 @@ export const layer = (options: {
         Effect.mapError(storeFailure),
       )
 
-      const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
-        const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
+      const admitAuthorizedRun: HostedProductService["admitAuthorizedRun"] = Effect.fn(
+        "HostedProduct.admitAuthorizedRun",
+      )(function* (input) {
         const executionRoute = yield* modelRegistry
-          .resolve(authority.ownerId, input.mode)
+          .resolve(input.authority.ownerId, input.mode)
           .pipe(Effect.mapError(modelFailure))
         const commandId = CommandId.make(input.operationKey)
         const turnId = TurnId.make(yield* crypto.randomUUIDv4)
         const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
         const readinessProof = yield* options.promptAdmissionReadiness
         const admitted = yield* store.admitPrompt({
-          ownerId: authority.ownerId,
+          ownerId: input.authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           commandId,
           idempotencyKey: IdempotencyKey.make(input.operationKey),
           turnId,
-          actor: authority.actor,
+          actor: input.authority.actor,
           prompt: input.prompt,
           ...(input.promptParts === undefined ? {} : { promptParts: input.promptParts }),
           executionRoute,
@@ -720,12 +800,41 @@ export const layer = (options: {
           queueCapacity: 32,
           readinessProof,
         })
+        if (admitted._tag === "Cancelled") return { _tag: "Cancelled" as const, commandId: input.operationKey }
         return {
+          _tag: "Admitted" as const,
           commandId: String(admitted.command.commandId),
           turnId: String(admitted.turnId),
           status: admitted.status,
         }
       }, Effect.mapError(storeFailure))
+
+      const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
+        const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
+        return yield* admitAuthorizedRun({ ...input, authority })
+      })
+
+      const cancelAuthorizedRunAdmission: HostedProductService["cancelAuthorizedRunAdmission"] = Effect.fn(
+        "HostedProduct.cancelAuthorizedRunAdmission",
+      )(function* (input) {
+        const cancelledAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const cancellation = yield* store.cancelPrompt({
+          ownerId: input.authority.ownerId,
+          threadId: ThreadId.make(input.threadId),
+          cancelCommandId: CommandId.make(input.cancelCommandId),
+          targetCommandId: CommandId.make(input.targetCommandId),
+          actor: input.authority.actor,
+          cancelledAt,
+        })
+        return cancellation._tag === "Turn" ? { turnId: String(cancellation.turnId) } : {}
+      }, Effect.mapError(storeFailure))
+
+      const cancelRunAdmission: HostedProductService["cancelRunAdmission"] = Effect.fn(
+        "HostedProduct.cancelRunAdmission",
+      )(function* (input) {
+        const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
+        return yield* cancelAuthorizedRunAdmission({ ...input, authority })
+      })
 
       return HostedProduct.of({
         ready: sql`SELECT 1 FROM rika_hosted_owners LIMIT 1`.pipe(Effect.asVoid, Effect.mapError(unavailable)),
@@ -736,6 +845,9 @@ export const layer = (options: {
         setRemoteThreadCreation,
         pollRunner,
         admitRun,
+        admitAuthorizedRun,
+        cancelRunAdmission,
+        cancelAuthorizedRunAdmission,
         authorizeThread,
         threadExecutionContext,
         activatePrincipal,
@@ -750,8 +862,10 @@ export const postgresTest = (options: {
   readonly promptAdmissionReadiness?: Effect.Effect<boolean>
 }) =>
   layer({
-    ...options,
-    provision: () => Effect.void,
+    orb: {
+      templateBuildId: options.templateBuildId,
+      providerScope: options.providerScope,
+    },
     promptAdmissionReadiness: options.promptAdmissionReadiness ?? Effect.succeed(true),
   }).pipe(
     Layer.provide(
@@ -759,7 +873,7 @@ export const postgresTest = (options: {
         postgresLayer(options.database),
         AuthorizationPolicy.layer,
         hostedModelRegistryTestLayer,
-        hostedRepositoriesTestLayer,
+        hostedRepositoriesUnavailableLayer,
       ),
     ),
   )

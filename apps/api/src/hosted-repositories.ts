@@ -145,18 +145,18 @@ export class HostedRepositories extends Context.Service<HostedRepositories, Host
   "@rika/api/hosted-repositories/HostedRepositories",
 ) {}
 
-export const testLayer = Layer.succeed(
+export const unavailableLayer = Layer.succeed(
   HostedRepositories,
   HostedRepositories.of({
     authorize: () => Effect.void,
-    resolve: () => Effect.fail(failure("configuration", "Test Project repository is not configured")),
-    credential: () => Effect.fail(failure("configuration", "Test repository credential is not configured")),
+    resolve: () => Effect.fail(failure("configuration", "Project repository is not configured")),
+    credential: () => Effect.fail(failure("configuration", "Repository credential is not configured")),
     revoke: () => Effect.void,
-    inspectTarget: () => Effect.fail(failure("configuration", "Test repository target is not configured")),
-    createPullRequest: () => Effect.fail(failure("configuration", "Test pull request creation is not configured")),
-    approvePublication: () => Effect.fail(failure("configuration", "Test publication approval is not configured")),
-    recordPush: () => Effect.fail(failure("configuration", "Test publication result is not configured")),
-    recordPullRequest: () => Effect.fail(failure("configuration", "Test pull request result is not configured")),
+    inspectTarget: () => Effect.fail(failure("configuration", "Repository target is not configured")),
+    createPullRequest: () => Effect.fail(failure("configuration", "Pull request creation is not configured")),
+    approvePublication: () => Effect.fail(failure("configuration", "Publication approval is not configured")),
+    recordPush: () => Effect.fail(failure("configuration", "Publication result is not configured")),
+    recordPullRequest: () => Effect.fail(failure("configuration", "Pull request result is not configured")),
     revokePublicationCredential: () => Effect.void,
   }),
 )

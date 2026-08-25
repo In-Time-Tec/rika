@@ -45,7 +45,6 @@ export const layer = (options: {
   readonly leaseMillis: number
   readonly pollIntervalMillis: number
   readonly concurrency?: number
-  readonly stuckClaimMillis?: number
 }) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -62,65 +61,48 @@ export const layer = (options: {
         ReadonlyMap<string, { readonly claimToken: string; readonly claimedAt: number }>
       >(new Map())
       const concurrency = options.concurrency ?? 1
-      const heartbeatInterval = Math.max(1, Math.floor(options.leaseMillis / 3))
-      const stuckClaimMillis = options.stuckClaimMillis ?? options.leaseMillis * 4
-      const correlation = (claim: TurnClaim): HostedObservability.Correlation => ({
-        threadId: claim.input.threadId,
-        turnId: claim.input.turnId,
-      })
-      const heartbeat = (claim: TurnClaim) => {
-        let stuckReported = false
-        return Effect.forever(
-          Effect.sleep(heartbeatInterval).pipe(
-            Effect.andThen(Clock.currentTimeMillis),
-            Effect.tap((now) => {
-              const claimAge = now - claim.claimedAt
-              if (stuckReported || claimAge < stuckClaimMillis) return Effect.void
-              stuckReported = true
-              return HostedObservability.health("stuck_queue_claim", correlation(claim), {
-                value: claimAge,
-                threshold: stuckClaimMillis,
-              }).pipe(
-                Effect.andThen(
-                  SubscriptionRef.update(health, (state) => ({
-                    ...state,
-                    lastFailure: { at: now, message: "Hosted Turn worker has a stuck queue claim" },
-                  })),
-                ),
-              )
-            }),
-            Effect.flatMap((now) => store.renew(claim, now, options.leaseMillis)),
-            Effect.tap((renewed) =>
-              renewed ? Effect.void : HostedObservability.health("stale_lease", correlation(claim)),
-            ),
-            Effect.filterOrFail(
-              (renewed) => renewed,
-              () => HostedTurnWorkerError.make({ message: `Lost claim for Turn ${claim.input.turnId}` }),
-            ),
-            Effect.asVoid,
-          ),
-        )
-      }
-      const execute = Effect.fn("HostedTurnWorker.execute")(function* (claim: TurnClaim) {
-        if (!claim.prepared) {
-          const prepared = yield* store.prepare(claim, yield* Clock.currentTimeMillis)
-          if (!prepared) {
+      const executeClaim = Effect.fn("HostedTurnWorker.execute")(function* (claim: TurnClaim) {
+        let prepared = claim.preparedExecution
+        if (prepared === undefined) {
+          prepared = yield* gateway.prepareTurn(claim.input)
+          const persisted = yield* store.prepare(claim, prepared, yield* Clock.currentTimeMillis)
+          if (!persisted) {
             yield* store.release(claim)
             return
           }
         }
-        yield* Effect.raceFirst(
-          Effect.gen(function* () {
-            const link = yield* gateway.startTurn(claim.input)
-            yield* HostedObservability.event("run_created", "success", {
-              threadId: claim.input.threadId,
-              turnId: claim.input.turnId,
-              runId: link.runId,
-            })
-            yield* store.complete(claim, link, yield* Clock.currentTimeMillis)
-          }),
-          heartbeat(claim),
-        ).pipe(
+        let link = claim.admissionLink
+        if (link === undefined) {
+          link = yield* gateway.admitTurn(prepared)
+          yield* store.completeAdmission(claim, link, yield* Clock.currentTimeMillis)
+          yield* HostedObservability.event("run_created", "success", {
+            threadId: claim.input.threadId,
+            turnId: claim.input.turnId,
+            runId: link.runId,
+          })
+        }
+        const activationRequested =
+          claim.activationRequested || (yield* store.requestActivation(claim, yield* Clock.currentTimeMillis))
+        const status = activationRequested
+          ? yield* gateway.activateTurn(prepared, link)
+          : yield* gateway
+              .cancelTurn(link, "Cancelled before execution activation")
+              .pipe(Effect.as("cancelled" as const))
+        yield* store.completeActivation(claim, status, yield* Clock.currentTimeMillis)
+      })
+      const execute = (claim: TurnClaim) =>
+        executeClaim(claim).pipe(
+          Effect.raceFirst(
+            Effect.sleep(Math.max(1, Math.floor(options.leaseMillis / 3))).pipe(
+              Effect.andThen(store.renew(claim, options.leaseMillis)),
+              Effect.flatMap((renewed) =>
+                renewed
+                  ? Effect.void
+                  : Effect.fail(HostedTurnWorkerError.make({ message: "Hosted Turn claim was lost" })),
+              ),
+              Effect.forever,
+            ),
+          ),
           Effect.ensuring(
             Ref.update(activeClaims, (claims) => {
               const current = claims.get(claim.input.turnId)
@@ -131,12 +113,10 @@ export const layer = (options: {
             }),
           ),
         )
-      })
       const next = Effect.fn("HostedTurnWorker.next")(function* () {
         const request = {
           workerId: options.workerId,
           claimToken: yield* crypto.randomUUIDv4,
-          now: yield* Clock.currentTimeMillis,
           leaseMillis: options.leaseMillis,
         }
         return (yield* store.claimRecovery(request)) ?? (yield* store.claimNext(request))

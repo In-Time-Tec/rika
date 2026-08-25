@@ -53,8 +53,12 @@ export const InteractiveCommand = Schema.Union([
     authorizationId: Schema.String,
     checkpoint: Schema.optionalKey(ExecutionProjection.Checkpoint),
   }),
-  Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("Cancel") }),
+  Schema.Struct({
+    _tag: Schema.tag("InterruptAndSend"),
+    prompt: Schema.String,
+    targetTurnId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({ _tag: Schema.tag("Cancel"), targetTurnId: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ _tag: Schema.tag("Quit") }),
   Schema.Struct({ _tag: Schema.tag("NewThread") }),
   Schema.Struct({ _tag: Schema.tag("ArchiveThread") }),
@@ -94,9 +98,9 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "DenyAuthorization":
       return session.denyAuthorization(command.turnId, command.authorizationId, command.checkpoint)
     case "InterruptAndSend":
-      return session.interruptAndSend(command.prompt)
+      return session.interruptAndSend(command.prompt, command.targetTurnId)
     case "Cancel":
-      return session.cancel
+      return session.cancel(command.targetTurnId === undefined ? undefined : { turnId: command.targetTurnId })
     case "Quit":
       return session.quit
     case "NewThread":

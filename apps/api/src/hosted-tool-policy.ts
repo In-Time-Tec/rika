@@ -3,6 +3,7 @@ import type { AccessWire, BindingRequest } from "@rika/remote-execution/protocol
 import type { BindingOutcome, BindingResponse } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
+import { approvalTarget } from "@rika/execution"
 import { ActorAttribution, BetterAuthUserId, OrganizationId, type HostedOwner } from "@rika/product/hosted-model"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Context, Crypto, Effect, Encoding, Layer, Option, Schema } from "effect"
@@ -311,11 +312,7 @@ export interface RecordDecisionInput {
   readonly actor: ActorAttribution
   readonly authorizationId: string
   readonly checkpoint: ExecutionProjection.Checkpoint
-  readonly operation: string
-  readonly capability: string
-  readonly authorizationRequest: string
   readonly decision: "approved" | "denied"
-  readonly outcome: "admitted" | "succeeded" | "failed"
 }
 
 export interface HostedToolPolicyService {
@@ -727,18 +724,6 @@ export const layer = Layer.effect(
 
     const recordDecision: HostedToolPolicyService["recordDecision"] = Effect.fn("HostedToolPolicy.recordDecision")(
       function* (input) {
-        const request = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ToolAuthorizationRequest))(
-          input.authorizationRequest,
-        ).pipe(
-          Effect.mapError(() =>
-            HostedToolPolicyError.make({ kind: "conflict", message: "Authorization request is not exact" }),
-          ),
-        )
-        if (input.operation !== `rika.tool.${request.operation.module}.${request.operation.name}`)
-          return yield* HostedToolPolicyError.make({
-            kind: "conflict",
-            message: "Authorization operation does not match its exact request",
-          })
         const rows = yield* sql<AuditRow>`SELECT sequence::text AS sequence, audit_group_id AS "auditGroupId", phase,
           owner_id AS "ownerId", thread_id AS "threadId", turn_id AS "turnId", actor,
           decision_actor AS "decisionActor", policy_id AS "policyId", policy_version AS "policyVersion",
@@ -752,13 +737,6 @@ export const layer = Layer.effect(
         WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND turn_id = ${input.turnId}
           AND phase = 'outcome' AND outcome = 'suspended'
           AND authorization_id = ${input.authorizationId}
-          AND policy_id = ${request.policy.id} AND policy_version = ${request.policy.version}
-          AND module = ${request.operation.module} AND operation = ${request.operation.name}
-          AND capability = ${input.capability}
-          AND arguments_digest = ${request.argumentsDigest} AND workspace_id = ${request.workspace}
-          AND repository IS NOT DISTINCT FROM ${request.repository === null ? null : sql.json(request.repository)}
-          AND branch IS NOT DISTINCT FROM ${request.branch}
-          AND executor = ${sql.json(request.executor)} AND actor = ${sql.json(request.actor)}
         ORDER BY sequence DESC LIMIT 1`.pipe(Effect.mapError(unavailable))
         const row = rows[0]
         if (row === undefined)
@@ -784,15 +762,90 @@ export const layer = Layer.effect(
           branch: record.branch,
           executor: record.executor,
         }
-        yield* insert({
-          context,
-          phase: "decision",
-          decisionActor: input.actor,
-          authorizationId: input.authorizationId,
-          checkpoint: yield* checkpoint(input.checkpoint),
-          decision: input.decision,
-          outcome: input.outcome,
-        })
+        const expectedCheckpoint = yield* checkpoint(input.checkpoint)
+        const expectedTarget = approvalTarget(input.checkpoint, input.authorizationId)
+        if (expectedTarget === undefined)
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization checkpoint does not contain the admitted operation",
+          })
+        const capabilities = yield* Schema.encodeEffect(ToolCapabilitiesJson)(context.policy.capabilities).pipe(
+          Effect.mapError(unavailable),
+        )
+        const existingDecisions = yield* sql<{
+          readonly decisionActor: unknown
+          readonly authorizationCheckpoint: unknown
+          readonly authorizationId: string | null
+          readonly decision: ToolAuditRecord["decision"]
+          readonly outcome: ToolAuditRecord["outcome"]
+        }>`SELECT decision_actor AS "decisionActor", authorization_checkpoint AS "authorizationCheckpoint",
+            authorization_id AS "authorizationId", decision, outcome
+          FROM rika_hosted_tool_audit_records
+          WHERE audit_group_id = ${context.auditGroupId} AND phase = 'decision'`.pipe(Effect.mapError(unavailable))
+        const existingDecision = existingDecisions[0]
+        const sameDecision = (decision: (typeof existingDecisions)[number]) =>
+          canonical(decision.decisionActor) === canonical(input.actor) &&
+          canonical(decision.authorizationCheckpoint) === canonical(expectedCheckpoint) &&
+          decision.authorizationId === input.authorizationId &&
+          decision.decision === input.decision &&
+          decision.outcome === "admitted"
+        if (existingDecision !== undefined) {
+          if (sameDecision(existingDecision)) return
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization already has a different decision",
+          })
+        }
+        const checkpoints = yield* sql<{
+          readonly version: number | null
+          readonly cursor: string | null
+          readonly state: string | null
+        }>`SELECT projector_version AS version, projector_cursor AS cursor, projector_state AS state
+          FROM rika_transcript_checkpoints WHERE turn_id = ${input.turnId}`.pipe(Effect.mapError(unavailable))
+        const current = checkpoints[0]
+        if (current?.version === null || current?.cursor === null || current?.state === null || current === undefined)
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization has no durable execution checkpoint",
+          })
+        if (current.version !== input.checkpoint.version)
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization checkpoint uses a different projection version",
+          })
+        const currentTarget = approvalTarget(
+          { version: input.checkpoint.version, cursor: current.cursor, state: current.state },
+          input.authorizationId,
+        )
+        if (currentTarget === undefined || canonical(currentTarget) !== canonical(expectedTarget))
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization checkpoint does not match the pending operation",
+          })
+        yield* sql`INSERT INTO rika_hosted_tool_audit_records
+          (audit_group_id, phase, owner_id, thread_id, turn_id, actor, decision_actor,
+            policy_id, policy_version, capability, capabilities, side_effect, approval, replay_policy,
+            authorization_id, authorization_checkpoint, module, operation, operation_key, call_id,
+            arguments_digest, workspace_id, repository, branch, executor, decision, outcome)
+          VALUES (${context.auditGroupId}, 'decision', ${context.ownerId}, ${context.threadId}, ${context.turnId},
+            ${sql.json(context.actor)}, ${sql.json(input.actor)}, ${context.policy.id}, ${context.policy.version},
+            ${context.policy.capability}, ${capabilities}::jsonb, ${context.policy.sideEffect}, ${context.policy.approval},
+            ${context.policy.replayPolicy}, ${input.authorizationId}, ${sql.json(expectedCheckpoint)}, ${context.module},
+            ${context.operation}, ${context.operationKey}, ${context.callId}, ${context.argumentsDigest},
+            ${context.workspaceId}, ${context.repository === null ? null : sql.json(context.repository)}, ${context.branch},
+            ${sql.json(context.executor)}, ${input.decision}, 'admitted')
+          ON CONFLICT (audit_group_id) WHERE phase = 'decision' DO NOTHING`.pipe(Effect.mapError(unavailable))
+        const decisions = yield* sql<(typeof existingDecisions)[number]>`SELECT
+            decision_actor AS "decisionActor", authorization_checkpoint AS "authorizationCheckpoint",
+            authorization_id AS "authorizationId", decision, outcome
+          FROM rika_hosted_tool_audit_records
+          WHERE audit_group_id = ${context.auditGroupId} AND phase = 'decision'`.pipe(Effect.mapError(unavailable))
+        const decision = decisions[0]
+        if (decision === undefined || !sameDecision(decision))
+          return yield* HostedToolPolicyError.make({
+            kind: "conflict",
+            message: "Authorization already has a different decision",
+          })
       },
     )
 

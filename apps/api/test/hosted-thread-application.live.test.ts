@@ -67,6 +67,9 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           Layer.succeed(ThreadProtocolStore, {
             initializeThread: () => Effect.die("unused"),
             admitCommand: () => Effect.die("unused"),
+            claimNextCommand: () => Effect.die("unused"),
+            renewCommandClaim: () => Effect.die("unused"),
+            releaseCommandClaim: () => Effect.die("unused"),
             completeCommand: () => Effect.die("unused"),
             appendEvents: () => Effect.die("unused"),
             saveSnapshot: () => Effect.die("unused"),

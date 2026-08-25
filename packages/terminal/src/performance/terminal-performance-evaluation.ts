@@ -145,7 +145,8 @@ const measured = (
     ? { id, unit, value, status: "measured" }
     : { id, unit, value, target, status: "measured", pass: targetPasses(target, value) }
 
-const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number => Number(finishedAt - startedAt) / 1_000_000
+const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number =>
+  Number(finishedAt - startedAt) / 1_000_000
 const renderOnce = (render: Awaited<ReturnType<typeof createTestRenderer>>["renderOnce"]) =>
   Effect.tryPromise(render).pipe(Effect.orDie)
 

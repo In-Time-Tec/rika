@@ -207,6 +207,26 @@ test("does not issue another cancel while cancellation is pending", () => {
   }
   expect(update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
 })
+test("targets an unresolved submission when Ctrl+C arrives before Turn admission", () => {
+  const submitted = update(
+    { ...initial("/work"), currentThreadId: "thread-a", input: "pending prompt" },
+    { _tag: "Submitted", submissionId: "submission-pending" },
+  )
+  const cancelled = update(submitted, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
+  expect(cancelled.cancelPending).toBe(true)
+  expect(cancelled.pendingAction).toEqual({
+    _tag: "Cancel",
+    submissionId: "submission-pending",
+    threadId: "thread-a",
+  })
+  const started = update(cancelled, {
+    _tag: "TurnStarted",
+    turnId: "turn-pending",
+    prompt: "pending prompt",
+    submissionId: "submission-pending",
+  })
+  expect(started.cancelPending).toBe(true)
+})
 test("preserves steering rows across terminal events until authoritative disposition arrives", () => {
   const busy: Model = {
     ...initial("/work"),

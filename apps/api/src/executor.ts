@@ -15,6 +15,7 @@ import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import type { ExecutorAssignment } from "@rika/product/executor-assignment"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   AssignmentLeaseEpoch,
@@ -32,7 +33,7 @@ import {
   type CellResponse as CellResponseValue,
 } from "@rika/remote-execution/protocol"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schedule, Schema } from "effect"
+import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import {
   GatewayError,
   makeGateway,
@@ -52,6 +53,33 @@ export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>
   message: Schema.String,
 }) {}
 
+const orbUnavailable = () => ControllerError.make({ kind: "provider", message: "Orb execution is not configured" })
+
+export const runnerOnlyControllerLayer = Layer.succeed(
+  Controller,
+  Controller.of({
+    provision: () => Effect.fail(orbUnavailable()),
+    replace: () => Effect.fail(orbUnavailable()),
+    resume: () => Effect.fail(orbUnavailable()),
+    pause: () => Effect.fail(orbUnavailable()),
+    kill: () => Effect.fail(orbUnavailable()),
+    portal: () => Effect.fail(orbUnavailable()),
+    hello: () => Effect.fail(orbUnavailable()),
+    reconnect: () => Effect.fail(orbUnavailable()),
+    validateAccess: () => Effect.fail(orbUnavailable()),
+    heartbeat: () => Effect.fail(orbUnavailable()),
+    checkpoint: () => Effect.fail(orbUnavailable()),
+    credential: () => Effect.fail(orbUnavailable()),
+    revokeCredential: () => Effect.fail(orbUnavailable()),
+    workspace: () => Effect.fail(orbUnavailable()),
+    ready: () => Effect.fail(orbUnavailable()),
+    loadSetupCache: () => Effect.fail(orbUnavailable()),
+    storeSetupCache: () => Effect.fail(orbUnavailable()),
+    activatePhase: () => Effect.fail(orbUnavailable()),
+    cleanupOrphans: Effect.succeed([]),
+  }),
+)
+
 const required = (environment: Record<string, string | undefined>, name: string) => {
   const value = environment[name]?.trim()
   return value === undefined || value.length === 0
@@ -70,8 +98,6 @@ const OperationIdentity = Schema.Struct({
   code: Schema.String,
   attempt: Schema.Int,
   replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
-  admittedAt: Schema.NullOr(Schema.String),
-  deadlineAt: Schema.String,
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
 const requiredWorkspaceCapabilities = [
@@ -220,6 +246,17 @@ export const service = Layer.effect(
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
+    yield* Effect.forever(
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) => preparations.expireOverdue(now)),
+        Effect.catch((error) =>
+          Effect.logError("workspace-preparation-expiry.failed").pipe(
+            Effect.annotateLogs("rika.error.message", error.message),
+          ),
+        ),
+        Effect.andThen(Effect.sleep("1 second")),
+      ),
+    ).pipe(Effect.forkScoped)
     const decodeLifecycle = Schema.decodeUnknownEffect(CellLifecycleFrame)
     const decodeResponse = Schema.decodeUnknownEffect(CellResponse)
     const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrame)
@@ -394,7 +431,6 @@ export const service = Layer.effect(
                   state = ${frame.outcome === "unknown" ? "unknown" : "completed"},
                   response = ${sql.json(frame.response)},
                   terminal_outcome = ${frame.outcome},
-                  resolution_state = ${frame.outcome === "unknown" ? "pending" : null},
                   updated_at = clock_timestamp()
                 WHERE assignment_id = ${access.fence.assignmentId} AND operation_key = ${frame.attribution.operationKey}
                   AND attempt = ${frame.attribution.attempt}::bigint
@@ -426,6 +462,32 @@ export const service = Layer.effect(
             GatewayError.make({ kind: "transport", message: "Could not load executor lifecycle frames" }),
           ),
         ),
+      replay: (assignmentId) =>
+        sql<{
+          readonly operationKey: string
+          readonly attempt: string
+          readonly afterCursor: string
+        }>`SELECT operation.operation_key AS "operationKey", operation.attempt::text AS attempt,
+            COALESCE(MAX(frame.cursor), 0)::text AS "afterCursor"
+          FROM rika_hosted_executor_operations operation
+          LEFT JOIN rika_hosted_executor_operation_frames frame
+            ON frame.assignment_id = operation.assignment_id
+            AND frame.operation_key = operation.operation_key
+            AND frame.attempt = operation.attempt
+          WHERE operation.assignment_id = ${assignmentId} AND operation.state = 'dispatched'
+          GROUP BY operation.operation_key, operation.attempt
+          ORDER BY operation.operation_key, operation.attempt`.pipe(
+          Effect.map((rows) =>
+            rows.map((row) => ({
+              operationKey: row.operationKey,
+              attempt: Number(row.attempt),
+              afterCursor: Number(row.afterCursor),
+            })),
+          ),
+          Effect.catchTag("SqlError", () =>
+            GatewayError.make({ kind: "transport", message: "Could not load executor replay queue" }),
+          ),
+        ),
       prepare: (input) =>
         Effect.gen(function* () {
           const encoded = encodeOperationIdentity({
@@ -439,8 +501,6 @@ export const service = Layer.effect(
             code: input.code,
             attempt: input.attempt,
             replayPolicy: input.replayPolicy,
-            admittedAt: input.admittedAt,
-            deadlineAt: input.deadlineAt,
           })
           const requestDigest = Encoding.encodeHex(
             yield* crypto
@@ -496,14 +556,13 @@ export const service = Layer.effect(
             row.toolCallId !== input.toolCallId ||
             row.code !== input.code ||
             Number(row.attempt) !== input.attempt ||
-            row.replayPolicy !== input.replayPolicy ||
-            row.admittedAt !== input.admittedAt ||
-            row.deadlineAt !== input.deadlineAt
+            row.replayPolicy !== input.replayPolicy
           )
             return yield* GatewayError.make({
               kind: "fenced",
               message: "Executor operation key conflicts with a different request",
             })
+          return { admittedAt: row.admittedAt, deadlineAt: row.deadlineAt }
         }).pipe(
           Effect.catchTag("SqlError", () =>
             GatewayError.make({ kind: "transport", message: "Could not persist executor operation" }),
@@ -655,17 +714,19 @@ export const service = Layer.effect(
                 return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
               if (row.state === "completed" || row.state === "unknown")
                 return { _tag: "AlreadyTerminal", result: yield* terminalResult(row) } as const
-              const ambiguous = row.state === "dispatched"
-              const response = ambiguous ? unknownResponse : timeoutResponse
+              if (row.state === "dispatched")
+                return {
+                  _tag: "Resolved",
+                  result: { response: unknownResponse, outcome: "unknown" },
+                } as const
               yield* sql`UPDATE rika_hosted_executor_operations SET
-                state = ${ambiguous ? "unknown" : "completed"}, response = ${sql.json(response)},
-                terminal_outcome = ${ambiguous ? "unknown" : "failed"},
-                resolution_state = ${ambiguous ? "pending" : null}, updated_at = clock_timestamp()
+                state = 'completed', response = ${sql.json(timeoutResponse)}, terminal_outcome = 'failed',
+                updated_at = clock_timestamp()
               WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
                 AND attempt = ${input.attempt}::bigint AND state = ${row.state}`
               return {
                 _tag: "Resolved",
-                result: { response, outcome: ambiguous ? ("unknown" as const) : ("failed" as const) },
+                result: { response: timeoutResponse, outcome: "failed" },
               } as const
             }),
           )
@@ -755,12 +816,14 @@ export const service = Layer.effect(
       {
         start: (input) =>
           Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis
             yield* preparations.start({
               access: yield* preparationAccess(input.access),
               workspaceId: input.workspaceId,
               phase: input.phase,
               attempt: input.attempt,
-              now: yield* Clock.currentTimeMillis,
+              now,
+              deadlineAt: now + 30 * 60 * 1_000,
             })
           }).pipe(Effect.mapError(preparationFailure)),
         output: (input) =>
@@ -816,12 +879,13 @@ export const service = Layer.effect(
     const runnerGateway = yield* makeRunnerGateway(runner, toolPolicy)
     const bindings = Effect.fn("Executor.bindings")(function* (
       input: Parameters<Runtime["run"]>[0],
+      assignmentId: string,
       machine: typeof gateway.machine,
     ) {
       const machineContext = yield* Layer.buildWithScope(
         MachineBindings.layer({
           execute: (request) =>
-            machine(input.threadId, input.operationKey, input.attempt, request).pipe(
+            machine(assignmentId, input.operationKey, input.attempt, request).pipe(
               Effect.mapError((error) => new MachineBindings.Unavailable({ message: error.message })),
             ),
         }),
@@ -879,22 +943,51 @@ export const service = Layer.effect(
                   ),
                 )
             }
-            const active = yield* Effect.suspend(() => assignments.get(initial.id)).pipe(
-              Effect.flatMap((current) =>
-                current?.lifecycle._tag === "Active" &&
-                current.capabilityGeneration === current.generation &&
-                current.capabilities !== null
-                  ? Effect.succeed(current)
-                  : Effect.fail("workspace-not-ready" as const),
-              ),
-              Effect.retry({ times: 300, schedule: Schedule.spaced("100 millis") }),
-              Effect.mapError(() =>
-                ControllerError.make({
-                  kind: "assignment-conflict",
-                  message: "Executor transport connected but workspace capabilities are not ready",
-                }),
-              ),
-            )
+            const awaitActive = (): Effect.Effect<ExecutorAssignment, ControllerError> =>
+              Effect.gen(function* () {
+                const current = yield* assignments
+                  .get(initial.id)
+                  .pipe(
+                    Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })),
+                  )
+                if (current === undefined)
+                  return yield* ControllerError.make({
+                    kind: "assignment-missing",
+                    message: "Executor assignment disappeared while awaiting workspace readiness",
+                  })
+                if (current.generation !== initial.generation)
+                  return yield* ControllerError.make({
+                    kind: "fenced",
+                    message: "Executor assignment was replaced while awaiting workspace readiness",
+                  })
+                if (
+                  current.lifecycle._tag === "Active" &&
+                  current.capabilityGeneration === current.generation &&
+                  current.capabilities !== null
+                )
+                  return current
+                if (
+                  current.lifecycle._tag !== "Provisioning" &&
+                  current.lifecycle._tag !== "AwaitingBootstrap"
+                )
+                  return yield* ControllerError.make({
+                    kind: "assignment-conflict",
+                    message: "Executor workspace stopped preparing before its capabilities became ready",
+                  })
+                const bootstrapLive = yield* assignments
+                  .isBootstrapLive({ assignmentId: current.id, generation: current.generation })
+                  .pipe(
+                    Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })),
+                  )
+                if (!bootstrapLive)
+                  return yield* ControllerError.make({
+                    kind: "assignment-conflict",
+                    message: "Executor workspace preparation exceeded its durable bootstrap deadline",
+                  })
+                yield* Effect.sleep(100)
+                return yield* awaitActive()
+              })
+            const active = yield* awaitActive()
             const capabilities = active.capabilities!
             const unavailable = requiredWorkspaceCapabilities.flatMap((name) => {
               const capability = capabilities[name]
@@ -998,7 +1091,7 @@ export const service = Layer.effect(
             "cell_execution",
             correlation,
             Effect.gen(function* () {
-              const authority = yield* bindings(input, runnerGateway.machine)
+              const authority = yield* bindings(input, assignment.id, runnerGateway.machine)
               return yield* runnerGateway.execute({
                 assignmentId: assignment.id,
                 ...input,
@@ -1007,35 +1100,11 @@ export const service = Layer.effect(
             }),
           )
         }
-        const latestCheckpoint = yield* assignments
-          .latestCheckpoint(assignment.id)
-          .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
-        const phase =
-          assignment.lifecycle._tag === "Paused" ||
-          assignment.lifecycle._tag === "Active" ||
-          Number(assignment.generation) > 1 ||
-          latestCheckpoint !== undefined
-            ? "runtime"
-            : "setup"
-        yield* environment
-          .usePhase({ assignmentId: assignment.id, phase }, (resolved) =>
-            controller.provision(assignment.id, {
-              egress: resolved.egress,
-              environmentDigest: resolved.manifest.digest,
-            }),
-          )
-          .pipe(
-            Effect.mapError((error) =>
-              Schema.is(ControllerError)(error)
-                ? error
-                : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
-            ),
-          )
         return yield* HostedObservability.observe(
           "cell_execution",
           correlation,
           Effect.gen(function* () {
-            const authority = yield* bindings(input, gateway.machine)
+            const authority = yield* bindings(input, assignment.id, gateway.machine)
             const result = yield* gateway.execute({
               assignmentId: assignment.id,
               ...input,

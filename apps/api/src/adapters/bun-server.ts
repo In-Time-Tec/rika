@@ -1,4 +1,4 @@
-import { Deferred, Effect, Exit, FiberSet, Queue, Schema, Scope } from "effect"
+import { Deferred, Effect, Exit, FiberSet, Function, Queue, Schema, Scope } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
 import type { Gateway, Socket } from "../executor-gateway"
@@ -39,6 +39,8 @@ interface AuthoritySession {
   readonly close: (code?: number, reason?: string) => void
 }
 
+const maximumSessionMessages = 1024
+
 export const pollAuthority = (sessions: ReadonlySet<AuthoritySession>) =>
   Effect.sleep("100 millis").pipe(
     Effect.andThen(
@@ -61,15 +63,18 @@ export const pollAuthority = (sessions: ReadonlySet<AuthoritySession>) =>
   )
 
 const ownedSession = (handler: {
+  readonly opened?: (socket: Socket) => Effect.Effect<void>
   readonly receive: (socket: Socket, message: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket | undefined) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
   readonly concurrent?: (message: unknown) => boolean
+  readonly runConcurrent?: (effect: Effect.Effect<void>) => void
+  readonly maximumQueuedBytes?: number
 }): Session => {
   const scope = Scope.makeUnsafe("parallel")
   const fibers = Effect.runSync(FiberSet.make<void, never>().pipe(Effect.provideService(Scope.Scope, scope)))
   const run = Effect.runSync(FiberSet.runtime(fibers)<never>())
-  const serial = Effect.runSync(Queue.unbounded<Effect.Effect<void>>())
+  const serial = Effect.runSync(Queue.bounded<Effect.Effect<void>>(maximumSessionMessages))
   run(
     Queue.take(serial).pipe(
       Effect.flatMap((receive) => receive),
@@ -80,6 +85,7 @@ const ownedSession = (handler: {
   let activeSocket: Bun.ServerWebSocket<Session> | undefined
   let accepting = true
   let closing = false
+  let queuedBytes = 0
   const stop = (socket: Socket | undefined) =>
     Effect.suspend(() => {
       accepting = false
@@ -93,12 +99,31 @@ const ownedSession = (handler: {
   return {
     attach: (socket) => {
       activeSocket = socket
+      if (handler.opened !== undefined) run(handler.opened(socket))
     },
     receive: (socket, message) => {
       if (!accepting) return
-      const receive = handler.receive(socket, message).pipe(Effect.ignore)
-      if (handler.concurrent?.(message) === true) run(receive)
-      else Queue.offerUnsafe(serial, receive)
+      const bytes = typeof message === "string" ? Buffer.byteLength(message) : (message as ArrayBuffer).byteLength
+      if (handler.maximumQueuedBytes !== undefined && queuedBytes + bytes > handler.maximumQueuedBytes) {
+        accepting = false
+        socket.close(1013, "session byte limit exceeded")
+        return
+      }
+      queuedBytes += bytes
+      const receive = handler.receive(socket, message).pipe(
+        Effect.ignore,
+        Effect.ensuring(
+          Effect.sync(() => {
+            queuedBytes -= bytes
+          }),
+        ),
+      )
+      if (handler.concurrent?.(message) === true) (handler.runConcurrent ?? run)(receive)
+      else if (!Queue.offerUnsafe(serial, receive)) {
+        queuedBytes -= bytes
+        accepting = false
+        socket.close(1013, "session overloaded")
+      }
     },
     disconnected: (socket) => {
       accepting = false
@@ -117,7 +142,10 @@ const ownedSession = (handler: {
 }
 
 const ReverseMessage = Schema.fromJsonString(
-  Schema.Struct({ _tag: Schema.Literals(["BindingInvoke", "MachineResult"]), payload: Schema.optional(Schema.Unknown) }),
+  Schema.Struct({
+    _tag: Schema.Literals(["BindingInvoke", "MachineResult"]),
+    payload: Schema.optional(Schema.Unknown),
+  }),
 )
 const decodeReverseMessage = Schema.decodeUnknownExit(ReverseMessage)
 
@@ -126,31 +154,123 @@ const reverse = (message: unknown) => {
   return Exit.isSuccess(decodeReverseMessage(text))
 }
 
-const session = (gateway: SessionGateway): Session =>
+const session = (gateway: SessionGateway, runConcurrent: (effect: Effect.Effect<void>) => void): Session =>
   ownedSession({
     receive: gateway.receive,
     disconnected: (socket) => (socket === undefined ? Effect.void : gateway.disconnected(socket)),
     active: gateway.active,
     concurrent: reverse,
+    runConcurrent,
   })
 
 const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMessage))
 const encodeThreadFrame = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
+const maximumThreadSocketBytes = 32 * 1024 * 1024
 
-const threadSession = (connection: HostedThreadConnection): Session =>
-  ownedSession({
+interface EncodedThreadFrames {
+  readonly values: ReadonlyArray<string>
+  readonly bytes: number
+}
+
+const encodeThreadFrames = (frames: ReadonlyArray<ServerFrame>): EncodedThreadFrames => {
+  const values = frames.map((frame) => encodeThreadFrame(frame))
+  return { values, bytes: values.reduce((total, value) => total + Buffer.byteLength(value), 0) }
+}
+
+const sendEncodedThreadFrames = (socket: Socket, frames: EncodedThreadFrames) =>
+  Effect.sync(() => {
+    const buffered = socket as Bun.ServerWebSocket<Session>
+    if (buffered.getBufferedAmount() + frames.bytes > maximumThreadSocketBytes) {
+      socket.close(1013, "slow Thread consumer")
+      return
+    }
+    for (const encoded of frames.values) socket.send(encoded)
+  })
+
+export const sendThreadFrames: {
+  (socket: Socket, frames: ReadonlyArray<ServerFrame>): Effect.Effect<void>
+  (frames: ReadonlyArray<ServerFrame>): (socket: Socket) => Effect.Effect<void>
+} = Function.dual(2, (socket: Socket, frames: ReadonlyArray<ServerFrame>) =>
+  sendEncodedThreadFrames(socket, encodeThreadFrames(frames)),
+)
+
+const threadSession = (
+  connection: HostedThreadConnection,
+  runCommand: (effect: Effect.Effect<void>) => void,
+): Session => {
+  const outbound = Effect.runSync(Queue.bounded<EncodedThreadFrames>(maximumSessionMessages))
+  const inbound = Effect.runSync(
+    Queue.unbounded<{
+      readonly message: ClientMessage
+      readonly processed: Deferred.Deferred<void>
+    }>(),
+  )
+  let outboundBytes = 0
+  let acceptingOutput = true
+  const enqueue = (socket: Socket, frames: ReadonlyArray<ServerFrame>) =>
+    Effect.sync(() => {
+      if (!acceptingOutput || frames.length === 0) return
+      const encoded = encodeThreadFrames(frames)
+      if (outboundBytes + encoded.bytes > maximumThreadSocketBytes || !Queue.offerUnsafe(outbound, encoded)) {
+        acceptingOutput = false
+        socket.close(1013, "Thread output limit exceeded")
+        return
+      }
+      outboundBytes += encoded.bytes
+    })
+  const write = (socket: Socket) =>
+    Queue.take(outbound).pipe(
+      Effect.tap((frames) =>
+        Effect.sync(() => {
+          outboundBytes -= frames.bytes
+        }).pipe(Effect.andThen(sendEncodedThreadFrames(socket, frames))),
+      ),
+      Effect.forever,
+    )
+  const process = (socket: Socket) =>
+    Effect.raceFirst(
+      Queue.take(inbound).pipe(Effect.map((value) => ({ _tag: "Inbound" as const, value }))),
+      connection.outbound.pipe(
+        Effect.map((frames) => ({ _tag: "Outbound" as const, frames })),
+        Effect.catch(() =>
+          Effect.sync(() => socket.close(1011, "Thread replay failed")).pipe(Effect.andThen(Effect.never)),
+        ),
+      ),
+    ).pipe(
+      Effect.flatMap((next) =>
+        next._tag === "Inbound"
+          ? Effect.sync(() =>
+              runCommand(
+                connection.receive(next.value.message).pipe(
+                  Effect.flatMap((frames) => enqueue(socket, frames)),
+                  Effect.ensuring(Deferred.succeed(next.value.processed, undefined)),
+                ),
+              ),
+            ).pipe(Effect.andThen(Deferred.await(next.value.processed)))
+          : enqueue(socket, next.frames),
+      ),
+      Effect.forever,
+    )
+  return ownedSession({
+    opened: (socket) => Effect.raceFirst(write(socket), process(socket)),
     receive: (socket, message) => {
       const body = typeof message === "string" ? message : Buffer.from(message as Uint8Array).toString("utf8")
       return decodeThreadMessage(body).pipe(
-        Effect.flatMap(connection.receive),
-        Effect.tap((frames) => Effect.sync(() => frames.forEach((current) => socket.send(encodeThreadFrame(current))))),
-        Effect.asVoid,
+        Effect.flatMap((decoded) =>
+          Effect.gen(function* () {
+            const processed = yield* Deferred.make<void>()
+            yield* Queue.offer(inbound, { message: decoded, processed })
+            yield* Deferred.await(processed)
+          }),
+        ),
         Effect.catch(() => Effect.sync(() => socket.close(1003, "invalid Thread protocol frame"))),
       )
     },
     disconnected: () => connection.detach,
-    active: () => connection.active,
+    active: () => Effect.succeed(true),
+    maximumQueuedBytes: maximumThreadSocketBytes,
   })
+}
 
 const threadTicket = (request: Request) => {
   const offered = request.headers
@@ -171,10 +291,15 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         Effect.provideService(Scope.Scope, sessionClosureScope),
       )
       const runSessionClose = yield* FiberSet.runtime(sessionClosures)<never>()
+      const reverseMessages = yield* FiberSet.make<void, never>()
+      const runReverseMessage = yield* FiberSet.runtime(reverseMessages)<never>()
+      const threadCommands = yield* FiberSet.make<void, never>()
+      const runThreadCommand = yield* FiberSet.runtime(threadCommands)<never>()
       const context = yield* Effect.context<never>()
       return yield* Effect.sync(() => {
         const api = makeRikaApiHandler(input.dependencies)
         const sessions = new Set<Session>()
+        const authoritySessions = new Set<Session>()
         const idleWaiters = new Set<() => void>()
         let activeRequests = 0
         let stopping = false
@@ -208,7 +333,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         })
         const supplementalApi = makeSupplementalApiRequestHandler(input.dependencies)
         const server = Bun.serve<Session>({
-          hostname: "0.0.0.0",
+          hostname: input.config.production ? "0.0.0.0" : "127.0.0.1",
           port: input.config.port,
           fetch: (request, bunServer) => {
             if (stopping) return new Response("Server stopping", { status: 503 })
@@ -222,7 +347,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
                 input.dependencies.threads.connect(ticket, threadWebSocketAudience).pipe(
                   Effect.map((connection) => {
                     if (stopping) return new Response("Server stopping", { status: 503 })
-                    const current = threadSession(connection)
+                    const current = threadSession(connection, runThreadCommand)
                     sessions.add(current)
                     if (
                       bunServer.upgrade(request, {
@@ -245,10 +370,12 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
                 pathname === "/api/v1/executors"
                   ? input.dependencies.executor.gateway
                   : input.dependencies.executor.runnerGateway
-              const current = session(gateway)
+              const current = session(gateway, runReverseMessage)
               sessions.add(current)
+              authoritySessions.add(current)
               if (bunServer.upgrade(request, { data: current })) return undefined
               sessions.delete(current)
+              authoritySessions.delete(current)
               runSessionClose(current.drain())
               return new Response("WebSocket upgrade required", { status: 426 })
             }
@@ -262,12 +389,14 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
             return runRequest(bridgePromise(() => supplementalApi(publicRequest)))
           },
           websocket: {
+            maxPayloadLength: maximumThreadSocketBytes,
             open: (socket) => {
               socket.data!.attach(socket)
             },
             message: (socket, message) => socket.data!.receive(socket, message),
             close: (socket) => {
               sessions.delete(socket.data!)
+              authoritySessions.delete(socket.data!)
               runSessionClose(socket.data!.disconnected(socket))
             },
           },
@@ -276,10 +405,13 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           api,
           server,
           sessions,
+          authoritySessions,
           waitForRequests,
           sessionClosureScope,
           sessionClosures,
           runSessionClose,
+          reverseMessages,
+          threadCommands,
           stopAdmission: () => {
             stopping = true
           },
@@ -294,6 +426,8 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
       sessionClosureScope,
       sessionClosures,
       runSessionClose,
+      reverseMessages,
+      threadCommands,
       stopAdmission,
     }) =>
       Effect.gen(function* () {
@@ -308,6 +442,8 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           yield* FiberSet.awaitEmpty(sessionClosures)
           for (const current of draining) current.close()
           yield* FiberSet.awaitEmpty(sessionClosures)
+          yield* FiberSet.awaitEmpty(reverseMessages)
+          yield* FiberSet.awaitEmpty(threadCommands)
           yield* Effect.all([waitForRequests, bridgePromise(() => stopped)], {
             concurrency: "unbounded",
             discard: true,
@@ -315,6 +451,8 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         }).pipe(Effect.timeoutOption("5 seconds"))
         if (graceful._tag === "None") {
           for (const current of draining) current.close()
+          yield* FiberSet.clear(reverseMessages)
+          yield* FiberSet.clear(threadCommands)
           yield* bridgePromise(() => server.stop(true))
         } else {
           yield* Scope.close(sessionClosureScope, Exit.void)
@@ -322,5 +460,7 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
         yield* bridgePromise(api.dispose)
       }),
   ).pipe(
-    Effect.tap((resources) => pollAuthority(resources.sessions).pipe(Effect.forkScoped({ startImmediately: true }))),
+    Effect.tap((resources) =>
+      pollAuthority(resources.authoritySessions).pipe(Effect.forkScoped({ startImmediately: true })),
+    ),
   )

@@ -1,5 +1,6 @@
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import { Defaults } from "@rika/configuration/configuration-settings"
+import { Defaults, type ConfigurationSettings } from "@rika/configuration/configuration-settings"
+import type { ModelRoute } from "@rika/configuration/model-route"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import type { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Schema } from "effect"
@@ -41,27 +42,56 @@ const credentialFailure = (error: HostedProviderCredentialError) => {
 
 const hostedSettings = Defaults.settingsDefaults
 
-export const layer = Layer.effect(
-  HostedModelRegistry,
-  Effect.gen(function* () {
-    const credentials = yield* HostedProviderCredentials
-    const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
-      const mode = (requestedMode ?? hostedSettings.defaultMode) as ModeId
-      const account = yield* credentials.requireOpenAiAccount(ownerId).pipe(Effect.mapError(credentialFailure))
-      return yield* Effect.try({
-        try: () =>
-          ExecutionRouteResolution.resolve(hostedSettings, mode, undefined, {
-            openAiAccount: {
-              credentialIdentity: account.credentialIdentity,
-              fingerprint: account.fingerprint,
-            },
-          }),
-        catch: invalid,
+const developmentSettings = (model: string, credentialIdentity: string): ConfigurationSettings => {
+  const route: ModelRoute.DirectModelRoute = { provider: "openrouter", model, effort: "low" }
+  return {
+    ...hostedSettings,
+    providers: {
+      ...hostedSettings.providers,
+      openrouter: { ...Defaults.providerDefaults.openrouter, credentialIdentity },
+    },
+    modes: Object.fromEntries(
+      Object.keys(hostedSettings.modes).map((mode) => [mode, { main: route, oracle: route, agents: {} }]),
+    ),
+    threadTitle: route,
+    compaction: { summaryModel: route },
+  }
+}
+
+export const layer = (options: { readonly developmentModel?: string } = {}) =>
+  Layer.effect(
+    HostedModelRegistry,
+    Effect.gen(function* () {
+      const credentials = yield* HostedProviderCredentials
+      const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
+        const mode = (requestedMode ?? hostedSettings.defaultMode) as ModeId
+        const developmentModel = options.developmentModel
+        if (developmentModel !== undefined) {
+          const credential = yield* credentials.require(ownerId, "openrouter").pipe(Effect.mapError(credentialFailure))
+          return yield* Effect.try({
+            try: () =>
+              ExecutionRouteResolution.resolve(
+                developmentSettings(developmentModel, credential.credentialIdentity),
+                mode,
+              ),
+            catch: invalid,
+          })
+        }
+        const account = yield* credentials.requireOpenAiAccount(ownerId).pipe(Effect.mapError(credentialFailure))
+        return yield* Effect.try({
+          try: () =>
+            ExecutionRouteResolution.resolve(hostedSettings, mode, undefined, {
+              openAiAccount: {
+                credentialIdentity: account.credentialIdentity,
+                fingerprint: account.fingerprint,
+              },
+            }),
+          catch: invalid,
+        })
       })
-    })
-    return HostedModelRegistry.of({ modes: Object.keys(hostedSettings.modes), resolve })
-  }),
-)
+      return HostedModelRegistry.of({ modes: Object.keys(hostedSettings.modes), resolve })
+    }),
+  )
 
 export const testLayer = Layer.succeed(
   HostedModelRegistry,

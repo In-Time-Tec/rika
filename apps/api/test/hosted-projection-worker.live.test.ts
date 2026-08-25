@@ -11,6 +11,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "./live-platform"
+import { layer as hostedExecutionReconcilerLayer } from "../src/hosted-execution-reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../src/hosted-projection-worker"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -117,7 +118,10 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       const gatewayBase = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
       const build = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
         Layer.buildWithScope(
-          hostedProjectionWorkerLayer({ concurrency: 2, pollIntervalMillis: 10 }).pipe(
+          Layer.merge(
+            hostedProjectionWorkerLayer({ concurrency: 2, pollIntervalMillis: 10 }),
+            hostedExecutionReconcilerLayer({ pollIntervalMillis: 10 }),
+          ).pipe(
             Layer.provide(ProductRepositories.projectionLayer),
             Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })),
             Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),

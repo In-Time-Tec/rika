@@ -138,12 +138,13 @@ export const createInputHandlers = (context: InputContext): Partial<Parameters<t
       render()
     },
     key: (key) => {
-      if (key.ctrl && key.name === "c" && loop.model.busy && loop.model.cancelPending) {
+      const cancellable = loop.model.busy || loop.model.submittedDrafts.some((draft) => draft.turnId === undefined)
+      if (key.ctrl && key.name === "c" && cancellable && loop.model.cancelPending) {
         close()
         return
       }
-      if (loop.model.busy && loop.ctrlCMenuVisible) showCtrlCMenu(false)
-      if (key.ctrl && key.name === "c" && !loop.model.busy) {
+      if (cancellable && loop.ctrlCMenuVisible) showCtrlCMenu(false)
+      if (key.ctrl && key.name === "c" && !cancellable) {
         if (loop.ctrlCMenuVisible) {
           showCtrlCMenu(false)
           close()

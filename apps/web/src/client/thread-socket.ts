@@ -70,8 +70,6 @@ const payloadThreadId = (payload: Payload): string | undefined => {
   if (
     payload._tag === "ThreadAttached" ||
     payload._tag === "ThreadSnapshot" ||
-    payload._tag === "ExecutorStatus" ||
-    payload._tag === "WorkspaceStatus" ||
     payload._tag === "WorkspaceFileInspected" ||
     payload._tag === "PortalOpened" ||
     payload._tag === "PresenceSnapshot" ||
@@ -90,6 +88,20 @@ const supersedeCandidate = () => {
 
 const quarantine = (current: WebSocket, reason: string) => {
   current.close(1002, reason)
+}
+
+const acknowledge = (current: WebSocket, threadId: string, cursor: bigint) => {
+  try {
+    current.send(
+      encodeJson({
+        protocolVersion: 1,
+        requestId: requestId("ack"),
+        command: { _tag: "AcknowledgeCursor", threadId, cursor: cursor.toString() },
+      }),
+    )
+  } catch {
+    quarantine(current, "cursor acknowledgement failed")
+  }
 }
 
 const open = (ticket: Ticket) =>
@@ -184,6 +196,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         attachedView = view
         active = true
         settled = true
+        acknowledge(current, threadId, attachedCursor)
         previous?.close(1000, "replaced")
         resume(Effect.succeed(frame))
         return
@@ -234,6 +247,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         }
         attachedCursor = cursor
         attachedVersion = version
+        acknowledge(current, attachedThreadId!, attachedCursor)
       } else if (payload._tag === "ThreadSnapshot") {
         const cursor = BigInt(payload.cursor)
         const version = BigInt(payload.threadVersion)
@@ -250,6 +264,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         attachedCursor = cursor
         attachedVersion = version
         attachedView = view.success
+        acknowledge(current, attachedThreadId!, attachedCursor)
       }
       emit(frame)
     }

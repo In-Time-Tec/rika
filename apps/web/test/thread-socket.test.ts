@@ -160,6 +160,36 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it.effect("acknowledges every committed attachment, event, and snapshot cursor", () =>
+  Effect.gen(function* () {
+    const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-ack")))
+    const connection = yield* nextConnection(0)
+    attach(connection, "thread-ack", "thread-ack", "3", "3")
+    yield* Fiber.join(connecting)
+    expect(connection.sent.at(-1)).toMatchObject({
+      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "3" },
+    })
+
+    connection.receive(threadEvent("thread-ack", "4", "4"))
+    expect(connection.sent.at(-1)).toMatchObject({
+      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "4" },
+    })
+    connection.receive({
+      protocolVersion: 1,
+      payload: {
+        _tag: "ThreadSnapshot",
+        threadId: "thread-ack",
+        threadVersion: "5",
+        cursor: "5",
+        snapshot: snapshot("thread-ack"),
+      },
+    })
+    expect(connection.sent.at(-1)).toMatchObject({
+      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "5" },
+    })
+  }),
+)
+
 it.effect("keeps A active while B attaches, then makes late A frames and close inert after the atomic swap", () =>
   Effect.gen(function* () {
     const frames: Array<unknown> = []
@@ -195,11 +225,11 @@ it.effect("keeps A active while B attaches, then makes late A frames and close i
 
       first.receive({
         protocolVersion: 1,
-        payload: { _tag: "ExecutorStatus", threadId: "thread-a", status: { state: "connected" } },
+        payload: { _tag: "PresenceSnapshot", threadId: "thread-a", participants: [] },
       })
       second.receive({
         protocolVersion: 1,
-        payload: { _tag: "ExecutorStatus", threadId: "thread-a", status: { state: "connected" } },
+        payload: { _tag: "PresenceSnapshot", threadId: "thread-a", participants: [] },
       })
       expect(frames).toHaveLength(1)
     } finally {

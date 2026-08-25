@@ -642,6 +642,16 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
       return rows[0] === undefined ? undefined : yield* get(ExecutorAssignmentId.make(rows[0].id))
     },
   )
+  const isBootstrapLive: AssignmentsService["isBootstrapLive"] = Effect.fn(
+    "PostgresAssignments.isBootstrapLive",
+  )(function* (input) {
+    const rows = yield* select(input.assignmentId)
+    const row = rows[0]
+    if (row === undefined) return yield* failure("not-found", "Executor assignment does not exist")
+    if (row.generation !== input.generation)
+      return yield* failure("stale-fence", "Executor assignment fence is stale")
+    return (row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap") && row.bootstrapLive
+  })
 
   const latestCheckpoint: AssignmentsService["latestCheckpoint"] = Effect.fn("PostgresAssignments.latestCheckpoint")(
     function* (assignmentId) {
@@ -688,6 +698,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     create,
     get,
     getForThread,
+    isBootstrapLive,
     beginProvisioning,
     beginReplacement,
     bindProviderInstance,

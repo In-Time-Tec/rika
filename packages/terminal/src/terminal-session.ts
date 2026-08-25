@@ -24,7 +24,7 @@ export type Action =
   | { readonly _tag: "ApproveAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "DenyAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
-  | { readonly _tag: "Cancel" }
+  | { readonly _tag: "Cancel"; readonly submissionId?: string; readonly threadId?: string }
   | { readonly _tag: "Quit" }
   | { readonly _tag: "NewThread" }
   | { readonly _tag: "NewOrbThread" }
@@ -56,7 +56,7 @@ export interface Adapter {
   readonly approveAuthorization?: (turnId: string, authorizationId: string) => void
   readonly denyAuthorization?: (turnId: string, authorizationId: string) => void
   readonly interruptAndSend?: (prompt: string) => void
-  readonly cancel?: () => void
+  readonly cancel?: (target: { readonly submissionId?: string; readonly threadId?: string }) => void
   readonly selectThread?: (id: string) => void
 }
 
@@ -95,7 +95,10 @@ export const execute: {
       adapter.interruptAndSend?.(action.prompt)
       return adapter.interruptAndSend !== undefined
     case "Cancel":
-      adapter.cancel?.()
+      adapter.cancel?.({
+        ...(action.submissionId === undefined ? {} : { submissionId: action.submissionId }),
+        ...(action.threadId === undefined ? {} : { threadId: action.threadId }),
+      })
       return adapter.cancel !== undefined
     case "Quit":
       adapter.quit()

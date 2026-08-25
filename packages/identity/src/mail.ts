@@ -15,6 +15,8 @@ export interface MailSender {
   readonly send: (message: MailMessage) => Effect.Effect<void, MailDeliveryError>
 }
 
+export const noOpMailSender: MailSender = { send: () => Effect.void }
+
 const escapeHtml = (value: string) =>
   value
     .replaceAll("&", "&amp;")

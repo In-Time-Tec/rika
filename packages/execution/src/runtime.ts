@@ -3,7 +3,17 @@ import type { HarnessState } from "tenetkit/harness"
 import { KernelPool, KernelStateStore } from "tenetkit/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
-import { Approval, Run, RunTree, Runtime } from "tenetkit/runtime"
+import {
+  Approval,
+  Errors,
+  ExecutableManifest,
+  ExecutableRegistration,
+  Message,
+  Run,
+  RunTree,
+  Runtime,
+  TreePolicy,
+} from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as HostedObservability from "@rika/product/hosted-observability"
@@ -13,6 +23,7 @@ import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStoreShape } from "@rika/product/provider-credential-store"
 import { Cause, Context, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Prompt } from "effect/unstable/ai"
 import {
   type CellResolver,
   type KernelOptions,
@@ -26,6 +37,8 @@ import {
 import * as Postgres from "./postgres"
 import { TreeProjector } from "./projection/tree"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "./projection/semantic-event"
+
+export const approvalTarget = TreeProjector.authorizationTarget
 
 const derivedKernelOptions = (dataRoot: string): KernelOptions => ({ runtimeVersion: Bun.version, dataRoot })
 
@@ -132,7 +145,7 @@ const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFa
     message: message(cause),
   })
 const prompt = (input: ExecutionGateway.StartTurn) =>
-  input.promptParts === undefined
+  input.promptParts === undefined || input.promptParts.length === 0
     ? input.prompt
     : [
         {
@@ -150,7 +163,42 @@ const prompt = (input: ExecutionGateway.StartTurn) =>
         },
       ]
 
-const status = (value: Run.RunStatus): Status => {
+const RuntimeAdmission = Schema.Struct({
+  runId: Schema.String,
+  treePolicy: Schema.optionalKey(TreePolicy.TreePolicy),
+  executable: ExecutableManifest.PinnedExecutable,
+  registrations: Schema.Array(ExecutableRegistration.ExecutableRegistration),
+  sessionId: Schema.String,
+  idempotencyKey: Schema.String,
+  prompt: Prompt.Prompt,
+  metadata: Schema.optionalKey(Message.Metadata),
+})
+const RuntimeAdmissionJson = Schema.fromJsonString(RuntimeAdmission)
+
+const prepareFailure = (cause: unknown) =>
+  ExecutionGateway.PrepareTurnFailure.make({
+    kind: "invalid",
+    message: message(cause),
+  })
+const isAdmitTurnFailure = Schema.is(ExecutionGateway.AdmitTurnFailure)
+const admitFailure = (cause: unknown) => {
+  if (isAdmitTurnFailure(cause)) return cause
+  let kind: ExecutionGateway.AdmitTurnFailure["kind"] = "invalid"
+  if (Schema.is(Errors.IdempotencyConflict)(cause)) kind = "idempotency-conflict"
+  else if (Schema.is(Errors.RunIdConflict)(cause)) kind = "run-id-conflict"
+  else if (Schema.is(Errors.RuntimeUnavailable)(cause)) kind = "unavailable"
+  return ExecutionGateway.AdmitTurnFailure.make({ kind, message: message(cause) })
+}
+const isActivateTurnFailure = Schema.is(ExecutionGateway.ActivateTurnFailure)
+const activateFailure = (cause: unknown) =>
+  isActivateTurnFailure(cause)
+    ? cause
+    : ExecutionGateway.ActivateTurnFailure.make({
+        kind: Schema.is(Errors.RunNotFound)(cause) ? "missing" : "unavailable",
+        message: message(cause),
+      })
+
+const status = (value: Run.RunStatus): Exclude<Status, "accepted"> => {
   switch (value) {
     case "queued":
       return "queued"
@@ -284,11 +332,6 @@ export const makeHostedModelObserver = (link: ExecutionGateway.ExecutionLink) =>
 const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreShape | undefined, hosted: boolean) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime
-    // A replayPolicy:"never" operation interrupted by cancellation parks the Run in
-    // `needs-resolution` until it is explicitly resolved. TenetKit cannot decide the outcome of a
-    // side-effecting operation on its own, so the product settles it as Failed and lets the Run
-    // reach its terminal state. Idempotent and restart-safe: resolving an already-resolved
-    // operation is a no-op, and the operation id is recovered from durable history.
     const resolveParkedOperations = (runId: string, reason: string) =>
       Effect.gen(function* () {
         const inspection = yield* RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
@@ -322,8 +365,6 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         )
       }).pipe(Effect.ignore)
 
-    // Cancellation is only complete once the Run is terminal. A parked Run is resolved and then
-    // re-checked, because the park may be recorded after `cancel` returns.
     const awaitSettledCancellation = (runId: string, reason: string) =>
       resolveParkedOperations(runId, reason).pipe(
         Effect.andThen(RunTree.inspect(runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
@@ -332,7 +373,6 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         ),
         Effect.flatMap((pending) => (pending ? Effect.fail("pending" as const) : Effect.void)),
         Effect.retry({ times: 40, schedule: Schedule.spaced("100 millis") }),
-        Effect.ignore,
       )
 
     const respondToApproval = (
@@ -358,83 +398,168 @@ const make = (options: CommonOptions, credentialStore: ProviderCredentialStoreSh
         )
       }).pipe(Effect.mapError(approvalFailure))
 
+    const prepareTurn: ExecutionGateway.Interface["prepareTurn"] = Effect.fn("ExecutionGateway.prepareTurn")(function* (
+      input,
+    ) {
+      const resolver = resolveCells(options.cells)
+      const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspaceId)
+      if (cell?._tag === "Remote")
+        yield* cell.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
+      const turnCapabilities =
+        options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
+      const configured = yield* configure({
+        executionRoute: input.executionRoute,
+        workspace: input.workspaceId,
+        executionIdentity: { threadId: input.threadId, turnId: input.turnId },
+        kernel: options.kernel,
+        ...(cell === undefined ? {} : { cell }),
+        ...(turnCapabilities === undefined
+          ? {}
+          : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
+        ...(credentialStore === undefined ? {} : { credentialStore }),
+        ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
+        ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
+      })
+      const runId = input.turnId
+      const rootAdmissionJson = yield* Schema.encodeEffect(RuntimeAdmissionJson)({
+        runId,
+        treePolicy: input.executionRoute.subagents,
+        executable: configured.executable,
+        registrations: configured.registrations,
+        sessionId: input.threadId,
+        idempotencyKey: input.turnId,
+        prompt: Prompt.make(prompt(input)),
+        metadata: { threadId: input.threadId, turnId: input.turnId },
+      })
+      if (input.titleIntent === undefined)
+        return {
+          threadId: input.threadId,
+          turnId: input.turnId,
+          runId,
+          rootAdmissionJson,
+          ...(input.reviewIntent === undefined ? {} : { reviewIntent: input.reviewIntent }),
+        }
+      const derivedTitleRunId = titleRunId(runId)
+      const titleAdmissionJson = yield* Schema.encodeEffect(RuntimeAdmissionJson)({
+        runId: derivedTitleRunId,
+        executable: configured.titleExecutable,
+        registrations: configured.titleRegistrations,
+        sessionId: derivedTitleRunId,
+        idempotencyKey: `${input.turnId}:title`,
+        prompt: Prompt.make(`Generate a title for this request:\n\n${input.prompt}`),
+        metadata: {
+          threadId: input.threadId,
+          turnId: input.turnId,
+          productIntent: "thread-title",
+          expectedTitle: input.titleIntent.expectedTitle,
+        },
+      })
+      return {
+        threadId: input.threadId,
+        turnId: input.turnId,
+        runId,
+        titleRunId: derivedTitleRunId,
+        rootAdmissionJson,
+        titleAdmissionJson,
+        ...(input.reviewIntent === undefined ? {} : { reviewIntent: input.reviewIntent }),
+      }
+    }, Effect.mapError(prepareFailure))
+    const admitTurn: ExecutionGateway.Interface["admitTurn"] = Effect.fn("ExecutionGateway.admitTurn")(function* (
+      input,
+    ) {
+      const root = yield* Schema.decodeUnknownEffect(RuntimeAdmissionJson)(input.rootAdmissionJson)
+      if (root.runId !== input.runId || input.runId !== input.turnId)
+        return yield* ExecutionGateway.AdmitTurnFailure.make({
+          kind: "invalid",
+          message: "Prepared root admission identity is invalid",
+        })
+      yield* runtime.admit(root)
+      if (input.titleRunId !== undefined) {
+        if (input.titleAdmissionJson === undefined)
+          return yield* ExecutionGateway.AdmitTurnFailure.make({
+            kind: "invalid",
+            message: "Prepared title admission is missing",
+          })
+        const title = yield* Schema.decodeUnknownEffect(RuntimeAdmissionJson)(input.titleAdmissionJson)
+        if (title.runId !== input.titleRunId)
+          return yield* ExecutionGateway.AdmitTurnFailure.make({
+            kind: "invalid",
+            message: "Prepared title admission identity is invalid",
+          })
+        yield* runtime.admit(title)
+      }
+      return {
+        runId: input.runId,
+        ...(input.titleRunId === undefined ? {} : { titleRunId: input.titleRunId }),
+        turnId: input.turnId,
+        threadId: input.threadId,
+      }
+    }, Effect.mapError(admitFailure))
+    const activateTurn: ExecutionGateway.Interface["activateTurn"] = Effect.fn("ExecutionGateway.activateTurn")(
+      function* (input, link) {
+        if (
+          input.runId !== link.runId ||
+          input.turnId !== link.turnId ||
+          input.threadId !== link.threadId ||
+          input.titleRunId !== link.titleRunId
+        )
+          return yield* ExecutionGateway.ActivateTurnFailure.make({
+            kind: "missing",
+            message: "Prepared Turn does not match its execution link",
+          })
+        const root = yield* runtime.activate({ runId: link.runId })
+        const rootStatus = status(root.status)
+        if (rootStatus !== "running" && rootStatus !== "waiting") {
+          if (link.titleRunId !== undefined)
+            yield* runtime.cancel({ runId: link.titleRunId, reason: "Root Run did not activate" }).pipe(Effect.ignore)
+          if (rootStatus === "queued")
+            return yield* ExecutionGateway.ActivateTurnFailure.make({
+              kind: "unavailable",
+              message: "Runtime activation returned a queued Run",
+            })
+          return rootStatus
+        }
+        yield* Effect.all(
+          [
+            input.reviewIntent === undefined
+              ? Effect.void
+              : runtime.fanOut({
+                  parentRunId: link.runId,
+                  idempotencyKey: `${input.turnId}:review`,
+                  members: input.reviewIntent.lanes.map((lane) => ({
+                    key: lane.key,
+                    selection: "Review",
+                    prompt: lane.prompt,
+                    metadata: {
+                      threadId: input.threadId,
+                      turnId: input.turnId,
+                      productIntent: "review",
+                      reviewLane: lane.key,
+                    },
+                  })),
+                  concurrency: input.reviewIntent.concurrency,
+                  join: { _tag: "AllSettled" },
+                  remainder: "await",
+                }),
+            link.titleRunId === undefined ? Effect.void : runtime.activate({ runId: link.titleRunId }),
+          ],
+          { concurrency: 2, discard: true },
+        )
+        return rootStatus
+      },
+      Effect.mapError(activateFailure),
+    )
     const gateway = ExecutionGateway.Service.of({
       startTurn: (input) =>
         Effect.gen(function* () {
-          const resolver = resolveCells(options.cells)
-          const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspaceId)
-          if (cell?._tag === "Remote")
-            yield* cell.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
-          const turnCapabilities =
-            options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
-          const configured = yield* configure({
-            executionRoute: input.executionRoute,
-            workspace: input.workspaceId,
-            executionIdentity: { threadId: input.threadId, turnId: input.turnId },
-            kernel: options.kernel,
-            ...(cell === undefined ? {} : { cell }),
-            ...(turnCapabilities === undefined
-              ? {}
-              : { skills: turnCapabilities.skills, harnessSnapshot: turnCapabilities.harnessSnapshot }),
-            ...(credentialStore === undefined ? {} : { credentialStore }),
-            ...(options.openAiAccountAccess === undefined ? {} : { openAiAccountAccess: options.openAiAccountAccess }),
-            ...(options.modelServices === undefined ? {} : { modelServices: options.modelServices }),
-          })
-          const receipt = yield* runtime.start({
-            executable: configured.executable,
-            registrations: configured.registrations,
-            treePolicy: input.executionRoute.subagents,
-            sessionId: input.threadId,
-            idempotencyKey: input.turnId,
-            prompt: prompt(input),
-            metadata: { threadId: input.threadId, turnId: input.turnId },
-            ...(input.reviewIntent === undefined
-              ? {}
-              : {
-                  initialFanOuts: [
-                    {
-                      idempotencyKey: `${input.turnId}:review`,
-                      members: input.reviewIntent.lanes.map((lane) => ({
-                        key: lane.key,
-                        selection: "Review",
-                        prompt: lane.prompt,
-                        metadata: {
-                          threadId: input.threadId,
-                          turnId: input.turnId,
-                          productIntent: "review",
-                          reviewLane: lane.key,
-                        },
-                      })),
-                      concurrency: input.reviewIntent.concurrency,
-                      join: { _tag: "AllSettled" },
-                      remainder: "await",
-                    },
-                  ],
-                }),
-          })
-          const derivedTitleRunId = titleRunId(receipt.runId)
-          if (input.titleIntent !== undefined)
-            yield* runtime.start({
-              runId: derivedTitleRunId,
-              executable: configured.titleExecutable,
-              registrations: configured.titleRegistrations,
-              sessionId: derivedTitleRunId,
-              prompt: `Generate a title for this request:\n\n${input.prompt}`,
-              idempotencyKey: `${input.turnId}:title`,
-              metadata: {
-                threadId: input.threadId,
-                turnId: input.turnId,
-                productIntent: "thread-title",
-                expectedTitle: input.titleIntent.expectedTitle,
-              },
-            })
-          return {
-            runId: receipt.runId,
-            ...(input.titleIntent === undefined ? {} : { titleRunId: derivedTitleRunId }),
-            turnId: input.turnId,
-            threadId: input.threadId,
-          }
+          const prepared = yield* prepareTurn(input)
+          const link = yield* admitTurn(prepared)
+          yield* activateTurn(prepared, link)
+          return link
         }).pipe(Effect.mapError((cause) => ExecutionGateway.StartTurnFailure.make({ message: message(cause) }))),
+      prepareTurn,
+      admitTurn,
+      activateTurn,
       cancelTurn: (link, reason) =>
         Effect.all(
           [

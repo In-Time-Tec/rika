@@ -98,15 +98,31 @@ const awaitCommand = Effect.fn("HostedThreadClient.awaitCommand")(function* (
   while (true) {
     const payload = (yield* connection.next).payload
     if (
-      (payload._tag === "CommandAccepted" || payload._tag === "CommandRejected") &&
-      payload.requestId === requestId &&
-      payload.commandId === commandId
+      (payload._tag === "CommandAdmitted" ||
+        payload._tag === "CommandAccepted" ||
+        payload._tag === "CommandRejected") &&
+      payload.requestId === requestId
     ) {
+      if (payload.commandId === undefined || String(payload.commandId) !== commandId)
+        return yield* failure("protocol", "Hosted Thread response command identity did not match its command")
       if (threadId !== undefined && String(payload.threadId) !== threadId)
         return yield* failure("protocol", "Hosted Thread response identity did not match its command")
       if (payload._tag === "CommandRejected") return yield* rejection(payload)
       return payload
     }
+  }
+})
+
+const applyCommand = Effect.fn("HostedThreadClient.applyCommand")(function* (
+  connection: Effect.Success<ReturnType<typeof connect>>,
+  message: ClientMessage,
+  commandId: string,
+  threadId?: string,
+) {
+  yield* connection.send(message)
+  while (true) {
+    const outcome = yield* awaitCommand(connection, message.requestId, commandId, threadId)
+    if (outcome._tag !== "CommandAdmitted") return outcome
   }
 })
 
@@ -147,7 +163,8 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const connection = yield* connect(input.ticket)
             const requestId = `${input.commandId}:create`
-            yield* connection.send(
+            const accepted = yield* applyCommand(
+              connection,
               envelope(requestId, {
                 _tag: "CreateThread",
                 commandId: CommandId.make(input.commandId),
@@ -161,8 +178,8 @@ export const layer = Layer.effect(
                 executorKind: input.executorKind,
                 ...(input.runnerTarget === undefined ? {} : { runnerTarget: input.runnerTarget }),
               }),
+              input.commandId,
             )
-            const accepted = yield* awaitCommand(connection, requestId, input.commandId)
             if (accepted.result._tag !== "ThreadCreated")
               return yield* failure("protocol", "Hosted Thread creation returned the wrong result")
             if (String(accepted.threadId) !== String(accepted.result.threadId))
@@ -178,7 +195,8 @@ export const layer = Layer.effect(
             const connection = yield* connect(input.ticket)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:submit`
-            yield* connection.send(
+            const accepted = yield* applyCommand(
+              connection,
               envelope(requestId, {
                 _tag: "SubmitPrompt",
                 threadId: ThreadId.make(input.threadId),
@@ -188,8 +206,9 @@ export const layer = Layer.effect(
                 text,
                 ...(input.request.mode === undefined ? {} : { mode: input.request.mode }),
               }),
+              input.commandId,
+              input.threadId,
             )
-            const accepted = yield* awaitCommand(connection, requestId, input.commandId, input.threadId)
             if (accepted.result._tag !== "PromptAdmitted")
               return yield* failure("protocol", "Hosted prompt returned the wrong result")
             return { commandId: input.commandId, status: accepted.result.status }
@@ -201,7 +220,8 @@ export const layer = Layer.effect(
             const connection = yield* connect(input.ticket)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:service`
-            yield* connection.send(
+            const accepted = yield* applyCommand(
+              connection,
               envelope(requestId, {
                 _tag: "EnsureRepositoryService",
                 threadId: ThreadId.make(input.threadId),
@@ -210,8 +230,9 @@ export const layer = Layer.effect(
                 expectedThreadVersion: snapshot.threadVersion,
                 service: input.service,
               }),
+              input.commandId,
+              input.threadId,
             )
-            const accepted = yield* awaitCommand(connection, requestId, input.commandId, input.threadId)
             if (accepted.result._tag !== "Applied")
               return yield* failure("protocol", "Repository service returned the wrong result")
           }),
@@ -222,7 +243,8 @@ export const layer = Layer.effect(
             const connection = yield* connect(input.ticket)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:service`
-            yield* connection.send(
+            const accepted = yield* applyCommand(
+              connection,
               envelope(requestId, {
                 _tag: "StopRepositoryService",
                 threadId: ThreadId.make(input.threadId),
@@ -231,8 +253,9 @@ export const layer = Layer.effect(
                 expectedThreadVersion: snapshot.threadVersion,
                 serviceId: input.serviceId,
               }),
+              input.commandId,
+              input.threadId,
             )
-            const accepted = yield* awaitCommand(connection, requestId, input.commandId, input.threadId)
             if (accepted.result._tag !== "Applied")
               return yield* failure("protocol", "Repository service returned the wrong result")
           }),

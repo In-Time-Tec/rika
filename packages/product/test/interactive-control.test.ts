@@ -203,7 +203,7 @@ it.effect("admits a queued prompt longer than the composer convenience limit", (
   }),
 )
 
-it.effect("rejects a stale checkpoint and delivers a typed denial for the exact operation", () =>
+it.effect("delivers each exact authorization checkpoint without consulting a newer projection", () =>
   Effect.gen(function* () {
     const checkpoint = {
       version: ExecutionProjection.projectionVersion,
@@ -233,22 +233,18 @@ it.effect("rejects a stale checkpoint and delivers a typed denial for the exact 
       fail: operationError,
     })
 
-    yield* control.approveAuthorization("turn-1", "authorization-1", {
+    const earlierCheckpoint = {
       ...checkpoint,
-      cursor: "stale-cursor",
-    })
-    expect(responses).toEqual([])
-    expect(events).toMatchObject([
-      {
-        _tag: "ExecutionControlFailed",
-        threadId: "thread-1",
-        turnId: "turn-1",
-        action: "approve",
-        failure: { message: "Authorization checkpoint is stale" },
-      },
-    ])
+      cursor: "earlier-cursor",
+    }
+    yield* control.approveAuthorization("turn-1", "authorization-1", earlierCheckpoint)
+    expect(responses).toEqual([["approve", { authorizationId: "authorization-1", checkpoint: earlierCheckpoint }]])
+    expect(events).toEqual([])
 
     yield* control.denyAuthorization("turn-1", "authorization-1", checkpoint)
-    expect(responses).toEqual([["deny", { authorizationId: "authorization-1", checkpoint }]])
+    expect(responses).toEqual([
+      ["approve", { authorizationId: "authorization-1", checkpoint: earlierCheckpoint }],
+      ["deny", { authorizationId: "authorization-1", checkpoint }],
+    ])
   }),
 )

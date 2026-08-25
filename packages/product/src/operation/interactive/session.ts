@@ -150,6 +150,7 @@ const makeInteractiveSupervisionComponentsImpl = (
     claimTurnObserver: input.claimTurnObserver,
     observeTurn: following.observeTurn,
     recoveryOwner: input.recoveryOwner,
+    observeExecution: input.observeExecution,
     sessionThreadViews: input.sessionThreadViews,
     sessionId: input.sessionId,
     getSelectedThreadId: state.getSelectedThreadId,
@@ -289,11 +290,19 @@ export const makeInteractiveSession = (
   input: InteractiveSessionInput,
 ): ((
   workspace: string,
-  settings?: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean },
+  settings?: {
+    readonly initialThreadId?: string
+    readonly recoveryOwner?: boolean
+    readonly observeExecution?: boolean
+  },
 ) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>) =>
   Effect.fn("ProductOperation.makeInteractiveSession")(function* (
     workspace: string,
-    settings: { readonly initialThreadId?: string; readonly recoveryOwner?: boolean } = {},
+    settings: {
+      readonly initialThreadId?: string
+      readonly recoveryOwner?: boolean
+      readonly observeExecution?: boolean
+    } = {},
   ) {
     const sessionId = input.nextSessionId()
     const supervisionInitialized = yield* Deferred.make<void, InteractiveSupervisionError>()
@@ -318,6 +327,7 @@ export const makeInteractiveSession = (
       workspace,
       sessionId,
       recoveryOwner: settings.recoveryOwner ?? false,
+      observeExecution: settings.observeExecution ?? true,
       supervisionInitialized,
       emit: state.emit,
       dispatchFailure: state.dispatchFailure,
@@ -362,8 +372,9 @@ export const makeInteractiveSession = (
         state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId, checkpoint)),
       denyAuthorization: (turnId, authorizationId, checkpoint) =>
         state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId, checkpoint)),
-      interruptAndSend: (prompt) => state.composition.admitLocal(implementation.interruptAndSend(prompt)),
-      cancel: state.composition.admitLocal(implementation.cancel),
+      interruptAndSend: (prompt, targetTurnId) =>
+        state.composition.admitLocal(implementation.interruptAndSend(prompt, targetTurnId)),
+      cancel: (target) => state.composition.admitLocal(implementation.cancel(target)),
       quit: implementation.quit,
       selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),
       readQueue: (threadId) => state.composition.admitLocal(implementation.readQueue(threadId)),

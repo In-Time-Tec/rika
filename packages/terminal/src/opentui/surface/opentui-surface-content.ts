@@ -33,18 +33,10 @@ const connectionActivity = (model: Model): string | undefined => {
   switch (connection?.activity) {
     case "authenticating":
       return "Authenticating"
-    case "executor-connecting":
-      return "Connecting executor"
     case "workspace-preparing":
       return "Preparing workspace"
-    case "workspace-setup":
-      return "Setting up workspace"
-    case "workspace-resuming":
-      return "Resuming workspace"
-    case "lease-active":
-      return "Executing"
-    case "retrying":
-      return "Retrying"
+    case "workspace-failed":
+      return "Workspace preparation failed"
     case "approval-required":
       return "Approval required"
     case "unknown-operation":
@@ -58,9 +50,7 @@ const authoritativeActivity = (model: Model): string | undefined => {
   switch (model.connection?.activity) {
     case "authenticating":
     case "workspace-preparing":
-    case "workspace-setup":
-    case "workspace-resuming":
-    case "retrying":
+    case "workspace-failed":
     case "approval-required":
     case "unknown-operation":
       return connectionActivity(model)

@@ -24,7 +24,7 @@ import { Executor, service as executorService } from "../../api/src/executor"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../api/src/hosted-environment"
 import { HostedProduct, layer as hostedProductLayer } from "../../api/src/hosted-product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../api/src/hosted-model-registry"
-import { testLayer as hostedRepositoriesTestLayer } from "../../api/src/hosted-repositories"
+import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../api/src/hosted-repositories"
 import { layer as runnerExecutorLayer } from "../../api/src/runner-executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "../../api/src/hosted-tool-policy"
 import { makeRikaApiHandler } from "../../api/src/api"
@@ -256,7 +256,7 @@ it.layer(BunServices.layer)((test) => {
             AuthorizationPolicy.layer,
             BunCrypto.layer,
             hostedModelRegistryTestLayer,
-            hostedRepositoriesTestLayer,
+            hostedRepositoriesUnavailableLayer,
           )
           const executionReadinessCheck = Effect.succeed({
             backend: "postgres" as const,
@@ -264,10 +264,11 @@ it.layer(BunServices.layer)((test) => {
             workerId: "rika-cli-e2e-integration",
           })
           const productLayer = hostedProductLayer({
-            templateBuildId: "template-build-v1-immutable",
-            providerScope: "integration-test",
+            orb: {
+              templateBuildId: "template-build-v1-immutable",
+              providerScope: "integration-test",
+            },
             promptAdmissionReadiness: executionReadinessCheck.pipe(Effect.as(true)),
-            provision: () => Effect.void,
           }).pipe(Layer.provide(shared))
           const environmentLayer = hostedEnvironmentLayer({
             encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),
@@ -364,6 +365,7 @@ it.layer(BunServices.layer)((test) => {
             recovery: {
               inspect: () => Effect.succeed([]),
               resolve: () => Effect.die("unused"),
+              reconcileCompleted: Effect.void,
             },
             executor,
             execution: {
@@ -479,7 +481,14 @@ it.layer(BunServices.layer)((test) => {
                       prompt: request.prompt.join("\n"),
                       ...(request.mode === undefined ? {} : { mode: request.mode }),
                     })
-                    .pipe(Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message }))),
+                    .pipe(
+                      Effect.flatMap((result) =>
+                        result._tag === "Admitted"
+                          ? Effect.succeed(result)
+                          : Effect.fail(HostedError.make({ kind: "protocol", message: "Prompt was cancelled" })),
+                      ),
+                      Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message })),
+                    ),
                 ensureService: () => Effect.die("unused"),
                 stopService: () => Effect.die("unused"),
                 openPortal: () => Effect.die("unused"),

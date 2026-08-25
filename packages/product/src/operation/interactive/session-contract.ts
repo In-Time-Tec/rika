@@ -39,8 +39,12 @@ export interface InteractiveSession {
     authorizationId: string,
     checkpoint?: ExecutionProjection.Checkpoint,
   ) => Effect.Effect<void, OperationUnavailable>
-  readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
-  readonly cancel: Effect.Effect<void, OperationUnavailable>
+  readonly interruptAndSend: (prompt: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
+  readonly cancel: (target?: {
+    readonly turnId?: string
+    readonly submissionId?: string
+    readonly threadId?: string
+  }) => Effect.Effect<void, OperationUnavailable>
   readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
   readonly newOrbThread?: Effect.Effect<void, OperationUnavailable>
@@ -219,6 +223,7 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly workspace: string
     readonly sessionId: number
     readonly recoveryOwner: boolean
+    readonly observeExecution: boolean
     readonly supervisionInitialized: Deferred.Deferred<void, InteractiveSupervisionError>
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure

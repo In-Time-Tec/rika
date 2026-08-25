@@ -1,0 +1,9 @@
+services:
+  secret-service:
+    command: bun scripts/development/secret-service.ts
+  rika:
+    command: bun run dev
+    health: /readyz
+    portal:
+      title: Rika
+      description: Use the seeded Rika development account.

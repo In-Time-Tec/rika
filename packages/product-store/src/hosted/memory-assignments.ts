@@ -153,6 +153,16 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(state), (current) =>
         [...current.assignments.values()].find((assignment) => assignment.threadId === threadId),
       ),
+    isBootstrapLive: (input) =>
+      Effect.gen(function* () {
+        const assignment = load(yield* Ref.get(state), input.assignmentId)
+        if (assignment === undefined) return yield* AssignmentError.make({ reason: "not-found", message: "Executor assignment does not exist" })
+        if (assignment.generation !== input.generation)
+          return yield* AssignmentError.make({ reason: "stale-fence", message: "Executor assignment fence is stale" })
+        const lifecycle = assignment.lifecycle
+        if (lifecycle._tag !== "Provisioning" && lifecycle._tag !== "AwaitingBootstrap") return false
+        return DateTime.toEpochMillis(DateTime.makeUnsafe(lifecycle.bootstrapExpiresAt)) > (yield* Clock.currentTimeMillis)
+      }),
     beginProvisioning: (input) =>
       mutation((current, now) => {
         const assignment = load(current, input.assignmentId)

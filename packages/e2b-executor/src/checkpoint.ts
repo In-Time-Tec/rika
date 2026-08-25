@@ -298,7 +298,7 @@ export interface S3Options {
 export const s3ObjectStoreLayer = (options: S3Options): Layer.Layer<ObjectStore> => {
   const client = new S3Client({
     region: options.region,
-    ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
+    ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint, forcePathStyle: true }),
   })
   return Layer.succeed(
     ObjectStore,

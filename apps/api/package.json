@@ -24,13 +24,13 @@
     "@rika/product-store": "workspace:*",
     "@rika/remote-execution": "workspace:*",
     "effect": "4.0.0-rc.111",
+    "pg": "8.21.0",
     "tenetkit": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.111",
     "@types/bun": "1.4.0",
     "@types/pg": "8.15.5",
-    "pg": "8.21.0",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
   },

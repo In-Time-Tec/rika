@@ -11,20 +11,27 @@ import { Context, Deferred, Effect, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "../src/hosted-turn-worker"
 
-it.effect("starts a claimed Turn while renewing its lease", () =>
+const preparedFor = (
+  input: Pick<ExecutionGateway.StartTurn, "threadId" | "turnId">,
+): ExecutionGateway.PreparedTurn => ({
+  threadId: input.threadId,
+  turnId: input.turnId,
+  runId: input.turnId,
+  rootAdmissionJson: "{}",
+})
+
+it.effect("persists staged admission before activation", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const started = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
       const completed = yield* Deferred.make<void>()
       const claims = yield* Ref.make(0)
-      const renewals = yield* Ref.make(0)
+      const transitions = yield* Ref.make<ReadonlyArray<string>>([])
       const noClaim: TurnClaim | undefined = undefined
       const claim: TurnClaim = {
         workerId: "worker-test",
         claimToken: "claim-test",
         expiresAt: 30,
-        prepared: false,
+        activationRequested: false,
         ownerId: "owner-test",
         claimedAt: 0,
         input: {
@@ -39,18 +46,27 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
         claimRecovery: () => Effect.succeed(noClaim),
         claimNext: () =>
           Ref.getAndUpdate(claims, (value) => value + 1).pipe(Effect.map((value) => (value === 0 ? claim : undefined))),
-        prepare: () => Effect.succeed(true),
-        renew: () => Ref.update(renewals, (value) => value + 1).pipe(Effect.as(true)),
-        complete: () => Deferred.succeed(completed, undefined),
+        renew: () => Effect.succeed(true),
+        prepare: () => Ref.update(transitions, (value) => [...value, "persist-prepared"]).pipe(Effect.as(true)),
+        completeAdmission: () => Ref.update(transitions, (value) => [...value, "persist-admission"]),
+        requestActivation: () =>
+          Ref.update(transitions, (value) => [...value, "request-activation"]).pipe(Effect.as(true)),
+        completeActivation: () =>
+          Ref.update(transitions, (value) => [...value, "complete"]).pipe(
+            Effect.andThen(Deferred.succeed(completed, undefined)),
+          ),
         release: () => Effect.void,
       }
       const gateway = ExecutionGateway.Service.of({
-        ...Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service),
-        startTurn: (input) =>
-          Deferred.succeed(started, undefined).pipe(
-            Effect.andThen(Deferred.await(release)),
-            Effect.as({ runId: "run-test", turnId: input.turnId, threadId: input.threadId }),
+        ...ExecutionGateway.makeTest(),
+        prepareTurn: (input) =>
+          Ref.update(transitions, (value) => [...value, "prepare-runtime"]).pipe(Effect.as(preparedFor(input))),
+        admitTurn: (input) =>
+          Ref.update(transitions, (value) => [...value, "admit"]).pipe(
+            Effect.as({ runId: input.runId, turnId: input.turnId, threadId: input.threadId }),
           ),
+        activateTurn: () =>
+          Ref.update(transitions, (value) => [...value, "activate"]).pipe(Effect.as("running" as const)),
       })
       const context = yield* Layer.build(
         hostedTurnWorkerLayer({ workerId: "worker-test", leaseMillis: 30, pollIntervalMillis: 10 }).pipe(
@@ -59,16 +75,89 @@ it.effect("starts a claimed Turn while renewing its lease", () =>
           Layer.provide(BunCrypto.layer),
         ),
       )
-      yield* Deferred.await(started)
-      yield* TestClock.adjust(11)
-      expect(yield* Ref.get(renewals)).toBeGreaterThan(0)
-      yield* Deferred.succeed(release, undefined)
       yield* Deferred.await(completed)
+      yield* Effect.yieldNow
       yield* HostedTurnWorker.pipe(
         Effect.provide(context),
         Effect.flatMap((worker) => worker.ready),
       )
       expect(yield* Ref.get(claims)).toBeGreaterThanOrEqual(1)
+      expect(yield* Ref.get(transitions)).toEqual([
+        "prepare-runtime",
+        "persist-prepared",
+        "admit",
+        "persist-admission",
+        "request-activation",
+        "activate",
+        "complete",
+      ])
+    }),
+  ),
+)
+
+it.effect("cancels a durably admitted Runtime Run when cancellation won before the admission link was persisted", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const completed = yield* Deferred.make<void>()
+      const claimed = yield* Ref.make(false)
+      const transitions = yield* Ref.make<ReadonlyArray<string>>([])
+      const preparedExecution = preparedFor({ threadId: "thread-test", turnId: "turn-test" })
+      const claim: TurnClaim = {
+        workerId: "worker-test",
+        claimToken: "claim-test",
+        expiresAt: 30,
+        preparedExecution,
+        activationRequested: false,
+        ownerId: "owner-test",
+        claimedAt: 0,
+        input: {
+          threadId: "thread-test",
+          turnId: "turn-test",
+          workspaceId: "workspace-test",
+          prompt: "test",
+          executionRoute: ExecutionRoute.testExecutionRoute(),
+        },
+      }
+      const store: HostedTurnWorkerStoreService = {
+        claimRecovery: () =>
+          Ref.getAndSet(claimed, true).pipe(Effect.map((alreadyClaimed) => (alreadyClaimed ? undefined : claim))),
+        claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        renew: () => Effect.succeed(true),
+        prepare: () => Effect.die("prepared recovery claims must not be prepared again"),
+        completeAdmission: () => Ref.update(transitions, (value) => [...value, "persist-admission"]),
+        requestActivation: () =>
+          Ref.update(transitions, (value) => [...value, "observe-cancellation"]).pipe(Effect.as(false)),
+        completeActivation: (_claim, status) =>
+          Ref.update(transitions, (value) => [...value, `complete-${status}`]).pipe(
+            Effect.andThen(Deferred.succeed(completed, undefined)),
+          ),
+        release: () => Effect.void,
+      }
+      const gateway = ExecutionGateway.Service.of({
+        ...ExecutionGateway.makeTest(),
+        admitTurn: (input) =>
+          Ref.update(transitions, (value) => [...value, "repeat-admission"]).pipe(
+            Effect.as({ runId: input.runId, turnId: input.turnId, threadId: input.threadId }),
+          ),
+        activateTurn: () => Effect.die("cancelled staged admission must not activate"),
+        cancelTurn: () => Ref.update(transitions, (value) => [...value, "cancel-runtime"]),
+      })
+      yield* Layer.build(
+        hostedTurnWorkerLayer({ workerId: "worker-test", leaseMillis: 30, pollIntervalMillis: 10 }).pipe(
+          Layer.provide(Layer.succeed(HostedTurnWorkerStore, store)),
+          Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+          Layer.provide(BunCrypto.layer),
+        ),
+      )
+
+      yield* Deferred.await(completed)
+      expect(yield* Ref.get(transitions)).toEqual([
+        "repeat-admission",
+        "persist-admission",
+        "observe-cancellation",
+        "cancel-runtime",
+        "complete-cancelled",
+      ])
     }),
   ),
 )
@@ -83,7 +172,8 @@ it.effect("does not let one nonresponsive Turn starve an unrelated claimed Turn"
         workerId: "worker-test",
         claimToken: `claim-${turnId}`,
         expiresAt: 30,
-        prepared: true,
+        preparedExecution: preparedFor({ threadId, turnId }),
+        activationRequested: false,
         ownerId: "owner-test",
         claimedAt: 0,
         input: {
@@ -98,18 +188,20 @@ it.effect("does not let one nonresponsive Turn starve an unrelated claimed Turn"
       const store: HostedTurnWorkerStoreService = {
         claimRecovery: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
         claimNext: () => Ref.getAndUpdate(claimIndex, (value) => value + 1).pipe(Effect.map((index) => claims[index])),
-        prepare: () => Effect.succeed(true),
         renew: () => Effect.succeed(true),
-        complete: (claim) =>
+        prepare: () => Effect.succeed(true),
+        completeAdmission: () => Effect.void,
+        requestActivation: () => Effect.succeed(true),
+        completeActivation: (claim) =>
           claim.input.turnId === "turn-unrelated" ? Deferred.succeed(unrelatedCompleted, undefined) : Effect.void,
         release: () => Effect.void,
       }
       const gateway = ExecutionGateway.Service.of({
-        ...Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service),
-        startTurn: (input) =>
+        ...ExecutionGateway.makeTest(),
+        activateTurn: (input) =>
           input.turnId === "turn-blocked"
             ? Deferred.succeed(blockedStarted, undefined).pipe(Effect.andThen(Effect.never))
-            : Effect.succeed({ runId: "run-unrelated", turnId: input.turnId, threadId: input.threadId }),
+            : Effect.succeed("running" as const),
       })
       const context = yield* Layer.build(
         hostedTurnWorkerLayer({
@@ -135,6 +227,61 @@ it.effect("does not let one nonresponsive Turn starve an unrelated claimed Turn"
   ),
 )
 
+it.effect("interrupts workspace preparation when PostgreSQL claim renewal is lost", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const preparationStarted = yield* Deferred.make<void>()
+      const preparationInterrupted = yield* Deferred.make<void>()
+      const claim: TurnClaim = {
+        workerId: "worker-test",
+        claimToken: "claim-test",
+        expiresAt: 30,
+        activationRequested: false,
+        ownerId: "owner-test",
+        claimedAt: 0,
+        input: {
+          threadId: "thread-test",
+          turnId: "turn-test",
+          workspaceId: "workspace-test",
+          prompt: "test",
+          executionRoute: ExecutionRoute.testExecutionRoute(),
+        },
+      }
+      const claimed = yield* Ref.make(false)
+      const store: HostedTurnWorkerStoreService = {
+        claimRecovery: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        claimNext: () =>
+          Ref.getAndSet(claimed, true).pipe(Effect.map((alreadyClaimed) => (alreadyClaimed ? undefined : claim))),
+        renew: () => Effect.succeed(false),
+        prepare: () => Effect.die("lost claim must not persist preparation"),
+        completeAdmission: () => Effect.die("lost claim must not admit"),
+        requestActivation: () => Effect.die("lost claim must not activate"),
+        completeActivation: () => Effect.die("lost claim must not complete"),
+        release: () => Effect.void,
+      }
+      const gateway = ExecutionGateway.Service.of({
+        ...ExecutionGateway.makeTest(),
+        prepareTurn: () =>
+          Deferred.succeed(preparationStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(preparationInterrupted, undefined)),
+          ),
+      })
+      yield* Layer.build(
+        hostedTurnWorkerLayer({ workerId: "worker-test", leaseMillis: 30, pollIntervalMillis: 10 }).pipe(
+          Layer.provide(Layer.succeed(HostedTurnWorkerStore, store)),
+          Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+          Layer.provide(BunCrypto.layer),
+        ),
+      )
+
+      yield* Deferred.await(preparationStarted)
+      yield* TestClock.adjust(10)
+      yield* Deferred.await(preparationInterrupted)
+    }),
+  ),
+)
+
 it.effect("replaces stale local execution when the same prepared Turn is reclaimed", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -151,7 +298,8 @@ it.effect("replaces stale local execution when the same prepared Turn is reclaim
         workerId: "worker-test",
         claimToken,
         expiresAt: 30,
-        prepared: true,
+        preparedExecution: preparedFor({ threadId: "thread-test", turnId: "turn-test" }),
+        activationRequested: false,
         ownerId: "owner-test",
         claimedAt,
         input: {
@@ -167,17 +315,19 @@ it.effect("replaces stale local execution when the same prepared Turn is reclaim
         claimRecovery: () =>
           Ref.getAndUpdate(claimIndex, (value) => value + 1).pipe(Effect.map((index) => claims[index])),
         claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
-        prepare: () => Effect.die("prepared recovery claims must not be prepared again"),
         renew: () => Effect.succeed(true),
-        complete: (claim) =>
+        prepare: () => Effect.die("prepared recovery claims must not be prepared again"),
+        completeAdmission: () => Effect.void,
+        requestActivation: () => Effect.succeed(true),
+        completeActivation: (claim) =>
           Ref.update(completedTokens, (tokens) => [...tokens, claim.claimToken]).pipe(
             Effect.andThen(Deferred.succeed(secondCompleted, undefined)),
           ),
         release: (claim) => Ref.update(releasedTokens, (tokens) => [...tokens, claim.claimToken]),
       }
       const gateway = ExecutionGateway.Service.of({
-        ...Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service),
-        startTurn: (input) =>
+        ...ExecutionGateway.makeTest(),
+        activateTurn: () =>
           Ref.getAndUpdate(executionIndex, (value) => value + 1).pipe(
             Effect.flatMap((index) =>
               index === 0
@@ -187,7 +337,7 @@ it.effect("replaces stale local execution when the same prepared Turn is reclaim
                   )
                 : Deferred.succeed(secondStarted, undefined).pipe(
                     Effect.andThen(Deferred.await(releaseSecond)),
-                    Effect.as({ runId: "run-new", turnId: input.turnId, threadId: input.threadId }),
+                    Effect.as("running" as const),
                   ),
             ),
           ),
@@ -234,9 +384,11 @@ it.effect("rejects a stale Turn worker when claiming blocks after a successful p
             ),
           ),
         claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        renew: () => Effect.succeed(true),
         prepare: () => Effect.die("unused"),
-        renew: () => Effect.die("unused"),
-        complete: () => Effect.die("unused"),
+        completeAdmission: () => Effect.die("unused"),
+        requestActivation: () => Effect.die("unused"),
+        completeActivation: () => Effect.die("unused"),
         release: () => Effect.die("unused"),
       }
       const context = yield* Layer.build(
@@ -261,9 +413,11 @@ it.effect("rejects the current Turn claim failure immediately", () =>
       const store: HostedTurnWorkerStoreService = {
         claimRecovery: () => Effect.die("claim unavailable"),
         claimNext: () => Effect.void.pipe(Effect.as(undefined as TurnClaim | undefined)),
+        renew: () => Effect.succeed(true),
         prepare: () => Effect.die("unused"),
-        renew: () => Effect.die("unused"),
-        complete: () => Effect.die("unused"),
+        completeAdmission: () => Effect.die("unused"),
+        requestActivation: () => Effect.die("unused"),
+        completeActivation: () => Effect.die("unused"),
         release: () => Effect.die("unused"),
       }
       const context = yield* Layer.build(

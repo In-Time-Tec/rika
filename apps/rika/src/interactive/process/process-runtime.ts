@@ -118,7 +118,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     if (decision._tag === "Ignore") return
     if (decision._tag === "Cancel") {
       yield* SubscriptionRef.set(loop.lifecycle, { _tag: "Cancelling" })
-      run(session.cancel)
+      run(session.cancel())
       return
     }
     if (decision._tag === "ForceQuit") {
@@ -228,8 +228,12 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         ),
       )
     })
-  const startSelection = (select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>) => {
+  const startSelection = (
+    select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+    acceptsCreatedThread = false,
+  ) => {
     const generation = (loop.selectionGeneration += 1)
+    loop.newThreadSelectionGeneration = acceptsCreatedThread ? generation : undefined
     const previous = loop.selectionFiber
     let selectedFiber: Fiber.Fiber<void, never>
     selectedFiber = fork(
@@ -238,6 +242,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         Effect.ensuring(
           Effect.sync(() => {
             if (loop.selectionFiber === selectedFiber) loop.selectionFiber = undefined
+            if (loop.newThreadSelectionGeneration === generation) loop.newThreadSelectionGeneration = undefined
           }),
         ),
       ),
@@ -368,9 +373,11 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     approveAuthorization: (turnId, authorizationId) => run(session.approveAuthorization(turnId, authorizationId)),
     denyAuthorization: (turnId, authorizationId) => run(session.denyAuthorization(turnId, authorizationId)),
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
-    cancel: () => run(session.cancel),
-    newThread: () => startSelection(() => session.newThread),
-    ...(session.newOrbThread === undefined ? {} : { newOrbThread: () => startSelection(() => session.newOrbThread!) }),
+    cancel: (target) => run(session.cancel(target)),
+    newThread: () => startSelection(() => session.newThread, true),
+    ...(session.newOrbThread === undefined
+      ? {}
+      : { newOrbThread: () => startSelection(() => session.newOrbThread!, true) }),
     ...(session.pauseOrb === undefined ? {} : { pauseOrb: () => run(session.pauseOrb!) }),
     ...(session.resumeOrb === undefined ? {} : { resumeOrb: () => run(session.resumeOrb!) }),
     ...(session.enableRemoteThreadCreation === undefined

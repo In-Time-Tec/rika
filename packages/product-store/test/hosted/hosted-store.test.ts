@@ -123,12 +123,50 @@ it.layer(layer)("hosted memory store owner identity", (test) => {
         }),
       ).toEqual([])
       const admitted = yield* store.admitPrompt({ ...prompt, readinessProof: true })
+      expect(admitted._tag).toBe("Admitted")
+      if (admitted._tag !== "Admitted") return yield* Effect.die("Prompt was cancelled unexpectedly")
       expect(yield* store.admitPrompt({ ...prompt, readinessProof: false })).toEqual(admitted)
       const duplicates = yield* Effect.all(
         Array.from({ length: 8 }, () => store.admitPrompt({ ...prompt, readinessProof: true })),
         { concurrency: "unbounded" },
       )
-      expect(duplicates.every((duplicate) => duplicate.command.commandId === admitted.command.commandId)).toBe(true)
+      expect(
+        duplicates.every(
+          (duplicate) => duplicate._tag === "Admitted" && duplicate.command.commandId === admitted.command.commandId,
+        ),
+      ).toBe(true)
+      const cancellation = {
+        ownerId: personalOwnerId,
+        threadId: thread.id,
+        cancelCommandId: CommandId.make("cancel-before-admission"),
+        targetCommandId: CommandId.make("cancelled-prompt-command"),
+        actor: personalActor,
+        cancelledAt: now,
+      }
+      expect(yield* store.cancelPrompt(cancellation)).toEqual({
+        _tag: "Pending",
+        targetCommandId: cancellation.targetCommandId,
+      })
+      expect(yield* store.cancelPrompt(cancellation)).toEqual({
+        _tag: "Pending",
+        targetCommandId: cancellation.targetCommandId,
+      })
+      expect(
+        yield* store.admitPrompt({
+          ...prompt,
+          commandId: cancellation.targetCommandId,
+          idempotencyKey: IdempotencyKey.make("cancelled-prompt-key"),
+          turnId: TurnId.make("cancelled-prompt-turn"),
+          readinessProof: true,
+        }),
+      ).toEqual({ _tag: "Cancelled", targetCommandId: cancellation.targetCommandId })
+      expect(
+        yield* store.cancelPrompt({
+          ...cancellation,
+          cancelCommandId: CommandId.make("cancel-after-admission"),
+          targetCommandId: prompt.commandId,
+        }),
+      ).toEqual({ _tag: "Turn", targetCommandId: prompt.commandId, turnId: prompt.turnId })
       expect(
         (yield* store.readCommands({
           ownerId: personalOwnerId,

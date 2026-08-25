@@ -51,6 +51,11 @@ export interface Version {
   readonly revision: AssignmentRevision
 }
 
+export interface BootstrapFence {
+  readonly assignmentId: ExecutorAssignmentId
+  readonly generation: FencingGeneration
+}
+
 export interface BeginProvisioningInput extends Version {
   readonly bootstrapCredentialDigest: Redacted.Redacted<string>
   readonly bootstrapLifetimeMillis: number
@@ -129,6 +134,7 @@ export interface AssignmentsService {
   readonly create: (input: CreateInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly get: (assignmentId: ExecutorAssignmentId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
   readonly getForThread: (threadId: ThreadId) => Effect.Effect<ExecutorAssignment | undefined, AssignmentError>
+  readonly isBootstrapLive: (input: BootstrapFence) => Effect.Effect<boolean, AssignmentError>
   readonly beginProvisioning: (input: BeginProvisioningInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly beginReplacement: (input: BeginReplacementInput) => Effect.Effect<ExecutorAssignment, AssignmentError>
   readonly bindProviderInstance: (

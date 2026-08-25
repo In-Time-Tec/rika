@@ -14,8 +14,9 @@ import {
   type HostedTurnWorkerStoreService,
   type TurnClaim,
 } from "@rika/product-store/postgres-turn-worker-store"
-import { Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
+import { Clock, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import { layer as executionReconcilerLayer } from "../src/hosted-execution-reconciler"
 import { layer as projectionWorkerLayer } from "../src/hosted-projection-worker"
 import { layer as turnWorkerLayer } from "../src/hosted-turn-worker"
 
@@ -36,16 +37,21 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     const runningCommitted = yield* Deferred.make<void>()
     const terminalPersistenceEntered = yield* Deferred.make<void>()
     const terminalPersisted = yield* Deferred.make<void>()
+    const terminalProjectionFailed = yield* Deferred.make<void>()
+    const terminalProjected = yield* Deferred.make<void>()
     const durable = {
       commands: new Map<string, string>(),
       turns: new Map<string, Turn.AgentExecutionTurn>(),
       claim: undefined as TurnClaim | undefined,
       prepared: false,
+      preparedExecution: undefined as ExecutionGateway.PreparedTurn | undefined,
       link: undefined as ExecutionGateway.ExecutionLink | undefined,
+      activationRequested: false,
       runs: new Map<string, ExecutionGateway.ExecutionLink>(),
       runtimeStartCalls: 0,
       projection: undefined as Projection | undefined,
       projectionCommits: new Map<number, number>(),
+      terminalProjectionAttempts: 0,
       terminalPersistenceAttempts: 0,
       operationReceipts: new Map([["unknown-operation", "unknown" as const]]),
       operationDispatches: 1,
@@ -75,46 +81,63 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     expect(yield* replacementAdmissionService.admit("restart-command")).toBe(turnId)
     expect(durable.turns.size).toBe(1)
 
-    const claimFor = (request: ClaimRequest, prepared: boolean) => {
-      if (durable.claim !== undefined && durable.claim.expiresAt > request.now) return undefined
+    const claimFor = (request: ClaimRequest, prepared: boolean, now: number) => {
+      if (durable.claim !== undefined && durable.claim.expiresAt > now) return undefined
       const turn = durable.turns.get(turnId)
       if (turn === undefined || (prepared ? !durable.prepared || durable.link !== undefined : turn.status !== "queued"))
         return undefined
       durable.claim = {
         workerId: request.workerId,
         claimToken: request.claimToken,
-        expiresAt: request.now + request.leaseMillis,
-        prepared,
+        expiresAt: now + request.leaseMillis,
+        ...(durable.preparedExecution === undefined ? {} : { preparedExecution: durable.preparedExecution }),
+        ...(durable.link === undefined ? {} : { admissionLink: durable.link }),
+        activationRequested: durable.activationRequested,
         ownerId: "restart-owner",
-        claimedAt: request.now,
+        claimedAt: now,
         input,
       }
       return durable.claim
     }
     const store: HostedTurnWorkerStoreService = {
       claimNext: (request) =>
-        Effect.sync(() => claimFor(request, false)).pipe(
+        Clock.currentTimeMillis.pipe(
+          Effect.map((now) => claimFor(request, false, now)),
           Effect.tap((value) => (value === undefined ? Effect.void : Deferred.succeed(claimed, undefined))),
         ),
-      claimRecovery: (request) => Effect.sync(() => claimFor(request, true)),
-      prepare: (claim) =>
+      claimRecovery: (request) => Clock.currentTimeMillis.pipe(Effect.map((now) => claimFor(request, true, now))),
+      renew: (claim, leaseMillis) =>
+        Clock.currentTimeMillis.pipe(
+          Effect.map((now) => {
+            if (durable.claim?.claimToken !== claim.claimToken || durable.claim.expiresAt <= now) return false
+            durable.claim = { ...durable.claim, expiresAt: now + leaseMillis }
+            return true
+          }),
+        ),
+      prepare: (claim, preparedExecution) =>
         Effect.sync(() => {
           if (durable.claim?.claimToken !== claim.claimToken) return false
           durable.prepared = true
-          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, status: "running" })
+          durable.preparedExecution = preparedExecution
+          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, status: "accepted" })
           return true
         }),
-      renew: (claim, now, leaseMillis) =>
-        Effect.sync(() => {
-          if (durable.claim?.claimToken !== claim.claimToken || durable.claim.expiresAt <= now) return false
-          durable.claim = { ...durable.claim, expiresAt: now + leaseMillis }
-          return true
-        }),
-      complete: (claim, link) =>
+      completeAdmission: (claim, link) =>
         Effect.sync(() => {
           if (durable.claim?.claimToken !== claim.claimToken) throw new Error("stale claim completed")
           durable.link = link
-          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, executionLink: link })
+        }),
+      requestActivation: (claim) =>
+        Effect.sync(() => {
+          if (durable.claim?.claimToken !== claim.claimToken) throw new Error("stale claim activated")
+          durable.activationRequested = true
+          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, executionLink: durable.link! })
+          durable.turns.set(turnId, { ...durable.turns.get(turnId)!, status: "running" })
+          return true
+        }),
+      completeActivation: (claim) =>
+        Effect.sync(() => {
+          if (durable.claim?.claimToken !== claim.claimToken) throw new Error("stale claim completed")
           durable.claim = undefined
         }),
       release: () =>
@@ -122,7 +145,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
           durable.claim = undefined
         }),
     }
-    const gatewayBase = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
+    const gatewayBase = ExecutionGateway.makeTest()
     const buildTurnWorker = (workerId: string, gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
       Layer.buildWithScope(
         turnWorkerLayer({ workerId, leaseMillis: 30, pollIntervalMillis: 10 }).pipe(
@@ -141,10 +164,10 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
 
     const crashingGateway = ExecutionGateway.Service.of({
       ...gatewayBase,
-      startTurn: () =>
+      admitTurn: (prepared) =>
         Effect.sync(() => {
           durable.runtimeStartCalls += 1
-          const link = durable.runs.get(turnId) ?? { runId: "restart-run", threadId, turnId }
+          const link = durable.runs.get(turnId) ?? { runId: prepared.runId, threadId, turnId }
           durable.runs.set(turnId, link)
           return link
         }).pipe(
@@ -161,7 +184,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
 
     const recoveryGateway = ExecutionGateway.Service.of({
       ...gatewayBase,
-      startTurn: () =>
+      admitTurn: () =>
         Effect.sync(() => {
           durable.runtimeStartCalls += 1
           return durable.runs.get(turnId)!
@@ -170,7 +193,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     const completionScope = yield* Scope.make()
     yield* buildTurnWorker("claim-worker-3", recoveryGateway, completionScope)
     yield* TestClock.adjust(1)
-    expect(durable.link).toEqual({ runId: "restart-run", threadId, turnId })
+    expect(durable.link).toEqual({ runId: turnId, threadId, turnId })
     yield* Scope.close(completionScope, Exit.void)
     expect(durable.turns.size).toBe(1)
     expect(durable.runs.size).toBe(1)
@@ -205,6 +228,11 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     }
     const turns = {
       get: () => Effect.succeed(durable.turns.get(turnId)),
+      listNonterminal: Effect.sync(() => {
+        const current = durable.turns.get(turnId)
+        return current === undefined || current.status === "completed" ? [] : [current]
+      }),
+      listSteeringAdmissions: Effect.succeed([]),
       setStatus: (_id: Turn.TurnId, status: ExecutionProjection.Result["status"]) => {
         durable.terminalPersistenceAttempts += 1
         if (durable.terminalPersistenceAttempts === 1)
@@ -220,8 +248,15 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     const transcripts = {
       listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
       get: () => Effect.succeed(durable.projection),
-      commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
-        Effect.sync(() => {
+      commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) => {
+        if (change.revision === 1) {
+          durable.terminalProjectionAttempts += 1
+          if (durable.terminalProjectionAttempts === 1)
+            return Deferred.succeed(terminalProjectionFailed, undefined).pipe(
+              Effect.andThen(Effect.die("terminal projection commit failed")),
+            )
+        }
+        return Effect.sync(() => {
           durable.projectionCommits.set(change.revision, (durable.projectionCommits.get(change.revision) ?? 0) + 1)
           durable.projection = {
             turn: durable.turns.get(turnId)!,
@@ -235,11 +270,16 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
           return "committed" as const
         }).pipe(
           Effect.tap(() => (change.revision === 0 ? Deferred.succeed(runningCommitted, undefined) : Effect.void)),
-        ),
+          Effect.tap(() => (change.revision === 1 ? Deferred.succeed(terminalProjected, undefined) : Effect.void)),
+        )
+      },
     } as unknown as TranscriptRepository.Interface
-    const buildProjectionWorker = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
+    const buildWorkers = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
       Layer.buildWithScope(
-        projectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        Layer.merge(
+          projectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }),
+          executionReconcilerLayer({ pollIntervalMillis: 10 }),
+        ).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -247,10 +287,11 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
         scope,
       )
     const projectionScope = yield* Scope.make()
-    yield* buildProjectionWorker(
+    yield* buildWorkers(
       ExecutionGateway.Service.of({
         ...gatewayBase,
         watchTurn: () => Stream.concat(Stream.succeed(running), Stream.never),
+        inspectTurn: () => Effect.succeed({ status: "running", cursor: "running" }),
       }),
       projectionScope,
     )
@@ -258,7 +299,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     yield* Scope.close(projectionScope, Exit.void)
 
     const terminalScope = yield* Scope.make()
-    yield* buildProjectionWorker(
+    yield* buildWorkers(
       ExecutionGateway.Service.of({
         ...gatewayBase,
         watchTurn: () => Stream.succeed(completed),
@@ -267,18 +308,20 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
       terminalScope,
     )
     yield* Deferred.await(terminalPersistenceEntered)
+    yield* Deferred.await(terminalProjectionFailed)
     yield* Scope.close(terminalScope, Exit.void)
 
     const persistenceScope = yield* Scope.make()
-    yield* buildProjectionWorker(
+    yield* buildWorkers(
       ExecutionGateway.Service.of({
         ...gatewayBase,
-        watchTurn: () => Stream.empty,
+        watchTurn: () => Stream.succeed(completed),
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "terminal" }),
       }),
       persistenceScope,
     )
     yield* Deferred.await(terminalPersisted)
+    yield* Deferred.await(terminalProjected)
     yield* Scope.close(persistenceScope, Exit.void)
     expect(durable.projectionCommits).toEqual(
       new Map([

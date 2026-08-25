@@ -62,9 +62,9 @@ export const runInProcessInteractive = Effect.fn("ClientMain.runInProcessInterac
   runner: Effect.Effect<never, E, R>,
   interactive: Effect.Effect<A, E2, R2>,
 ) {
-    yield* runner.pipe(Effect.forkScoped)
-    yield* Effect.yieldNow
-    return yield* interactive
+  yield* runner.pipe(Effect.forkScoped)
+  yield* Effect.yieldNow
+  return yield* interactive
 })
 
 const dispatcherLayer = () =>
@@ -122,7 +122,7 @@ const dispatcherLayer = () =>
                         Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
                       ),
                     ),
-                  startRunner: (prepared) => Runner.runRunner(runnerInput, prepared),
+                  startRunner: (prepared, ready) => Runner.runRunner(runnerInput, prepared, ready),
                 }).pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
               }),
             )

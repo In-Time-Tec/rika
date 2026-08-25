@@ -193,10 +193,29 @@ export interface AdmitPromptInput {
 }
 
 export interface AdmittedPrompt {
+  readonly _tag: "Admitted"
   readonly command: ThreadCommand
   readonly turnId: TurnId
   readonly status: PromptAdmissionStatus
 }
+
+export interface CancelledPrompt {
+  readonly _tag: "Cancelled"
+  readonly targetCommandId: CommandId
+}
+
+export interface CancelPromptInput {
+  readonly ownerId: OwnerId
+  readonly threadId: ThreadId
+  readonly cancelCommandId: CommandId
+  readonly targetCommandId: CommandId
+  readonly actor: ActorAttribution
+  readonly cancelledAt: Timestamp
+}
+
+export type PromptCancellation =
+  | { readonly _tag: "Pending"; readonly targetCommandId: CommandId }
+  | { readonly _tag: "Turn"; readonly targetCommandId: CommandId; readonly turnId: TurnId }
 
 export interface AppendEventInput {
   readonly eventId: EventId
@@ -292,7 +311,8 @@ export interface StoreService {
   readonly grantClientAuthority: (input: GrantClientAuthorityInput) => Effect.Effect<void, StoreError>
   readonly authorizeThread: (input: AuthorizeThreadInput) => Effect.Effect<void, StoreError>
   readonly admitCommand: (input: AdmitCommandInput) => Effect.Effect<ThreadCommand, StoreError>
-  readonly admitPrompt: (input: AdmitPromptInput) => Effect.Effect<AdmittedPrompt, StoreError>
+  readonly admitPrompt: (input: AdmitPromptInput) => Effect.Effect<AdmittedPrompt | CancelledPrompt, StoreError>
+  readonly cancelPrompt: (input: CancelPromptInput) => Effect.Effect<PromptCancellation, StoreError>
   readonly readCommands: (input: ReadThreadLogInput) => Effect.Effect<ReadonlyArray<ThreadCommand>, StoreError>
   readonly appendEvent: (input: AppendEventInput) => Effect.Effect<ThreadEvent, StoreError>
   /** Append a terminal recovery event without requiring the expired dispatch lease. */

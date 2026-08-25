@@ -21,15 +21,21 @@ const operationFailure = (error: unknown) =>
 const startRunnerWhenPlaced = <Prepared, E, R, E2, R2>(
   connection: InteractiveConnection.Connection,
   prepare: Effect.Effect<Prepared, E, R>,
-  startRunner: (prepared: Prepared) => Effect.Effect<never, E2, R2>,
+  startRunner: (prepared: Prepared, ready: Deferred.Deferred<void>) => Effect.Effect<never, E2, R2>,
+  ready = Deferred.makeUnsafe<void>(),
 ) =>
   Stream.concat(Stream.make(connection.initialState), connection.stateChanges).pipe(
     Stream.filter((state) => state.target === "runner"),
     Stream.runHead,
     Effect.flatMap((placement) =>
-      placement._tag === "Some" ? prepare.pipe(Effect.flatMap((prepared) => startRunner(prepared))) : Effect.never,
+      placement._tag === "Some"
+        ? prepare.pipe(Effect.flatMap((prepared) => startRunner(prepared, ready)))
+        : Effect.never,
     ),
   )
+
+const runnerConnectionState = (state: InteractiveConnection.State, ready: boolean): InteractiveConnection.State =>
+  state.target === "runner" && !ready ? { ...state, connectivity: "connecting" } : state
 
 const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right: Effect.Effect<A2, E2, R2>) =>
   Effect.scoped(
@@ -51,7 +57,6 @@ export const makeDeferredSession = (
 } => {
   let attached: InteractiveSession.InteractiveSession | undefined
   const effects = new Set([
-    "cancel",
     "quit",
     "newThread",
     "newOrbThread",
@@ -97,7 +102,10 @@ export const makeDeferredSession = (
 const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
-    readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
+    readonly startRunner: (
+      prepared: PreparedRunnerCheckout,
+      ready: Deferred.Deferred<void>,
+    ) => Effect.Effect<never, E, R>
   },
 ) {
   const profile = yield* localLoginProfile()
@@ -195,14 +203,35 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
       createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
       setRemoteThreadCreation,
     })
+    const runnerReady = yield* Deferred.make<void>()
+    let runnerConnected = false
+    let latestHostedState = hosted.connection.initialState
     yield* hosted.connection.stateChanges.pipe(
-      Stream.runForEach((state) => SubscriptionRef.set(connectionState, state)),
+      Stream.runForEach((state) =>
+        Effect.sync(() => {
+          latestHostedState = state
+        }).pipe(Effect.andThen(SubscriptionRef.set(connectionState, runnerConnectionState(state, runnerConnected)))),
+      ),
+      Effect.forkScoped,
+    )
+    yield* Deferred.await(runnerReady).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          runnerConnected = true
+        }),
+      ),
+      Effect.andThen(
+        Effect.suspend(() => SubscriptionRef.set(connectionState, runnerConnectionState(latestHostedState, true))),
+      ),
       Effect.forkScoped,
     )
     deferred.attach(hosted.session)
     yield* Deferred.succeed(sessionReady, hosted.session)
-    return yield* startRunnerWhenPlaced(hosted.connection, prepare, (prepared) =>
-      options.startRunner(prepared).pipe(Effect.mapError(operationFailure)),
+    return yield* startRunnerWhenPlaced(
+      hosted.connection,
+      prepare,
+      (prepared, ready) => options.startRunner(prepared, ready).pipe(Effect.mapError(operationFailure)),
+      runnerReady,
     )
   }).pipe(Effect.mapError(operationFailure))
   yield* raceStructured(
@@ -220,10 +249,13 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
 export const runHostedInteractive = Effect.fn("HostedInteractiveController.entry")(function* <E, R extends object>(
   input: InteractiveFeed.InteractiveInput,
   options: InteractiveTuiOptions & {
-    readonly startRunner: (prepared: PreparedRunnerCheckout) => Effect.Effect<never, E, R>
+    readonly startRunner: (
+      prepared: PreparedRunnerCheckout,
+      ready: Deferred.Deferred<void>,
+    ) => Effect.Effect<never, E, R>
   },
 ) {
   return yield* run(input, options).pipe(Effect.mapError(operationFailure))
 })
 
-export const hostedInteractiveControllerInternals = { raceStructured, startRunnerWhenPlaced }
+export const hostedInteractiveControllerInternals = { raceStructured, runnerConnectionState, startRunnerWhenPlaced }

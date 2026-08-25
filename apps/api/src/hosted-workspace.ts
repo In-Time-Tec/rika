@@ -3,7 +3,6 @@ import { ThreadId } from "@rika/product/hosted-model"
 import type { WorkspaceRequest, WorkspaceResponse } from "@rika/product/workspace-capability"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Executor } from "./executor"
-import { HostedEnvironment } from "./hosted-environment"
 
 export class HostedWorkspaceError extends Schema.TaggedError<HostedWorkspaceError>()("HostedWorkspaceError", {
   kind: Schema.Literals(["unsupported", "unavailable"]),
@@ -29,7 +28,6 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const executor = yield* Executor
     const assignments = yield* ExecutorAssignments
-    const environment = yield* HostedEnvironment
     const requireOrb = Effect.fn("HostedWorkspace.requireOrb")(function* (threadId: string) {
       const assignment = yield* assignments
         .getForThread(ThreadId.make(threadId))
@@ -58,20 +56,15 @@ export const layer = Layer.effect(
           kind: "unsupported",
           message: "Hosted Workspace access requires an E2B executor",
         })
-      const phase =
-        assignment.lifecycle._tag === "Paused" || assignment.lifecycle._tag === "Active" ? "runtime" : "setup"
-      yield* environment
-        .usePhase({ assignmentId: assignment.id, phase }, (resolved) =>
-          executor.controller.provision(assignment.id, {
-            egress: resolved.egress,
-            environmentDigest: resolved.manifest.digest,
-          }),
-        )
-        .pipe(
-          Effect.mapError(() =>
-            HostedWorkspaceError.make({ kind: "unavailable", message: "Workspace executor is unavailable" }),
-          ),
-        )
+      if (
+        assignment.lifecycle._tag !== "Active" ||
+        assignment.capabilityGeneration !== assignment.generation ||
+        assignment.capabilities === null
+      )
+        return yield* HostedWorkspaceError.make({
+          kind: "unavailable",
+          message: "Workspace is not ready",
+        })
       return yield* executor.gateway
         .workspace(assignment.id, request)
         .pipe(
@@ -82,6 +75,7 @@ export const layer = Layer.effect(
     })
     const pause = Effect.fn("HostedWorkspace.pause")(function* (threadId: string) {
       const assignment = yield* requireOrb(threadId)
+      if (assignment.lifecycle._tag === "Paused") return
       yield* executor
         .pause({ assignmentId: assignment.id, generation: Number(assignment.generation) })
         .pipe(
@@ -90,6 +84,12 @@ export const layer = Layer.effect(
     })
     const resume = Effect.fn("HostedWorkspace.resume")(function* (threadId: string) {
       const assignment = yield* requireOrb(threadId)
+      if (
+        assignment.lifecycle._tag === "Active" ||
+        assignment.lifecycle._tag === "Provisioning" ||
+        assignment.lifecycle._tag === "AwaitingBootstrap"
+      )
+        return
       yield* executor
         .resume({ assignmentId: assignment.id, generation: Number(assignment.generation) })
         .pipe(

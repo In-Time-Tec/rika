@@ -354,12 +354,14 @@ export const layer = Layer.effect(
           "Runner preference",
         )
       },
-      pollRunner: (origin, checkoutFingerprint, session) => {
+      pollRunner: (origin, checkoutFingerprint, supervisorId, activeAssignmentIds, session) => {
         const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}/admissions`
         return authenticatedJson(
           "POST",
           url,
-          HttpClientRequest.post(url),
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({ supervisorId, activeAssignmentIds }),
+          ),
           session,
           RunnerPollResult,
           "Runner admission",

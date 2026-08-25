@@ -151,11 +151,8 @@ export const workerLayer = (
           const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
           yield* Effect.forkScoped(runtimeWorker.run)
         })
-        const loop: Layer.Layer<
-          never,
-          never,
-          RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
-        > = Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
+        const loop: Layer.Layer<never, never, RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore> =
+          Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
         return Layer.merge(worker, loop)
       }),
     ),
@@ -176,22 +173,24 @@ const age = (now: number, at: number | undefined) => (at === undefined ? undefin
 export const workerDiagnostics: {
   (now: number): (status: RuntimeWorker.WorkerStatus) => WorkerDiagnostics
   (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics
-} = Function.dual(2, (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
-  ...status,
-  pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
-  lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
-  oldestClaimAgeMillis: age(now, status.oldestClaimAt),
-  lastFailureAgeMillis: age(now, status.lastFailure?.at),
-  availableCapacity: Math.max(0, status.capacity - status.active),
-}))
+} = Function.dual(
+  2,
+  (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
+    ...status,
+    pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
+    lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
+    oldestClaimAgeMillis: age(now, status.oldestClaimAt),
+    lastFailureAgeMillis: age(now, status.lastFailure?.at),
+    availableCapacity: Math.max(0, status.capacity - status.active),
+  }),
+)
 
 export const checkWorkerReadiness: {
-  (now: number, pollIntervalMillis: number): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
   (
-    status: RuntimeWorker.WorkerStatus,
     now: number,
     pollIntervalMillis: number,
-  ): Effect.Effect<void, WorkerUnavailable>
+  ): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
+  (status: RuntimeWorker.WorkerStatus, now: number, pollIntervalMillis: number): Effect.Effect<void, WorkerUnavailable>
 } = Function.dual(
   3,
   (
@@ -200,7 +199,9 @@ export const checkWorkerReadiness: {
     pollIntervalMillis: number,
   ): Effect.Effect<void, WorkerUnavailable> => {
     if (status.poll._tag === "Starting")
-      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }))
+      return Effect.fail(
+        WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }),
+      )
     if (status.poll._tag === "Failed")
       return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll failed" }))
     if (now - status.poll.at > pollIntervalMillis * 4)

@@ -55,6 +55,11 @@ interface CommandRow {
   readonly completedAt: string | null
 }
 
+interface CommandClaimRow extends CommandRow {
+  readonly claimToken: string | null
+  readonly claimActive: boolean | null
+}
+
 const commandRow = Effect.fn("PostgresThreadProtocolStore.commandRow")(function* (row: CommandRow) {
   return {
     ownerId: OwnerId.make(row.ownerId),
@@ -184,6 +189,80 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     return written
   })
 
+  const claimNextCommand: ThreadProtocolStoreService["claimNextCommand"] = Effect.fn(
+    "PostgresThreadProtocolStore.claimNextCommand",
+  )(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const rows = yield* query(sql<CommandRow>`WITH candidate AS (
+            SELECT command_candidate.thread_id, command_candidate.command_id
+            FROM rika_hosted_thread_protocol_state protocol_state
+            JOIN LATERAL (
+              SELECT command_record.thread_id, command_record.command_id, command_record.admitted_at,
+                command_record.thread_version
+              FROM rika_hosted_thread_protocol_commands command_record
+              WHERE command_record.thread_id = protocol_state.thread_id
+                AND command_record.state = 'admitted'
+                AND (command_record.claim_token IS NULL OR command_record.claim_expires_at <= transaction_timestamp())
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM rika_hosted_thread_protocol_commands predecessor
+                  WHERE predecessor.thread_id = command_record.thread_id
+                    AND predecessor.thread_version < command_record.thread_version
+                    AND predecessor.state = 'admitted'
+                    AND NOT (
+                      command_record.command ->> '_tag' = 'Cancel'
+                      AND command_record.command -> 'target' ->> '_tag' = 'Command'
+                      AND predecessor.command_id = command_record.command -> 'target' ->> 'commandId'
+                      AND predecessor.command ->> '_tag' = 'SubmitPrompt'
+                    )
+                )
+              ORDER BY command_record.thread_version
+              LIMIT 1
+            ) command_candidate ON TRUE
+            ORDER BY command_candidate.admitted_at, command_candidate.thread_id, command_candidate.thread_version
+            FOR UPDATE OF protocol_state SKIP LOCKED
+            LIMIT 1
+          )
+          UPDATE rika_hosted_thread_protocol_commands command_record
+          SET claim_token = ${input.claimToken},
+            claim_expires_at = transaction_timestamp() + ${input.claimMillis} * interval '1 millisecond'
+          FROM candidate
+          WHERE command_record.thread_id = candidate.thread_id
+            AND command_record.command_id = candidate.command_id
+          RETURNING command_record.owner_id AS "ownerId", command_record.thread_id AS "threadId",
+            command_record.command_id AS "commandId", command_record.idempotency_key AS "idempotencyKey",
+            command_record.expected_version::text AS "expectedThreadVersion",
+            command_record.thread_version::text AS "threadVersion", command_record.actor, command_record.command,
+            command_record.state, command_record.result, command_record.event_cursor::text AS cursor,
+            ${sql.unsafe(timestampSql.replace("%s", "command_record.admitted_at"))} AS "admittedAt",
+            NULL::text AS "completedAt"`)
+        return rows[0] === undefined ? undefined : yield* commandRow(rows[0])
+      }),
+    )
+  })
+
+  const renewCommandClaim: ThreadProtocolStoreService["renewCommandClaim"] = Effect.fn(
+    "PostgresThreadProtocolStore.renewCommandClaim",
+  )(function* (input) {
+    const rows = yield* query(sql`UPDATE rika_hosted_thread_protocol_commands
+      SET claim_expires_at = transaction_timestamp() + ${input.claimMillis} * interval '1 millisecond'
+      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND command_id = ${input.commandId}
+        AND state = 'admitted' AND claim_token = ${input.claimToken}
+        AND claim_expires_at > transaction_timestamp()
+      RETURNING command_id`)
+    return rows[0] !== undefined
+  })
+
+  const releaseCommandClaim: ThreadProtocolStoreService["releaseCommandClaim"] = Effect.fn(
+    "PostgresThreadProtocolStore.releaseCommandClaim",
+  )(function* (input) {
+    yield* query(sql`UPDATE rika_hosted_thread_protocol_commands SET claim_token = NULL, claim_expires_at = NULL
+      WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND command_id = ${input.commandId}
+        AND state = 'admitted' AND claim_token = ${input.claimToken}`).pipe(Effect.asVoid)
+  })
+
   const completeCommand: ThreadProtocolStoreService["completeCommand"] = Effect.fn(
     "PostgresThreadProtocolStore.completeCommand",
   )(function* (input) {
@@ -197,20 +276,24 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           FOR UPDATE`)
         const state = stateRows[0]
         if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
-        const rows = yield* query(sql<CommandRow>`SELECT owner_id AS "ownerId", thread_id AS "threadId",
+        const rows = yield* query(sql<CommandClaimRow>`SELECT owner_id AS "ownerId", thread_id AS "threadId",
             command_id AS "commandId", idempotency_key AS "idempotencyKey",
             expected_version::text AS "expectedThreadVersion", thread_version::text AS "threadVersion",
             actor, command, state, result, event_cursor::text AS cursor,
             ${sql.unsafe(timestampSql.replace("%s", "admitted_at"))} AS "admittedAt",
-            CASE WHEN completed_at IS NULL THEN NULL ELSE ${sql.unsafe(timestampSql.replace("%s", "completed_at"))} END AS "completedAt"
+            CASE WHEN completed_at IS NULL THEN NULL ELSE ${sql.unsafe(timestampSql.replace("%s", "completed_at"))} END AS "completedAt",
+            claim_token AS "claimToken",
+            claim_expires_at > transaction_timestamp() AS "claimActive"
           FROM rika_hosted_thread_protocol_commands
           WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND command_id = ${input.commandId}
           FOR UPDATE`)
         const current = rows[0]
         if (current === undefined) return yield* failure("not-found", "Command is unavailable")
         const currentCommand = yield* commandRow(current)
-        if (current.state === "completed") return currentCommand
-        const threadVersion = ThreadVersion.make(current.threadVersion)
+        if (current.state === "completed") return { _tag: "Duplicate" as const, command: currentCommand }
+        if (current.claimToken !== input.claimToken || current.claimActive !== true)
+          return yield* failure("stale-fence", "Command application claim is expired or fenced")
+        const threadVersion = ThreadVersion.make(state.version)
         const events = yield* writeEvents({
           ownerId: input.ownerId,
           threadId: input.threadId,
@@ -223,21 +306,25 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         if (input.events.length > 0)
           yield* query(sql`UPDATE rika_hosted_thread_protocol_state SET event_cursor = ${cursor}
             WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}`)
+        if (input.events.length > 0) yield* query(sql`SELECT pg_notify('rika_thread_protocol', ${input.threadId})`)
         if (input.snapshot !== undefined)
           yield* query(sql`INSERT INTO rika_hosted_thread_protocol_snapshots
             (owner_id, thread_id, thread_version, cursor, snapshot, created_at)
             VALUES (${input.ownerId}, ${input.threadId}, ${threadVersion}, ${cursor}, ${sql.json(input.snapshot)},
-              ${input.completedAt})`)
+              ${input.completedAt})
+            ON CONFLICT (thread_id, thread_version) DO UPDATE
+              SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at
+              WHERE rika_hosted_thread_protocol_snapshots.cursor <= EXCLUDED.cursor`)
         const completed = yield* query(sql<CommandRow>`UPDATE rika_hosted_thread_protocol_commands
           SET state = 'completed', result = ${sql.json(input.result)}, event_cursor = ${cursor},
-            completed_at = ${input.completedAt}
+            completed_at = ${input.completedAt}, claim_token = NULL, claim_expires_at = NULL
           WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId} AND command_id = ${input.commandId}
           RETURNING owner_id AS "ownerId", thread_id AS "threadId", command_id AS "commandId",
             idempotency_key AS "idempotencyKey", expected_version::text AS "expectedThreadVersion",
             thread_version::text AS "threadVersion", actor, command, state, result, event_cursor::text AS cursor,
             ${sql.unsafe(timestampSql.replace("%s", "admitted_at"))} AS "admittedAt",
             ${sql.unsafe(timestampSql.replace("%s", "completed_at"))} AS "completedAt"`)
-        return yield* commandRow(completed[0]!)
+        return { _tag: "Completed" as const, command: yield* commandRow(completed[0]!) }
       }),
     )
   })
@@ -263,12 +350,14 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         })
         yield* query(sql`UPDATE rika_hosted_thread_protocol_state SET event_cursor = ${events.at(-1)!.cursor}
           WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}`)
+        yield* query(sql`SELECT pg_notify('rika_thread_protocol', ${input.threadId})`)
         yield* query(sql`INSERT INTO rika_hosted_thread_protocol_snapshots
           (owner_id, thread_id, thread_version, cursor, snapshot, created_at)
           VALUES (${input.ownerId}, ${input.threadId}, ${state.version}, ${events.at(-1)!.cursor},
             ${sql.json(input.snapshot)}, ${input.createdAt})
           ON CONFLICT (thread_id, thread_version) DO UPDATE
-            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at`)
+            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at
+            WHERE rika_hosted_thread_protocol_snapshots.cursor <= EXCLUDED.cursor`)
         return events
       }),
     )
@@ -292,7 +381,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           VALUES (${input.ownerId}, ${input.threadId}, ${input.threadVersion}, ${input.cursor},
             ${sql.json(input.snapshot)}, ${input.createdAt})
           ON CONFLICT (thread_id, thread_version) DO UPDATE
-            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at`)
+            SET cursor = EXCLUDED.cursor, snapshot = EXCLUDED.snapshot, created_at = EXCLUDED.created_at
+            WHERE rika_hosted_thread_protocol_snapshots.cursor <= EXCLUDED.cursor`)
       }),
     )
   })
@@ -469,6 +559,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
   return ThreadProtocolStore.of({
     initializeThread,
     admitCommand,
+    claimNextCommand,
+    renewCommandClaim,
+    releaseCommandClaim,
     completeCommand,
     appendEvents,
     saveSnapshot,

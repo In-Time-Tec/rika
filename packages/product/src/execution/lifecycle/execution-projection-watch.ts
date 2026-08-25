@@ -4,73 +4,10 @@ import * as ExecutionStatus from "@rika/product/execution-status"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Cause, Clock, Effect, Stream } from "effect"
 
 export const DefectMaxConsecutiveAttempts = 3
 export const StallMaxSilenceMs = 15 * 60_000
-
-const transcriptTerminalStatus = (
-  status: "completed" | "failed" | "cancelled",
-): "complete" | "failed" | "cancelled" => (status === "completed" ? "complete" : status)
-
-const stalledUnit = (
-  turn: Turn.AgentExecutionTurn,
-  revision: number,
-  silenceMs: number,
-  status: "completed" | "failed" | "cancelled",
-): TranscriptUnit.Unit => {
-  const key = `turn:${turn.id}:execution-stalled`
-  return {
-    key,
-    turnId: turn.id,
-    order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER),
-    revision,
-    executionOutcome: {
-      status: transcriptTerminalStatus(status),
-      reason: "The durable Execution stopped reporting progress.",
-    },
-    content: {
-      _tag: "Block",
-      block: {
-        _tag: "Error",
-        title: "Execution stalled",
-        detail: `No execution progress for ${Math.round(silenceMs / 1_000)} seconds; terminal execution authority reported the Turn settled.`,
-        turnId: turn.id,
-        category: "execution-stalled",
-        retryable: false,
-      },
-    },
-  }
-}
-
-const defectUnit = (
-  turn: Turn.AgentExecutionTurn,
-  revision: number,
-  detail: string,
-  status: "completed" | "failed" | "cancelled",
-): TranscriptUnit.Unit => {
-  const key = `turn:${turn.id}:projection-defect`
-  return {
-    key,
-    turnId: turn.id,
-    order: TranscriptOrdering.unitOrder(key, Number.MAX_SAFE_INTEGER),
-    revision,
-    executionOutcome: { status: transcriptTerminalStatus(status), reason: detail },
-    content: {
-      _tag: "Block",
-      block: {
-        _tag: "Error",
-        title: "Turn projection failed",
-        detail,
-        turnId: turn.id,
-        category: "projection-defect",
-        retryable: false,
-      },
-    },
-  }
-}
 
 export const watch = (input: {
   readonly turnId: Turn.TurnId
@@ -78,11 +15,12 @@ export const watch = (input: {
   readonly transcripts: TranscriptRepository.Interface
   readonly backend: ExecutionGateway.Interface
   readonly onChange?: (change: ExecutionProjection.Change) => void
+  readonly onCommitted?: (change: ExecutionProjection.Change) => Effect.Effect<void, never, never>
   readonly onPreview?: (preview: ExecutionGateway.ModelPreviewEvent) => void
   readonly stallSilenceMs?: number | undefined
 }) =>
   Effect.gen(function* () {
-    const { backend, onChange, onPreview, transcripts, turnId, turns } = input
+    const { backend, onChange, onCommitted, onPreview, transcripts, turnId, turns } = input
     const stallSilenceMs = input.stallSilenceMs ?? StallMaxSilenceMs
     const clock = yield* Clock.Clock
     const turn = yield* turns.get(turnId)
@@ -100,41 +38,6 @@ export const watch = (input: {
     let retryDelay = 100
     let consecutiveDefects = 0
     let lastProgressAt = yield* clock.currentTimeMillis
-    const settleFailure = Effect.fn("ExecutionProjectionWatch.settleFailure")(function* (
-      reason: string,
-      makeUnit: (revision: number, status: "completed" | "failed" | "cancelled") => TranscriptUnit.Unit,
-    ) {
-      yield* backend
-        .cancelTurn(executionLink, reason)
-        .pipe(Effect.mapError((error) => ExecutionGateway.WatchTurnFailure.make({ message: error.message })))
-      const inspection = yield* backend
-        .inspectTurn(executionLink)
-        .pipe(Effect.mapError((error) => ExecutionGateway.WatchTurnFailure.make({ message: error.message })))
-      if (inspection.status === "unavailable" || !ExecutionStatus.isTerminalStatus(inspection.status))
-        return yield* ExecutionGateway.WatchTurnFailure.make({
-          message: `Turn ${turnId} cancellation has not reached terminal execution authority`,
-        })
-      const projection = yield* transcripts.get(turnId)
-      const now = yield* clock.currentTimeMillis
-      const revision = (projection?.units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1) ?? -1) + 1
-      const units = [...(projection?.units ?? []), makeUnit(revision, inspection.status)]
-      yield* transcripts.replaceUnits({ ...turn, status: inspection.status, updatedAt: now }, units)
-      return {
-        turnId: String(turnId),
-        status: inspection.status,
-        state: {
-          status: inspection.status,
-          usage: ExecutionProjection.emptyUsageState(),
-          steering: { steeringMessages: 0, followUpMessages: 0 },
-        },
-        units,
-        ...(projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }),
-      }
-    })
-    const settleStalled = (silenceMs: number) =>
-      settleFailure("Execution stopped reporting progress", (revision, status) =>
-        stalledUnit(turn, revision, silenceMs, status),
-      )
     while (true) {
       let progressed = false
       let previewed = false
@@ -161,6 +64,7 @@ export const watch = (input: {
               latestChange = change
               progressed = true
               yield* notify(() => onChange?.(change))
+              if (onCommitted !== undefined) yield* onCommitted(change)
             })
           yield* backend
             .watchTurn(executionLink, {
@@ -229,21 +133,17 @@ export const watch = (input: {
               "rika.stall.silence.ms": silence,
             }),
           )
-          return yield* settleStalled(silence)
         }
         if (Cause.hasDies(attempt.cause)) {
           consecutiveDefects += 1
-          if (consecutiveDefects >= DefectMaxConsecutiveAttempts) {
+          if (consecutiveDefects === DefectMaxConsecutiveAttempts) {
             const detail = Cause.pretty(attempt.cause)
-            yield* Effect.logError("execution-projection-watch.defect-terminal").pipe(
+            yield* Effect.logError("execution-projection-watch.defect").pipe(
               Effect.annotateLogs({
                 "rika.turn.id": String(turnId),
                 "rika.defect.attempts": consecutiveDefects,
                 "rika.failure.message": detail,
               }),
-            )
-            return yield* settleFailure("Execution projection repeatedly failed", (revision, status) =>
-              defectUnit(turn, revision, detail, status),
             )
           }
         } else {
@@ -272,7 +172,6 @@ export const watch = (input: {
               "rika.stall.silence.ms": silence,
             }),
           )
-          return yield* settleStalled(silence)
         }
         const delay = progressed ? 100 : retryDelay
         retryDelay = Math.min(delay * 2, 5_000)

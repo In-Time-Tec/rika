@@ -25,19 +25,22 @@ import * as ThreadView from "@rika/product/thread-view"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./hosted-contract"
 import { authenticated } from "./hosted-account"
 import { connect } from "./hosted-thread-client"
-import { Crypto, Deferred, Effect, Exit, Option, Schema, Semaphore, SubscriptionRef } from "effect"
+import { Crypto, Deferred, Effect, Exit, Option, Queue, Schema, Semaphore, SubscriptionRef } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 
 type Payload = ServerFrame["payload"]
+type Admitted = Extract<Payload, { readonly _tag: "CommandAdmitted" }>
 type Accepted = Extract<Payload, { readonly _tag: "CommandAccepted" }>
 type Rejected = Extract<Payload, { readonly _tag: "CommandRejected" }>
 type Snapshot = Extract<Payload, { readonly _tag: "ThreadSnapshot" }>
 type Attachment = Extract<Payload, { readonly _tag: "ThreadAttached" }>
 type SnapshotProjection = Pick<Snapshot, "threadId" | "threadVersion" | "cursor" | "snapshot">
+type CancellationTarget = Extract<MutatingThreadCommand, { readonly _tag: "Cancel" }>["target"]
 const encodeThreadView = Schema.encodeSync(Schema.fromJsonString(ThreadView.ThreadViewSnapshot))
-type CommandOutcome = Accepted | Rejected
+type CommandOutcome = Admitted | Accepted | Rejected
 
 const failure = (message: string) => HostedError.make({ kind: "network", message })
+const protocolFailure = (message: string) => HostedError.make({ kind: "protocol", message })
 type PreparedAttachment = {
   readonly attachment: Attachment
   readonly snapshotCursor: bigint
@@ -131,7 +134,11 @@ const envelope = (requestId: string, command: ClientCommand): ClientMessage => (
 })
 
 interface PhysicalConnection {
-  readonly command: (requestId: string, command: ClientCommand) => Effect.Effect<CommandOutcome, HostedError>
+  readonly command: (
+    requestId: string,
+    command: ClientCommand,
+    completeOnAdmission: boolean,
+  ) => Effect.Effect<CommandOutcome, HostedError>
   readonly acknowledge: (requestId: string, threadId: string, cursor: string) => Effect.Effect<void, HostedError>
   readonly attach: (threadId: string, cursor: string) => Effect.Effect<PendingAttachment, HostedError>
   readonly invalidate: Effect.Effect<void>
@@ -170,12 +177,11 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
     http.issueThreadTicket(input.profile.origin, session),
   ).pipe(Effect.provideService(Http, http), Effect.provideService(CredentialStore, credentials))
   const socket = yield* connect(ticket)
-  const outcomes = new Map<string, Deferred.Deferred<CommandOutcome, HostedError>>()
+  const outcomes = new Map<string, Queue.Queue<CommandOutcome>>()
   const attachments = new Map<string, AttachmentWaiter>()
   const disconnected = yield* Deferred.make<never, HostedError>()
   const failPending = (error: HostedError) =>
     Effect.sync(() => {
-      for (const waiter of outcomes.values()) Deferred.doneUnsafe(waiter, Effect.fail(error))
       for (const waiter of attachments.values()) {
         Deferred.doneUnsafe(waiter.response, Effect.fail(error))
         Deferred.doneUnsafe(waiter.processed, Effect.fail(error))
@@ -185,21 +191,31 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
       Deferred.doneUnsafe(disconnected, Effect.fail(error))
     })
   let physical: PhysicalConnection
-  const command = (requestId: string, value: ClientCommand) =>
+  const command = (requestId: string, value: ClientCommand, completeOnAdmission: boolean) =>
     Effect.gen(function* () {
-      const waiter = yield* Deferred.make<CommandOutcome, HostedError>()
+      const waiter = yield* Queue.bounded<CommandOutcome>(2)
       outcomes.set(requestId, waiter)
       yield* socket
         .send(envelope(requestId, value))
         .pipe(Effect.onError(() => Effect.sync(() => outcomes.delete(requestId))))
-      const outcome = yield* Deferred.await(waiter).pipe(Effect.ensuring(Effect.sync(() => outcomes.delete(requestId))))
+      const next = Queue.take(waiter).pipe(Effect.raceFirst(Deferred.await(disconnected)))
+      let outcome = yield* next
+      if (outcome._tag === "CommandAdmitted" && !completeOnAdmission) outcome = yield* next
       if ("threadId" in value && String(outcome.threadId) !== String(value.threadId)) {
-        const error = failure("Hosted Thread response identity did not match its command")
+        const error = protocolFailure("Hosted Thread response identity did not match its command")
+        yield* failPending(error)
+        return yield* error
+      }
+      if (
+        "commandId" in value &&
+        (outcome.commandId === undefined || String(outcome.commandId) !== String(value.commandId))
+      ) {
+        const error = protocolFailure("Hosted Thread response command identity did not match its command")
         yield* failPending(error)
         return yield* error
       }
       return outcome
-    })
+    }).pipe(Effect.ensuring(Effect.sync(() => outcomes.delete(requestId))))
   const attach = (threadId: string, cursor: string) =>
     Effect.gen(function* () {
       const requestId = `attach:${threadId}:${yield* randomId}`
@@ -259,9 +275,13 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         if (waiter === undefined) return yield* failure("Hosted Thread attachment response was not requested")
         yield* Deferred.succeed(waiter.response, payload)
         yield* Deferred.await(waiter.processed)
-      } else if (payload._tag === "CommandAccepted" || payload._tag === "CommandRejected") {
+      } else if (
+        payload._tag === "CommandAdmitted" ||
+        payload._tag === "CommandAccepted" ||
+        payload._tag === "CommandRejected"
+      ) {
         const waiter = outcomes.get(payload.requestId)
-        if (waiter !== undefined) yield* Deferred.succeed(waiter, payload)
+        if (waiter !== undefined) yield* Queue.offer(waiter, payload)
         if (payload._tag === "CommandRejected") {
           const attachmentWaiter = attachments.get(payload.requestId)
           if (attachmentWaiter !== undefined) {
@@ -327,7 +347,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const randomId = crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("Hosted Thread request identifier could not be created")),
   )
-  const commandAdmission = yield* Semaphore.make(1)
+  const selectionAdmission = yield* Semaphore.make(1)
   const initialState: InteractiveConnection.State = {
     connectivity: "connecting",
     target: "resolving",
@@ -346,6 +366,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   let stopped = false
   let current: PhysicalConnection | undefined
   let connecting: PhysicalConnection | undefined
+  const latestSubmitCommandIds = new Map<string, string>()
+  const pendingSubmitCommandIds = new Map<string, Map<string, Deferred.Deferred<string, OperationUnavailable>>>()
   let connectionChanged = Deferred.makeUnsafe<void>()
   const updateState = (update: (previousState: InteractiveConnection.State) => InteractiveConnection.State) =>
     SubscriptionRef.updateSome(state, (previousState) => {
@@ -378,27 +400,33 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const requestId = `ack:${threadId}:${cursor}:${yield* randomId}`
       yield* connection.acknowledge(requestId, threadId, cursor)
     }).pipe(Effect.ignore)
-  const statusState = (
-    payload: Extract<Payload, { readonly _tag: "ExecutorStatus" | "WorkspaceStatus" }>,
-  ): InteractiveConnection.Activity | undefined => {
-    const status = payload.status.state
-    if (typeof status !== "string") return undefined
-    const states: Record<string, InteractiveConnection.Activity> = {
-      waiting: "executor-waiting",
-      connecting: "executor-connecting",
-      connected: "executor-connected",
-      preparing: "workspace-preparing",
-      setup: "workspace-setup",
-      resuming: "workspace-resuming",
-      leased: "lease-active",
-      retrying: "retrying",
-      approval: "approval-required",
-      unknown: "unknown-operation",
-      terminal: "terminal",
-    }
-    return states[status]
-  }
   const authority = () => (selection._tag === "Attached" ? selection.projection : selection.authority)
+  const pendingSubmitCommandId = (threadId: string, submissionId: string) => {
+    let threadSubmissions = pendingSubmitCommandIds.get(threadId)
+    if (threadSubmissions === undefined) {
+      threadSubmissions = new Map()
+      pendingSubmitCommandIds.set(threadId, threadSubmissions)
+    }
+    const existing = threadSubmissions.get(submissionId)
+    if (existing !== undefined) return existing
+    const created = Deferred.makeUnsafe<string, OperationUnavailable>()
+    threadSubmissions.set(submissionId, created)
+    return created
+  }
+  const forgetPendingSubmitCommandId = (threadId: string, submissionId: string) =>
+    Effect.sync(() => {
+      const threadSubmissions = pendingSubmitCommandIds.get(threadId)
+      threadSubmissions?.delete(submissionId)
+      if (threadSubmissions?.size === 0) pendingSubmitCommandIds.delete(threadId)
+    })
+  const activeTurnId = () =>
+    authority()?.view.turns.findLast(
+      (entry) =>
+        entry.turn.status === "accepted" ||
+        entry.turn.status === "running" ||
+        entry.turn.status === "cancelling" ||
+        entry.turn.status === "waiting",
+    )?.turn.id
   const replaceAuthority = (expected: Projection, replacement: Projection) => {
     if (selection._tag === "Attached" && selection.projection === expected) {
       selection = { _tag: "Attached", projection: replacement }
@@ -416,10 +444,11 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const projectionActivity = (
     view: ThreadView.ThreadViewSnapshot,
     pendingAuthorizations: ReadonlyArray<unknown>,
+    executorKind: HostedThreadSnapshot["executorKind"],
+    workspace: HostedThreadSnapshot["workspace"],
   ): InteractiveConnection.Activity => {
     const active = view.turns
     if (pendingAuthorizations.length > 0) return "approval-required"
-    if (active.some((entry) => entry.turn.status === "waiting")) return "executor-waiting"
     if (
       active.length > 0 &&
       active.every(
@@ -428,9 +457,14 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       )
     )
       return "terminal"
+    if (active.length > 0 && executorKind === "orb" && workspace?._tag === "OrbWorkspace") {
+      if (workspace.state === "preparing") return "workspace-preparing"
+      if (workspace.state === "failed") return "workspace-failed"
+    }
+    if (active.some((entry) => entry.turn.status === "waiting")) return "executor-waiting"
     if (active.some((entry) => entry.turn.status === "running" || entry.turn.status === "cancelling"))
       return "executor-connected"
-    return active.length > 0 ? "workspace-preparing" : "executor-waiting"
+    return "executor-waiting"
   }
   const projectionFromSnapshot = (
     payload: SnapshotProjection,
@@ -450,7 +484,12 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         ]),
       ),
       target: payload.snapshot.executorKind,
-      activity: projectionActivity(payload.snapshot.view, payload.snapshot.pendingAuthorizations),
+      activity: projectionActivity(
+        payload.snapshot.view,
+        payload.snapshot.pendingAuthorizations,
+        payload.snapshot.executorKind,
+        payload.snapshot.workspace,
+      ),
       participants,
       committedCursor: String(payload.cursor),
       version: String(payload.threadVersion),
@@ -478,6 +517,11 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       if (!hostedThreadSnapshotMatches(payload.snapshot, threadId))
         return yield* failure("Hosted Thread snapshot identity did not match its response")
       const previous = authority()!
+      const cursor = BigInt(payload.cursor)
+      const previousCursor = BigInt(previous.committedCursor)
+      if (cursor < previousCursor) return
+      if (BigInt(payload.threadVersion) < BigInt(previous.version))
+        return yield* failure("Hosted Thread snapshot version regressed")
       const candidate = projectionFromSnapshot(
         payload,
         previous.participants,
@@ -520,7 +564,12 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         ]),
       ),
       target: payload.snapshot.executorKind,
-      activity: projectionActivity(prepared.view, payload.snapshot.pendingAuthorizations),
+      activity: projectionActivity(
+        prepared.view,
+        payload.snapshot.pendingAuthorizations,
+        payload.snapshot.executorKind,
+        payload.snapshot.workspace,
+      ),
       participants: payload.participants.length,
       committedCursor: String(payload.cursor),
       version: String(payload.threadVersion),
@@ -563,16 +612,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     })
   const receive = (payload: Payload, connection: PhysicalConnection) =>
     Effect.gen(function* () {
-      if (payload._tag === "ExecutorStatus" || payload._tag === "WorkspaceStatus") {
-        if (!currentFrame(connection) || !selectedFrame(String(payload.threadId))) return
-        const next = statusState(payload)
-        if (next !== undefined) {
-          const projection = authority()!
-          replaceAuthority(projection, { ...projection, activity: next })
-          yield* setActivity(next)
-        }
-        return
-      }
       if (payload._tag === "PresenceSnapshot") {
         if (!currentFrame(connection) || !selectedFrame(String(payload.threadId))) return
         const projection = authority()!
@@ -597,6 +636,12 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         if (next !== previous + 1n) return yield* failure("Hosted Thread event cursor was not contiguous")
         if (BigInt(payload.event.threadVersion) < BigInt(projection.version))
           return yield* failure("Hosted Thread event version regressed")
+        if (
+          (payload.event.event._tag === "SubmissionAdmitted" ||
+            payload.event.event._tag === "SubmissionRejected") &&
+          payload.event.event.submissionId !== undefined
+        )
+          yield* forgetPendingSubmitCommandId(threadId, payload.event.event.submissionId)
         let nextView = projection.view
         if (payload.event.event._tag === "ThreadViewSnapshot") {
           const view = ThreadView.fromSnapshot(payload.event.event.snapshot)
@@ -627,7 +672,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     })
 
   const attachSelection = (request: { readonly threadId: string; readonly token: object }, expected?: string) =>
-    commandAdmission.withPermits(1)(
+    selectionAdmission.withPermits(1)(
       HostedObservability.observe(
         "attach",
         { threadId: request.threadId },
@@ -822,78 +867,79 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       )
     })
   const connectionLoop = superviseConnection(false)
-  const refreshLoop = Effect.forever(
-    Effect.sleep("500 millis").pipe(
-      Effect.andThen(
-        Effect.suspend(() =>
-          selection._tag === "Attached"
-            ? requestSelection(selection.projection.threadId, selection.projection).pipe(Effect.ignore)
-            : Effect.void,
-        ),
-      ),
-    ),
-  )
 
   const mutate = (
     operation: string,
     commandId: string,
     make: (threadId: ThreadId, version: string) => MutatingThreadCommand,
+    completeOnAdmission = false,
   ) =>
-    commandAdmission
-      .withPermits(1)(
-        Effect.gen(function* () {
-          const admitted = authority()
-          if (admitted === undefined) return yield* failure("Hosted Thread authority is unavailable")
-          const threadId = admitted.threadId
-          const attempt = (): Effect.Effect<void, HostedError> =>
-            Effect.suspend(() => {
-              if (stopped) return Effect.fail(failure("Hosted interactive session is closed"))
-              return Effect.gen(function* () {
-                const projection = authority()
-                if (projection === undefined || projection.threadId !== threadId)
-                  return yield* failure("Hosted Thread authority changed during command execution")
+    Effect.gen(function* () {
+      const admitted = authority()
+      if (admitted === undefined) return yield* failure("Hosted Thread authority is unavailable")
+      const threadId = admitted.threadId
+      const attempt = (retryStaleVersion: boolean): Effect.Effect<void, HostedError> =>
+        Effect.suspend(() => {
+          if (stopped) return Effect.fail(failure("Hosted interactive session is closed"))
+          return Effect.gen(function* () {
+            const projection = authority()
+            if (projection === undefined || projection.threadId !== threadId)
+              return yield* failure("Hosted Thread authority changed during command execution")
+            const command = make(ThreadId.make(threadId), projection.version)
+            const sendUntilKnown = (): Effect.Effect<CommandOutcome, HostedError> =>
+              Effect.gen(function* () {
                 const physical = yield* awaitConnection
                 const requestId = `${commandId}:${yield* randomId}`
-                const outcome = yield* Effect.result(
-                  physical.command(requestId, make(ThreadId.make(threadId), projection.version)),
-                )
-                if (outcome._tag === "Failure") {
-                  if (current === physical) publishConnection(undefined)
-                  yield* updateState((previousState) => ({
-                    ...previousState,
-                    connectivity: "reconnecting",
-                    activity: "retrying",
-                  }))
-                  return yield* attempt()
-                }
-                if (outcome.success._tag === "CommandAccepted") {
-                  const committed = authority()
-                  if (committed?.threadId === threadId)
-                    replaceAuthority(committed, { ...committed, version: String(outcome.success.threadVersion) })
-                  return
-                }
-                if (outcome.success.reason === "stale-version" && outcome.success.currentThreadVersion !== undefined) {
-                  const committed = authority()
-                  if (committed?.threadId !== threadId)
-                    return yield* failure("Hosted Thread authority changed during command retry")
-                  replaceAuthority(committed, {
-                    ...committed,
-                    version: String(outcome.success.currentThreadVersion),
-                  })
-                  return yield* attempt()
-                }
-                if (outcome.success.reason === "conflict" || outcome.success.reason === "unavailable")
+                const outcome = yield* Effect.result(physical.command(requestId, command, completeOnAdmission))
+                if (outcome._tag === "Success") {
+                  if (outcome.success._tag !== "CommandRejected" || outcome.success.reason !== "unavailable")
+                    return outcome.success
                   yield* setActivity("unknown-operation")
-                return yield* HostedError.make({
-                  kind: outcome.success.reason === "forbidden" ? "denied" : "protocol",
-                  message: outcome.success.message,
-                })
+                  yield* Effect.sleep("250 millis")
+                  return yield* sendUntilKnown()
+                }
+                if (outcome.failure.kind === "protocol") return yield* outcome.failure
+                if (current === physical) publishConnection(undefined)
+                yield* updateState((previousState) => ({
+                  ...previousState,
+                  connectivity: "reconnecting",
+                }))
+                return yield* sendUntilKnown()
               })
+            let outcome = yield* sendUntilKnown()
+            while (outcome._tag === "CommandAdmitted") {
+              const committed = authority()
+              if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
+                replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
+              if (completeOnAdmission) return
+              return yield* failure("Hosted Thread command completion was not pushed after durable admission")
+            }
+            if (outcome._tag === "CommandAccepted") {
+              const committed = authority()
+              if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
+                replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
+              return
+            }
+            if (retryStaleVersion && outcome.reason === "stale-version" && outcome.currentThreadVersion !== undefined) {
+              const committed = authority()
+              if (committed?.threadId !== threadId)
+                return yield* failure("Hosted Thread authority changed during command retry")
+              if (BigInt(outcome.currentThreadVersion) > BigInt(committed.version))
+                replaceAuthority(committed, {
+                  ...committed,
+                  version: String(outcome.currentThreadVersion),
+                })
+              return yield* attempt(false)
+            }
+            if (outcome.reason === "conflict") yield* setActivity("unknown-operation")
+            return yield* HostedError.make({
+              kind: outcome.reason === "forbidden" ? "denied" : "protocol",
+              message: outcome.message,
             })
-          yield* attempt()
-        }),
-      )
-      .pipe(Effect.mapError((error) => unavailable(operation, error)))
+          })
+        })
+      yield* attempt(true)
+    }).pipe(Effect.mapError((error) => unavailable(operation, error)))
 
   const unsupported = (operation: string) =>
     Effect.fail(OperationUnavailable.make({ operation, message: `${operation} is unavailable for hosted Threads` }))
@@ -914,10 +960,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           )
         consumerAttached = true
         dispatch = next
-        return Effect.raceFirst(
-          Effect.all([connectionLoop, refreshLoop], { concurrency: "unbounded", discard: true }),
-          Deferred.await(closed),
-        ).pipe(
+        return Effect.raceFirst(connectionLoop, Deferred.await(closed)).pipe(
           Effect.ensuring(
             Effect.sync(() => {
               consumerAttached = false
@@ -933,31 +976,46 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         ?.checkpoint,
     submit: (prompt, mode, parts, _tuning, submissionId) =>
       Effect.gen(function* () {
-        const commandId = submissionId ?? (yield* nextCommandId("submit"))
-        yield* mutate("InteractiveSession.submit", commandId, (threadId, version) => ({
-          _tag: "SubmitPrompt",
-          threadId,
-          commandId: CommandId.make(commandId),
-          idempotencyKey: IdempotencyKey.make(commandId),
-          expectedThreadVersion: ThreadVersion.make(version),
-          text: prompt,
-          ...(mode === undefined ? {} : { mode }),
-          ...(parts === undefined
-            ? {}
-            : {
-                attachments: parts.flatMap((part) =>
-                  part.type === "image"
-                    ? [
-                        {
-                          mediaType: part.mediaType,
-                          data: part.data,
-                          ...(part.filename === undefined ? {} : { filename: part.filename }),
-                        },
-                      ]
-                    : [],
-                ),
-              }),
-        }))
+        const selectedThreadId = authority()?.threadId
+        if (selectedThreadId === undefined) return yield* unsupported("InteractiveSession.submit")
+        const pendingCommandId =
+          submissionId === undefined ? undefined : pendingSubmitCommandId(selectedThreadId, submissionId)
+        const commandId = yield* nextCommandId("submit").pipe(
+          Effect.tapError((error) =>
+            pendingCommandId === undefined ? Effect.void : Deferred.fail(pendingCommandId, error).pipe(Effect.asVoid),
+          ),
+        )
+        if (pendingCommandId !== undefined) yield* Deferred.succeed(pendingCommandId, commandId)
+        const attachments = parts?.flatMap((part) =>
+          part.type === "image"
+            ? [
+                {
+                  mediaType: part.mediaType,
+                  data: part.data,
+                  ...(part.filename === undefined ? {} : { filename: part.filename }),
+                },
+              ]
+            : [],
+        )
+        yield* mutate(
+          "InteractiveSession.submit",
+          commandId,
+          (threadId, version) => {
+            latestSubmitCommandIds.set(String(threadId), commandId)
+            return {
+              _tag: "SubmitPrompt",
+              threadId,
+              commandId: CommandId.make(commandId),
+              idempotencyKey: IdempotencyKey.make(commandId),
+              expectedThreadVersion: ThreadVersion.make(version),
+              text: prompt,
+              ...(submissionId === undefined ? {} : { submissionId }),
+              ...(mode === undefined ? {} : { mode }),
+              ...(attachments === undefined || attachments.length === 0 ? {} : { attachments }),
+            }
+          },
+          true,
+        )
       }),
     shell: () => unsupported("InteractiveSession.shell"),
     editQueued: () => unsupported("InteractiveSession.editQueued"),
@@ -972,16 +1030,19 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         text,
         targetTurnId: turnId as never,
       })),
-    steer: (text, requestId, turnId) =>
-      mutate("InteractiveSession.steer", requestId, (threadId, version) => ({
+    steer: (text, requestId, turnId) => {
+      const targetTurnId = turnId ?? activeTurnId()
+      if (targetTurnId === undefined) return unsupported("InteractiveSession.steer")
+      return mutate("InteractiveSession.steer", requestId, (threadId, version) => ({
         _tag: "Steer",
         threadId,
         commandId: CommandId.make(requestId),
         idempotencyKey: IdempotencyKey.make(requestId),
         expectedThreadVersion: ThreadVersion.make(version),
         text,
-        ...(turnId === undefined ? {} : { targetTurnId: turnId as never }),
-      })),
+        targetTurnId: targetTurnId as never,
+      }))
+    },
     approveAuthorization: (turnId, authorizationId) => {
       const pending = authority()?.authorizations.get(`${turnId}:${authorizationId}`)
       if (pending === undefined) return unsupported("InteractiveSession.approveAuthorization")
@@ -1012,8 +1073,10 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         checkpoint: pending.checkpoint,
       }))
     },
-    interruptAndSend: (prompt) =>
+    interruptAndSend: (prompt, requestedTargetTurnId) =>
       Effect.gen(function* () {
+        const targetTurnId = requestedTargetTurnId ?? activeTurnId()
+        if (targetTurnId === undefined) return yield* unsupported("InteractiveSession.interruptAndSend")
         const commandId = yield* nextCommandId("interrupt")
         yield* mutate("InteractiveSession.interruptAndSend", commandId, (threadId, version) => ({
           _tag: "InterruptAndSend",
@@ -1022,18 +1085,62 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           idempotencyKey: IdempotencyKey.make(commandId),
           expectedThreadVersion: ThreadVersion.make(version),
           text: prompt,
+          targetTurnId: targetTurnId as never,
         }))
       }),
-    cancel: Effect.gen(function* () {
-      const commandId = yield* nextCommandId("cancel")
-      yield* mutate("InteractiveSession.cancel", commandId, (threadId, version) => ({
-        _tag: "Cancel",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-      }))
-    }),
+    cancel: (requestedTarget = {}) =>
+      Effect.gen(function* () {
+        const selectedThreadId = requestedTarget.threadId ?? authority()?.threadId
+        if (selectedThreadId === undefined) return yield* unsupported("InteractiveSession.cancel")
+        if (authority()?.threadId !== selectedThreadId)
+          return yield* unavailable(
+            "InteractiveSession.cancel",
+            failure("Hosted Thread authority changed before cancellation"),
+          )
+        const targetTurnId = requestedTarget.turnId ?? (requestedTarget.submissionId === undefined ? activeTurnId() : undefined)
+        const latestSubmitCommandId = latestSubmitCommandIds.get(selectedThreadId)
+        let target: CancellationTarget | undefined
+        if (targetTurnId !== undefined) target = { _tag: "Turn", turnId: targetTurnId as never }
+        else {
+          let targetCommandId = latestSubmitCommandId
+          if (requestedTarget.submissionId !== undefined) {
+            const pendingCommandId = pendingSubmitCommandIds.get(selectedThreadId)?.get(requestedTarget.submissionId)
+            if (pendingCommandId === undefined)
+              return yield* unavailable(
+                "InteractiveSession.cancel",
+                failure("Hosted submission is no longer awaiting Turn admission"),
+              )
+            targetCommandId = yield* Effect.raceFirst(
+              Deferred.await(pendingCommandId),
+              Deferred.await(closed).pipe(Effect.andThen(unsupported("InteractiveSession.cancel"))),
+            )
+          }
+          if (targetCommandId !== undefined)
+            target = { _tag: "Command", commandId: CommandId.make(targetCommandId) }
+        }
+        if (target === undefined) return yield* unsupported("InteractiveSession.cancel")
+        const commandId = yield* nextCommandId("cancel")
+        if (authority()?.threadId !== selectedThreadId)
+          return yield* unavailable(
+            "InteractiveSession.cancel",
+            failure("Hosted Thread authority changed during cancellation"),
+          )
+        yield* mutate(
+          "InteractiveSession.cancel",
+          commandId,
+          (threadId, version) => ({
+            _tag: "Cancel",
+            threadId,
+            commandId: CommandId.make(commandId),
+            idempotencyKey: IdempotencyKey.make(commandId),
+            expectedThreadVersion: ThreadVersion.make(version),
+            target,
+          }),
+          true,
+        )
+        if (requestedTarget.submissionId !== undefined)
+          yield* forgetPendingSubmitCommandId(selectedThreadId, requestedTarget.submissionId)
+      }),
     quit: Effect.suspend(() => {
       const physical = current
       stopped = true

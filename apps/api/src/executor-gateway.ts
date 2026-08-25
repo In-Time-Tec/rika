@@ -112,6 +112,7 @@ interface Pending {
   readonly waiters: number
   readonly bindings: BindingAuthority
   readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
+  readonly bindingAccess: Semaphore.Semaphore
   readonly nextMachineOrdinal: Ref.Ref<number>
 }
 
@@ -231,7 +232,21 @@ export interface LifecycleStore {
     operationKey: string,
     attempt: number,
   ) => Effect.Effect<ReadonlyArray<CellLifecycleFrame>, GatewayError>
-  readonly prepare: (input: ExecuteInput) => Effect.Effect<void, GatewayError>
+  readonly replay: (assignmentId: string) => Effect.Effect<
+    ReadonlyArray<{
+      readonly operationKey: string
+      readonly attempt: number
+      readonly afterCursor: number
+    }>,
+    GatewayError
+  >
+  readonly prepare: (input: ExecuteInput) => Effect.Effect<
+    {
+      readonly admittedAt: string | null
+      readonly deadlineAt: string
+    },
+    GatewayError
+  >
   readonly inspect: (input: ExecuteInput) => Effect.Effect<
     {
       readonly state: "accepted" | "dispatched" | "completed" | "unknown"
@@ -682,11 +697,13 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   })
 
   const replayPending = Effect.fn("ExecutorGateway.replayPending")(function* (session: Session) {
+    const terminalReceipts = new Set<string>()
     for (const operation of (yield* Ref.get(pending)).values()) {
       if (operation.assignmentId !== session.access.fence.assignmentId) continue
       const operationKey = key(operation.assignmentId, operation.operationKey, operation.attempt)
       const terminal = (yield* Ref.get(terminals)).get(operationKey)
       if (terminal !== undefined) {
+        terminalReceipts.add(operationKey)
         session.socket.send(
           encode({
             _tag: "CellTerminalReceipt",
@@ -696,16 +713,17 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             cursor: terminal.cursor,
           }),
         )
-        continue
       }
-      const retained = (yield* Ref.get(frames)).get(operationKey) ?? []
+    }
+    for (const operation of yield* lifecycle.replay(session.access.fence.assignmentId)) {
+      if (terminalReceipts.has(key(session.access.fence.assignmentId, operation.operationKey, operation.attempt))) continue
       session.socket.send(
         encode({
           _tag: "CellReplay",
           access: session.access,
           operationKey: operation.operationKey,
           attempt: operation.attempt,
-          afterCursor: retained.at(-1)?.cursor ?? 0,
+          afterCursor: operation.afterCursor,
         }),
       )
     }
@@ -976,91 +994,98 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }),
     )
     if (operation === undefined) return
-    const calls = operation.bindingCalls
-    const candidate = yield* Deferred.make<BindingOutcome>()
-    const call = yield* Ref.modify(calls, (current) => {
-      const known = current.get(callId)
-      if (known !== undefined) return [known, current] as const
-      const created = { requestDigest, result: candidate }
-      return [created, new Map(current).set(callId, created)] as const
-    })
-    if (call.requestDigest !== requestDigest)
-      return yield* GatewayError.make({ kind: "fenced", message: "Binding call id conflicts with a different request" })
-    const remaining = Math.max(
-      0,
-      DateTime.toEpochMillis(DateTime.makeUnsafe(operation.request.deadlineAt)) - (yield* Clock.currentTimeMillis),
-    )
-    const deadlineOutcome = {
-      _tag: "Unknown" as const,
-      message: "Cell binding outcome is unknown at the operation deadline",
-    }
-    if (call.result === candidate) {
-      const correlation = {
-        threadId: operation.request.threadId,
-        turnId: operation.request.turnId,
-        runId: operation.request.runId,
-        operationId: operationKey,
-        ...(request.cellId === undefined ? {} : { cellId: request.cellId }),
-        bindingId: callId,
-      }
-      yield* HostedObservability.event("binding_send", "success", correlation)
-      const outcome = yield* HostedObservability.observe(
-        "binding_terminal",
-        correlation,
-        invokeAdmittedTool({
-          policyService: toolPolicy,
-          threadId: operation.request.threadId,
-          turnId: operation.request.turnId,
-          workspaceId: operation.request.workspaceId,
-          operationKey,
-          callId,
-          request,
-          access,
-          invoke: operation.bindings.registry.invoke({ ...request, input: request.input }),
-        }).pipe(
-          Effect.provideContext(operation.bindings.context),
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.succeed(deadlineOutcome) }),
-          Effect.orElseSucceed(
-            (): BindingOutcome => ({
-              _tag: "Unknown",
-              message: "Tool admission could not durably record its decision",
-            }),
-          ),
-          Effect.onInterrupt(() => Deferred.succeed(candidate, deadlineOutcome).pipe(Effect.asVoid)),
-        ),
-        (result) => {
-          if (result._tag === "Unknown") return "unknown"
-          return result._tag === "Rejected" ? "failure" : "success"
-        },
-      )
-      yield* Deferred.succeed(candidate, outcome)
-    }
-    const outcome = yield* Deferred.await(call.result).pipe(
-      Effect.timeoutOrElse({
-        duration: remaining,
-        orElse: () => Deferred.succeed(call.result, deadlineOutcome).pipe(Effect.andThen(Deferred.await(call.result))),
-      }),
-    )
-    yield* admission.withPermits(1)(
+    yield* operation.bindingAccess.withPermits(1)(
       Effect.gen(function* () {
-        const assigned = (yield* Ref.get(assignments)).get(socket)
-        const currentSession = (yield* Ref.get(sessions)).get(operation.assignmentId)
-        if (
-          assigned !== operation.assignmentId ||
-          currentSession?.socket !== socket ||
-          !sameAccess(currentSession.access, access)
+        const calls = operation.bindingCalls
+        const candidate = yield* Deferred.make<BindingOutcome>()
+        const call = yield* Ref.modify(calls, (current) => {
+          const known = current.get(callId)
+          if (known !== undefined) return [known, current] as const
+          const created = { requestDigest, result: candidate }
+          return [created, new Map(current).set(callId, created)] as const
+        })
+        if (call.requestDigest !== requestDigest)
+          return yield* GatewayError.make({
+            kind: "fenced",
+            message: "Binding call id conflicts with a different request",
+          })
+        const remaining = Math.max(
+          0,
+          DateTime.toEpochMillis(DateTime.makeUnsafe(operation.request.deadlineAt)) - (yield* Clock.currentTimeMillis),
         )
-          return yield* GatewayError.make({ kind: "disconnected", message: "Binding result has no current executor" })
-        socket.send(
-          encode({
-            _tag: "BindingResult",
-            access,
-            operationKey,
-            attempt,
-            callId,
-            requestDigest,
-            outcome,
+        const deadlineOutcome = {
+          _tag: "Unknown" as const,
+          message: "Cell binding outcome is unknown at the operation deadline",
+        }
+        if (call.result === candidate) {
+          const correlation = {
+            threadId: operation.request.threadId,
+            turnId: operation.request.turnId,
+            runId: operation.request.runId,
+            operationId: operationKey,
+            ...(request.cellId === undefined ? {} : { cellId: request.cellId }),
+            bindingId: callId,
+          }
+          yield* HostedObservability.event("binding_send", "success", correlation)
+          const outcome = yield* HostedObservability.observe(
+            "binding_terminal",
+            correlation,
+            invokeAdmittedTool({
+              policyService: toolPolicy,
+              threadId: operation.request.threadId,
+              turnId: operation.request.turnId,
+              workspaceId: operation.request.workspaceId,
+              operationKey,
+              callId,
+              request,
+              access,
+              invoke: operation.bindings.registry.invoke({ ...request, input: request.input }),
+            }).pipe(
+              Effect.provideContext(operation.bindings.context),
+              Effect.provideService(Crypto.Crypto, crypto),
+              Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.succeed(deadlineOutcome) }),
+              Effect.orElseSucceed(
+                (): BindingOutcome => ({
+                  _tag: "Unknown",
+                  message: "Tool admission could not durably record its decision",
+                }),
+              ),
+              Effect.onInterrupt(() => Deferred.succeed(candidate, deadlineOutcome).pipe(Effect.asVoid)),
+            ),
+            (result) => {
+              if (result._tag === "Unknown") return "unknown"
+              return result._tag === "Rejected" ? "failure" : "success"
+            },
+          )
+          yield* Deferred.succeed(candidate, outcome)
+        }
+        const outcome = yield* Deferred.await(call.result).pipe(
+          Effect.timeoutOrElse({
+            duration: remaining,
+            orElse: () => Deferred.succeed(call.result, deadlineOutcome).pipe(Effect.andThen(Deferred.await(call.result))),
+          }),
+        )
+        yield* admission.withPermits(1)(
+          Effect.gen(function* () {
+            const assigned = (yield* Ref.get(assignments)).get(socket)
+            const currentSession = (yield* Ref.get(sessions)).get(operation.assignmentId)
+            if (
+              assigned !== operation.assignmentId ||
+              currentSession?.socket !== socket ||
+              !sameAccess(currentSession.access, access)
+            )
+              return yield* GatewayError.make({ kind: "disconnected", message: "Binding result has no current executor" })
+            socket.send(
+              encode({
+                _tag: "BindingResult",
+                access,
+                operationKey,
+                attempt,
+                callId,
+                requestDigest,
+                outcome,
+              }),
+            )
           }),
         )
       }),
@@ -1602,7 +1627,15 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           handle(socket, message).pipe(
             Effect.matchEffect({
               onFailure: (error) =>
-                recover(message, error).pipe(Effect.andThen(Effect.sync(() => failure(socket, message, error)))),
+                Effect.logError("executor-gateway.frame-rejected").pipe(
+                  Effect.annotateLogs({
+                    "rika.executor.frame": message._tag,
+                    "rika.error.kind": error.kind,
+                    "rika.error.message": error.message,
+                  }),
+                  Effect.andThen(recover(message, error)),
+                  Effect.andThen(Effect.sync(() => failure(socket, message, error))),
+                ),
               onSuccess: () => Effect.void,
             }),
           ),
@@ -1803,15 +1836,21 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError> = Effect.fn(
     "ExecutorGateway.execute",
   )(function* (input: ExecuteInput) {
+    const operationalWindow = yield* lifecycle.prepare(input)
+    const request = {
+      ...input,
+      admittedAt: operationalWindow.admittedAt,
+      deadlineAt: operationalWindow.deadlineAt,
+    }
     const resolveDeadline = Effect.fn("ExecutorGateway.resolveDeadline")(function* () {
-      const resolution = yield* lifecycle.resolveDeadline(input)
+      const resolution = yield* lifecycle.resolveDeadline(request)
       if (resolution._tag === "Resolved") {
         const correlation = {
-          threadId: input.threadId,
-          turnId: input.turnId,
-          runId: input.runId,
-          operationId: input.operationKey,
-          cellId: input.toolCallId,
+          threadId: request.threadId,
+          turnId: request.turnId,
+          runId: request.runId,
+          operationId: request.operationKey,
+          cellId: request.toolCallId,
         }
         if (resolution.result.outcome === "unknown") yield* HostedObservability.unknownOutcome(correlation)
         else {
@@ -1823,40 +1862,39 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }
       return resolution.result
     })
-    yield* lifecycle.prepare(input)
-    const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))
-    const prepared = yield* lifecycle.inspect(input)
+    const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(request.deadlineAt))
+    const prepared = yield* lifecycle.inspect(request)
     const replay = yield* durableResult(prepared)
     if (replay !== undefined) return replay
     if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) return yield* resolveDeadline()
-    const connected = yield* awaitSession(input.assignmentId).pipe(
+    const connected = yield* awaitSession(request.assignmentId).pipe(
       Effect.timeoutOption(Math.max(0, deadlineAtMillis - (yield* Clock.currentTimeMillis))),
     )
     if (Option.isNone(connected)) return yield* resolveDeadline()
-    const pendingKey = key(input.assignmentId, input.operationKey, input.attempt)
+    const pendingKey = key(request.assignmentId, request.operationKey, request.attempt)
     const operation = yield* admission.withPermits(1)(
       Effect.gen(function* () {
-        const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
+        const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(request.assignmentId)))
         if (session === undefined || !session.ready)
           return yield* GatewayError.make({
             kind: "disconnected",
             message: "Executor workspace is not ready",
           })
-        if ((yield* Ref.get(quiescing)).has(input.assignmentId))
+        if ((yield* Ref.get(quiescing)).has(request.assignmentId))
           return yield* GatewayError.make({ kind: "fenced", message: "Executor is quiescing" })
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
         yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
         yield* preparation.ready(session.access)
-        yield* grant(session, "runtime", input.operationKey)
-        yield* hydrate(input)
-        const durable = yield* lifecycle.inspect(input)
+        yield* grant(session, "runtime", request.operationKey)
+        yield* hydrate(request)
+        const durable = yield* lifecycle.inspect(request)
         const restored = yield* durableResult(durable, session.access)
         if (restored !== undefined)
           return {
-            assignmentId: input.assignmentId,
-            operationKey: input.operationKey,
-            attempt: input.attempt,
-            request: input,
+            assignmentId: request.assignmentId,
+            operationKey: request.operationKey,
+            attempt: request.attempt,
+            request,
             socket: session.socket,
             access: session.access,
             result: yield* Deferred.make<ExecutionResult, GatewayError>().pipe(
@@ -1867,10 +1905,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) {
           const deadlineResult = yield* resolveDeadline()
           return {
-            assignmentId: input.assignmentId,
-            operationKey: input.operationKey,
-            attempt: input.attempt,
-            request: input,
+            assignmentId: request.assignmentId,
+            operationKey: request.operationKey,
+            attempt: request.attempt,
+            request,
             socket: session.socket,
             access: session.access,
             result: yield* Deferred.make<ExecutionResult, GatewayError>().pipe(
@@ -1882,10 +1920,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         const terminal = (yield* Ref.get(terminals)).get(pendingKey)
         if (terminal !== undefined)
           return {
-            assignmentId: input.assignmentId,
-            operationKey: input.operationKey,
-            attempt: input.attempt,
-            request: input,
+            assignmentId: request.assignmentId,
+            operationKey: request.operationKey,
+            attempt: request.attempt,
+            request,
             socket: session.socket,
             access: session.access,
             result: yield* Deferred.make<ExecutionResult, GatewayError>().pipe(
@@ -1907,10 +1945,10 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         ) {
           const resolved = yield* resolveDeadline()
           return {
-            assignmentId: input.assignmentId,
-            operationKey: input.operationKey,
-            attempt: input.attempt,
-            request: input,
+            assignmentId: request.assignmentId,
+            operationKey: request.operationKey,
+            attempt: request.attempt,
+            request,
             socket: session.socket,
             access: session.access,
             result: yield* Deferred.make<ExecutionResult, GatewayError>().pipe(
@@ -1919,7 +1957,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             waiters: 1,
           }
         }
-        yield* lifecycle.dispatch(input, session.access)
+        yield* lifecycle.dispatch(request, session.access)
         const result = yield* Deferred.make<ExecutionResult, GatewayError>()
         const known = yield* Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey)))
         if (known !== undefined && known.socket === session.socket && sameAccess(known.access, session.access)) {
@@ -1948,16 +1986,17 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           )
         }
         const created: Pending = {
-          assignmentId: input.assignmentId,
-          operationKey: input.operationKey,
-          attempt: input.attempt,
-          request: input,
+          assignmentId: request.assignmentId,
+          operationKey: request.operationKey,
+          attempt: request.attempt,
+          request,
           socket: session.socket,
           access: session.access,
           result,
           waiters: 1,
-          bindings: input.bindings,
+          bindings: request.bindings,
           bindingCalls: yield* Ref.make(new Map()),
+          bindingAccess: yield* Semaphore.make(1),
           nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (current) => new Map(current).set(pendingKey, created))
@@ -1968,35 +2007,25 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
                 _tag: "CellExecute",
                 request: {
                   access: session.access,
-                  operationKey: input.operationKey,
-                  workspaceId: input.workspaceId,
-                  sessionId: input.sessionId,
-                  threadId: input.threadId,
-                  turnId: input.turnId,
-                  runId: input.runId,
-                  toolCallId: input.toolCallId,
-                  code: input.code,
-                  rootRunId: input.rootRunId,
-                  attempt: input.attempt,
-                  replayPolicy: input.replayPolicy,
-                  admittedAt: input.admittedAt,
-                  deadlineAt: input.deadlineAt,
+                  operationKey: request.operationKey,
+                  workspaceId: request.workspaceId,
+                  sessionId: request.sessionId,
+                  threadId: request.threadId,
+                  turnId: request.turnId,
+                  runId: request.runId,
+                  toolCallId: request.toolCallId,
+                  code: request.code,
+                  rootRunId: request.rootRunId,
+                  attempt: request.attempt,
+                  replayPolicy: request.replayPolicy,
+                  admittedAt: request.admittedAt,
+                  deadlineAt: request.deadlineAt,
                   bindings: created.bindings.manifest,
                 },
               }),
             ),
-          catch: () => GatewayError.make({ kind: "transport", message: "Could not send work to the executor" }),
-        }).pipe(
-          Effect.tapError((error) => Deferred.fail(created.result, error)),
-          Effect.tapError(() =>
-            Ref.update(pending, (current) => {
-              if (current.get(pendingKey)?.result !== created.result) return current
-              const next = new Map(current)
-              next.delete(pendingKey)
-              return next
-            }),
-          ),
-        )
+          catch: () => undefined,
+        }).pipe(Effect.ignore)
         return created
       }),
     )
@@ -2023,7 +2052,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           }),
           machineLock.withPermits(1)(
             Ref.update(machineCalls, (current) => {
-              const prefix = `${input.assignmentId}\u0000${input.operationKey}\u0000${input.attempt}\u0000`
+              const prefix = `${request.assignmentId}\u0000${request.operationKey}\u0000${request.attempt}\u0000`
               return new Map(Array.from(current).filter(([callKey]) => !callKey.startsWith(prefix)))
             }),
           ),
@@ -2049,7 +2078,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (Option.isSome(completed)) return Effect.succeed(completed.value)
         return resolveDeadline().pipe(Effect.tap((result) => (result.outcome === "unknown" ? sendCancel : Effect.void)))
       }),
-      Effect.onInterrupt(() => sendCancel),
       Effect.ensuring(removePending),
     )
   })
@@ -2177,8 +2205,18 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       const current = (yield* Ref.get(sessions)).get(assignmentId)
       if (current === undefined || current.socket !== socket) return false
       return yield* controller.validateAccess(redactAccess(current.access)).pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
+        Effect.matchEffect({
+          onFailure: (error) =>
+            Effect.logError("executor-gateway.authority-invalid").pipe(
+              Effect.annotateLogs({
+                "rika.executor.assignment.id": assignmentId,
+                "rika.error.kind": error.kind,
+                "rika.error.message": error.message,
+              }),
+              Effect.as(false),
+            ),
+          onSuccess: () => Effect.succeed(true),
+        }),
       )
     })
 

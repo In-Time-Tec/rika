@@ -48,11 +48,11 @@ test(
         yield* app.setConnectionState({
           connectivity: "connected",
           target: "orb",
-          activity: "workspace-setup",
+          activity: "workspace-preparing",
           ownership: "organization",
           participants: 2,
         })
-        const orb = yield* app.waitFrame("Setting up workspace")
+        const orb = yield* app.waitFrame("Preparing workspace")
         expect(orb).toContain("Orb")
         expect(hasColor(app, "Orb", "174,119,255,255")).toBe(true)
         yield* app.quit

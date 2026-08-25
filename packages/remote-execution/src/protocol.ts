@@ -86,6 +86,7 @@ export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type
  * attested by the sandbox bootstrap listener.
  */
 export const RunnerAdmissionWire = Schema.Struct({
+  assignmentId: Identifier,
   admissionId: Identifier,
   ticket: Identifier,
   executorUrl: Identifier,

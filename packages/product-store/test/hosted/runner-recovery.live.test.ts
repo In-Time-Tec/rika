@@ -24,7 +24,7 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
-import { Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/migrations"
@@ -32,8 +32,8 @@ import { runMigration } from "../../../identity/src/postgres"
 import { migrations } from "../../src/hosted/migrations"
 import * as HostedPostgres from "../../src/hosted/postgres-layer"
 
-const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const readFileString = (url: URL) =>
   Effect.scoped(
     Layer.build(BunServices.layer).pipe(
@@ -107,7 +107,7 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
     const database = `rika_local_recovery_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
     yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl!)
+    const parsed = new URL(databaseUrl)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     const pool = new Pool({ connectionString: url })

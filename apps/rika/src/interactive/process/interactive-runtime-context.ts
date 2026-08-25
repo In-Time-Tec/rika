@@ -28,6 +28,7 @@ export interface InteractiveLoop {
   submissionSequence: number
   selectionFiber: Fiber.Fiber<void, never> | undefined
   selectionGeneration: number
+  newThreadSelectionGeneration: number | undefined
   renderSuppressed: boolean
   selectionResyncs: Set<string>
   queueResyncs: Set<string>

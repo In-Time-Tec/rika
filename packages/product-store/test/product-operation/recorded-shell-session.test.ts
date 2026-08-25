@@ -17,6 +17,7 @@ import { Context, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { executionSessionLifecycleLayerTest } from "../support/operation-layer-harness"
 
 const backend = ExecutionGateway.Service.of({
+  ...ExecutionGateway.makeTest(),
   startTurn: () => Effect.die("unused"),
   cancelTurn: () => Effect.die("unused"),
   steerTurn: () => Effect.die("unused"),

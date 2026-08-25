@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted } from "effect"
+import { Config, Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { runMigration } from "../../../identity/src/postgres"
@@ -32,8 +32,8 @@ import { HostedStore } from "@rika/product/hosted-store"
 import { EnvironmentStore } from "@rika/product/environment-store"
 import { EnvironmentReferenceId, SourceCommitSha, resolveEnvironmentReferences } from "@rika/product/environment-policy"
 
-const databaseUrl = "postgresql://rika:rika@127.0.0.1:5432/rika_test"
-const live = databaseUrl !== undefined
+const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const live = databaseUrl !== ""
 const readFileString = (url: URL) =>
   Effect.scoped(
     Layer.build(BunServices.layer).pipe(
@@ -108,7 +108,7 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
     const database = `rika_live_${yield* Random.nextInt}`
     const admin = new Pool({ connectionString: databaseUrl })
     yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl!)
+    const parsed = new URL(databaseUrl)
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     let migrated: Pool | undefined

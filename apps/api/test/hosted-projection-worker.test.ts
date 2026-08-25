@@ -33,17 +33,14 @@ const state = (status: "running" | "completed") => ({
   steering: { steeringMessages: 0, followUpMessages: 0 },
 })
 
-it.effect("projects a recovered Turn through its terminal cursor", () =>
+it.effect("projects a recovered Turn through its terminal cursor without owning Turn settlement", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const settled = yield* Deferred.make<Turn.AgentExecutionTurn>()
+      const projected = yield* Deferred.make<void>()
       let projection: Projection | undefined
       const turns = {
         get: () => Effect.succeed(turn),
-        setStatus: (_id: Turn.TurnId, status: ExecutionProjection.Result["status"], now: number) => {
-          const updated = { ...turn, status, updatedAt: now }
-          return Deferred.succeed(settled, updated).pipe(Effect.as(updated))
-        },
+        setStatus: () => Effect.die("projection worker settled the Turn"),
       } as unknown as TurnRepository.Interface
       const transcripts = {
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
@@ -59,8 +56,10 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
               ...(change.checkpoint === undefined ? {} : { projectorCheckpoint: change.checkpoint }),
               projectionVersion: ExecutionProjection.projectionVersion,
             }
-            return "committed" as const
-          }),
+          }).pipe(
+            Effect.andThen(change.state.status === "completed" ? Deferred.succeed(projected, undefined) : Effect.void),
+            Effect.as("committed" as const),
+          ),
       } as unknown as TranscriptRepository.Interface
       const running: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
@@ -91,7 +90,7 @@ it.effect("projects a recovered Turn through its terminal cursor", () =>
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
       )
-      expect(yield* Deferred.await(settled)).toMatchObject({ status: "completed" })
+      yield* Deferred.await(projected)
       yield* HostedProjectionWorker.pipe(
         Effect.provide(context),
         Effect.flatMap((worker) => worker.ready),
@@ -141,15 +140,12 @@ it.effect("does not reset active projection age when a duplicate candidate is re
   ),
 )
 
-it.effect("cancels a silent watch before failing it and admits the next recovery candidate", () =>
+it.effect("does not cancel or settle execution when projection is silent", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const silentTurnId = Turn.TurnId.make("turn-silent")
       const nextTurnId = Turn.TurnId.make("turn-next")
-      const silentSettled = yield* Deferred.make<void>()
-      const nextSettled = yield* Deferred.make<void>()
       const events = yield* Ref.make<ReadonlyArray<string>>([])
-      const failedTurns = yield* Ref.make<ReadonlySet<Turn.TurnId>>(new Set())
       const projections = new Map<Turn.TurnId, Projection>()
       const turnFor = (id: Turn.TurnId): Turn.AgentExecutionTurn => ({
         ...turn,
@@ -159,30 +155,14 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
       const turns = {
         get: (id: Turn.TurnId) => Effect.succeed(turnFor(id)),
         setStatus: (id: Turn.TurnId) =>
-          Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(
-            Effect.andThen(
-              id === silentTurnId
-                ? Deferred.succeed(silentSettled, undefined)
-                : Deferred.succeed(nextSettled, undefined),
-            ),
-            Effect.as(turnFor(id)),
-          ),
+          Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(Effect.as(turnFor(id))),
       } as unknown as TurnRepository.Interface
       const transcripts = {
         listProjectionRecoveryCandidates: () =>
-          Ref.get(failedTurns).pipe(
-            Effect.map((settled) =>
-              [silentTurnId, nextTurnId]
-                .filter((candidateTurnId) => !settled.has(candidateTurnId))
-                .map((candidateTurnId) => ({ threadId, turnId: candidateTurnId })),
-            ),
-          ),
+          Effect.succeed([silentTurnId, nextTurnId].map((candidateTurnId) => ({ threadId, turnId: candidateTurnId }))),
         get: (id: Turn.TurnId) => Effect.sync(() => projections.get(id)),
         replaceUnits: (failed: Turn.AgentExecutionTurn) =>
-          Ref.update(events, (current) => [...current, `persisted:${failed.id}`]).pipe(
-            Effect.andThen(Ref.update(failedTurns, (current) => new Set([...current, failed.id]))),
-            Effect.as(undefined as never),
-          ),
+          Ref.update(events, (current) => [...current, `persisted:${failed.id}`]).pipe(Effect.as(undefined as never)),
         commitProjection: (candidateTurn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
           Effect.sync(() => {
             const previous = projections.get(candidateTurn.id)
@@ -215,7 +195,7 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "completed" }),
         cancelTurn: (link) => Ref.update(events, (current) => [...current, `cancelled:${link.turnId}`]),
       })
-      yield* Layer.build(
+      const context = yield* Layer.build(
         hostedProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 60_000 }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
@@ -224,14 +204,16 @@ it.effect("cancels a silent watch before failing it and admits the next recovery
       )
 
       yield* TestClock.adjust(15 * 60_000)
-      yield* Deferred.await(silentSettled)
-      yield* Effect.forEach([1, 2, 3, 4, 5], () => Effect.yieldNow.pipe(Effect.andThen(TestClock.adjust(60_000))), {
-        discard: true,
-      })
+      yield* Effect.yieldNow
       const observed = yield* Ref.get(events)
-      expect(observed.indexOf(`cancelled:${silentTurnId}`)).toBeGreaterThanOrEqual(0)
-      expect(observed.indexOf(`cancelled:${silentTurnId}`)).toBeLessThan(observed.indexOf(`persisted:${silentTurnId}`))
-      expect((yield* Deferred.poll(nextSettled))._tag).toBe("Some")
+      expect(observed).not.toContain(`cancelled:${silentTurnId}`)
+      expect(observed).not.toContain(`persisted:${silentTurnId}`)
+      expect(observed).not.toContain(`settled:${silentTurnId}`)
+      expect(observed).not.toContain(`started:${nextTurnId}`)
+      expect(yield* Context.get(context, HostedProjectionWorker).status).toMatchObject({
+        active: 1,
+        availableCapacity: 0,
+      })
     }),
   ),
 )

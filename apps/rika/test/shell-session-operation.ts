@@ -44,6 +44,7 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
   let nextTurn = 0
   const executionReads: Array<"inspect"> = []
   const backend = ExecutionGateway.Service.of({
+    ...ExecutionGateway.makeTest(),
     startTurn: () => Effect.die("unused"),
     cancelTurn: () => Effect.die("unused"),
     steerTurn: () => Effect.die("unused"),

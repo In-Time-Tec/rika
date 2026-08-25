@@ -1,6 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Fiber, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
@@ -36,10 +37,15 @@ import {
   type HostedProductService,
   type OwnerSelection,
 } from "../src/hosted-product"
-import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../src/hosted-thread-protocol"
+import {
+  HostedThreadProtocol,
+  layer as hostedThreadProtocolLayer,
+  layerWithOptions as hostedThreadProtocolLayerWithOptions,
+} from "../src/hosted-thread-protocol"
+import { makeThreadProtocolNotifications } from "../src/thread-protocol-notifications"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
 import { HostedToolPolicy } from "../src/hosted-tool-policy"
-import { HostedWorkspace } from "../src/hosted-workspace"
+import { HostedWorkspace, HostedWorkspaceError } from "../src/hosted-workspace"
 import { testToolPolicy } from "./hosted-tool-policy-fixture"
 
 const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
@@ -90,6 +96,7 @@ const memoryStore = () => {
   let latestSnapshot: HostedThreadSnapshot | undefined
   let latestSnapshotCursor = 0n
   let latestSnapshotVersion = 0n
+  const claims = new Map<string, string>()
   const acknowledgements: Array<{ readonly threadId: string; readonly cursor: string }> = []
   const events: Array<{
     readonly event: InteractiveEvent
@@ -119,10 +126,16 @@ const memoryStore = () => {
         keys.set(input.idempotencyKey, input.commandId)
         return Effect.succeed({ _tag: "Admitted" as const, command: admitted })
       }),
+    claimNextCommand: () => Effect.die("unused"),
+    renewCommandClaim: (input) => Effect.sync(() => claims.get(input.commandId) === input.claimToken),
+    releaseCommandClaim: (input) =>
+      Effect.sync(() => {
+        if (claims.get(input.commandId) === input.claimToken) claims.delete(input.commandId)
+      }),
     completeCommand: (input) =>
       Effect.sync(() => {
         const admitted = commands.get(input.commandId)!
-        if (admitted.state === "completed") return admitted
+        if (admitted.state === "completed") return { _tag: "Duplicate" as const, command: admitted }
         for (const event of input.events) {
           cursor += 1n
           events.push({
@@ -144,7 +157,7 @@ const memoryStore = () => {
           completedAt: input.completedAt,
         }
         commands.set(input.commandId, completed)
-        return completed
+        return { _tag: "Completed" as const, command: completed }
       }),
     appendEvents: (input) =>
       Effect.sync(() => {
@@ -172,41 +185,44 @@ const memoryStore = () => {
         latestSnapshotCursor = BigInt(input.cursor)
         latestSnapshotVersion = BigInt(input.threadVersion)
       }),
-    replay: (input) => {
-      const targetCursor =
-        input.throughCursor === undefined || BigInt(input.throughCursor) > cursor ? cursor : BigInt(input.throughCursor)
-      const includeSnapshot =
-        input.includeSnapshot !== false && latestSnapshot !== undefined && latestSnapshotCursor <= targetCursor
-      const replayCursor = includeSnapshot ? latestSnapshotCursor : BigInt(input.afterCursor)
-      return Effect.succeed({
-        threadVersion: ThreadVersion.make(String(version)),
-        cursor: ThreadEventCursor.make(String(cursor)),
-        ...(!includeSnapshot
-          ? {}
-          : {
-              snapshot: {
-                ownerId,
-                threadId,
-                threadVersion: ThreadVersion.make(String(latestSnapshotVersion)),
-                cursor: ThreadEventCursor.make(String(latestSnapshotCursor)),
-                snapshot: latestSnapshot!,
-                createdAt: timestamp,
-              },
-            }),
-        events: events
-          .filter((event) => BigInt(event.cursor) > replayCursor && BigInt(event.cursor) <= targetCursor)
-          .slice(0, input.limit)
-          .map((event) => ({
-            ownerId,
-            threadId,
-            sequence: event.cursor,
-            cursor: ThreadEventCursor.make(event.cursor),
-            threadVersion: ThreadVersion.make(event.threadVersion),
-            event: event.event,
-            createdAt: timestamp,
-          })),
-      })
-    },
+    replay: (input) =>
+      Effect.sync(() => {
+        const targetCursor =
+          input.throughCursor === undefined || BigInt(input.throughCursor) > cursor
+            ? cursor
+            : BigInt(input.throughCursor)
+        const includeSnapshot =
+          input.includeSnapshot !== false && latestSnapshot !== undefined && latestSnapshotCursor <= targetCursor
+        const replayCursor = includeSnapshot ? latestSnapshotCursor : BigInt(input.afterCursor)
+        return {
+          threadVersion: ThreadVersion.make(String(version)),
+          cursor: ThreadEventCursor.make(String(cursor)),
+          ...(!includeSnapshot
+            ? {}
+            : {
+                snapshot: {
+                  ownerId,
+                  threadId,
+                  threadVersion: ThreadVersion.make(String(latestSnapshotVersion)),
+                  cursor: ThreadEventCursor.make(String(latestSnapshotCursor)),
+                  snapshot: latestSnapshot!,
+                  createdAt: timestamp,
+                },
+              }),
+          events: events
+            .filter((event) => BigInt(event.cursor) > replayCursor && BigInt(event.cursor) <= targetCursor)
+            .slice(0, input.limit)
+            .map((event) => ({
+              ownerId,
+              threadId,
+              sequence: event.cursor,
+              cursor: ThreadEventCursor.make(event.cursor),
+              threadVersion: ThreadVersion.make(event.threadVersion),
+              event: event.event,
+              createdAt: timestamp,
+            })),
+        }
+      }),
     acknowledgeCursor: (input) =>
       Effect.sync(() => {
         acknowledgements.push({ threadId: input.threadId, cursor: input.cursor })
@@ -233,17 +249,23 @@ const memoryStore = () => {
       latestSnapshotCursor = 0n
       latestSnapshotVersion = 0n
     },
+    dropEventsThrough: (throughCursor: string) => {
+      const retained = events.filter((event) => BigInt(event.cursor) > BigInt(throughCursor))
+      events.splice(0, events.length, ...retained)
+    },
   })
 }
 
 it.effect("derives personal authority, admits a retried submission once, and resyncs stale controllers", () => {
   const store = memoryStore()
+  const notifications = makeThreadProtocolNotifications()
   let selectedOwner: OwnerSelection | undefined
   const applied: Array<string> = []
   const admittedRuns: Array<Parameters<HostedProductService["admitRun"]>[0]> = []
   const authorizedActions: Array<AuthorizationAction> = []
   const workspaceRequests: Array<string> = []
   const workspaceLifecycle: Array<"paused" | "resumed"> = []
+  let pauseAttempts = 0
   const product: HostedProductService = {
     ready: Effect.void,
     projects: () => Effect.succeed([]),
@@ -272,9 +294,20 @@ it.effect("derives personal authority, admits a retried submission once, and res
           }),
     admitRun: (input) =>
       Effect.sync(() => {
+        if (input.operationKey === "submit-cancelled")
+          return { _tag: "Cancelled" as const, commandId: input.operationKey }
         if (!admittedRuns.some((admitted) => admitted.operationKey === input.operationKey)) admittedRuns.push(input)
-        return { commandId: input.operationKey, turnId: `turn-${input.operationKey}`, status: "queued" as const }
+        return {
+          _tag: "Admitted" as const,
+          commandId: input.operationKey,
+          turnId: `turn-${input.operationKey}`,
+          status: "queued" as const,
+        }
       }),
+    admitAuthorizedRun: () => Effect.die("unused"),
+    cancelRunAdmission: (input) =>
+      input.targetCommandId === "submit-cancelled" ? Effect.succeed({}) : Effect.die("unused"),
+    cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const operations: HostedThreadApplicationService = {
     thread: () => Effect.succeed(snapshot.view.thread),
@@ -313,7 +346,13 @@ it.effect("derives personal authority, admits a retried submission once, and res
               serviceId: request._tag === "RepositoryServiceEnsure" ? request.service.serviceId : request.serviceId,
             }
           }),
-        pause: () => Effect.sync(() => void workspaceLifecycle.push("paused")),
+        pause: () =>
+          Effect.suspend(() => {
+            pauseAttempts += 1
+            if (pauseAttempts === 1)
+              return Effect.fail(HostedWorkspaceError.make({ kind: "unavailable", message: "pause interrupted" }))
+            return Effect.sync(() => void workspaceLifecycle.push("paused"))
+          }),
         resume: () => Effect.sync(() => void workspaceLifecycle.push("resumed")),
         portal: (_threadId, port) => Effect.succeed(`https://${port}-orb.e2b.app`),
       }),
@@ -326,7 +365,9 @@ it.effect("derives personal authority, admits a retried submission once, and res
   return Effect.scoped(
     Effect.gen(function* () {
       const protocol = Context.get(
-        yield* Layer.build(hostedThreadProtocolLayer.pipe(Layer.provide(dependencies))),
+        yield* Layer.build(
+          hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies)),
+        ),
         HostedThreadProtocol,
       )
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
@@ -343,7 +384,28 @@ it.effect("derives personal authority, admits a retried submission once, and res
           runnerTarget: { deviceId: "device-1" as never, checkoutFingerprint: "checkout-1" as never },
         },
       })
-      expect(created[0]?.payload).toMatchObject({ _tag: "CommandAccepted", threadVersion: "1" })
+      expect(created[0]?.payload).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "1" })
+      const creationCompletion = yield* Effect.forkChild(first.outbound, { startImmediately: true })
+      yield* store.completeCommand({
+        ownerId,
+        threadId,
+        commandId: CommandId.make(threadId),
+        claimToken: "create-claim",
+        result: { _tag: "ThreadCreated", threadId },
+        events: [],
+        completedAt: timestamp,
+      })
+      notifications.recover()
+      expect(yield* Fiber.join(creationCompletion)).toMatchObject([
+        {
+          payload: {
+            _tag: "CommandAccepted",
+            requestId: "request-create",
+            commandId: threadId,
+            result: { _tag: "ThreadCreated", threadId },
+          },
+        },
+      ])
       expect(selectedOwner).toEqual({ _tag: "PersonalOwner", userId: "user-1" })
       store.dropSnapshot()
       expect(
@@ -394,45 +456,20 @@ it.effect("derives personal authority, admits a retried submission once, and res
       }
       const submitted = yield* first.receive(submit)
       expect(submitted[0]?.payload).toMatchObject({
-        _tag: "CommandAccepted",
+        _tag: "CommandAdmitted",
         threadVersion: "2",
-        cursor: "1",
-        result: { _tag: "PromptAdmitted", status: "queued" },
       })
-      expect(submitted[1]?.payload).toMatchObject({
-        _tag: "ThreadEvent",
-        event: {
-          cursor: "1",
-          event: {
-            _tag: "SubmissionAdmitted",
-            threadId,
-            turnId: "turn-submit-1",
-            status: "queued",
-            submissionId: "submit-1",
-          },
-        },
-      })
+      expect(submitted).toHaveLength(1)
       expect(yield* first.receive({ ...submit, requestId: "request-retry" as never })).toMatchObject([
         {
           payload: {
-            _tag: "CommandAccepted",
+            _tag: "CommandAdmitted",
             requestId: "request-retry",
             threadVersion: "2",
-            cursor: "1",
-            result: { _tag: "PromptAdmitted", status: "queued" },
           },
         },
       ])
-      expect(admittedRuns).toEqual([
-        {
-          principal: { userId, clientId, deviceId },
-          threadId,
-          operationKey: "submit-1",
-          prompt: "queued while busy",
-          promptParts: [{ type: "image", mediaType: "image/png", data: "aW1hZ2U=", filename: "evidence.png" }],
-          mode: "high",
-        },
-      ])
+      expect(admittedRuns).toEqual([])
       expect(applied).toEqual([])
 
       const cancel = {
@@ -444,20 +481,21 @@ it.effect("derives personal authority, admits a retried submission once, and res
           commandId: CommandId.make("cancel-1"),
           idempotencyKey: "cancel-key" as never,
           expectedThreadVersion: ThreadVersion.make("2"),
+          target: { _tag: "Turn" as const, turnId: TurnId.make("turn-1") },
         },
       }
       expect((yield* first.receive(cancel))[0]?.payload).toMatchObject({
-        _tag: "CommandAccepted",
+        _tag: "CommandAdmitted",
         threadVersion: "3",
       })
       expect(
         (yield* first.receive({ ...cancel, requestId: "request-cancel-retry" as never }))[0]?.payload,
       ).toMatchObject({
-        _tag: "CommandAccepted",
+        _tag: "CommandAdmitted",
         requestId: "request-cancel-retry",
         threadVersion: "3",
       })
-      expect(applied).toEqual(["cancel-1"])
+      expect(applied).toEqual([])
 
       const second = yield* protocol.connect("ticket-2", "/api/v1/threads/socket")
       expect(
@@ -470,8 +508,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
         {
           payload: {
             _tag: "ThreadAttached",
-            cursor: "2",
-            snapshotCursor: "2",
+            cursor: "0",
+            snapshotCursor: "0",
             events: [],
             participants: [],
           },
@@ -517,18 +555,18 @@ it.effect("derives personal authority, admits a retried submission once, and res
           command: {
             _tag: "AcknowledgeCursor",
             threadId,
-            cursor: ThreadEventCursor.make("2"),
+            cursor: ThreadEventCursor.make("0"),
           },
         }))[0]?.payload,
       ).toMatchObject({
         _tag: "CommandAccepted",
         threadId,
       })
-      expect(store.acknowledgements()).toEqual([{ threadId, cursor: "2" }])
+      expect(store.acknowledgements()).toEqual([{ threadId, cursor: "0" }])
       expect(
         (yield* second.receive({ ...submit, requestId: "request-submit-while-attached-thread-2" as never }))[0]
           ?.payload,
-      ).toMatchObject({ _tag: "CommandAccepted", threadId })
+      ).toMatchObject({ _tag: "CommandAdmitted", threadId })
       expect(store.admissions().at(-1)).toEqual({ threadId, commandId: "submit-1" })
       expect(
         (yield* second.receive({
@@ -541,7 +579,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         threadId,
         reason: "stale-version",
         currentThreadVersion: "3",
-        currentCursor: "2",
+        currentCursor: "0",
       })
 
       const approval = {
@@ -559,17 +597,17 @@ it.effect("derives personal authority, admits a retried submission once, and res
         },
       }
       expect((yield* first.receive(approval))[0]?.payload).toMatchObject({
-        _tag: "CommandRejected",
-        reason: "conflict",
+        _tag: "CommandAdmitted",
+        threadVersion: "4",
       })
       expect(
         (yield* first.receive({ ...approval, requestId: "request-approval-retry" as never }))[0]?.payload,
       ).toMatchObject({
-        _tag: "CommandRejected",
+        _tag: "CommandAdmitted",
         requestId: "request-approval-retry",
-        reason: "conflict",
+        threadVersion: "4",
       })
-      expect(applied).toEqual(["cancel-1"])
+      expect(applied).toEqual([])
 
       const ensureService = {
         protocolVersion: 1 as const,
@@ -584,14 +622,14 @@ it.effect("derives personal authority, admits a retried submission once, and res
         },
       }
       expect((yield* first.receive(ensureService))[0]?.payload).toMatchObject({
-        _tag: "CommandAccepted",
+        _tag: "CommandAdmitted",
         threadVersion: "5",
       })
       expect(
         (yield* first.receive({ ...ensureService, requestId: "request-service-retry" as never }))[0]?.payload,
-      ).toMatchObject({ _tag: "CommandAccepted", threadVersion: "5" })
+      ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "5" })
       expect(authorizedActions).toContain("workspace:service:control")
-      expect(workspaceRequests).toEqual(["WorkspaceFileInspect", "RepositoryServiceEnsure"])
+      expect(workspaceRequests).toEqual(["WorkspaceFileInspect"])
       const pauseOrb = {
         protocolVersion: 1 as const,
         requestId: "request-pause-orb" as never,
@@ -604,9 +642,13 @@ it.effect("derives personal authority, admits a retried submission once, and res
         },
       }
       expect((yield* first.receive(pauseOrb))[0]?.payload).toMatchObject({
-        _tag: "CommandAccepted",
+        _tag: "CommandAdmitted",
         threadVersion: "6",
       })
+      expect(store.command("pause-orb-1")?.state).toBe("admitted")
+      expect(
+        (yield* first.receive({ ...pauseOrb, requestId: "request-pause-orb-retry" as never }))[0]?.payload,
+      ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "6" })
       expect(
         (yield* first.receive({
           protocolVersion: 1,
@@ -619,7 +661,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
             expectedThreadVersion: ThreadVersion.make("6"),
           },
         }))[0]?.payload,
-      ).toMatchObject({ _tag: "CommandAccepted", threadVersion: "7" })
+      ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "7" })
       expect(
         (yield* first.receive({
           protocolVersion: 1,
@@ -631,11 +673,41 @@ it.effect("derives personal authority, admits a retried submission once, and res
         port: 3000,
         url: "https://3000-orb.e2b.app",
       })
+      expect(workspaceLifecycle).toEqual([])
+      const cancellationFirst = yield* first.receive({
+        protocolVersion: 1,
+        requestId: "request-cancel-before-submit" as never,
+        command: {
+          _tag: "Cancel",
+          threadId,
+          commandId: CommandId.make("cancel-before-submit"),
+          idempotencyKey: "cancel-before-submit-key" as never,
+          expectedThreadVersion: ThreadVersion.make("7"),
+          target: { _tag: "Command", commandId: CommandId.make("submit-cancelled") },
+        },
+      })
+      expect(cancellationFirst).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "8" } }])
+      expect(
+        yield* first.receive({
+          protocolVersion: 1,
+          requestId: "request-submit-after-cancel" as never,
+          command: {
+            _tag: "SubmitPrompt",
+            threadId,
+            commandId: CommandId.make("submit-cancelled"),
+            idempotencyKey: "submit-cancelled-key" as never,
+            expectedThreadVersion: ThreadVersion.make("8"),
+            text: "must not create a Turn",
+          },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "9" } }])
+      expect(admittedRuns.some((run) => run.operationKey === "submit-cancelled")).toBe(false)
+      expect(applied).toEqual([])
     }),
   )
 })
 
-it.effect("binds authorization decisions to one durable checkpoint", () => {
+it.effect("admits authorization decisions without applying them in the socket session", () => {
   const store = memoryStore()
   const decisions: Array<Parameters<typeof testToolPolicy.recordDecision>[0]> = []
   const checkpoint = {
@@ -676,6 +748,9 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
     setRemoteThreadCreation: () => Effect.die("unused"),
     pollRunner: () => Effect.die("unused"),
     admitRun: () => Effect.die("unused"),
+    admitAuthorizedRun: () => Effect.die("unused"),
+    cancelRunAdmission: () => Effect.die("unused"),
+    cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const operations: HostedThreadApplicationService = {
     thread: () => Effect.succeed(currentSnapshot.view.thread),
@@ -739,50 +814,14 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
         },
       }
       expect(yield* session.receive(approve)).toMatchObject([
-        { payload: { _tag: "CommandAccepted", threadVersion: "1", result: { _tag: "Applied" } } },
+        { payload: { _tag: "CommandAdmitted", threadVersion: "1" } },
       ])
       expect(yield* session.receive(approve)).toMatchObject([
-        { payload: { _tag: "CommandAccepted", threadVersion: "1", result: { _tag: "Applied" } } },
+        { payload: { _tag: "CommandAdmitted", threadVersion: "1" } },
       ])
-      expect(delivered).toEqual([
-        {
-          _tag: "ApproveAuthorization",
-          turnId: "turn-authorization",
-          authorizationId: "authorization-1",
-          checkpoint,
-        },
-      ])
-      expect(store.command("approve-command")?.result).toEqual({
-        _tag: "Applied",
-        authorization: {
-          actor,
-          turnId: "turn-authorization",
-          authorizationId: "authorization-1",
-          checkpoint,
-          operation: "rika.tool.processes.start",
-          capability: "terminal.execute",
-          arguments: '{"exact":"request"}',
-          repository: { identity: "In-Time-Tec/rika", branch: "feature/thread-controls" },
-          branch: "feature/thread-controls",
-          executor: { assignmentId, kind: "orb", generation: "7" },
-          decision: "approve",
-          result: { _tag: "Delivered" },
-        },
-      })
-      expect(decisions).toEqual([
-        expect.objectContaining({
-          ownerId,
-          threadId,
-          turnId: "turn-authorization",
-          actor,
-          authorizationId: "authorization-1",
-          checkpoint,
-          operation: "rika.tool.processes.start",
-          capability: "terminal.execute",
-          authorizationRequest: '{"exact":"request"}',
-          decision: "approved",
-        }),
-      ])
+      expect(delivered).toEqual([])
+      expect(store.command("approve-command")?.result).toBeUndefined()
+      expect(decisions).toEqual([])
       const repaired = yield* protocol.connect("ticket-repaired", "/api/v1/threads/socket")
       expect(
         yield* repaired.receive({
@@ -798,7 +837,7 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
             cursor: "0",
             snapshotThreadVersion: "1",
             snapshotCursor: "0",
-            snapshot: { view: currentSnapshot.view, pendingAuthorizations: [] },
+            snapshot: currentSnapshot,
             events: [],
           },
         },
@@ -818,42 +857,12 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
       ).toMatchObject([
         {
           payload: {
-            _tag: "CommandRejected",
-            reason: "conflict",
-            message: "Authorization checkpoint is stale or does not belong to this Thread",
+            _tag: "CommandAdmitted",
+            threadVersion: "2",
           },
         },
       ])
-      expect(delivered).toHaveLength(1)
-
-      currentSnapshot = {
-        ...currentSnapshot,
-        pendingAuthorizations: [
-          {
-            threadId: ThreadId.make("another-thread"),
-            turnId: approve.command.turnId,
-            authorizationId: approve.command.authorizationId,
-            operation: "shell",
-            capability: "process",
-            input: "bun test",
-            inputTruncated: false,
-            checkpoint,
-          },
-        ],
-      }
-      expect(
-        yield* session.receive({
-          protocolVersion: 1,
-          requestId: RequestId.make("cross-thread-request"),
-          command: {
-            ...approve.command,
-            commandId: CommandId.make("cross-thread-command"),
-            idempotencyKey: IdempotencyKey.make("cross-thread-key"),
-            expectedThreadVersion: ThreadVersion.make("2"),
-          },
-        }),
-      ).toMatchObject([{ payload: { _tag: "CommandRejected", reason: "conflict" } }])
-      expect(delivered).toHaveLength(1)
+      expect(delivered).toHaveLength(0)
 
       const denialCheckpoint = { ...checkpoint, cursor: "denial-cursor" }
       currentSnapshot = {
@@ -880,27 +889,157 @@ it.effect("binds authorization decisions to one durable checkpoint", () => {
             threadId,
             commandId: CommandId.make("deny-command"),
             idempotencyKey: IdempotencyKey.make("deny-key"),
-            expectedThreadVersion: ThreadVersion.make("3"),
+            expectedThreadVersion: ThreadVersion.make("2"),
             turnId: TurnId.make("turn-denial"),
             authorizationId: "authorization-2",
             checkpoint: denialCheckpoint,
           },
         }),
-      ).toMatchObject([{ payload: { _tag: "CommandAccepted", result: { _tag: "Applied" } } }])
-      expect(delivered[1]).toEqual({
-        _tag: "DenyAuthorization",
-        turnId: "turn-denial",
-        authorizationId: "authorization-2",
-        checkpoint: denialCheckpoint,
+      ).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "3" } }])
+      expect(delivered).toHaveLength(0)
+      expect(store.command("deny-command")?.result).toBeUndefined()
+    }),
+  )
+})
+
+it.effect("labels outbound snapshots with durable cursors and resets compacted gaps", () => {
+  const store = memoryStore()
+  let currentSnapshot: HostedThreadSnapshot = snapshot
+  const product: HostedProductService = {
+    ready: Effect.void,
+    projects: () => Effect.succeed([]),
+    createProject: () => Effect.die("unused"),
+    activatePrincipal: () => Effect.void,
+    createConnection: () => Effect.die("unused"),
+    authorizeThread: () => Effect.succeed({ ownerId, actor }),
+    threadExecutionContext: () => Effect.die("unused"),
+    registerRunner: () => Effect.die("unused"),
+    setRemoteThreadCreation: () => Effect.die("unused"),
+    pollRunner: () => Effect.die("unused"),
+    admitRun: () => Effect.die("unused"),
+    admitAuthorizedRun: () => Effect.die("unused"),
+    cancelRunAdmission: () => Effect.die("unused"),
+    cancelAuthorizedRunAdmission: () => Effect.die("unused"),
+  }
+  const operations: HostedThreadApplicationService = {
+    thread: () => Effect.succeed(currentSnapshot.view.thread),
+    interactive: () => Effect.die("unused"),
+    snapshot: () => Effect.succeed(currentSnapshot),
+  }
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(HostedProduct, product),
+    Layer.succeed(HostedThreadApplication, operations),
+    Layer.succeed(
+      HostedWorkspace,
+      HostedWorkspace.of({
+        execute: () => Effect.die("unused"),
+        pause: () => Effect.die("unused"),
+        resume: () => Effect.die("unused"),
+        portal: () => Effect.die("unused"),
+      }),
+    ),
+    Layer.succeed(ThreadProtocolStore, store),
+    hostedStoreLayer,
+    Layer.succeed(HostedToolPolicy, testToolPolicy),
+    BunCrypto.layer,
+  )
+  const snapshotWithTitle = (title: string): HostedThreadSnapshot => ({
+    ...snapshot,
+    view: { ...snapshot.view, thread: { ...snapshot.view.thread, title } },
+  })
+  const notifications = makeThreadProtocolNotifications()
+  const pollOutbound = (connection: { readonly outbound: Effect.Effect<ReadonlyArray<unknown>, unknown, never> }) =>
+    Effect.gen(function* () {
+      const polling = yield* Effect.forkChild(connection.outbound, { startImmediately: true })
+      notifications.recover()
+      return yield* Fiber.join(polling)
+    })
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* store.saveSnapshot({
+        ownerId,
+        threadId,
+        threadVersion: ThreadVersion.make("0"),
+        cursor: ThreadEventCursor.make("0"),
+        snapshot,
+        createdAt: timestamp,
       })
-      expect(store.command("deny-command")?.result).toMatchObject({
-        authorization: {
-          decision: "deny",
-          operation: "write-file",
-          arguments: '{"path":"README.md"}',
-          result: { _tag: "Delivered" },
+      const protocol = Context.get(
+        yield* Layer.build(
+          hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies)),
+        ),
+        HostedThreadProtocol,
+      )
+      const connection = yield* protocol.connect("ticket", "/api/v1/threads/socket")
+      yield* connection.receive({
+        protocolVersion: 1,
+        requestId: RequestId.make("attach-snapshot-race"),
+        command: { _tag: "AttachThread", threadId, afterCursor: ThreadEventCursor.make("0") },
+      })
+
+      currentSnapshot = snapshotWithTitle("Materialized ahead")
+      const durableAhead = snapshotWithTitle("Durable one")
+      yield* store.appendEvents({
+        ownerId,
+        threadId,
+        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        snapshot: durableAhead,
+        createdAt: timestamp,
+      })
+      expect(yield* pollOutbound(connection)).toMatchObject([
+        { payload: { _tag: "ThreadEvent", event: { cursor: "1" } } },
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            cursor: "1",
+            threadVersion: "0",
+            snapshot: durableAhead,
+          },
         },
+      ])
+
+      currentSnapshot = snapshotWithTitle("Materialized behind")
+      const durableBehind = snapshotWithTitle("Durable two")
+      yield* store.appendEvents({
+        ownerId,
+        threadId,
+        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        snapshot: durableBehind,
+        createdAt: timestamp,
       })
+      expect(yield* pollOutbound(connection)).toMatchObject([
+        { payload: { _tag: "ThreadEvent", event: { cursor: "2" } } },
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            cursor: "2",
+            threadVersion: "0",
+            snapshot: durableBehind,
+          },
+        },
+      ])
+
+      currentSnapshot = snapshotWithTitle("Materialized after compaction")
+      const durableCompacted = snapshotWithTitle("Durable compacted")
+      yield* store.appendEvents({
+        ownerId,
+        threadId,
+        events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        snapshot: durableCompacted,
+        createdAt: timestamp,
+      })
+      store.dropEventsThrough("3")
+      expect(yield* pollOutbound(connection)).toMatchObject([
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            cursor: "3",
+            threadVersion: "0",
+            snapshot: durableCompacted,
+          },
+        },
+      ])
     }),
   )
 })

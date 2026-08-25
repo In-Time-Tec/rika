@@ -284,10 +284,12 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             ? submitted
             : Deferred.await(options.holdSubmissionAdmission).pipe(Effect.andThen(submitted))
         },
-        cancel:
-          options.holdCancellation === undefined
-            ? current.cancel
-            : Deferred.await(options.holdCancellation).pipe(Effect.andThen(current.cancel)),
+        cancel: (target) => {
+          const cancelled = current.cancel(target)
+          return options.holdCancellation === undefined
+            ? cancelled
+            : Deferred.await(options.holdCancellation).pipe(Effect.andThen(cancelled))
+        },
         events: (dispatch) =>
           current.events((event) => {
             const delivered = options.mapInteractiveEvent?.(event) ?? event

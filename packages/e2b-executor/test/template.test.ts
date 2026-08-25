@@ -12,9 +12,12 @@ describe("E2B template", () => {
     test("starts the exported remote executor host without controller credentials", () =>
       Effect.gen(function* () {
         const dockerfile = yield* read("../../../infra/e2b/executor-v1/e2b.Dockerfile")
-        expect(dockerfile).toContain("COPY packages ./packages")
+        expect(dockerfile).toContain("COPY packages/remote-execution ./packages/remote-execution")
         expect(dockerfile).toContain("install -d -m 0700 -o rika-executor -g rika-executor /var/lib/rika-executor")
         expect(dockerfile).toContain("Defaults:rika-executor env_reset")
+        expect(dockerfile).toContain(
+          "rika-executor ALL=(root) NOPASSWD: /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika",
+        )
         expect(dockerfile).toContain("usermod --append --groups rika-workspace rika-executor")
         expect(dockerfile).toContain("sudo -n -u rika-workspace -- test -w /home/rika-workspace/workspace")
         expect(dockerfile).toContain("zstd=1.5.4+dfsg2-5")
@@ -25,6 +28,9 @@ describe("E2B template", () => {
         expect(startup).toContain('E2B_SANDBOX_ID="template-readiness"')
         expect(startup.indexOf("/run/e2b/.E2B_SANDBOX_ID")).toBeLessThan(
           startup.indexOf('E2B_SANDBOX_ID="template-readiness"'),
+        )
+        expect(startup).toContain(
+          "sudo -n /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika",
         )
         expect(startup).toContain("export E2B_SANDBOX_ID")
         expect(startup).toContain("exec bun run /opt/rika/packages/remote-execution/src/host.ts")

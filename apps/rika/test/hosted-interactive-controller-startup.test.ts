@@ -16,7 +16,7 @@ import {
 } from "../src/hosted/hosted-interactive-controller"
 import * as Runner from "../src/runner/runner"
 
-const { raceStructured, startRunnerWhenPlaced } = hostedInteractiveControllerInternals
+const { raceStructured, runnerConnectionState, startRunnerWhenPlaced } = hostedInteractiveControllerInternals
 
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
@@ -30,6 +30,16 @@ const placement = (target: "orb" | "runner") => ({
   connectivity: "connected" as const,
   target,
   participants: 1,
+})
+
+it("keeps local submission disconnected until the concrete Runner reports ready", () => {
+  expect(runnerConnectionState(placement("runner"), false)).toEqual({
+    connectivity: "connecting",
+    target: "runner",
+    participants: 1,
+  })
+  expect(runnerConnectionState(placement("runner"), true)).toEqual(placement("runner"))
+  expect(runnerConnectionState(placement("orb"), false)).toEqual(placement("orb"))
 })
 
 it.effect("prepares no Runner for Orb placement, then starts one Runner once despite repeated states", () =>
@@ -244,13 +254,13 @@ it.effect("direct Effect members delegate after attachment", () =>
     const called: Array<string> = []
     const real = {
       quit: Effect.sync(() => called.push("quit")),
-      cancel: Effect.sync(() => called.push("cancel")),
+      cancel: () => Effect.sync(() => called.push("cancel")),
       newThread: Effect.sync(() => called.push("newThread")),
     } as unknown as InteractiveSession.InteractiveSession
     deferred.attach(real)
     yield* Deferred.succeed(ready, real)
     yield* deferred.session.quit
-    yield* deferred.session.cancel
+    yield* deferred.session.cancel()
     yield* deferred.session.newThread
     expect(called).toEqual(["quit", "cancel", "newThread"])
   }),

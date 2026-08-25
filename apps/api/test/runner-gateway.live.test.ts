@@ -82,8 +82,6 @@ const operationDigest = (request: ReturnType<typeof cellRequest>) =>
         code: request.code,
         attempt: request.attempt,
         replayPolicy: request.replayPolicy,
-        admittedAt: request.admittedAt,
-        deadlineAt: request.deadlineAt,
       }),
     )
     .digest("hex")
@@ -120,6 +118,21 @@ const workspaceCapabilities = {
   workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
 }
 
+const operationAttribution = (operationKey: string) => {
+  const operation = cellRequest(operationKey)
+  return {
+    operationKey,
+    workspaceId: operation.workspaceId,
+    sessionId: operation.sessionId,
+    threadId: operation.threadId,
+    turnId: operation.turnId,
+    runId: operation.runId,
+    rootRunId: operation.rootRunId,
+    toolCallId: operation.toolCallId,
+    attempt: operation.attempt,
+  }
+}
+
 const persistTerminal = (
   gateway: RunnerGateway,
   target: Socket,
@@ -129,18 +142,7 @@ const persistTerminal = (
   terminalOutcome: "completed" | "failed" | "cancelled" | "unknown" = "completed",
 ) =>
   Effect.gen(function* () {
-    const operation = cellRequest(operationKey)
-    const attribution = {
-      operationKey,
-      workspaceId: operation.workspaceId,
-      sessionId: operation.sessionId,
-      threadId: operation.threadId,
-      turnId: operation.turnId,
-      runId: operation.runId,
-      rootRunId: operation.rootRunId,
-      toolCallId: operation.toolCallId,
-      attempt: operation.attempt,
-    }
+    const attribution = operationAttribution(operationKey)
     for (const frame of [
       { _tag: "Accepted" as const, attribution, cursor: 1 },
       { _tag: "Started" as const, attribution, cursor: 2 },
@@ -292,6 +294,24 @@ const seed = (
     )
     yield* query(
       pool,
+      `INSERT INTO rika_workspaces (owner_id, path, created_at)
+      VALUES ($1, 'workspace-local-gateway', 1)`,
+      [ownerId],
+    )
+    yield* query(
+      pool,
+      `INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
+      VALUES ('thread-local-gateway', $1, 'workspace-local-gateway', 'Local', 1, 1)`,
+      [ownerId],
+    )
+    yield* query(
+      pool,
+      `INSERT INTO rika_turns
+      (id, thread_id, prompt, status, created_at, updated_at, execution_route_json)
+      VALUES ('turn-local-gateway', 'thread-local-gateway', 'restart', 'accepted', 1, 1, '{}')`,
+    )
+    yield* query(
+      pool,
       `INSERT INTO rika_hosted_devices
       (id, user_id, display_name, public_key_fingerprint, created_at, last_seen_at)
       VALUES ($1, 'user-local-gateway', 'Local', 'sha256:local-gateway', now(), now())`,
@@ -346,9 +366,10 @@ const seed = (
     yield* query(
       pool,
       `INSERT INTO rika_hosted_thread_commands
-      (owner_id, thread_id, command_id, idempotency_key, actor, sequence, commit_cursor, command, admitted_at)
-      VALUES ($3, 'thread-local-gateway', $1, $1, $2::jsonb,
-        1, 1, '{"_tag":"SubmitPrompt","prompt":"restart"}', now())`,
+      (owner_id, thread_id, command_id, idempotency_key, actor, sequence, commit_cursor, command, admitted_at,
+        turn_id, admission_status)
+      VALUES ($3, 'thread-local-gateway', $1 || '-command', $1 || '-submission', $2::jsonb,
+        1, 1, '{"_tag":"SubmitPrompt","prompt":"restart"}', now(), 'turn-local-gateway', 'accepted')`,
       [
         operationKey,
         encodeActor(
@@ -463,6 +484,15 @@ it.effect.skipIf(!live)(
           const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
           const firstSocket = socket()
           yield* first.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+          const attribution = operationAttribution("operation-restart")
+          yield* first.receive(
+            firstSocket,
+            encode({ _tag: "CellLifecycle", access, frame: { _tag: "Accepted", attribution, cursor: 1 } }),
+          )
+          yield* first.receive(
+            firstSocket,
+            encode({ _tag: "CellLifecycle", access, frame: { _tag: "Started", attribution, cursor: 2 } }),
+          )
           yield* first.disconnected(firstSocket)
           expect(
             (yield* query(
@@ -474,7 +504,68 @@ it.effect.skipIf(!live)(
           const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
           const secondSocket = socket()
           yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
-          yield* persistTerminal(restarted, secondSocket, access, "operation-restart")
+          expect(
+            secondSocket.sent.map((value) => decode(value)).find((message) => message._tag === "CellReplay"),
+          ).toEqual({
+            _tag: "CellReplay",
+            access,
+            operationKey: "operation-restart",
+            attempt: 0,
+            afterCursor: 2,
+          })
+          const reattached = yield* Effect.forkChild(
+            restarted.execute({
+              ...cellRequest("operation-restart", "2026-08-25T00:02:00.000Z"),
+              admittedAt: "2026-08-25T00:00:00.000Z",
+            }),
+          )
+          expect(
+            yield* eventually(() =>
+              secondSocket.sent
+                .map((value) => decode(value))
+                .find(
+                  (message) =>
+                    message._tag === "CellExecute" && message.request.operationKey === "operation-restart",
+                ),
+            ),
+          ).toMatchObject({
+            _tag: "CellExecute",
+            request: {
+              operationKey: "operation-restart",
+              admittedAt: null,
+              deadlineAt: "2999-01-01T00:00:00.000Z",
+            },
+          })
+          const bindingRequest = {
+            module: "missing",
+            operation: "missing",
+            input: {},
+            sessionId: assignmentId,
+            cellId: "call-local-gateway",
+          } as const
+          yield* restarted.receive(
+            secondSocket,
+            encode({
+              _tag: "BindingInvoke",
+              access,
+              operationKey: "operation-restart",
+              attempt: 0,
+              callId: "operation-restart:binding:0",
+              requestDigest: bindingRequestDigest(bindingRequest),
+              request: bindingRequest,
+            }),
+          )
+          expect(
+            secondSocket.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult"),
+          ).toHaveLength(1)
+          yield* restarted.receive(
+            secondSocket,
+            encode({
+              _tag: "CellLifecycle",
+              access,
+              frame: { _tag: "Terminal", attribution, cursor: 3, outcome: "completed", response },
+            }),
+          )
           const result = encode({
             _tag: "LocalCellResult",
             access,
@@ -484,6 +575,7 @@ it.effect.skipIf(!live)(
           })
           yield* restarted.receive(secondSocket, result)
           yield* restarted.receive(secondSocket, result)
+          expect(yield* Fiber.join(reattached)).toMatchObject({ response, outcome: "completed" })
           expect(secondSocket.closed).toEqual([])
           expect(
             secondSocket.sent.map((value) => decode(value)).filter((message) => message._tag === "LocalCellReceipt"),
@@ -533,7 +625,7 @@ it.effect.skipIf(!live)("replays the exact durable cancelled terminal without di
   ),
 )
 
-it.effect.skipIf(!live)("keeps deadline authority when a late Runner terminal and result arrive", () =>
+it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the caller deadline", () =>
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -549,8 +641,9 @@ it.effect.skipIf(!live)("keeps deadline authority when a late Runner terminal an
           failure: { kind: "cancelled", message: "Cell operation was cancelled" },
         }
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* TestClock.adjust("1 second")
         const deadline = yield* gateway.execute(cellRequest("operation-deadline-first", deadlineAt))
-        expect(deadline).toMatchObject({ outcome: "unknown", eventPersisted: true })
+        expect(deadline).toMatchObject({ outcome: "unknown", eventPersisted: false })
         expect(
           target.sent
             .map((value) => decode(value))
@@ -589,7 +682,7 @@ it.effect.skipIf(!live)("keeps deadline authority when a late Runner terminal an
             `SELECT state, terminal_outcome AS "terminalOutcome", response
               FROM rika_hosted_executor_operations WHERE operation_key = 'operation-deadline-first'`,
           )).rows,
-        ).toEqual([{ state: "unknown", terminalOutcome: "unknown", response: deadline.response }])
+        ).toEqual([{ state: "completed", terminalOutcome: "cancelled", response: cancelled }])
       }),
     ),
   ),
@@ -760,7 +853,7 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
           _tag: "Unknown",
           message: "Machine outcome is unknown at the operation deadline",
         })
-        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: true })
+        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: false })
         expect(binding.pollUnsafe()).toBeUndefined()
         expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
           [],
@@ -938,7 +1031,7 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
   ),
 )
 
-it.effect.skipIf(!live)("dispatches a personal-owner operation without any organization membership", () =>
+it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay", () =>
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -951,13 +1044,15 @@ it.effect.skipIf(!live)("dispatches a personal-owner operation without any organ
         const target = socket()
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
         target.failSend = true
-        const result = yield* gateway.execute(cellRequest("operation-personal"))
-        expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "CellExecute")).toBe(true)
-        expect(result.response).toEqual({
-          _tag: "DomainFailure",
-          failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
-        })
-        expect((yield* operationState(pool, "operation-personal")).rows).toEqual([{ state: "unknown", events: 1 }])
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-personal")))
+        yield* eventually(() =>
+          target.sent.map((value) => decode(value)).find((message) => message._tag === "CellExecute"),
+        )
+        yield* Fiber.interrupt(running)
+        expect(
+          target.sent.map((value) => decode(value)).some((message) => message._tag === "CellCancel"),
+        ).toBe(false)
+        expect((yield* operationState(pool, "operation-personal")).rows).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
@@ -1067,7 +1162,7 @@ it.effect.skipIf(!live)("rejects a conflicting completion after a durable result
   ),
 )
 
-it.effect.skipIf(!live)("recovers an overdue dispatch once across concurrent gateway reapers", () =>
+it.effect.skipIf(!live)("reports an overdue dispatch without replacing the Runner's terminal authority", () =>
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1078,6 +1173,7 @@ it.effect.skipIf(!live)("recovers an overdue dispatch once across concurrent gat
         )
         const left = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const right = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        yield* TestClock.adjust("1 second")
         const results = yield* Effect.all(
           [
             left.execute(cellRequest("operation-overdue", deadlineAt)),
@@ -1095,13 +1191,14 @@ it.effect.skipIf(!live)("recovers an overdue dispatch once across concurrent gat
             failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
           },
         ])
-        expect((yield* operationState(pool, "operation-overdue")).rows).toEqual([{ state: "unknown", events: 1 }])
+        expect(results.map((result) => result.eventPersisted)).toEqual([false, false])
+        expect((yield* operationState(pool, "operation-overdue")).rows).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
 )
 
-it.effect.skipIf(!live)("recovers a dispatched operation after the assignment lease expires", () =>
+it.effect.skipIf(!live)("does not infer an operation outcome from assignment lease expiry", () =>
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1109,19 +1206,47 @@ it.effect.skipIf(!live)("recovers a dispatched operation after the assignment le
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
-        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
-        const result = yield* gateway.execute(cellRequest("operation-expired-lease"))
-        expect(result.response).toEqual({
-          _tag: "DomainFailure",
-          failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
-        })
-        expect((yield* operationState(pool, "operation-expired-lease")).rows).toEqual([{ state: "unknown", events: 1 }])
+        yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        expect((yield* operationState(pool, "operation-expired-lease")).rows).toEqual([
+          { state: "dispatched", events: 0 },
+        ])
       }),
     ),
   ),
 )
 
-it.effect.skipIf(!live)("terminalizes unresolved work and releases the assignment on explicit goodbye", () =>
+it.effect.skipIf(!live)("publishes a durable terminal receipt after the assignment lease expires", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-terminal-expired-lease"
+        yield* seed(pool, operationKey)
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const connected = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* connected.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* persistTerminal(connected, target, access, operationKey)
+        yield* query(
+          pool,
+          `UPDATE rika_hosted_executor_assignments SET lease_expires_at = now() - interval '1 second' WHERE id = $1`,
+          [assignmentId],
+        )
+
+        const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        expect(yield* restarted.execute(cellRequest(operationKey))).toMatchObject({
+          response,
+          outcome: "completed",
+          eventPersisted: true,
+        })
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("releases the assignment without inventing terminal work on explicit goodbye", () =>
   isolated(({ url, pool }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1146,12 +1271,7 @@ it.effect.skipIf(!live)("terminalizes unresolved work and releases the assignmen
           (yield* query(pool, `SELECT lifecycle FROM rika_hosted_executor_assignments WHERE id = $1`, [assignmentId]))
             .rows,
         ).toEqual([{ lifecycle: "paused" }])
-        const recovered = yield* gateway.execute(cellRequest("operation-goodbye"))
-        expect(recovered.response).toEqual({
-          _tag: "DomainFailure",
-          failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
-        })
-        expect((yield* operationState(pool, "operation-goodbye")).rows).toEqual([{ state: "unknown", events: 1 }])
+        expect((yield* operationState(pool, "operation-goodbye")).rows).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),

@@ -29,8 +29,17 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       )
 
       expect(dockerfile).toContain("COPY package.json bun.lock ./")
-      expect(dockerfile).toContain("COPY packages ./packages")
-      expect(dockerfile).toContain("COPY apps ./apps")
+      for (const source of [
+        "packages/coding-tools",
+        "packages/credential-vault",
+        "packages/e2b-executor",
+        "packages/kernel",
+        "packages/remote-execution",
+        "apps/rika",
+      ])
+        expect(dockerfile).toContain(`COPY ${source} ./${source}`)
+      expect(dockerfile).not.toContain("COPY packages ./packages")
+      expect(dockerfile).not.toContain("COPY apps ./apps")
       expect(dockerfile).toContain("bun install --production --frozen-lockfile --ignore-scripts")
       expect(dockerfile).toContain("node_modules/tenetkit/package.json")
       expect(dockerfile).toContain("packages/kernel/src/executor-runtime.ts")
@@ -149,7 +158,12 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(dockerfile).toContain("USER rika-executor")
       expect(dockerfile).toContain("sudo -n -u rika-workspace")
       expect(dockerfile).not.toMatch(/ARG .*?(TOKEN|SECRET|PASSWORD|PRIVATE_KEY)/)
-      expect(dockerfile).not.toMatch(/COPY .*?(\.env|\.git|\.ssh|credential)/i)
+      const copiedSources = dockerfile
+        .split("\n")
+        .filter((line) => line.startsWith("COPY "))
+        .flatMap((line) => line.slice("COPY ".length).trim().split(/\s+/).slice(0, -1))
+      for (const source of copiedSources)
+        expect(source).not.toMatch(/(^|\/)(\.env(?:\..*)?|\.git|\.ssh|\.git-credentials|credentials?)(\/|$)/i)
     }),
   )
 
@@ -191,13 +205,16 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
 
   test.effect("imports the immutable private image with short-lived registry credentials", () =>
     Effect.gen(function* () {
-      const create = yield* text("packages/e2b-executor/scripts/create-image-template.ts", root)
+      const [create, dockerfile] = yield* Effect.all(
+        [text("packages/e2b-executor/scripts/create-image-template.ts", root), text("e2b.Dockerfile")],
+        { concurrency: "unbounded" },
+      )
 
       expect(create).toContain(".fromImage(image, { username, password: Redacted.value(password) })")
-      expect(create).toContain("rika-executor ALL=(root) NOPASSWD: ${createRuntimeDirectory}")
-      expect(create).toContain("> /etc/sudoers.d/rika-runtime && chmod 0440 /etc/sudoers.d/rika-runtime")
       expect(create).toContain('.setUser("rika-executor")')
-      expect(create).toContain("`sudo -n ${createRuntimeDirectory} && exec /opt/rika/start.sh`")
+      expect(create).toContain(
+        '.setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")',
+      )
       expect(create).toContain('"curl --fail --silent http://127.0.0.1:7070/health"')
       expect(create).toContain("Template.build(template, alias, {")
       expect(create).toContain("apiKey: Redacted.value(apiKey)")
@@ -205,6 +222,11 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(create).toContain('Config.string("GHCR_USERNAME")')
       expect(create).toContain('Config.redacted("GHCR_PASSWORD")')
       expect(create).not.toContain("console.log")
+      expect(create).not.toContain("/etc/sudoers")
+      expect(dockerfile).toContain(
+        "rika-executor ALL=(root) NOPASSWD: /usr/bin/install -d -m 2750 -o rika-executor -g rika-workspace /run/rika",
+      )
+      expect(dockerfile).toContain("install -d -m 2750 -o rika-executor -g rika-workspace /run/rika")
     }),
   )
 

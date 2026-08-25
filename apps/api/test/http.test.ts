@@ -73,11 +73,15 @@ const product: HostedProductService = {
   pollRunner: () => Effect.die("unused"),
   createConnection: () => Effect.succeed({ threadId: "thread-1" }),
   admitRun: () => Effect.die("unused"),
+  admitAuthorizedRun: () => Effect.die("unused"),
+  cancelRunAdmission: () => Effect.die("unused"),
+  cancelAuthorizedRunAdmission: () => Effect.die("unused"),
 }
 
 const recovery: HttpDependencies["recovery"] = {
   inspect: () => Effect.die("unused"),
   resolve: () => Effect.die("unused"),
+  reconcileCompleted: Effect.die("unused"),
 }
 
 const executor: Executor = {
@@ -168,6 +172,19 @@ const cliRegistrationBody = {
 } as const
 
 describe("api HTTP", () => {
+  it.effect("does not expose an authentication bypass in development or production", () =>
+    Effect.gen(function* () {
+      const development: HttpDependencies = {
+        ...dependencies(),
+        production: false,
+      }
+      const local = yield* response("/__dev/log-me-in/rika%40local.test", development)
+      const production = yield* response("/__dev/log-me-in/rika%40local.test", dependencies())
+      expect(local.status).toBe(404)
+      expect(production.status).toBe(404)
+    }),
+  )
+
   it.effect("serves liveness without consulting identity or PostgreSQL", () =>
     Effect.gen(function* () {
       const unavailable: HttpDependencies = {

@@ -19,6 +19,7 @@ const heartbeatIntervalMillis = 20_000
 const admissionLifetimeMillis = 60_000
 
 export interface RunnerAdmission {
+  readonly assignmentId: ExecutorAssignmentId
   readonly admissionId: string
   readonly ticket: string
   readonly expiresAt: number
@@ -276,11 +277,12 @@ export const layer = Layer.effect(
             const expiry = persisted[0]
             if (expiry === undefined) return yield* failure("repository", "Runner admission expiry was not persisted")
             return {
+              assignmentId: awaiting.id,
               admissionId,
               ticket: Redacted.value(ticket),
               expiresAt: Math.floor(number(expiry.expiresAt)),
               executorUrl: input.executorUrl,
-              workspaceIdentity: input.workspaceFingerprint,
+              workspaceIdentity: awaiting.workspaceId,
             }
           }),
         )
@@ -381,20 +383,10 @@ export const layer = Layer.effect(
     })
     const workspaceIdentity = Effect.fn("RunnerExecutor.workspaceIdentity")(function* (input: ProtocolAccess) {
       yield* validateAccess(input)
-      const rows = yield* sql<{ readonly fingerprint: string }>`SELECT workspace_fingerprint AS fingerprint
-        FROM rika_hosted_runner_admissions
-        WHERE assignment_id = ${input.fence.assignmentId} AND generation = ${input.fence.assignmentGeneration}
-          AND device_id = ${input.fence.instanceId} AND process_incarnation = ${input.fence.processIncarnation}
-          AND consumed_at IS NOT NULL AND revoked_at IS NULL
-        ORDER BY consumed_at DESC LIMIT 1`.pipe(
-        Effect.mapError(() => failure("repository", "Local workspace identity is unavailable")),
-      )
-      if (rows[0] === undefined) return yield* failure("fenced", "Local workspace identity is unavailable")
-      return rows[0].fingerprint
+      return (yield* load(input.fence.assignmentId)).workspaceId
     })
     const reconnect = Effect.fn("RunnerExecutor.reconnect")(function* (input: ProtocolAccess) {
       const persisted = yield* access(input, yield* principalFor(input))
-      yield* assignments.authenticate(persisted).pipe(Effect.mapError(assignmentFailure))
       const active = yield* assignments
         .reconnect({ access: persisted, leaseLifetimeMillis })
         .pipe(Effect.mapError(assignmentFailure))

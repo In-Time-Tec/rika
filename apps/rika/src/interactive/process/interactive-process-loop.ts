@@ -82,6 +82,7 @@ export const interactiveTui =
           submissionSequence: 0,
           selectionFiber: undefined as Fiber.Fiber<void, never> | undefined,
           selectionGeneration: 0,
+          newThreadSelectionGeneration: undefined,
           renderSuppressed: false,
           selectionResyncs: new Set<string>(),
           queueResyncs: new Set<string>(),

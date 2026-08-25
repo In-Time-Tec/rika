@@ -21,6 +21,7 @@ interface PreparationRow {
   readonly failure: unknown
   readonly startedAt: number
   readonly updatedAt: number
+  readonly deadlineAt: number
 }
 
 const failure = (reason: WorkspacePreparationError["reason"], message: string) =>
@@ -38,7 +39,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
       workspace_id AS "workspaceId", generation::text AS generation, lease_epoch::text AS "leaseEpoch",
       attempt, state, phase, evidence, failure,
       (extract(epoch FROM started_at) * 1000)::float8 AS "startedAt",
-      (extract(epoch FROM updated_at) * 1000)::float8 AS "updatedAt"
+      (extract(epoch FROM updated_at) * 1000)::float8 AS "updatedAt",
+      (extract(epoch FROM deadline_at) * 1000)::float8 AS "deadlineAt"
       FROM rika_hosted_workspace_preparations
       WHERE assignment_id = ${assignmentId} AND generation = ${generation}::bigint`)
 
@@ -83,15 +85,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
       const assignment = yield* authenticate(input.access)
       if (assignment.workspaceId !== input.workspaceId)
         return yield* failure("invalid", "Workspace preparation identity does not match its assignment")
+      if (input.deadlineAt <= input.now)
+        return yield* failure("invalid", "Workspace preparation deadline must be after its start")
       yield* query(sql`INSERT INTO rika_hosted_workspace_preparations
         (assignment_id, owner_id, workspace_id, generation, lease_epoch, attempt, state, phase,
-          evidence, failure, started_at, updated_at)
+          evidence, failure, started_at, updated_at, deadline_at)
         VALUES (${input.access.assignmentId}, ${assignment.ownerId}, ${assignment.workspaceId},
           ${input.access.assignmentGeneration}::bigint, ${input.access.leaseEpoch}::bigint, ${input.attempt},
-          'preparing', ${input.phase}, NULL, NULL, to_timestamp(${input.now} / 1000.0), to_timestamp(${input.now} / 1000.0))
+          'preparing', ${input.phase}, NULL, NULL, to_timestamp(${input.now} / 1000.0),
+          to_timestamp(${input.now} / 1000.0), to_timestamp(${input.deadlineAt} / 1000.0))
         ON CONFLICT (assignment_id, generation) DO UPDATE SET
           lease_epoch = EXCLUDED.lease_epoch, attempt = EXCLUDED.attempt, state = 'preparing',
-          phase = EXCLUDED.phase, evidence = NULL, failure = NULL, updated_at = EXCLUDED.updated_at
+          phase = EXCLUDED.phase, evidence = NULL, failure = NULL, updated_at = EXCLUDED.updated_at,
+          deadline_at = EXCLUDED.deadline_at
         WHERE rika_hosted_workspace_preparations.lease_epoch < EXCLUDED.lease_epoch
           OR (rika_hosted_workspace_preparations.lease_epoch = EXCLUDED.lease_epoch AND (
             (rika_hosted_workspace_preparations.attempt = EXCLUDED.attempt
@@ -100,7 +106,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
             OR (rika_hosted_workspace_preparations.attempt < EXCLUDED.attempt
               AND rika_hosted_workspace_preparations.state = 'failed'
               AND (rika_hosted_workspace_preparations.failure ->> 'retryable')::boolean)
-          ))`)
+          )) AND EXCLUDED.deadline_at > EXCLUDED.updated_at`)
       const preparation = yield* current(input.access.assignmentId, input.access.assignmentGeneration)
       if (preparation.leaseEpoch !== input.access.leaseEpoch || preparation.attempt !== input.attempt)
         return yield* failure("stale-fence", "Workspace preparation start fence is stale")
@@ -120,7 +126,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
       WHERE assignment_id = ${input.access.assignmentId}
         AND generation = ${input.access.assignmentGeneration}::bigint
         AND lease_epoch = ${input.access.leaseEpoch}::bigint
-        AND attempt = ${input.attempt} AND state = 'preparing' RETURNING sequence`)
+        AND attempt = ${input.attempt} AND state = 'preparing'
+        AND deadline_at > to_timestamp(${input.now} / 1000.0) RETURNING sequence`)
     if (inserted[0] === undefined) return yield* failure("stale-fence", "Workspace preparation output fence is stale")
     yield* query(sql`DELETE FROM rika_hosted_workspace_preparation_output
       WHERE assignment_id = ${input.access.assignmentId}
@@ -160,7 +167,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
       WHERE assignment_id = ${input.access.assignmentId}
         AND generation = ${input.access.assignmentGeneration}::bigint
         AND lease_epoch = ${input.access.leaseEpoch}::bigint
-        AND attempt = ${input.attempt} AND state = 'preparing' RETURNING assignment_id`)
+        AND attempt = ${input.attempt} AND state = 'preparing'
+        AND deadline_at > to_timestamp(${input.now} / 1000.0) RETURNING assignment_id`)
     if (rows[0] === undefined) {
       const existing = yield* current(input.access.assignmentId, input.access.assignmentGeneration)
       const duplicate = completed
@@ -208,7 +216,19 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
     return preparation
   })
 
-  return WorkspacePreparations.of({ start, appendOutput, complete, fail, retryAttempt, requireReady })
+  const expireOverdue: WorkspacePreparationsService["expireOverdue"] = Effect.fn(
+    "PostgresWorkspacePreparations.expireOverdue",
+  )(function* (now) {
+    const rows = yield* query(sql`UPDATE rika_hosted_workspace_preparations SET
+      state = 'failed', evidence = NULL,
+      failure = ${sql.json({ message: "Workspace preparation deadline exceeded", retryable: true })},
+      updated_at = to_timestamp(${now} / 1000.0)
+      WHERE state = 'preparing' AND deadline_at <= to_timestamp(${now} / 1000.0)
+      RETURNING assignment_id`)
+    return rows.length
+  })
+
+  return WorkspacePreparations.of({ start, appendOutput, complete, fail, retryAttempt, requireReady, expireOverdue })
 })
 
 export const layer = Layer.effect(WorkspacePreparations, make)

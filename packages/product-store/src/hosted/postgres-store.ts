@@ -67,6 +67,7 @@ const transaction = <A>(sql: SqlClient, effect: Effect.Effect<A, StoreError>) =>
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const AdmissionStatus = Schema.Literals(["accepted", "queued"])
+const actorEquivalent = Schema.toEquivalence(ActorAttribution)
 const commandEquivalent = Schema.toEquivalence(
   Schema.Struct({
     ownerId: ThreadCommand.fields.ownerId,
@@ -450,6 +451,54 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     )
   })
 
+  const cancelPrompt: StoreService["cancelPrompt"] = Effect.fn("PostgresStore.cancelPrompt")(function* (input) {
+    return yield* transaction(
+      sql,
+      Effect.gen(function* () {
+        const locked = yield* query(sql`SELECT id FROM rika_hosted_threads
+          WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR UPDATE`)
+        if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist for the owner")
+        yield* requireThreadAccess(sql, input, "thread:control", input.cancelledAt)
+        const cancellations = yield* query(sql<{
+          readonly targetCommandId: string
+          readonly cancelCommandId: string
+          readonly actor: unknown
+        }>`SELECT target_command_id AS "targetCommandId", cancel_command_id AS "cancelCommandId", actor
+          FROM rika_hosted_prompt_cancellations
+          WHERE thread_id = ${input.threadId}
+            AND (target_command_id = ${input.targetCommandId} OR cancel_command_id = ${input.cancelCommandId})
+          FOR UPDATE`)
+        if (cancellations.length > 1)
+          return yield* failure("conflict", "Cancellation identities refer to different submissions")
+        const existing = cancellations[0]
+        if (existing !== undefined) {
+          const actor = yield* decode(ActorAttribution, existing.actor)
+          if (
+            existing.targetCommandId !== input.targetCommandId ||
+            existing.cancelCommandId !== input.cancelCommandId ||
+            !actorEquivalent(actor, input.actor)
+          )
+            return yield* failure("conflict", "Cancellation identity was reused with incompatible input")
+        } else {
+          yield* query(sql`INSERT INTO rika_hosted_prompt_cancellations
+            (owner_id, thread_id, target_command_id, cancel_command_id, actor, cancelled_at)
+            VALUES (${input.ownerId}, ${input.threadId}, ${input.targetCommandId}, ${input.cancelCommandId},
+              ${sql.json(input.actor)}, ${input.cancelledAt})`)
+        }
+        const targets = yield* query(sql<{ readonly turnId: string | null; readonly tag: string | null }>`
+          SELECT turn_id AS "turnId", command->>'_tag' AS tag FROM rika_hosted_thread_commands
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND command_id = ${input.targetCommandId}`)
+        const target = targets[0]
+        if (target !== undefined && (target.tag !== "SubmitPrompt" || target.turnId === null))
+          return yield* failure("conflict", "Cancellation target is not a prompt submission")
+        return target?.turnId === undefined || target.turnId === null
+          ? { _tag: "Pending" as const, targetCommandId: input.targetCommandId }
+          : { _tag: "Turn" as const, targetCommandId: input.targetCommandId, turnId: TurnId.make(target.turnId) }
+      }),
+    )
+  })
+
   const admitPrompt = Effect.fn("PostgresStore.admitPrompt")(function* (input: AdmitPromptInput) {
     if (input.prompt.length === 0) return yield* failure("conflict", "Prompt cannot be empty")
     const queueCapacity = Math.trunc(input.queueCapacity)
@@ -505,8 +554,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           const status = yield* Schema.decodeUnknownEffect(AdmissionStatus)(
             (existingRows[0] as { readonly admissionStatus?: unknown }).admissionStatus,
           ).pipe(Effect.mapError(databaseError))
-          return { command: existing, turnId: TurnId.make(turnId), status }
+          return { _tag: "Admitted" as const, command: existing, turnId: TurnId.make(turnId), status }
         }
+        const cancelled = yield* query(sql`SELECT 1 FROM rika_hosted_prompt_cancellations
+          WHERE owner_id = ${input.ownerId} AND thread_id = ${input.threadId}
+            AND target_command_id = ${input.commandId}`)
+        if (cancelled[0] !== undefined) return { _tag: "Cancelled" as const, targetCommandId: input.commandId }
         if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
         const productThread = yield* query(sql`SELECT 1 FROM rika_threads
           WHERE id = ${input.threadId} AND owner_id = ${input.ownerId} FOR KEY SHARE`)
@@ -550,10 +603,15 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
             commit_cursor::text AS "commitCursor", command,
             to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "admittedAt"`)
         inserted = true
-        return { command: yield* decode(ThreadCommand, rows[0]), turnId: input.turnId, status }
+        return {
+          _tag: "Admitted" as const,
+          command: yield* decode(ThreadCommand, rows[0]),
+          turnId: input.turnId,
+          status,
+        }
       }),
     )
-    if (inserted)
+    if (inserted && admitted._tag === "Admitted")
       yield* HostedObservability.event("admission", "success", {
         threadId: input.threadId,
         turnId: admitted.turnId,
@@ -672,7 +730,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
           FROM rika_hosted_executor_operations operation
           WHERE operation.assignment_id = ${input.assignmentId}
             AND operation.operation_key = ${input.idempotencyKey}
-            AND operation.state = 'unknown'
+            AND operation.state IN ('completed', 'unknown')
             AND operation.dispatched_generation = ${input.assignmentGeneration}::bigint
             AND operation.dispatched_lease_epoch = ${input.leaseEpoch}::bigint
             AND operation.dispatched_executor_instance_id = ${input.executorInstanceId}
@@ -947,6 +1005,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<StoreService, never, PgCl
     authorizeThread,
     admitCommand,
     admitPrompt,
+    cancelPrompt,
     readCommands,
     appendEvent,
     appendRecoveredEvent,
