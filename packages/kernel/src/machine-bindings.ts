@@ -6,6 +6,8 @@ import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import type * as McpConfiguration from "@rika/extensions/mcp-configuration"
 import { Context, Data, Effect, Layer, Schema } from "effect"
 
+export type Services = CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService
+
 export type Request =
   | { readonly _tag: "CodingTool"; readonly request: typeof CodingToolRuntime.Request.Type }
   | { readonly _tag: "ProcessStop"; readonly processId: string }
@@ -208,7 +210,5 @@ const mcp = Layer.effect(
   ),
 )
 
-export const layer = (
-  client: Interface,
-): Layer.Layer<CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService> =>
+export const layer = (client: Interface): Layer.Layer<Services> =>
   Layer.mergeAll(codingTools, processes, mcp).pipe(Layer.provide(Layer.succeed(Client, Client.of(client))))

@@ -1,25 +1,14 @@
 import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
-import { HarnessStore } from "tenetkit/harness"
 import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
-import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
-import * as McpRuntime from "@rika/extensions/mcp-runtime"
-import { GoalService } from "@rika/product/goal-service"
-import * as ThreadQuery from "@rika/product/thread-query-service"
 import { Context, Effect, Function, Layer, Option, Ref, Scope } from "effect"
 import type { FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type { BindingRequirements } from "./binding/modules"
-import { ArtifactStore } from "./binding/artifact/store"
 import * as KernelComposition from "./kernel-composition"
 
-type PerCallServices =
-  | ToolContext.ToolContext
-  | NestedOperation.NestedOperations
-  | Session.SessionStore
-  | Approvals.Approvals
+export type CapturedServices = ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
 
-export type CellServices = BindingRequirements | Approvals.Approvals
+export type CellServices = BindingRequirements
 
 const requiredService = <Identifier, Service>(key: Context.Key<Identifier, Service>) =>
   Effect.serviceOption(key).pipe(
@@ -31,19 +20,11 @@ const requiredService = <Identifier, Service>(key: Context.Key<Identifier, Servi
     ),
   )
 
-export const capture: Effect.Effect<Context.Context<CellServices>> = Effect.gen(function* () {
-  const context = Context.make(CodingToolRuntime.Service, yield* requiredService(CodingToolRuntime.Service))
+export const capture: Effect.Effect<Context.Context<CapturedServices>> = Effect.gen(function* () {
+  const context = Context.make(ToolContext.ToolContext, yield* requiredService(ToolContext.ToolContext))
   return context.pipe(
-    Context.add(ShellProcessRegistry.Service, yield* requiredService(ShellProcessRegistry.Service)),
-    Context.add(ThreadQuery.Factory, yield* requiredService(ThreadQuery.Factory)),
-    Context.add(McpRuntime.McpRuntimeService, yield* requiredService(McpRuntime.McpRuntimeService)),
-    Context.add(HarnessStore.HarnessStore, yield* requiredService(HarnessStore.HarnessStore)),
-    Context.add(Session.SessionStore, yield* requiredService(Session.SessionStore)),
-    Context.add(GoalService, yield* requiredService(GoalService)),
-    Context.add(ArtifactStore, yield* requiredService(ArtifactStore)),
     Context.add(NestedOperation.NestedOperations, yield* requiredService(NestedOperation.NestedOperations)),
-    Context.add(ToolContext.ToolContext, yield* requiredService(ToolContext.ToolContext)),
-    Context.add(Approvals.Approvals, yield* requiredService(Approvals.Approvals)),
+    Context.add(Session.SessionStore, yield* requiredService(Session.SessionStore)),
   )
 })
 
@@ -129,10 +110,10 @@ export interface Executor<Request, Response, Error> {
 
 export interface Options extends KernelComposition.Options {
   readonly trustMode: NonNullable<KernelComposition.Options["trustMode"]>
-  readonly bindingServices: Layer.Layer<Exclude<BindingRequirements, PerCallServices>>
+  readonly bindingServices: Layer.Layer<Exclude<BindingRequirements, CapturedServices>>
 }
 
-const mountingPlaceholders: Layer.Layer<PerCallServices> = Layer.mergeAll(
+const mountingPlaceholders = Layer.mergeAll(
   ToolContext.layerDefault,
   NestedOperation.layerDirect,
   Session.layerMemory,

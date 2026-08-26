@@ -74,7 +74,7 @@ export class AdmissionFailure extends Schema.TaggedError<AdmissionFailure>()(
 export interface Interface {
   readonly execute: (
     request: Request,
-    authority: Context.Context<ExecutorRuntime.CellServices>,
+    authority: Context.Context<ExecutorRuntime.CapturedServices>,
   ) => Effect.Effect<TransportResponse, Unavailable | UnknownOutcome>
   readonly cancel: (request: CancellationRequest) => Effect.Effect<TransportResponse, Unavailable | UnknownOutcome>
 }

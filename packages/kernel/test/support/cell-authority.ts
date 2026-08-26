@@ -72,10 +72,9 @@ export const context = (
   toolContext: ToolContext.Interface,
 ): Effect.Effect<Context.Context<ExecutorRuntime.CellServices>> => authority(toolContext)
 
-export const capture = (overrides: Context.Context<never> = Context.empty()) =>
+export const capture = (
+  overrides: Context.Context<never> = Context.empty(),
+): Effect.Effect<Context.Context<ExecutorRuntime.CellServices>> =>
   Effect.scoped(
-    Effect.flatMap(defaultToolContext, authority).pipe(
-      Effect.map((services) => Context.merge(services, overrides)),
-      Effect.flatMap((services) => ExecutorRuntime.capture.pipe(Effect.provideContext(services))),
-    ),
+    Effect.flatMap(defaultToolContext, authority).pipe(Effect.map((services) => Context.merge(services, overrides))),
   )

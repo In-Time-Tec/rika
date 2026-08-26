@@ -59,7 +59,9 @@ export default Alchemy.Stack(
   { providers, state: Alchemy.localState() },
   Effect.gen(function* () {
     const postgresPassword = yield* Alchemy.makeRandom("PostgresPassword", { bytes: 24 })
-    const authSecret = yield* Alchemy.makeRandom("BetterAuthSecret")
+    const authSecret = Output.map(yield* Alchemy.makeRandom("BetterAuthSecret"), (value) =>
+      Redacted.make(`0123456789abcdef${Redacted.value(value)}`),
+    )
     const providerKeyHex = yield* Alchemy.makeRandom("ProviderCredentialKey")
     const workspaceKeyHex = yield* Alchemy.makeRandom("WorkspaceEncryptionKey")
     const minioSecret = yield* Alchemy.makeRandom("MinioSecret")

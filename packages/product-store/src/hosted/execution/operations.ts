@@ -357,30 +357,12 @@ const make = Effect.gen(function* () {
           )
           const assignments = yield* query(
             tx
-              .select({ id: rikaHostedExecutorAssignments.id })
+              .select({
+                id: rikaHostedExecutorAssignments.id,
+                ownerId: rikaHostedExecutorAssignments.ownerId,
+                executorKind: rikaHostedExecutorAssignments.executorKind,
+              })
               .from(rikaHostedExecutorAssignments)
-              .innerJoin(
-                rikaHostedRunnerAdmissions,
-                and(
-                  eq(rikaHostedRunnerAdmissions.assignmentId, rikaHostedExecutorAssignments.id),
-                  eq(rikaHostedRunnerAdmissions.ownerId, rikaHostedExecutorAssignments.ownerId),
-                  eq(rikaHostedRunnerAdmissions.generation, rikaHostedExecutorAssignments.generation),
-                  eq(rikaHostedRunnerAdmissions.deviceId, rikaHostedExecutorAssignments.providerInstanceId),
-                  eq(rikaHostedRunnerAdmissions.processIncarnation, rikaHostedExecutorAssignments.processIncarnation),
-                  isNotNull(rikaHostedRunnerAdmissions.consumedAt),
-                  isNull(rikaHostedRunnerAdmissions.revokedAt),
-                ),
-              )
-              .innerJoin(
-                cliRegistration,
-                and(
-                  eq(cliRegistration.clientId, rikaHostedRunnerAdmissions.clientId),
-                  sql`${cliRegistration.deviceId}::text = ${rikaHostedRunnerAdmissions.deviceId}`,
-                  eq(cliRegistration.userId, rikaHostedRunnerAdmissions.userId),
-                  isNull(cliRegistration.revokedAt),
-                ),
-              )
-              .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedExecutorAssignments.ownerId))
               .innerJoin(
                 rikaHostedWorkspaceCapabilityAdmissions,
                 and(
@@ -395,35 +377,61 @@ const make = Effect.gen(function* () {
                   sql`${rikaHostedWorkspaceCapabilityAdmissions.environmentDigest} = ${rikaHostedExecutorAssignments.capabilitySnapshot}->>'environmentDigest'`,
                 ),
               )
-              .where(
-                and(
-                  assignmentPredicate,
-                  eq(rikaHostedExecutorAssignments.threadId, input.threadId),
-                  or(
-                    and(
-                      eq(rikaHostedOwners.kind, "personal"),
-                      eq(rikaHostedOwners.userId, rikaHostedRunnerAdmissions.userId),
-                    ),
-                    and(
-                      eq(rikaHostedOwners.kind, "organization"),
-                      exists(
-                        tx
-                          .select({ id: identityMember.id })
-                          .from(identityMember)
-                          .where(
-                            and(
-                              eq(identityMember.organizationId, rikaHostedOwners.organizationId),
-                              eq(identityMember.userId, rikaHostedRunnerAdmissions.userId),
+              .where(and(assignmentPredicate, eq(rikaHostedExecutorAssignments.threadId, input.threadId)))
+              .for("update"),
+          )
+          const assignment = assignments[0]
+          if (assignment === undefined) return "fenced"
+          if (assignment.executorKind === "runner") {
+            const admissions = yield* query(
+              tx
+                .select({ id: rikaHostedRunnerAdmissions.assignmentId })
+                .from(rikaHostedRunnerAdmissions)
+                .innerJoin(
+                  cliRegistration,
+                  and(
+                    eq(cliRegistration.clientId, rikaHostedRunnerAdmissions.clientId),
+                    sql`${cliRegistration.deviceId}::text = ${rikaHostedRunnerAdmissions.deviceId}`,
+                    eq(cliRegistration.userId, rikaHostedRunnerAdmissions.userId),
+                    isNull(cliRegistration.revokedAt),
+                  ),
+                )
+                .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedRunnerAdmissions.ownerId))
+                .where(
+                  and(
+                    eq(rikaHostedRunnerAdmissions.assignmentId, assignment.id),
+                    eq(rikaHostedRunnerAdmissions.ownerId, assignment.ownerId),
+                    eq(rikaHostedRunnerAdmissions.generation, fence.assignmentGeneration),
+                    eq(rikaHostedRunnerAdmissions.deviceId, fence.providerInstanceId),
+                    eq(rikaHostedRunnerAdmissions.processIncarnation, fence.processIncarnation),
+                    isNotNull(rikaHostedRunnerAdmissions.consumedAt),
+                    isNull(rikaHostedRunnerAdmissions.revokedAt),
+                    or(
+                      and(
+                        eq(rikaHostedOwners.kind, "personal"),
+                        eq(rikaHostedOwners.userId, rikaHostedRunnerAdmissions.userId),
+                      ),
+                      and(
+                        eq(rikaHostedOwners.kind, "organization"),
+                        exists(
+                          tx
+                            .select({ id: identityMember.id })
+                            .from(identityMember)
+                            .where(
+                              and(
+                                eq(identityMember.organizationId, rikaHostedOwners.organizationId),
+                                eq(identityMember.userId, rikaHostedRunnerAdmissions.userId),
+                              ),
                             ),
-                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              )
-              .for("update"),
-          )
-          if (assignments[0] === undefined) return "fenced"
+                )
+                .for("update"),
+            )
+            if (admissions[0] === undefined) return "fenced"
+          }
           const rows = yield* query(selectOperation(tx, input, "update"))
           const row = rows[0]
           if (row === undefined) return "missing"

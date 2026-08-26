@@ -27,13 +27,14 @@ import {
   ExecutorAssignmentId,
   ExecutorInstanceId,
   FencingGeneration,
+  type OwnerId,
   ThreadId,
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { bindingManifest, CellResponse, type CellResponse as CellResponseValue } from "@rika/remote-execution/protocol"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
+import { Clock, Config, Context, Crypto, Effect, Encoding, Layer, LayerMap, Redacted, Schema, Scope } from "effect"
 import {
   cancelledResponse,
   ExecutorGateway,
@@ -51,6 +52,7 @@ import { HostedRepositories } from "../hosted/repositories"
 import * as RunnerGatewayModule from "../runner/gateway"
 import type { RunnerGateway } from "../runner/gateway"
 import { HostedToolPolicy } from "../hosted/execution/tool-policy"
+import * as ApiBindings from "./api-bindings"
 
 export class ExecutorConfigError extends Schema.TaggedError<ExecutorConfigError>()("ExecutorConfigError", {
   message: Schema.String,
@@ -220,7 +222,7 @@ export interface Runtime {
     readonly replayPolicy: "pure" | "provider-idempotent" | "never"
     readonly admittedAt: string | null
     readonly deadlineAt: string
-    readonly authority: Context.Context<ExecutorRuntime.CellServices>
+    readonly authority: Context.Context<ExecutorRuntime.CapturedServices>
   }) => Effect.Effect<
     {
       readonly access?: import("@rika/remote-execution/protocol").AccessWire
@@ -256,6 +258,12 @@ export const service = Layer.effect(
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
+    const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
+    const apiBindings = yield* LayerMap.make((ownerId: OwnerId) =>
+      ApiBindings.layer({ ownerId, dataRoot: `${temporaryDirectory}/rika-hosted` }).pipe(
+        Layer.provide(Layer.succeed(PgClient.PgClient, sql)),
+      ),
+    )
     const operationsContext = yield* Layer.buildWithScope(
       hostedExecutionOperationsLayer.pipe(Layer.provide(Layer.succeed(PgClient.PgClient, sql))),
       scope,
@@ -717,6 +725,7 @@ export const service = Layer.effect(
     const bindings = Effect.fn("Executor.bindings")(function* (
       input: Parameters<Runtime["run"]>[0],
       assignmentId: string,
+      ownerId: OwnerId,
       machine: typeof gateway.machine,
     ) {
       const machineContext = yield* Layer.buildWithScope(
@@ -728,7 +737,11 @@ export const service = Layer.effect(
         }),
         scope,
       )
-      const context = Context.merge(input.authority, machineContext)
+      const apiContext = yield* apiBindings.contextEffect(ownerId).pipe(Effect.provideService(Scope.Scope, scope))
+      const context: Context.Context<ExecutorRuntime.CellServices> = Context.merge(
+        Context.merge(input.authority, apiContext),
+        machineContext,
+      )
       const registry = yield* HostBindingRegistry.make(hostedBindingModules(input.workspaceId)).pipe(
         Effect.provideContext(context),
         Effect.orDie,
@@ -907,7 +920,7 @@ export const service = Layer.effect(
             "cell_execution",
             correlation,
             Effect.gen(function* () {
-              const authority = yield* bindings(input, assignment.id, runnerGateway.machine)
+              const authority = yield* bindings(input, assignment.id, assignment.ownerId, runnerGateway.machine)
               return yield* runnerGateway.execute({
                 assignmentId: assignment.id,
                 ...input,
@@ -920,7 +933,7 @@ export const service = Layer.effect(
           "cell_execution",
           correlation,
           Effect.gen(function* () {
-            const authority = yield* bindings(input, assignment.id, gateway.machine)
+            const authority = yield* bindings(input, assignment.id, assignment.ownerId, gateway.machine)
             const result = yield* gateway.execute({
               assignmentId: assignment.id,
               ...input,

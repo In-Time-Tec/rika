@@ -34,6 +34,10 @@ import { TurnId } from "@rika/product/turn-record"
 import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import { HostedStore } from "@rika/product/hosted-store"
+import {
+  HostedExecutionOperations,
+  layer as hostedExecutionOperationsLayer,
+} from "../../src/hosted/execution/operations"
 import { EnvironmentStore } from "@rika/product/environment-store"
 import { EnvironmentReferenceId, SourceCommitSha, resolveEnvironmentReferences } from "@rika/product/environment-policy"
 
@@ -143,7 +147,8 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
           createdAt: now,
         }),
       )
-      const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
+      const hosted = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
+      const layer = Layer.merge(hosted, hostedExecutionOperationsLayer.pipe(Layer.provide(hosted)))
       yield* Effect.scoped(
         Effect.gen(function* () {
           const context = yield* Layer.build(layer)
@@ -662,6 +667,45 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               return yield* Effect.die(new Error("assignment did not become active"))
             expect(active.capabilityGeneration).toBe(active.generation)
             expect(active.capabilities?.environmentDigest).toBe(`sha256:${"a".repeat(64)}`)
+            const operations = yield* HostedExecutionOperations
+            const operation = {
+              assignmentId: String(active.id),
+              operationKey: "operation-orb-live",
+              requestDigest: "request-orb-live",
+              workspaceId: String(active.workspaceId),
+              sessionId: "session-orb-live",
+              threadId: String(active.threadId),
+              turnId: "turn-orb-live",
+              runId: "run-orb-live",
+              rootRunId: "run-orb-live",
+              toolCallId: "tool-orb-live",
+              code: "1 + 1",
+              attempt: 0,
+              replayPolicy: "pure" as const,
+              admittedAt: null,
+              deadlineAt: at(59),
+            }
+            expect(
+              yield* operations.admitWorkspaceCapabilities({
+                threadId: operation.threadId,
+                turnId: operation.turnId,
+                assignmentId: operation.assignmentId,
+                workspaceId: operation.workspaceId,
+                assignmentGeneration: Number(active.generation),
+                environmentDigest: capabilities("a").environmentDigest,
+                requiredCapabilities: [],
+              }),
+            ).toBe(true)
+            expect(yield* operations.upsertOperation(operation)).toMatchObject({ state: "accepted" })
+            expect(
+              yield* operations.claimDispatch(operation, {
+                assignmentGeneration: Number(active.generation),
+                leaseEpoch: Number(active.lifecycle.leaseEpoch),
+                providerInstanceId: active.lifecycle.providerInstanceId,
+                executorInstanceId: active.lifecycle.executorInstanceId,
+                processIncarnation: active.lifecycle.processIncarnation,
+              }),
+            ).toBe("claimed")
             const access: Access = {
               assignmentId: active.id,
               assignmentGeneration: active.generation,

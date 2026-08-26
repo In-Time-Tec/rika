@@ -1,15 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
-import { HarnessStore } from "tenetkit/harness"
+import { NestedOperation, Session, ToolContext } from "tenetkit"
 import type { HostBindingRegistry } from "tenetkit/repl"
-import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
-import * as McpRuntime from "@rika/extensions/mcp-runtime"
-import { GoalService } from "@rika/product/goal-service"
-import * as ThreadQuery from "@rika/product/thread-query-service"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ExecutorRuntime from "../src/executor-runtime"
-import { ArtifactStore } from "../src/binding/artifact/store"
 
 const toolContext = (sessionId: string, operationKey: string): ToolContext.Interface =>
   ToolContext.ToolContext.of({
@@ -157,58 +150,21 @@ it.effect("carries the cell's nested-operation journal and Session store to the 
   }).pipe(Effect.scoped),
 )
 
-it.effect("captures the exact per-cell authority objects without reconstructing them", () =>
+it.effect("captures only per-call authority before remote placement", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const codingTools = CodingToolRuntime.Service.of({ run: () => Effect.die("unused") })
-      const processes = ShellProcessRegistry.Service.of({
-        start: () => Effect.die("unused"),
-        poll: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-      })
-      const threads = ThreadQuery.Factory.of({ forWorkspace: () => Effect.die("unused") })
-      const mcp = McpRuntime.McpRuntimeService.of({ connect: () => Effect.die("unused") })
-      const harness = Context.get(yield* Layer.build(HarnessStore.layerMemory), HarnessStore.HarnessStore)
       const context = toolContext("session-a", "operation-a")
       const nested = NestedOperation.NestedOperations.of({ run: (_request, effect) => effect })
       const session = Context.get(yield* Layer.build(Session.layerMemory), Session.SessionStore)
-      const approvals = Approvals.Approvals.of({ resolve: (pending) => Effect.succeed(pending) })
-      const goals = GoalService.of({
-        get: () => Effect.die("unused"),
-        create: () => Effect.die("unused"),
-        complete: () => Effect.die("unused"),
-        recordTurn: () => Effect.die("unused"),
-        continuation: () => Effect.die("unused"),
-      })
-      const artifacts = ArtifactStore.of({
-        put: () => Effect.die("unused"),
-        get: () => Effect.die("unused"),
-      })
-      const authority = Context.make(CodingToolRuntime.Service, codingTools).pipe(
-        Context.add(ShellProcessRegistry.Service, processes),
-        Context.add(ThreadQuery.Factory, threads),
-        Context.add(McpRuntime.McpRuntimeService, mcp),
-        Context.add(HarnessStore.HarnessStore, harness),
-        Context.add(Session.SessionStore, session),
-        Context.add(GoalService, goals),
-        Context.add(ArtifactStore, artifacts),
+      const authority = Context.make(ToolContext.ToolContext, context).pipe(
         Context.add(NestedOperation.NestedOperations, nested),
-        Context.add(ToolContext.ToolContext, context),
-        Context.add(Approvals.Approvals, approvals),
+        Context.add(Session.SessionStore, session),
       )
       const captured = yield* ExecutorRuntime.capture.pipe(Effect.provide(authority))
 
-      expect(Context.get(captured, CodingToolRuntime.Service)).toBe(codingTools)
-      expect(Context.get(captured, ShellProcessRegistry.Service)).toBe(processes)
-      expect(Context.get(captured, ThreadQuery.Factory)).toBe(threads)
-      expect(Context.get(captured, McpRuntime.McpRuntimeService)).toBe(mcp)
-      expect(Context.get(captured, HarnessStore.HarnessStore)).toBe(harness)
       expect(Context.get(captured, ToolContext.ToolContext)).toBe(context)
       expect(Context.get(captured, NestedOperation.NestedOperations)).toBe(nested)
       expect(Context.get(captured, Session.SessionStore)).toBe(session)
-      expect(Context.get(captured, Approvals.Approvals)).toBe(approvals)
-      expect(Context.get(captured, GoalService)).toBe(goals)
-      expect(Context.get(captured, ArtifactStore)).toBe(artifacts)
     }),
   ),
 )
