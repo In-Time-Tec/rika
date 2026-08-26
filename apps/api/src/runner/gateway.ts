@@ -961,8 +961,17 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
           .pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message }))),
       )
       .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner terminal")))
-    if (terminalized === undefined) return undefined
-    return finalResult(terminalResponse, outcome)
+    if (terminalized !== undefined) return finalResult(terminalResponse, outcome)
+    const changed = yield* operations
+      .findOperation(input)
+      .pipe(Effect.mapError(() => failure("transport", "Could not read Runner operation")))
+    if (changed === undefined) return yield* failure("transport", "Runner operation is unavailable")
+    if (changed.state === "completed" || changed.state === "unknown") {
+      if (changed.response === null || changed.terminalOutcome === null)
+        return yield* failure("transport", "Persisted Runner terminal outcome is missing")
+      return finalResult(changed.response, changed.terminalOutcome)
+    }
+    return undefined
   })
 
   const timeoutAccepted = (input: OperationInput) => terminalizeAccepted(input, timeoutResponse, "failed")
