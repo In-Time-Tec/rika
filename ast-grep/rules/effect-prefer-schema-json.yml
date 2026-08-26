@@ -1,6 +1,6 @@
 id: effect-prefer-schema-json
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — at an input or persistence boundary, prefer Schema.decodeUnknown/encode and a JSON schema transformation instead of untyped JSON.parse.
 note: JSON.parse can remain inside proven pure code when validation is owned elsewhere.
 rule:

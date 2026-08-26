@@ -3,10 +3,11 @@ import type * as ExecutionRequest from "@rika/product/execution-request"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { Context, Deferred, Effect, PlatformError, PubSub, Semaphore } from "effect"
-import type { OperationUnavailable } from "../contract/product-operation"
+import type { OperationUnavailable } from "../contract/product"
 import type { InteractiveEvent as ClientEvent } from "./event"
 import type { InteractiveEvent } from "./session-event"
-import type { InteractiveSessionState, makeInteractiveSessionComposition } from "./session-state"
+import type { InteractiveSessionState } from "./session-state"
+import type * as InteractiveSessionStateRuntime from "./session-state"
 import type { InteractiveOperationFeed } from "./view/feed"
 
 export interface InteractiveSession {
@@ -70,26 +71,26 @@ type ExecutionGatewayInterface = import("@rika/product/execution-gateway").Inter
 type ExecutionRouteSnapshot = import("@rika/product/execution-route-snapshot").ExecutionRouteSnapshot
 type ExecutionStatusStatus = import("@rika/product/execution-status").Status
 type PromptPart = import("@rika/product/execution-request").PromptPart
-type CreateInput = import("../../thread/repository/turn-repository-contract").CreateInput
-type QueueSubmission = import("../../thread/repository/turn-repository-queue").Submission
-type QueueClaim = import("../../thread/repository/turn-repository-queue").QueueClaim
-type RootTurnOwnerInterface = import("../../thread/queue/root-turn-owner").Interface
+type CreateInput = import("../../thread/repository/turn-contract").CreateInput
+type QueueSubmission = import("../../thread/repository/turn-queue").Submission
+type QueueClaim = import("../../thread/repository/turn-queue").QueueClaim
+type RootTurnOwnerInterface = import("../../thread/queue/root-owner").Interface
 type ProductLayerOptions<
   ThreadError extends Error,
   TurnError extends Error,
   BackendError extends Error,
   ThreadSummaryError extends Error = never,
   TranscriptError extends Error = never,
-> = import("../dispatch/product-operation-options").ProductLayerOptions<
+> = import("../foundation/options").ProductLayerOptions<
   ThreadError,
   TurnError,
   BackendError,
   ThreadSummaryError,
   TranscriptError
 >
-type OperationError = import("../operation-error").OperationError
-type operationError = typeof import("../operation-error").operationError
-type queueMutationEvent = typeof import("../dispatch/product-operation-runtime-support").queueMutationEvent
+type OperationError = import("../error").OperationError
+type operationError = typeof import("../error").operationError
+type queueMutationEvent = typeof import("../runtime/support").queueMutationEvent
 type executeShellCommand = typeof import("./shell").executeShellCommand
 type recordedShellStartedEvent = typeof import("./shell").recordedShellStartedEvent
 type recordedShellSettledEvents = typeof import("./shell").recordedShellSettledEvents
@@ -101,7 +102,7 @@ export type InteractiveExecutionContextServices =
   | import("@rika/product/turn-repository").Service
   | import("@rika/product/thread-summary-repository").Service
   | import("@rika/product/transcript-repository").Service
-  | import("../../context/context-resolution-service").Service
+  | import("../../context/resolution-service").Service
   | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
   | import("@rika/product/execution-gateway").Service
 
@@ -110,7 +111,7 @@ export type InteractiveDependencyContext = Context.Context<
   | import("@rika/product/turn-repository").Service
   | import("@rika/product/thread-summary-repository").Service
   | import("@rika/product/transcript-repository").Service
-  | import("../../context/context-resolution-service").Service
+  | import("../../context/resolution-service").Service
   | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
 >
 
@@ -148,7 +149,7 @@ export interface InteractiveSessionInput {
     | import("@rika/product/thread-repository").RepositoryError
     | TurnRepositoryError
     | import("@rika/extensions/execution-extension-service").NoGeneration,
-    | import("../../context/context-resolution-service").Service
+    | import("../../context/resolution-service").Service
     | import("@rika/product/thread-repository").Service
     | import("@rika/product/turn-repository").Service
     | import("@rika/extensions/execution-extension-service").ExecutionExtensionService
@@ -199,7 +200,7 @@ export interface InteractiveSessionInput {
   readonly dependencyContext: InteractiveDependencyContext
   readonly sessionThreadViews: Map<number, () => string | undefined>
   readonly interactiveSinks: Map<number, (origin: number, event: InteractiveEvent) => void>
-  readonly encodeJson: (value: unknown) => string
+  readonly encodeJson: <Value>(value: Value) => string
   readonly isTerminalStatus: (status: ExecutionStatusStatus) => boolean
   readonly executionStartFailureMessage: string
   readonly dispatchThreadSummaries: (
@@ -227,9 +228,13 @@ export type InteractiveRuntimeContext = InteractiveSessionInput &
     readonly supervisionInitialized: Deferred.Deferred<void, InteractiveSupervisionError>
     readonly emit: InteractiveOperationFeed["emit"]
     readonly dispatchFailure: dispatchInteractiveFailure
-    readonly admit: ReturnType<typeof makeInteractiveSessionComposition>["admit"]
-    readonly admitLocal: ReturnType<typeof makeInteractiveSessionComposition>["admitLocal"]
-    readonly attachFeed: ReturnType<typeof makeInteractiveSessionComposition>["attachFeed"]
+    readonly admit: ReturnType<typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition>["admit"]
+    readonly admitLocal: ReturnType<
+      typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition
+    >["admitLocal"]
+    readonly attachFeed: ReturnType<
+      typeof InteractiveSessionStateRuntime.makeInteractiveSessionComposition
+    >["attachFeed"]
   }
 
 export type InteractiveSupervisionError =

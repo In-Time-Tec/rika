@@ -4,7 +4,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import { initial } from "@rika/terminal/terminal-state"
 import { update } from "@rika/terminal/terminal-state-reducer"
-import { makeEventRouter } from "../src/interactive/process/process-events"
+import { makeEventRouter } from "../src/interactive/process/lifecycle/events"
 
 const snapshot = (threadId: string) => ({
   thread: {
@@ -53,7 +53,7 @@ describe("created Thread selection", () => {
       render: () => undefined,
       refreshTerminalTitle: () => undefined,
       requestSelectionResync: () => undefined,
-    } as never)
+    })
 
     dispatch({ _tag: "ThreadViewSnapshot", snapshot: snapshot("orb-thread") })
     dispatch({
@@ -87,7 +87,6 @@ describe("created Thread selection", () => {
       threadView: undefined,
       modelPreview: undefined,
       requestedThreadId: "second-thread",
-      newThreadSelectionGeneration: undefined,
       renderer: undefined,
       submittedSinceIdle: true,
     }
@@ -96,7 +95,7 @@ describe("created Thread selection", () => {
       render: () => undefined,
       refreshTerminalTitle: () => undefined,
       requestSelectionResync: () => undefined,
-    } as never)
+    })
 
     dispatch({ _tag: "ThreadViewSnapshot", snapshot: snapshot("second-thread") })
     const selected = loop.model

@@ -5,20 +5,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./host": "./src/host.ts",
-    "./runtime": "./src/runtime.ts",
-    "./workspace": "./src/workspace.ts",
-    "./operations": "./src/operations.ts",
-    "./cells": "./src/cells.ts",
-    "./binding-proxy": "./src/binding-proxy.ts",
-    "./machine": "./src/machine.ts",
-    "./machine-process": "./src/machine-process.ts",
-    "./protocol": "./src/protocol.ts",
-    "./pty": "./src/pty.ts",
-    "./repository-services": "./src/repository-services.ts",
-    "./workspace-files": "./src/workspace-files.ts",
-    "./workspace-archive": "./src/workspace-archive.ts",
-    "./foreground": "./src/foreground.ts"
+    "./host": "./src/host/service.ts",
+    "./runtime": "./src/host/runtime.ts",
+    "./workspace": "./src/workspace/service.ts",
+    "./operations": "./src/protocol/operations.ts",
+    "./cells": "./src/protocol/cells.ts",
+    "./binding-proxy": "./src/protocol/binding-proxy.ts",
+    "./machine": "./src/host/machine.ts",
+    "./protocol": "./src/protocol/messages.ts",
+    "./pty": "./src/host/pty.ts",
+    "./repository-services": "./src/workspace/repositories.ts",
+    "./workspace-files": "./src/workspace/files.ts",
+    "./workspace-archive": "./src/workspace/archive.ts",
+    "./foreground": "./src/host/foreground.ts",
+    "./machine-process": "./src/host/machine-process.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
@@ -40,7 +40,7 @@
     "domain": "remote-execution"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/remote-execution/src packages/remote-execution/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/remote-execution/src packages/remote-execution/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

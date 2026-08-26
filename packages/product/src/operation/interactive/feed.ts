@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { Input, OperationUnavailable } from "../contract/product-operation"
+import { Input, OperationUnavailable } from "../contract/product"
 import { InteractiveCommand } from "./command"
 import { InteractiveEventSchema } from "./event"
 

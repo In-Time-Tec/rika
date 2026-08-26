@@ -38,12 +38,17 @@ export type Response =
   | { readonly _tag: "DomainFailure"; readonly failure: Cell.CellFailure | InfrastructureFailure }
   | { readonly _tag: "Suspend"; readonly token: string }
 
-type EncodedResponse =
+export type EncodedResponse =
   | { readonly _tag: "Success"; readonly result: typeof Cell.CellResult.Encoded }
   | {
       readonly _tag: "DomainFailure"
       readonly failure: typeof Cell.CellFailure.Encoded | InfrastructureFailure
     }
+  | { readonly _tag: "Suspend"; readonly token: string }
+
+export type TransportResponse =
+  | { readonly _tag: "Success"; readonly result: Schema.Json }
+  | { readonly _tag: "DomainFailure"; readonly failure: Schema.Json }
   | { readonly _tag: "Suspend"; readonly token: string }
 
 export const Response: Schema.Codec<Response, EncodedResponse> = Schema.Union([
@@ -70,8 +75,8 @@ export interface Interface {
   readonly execute: (
     request: Request,
     authority: Context.Context<ExecutorRuntime.CellServices>,
-  ) => Effect.Effect<unknown, Unavailable | UnknownOutcome>
-  readonly cancel: (request: CancellationRequest) => Effect.Effect<unknown, Unavailable | UnknownOutcome>
+  ) => Effect.Effect<TransportResponse, Unavailable | UnknownOutcome>
+  readonly cancel: (request: CancellationRequest) => Effect.Effect<TransportResponse, Unavailable | UnknownOutcome>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/execution/remote-cells/Service") {}

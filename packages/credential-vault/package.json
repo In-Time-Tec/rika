@@ -5,13 +5,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./aws-kms": "./src/aws-kms.ts",
-    "./credential-aad": "./src/credential-aad.ts",
-    "./credential-cipher": "./src/credential-cipher.ts",
-    "./credential-model": "./src/credential-model.ts",
-    "./credential-vault": "./src/credential-vault.ts",
-    "./kms-data-key": "./src/kms-data-key.ts",
-    "./noble-aes-256-gcm": "./src/noble-aes-256-gcm.ts",
+    "./aws-kms": "./src/kms/aws.ts",
+    "./credential-aad": "./src/aad.ts",
+    "./credential-cipher": "./src/cipher.ts",
+    "./credential-model": "./src/model.ts",
+    "./credential-vault": "./src/vault.ts",
+    "./kms-data-key": "./src/kms/data-key.ts",
+    "./noble-aes-256-gcm": "./src/crypto/aes-256-gcm.ts",
     "./secret-bytes": "./src/secret-bytes.ts"
   },
   "dependencies": {
@@ -30,7 +30,7 @@
     "domain": "credentials"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/credential-vault/src packages/credential-vault/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/credential-vault/src packages/credential-vault/test",
     "test": "bun --cwd ../.. --bun vitest run --project unit packages/credential-vault",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }

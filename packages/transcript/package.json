@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./transcript-unit-identity": "./src/ordering/transcript-unit-identity.ts",
-    "./transcript-unit-order": "./src/ordering/transcript-unit-order.ts",
-    "./recorded-shell-presentation": "./src/presentation/recorded-shell-presentation.ts",
-    "./subagent-presentation": "./src/presentation/subagent-presentation.ts",
-    "./partial-tool-input": "./src/presentation/partial-tool-input.ts",
-    "./cell-presentation": "./src/presentation/cell-presentation.ts",
-    "./transcript-presentation-model": "./src/schema/transcript-presentation-model.ts",
-    "./transcript-unit": "./src/schema/transcript-unit.ts"
+    "./transcript-unit-identity": "./src/ordering/unit-identity.ts",
+    "./transcript-unit-order": "./src/ordering/unit-order.ts",
+    "./recorded-shell-presentation": "./src/presentation/recorded-shell.ts",
+    "./subagent-presentation": "./src/presentation/subagent.ts",
+    "./partial-tool-input": "./src/presentation/partial-input.ts",
+    "./cell-presentation": "./src/presentation/cell.ts",
+    "./transcript-presentation-model": "./src/schema/presentation.ts",
+    "./transcript-unit": "./src/schema/unit.ts"
   },
   "dependencies": {
     "@rika/coding-tools": "workspace:*",
@@ -29,7 +29,7 @@
     "domain": "transcript"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/transcript/src packages/transcript/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

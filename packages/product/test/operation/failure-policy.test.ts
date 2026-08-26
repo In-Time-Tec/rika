@@ -51,7 +51,16 @@ describe("failure policy", () => {
   })
 
   it("reads the settled failure off projected units with its classification", () => {
-    const unit = (block: object) =>
+    type Block =
+      | { readonly _tag: "Entry"; readonly role: "user"; readonly text: string }
+      | {
+          readonly _tag: "Error"
+          readonly title: string
+          readonly detail: string
+          readonly category: "rate-limit"
+          readonly retryable: boolean
+        }
+    const unit = (block: Block) =>
       ({
         key: "k",
         turnId: "t",

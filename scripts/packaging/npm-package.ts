@@ -20,7 +20,7 @@ export const launcherName = `${scope}/cli`
 
 export const platformPackageName = (target: PackageTarget): string => `${scope}/cli-${target}`
 
-export const platformConstraints = (target: PackageTarget): { readonly os: string; readonly cpu: string } => {
+export const platformConstraints = (target: PackageTarget) => {
   const [os, cpu] = target.split("-")
   return { os: os!, cpu: cpu! }
 }
@@ -79,8 +79,8 @@ process.exit(result.status === null ? 1 : result.status)
 `
 
 export const platformManifest: {
-  (version: string): (target: PackageTarget) => Record<string, unknown>
-  (target: PackageTarget, version: string): Record<string, unknown>
+  (version: string): (target: PackageTarget) => Schema.JsonObject
+  (target: PackageTarget, version: string): Schema.JsonObject
 } = dual(2, (target: PackageTarget, version: string) => ({
   name: platformPackageName(target),
   description: `Rika binaries for ${target}`,
@@ -90,7 +90,7 @@ export const platformManifest: {
   preferUnplugged: true,
 }))
 
-const writeJson = Effect.fn("NpmPackage.writeJson")(function* (file: string, value: unknown) {
+const writeJson = Effect.fn("NpmPackage.writeJson")(function* (file: string, value: Schema.Json) {
   const fileSystem = yield* FileSystem.FileSystem
   const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(value)
   yield* fileSystem.writeFileString(file, `${encoded}\n`)

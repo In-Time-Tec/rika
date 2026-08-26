@@ -1,5 +1,7 @@
 import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as PgClient from "@effect/sql-pg/PgClient"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Console, Context, Effect, Layer, Redacted } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
@@ -11,10 +13,16 @@ import {
   makeResendMailSender,
   noOpMailSender,
 } from "@rika/identity"
-import { serveApi } from "./adapters/bun-server"
-import { loadApiConfig } from "./api-config"
-import { seedDevelopment } from "./development-seed"
-import { HostedApplication, layer as hostedApplicationLayer } from "./hosted-application"
+import { serveApi } from "./server/bun"
+import { loadApiConfig } from "./config/api"
+import { seedDevelopment } from "./development/seed"
+import { HostedApplication, layer as hostedApplicationLayer } from "./hosted/application"
+
+type MutableHostedApplicationOptions = {
+  -readonly [Key in keyof Parameters<typeof hostedApplicationLayer>[0]]: Parameters<
+    typeof hostedApplicationLayer
+  >[0][Key]
+}
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -55,26 +63,25 @@ const program = Effect.scoped(
       ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
       maxConnections: 10,
     }
-    const application = Context.get(
-      yield* Layer.build(
-        hostedApplicationLayer({
-          database: postgres,
-          databaseUrl: config.databaseUrl,
-          providerCredentialKey,
-          ...(executorOptions === undefined ? {} : { executor: executorOptions }),
-          ...(github === undefined ? {} : { github }),
-          ...(developmentModel === undefined ? {} : { developmentModel }),
-          workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions?.deploymentId ?? "rika-development",
-        }),
-      ),
-      HostedApplication,
-    )
+    const postgresContext = yield* Layer.build(PgClient.layer(postgres))
+    const identityDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(postgresContext))
+    const applicationOptions: MutableHostedApplicationOptions = {
+      database: postgres,
+      databaseUrl: config.databaseUrl,
+      providerCredentialKey,
+      workerId: environment.RAILWAY_DEPLOYMENT_ID ?? executorOptions?.deploymentId ?? "rika-development",
+    }
+    if (executorOptions !== undefined) applicationOptions.executor = executorOptions
+    if (github !== undefined) applicationOptions.github = github
+    if (developmentModel !== undefined) applicationOptions.developmentModel = developmentModel
+    const application = Context.get(yield* Layer.build(hostedApplicationLayer(applicationOptions)), HostedApplication)
     if (developmentSeedEnabled) {
       const openRouterApiKey = environment.RIKA_DEV_OPENROUTER_API_KEY?.trim()
       if (openRouterApiKey === undefined || openRouterApiKey.length === 0)
         return yield* Effect.die("RIKA_DEV_OPENROUTER_API_KEY is required in development")
       yield* seedDevelopment({
         baseUrl: config.baseUrl,
+        database: identityDatabase,
         identity,
         pool,
         product: application.product,
@@ -86,8 +93,8 @@ const program = Effect.scoped(
       config,
       dependencies: {
         identity,
-        directory: makePostgresIdentityDirectory(pool),
-        devices: makePostgresCliDeviceDirectory(pool),
+        directory: makePostgresIdentityDirectory(identityDatabase),
+        devices: makePostgresCliDeviceDirectory(identityDatabase),
         product: application.product,
         toolPolicy: application.toolPolicy,
         threads: application.threadProtocol,

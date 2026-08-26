@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  type S3ClientConfig,
+} from "@aws-sdk/client-s3"
 import {
   MaximumArchiveBytes,
   decodeArchive,
@@ -296,10 +302,12 @@ export interface S3Options {
 }
 
 export const s3ObjectStoreLayer = (options: S3Options): Layer.Layer<ObjectStore> => {
-  const client = new S3Client({
-    region: options.region,
-    ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint, forcePathStyle: true }),
-  })
+  const config: S3ClientConfig = { region: options.region }
+  if (options.endpoint !== undefined) {
+    config.endpoint = options.endpoint
+    config.forcePathStyle = true
+  }
+  const client = new S3Client(config)
   return Layer.succeed(
     ObjectStore,
     ObjectStore.of({

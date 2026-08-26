@@ -1,6 +1,6 @@
 id: effect-prefer-clock
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — prefer Clock.currentTimeMillis/currentTimeNanos for time and DateTime for date values so time stays injectable and testable.
 rule:
   any:

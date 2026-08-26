@@ -310,9 +310,10 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)
   const connection = {
     apiKey,
-    ...(options.domain === undefined ? {} : { domain: options.domain }),
-    ...(options.requestTimeoutMillis === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMillis }),
   }
+  const configuredConnection: typeof connection & { domain?: string; requestTimeoutMs?: number } = connection
+  if (options.domain !== undefined) configuredConnection.domain = options.domain
+  if (options.requestTimeoutMillis !== undefined) configuredConnection.requestTimeoutMs = options.requestTimeoutMillis
   const attempt = <A, E>(operation: ProviderError["operation"], evaluate: () => Effect.Effect<A, E>) =>
     Effect.suspend(evaluate).pipe(
       Effect.mapError(() => ProviderError.make({ operation, message: `E2B ${operation} failed` })),

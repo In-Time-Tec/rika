@@ -1,6 +1,6 @@
 id: effect-prefer-child-process
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer effect/unstable/process ChildProcessSpawner with scoped process lifetimes instead of direct child_process, Bun.spawn, or Deno.Command calls.
 rule:
   any:

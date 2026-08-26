@@ -1,7 +1,17 @@
 import { expect, it } from "@effect/vitest"
 import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope } from "effect"
 import { TestClock } from "effect/testing"
-import { ExecutionHost, RunClaims, RunStore, RuntimeWorker } from "tenetkit/runtime"
+import {
+  Address,
+  ExecutableManifest,
+  ExecutionHost,
+  Message,
+  RunClaims,
+  RunStore,
+  RuntimeWorker,
+  TreePolicy,
+} from "tenetkit/runtime"
+import { Prompt } from "effect/unstable/ai"
 import * as Postgres from "../src/postgres"
 
 const worker = {
@@ -92,10 +102,7 @@ const workerDependencies = (
   Layer.mergeAll(
     Layer.succeed(RunClaims.RunClaims, RunClaims.RunClaims.of(claims)),
     Layer.succeed(ExecutionHost.ExecutionHost, ExecutionHost.ExecutionHost.of(executionHost)),
-    Layer.succeed(
-      RunStore.RunStore,
-      RunStore.RunStore.of({ inspect: () => Effect.die("unused") } as unknown as RunStore.Interface),
-    ),
+    RunStore.layerMemory({ addresses: [], resolver: { resolve: () => Effect.die("unused") } }),
   )
 
 const claims = (claimReadyRuns: RunClaims.Interface["claimReadyRuns"]): RunClaims.Interface => ({
@@ -104,8 +111,6 @@ const claims = (claimReadyRuns: RunClaims.Interface["claimReadyRuns"]): RunClaim
   releaseClaim: () => Effect.void,
   commitWithClaim: () => Effect.void,
 })
-
-type ClaimedRun = Effect.Success<ReturnType<RunClaims.Interface["claimReadyRuns"]>>[number]
 
 const waitUntil = (condition: Effect.Effect<boolean>): Effect.Effect<void> =>
   condition.pipe(
@@ -146,12 +151,39 @@ it.effect("interrupts an active claim and clears its status when the worker scop
     const executing = yield* Deferred.make<void>()
     const interrupted = yield* Deferred.make<void>()
     const claimed = yield* Ref.make(false)
-    const claim = {
-      run: { runId: "run-active-scope-close" },
+    const executable = ExecutableManifest.makeTest("scope-close", "1")
+    const claim: Effect.Success<ReturnType<RunClaims.Interface["claimReadyRuns"]>>[number] = {
+      run: {
+        runId: "run-active-scope-close",
+        status: "running",
+        address: "agent:scope-close",
+        sessionId: "session-scope-close",
+        message: Message.make({
+          id: "message-scope-close",
+          to: Address.make("agent:scope-close"),
+          sessionId: "session-scope-close",
+          prompt: Prompt.make("work"),
+          idempotencyKey: "scope-close",
+          correlationId: "scope-close",
+        }),
+        messageDigest: "scope-close",
+        executableRef: executable.ref,
+        executableManifest: executable.manifest,
+        rootRunId: "run-active-scope-close",
+        depth: 0,
+        treePolicy: TreePolicy.defaultTreePolicy,
+        attempt: 1,
+        attemptFence: 1,
+        lastSequence: 0,
+        cancellationRequested: false,
+        acceptedSequence: 0,
+        respondedWaitIds: new Set(),
+        admittedAt: "2026-01-01T00:00:00.000Z",
+      },
       workerId: worker.workerId,
       attemptFence: 1,
       leaseExpiresAt: DateTime.toDate(DateTime.makeUnsafe("2999-01-01T00:00:00.000Z")),
-    } as ClaimedRun
+    }
     const dependencies = workerDependencies(
       claims(() => Ref.getAndSet(claimed, true).pipe(Effect.map((alreadyClaimed) => (alreadyClaimed ? [] : [claim])))),
       {

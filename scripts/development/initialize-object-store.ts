@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { CreateBucketCommand, HeadBucketCommand, S3Client } from "@aws-sdk/client-s3"
-import { Config, Console, Data, Effect, Layer } from "effect"
+import { Config, Console, Data, Effect, Layer, Option, Schema } from "effect"
 
 class ObjectStoreInitializationError extends Data.TaggedError("ObjectStoreInitializationError")<{
   readonly message: string
@@ -12,29 +12,36 @@ class ObjectStoreClientError extends Data.TaggedError("ObjectStoreClientError")<
   readonly cause: unknown
 }> {}
 
-export const isMissingBucket = (cause: unknown) => {
-  if (typeof cause !== "object" || cause === null) return false
-  const failure = cause as { readonly name?: unknown; readonly $metadata?: { readonly httpStatusCode?: unknown } }
-  if (failure.$metadata !== undefined && "httpStatusCode" in failure.$metadata)
-    return failure.$metadata.httpStatusCode === 404
-  return failure.name === "NotFound" || failure.name === "NoSuchBucket"
-}
+const BucketFailure = Schema.Struct({
+  name: Schema.optionalKey(Schema.String),
+  $metadata: Schema.optionalKey(Schema.Struct({ httpStatusCode: Schema.optionalKey(Schema.Finite) })),
+})
+const decodeBucketFailure = Schema.decodeUnknownOption(BucketFailure)
 
-export const isRejectedObjectStoreCredential = (cause: unknown) => {
-  if (typeof cause !== "object" || cause === null) return false
-  const failure = cause as { readonly name?: unknown; readonly $metadata?: { readonly httpStatusCode?: unknown } }
-  return (
-    failure.$metadata?.httpStatusCode === 403 ||
-    failure.name === "AccessDenied" ||
-    failure.name === "InvalidAccessKeyId"
-  )
-}
+export const isMissingBucket = (cause: unknown) =>
+  Option.match(decodeBucketFailure(cause), {
+    onNone: () => false,
+    onSome: (failure) =>
+      failure.$metadata?.httpStatusCode === undefined
+        ? failure.name === "NotFound" || failure.name === "NoSuchBucket"
+        : failure.$metadata.httpStatusCode === 404,
+  })
+
+export const isRejectedObjectStoreCredential = (cause: unknown) =>
+  Option.match(decodeBucketFailure(cause), {
+    onNone: () => false,
+    onSome: (failure) =>
+      failure.$metadata?.httpStatusCode === 403 ||
+      failure.name === "AccessDenied" ||
+      failure.name === "InvalidAccessKeyId",
+  })
 
 interface BucketClient<E> {
   readonly send: (command: HeadBucketCommand | CreateBucketCommand) => Effect.Effect<unknown, E>
 }
 
-const clientFailureCause = (failure: unknown) => (failure instanceof ObjectStoreClientError ? failure.cause : failure)
+const clientFailureCause = <E>(failure: E | ObjectStoreClientError) =>
+  failure instanceof ObjectStoreClientError ? failure.cause : failure
 
 export const initializeBucket = Effect.fn("DevelopmentObjectStore.initializeBucket")(function* <E>(
   client: BucketClient<E>,

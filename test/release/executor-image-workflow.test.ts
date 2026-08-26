@@ -1,37 +1,44 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { expect, test } from "vitest"
 import { live, readText } from "../support/platform"
 
-type Step = {
-  readonly name?: string
-  readonly uses?: string
-  readonly run?: string
-  readonly env?: Readonly<Record<string, string>>
-  readonly with?: Readonly<Record<string, unknown>>
-  readonly if?: string
-  readonly id?: string
-}
-type Job = {
-  readonly if?: string
-  readonly needs?: string | ReadonlyArray<string>
-  readonly environment?: string
-  readonly permissions?: Readonly<Record<string, string>>
-  readonly steps?: ReadonlyArray<Step>
-  readonly "runs-on"?: string
-}
-type Workflow = {
-  readonly on?: {
-    readonly workflow_dispatch?: {
-      readonly inputs?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
-    }
-  }
-  readonly concurrency?: Readonly<Record<string, unknown>>
-  readonly jobs?: Readonly<Record<string, Job>>
-}
-
-const workflow = Bun.YAML.parse(
-  await Effect.runPromise(live(readText(".github/workflows/executor-image.yml"))),
-) as Workflow
+const workflow = Schema.decodeUnknownSync(
+  Schema.Struct({
+    on: Schema.optional(
+      Schema.Struct({
+        workflow_dispatch: Schema.optional(
+          Schema.Struct({ inputs: Schema.optional(Schema.Record(Schema.String, Schema.JsonObject)) }),
+        ),
+      }),
+    ),
+    concurrency: Schema.optional(Schema.JsonObject),
+    jobs: Schema.optional(
+      Schema.Record(
+        Schema.String,
+        Schema.Struct({
+          if: Schema.optional(Schema.String),
+          needs: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+          environment: Schema.optional(Schema.String),
+          permissions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          steps: Schema.optional(
+            Schema.Array(
+              Schema.Struct({
+                name: Schema.optional(Schema.String),
+                uses: Schema.optional(Schema.String),
+                run: Schema.optional(Schema.String),
+                env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+                with: Schema.optional(Schema.JsonObject),
+                if: Schema.optional(Schema.String),
+                id: Schema.optional(Schema.String),
+              }),
+            ),
+          ),
+          "runs-on": Schema.optional(Schema.String),
+        }),
+      ),
+    ),
+  }),
+)(Bun.YAML.parse(await Effect.runPromise(live(readText(".github/workflows/executor-image.yml")))))
 const jobs = workflow.jobs ?? {}
 const steps = (job: string) => jobs[job]?.steps ?? []
 const commands = (job: string) =>

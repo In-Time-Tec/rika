@@ -158,12 +158,10 @@ const make = Effect.gen(function* () {
       input.assignmentId === undefined || input.generation === undefined
         ? undefined
         : current.assignments.get(input.assignmentId)
-    let assignment = bound
-    if (assignment === undefined) {
-      if (identified === undefined) return { status: "preserved" } as const
-      if (identified.generation !== input.generation) return { status: "candidate" } as const
-      assignment = identified
-    }
+    const matched = identified?.generation === input.generation ? identified : undefined
+    const assignment = bound ?? matched
+    if (assignment === undefined)
+      return identified === undefined ? ({ status: "preserved" } as const) : ({ status: "candidate" } as const)
     const lifecycle = assignment.lifecycle
     if (lifecycle._tag === "Active" || lifecycle._tag === "Paused")
       return bound === undefined ? ({ status: "candidate" } as const) : ({ status: "preserved" } as const)

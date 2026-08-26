@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Config, Context, Effect, Layer } from "effect"
+import { Config, Context, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import * as Logging from "./diagnostics/diagnostic-file-logging"
+import * as Logging from "./diagnostics/file-logging"
 import { version } from "./platform/application-version"
 
 const provideLayerScoped =
@@ -17,8 +17,8 @@ const provideLayerScoped =
         ),
       ),
     )
-import { clientProcessExitCode } from "./client/client-process-exit"
-import { installClientSigintHandler, run } from "./client/client-process"
+import { clientProcessExitCode } from "./client/process-exit"
+import { installClientSigintHandler, run } from "./client/process"
 
 const exitProcess = process.exit
 
@@ -44,7 +44,7 @@ const startClient = () => {
       clientProcessExitCode({
         exit,
         interruptedBySigint,
-        successfulExitCode: typeof process.exitCode === "number" ? process.exitCode : undefined,
+        successfulExitCode: Schema.is(Schema.Int)(process.exitCode) ? process.exitCode : undefined,
       }),
     )
   })

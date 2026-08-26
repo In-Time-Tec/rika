@@ -2,7 +2,7 @@ import { Function, Schema } from "effect"
 import type { ModeId } from "./behavior-mode"
 import { presets } from "./model-preset"
 import type { ModelRoute } from "./model-route"
-import type { ConfigurationSettings } from "../settings/configuration-settings"
+import type { ConfigurationSettings } from "../settings/model"
 
 export class ModelRouteError extends Schema.TaggedError<ModelRouteError>()("ModelRouteError", {
   mode: Schema.String,
@@ -24,7 +24,7 @@ export interface ResolvedModelRoute {
     readonly keepRecentTokens: number
   }
   readonly maxOutputTokens: number
-  readonly options: Readonly<Record<string, unknown>>
+  readonly options: Schema.JsonObject
 }
 
 const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
@@ -60,7 +60,7 @@ const resolveRoute = (
     })
   const variants = alias?.variants[route.effort] ?? {
     normal: { options: {} },
-    ...(providerConnection.protocol === "openai-responses" ? { fast: { options: { service_tier: "priority" } } } : {}),
+    fast: providerConnection.protocol === "openai-responses" ? { options: { service_tier: "priority" } } : undefined,
   }
   const variant = route.fast === true ? (variants?.fast ?? variants?.normal) : variants?.normal
   if (variant === undefined)
@@ -94,7 +94,7 @@ export const resolveModelRoute: {
   (mode: ModeId, role?: ModelRoute.Role): (settings: ConfigurationSettings) => ResolvedModelRoute
   (settings: ConfigurationSettings, mode: ModeId, role?: ModelRoute.Role): ResolvedModelRoute
 } = Function.dual(
-  (args) => typeof args[0] === "object",
+  (args) => Schema.is(Schema.Struct({ modes: Schema.Unknown }))(args[0]),
   (settings: ConfigurationSettings, mode: ModeId, role: ModelRoute.Role = "main") => {
     const configured = own(settings.modes, mode)
     if (configured === undefined)
@@ -132,7 +132,7 @@ export const resolveAgentRoute: {
     agent: ModelRoute.AgentId,
     tuning?: { readonly fastMode?: boolean },
   ): ResolvedModelRoute
-} = Function.dual((args) => typeof args[0] === "object", resolveAgentRouteImpl)
+} = Function.dual((args) => Schema.is(Schema.Struct({ modes: Schema.Unknown }))(args[0]), resolveAgentRouteImpl)
 
 export const resolveThreadTitleRoute = (settings: ConfigurationSettings): ResolvedModelRoute =>
   resolveRoute(settings, settings.threadTitle, "Thread title model")

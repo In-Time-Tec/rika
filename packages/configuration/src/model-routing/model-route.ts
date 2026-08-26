@@ -1,3 +1,5 @@
+import type { Schema } from "effect"
+
 export namespace ModelRoute {
   export type Role = "main" | "oracle"
   export type AgentId = "librarian" | "painter" | "readThread" | "review" | "surgeon" | "task"
@@ -46,7 +48,7 @@ export namespace ModelRoute {
   export type ProviderOverride = HttpProviderOverride | Partial<Omit<AmazonBedrockProviderConnection, "protocol">>
 
   export interface ModelVariant {
-    readonly options: Readonly<Record<string, unknown>>
+    readonly options: Schema.JsonObject
   }
 
   export interface ModelAlias {

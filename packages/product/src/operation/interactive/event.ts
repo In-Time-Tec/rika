@@ -2,9 +2,9 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummary from "@rika/product/thread-summary"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
-import * as ExecutionGateway from "../../execution/contract/execution-gateway"
+import * as ExecutionGateway from "../../execution/gateway/service"
 import { Schema } from "effect"
-import { Failure } from "../operation-failure"
+import { Failure } from "../failure"
 
 export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("ThreadViewSnapshot"), snapshot: ThreadView.ThreadViewSnapshot }),

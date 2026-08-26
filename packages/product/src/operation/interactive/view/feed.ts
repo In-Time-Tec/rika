@@ -2,8 +2,8 @@ import * as Thread from "@rika/product/thread-record"
 import { Function, Clock, Effect, Queue, Ref, Semaphore } from "effect"
 import { type InteractiveEvent, type InteractiveEvent as RuntimeEvent } from "../session-event"
 import { type InteractiveEvent as ClientEvent } from "../event"
-import { makeThreadViewFeed } from "./thread-view"
-import { OperationUnavailable } from "../../contract/product-operation"
+import * as InteractiveThreadView from "./thread"
+import { OperationUnavailable } from "../../contract/product"
 
 export const capacity = 64
 
@@ -96,15 +96,15 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
         state.criticalOverflowed = true
         return
       }
+      const preview: Extract<ClientEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>["preview"] = {
+        _tag: "ModelPreviewCleared",
+        runId: event.preview.runId,
+        attemptFence: event.preview.attemptFence,
+        generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
+      }
       state.previewInvalidations.set(key, {
         ...event,
-        preview: {
-          _tag: "ModelPreviewCleared",
-          runId: event.preview.runId,
-          ...(event.preview.parentId === undefined ? {} : { parentId: event.preview.parentId }),
-          attemptFence: event.preview.attemptFence,
-          generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
-        },
+        preview: event.preview.parentId === undefined ? preview : { ...preview, parentId: event.preview.parentId },
       })
       return
     }
@@ -265,7 +265,7 @@ export const makeInteractiveOperationFeed = (input: {
   Effect.gen(function* () {
     const queue = yield* Queue.bounded<SessionEnvelope>(64)
     const clock = yield* Clock.Clock
-    const threadViews = makeThreadViewFeed(() => clock.currentTimeMillisUnsafe())
+    const threadViews = InteractiveThreadView.makeThreadViewFeed(() => clock.currentTimeMillisUnsafe())
     let overflow: State | undefined
 
     const deliver = (
@@ -273,11 +273,11 @@ export const makeInteractiveOperationFeed = (input: {
       options?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
     ): boolean => {
       const selected = withEpoch(event, options?.selectionRequest ?? input.currentEpoch())
-      const envelope: SessionEnvelope = {
-        event: selected,
-        ...(options?.selectionRequest === undefined ? {} : { selectionRequest: options.selectionRequest }),
-        ...(options?.selectedThreadOnly === undefined ? {} : { selectedThreadOnly: options.selectedThreadOnly }),
-      }
+      let envelope: SessionEnvelope = { event: selected }
+      if (options?.selectionRequest !== undefined)
+        envelope = { ...envelope, selectionRequest: options.selectionRequest }
+      if (options?.selectedThreadOnly !== undefined)
+        envelope = { ...envelope, selectedThreadOnly: options.selectedThreadOnly }
       if (overflow !== undefined) {
         remember(overflow, selected)
         return false

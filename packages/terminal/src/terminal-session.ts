@@ -1,11 +1,20 @@
 import { Function } from "effect"
-import * as Composer from "./state/model/terminal-composer-state"
-import * as ComposerPaste from "./state/model/terminal-composer-paste"
-import type { Mode } from "./state/model/terminal-state"
-import type { PromptPart } from "./state/model/terminal-composer-state"
+import * as Composer from "./state/composer/model"
+import * as ComposerPaste from "./state/composer/paste"
+import type { Mode } from "./state/model"
+import type { PromptPart } from "./state/composer/model"
 
 export interface ModelTuning {
   readonly fastMode?: boolean
+}
+
+export interface CancelTarget {
+  submissionId?: string
+  threadId?: string
+}
+
+export interface CancelAction extends CancelTarget {
+  readonly _tag: "Cancel"
 }
 
 export type Action =
@@ -24,7 +33,7 @@ export type Action =
   | { readonly _tag: "ApproveAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "DenyAuthorization"; readonly turnId: string; readonly authorizationId: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
-  | { readonly _tag: "Cancel"; readonly submissionId?: string; readonly threadId?: string }
+  | CancelAction
   | { readonly _tag: "Quit" }
   | { readonly _tag: "NewThread" }
   | { readonly _tag: "NewOrbThread" }
@@ -56,7 +65,7 @@ export interface Adapter {
   readonly approveAuthorization?: (turnId: string, authorizationId: string) => void
   readonly denyAuthorization?: (turnId: string, authorizationId: string) => void
   readonly interruptAndSend?: (prompt: string) => void
-  readonly cancel?: (target: { readonly submissionId?: string; readonly threadId?: string }) => void
+  readonly cancel?: (target: CancelTarget) => void
   readonly selectThread?: (id: string) => void
 }
 
@@ -94,12 +103,13 @@ export const execute: {
     case "InterruptAndSend":
       adapter.interruptAndSend?.(action.prompt)
       return adapter.interruptAndSend !== undefined
-    case "Cancel":
-      adapter.cancel?.({
-        ...(action.submissionId === undefined ? {} : { submissionId: action.submissionId }),
-        ...(action.threadId === undefined ? {} : { threadId: action.threadId }),
-      })
+    case "Cancel": {
+      const target: CancelTarget = {}
+      if (action.submissionId !== undefined) target.submissionId = action.submissionId
+      if (action.threadId !== undefined) target.threadId = action.threadId
+      adapter.cancel?.(target)
       return adapter.cancel !== undefined
+    }
     case "Quit":
       adapter.quit()
       return true

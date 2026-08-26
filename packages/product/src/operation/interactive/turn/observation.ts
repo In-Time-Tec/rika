@@ -8,23 +8,23 @@ import * as Turn from "@rika/product/turn-record"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import * as ResolvedContext from "../../../context/context-resolution-service"
+import * as ResolvedContext from "../../../context/resolution-service"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
-import type * as RootTurnOwner from "../../../thread/queue/root-turn-owner"
-import * as ExecutionAuthorityReconciliation from "../../../execution/lifecycle/execution-authority-reconciliation"
+import type * as RootTurnOwner from "../../../thread/queue/root-owner"
+import * as ExecutionAuthorityReconciliation from "../../../execution/authority/reconciliation"
 import { Clock, Effect, Cause, Deferred, Duration, Fiber, PubSub, Schedule } from "effect"
-import { isTerminalStatus } from "../../../execution/contract/execution-status"
-import { OperationError, operationError } from "../../operation-error"
+import { isTerminalStatus } from "../../../execution/session/status"
+import { OperationError, operationError } from "../../error"
 import { type InteractiveEvent } from "../session-event"
 import { type InteractiveOperationFeed } from "../view/feed"
-import { makeFailure } from "../../operation-failure"
-import { type SteeringAdmissionRejection } from "../../../thread/queue/root-turn-owner"
+import * as OperationFailure from "../../failure"
+import { type SteeringAdmissionRejection } from "../../../thread/queue/root-owner"
 import {
   type InteractiveExecutionContext,
   type InteractiveExecutionContextServices,
   type InteractiveSessionInput,
-  type makeInteractiveExecution,
 } from "../session"
+import type * as InteractiveSessionRuntime from "../session"
 import type { InteractiveSupervisionError } from "../session-contract"
 
 export const watchRootTurn = (input: {
@@ -169,7 +169,7 @@ export const makeInteractiveFollowing = (input: InteractiveFollowingInput) => {
     turnId: Turn.TurnId,
     dispatch: (event: InteractiveEvent) => void,
   ) {
-    const turns = (yield* TurnRepository.Service) as TurnRepository.Interface
+    const turns = yield* TurnRepository.Service
     return yield* watchRootTurn({
       turnId,
       turns,
@@ -209,7 +209,7 @@ export interface InteractiveSupervisionInput {
   readonly dirtyTurnObservers: Set<Turn.TurnId>
   readonly isTerminalStatus: InteractiveSessionInput["isTerminalStatus"]
   readonly setTurnStatus: InteractiveSessionInput["setTurnStatus"]
-  readonly settleThread: ReturnType<typeof makeInteractiveExecution>["settleThread"]
+  readonly settleThread: ReturnType<typeof InteractiveSessionRuntime.makeInteractiveExecution>["settleThread"]
   readonly notifyTurnChanged: InteractiveSessionInput["notifyTurnChanged"]
   readonly claimTurnObserver: InteractiveSessionInput["claimTurnObserver"]
   readonly observeTurn: ReturnType<typeof makeInteractiveFollowing>["observeTurn"]
@@ -258,7 +258,7 @@ export const makeInteractiveSupervision = (
       threadId: Thread.ThreadId.make(rejection.admission.target.threadId),
       turnId: Turn.TurnId.make(rejection.admission.target.turnId),
       action: "steer",
-      failure: makeFailure(Cause.fail(rejection.failure)),
+      failure: OperationFailure.makeFailure(Cause.fail(rejection.failure)),
       steeringRequestId: rejection.admission.input.idempotencyKey,
     })
   }
@@ -381,7 +381,11 @@ export const makeInteractiveSupervision = (
           setTurnStatus(id, status, now).pipe(
             Effect.provideService(TurnRepository.Service, turns),
             Effect.provideService(ThreadSummaryRepository.Service, summaryRepository),
-            Effect.map((turn) => turn as Turn.AgentExecutionTurn),
+            Effect.flatMap((turn) =>
+              turn._tag === "AgentExecution"
+                ? Effect.succeed(turn)
+                : Effect.die(new Error("Expected an agent execution turn")),
+            ),
           )
         if (observeExecution) {
           const reconciled = yield* ExecutionAuthorityReconciliation.make({

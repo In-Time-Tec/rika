@@ -59,10 +59,13 @@ export const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
 export type JsonObject = typeof JsonObject.Type
 const SecretMetadataKey =
   /^(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|private[_-]?key|authorization|cookie)$/i
-const containsSecretMetadataKey = (value: unknown): boolean => {
+const containsSecretMetadataKey = <Value>(value: Value): boolean => {
   if (Array.isArray(value)) return value.some(containsSecretMetadataKey)
-  if (typeof value !== "object" || value === null) return false
-  return Object.entries(value).some(([key, nested]) => SecretMetadataKey.test(key) || containsSecretMetadataKey(nested))
+  const record = Schema.decodeUnknownOption(JsonObject)(value)
+  if (record._tag === "None") return false
+  return Object.entries(record.value).some(
+    ([key, nested]) => SecretMetadataKey.test(key) || containsSecretMetadataKey(nested),
+  )
 }
 export const CredentialReferenceMetadata = JsonObject.check(
   Schema.makeFilter((metadata) =>

@@ -1,6 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as ExecutionStatus from "../../execution/contract/execution-status"
-import * as ExecutionProjection from "../../execution/contract/execution-projection"
+import * as ExecutionStatus from "../../execution/session/status"
+import * as ExecutionProjection from "../../execution/projection/contract"
 import * as ThreadResult from "@rika/product/thread-result"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
@@ -10,15 +10,15 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import { Function, Effect, Cause, Clock, type Exit, Context, Layer, Ref } from "effect"
 import { type InteractiveEvent } from "./session-event"
-import { operationError, OperationError, failureKind } from "../operation-error"
-import { clampThreadTitle } from "../../thread/query/thread-title-policy"
+import { operationError, OperationError, failureKind } from "../error"
+import { clampThreadTitle } from "../../thread/query/title-policy"
 import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import {
   type InteractiveExecutionContext,
   type InteractiveSessionInput,
   type InteractiveRuntimeContext,
 } from "./session"
-import { makeFailure } from "../operation-failure"
+import * as OperationFailure from "../failure"
 
 export const executionStartFailureMessage =
   "Rika could not start this message. Run rika diagnostics status if it keeps happening."
@@ -220,7 +220,10 @@ const runRecordedShellImpl = (
           recordedShellProjection(runningTurn).units,
         )
         emit(dispatch, shellStartedEvent(runningTurn, runningProjection))
-        const processExit = (yield* Effect.exit(
+        const processExit: Exit.Exit<
+          { readonly text: string; readonly truncated: boolean; readonly exitCode?: number },
+          unknown
+        > = yield* Effect.exit(
           restore(
             ensureTurnSummary(runningTurn).pipe(
               Effect.catchCause((cause) =>
@@ -237,7 +240,7 @@ const runRecordedShellImpl = (
               Effect.andThen(runShellCommand(tools, command)),
             ),
           ),
-        )) as Exit.Exit<{ readonly text: string; readonly truncated: boolean; readonly exitCode?: number }, unknown>
+        )
         const completedAt = yield* Clock.currentTimeMillis
         const interrupted = processExit._tag === "Failure" && Cause.hasInterrupts(processExit.cause)
         const terminalTurn: ThreadResult.TerminalRecordedShellTurn =
@@ -406,7 +409,7 @@ export const makeInteractiveShell = (
           _tag: "ExecutionFailed",
           selectionEpoch: 0,
           threadId: thread.id,
-          failure: makeFailure("Shell runtime is unavailable"),
+          failure: OperationFailure.makeFailure("Shell runtime is unavailable"),
         })
         return
       }

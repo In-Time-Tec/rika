@@ -3,8 +3,89 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function, Schema } from "effect"
 import { type Card, type Node } from "./model"
 import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
-import type { ProjectorRecoveryIndex } from "./projector-recovery"
+import type { ProjectorRecoveryIndex } from "./tree/projector-recovery"
 import type { UsageAccounting } from "./usage"
+
+const AuthorizationStateSchema = Schema.Struct({
+  unitKey: Schema.String,
+  rawRunId: Schema.String,
+  authorizationId: Schema.String,
+  approvalId: Schema.String,
+})
+
+const AuthorizationCheckpointSchema = Schema.Struct({
+  authorizations: Schema.Array(Schema.Tuple([Schema.String, AuthorizationStateSchema])),
+})
+
+const ToolStateSchema = Schema.Struct({ rawId: Schema.String, key: Schema.String, blockId: Schema.String })
+const CellStateSchema = Schema.Struct({
+  rawId: Schema.String,
+  key: Schema.String,
+  blockId: Schema.String,
+  partial: Schema.String,
+})
+const NodeSchema = Schema.Struct({
+  rawRunId: Schema.String,
+  publicId: Schema.String,
+  parentRawRunId: Schema.optionalKey(Schema.String),
+  parentUnitKey: Schema.optionalKey(Schema.String),
+  parentBlockId: Schema.optionalKey(Schema.String),
+  hidden: Schema.Boolean,
+  phase: Schema.Finite,
+  status: Schema.Literals(["running", "waiting", "completed", "failed", "cancelled"]),
+  lifecycle: Schema.Literals(["unknown", "accepted", "active", "waiting", "terminal"]),
+  started: Schema.Boolean,
+  attempt: Schema.optionalKey(Schema.Finite),
+  tools: Schema.Array(Schema.Tuple([Schema.String, ToolStateSchema])),
+  cells: Schema.Array(Schema.Tuple([Schema.String, CellStateSchema])),
+})
+const CardSchema = Schema.Struct({
+  parentRawRunId: Schema.String,
+  rawInvocationId: Schema.String,
+  publicId: Schema.String,
+  unitKey: Schema.String,
+  blockId: Schema.String,
+  selection: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  promptTruncated: Schema.Boolean,
+  memberKey: Schema.optionalKey(Schema.String),
+  rawChildRunId: Schema.optionalKey(Schema.String),
+})
+const AttemptStartSchema = Schema.Struct({
+  startedAt: Schema.Finite,
+  modelCallId: Schema.String,
+  rawRunId: Schema.String,
+})
+const ModelCallStateSchema = Schema.Struct({
+  purpose: Schema.Literals(["conversation", "structured-output", "compaction-summary"]),
+  requestOrdinal: Schema.optionalKey(Schema.Finite),
+})
+const PersistedProjectorSchema = Schema.Struct({
+  turnId: Schema.String,
+  revision: Schema.Finite,
+  hasOlder: Schema.Boolean,
+  rootStatus: Schema.Literals(["running", "completed", "failed", "cancelled"]),
+  title: Schema.optionalKey(Projection.GeneratedTitle),
+  steeringMessages: Schema.Finite,
+  followUpMessages: Schema.Finite,
+  pendingSteering: Schema.Array(Projection.PendingSteering),
+  settledSteering: Schema.Array(Projection.SteeringDisposition),
+  usageState: Projection.UsageState,
+  requestOrdinal: Schema.Finite,
+  pendingContextOrdinal: Schema.optionalKey(Schema.Finite),
+  attemptStarts: Schema.Array(Schema.Tuple([Schema.String, AttemptStartSchema])),
+  settledAttemptKeys: Schema.Array(Schema.String),
+  modelCalls: Schema.Array(Schema.Tuple([Schema.String, ModelCallStateSchema])),
+  activeAvailable: Schema.Boolean,
+  activeDepth: Schema.Finite,
+  activeAccumulatedMillis: Schema.Finite,
+  activeSince: Schema.optionalKey(Schema.Finite),
+  lastLifecycleAt: Schema.optionalKey(Schema.Finite),
+  nodes: Schema.Array(NodeSchema),
+  cards: Schema.Array(CardSchema),
+  authorizations: Schema.Array(Schema.Tuple([Schema.String, AuthorizationStateSchema])),
+  runningCompactions: Schema.Array(Schema.String),
+})
 
 export interface AuthorizationTarget {
   readonly runId: string
@@ -17,19 +98,9 @@ const authorizationTargetImpl = (
 ): AuthorizationTarget | undefined => {
   if (checkpoint.version !== Projection.projectionVersion) return undefined
   try {
-    const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
-      checkpoint.state,
-    ) as Partial<PersistedProjector>
-    if (!Array.isArray(parsed.authorizations)) return undefined
-    for (const candidate of parsed.authorizations) {
-      if (!Array.isArray(candidate) || candidate.length !== 2) continue
-      const value = candidate[1] as Partial<AuthorizationState>
-      if (
-        value.authorizationId === authorizationId &&
-        typeof value.rawRunId === "string" &&
-        typeof value.approvalId === "string"
-      )
-        return { runId: value.rawRunId, approvalId: value.approvalId }
+    const parsed = Schema.decodeSync(Schema.fromJsonString(AuthorizationCheckpointSchema))(checkpoint.state)
+    for (const [, value] of parsed.authorizations) {
+      if (value.authorizationId === authorizationId) return { runId: value.rawRunId, approvalId: value.approvalId }
     }
     return undefined
   } catch {
@@ -84,70 +155,57 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
   } = input
 
   const serialize = (): string => {
-    const persisted: PersistedProjector = {
-      turnId,
-      revision: core.revision,
-      hasOlder: core.historyOmitted || recovery.retainedUnitCount() < units.size,
-      rootStatus: core.rootStatus,
-      ...(core.title === undefined ? {} : { title: core.title }),
-      steeringMessages: core.steeringMessages,
-      followUpMessages: core.followUpMessages,
-      pendingSteering: [...pendingSteering.values()],
-      settledSteering: [...settledSteering.values()],
-      ...usage.persist(),
-      nodes: recovery.persistedNodes(),
-      cards: recovery.persistedCards(),
-      authorizations: recovery.persistedAuthorizations(authorizations),
-      runningCompactions: recovery.persistedCompactions(),
-    }
+    const persisted = Object.assign(
+      {
+        turnId,
+        revision: core.revision,
+        hasOlder: core.historyOmitted || recovery.retainedUnitCount() < units.size,
+        rootStatus: core.rootStatus,
+        steeringMessages: core.steeringMessages,
+        followUpMessages: core.followUpMessages,
+        pendingSteering: [...pendingSteering.values()],
+        settledSteering: [...settledSteering.values()],
+        ...usage.persist(),
+        nodes: recovery.persistedNodes(),
+        cards: recovery.persistedCards(),
+        authorizations: recovery.persistedAuthorizations(authorizations),
+        runningCompactions: recovery.persistedCompactions(),
+      },
+      core.title === undefined ? undefined : { title: core.title },
+    ) satisfies PersistedProjector
     return JSON.stringify(persisted)
   }
 
   const restore = (resumeCheckpoint: Projection.Checkpoint): void => {
-    const parsed = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
-      resumeCheckpoint.state,
-    ) as Partial<PersistedProjector>
+    const parsed = Schema.decodeSync(Schema.fromJsonString(PersistedProjectorSchema))(resumeCheckpoint.state)
     if (
       parsed.turnId !== turnId ||
-      typeof parsed.hasOlder !== "boolean" ||
       !Number.isSafeInteger(parsed.revision) ||
-      !Array.isArray(parsed.nodes) ||
-      !Array.isArray(parsed.cards) ||
-      !Schema.is(Projection.UsageState)(parsed.usageState) ||
       !Number.isSafeInteger(parsed.requestOrdinal) ||
-      !Array.isArray(parsed.attemptStarts) ||
-      !Array.isArray(parsed.settledAttemptKeys) ||
-      !Array.isArray(parsed.modelCalls) ||
-      !Array.isArray(parsed.authorizations) ||
-      !Array.isArray(parsed.runningCompactions) ||
-      !Schema.is(Schema.Array(Projection.PendingSteering))(parsed.pendingSteering) ||
-      !Schema.is(Schema.Array(Projection.SteeringDisposition))(parsed.settledSteering) ||
-      typeof parsed.activeAvailable !== "boolean" ||
-      !Number.isSafeInteger(parsed.activeDepth) ||
-      typeof parsed.activeAccumulatedMillis !== "number" ||
-      typeof parsed.steeringMessages !== "number" ||
-      typeof parsed.followUpMessages !== "number"
+      !Number.isSafeInteger(parsed.activeDepth)
     )
       throw new TypeError("Invalid TenetKit tree projector checkpoint")
-    core.revision = parsed.revision!
+    core.revision = parsed.revision
     core.historyOmitted = parsed.hasOlder
     core.rootStatus = parsed.rootStatus ?? "running"
     core.title = parsed.title
     core.steeringMessages = parsed.steeringMessages
     core.followUpMessages = parsed.followUpMessages
-    usage.restore({
+    const persistedUsage = {
       usageState: parsed.usageState,
-      requestOrdinal: parsed.requestOrdinal!,
-      ...(parsed.pendingContextOrdinal === undefined ? {} : { pendingContextOrdinal: parsed.pendingContextOrdinal }),
+      requestOrdinal: parsed.requestOrdinal,
       attemptStarts: parsed.attemptStarts,
       settledAttemptKeys: parsed.settledAttemptKeys,
       modelCalls: parsed.modelCalls,
       activeAvailable: parsed.activeAvailable,
-      activeDepth: parsed.activeDepth!,
+      activeDepth: parsed.activeDepth,
       activeAccumulatedMillis: parsed.activeAccumulatedMillis,
-      ...(parsed.activeSince === undefined ? {} : { activeSince: parsed.activeSince }),
-      ...(parsed.lastLifecycleAt === undefined ? {} : { lastLifecycleAt: parsed.lastLifecycleAt }),
-    })
+    }
+    if (parsed.pendingContextOrdinal !== undefined)
+      Object.assign(persistedUsage, { pendingContextOrdinal: parsed.pendingContextOrdinal })
+    if (parsed.activeSince !== undefined) Object.assign(persistedUsage, { activeSince: parsed.activeSince })
+    if (parsed.lastLifecycleAt !== undefined) Object.assign(persistedUsage, { lastLifecycleAt: parsed.lastLifecycleAt })
+    usage.restore(persistedUsage)
     units.clear()
     for (const value of baselineUnits) {
       if (value.turnId !== turnId) throw new TypeError("Invalid projector baseline unit")
@@ -155,23 +213,23 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     }
     nodes.clear()
     for (const persisted of parsed.nodes) {
-      if (typeof persisted.rawRunId !== "string" || typeof persisted.publicId !== "string")
-        throw new TypeError("Invalid projector topology checkpoint")
-      const node: Node = {
-        rawRunId: persisted.rawRunId,
-        publicId: persisted.publicId,
-        ...(persisted.parentRawRunId === undefined ? {} : { parentRawRunId: persisted.parentRawRunId }),
-        ...(persisted.parentUnitKey === undefined ? {} : { parentUnitKey: persisted.parentUnitKey }),
-        ...(persisted.parentBlockId === undefined ? {} : { parentBlockId: persisted.parentBlockId }),
-        hidden: persisted.hidden,
-        tools: new Map(persisted.tools),
-        cells: new Map(persisted.cells),
-        phase: persisted.phase,
-        status: persisted.status,
-        lifecycle: persisted.lifecycle,
-        started: persisted.started,
-        ...(persisted.attempt === undefined ? {} : { attempt: persisted.attempt }),
-      }
+      const node = Object.assign(
+        {
+          rawRunId: persisted.rawRunId,
+          publicId: persisted.publicId,
+          hidden: persisted.hidden,
+          tools: new Map(persisted.tools),
+          cells: new Map(persisted.cells),
+          phase: persisted.phase,
+          status: persisted.status,
+          lifecycle: persisted.lifecycle,
+          started: persisted.started,
+        },
+        persisted.parentRawRunId === undefined ? undefined : { parentRawRunId: persisted.parentRawRunId },
+        persisted.parentUnitKey === undefined ? undefined : { parentUnitKey: persisted.parentUnitKey },
+        persisted.parentBlockId === undefined ? undefined : { parentBlockId: persisted.parentBlockId },
+        persisted.attempt === undefined ? undefined : { attempt: persisted.attempt },
+      ) satisfies Node
       nodes.set(node.rawRunId, node)
       recovery.nodeChanged(node)
       for (const tool of node.tools.values()) recovery.toolChanged(node, tool, true)
@@ -200,7 +258,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       recovery.authorizationChanged(key, value.unitKey)
     }
     for (const key of parsed.runningCompactions) {
-      if (typeof key !== "string") throw new TypeError("Invalid projector compaction checkpoint")
       recovery.compactionChanged(key, true)
     }
     pendingSteering.clear()

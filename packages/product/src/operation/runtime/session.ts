@@ -1,0 +1,63 @@
+import { Effect } from "effect"
+import * as InteractiveSessionRuntime from "../interactive/session"
+import type { InteractiveSessionInput, InteractiveSessionRuntimeResult } from "../interactive/session"
+import { isTerminalStatus } from "../../execution/session/status"
+import {
+  executionStartFailureMessage,
+  recordedShellStartedEvent,
+  recordedShellSettledEvents,
+  temporaryThreadTitle,
+  executeShellCommand,
+} from "../interactive/shell"
+import { queueMutationEvent } from "./support"
+import { OperationError } from "../error"
+
+type ProductOperationInteractiveSessionInput = Omit<
+  InteractiveSessionInput,
+  | "isTerminalStatus"
+  | "executionStartFailureMessage"
+  | "temporaryThreadTitle"
+  | "queueMutationEvent"
+  | "recordedShellStartedEvent"
+  | "recordedShellSettledEvents"
+  | "executeShellCommand"
+  | "nextSessionId"
+>
+
+export type ProductOperationInteractiveSessionFactory = (
+  workspace: string,
+  settings?: {
+    readonly initialThreadId?: string
+    readonly recoveryOwner?: boolean
+    readonly observeExecution?: boolean
+  },
+) => Effect.Effect<InteractiveSessionRuntimeResult, OperationError, never>
+
+export const makeProductOperationInteractiveSession = (
+  input: ProductOperationInteractiveSessionInput,
+): ProductOperationInteractiveSessionFactory => {
+  let sequence = 0
+  return (
+    workspace: string,
+    settings: {
+      readonly initialThreadId?: string
+      readonly recoveryOwner?: boolean
+      readonly observeExecution?: boolean
+    } = {},
+  ) => {
+    const runtimeInput: InteractiveSessionInput = {
+      ...input,
+      encodeJson: input.encodeJson,
+      isTerminalStatus,
+      executionStartFailureMessage,
+      temporaryThreadTitle,
+      queueMutationEvent,
+      recordedShellStartedEvent,
+      recordedShellSettledEvents,
+      executeShellCommand,
+      nextSessionId: () => (sequence += 1),
+      activitySequence: input.activitySequence,
+    }
+    return InteractiveSessionRuntime.makeInteractiveSession(runtimeInput)(workspace, settings)
+  }
+}

@@ -241,15 +241,28 @@ const providerInstanceId = (assignment: ExecutorAssignment): string | undefined 
   return undefined
 }
 
+interface AssignmentCorrelation {
+  ownerId: ExecutorAssignment["ownerId"]
+  threadId: ExecutorAssignment["threadId"]
+  assignmentId: ExecutorAssignment["id"]
+  sandboxId?: string
+  buildId?: string
+}
+
+interface ExecutorEnvironment {
+  [name: string]: string
+}
+
 const assignmentCorrelation = (assignment: ExecutorAssignment): HostedObservability.Correlation => {
   const sandboxId = providerInstanceId(assignment)
-  return {
+  const correlation: AssignmentCorrelation = {
     ownerId: assignment.ownerId,
     threadId: assignment.threadId,
     assignmentId: assignment.id,
-    ...(sandboxId === undefined ? {} : { sandboxId }),
-    ...(assignment.placement._tag === "OrbPlacement" ? { buildId: assignment.placement.templateBuildId } : {}),
   }
+  if (sandboxId !== undefined) correlation.sandboxId = sandboxId
+  if (assignment.placement._tag === "OrbPlacement") correlation.buildId = assignment.placement.templateBuildId
+  return correlation
 }
 
 const publicAssignment = (assignment: ExecutorAssignment): Assignment => {
@@ -260,15 +273,16 @@ const publicAssignment = (assignment: ExecutorAssignment): Assignment => {
   if (lifecycle._tag === "Terminated") state = "terminated"
   const templateBuildId = assignment.placement._tag === "OrbPlacement" ? assignment.placement.templateBuildId : ""
   const sandboxId = providerInstanceId(assignment)
-  return {
+  const result: Assignment = {
     assignmentId: assignment.id,
     threadId: assignment.threadId,
     generation: number(assignment.generation),
     templateBuildId,
-    ...(sandboxId === undefined ? {} : { sandboxId }),
     state,
     cursor: { sequence: number(assignment.cursor.sequence), value: assignment.cursor.value },
   }
+  if (sandboxId === undefined) return result
+  return { ...result, sandboxId }
 }
 
 const version = (assignment: ExecutorAssignment) => ({
@@ -363,6 +377,26 @@ export const layer = (
         authorization: WorkspaceAuthorization,
       ) {
         const placement = yield* approvedPlacement(assignment)
+        const environment: ExecutorEnvironment = {
+          RIKA_EXECUTOR_TARGET: "orb",
+          RIKA_EXECUTOR_ASSIGNMENT_ID: assignment.id,
+          RIKA_EXECUTOR_GENERATION: assignment.generation,
+          RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
+          RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
+          RIKA_EXECUTOR_API_URL: options.apiUrl,
+          RIKA_EXECUTOR_WORKSPACE_ID: assignment.workspaceId,
+          RIKA_EXECUTOR_OWNER_ID: assignment.ownerId,
+          RIKA_EXECUTOR_THREAD_ID: assignment.threadId,
+          RIKA_EXECUTOR_ENVIRONMENT_DIGEST: authorization.environmentDigest,
+          RIKA_EXECUTOR_SETUP_CACHE: options.setupCache === true ? "1" : "0",
+          RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
+        }
+        if (assignment.checkout !== null) {
+          environment.RIKA_EXECUTOR_REPOSITORY_ID = assignment.checkout.repositoryId
+          environment.RIKA_EXECUTOR_REPOSITORY_OWNER = assignment.checkout.owner
+          environment.RIKA_EXECUTOR_REPOSITORY_NAME = assignment.checkout.name
+          environment.RIKA_EXECUTOR_COMMIT_SHA = assignment.checkout.commitSha
+        }
         const request: CreateRequest = {
           appId: options.appId,
           deploymentId: options.deploymentId,
@@ -373,28 +407,7 @@ export const layer = (
           generation: number(assignment.generation),
           idleTimeoutMillis,
           allowedEgress: yield* allowedEgress(authorization.egress),
-          environment: {
-            RIKA_EXECUTOR_TARGET: "orb",
-            RIKA_EXECUTOR_ASSIGNMENT_ID: assignment.id,
-            RIKA_EXECUTOR_GENERATION: assignment.generation,
-            RIKA_EXECUTOR_ID: `${assignment.id}:g${assignment.generation}`,
-            RIKA_EXECUTOR_TEMPLATE_BUILD_ID: placement.templateBuildId,
-            RIKA_EXECUTOR_API_URL: options.apiUrl,
-            RIKA_EXECUTOR_WORKSPACE_ID: assignment.workspaceId,
-            RIKA_EXECUTOR_OWNER_ID: assignment.ownerId,
-            RIKA_EXECUTOR_THREAD_ID: assignment.threadId,
-            RIKA_EXECUTOR_ENVIRONMENT_DIGEST: authorization.environmentDigest,
-            RIKA_EXECUTOR_SETUP_CACHE: options.setupCache === true ? "1" : "0",
-            ...(assignment.checkout === null
-              ? {}
-              : {
-                  RIKA_EXECUTOR_REPOSITORY_ID: assignment.checkout.repositoryId,
-                  RIKA_EXECUTOR_REPOSITORY_OWNER: assignment.checkout.owner,
-                  RIKA_EXECUTOR_REPOSITORY_NAME: assignment.checkout.name,
-                  RIKA_EXECUTOR_COMMIT_SHA: assignment.checkout.commitSha,
-                }),
-            RIKA_CHECKPOINT_OBJECT_PREFIX: `assignments/${assignment.id}/g${assignment.generation}/`,
-          },
+          environment,
         }
         return request
       })
@@ -1248,11 +1261,13 @@ export const layer = (
         reconnect: (access) =>
           HostedObservability.observe(
             "attach",
-            {
-              assignmentId: access.fence.assignmentId,
-              sandboxId: access.fence.instanceId,
-              ...(access.fence.target === "orb" ? { buildId: options.templateBuildId } : {}),
-            },
+            Object.assign(
+              {
+                assignmentId: access.fence.assignmentId,
+                sandboxId: access.fence.instanceId,
+              },
+              access.fence.target === "orb" ? { buildId: options.templateBuildId } : undefined,
+            ),
             reconnect(access),
           ),
         validateAccess,

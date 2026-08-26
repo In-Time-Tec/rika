@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./app-jwt": "./src/app-jwt.ts",
+    "./app-jwt": "./src/auth/jwt.ts",
     "./authorization-state": "./src/authorization-state.ts",
-    "./github-model": "./src/github-model.ts",
-    "./installation-service": "./src/installation-service.ts",
-    "./installation-token": "./src/installation-token.ts",
-    "./webhook-delivery": "./src/webhook-delivery.ts",
-    "./webhook-event": "./src/webhook-event.ts",
-    "./webhook-verifier": "./src/webhook-verifier.ts"
+    "./github-model": "./src/model.ts",
+    "./installation-service": "./src/installation/service.ts",
+    "./installation-token": "./src/installation/token.ts",
+    "./webhook-delivery": "./src/webhook/delivery.ts",
+    "./webhook-event": "./src/webhook/event.ts",
+    "./webhook-verifier": "./src/webhook/verifier.ts"
   },
   "dependencies": {
     "effect": "catalog:",
@@ -29,7 +29,7 @@
     "domain": "github-app"
   },
   "scripts": {
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/github-app/src packages/github-app/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/github-app/src packages/github-app/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   }
 }

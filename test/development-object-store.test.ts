@@ -1,5 +1,5 @@
-import { expect, it } from "@effect/vitest"
 import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3"
+import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import {
   initializeBucket,
@@ -8,7 +8,7 @@ import {
 } from "../scripts/development/initialize-object-store"
 import { postgresUnavailableMessage } from "../scripts/development/wait-for-services"
 
-const bucketClient = (headFailure?: unknown) => {
+const bucketClient = <E>(headFailure?: E) => {
   const commands: string[] = []
   return {
     commands,

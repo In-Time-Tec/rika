@@ -11,10 +11,7 @@ import {
 import { Errors } from "tenetkit/runtime"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
-import {
-  ProviderCredentialStoreError,
-  type ProviderCredentialStoreShape,
-} from "@rika/product/provider-credential-store"
+import * as ProviderCredentialStore from "@rika/product/provider-credential-store"
 import { Config, Effect, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 import * as OpenAiAccountCredentials from "./openai-account-credentials"
@@ -28,8 +25,8 @@ const apiKey = (candidate: CandidateSnapshot) =>
 
 const storedCredentialApiKey = (
   candidate: CandidateSnapshot,
-  store: ProviderCredentialStoreShape | undefined,
-): Effect.Effect<Config.Config<Redacted.Redacted<string>>, ProviderCredentialStoreError> => {
+  store: ProviderCredentialStore.ProviderCredentialStore["Service"] | undefined,
+): Effect.Effect<Config.Config<Redacted.Redacted<string>>, ProviderCredentialStore.ProviderCredentialStoreError> => {
   const identity = candidate.providerConnection.credentialIdentity
   if (identity === undefined || store === undefined) return Effect.succeed(apiKey(candidate))
   return store.load(identity).pipe(
@@ -37,7 +34,7 @@ const storedCredentialApiKey = (
       Option.match({
         onNone: () =>
           Effect.fail(
-            ProviderCredentialStoreError.make({
+            ProviderCredentialStore.ProviderCredentialStoreError.make({
               kind: "missing",
               message: "Provider credential is unavailable",
             }),
@@ -50,12 +47,12 @@ const storedCredentialApiKey = (
 
 export const layer = (options: {
   readonly candidate: CandidateSnapshot
-  readonly credentialStore?: ProviderCredentialStoreShape
+  readonly credentialStore?: ProviderCredentialStore.ProviderCredentialStoreService
   readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
 }): Layer.Layer<
   ModelRegistry.ModelRegistry,
-  Config.ConfigError | Errors.ExecutableRegistrationInvalid | ProviderCredentialStoreError
+  Config.ConfigError | Errors.ExecutableRegistrationInvalid | ProviderCredentialStore.ProviderCredentialStoreError
 > => {
   const { candidate, credentialStore, openAiAccountAccess } = options
   const httpClientLayer = options.httpClientLayer ?? FetchHttpClient.layer
@@ -147,20 +144,21 @@ export const layer = (options: {
       )
     case "amazon-bedrock": {
       const connection = new URL(candidate.providerConnection.baseUrl)
+      const region = connection.searchParams.get("region")
+      const profile = connection.searchParams.get("profile")
+      const endpoint = `${connection.protocol}//${connection.host}${connection.pathname}`
+      const authMode: "bearer" | "default" = connection.searchParams.get("authMode") === "bearer" ? "bearer" : "default"
+      const client = {
+        authMode,
+      }
+      if (region !== null) Object.assign(client, { region })
+      if (profile !== null) Object.assign(client, { profile })
+      if (connection.hostname !== "default") Object.assign(client, { endpoint })
       return AmazonBedrock.layer({
         model: candidate.model,
         registrationKey,
         config: AmazonBedrock.decodeConfig(candidate.providerOptions),
-        client: {
-          authMode: connection.searchParams.get("authMode") === "bearer" ? "bearer" : "default",
-          ...(connection.searchParams.get("region") === null ? {} : { region: connection.searchParams.get("region")! }),
-          ...(connection.searchParams.get("profile") === null
-            ? {}
-            : { profile: connection.searchParams.get("profile")! }),
-          ...(connection.hostname === "default"
-            ? {}
-            : { endpoint: `${connection.protocol}//${connection.host}${connection.pathname}` }),
-        },
+        client,
       })
     }
     case "test":

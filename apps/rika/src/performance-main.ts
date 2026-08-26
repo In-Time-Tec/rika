@@ -2,7 +2,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Console, Effect, Layer } from "effect"
-import { performanceEvaluation } from "./platform/application-performance-evaluation"
+import { performanceEvaluation } from "./platform/application-performance"
 
 if (import.meta.main)
   BunRuntime.runMain(

@@ -2,7 +2,7 @@ import type { RunEvent } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { Node } from "./model"
-import { boundedInsert } from "./nodes"
+import { boundedInsert } from "./tree/nodes"
 
 export interface SteeringProjection {
   readonly pending: Map<string, Projection.PendingSteering>

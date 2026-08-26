@@ -1,5 +1,4 @@
 import { Crypto, Deferred, Effect, Layer, Option, Redacted } from "effect"
-import { type ExecutorAssignment } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
@@ -146,6 +145,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
+  let layer: Harness["layer"]
   const harness: Harness = {
     provider,
     checkpointInspections,
@@ -157,7 +157,9 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     failReadAfterBind: false,
     assignmentReadFailures: 0,
     checkoutRequests: [],
-    layer: undefined as never,
+    get layer() {
+      return layer
+    },
   }
   const broker = Layer.succeed(
     Credentials,
@@ -293,7 +295,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     controlEgress: ["api.example.test"],
     ...overrides,
   }).pipe(Layer.provide(dependencies), Layer.provide(assignments))
-  harness.layer = Layer.merge(controller, assignments)
+  layer = Layer.merge(controller, assignments)
   return harness
 }
 
@@ -328,7 +330,9 @@ export const createAssignment = Effect.fn("test.createAssignment")(function* () 
 
 export const readAssignment = Effect.fn("test.readAssignment")(function* () {
   const repository = yield* ExecutorAssignments
-  return (yield* repository.get(assignmentInput.id)) as ExecutorAssignment
+  const assignment = yield* repository.get(assignmentInput.id)
+  if (assignment === undefined) return yield* Effect.die("assignment not found")
+  return assignment
 })
 
 export const checkpointId = CheckpointId.make("checkpoint-1")

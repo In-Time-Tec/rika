@@ -10,12 +10,13 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/identity/src packages/identity/test",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/identity/src packages/identity/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.1",
     "better-auth": "1.7.1",
+    "drizzle-orm": "catalog:",
     "effect": "4.0.0-rc.111",
     "pg": "8.21.0"
   },

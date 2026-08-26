@@ -7,8 +7,8 @@
   "type": "module",
   "scripts": {
     "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js apps/api/src apps/api/test",
-    "migrate": "bun ./src/migrate.ts",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings apps/api/src apps/api/test",
+    "migrate": "bun ./src/database/migrate.ts",
     "start": "bun ./src/main.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
@@ -23,6 +23,7 @@
     "@rika/execution": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/remote-execution": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "4.0.0-rc.111",
     "pg": "8.21.0",
     "tenetkit": "catalog:"

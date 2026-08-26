@@ -2,9 +2,10 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware, HttpApiSchema } from "effect/unstable/httpapi"
-import { accountAccess, type AccountAccess, type HttpDependencies } from "../http"
-import type { HostedEnvironmentError } from "../hosted-environment"
-import type { HostedProviderCredentialError } from "../hosted-provider-credentials"
+import { accountAccess, type AccountAccess, type HttpDependencies } from "../server/http"
+import type { HostedEnvironmentError } from "../hosted/environment/runtime"
+import type { HostedProviderCredentialError } from "../hosted/environment/provider-credentials"
+import type { AuthenticatedPrincipal } from "../hosted/product"
 
 const Message = { message: Schema.String }
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
@@ -60,12 +61,15 @@ export const authorizationLayer = (dependencies: HttpDependencies) =>
       }),
     ),
   )
-export const authenticatedPrincipal = (access: CurrentAccess["Service"]) => ({
-  userId: access.principal.userId,
-  deviceId: access.deviceId!,
-  clientId: access.principal.clientId!,
-  ...(access.principal.dpopJkt === undefined ? {} : { dpopJkt: access.principal.dpopJkt }),
-})
+export const authenticatedPrincipal = (access: CurrentAccess["Service"]) => {
+  const principal: AuthenticatedPrincipal = {
+    userId: access.principal.userId,
+    deviceId: access.deviceId!,
+    clientId: access.principal.clientId!,
+  }
+  if (access.principal.dpopJkt !== undefined) Object.assign(principal, { dpopJkt: access.principal.dpopJkt })
+  return principal
+}
 export const hostedOwner =
   (access: CurrentAccess["Service"]) =>
   (owner: { readonly kind: "personal" } | { readonly kind: "organization"; readonly organization_id: string }) =>

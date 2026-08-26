@@ -1,9 +1,10 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Config, Console, Context, Effect, FileSystem, Layer } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { makeApiAccountGateway } from "./adapters/api-account-gateway"
-import { serveWeb } from "./adapters/bun-server"
+import { FetchHttpClient } from "effect/unstable/http"
+import { apiAccountGatewayLayer } from "./account/api-gateway"
+import { AccountGateway } from "./account/gateway"
+import { serveWeb } from "./server/bun"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -26,11 +27,7 @@ const program = Effect.scoped(
     const dependencies = {
       production: nodeEnvironment === "production",
       fileSystem: yield* FileSystem.FileSystem,
-      accountGateway: makeApiAccountGateway({
-        domain: yield* Config.string("API_DOMAIN"),
-        port: yield* Config.string("API_PORT"),
-        client: yield* HttpClient.HttpClient,
-      }),
+      accountGateway: yield* AccountGateway,
     }
     yield* serveWeb({ port, dependencies })
     yield* Console.log(`Rika web listening on port ${port}`)
@@ -38,4 +35,10 @@ const program = Effect.scoped(
   }),
 )
 
-BunRuntime.runMain(program.pipe(provideLayerScoped(Layer.merge(FetchHttpClient.layer, BunFileSystem.layer))))
+BunRuntime.runMain(
+  program.pipe(
+    provideLayerScoped(
+      Layer.merge(BunFileSystem.layer, apiAccountGatewayLayer.pipe(Layer.provide(FetchHttpClient.layer))),
+    ),
+  ),
+)

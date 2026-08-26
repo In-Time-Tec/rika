@@ -4,14 +4,14 @@ import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import type * as RootTurnOwner from "../../../thread/queue/root-turn-owner"
-import * as TurnQueuePromotion from "../../../thread/repository/turn-repository-queue"
+import type * as RootTurnOwner from "../../../thread/queue/root-owner"
+import * as TurnQueuePromotion from "../../../thread/repository/turn-queue"
 import { Cause, Clock, Effect, Ref, Schema } from "effect"
 import { type InteractiveEvent } from "../session-event"
-import { OperationError, operationError } from "../../operation-error"
-import { makeFailure } from "../../operation-failure"
+import { OperationError, operationError } from "../../error"
+import * as OperationFailure from "../../failure"
 import { type InteractiveSession, type InteractiveSessionControlsInput } from "../session"
-import { OperationUnavailable } from "../../contract/product-operation"
+import { OperationUnavailable } from "../../contract/product"
 
 const routeEquivalent = Schema.toEquivalence(ExecutionRouteSnapshot)
 const terminal = (status: Turn.Turn["status"]) =>
@@ -48,15 +48,30 @@ export const makeInteractiveControl = (input: {
     Effect.gen(function* () {
       input.dispatch(input.queueMutation(yield* input.turns.dequeue(Turn.TurnId.make(id))))
     })
-  const steeringFailed = (error: unknown, requestId: string, turn?: Pick<Turn.Turn, "id" | "threadId">) =>
-    input.dispatch({
-      _tag: "ExecutionControlFailed",
-      selectionEpoch: 0,
-      ...(turn === undefined ? {} : { threadId: turn.threadId, turnId: turn.id }),
-      action: "steer",
-      failure: makeFailure(error),
-      steeringRequestId: requestId,
-    })
+  const steeringFailed = <ErrorValue>(
+    error: ErrorValue,
+    requestId: string,
+    turn?: Pick<Turn.Turn, "id" | "threadId">,
+  ) =>
+    input.dispatch(
+      turn === undefined
+        ? {
+            _tag: "ExecutionControlFailed",
+            selectionEpoch: 0,
+            action: "steer",
+            failure: OperationFailure.makeFailure(error),
+            steeringRequestId: requestId,
+          }
+        : {
+            _tag: "ExecutionControlFailed",
+            selectionEpoch: 0,
+            threadId: turn.threadId,
+            turnId: turn.id,
+            action: "steer",
+            failure: OperationFailure.makeFailure(error),
+            steeringRequestId: requestId,
+          },
+    )
   const steer = (text: string, requestId: string, targetTurnId?: string) =>
     Effect.suspend(() => {
       let target: Pick<Turn.Turn, "id" | "threadId"> | undefined
@@ -143,15 +158,16 @@ export const makeInteractiveControl = (input: {
           yield* input.notifyTurnChanged(turn)
         }),
       )
-      if (outcome._tag === "Failure")
-        input.dispatch({
+      if (outcome._tag === "Failure") {
+        const event: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> = {
           _tag: "ExecutionControlFailed",
           selectionEpoch: 0,
-          ...(threadId === undefined ? {} : { threadId }),
           turnId,
           action: decision,
-          failure: makeFailure(Cause.squash(outcome.cause)),
-        })
+          failure: OperationFailure.makeFailure(Cause.squash(outcome.cause)),
+        }
+        input.dispatch(threadId === undefined ? event : { ...event, threadId })
+      }
     })
   return {
     editQueued,
@@ -333,15 +349,25 @@ export const makeInteractiveSessionControls = (
         Effect.provide(executionDependencies),
         Effect.scoped,
         Effect.catch((error) =>
-          Effect.sync(() =>
+          Effect.sync(() => {
+            if (turn === undefined) {
+              sessionDispatch({
+                _tag: "ExecutionControlFailed",
+                selectionEpoch: 0,
+                action: "cancel",
+                failure: OperationFailure.makeFailure(error),
+              })
+              return
+            }
             sessionDispatch({
               _tag: "ExecutionControlFailed",
               selectionEpoch: 0,
-              ...(turn === undefined ? {} : { threadId: turn.threadId, turnId: turn.id }),
+              threadId: turn.threadId,
+              turnId: turn.id,
               action: "cancel",
-              failure: makeFailure(error),
-            }),
-          ),
+              failure: OperationFailure.makeFailure(error),
+            })
+          }),
         ),
       )
     })
@@ -351,7 +377,7 @@ export const makeInteractiveSessionControls = (
     cancel,
     quit: stopActiveExecutionWorkWithProjection.pipe(
       Effect.provide(executionDependencies),
-      Effect.mapError((failure: unknown) =>
+      Effect.mapError((failure) =>
         OperationUnavailable.make({ operation: "InteractiveSession.quit", message: String(failure) }),
       ),
     ),

@@ -3,6 +3,7 @@ import { CellTool } from "tenetkit/repl"
 import { TestModel } from "tenetkit/test"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
+import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Context, Effect, Layer, Ref, Scope, Stream } from "effect"
 import { LanguageModel, type Prompt } from "effect/unstable/ai"
 
@@ -69,6 +70,16 @@ interface SpawnRequest {
   readonly name?: string
 }
 
+interface ChildRequest {
+  selection: Profile
+  prompt: string
+  label?: string
+}
+
+interface ChildGroupMember extends ChildRequest {
+  key: string
+}
+
 /**
  * A cell that awaits one binding and returns its value. The model can only act through the cell, so
  * a scripted tool call is scripted cell source, and the source is what the transcript projects.
@@ -89,43 +100,47 @@ export const step = {
       readonly inputTokens?: number
       readonly outputTokens?: number
     } = {},
-  ): Step =>
-    TestModel.turn(parts, {
-      ...(options.delayMillis === undefined ? {} : { delay: `${options.delayMillis} millis` }),
-      ...(options.streamPartDelayMillis === undefined
-        ? {}
-        : { streamPartDelay: `${options.streamPartDelayMillis} millis` }),
-      ...(options.inputTokens === undefined && options.outputTokens === undefined ? {} : { usage: usage(options) }),
-    }),
+  ): Step => {
+    const turnOptions: TestModel.StepOptions = {}
+    if (options.delayMillis !== undefined) Object.assign(turnOptions, { delay: `${options.delayMillis} millis` })
+    if (options.streamPartDelayMillis !== undefined)
+      Object.assign(turnOptions, { streamPartDelay: `${options.streamPartDelayMillis} millis` })
+    if (options.inputTokens !== undefined || options.outputTokens !== undefined)
+      Object.assign(turnOptions, { usage: usage(options) })
+    return TestModel.turn(parts, turnOptions)
+  },
   part: (value: string): Part => TestModel.text(value),
   reasoning: (value: string): Part => TestModel.reasoning(value),
   cell: (code: string, id: string): Part => TestModel.toolCall(CellTool.name, { code }, { id }),
   binding: (call: BindingCall, id: string): Part => step.cell(bindingSource(call), id),
   bindings: (calls: ReadonlyArray<BindingCall>, id: string): Part => step.cell(calls.map(bindingSource).join("\n"), id),
-  spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part =>
-    children.length === 1
-      ? TestModel.toolCall(
-          "run_child",
-          {
-            selection: children[0]!.profile,
-            prompt: children[0]!.prompt,
-            ...(children[0]!.name === undefined ? {} : { label: children[0]!.name }),
-          },
-          { id },
-        )
-      : TestModel.toolCall(
-          "run_child_group",
-          {
-            members: children.map((child, index) => ({
-              key: child.name ?? `${child.profile.toLowerCase()}-${index}`,
-              selection: child.profile,
-              prompt: child.prompt,
-              ...(child.name === undefined ? {} : { label: child.name }),
-            })),
-            concurrency: children.length,
-          },
-          { id },
-        ),
+  spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part => {
+    if (children.length === 1) {
+      const child = children[0]!
+      const request: ChildRequest = {
+        selection: child.profile,
+        prompt: child.prompt,
+      }
+      if (child.name !== undefined) request.label = child.name
+      return TestModel.toolCall("run_child", request, { id })
+    }
+    return TestModel.toolCall(
+      "run_child_group",
+      {
+        members: children.map((child, index) => {
+          const member: ChildGroupMember = {
+            key: child.name ?? `${child.profile.toLowerCase()}-${index}`,
+            selection: child.profile,
+            prompt: child.prompt,
+          }
+          if (child.name !== undefined) member.label = child.name
+          return member
+        }),
+        concurrency: children.length,
+      },
+      { id },
+    )
+  },
   failure: (description: string, delayMillis?: number): Step =>
     TestModel.failure(
       AiError.make({
@@ -143,13 +158,13 @@ const withLaneIdentity = (
   snapshot: ExecutionRouteSnapshot.ExecutionRouteModelSnapshot,
   profile: Profile,
 ): ExecutionRouteSnapshot.ExecutionRouteModelSnapshot => {
-  const identity = identityFor(profile)
+  const identity = modelRegistrationIdentity(identityFor(profile))
   return {
     ...snapshot,
-    registrationIdentity: identity as typeof snapshot.registrationIdentity,
+    registrationIdentity: identity,
     candidates: snapshot.candidates.map((candidate) => ({
       ...candidate,
-      registrationIdentity: identity as typeof candidate.registrationIdentity,
+      registrationIdentity: identity,
     })),
   }
 }
@@ -193,9 +208,8 @@ const withProviderHttpEnvelope = (
   service: LanguageModel.Service,
   envelope: ProviderHttpEnvelope,
   observed: Ref.Ref<ProviderHttpEnvelopeCounts>,
-): LanguageModel.Service => ({
-  ...service,
-  streamText: ((options: Parameters<LanguageModel.Service["streamText"]>[0]) => {
+): LanguageModel.Service => {
+  const streamText = (options: Parameters<LanguageModel.Service["streamText"]>[0]) => {
     const metadata = AiResponse.makePart("response-metadata", {
       id: "provider-response-0",
       modelId: "provider-model",
@@ -218,8 +232,9 @@ const withProviderHttpEnvelope = (
         return Effect.void
       }),
     )
-  }) as LanguageModel.Service["streamText"],
-})
+  }
+  return Object.assign(service, { streamText })
+}
 
 export const makeLaneModels = Effect.fn("TestHarness.makeLaneModels")(function* (
   lanes: ReadonlyArray<Lane>,

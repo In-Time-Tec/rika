@@ -1,7 +1,7 @@
 import { Toolkit } from "effect/unstable/ai"
-import * as Policy from "../policy/coding-tool-policy"
-import type { Idempotency } from "../policy/policy-idempotency"
-import { ThreadContract } from "./thread-tool-contract"
+import * as Policy from "../policy/coding-tools"
+import type { Idempotency } from "../policy/idempotency"
+import { ThreadContract } from "./thread-contract"
 
 export const toolkit = Toolkit.make(ThreadContract.searchThreadsTool, ThreadContract.readThreadTranscriptTool)
 export const findToolkit = Toolkit.make(ThreadContract.findThreadTool)

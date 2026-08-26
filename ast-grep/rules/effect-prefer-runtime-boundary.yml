@@ -1,6 +1,6 @@
 id: effect-prefer-runtime-boundary
 language: TypeScript
-severity: info
+severity: error
 message: Effect TS advisory — return and compose this Effect; call Effect.run* only from an explicit application, process, test-host, or external-framework boundary.
 rule:
   pattern: Effect.$RUN($$$ARGS)

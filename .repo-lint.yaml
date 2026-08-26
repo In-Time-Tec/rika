@@ -1,0 +1,121 @@
+mode: strict
+useGitignore: true
+
+ignore:
+  - "**/AGENTS.md"
+  - "**/test/fixtures/visual/**"
+
+rules:
+  noAncestorPrefix:
+    - pattern: "apps/*/src/**/*.ts"
+      root: src
+    - pattern: "apps/*/test/**/*.ts"
+      root: test
+    - pattern: "packages/*/src/**/*.ts"
+      root: src
+    - pattern: "packages/*/test/**/*.ts"
+      root: test
+
+  mirror:
+    - source: "apps/*/test/**/*.test.ts"
+      target: "apps/*/src/**/*.ts"
+      pattern: "*.test.ts -> *.ts"
+      exclude:
+        - "apps/*/test/**/*.tui.test.ts"
+        - "apps/*/test/**/*.proc.test.ts"
+    - source: "apps/*/test/**/*.tui.test.ts"
+      target: "apps/*/src/**/*.ts"
+      pattern: "*.tui.test.ts -> *.ts"
+    - source: "apps/*/test/**/*.proc.test.ts"
+      target: "apps/*/src/**/*.ts"
+      pattern: "*.proc.test.ts -> *.ts"
+    - source: "packages/*/test/**/*.test.ts"
+      target: "packages/*/src/**/*.ts"
+      pattern: "*.test.ts -> *.ts"
+      exclude:
+        - "packages/*/test/**/*.tui.test.ts"
+        - "packages/*/test/**/*.proc.test.ts"
+    - source: "packages/*/test/**/*.tui.test.ts"
+      target: "packages/*/src/**/*.ts"
+      pattern: "*.tui.test.ts -> *.ts"
+    - source: "packages/*/test/**/*.proc.test.ts"
+      target: "packages/*/src/**/*.ts"
+      pattern: "*.proc.test.ts -> *.ts"
+
+  forbidNames:
+    - __tests__
+    - characterization
+    - common
+    - common.ts
+    - helpers
+    - helpers.ts
+    - integration
+    - misc
+    - misc.ts
+    - temp
+    - temp.ts
+    - tmp
+    - tmp.ts
+    - utils
+    - utils.ts
+
+  forbidPaths:
+    - "apps/*/src/**/*.test.ts"
+    - "packages/*/src/**/*.test.ts"
+    - "*.contract.test.ts"
+    - "*.integration.test.ts"
+    - "*.live.test.ts"
+    - "*.native.test.ts"
+    - "*.spec.ts"
+    - "*.story.test.ts"
+    - "*behavior-[0-9]*.test.ts"
+
+  match:
+    - pattern: "apps/*"
+      exclude:
+        - "apps/proxy"
+      require:
+        - src
+        - test
+      case: kebab
+    - pattern: "packages/*"
+      require:
+        - src
+        - test
+      case: kebab
+    - pattern: "apps/*/src"
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "apps/*/src/**"
+      case: kebab
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "apps/*/test"
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "apps/*/test/**"
+      case: kebab
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "packages/*/src"
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "packages/*/src/**"
+      case: kebab
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "packages/*/test"
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12
+    - pattern: "packages/*/test/**"
+      case: kebab
+      childCase: kebab
+      maxFiles: 12
+      maxDirectories: 12

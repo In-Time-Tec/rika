@@ -1,6 +1,6 @@
 id: effect-prefer-config
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer Config and provide configuration at the application Layer boundary instead of reading environment globals throughout the program.
 rule:
   any:

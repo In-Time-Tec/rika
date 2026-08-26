@@ -1,6 +1,16 @@
 {
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
   "plugins": ["effecttsgo"],
+  "jsPlugins": [
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    },
+    {
+      "name": "anti-slop-effect",
+      "specifier": "./tools/oxlint/anti-slop/effect/index.ts"
+    }
+  ],
   "options": {
     "typeAware": true
   },
@@ -12,6 +22,22 @@
   "rules": {
     "no-nested-ternary": "error",
     "no-underscore-dangle": "off",
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": "error",
+    "anti-slop/no-shape-in-symbol-names": "error",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "anti-slop-effect/no-service-constructor-imports": "error",
     "effecttsgo/abort-controller-in-effect": "error",
     "effecttsgo/any-unknown-in-error-context": "error",
     "effecttsgo/async-function": "error",
@@ -77,6 +103,7 @@
     "effecttsgo/overridden-schema-constructor": "error",
     "effecttsgo/prefer-schema-over-json": "error",
     "effecttsgo/prefer-schema-type-property": "error",
+    "effecttsgo/prefer-typed-schema-decoder": "error",
     "effecttsgo/prefer-unsafe-constructor": "error",
     "effecttsgo/process-env": "error",
     "effecttsgo/process-env-in-effect": "error",
@@ -121,5 +148,5 @@
       }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", ".turbo", "repos"]
+  "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "repos", "tools/oxlint/anti-slop"]
 }

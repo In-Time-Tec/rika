@@ -1,6 +1,6 @@
 import type { Run } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
-import type { SemanticTreeEvent } from "./semantic-event"
+import type { SemanticTreeEvent } from "./semantic/event"
 
 export interface ToolState {
   readonly rawId: string

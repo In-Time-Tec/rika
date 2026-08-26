@@ -15,10 +15,11 @@ export const developmentTemplate = (repositoryRoot: string): TemplateClass =>
     .fromDockerfile(`${repositoryRoot}/infra/e2b/executor-v1/e2b.Dockerfile`)
     .setStartCmd("/opt/rika/start.sh", "curl --fail --silent http://127.0.0.1:7070/health")
 
+const digestTemplateSourcePromise = (source: ReturnType<typeof Template.toJSON>) =>
+  source["then"]((value) => `sha256:${createHash("sha256").update(value).digest("hex")}`)
+
 export const developmentTemplateSourceDigest = (repositoryRoot: string) =>
-  Template.toJSON(developmentTemplate(repositoryRoot), true).then(
-    (source) => `sha256:${createHash("sha256").update(source).digest("hex")}`,
-  )
+  digestTemplateSourcePromise(Template.toJSON(developmentTemplate(repositoryRoot), true))
 
 const isReadyDevelopmentTemplateImpl = (
   identity: DevelopmentTemplateIdentity,

@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Client } from "pg"
-import { Config, Console, Data, Effect, Layer, Schedule } from "effect"
+import { Config, Console, Data, Effect, Layer, Option, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 
 class DevelopmentServiceUnavailable extends Data.TaggedError("DevelopmentServiceUnavailable")<{
@@ -13,10 +13,16 @@ class DevelopmentServiceUnavailable extends Data.TaggedError("DevelopmentService
 const unavailable = (message: string, retryable: boolean, cause?: unknown) =>
   new DevelopmentServiceUnavailable({ message, retryable, cause })
 
+const PostgresFailure = Schema.Struct({ code: Schema.optionalKey(Schema.String) })
+
 export const postgresUnavailableMessage = (cause: unknown) =>
-  typeof cause === "object" && cause !== null && "code" in cause && cause.code === "28P01"
-    ? "PostgreSQL rejected the development credential because the rika-development-postgres volume belongs to different Alchemy state; restore .alchemy or explicitly remove the stale development container and volume"
-    : "PostgreSQL is not ready"
+  Option.match(Schema.decodeUnknownOption(PostgresFailure)(cause), {
+    onNone: () => "PostgreSQL is not ready",
+    onSome: (failure) =>
+      failure.code === "28P01"
+        ? "PostgreSQL rejected the development credential because the rika-development-postgres volume belongs to different Alchemy state; restore .alchemy or explicitly remove the stale development container and volume"
+        : "PostgreSQL is not ready",
+  })
 
 const checkPostgres = (databaseUrl: string) =>
   Effect.acquireUseRelease(
@@ -43,7 +49,7 @@ const checkPostgres = (databaseUrl: string) =>
             cause,
           ),
       }),
-    (client) => Effect.promise(() => client.end()).pipe(Effect.ignore),
+    (client) => Effect.tryPromise(() => client.end()).pipe(Effect.ignore),
   )
 
 const program = Effect.gen(function* () {

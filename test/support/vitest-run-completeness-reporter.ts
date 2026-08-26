@@ -1,5 +1,10 @@
 import type { Reporter, TestCase, TestModule, TestSpecification, Vitest } from "vitest/node"
 
+interface CompletionDetail {
+  readonly reason: string
+  readonly unhandledErrors?: number
+}
+
 const failExit = (): void => {
   if (process.exitCode === undefined || process.exitCode === 0) process.exitCode = 1
 }
@@ -19,7 +24,7 @@ export class CompletionReporter implements Reporter {
     tests: { expected: this.expectedTests.size, completed: this.completedTests.size },
   })
 
-  private readonly line = (label: "COMPLETE" | "FAILED" | "INCOMPLETE", detail: object): string =>
+  private readonly line = (label: "COMPLETE" | "FAILED" | "INCOMPLETE", detail: CompletionDetail): string =>
     `VITEST RUN ${label} ${JSON.stringify({ ...detail, ...this.counts() })}`
 
   private readonly onExit = (): void => {

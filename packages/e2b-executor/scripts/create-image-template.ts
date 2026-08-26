@@ -34,7 +34,7 @@ export const createImageTemplate = Effect.fn("ExecutorImageTemplate.create")(fun
         message: cause instanceof Error ? cause.message : "E2B private image template build failed",
       }),
   })
-  const identity = yield* Schema.decodeUnknownEffect(TemplateIdentity)(built)
+  const identity = yield* Schema.decodeEffect(TemplateIdentity)(built)
   const artifact = yield* encodeTemplateIdentity(identity)
   yield* fileSystem.writeFileString("executor-template.json", `${artifact}\n`)
 })

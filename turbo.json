@@ -12,7 +12,18 @@
       "dependsOn": ["^build"]
     },
     "//#lint": {
-      "inputs": ["package.json", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "!**/dist/**"]
+      "inputs": [
+        ".oxlintrc.json",
+        "package.json",
+        "bun.lock",
+        "tools/oxlint/**",
+        "apps/**/*.ts",
+        "packages/**/*.ts",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
+        "*.ts",
+        "!**/dist/**"
+      ]
     },
     "//#test-unit": {
       "inputs": [
@@ -61,6 +72,9 @@
         "test/**/*.ts",
         "!**/dist/**"
       ]
+    },
+    "//#repo-lint": {
+      "inputs": [".repo-lint.yaml", ".gitignore", "apps/**", "packages/**", "!**/dist/**"]
     }
   }
 }

@@ -2,6 +2,7 @@ import * as Alchemy from "alchemy"
 import * as Command from "alchemy/Command"
 import * as Docker from "alchemy/Docker"
 import * as Output from "alchemy/Output"
+import * as Provider from "alchemy/Provider"
 import { Effect, Layer, Redacted } from "effect"
 import { developmentTemplateSourceDigest } from "./packages/e2b-executor/src/development-template"
 
@@ -10,7 +11,7 @@ const securedAlchemyState = Bun.spawnSync(["chmod", "-R", "go-rwx", ".alchemy"],
   stdout: "ignore",
   stderr: "ignore",
 })
-if (securedAlchemyState.exitCode !== 0 && (await Bun.file(".alchemy").exists()))
+if (Number(securedAlchemyState.exitCode) !== 0 && (await Bun.file(".alchemy").exists()) === true)
   throw new Error("Alchemy state permissions could not be secured")
 
 const publicPort = Number(Bun.env.PORT ?? "3000")
@@ -19,20 +20,39 @@ const publicUrl = Bun.env.PUBLIC_URL?.trim() || `http://localhost:${publicPort}`
 const openRouterApiKey = Bun.env.OPENROUTER_API_KEY?.trim()
 if (openRouterApiKey === undefined || openRouterApiKey.length === 0) throw new Error("OPENROUTER_API_KEY is required")
 
-const e2bNames = ["E2B_API_KEY", "E2B_APP_ID", "E2B_DEPLOYMENT_ID"] as const
-const configuredE2b = Object.fromEntries(
-  e2bNames.flatMap((name) => {
-    const value = Bun.env[name]?.trim()
-    return value === undefined || value.length === 0 ? [] : [[name, value]]
-  }),
-) as Partial<Record<(typeof e2bNames)[number], string>>
-const e2bEnabled = Object.keys(configuredE2b).length === e2bNames.length
-if (Object.keys(configuredE2b).length !== 0 && !e2bEnabled)
-  throw new Error(`E2B development requires ${e2bNames.join(", ")}`)
-const e2b = e2bEnabled ? (configuredE2b as Record<(typeof e2bNames)[number], string>) : undefined
-const e2bSourceDigest = e2b === undefined ? undefined : await developmentTemplateSourceDigest(process.cwd())
+const e2bApiKey = Bun.env.E2B_API_KEY?.trim() || undefined
+const e2bAppId = Bun.env.E2B_APP_ID?.trim() || undefined
+const e2bDeploymentId = Bun.env.E2B_DEPLOYMENT_ID?.trim() || undefined
+const e2bConfigured = e2bApiKey !== undefined || e2bAppId !== undefined || e2bDeploymentId !== undefined
+const e2bEnabled = e2bApiKey !== undefined && e2bAppId !== undefined && e2bDeploymentId !== undefined
+if (e2bConfigured && !e2bEnabled) throw new Error("E2B development requires E2B_API_KEY, E2B_APP_ID, E2B_DEPLOYMENT_ID")
+const e2b =
+  e2bApiKey === undefined || e2bAppId === undefined || e2bDeploymentId === undefined
+    ? undefined
+    : {
+        apiKey: e2bApiKey,
+        appId: e2bAppId,
+        deploymentId: e2bDeploymentId,
+        sourceDigest: await developmentTemplateSourceDigest(process.cwd()),
+      }
 
-const providers = Layer.mergeAll(Docker.providers(), Command.providers(), Alchemy.RandomProvider())
+const dockerProviders = Layer.effect(
+  Docker.Providers,
+  Provider.collection([Docker.Container, Docker.Network, Docker.RemoteImage, Docker.Volume]),
+).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Docker.ContainerProvider(),
+      Docker.NetworkProvider(),
+      Docker.RemoteImageProvider(),
+      Docker.VolumeProvider(),
+    ),
+  ),
+  Layer.provideMerge(Docker.DockerLive),
+)
+const providers = dockerProviders.pipe(
+  Layer.provideMerge(Layer.mergeAll(Command.providers(), Alchemy.RandomProvider())),
+)
 
 export default Alchemy.Stack(
   "Rika",
@@ -128,8 +148,8 @@ export default Alchemy.Stack(
         : yield* Command.Exec("EnsureDevelopmentExecutorTemplate", {
             command: "bun packages/e2b-executor/scripts/ensure-development-template.ts",
             env: {
-              E2B_API_KEY: Redacted.make(e2b.E2B_API_KEY),
-              RIKA_DEV_E2B_SOURCE_DIGEST: e2bSourceDigest!,
+              E2B_API_KEY: Redacted.make(e2b.apiKey),
+              RIKA_DEV_E2B_SOURCE_DIGEST: e2b.sourceDigest,
               RIKA_DEV_E2B_IDENTITY_PATH: ".alchemy/e2b-development-template.json",
               RIKA_DEV_REPOSITORY_ROOT: process.cwd(),
             },
@@ -148,7 +168,7 @@ export default Alchemy.Stack(
       },
     })
 
-    const apiEnvironment = {
+    const apiEnvironmentBase = {
       NODE_ENV: "development",
       PORT: "3001",
       DATABASE_URL: databaseUrl,
@@ -159,21 +179,26 @@ export default Alchemy.Stack(
       RIKA_PROVIDER_CREDENTIAL_KEY: providerCredentialKey,
       RIKA_DEV_SEED: "1",
       RIKA_DEV_OPENROUTER_API_KEY: Redacted.make(openRouterApiKey),
-      ...(Bun.env.RIKA_DEV_MODEL?.trim() === undefined ? {} : { RIKA_DEV_MODEL: Bun.env.RIKA_DEV_MODEL.trim() }),
       AWS_ACCESS_KEY_ID: "rika-development",
       AWS_SECRET_ACCESS_KEY: minioSecret,
       AWS_REGION: "us-east-1",
       RIKA_DEV_MIGRATIONS: Output.map(Output.of(migrations), () => "ready"),
       RIKA_DEV_OBJECT_STORE: Output.map(Output.of(objectStore), () => "ready"),
-      ...(e2b === undefined
-        ? {}
+    }
+    const developmentModel = Bun.env.RIKA_DEV_MODEL?.trim()
+    const modelEnvironment =
+      developmentModel === undefined ? apiEnvironmentBase : { ...apiEnvironmentBase, RIKA_DEV_MODEL: developmentModel }
+    const apiEnvironment =
+      e2b === undefined || executorTemplate === undefined
+        ? modelEnvironment
         : {
-            E2B_API_KEY: Redacted.make(e2b.E2B_API_KEY),
-            E2B_APP_ID: e2b.E2B_APP_ID,
-            E2B_DEPLOYMENT_ID: e2b.E2B_DEPLOYMENT_ID,
-            RIKA_DEV_E2B_SOURCE_DIGEST: e2bSourceDigest!,
+            ...modelEnvironment,
+            E2B_API_KEY: Redacted.make(e2b.apiKey),
+            E2B_APP_ID: e2b.appId,
+            E2B_DEPLOYMENT_ID: e2b.deploymentId,
+            RIKA_DEV_E2B_SOURCE_DIGEST: e2b.sourceDigest,
             RIKA_DEV_E2B_IDENTITY_PATH: ".alchemy/e2b-development-template.json",
-            RIKA_DEV_E2B_TEMPLATE_READY: Output.map(Output.of(executorTemplate!), () => "ready"),
+            RIKA_DEV_E2B_TEMPLATE_READY: Output.map(Output.of(executorTemplate), () => "ready"),
             RIKA_DEV_EXECUTOR_ORIGIN: "http://127.0.0.1:3003",
             RIKA_DEV_PROXY: Output.map(Output.of(proxy), () => "ready"),
             RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
@@ -181,8 +206,7 @@ export default Alchemy.Stack(
             RIKA_WORKSPACE_CHECKPOINT_ENDPOINT: "http://127.0.0.1:19000",
             RIKA_WORKSPACE_ENCRYPTION_KEY: workspaceEncryptionKey,
             RIKA_WORKSPACE_SETUP_CACHE: "false",
-          }),
-    }
+          }
     yield* Command.Dev("Api", {
       command: "bun scripts/development/api.ts",
       env: apiEnvironment,

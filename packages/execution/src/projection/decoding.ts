@@ -1,10 +1,12 @@
-import { Function } from "effect"
-import type { RunEvent } from "tenetkit/runtime"
+import { Function, Schema } from "effect"
+import type { Run, RunEvent } from "tenetkit/runtime"
 import { bounded, record } from "./values"
 import { toolTextLimit } from "./values"
 
-export const encoded = (value: unknown): string => {
-  if (typeof value === "string") return bounded(value, toolTextLimit)
+type ModelValue = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionStarted" }>["call"]["params"]
+
+export const encoded = (value: ModelValue): string => {
+  if (Schema.is(Schema.String)(value)) return bounded(value, toolTextLimit)
   try {
     return bounded(JSON.stringify(value) ?? "", toolTextLimit)
   } catch {
@@ -12,21 +14,16 @@ export const encoded = (value: unknown): string => {
   }
 }
 
-export const promptText = (value: unknown): string => {
-  if (typeof value === "string") return value
-  if (Array.isArray(value))
-    return value
-      .map(promptText)
-      .filter((part) => part.length > 0)
-      .join("\n")
+export const promptText = (value: ModelValue): string => {
+  if (Schema.is(Schema.String)(value)) return value
+  if (Array.isArray(value)) return value.map(promptText).filter(Boolean).join("\n")
   const object = record(value)
-  if (typeof object.text === "string") return object.text
-  if ("content" in object) return promptText(object.content)
-  return ""
+  if (Schema.is(Schema.String)(object.text)) return object.text
+  return "content" in object ? promptText(object.content) : ""
 }
 
-export const token = (value: unknown): number | undefined =>
-  typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 ? undefined : value
+export const token = (value: number | undefined): number | undefined =>
+  value === undefined || !Number.isSafeInteger(value) || value < 0 ? undefined : value
 
 const addImpl = (left: number | undefined, right: number | undefined): number | undefined => {
   if (right === undefined) return left
@@ -35,13 +32,12 @@ const addImpl = (left: number | undefined, right: number | undefined): number | 
   return value
 }
 
-export const providerCostNanoUsd = (value: unknown): number | undefined => {
+export const providerCostNanoUsd = (value: RunEvent.RunEvent | Run.RawUsageFact): number | undefined => {
   const event = record(value)
   const usage = record(event.usage)
   const candidate = record(event.cost ?? event.providerCost ?? usage.cost)
   const amount = candidate.amount
-  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 || candidate.currency !== "USD")
-    return undefined
+  if (!Schema.is(Schema.Finite)(amount) || amount < 0 || candidate.currency !== "USD") return undefined
   const nanoUsd = Math.round(amount * 1_000_000_000)
   return Number.isSafeInteger(nanoUsd) ? nanoUsd : undefined
 }

@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import { clipToWidth } from "../terminal/terminal-format"
+import { clipToWidth } from "../terminal/format"
 
 const clip = clipToWidth
 
@@ -106,4 +106,4 @@ export const renderPartialDiffStyled: {
 })
 import { TerminalStyledText, type TerminalTextChunk } from "../markdown/styled-text"
 import { bold, fg } from "../markdown/styled-text-effects"
-import { colors } from "../terminal/terminal-theme"
+import { colors } from "../terminal/theme"

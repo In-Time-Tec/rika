@@ -39,7 +39,7 @@ it.layer(BunServices.layer)("worker process completeness", (test) => {
         const reported = output.split("\n").find((line) => line.startsWith("VITEST RUN "))
         expect(reported).toBeDefined()
         expect(reported).not.toContain("VITEST RUN COMPLETE")
-        const counts = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Counts))(
+        const counts = yield* Schema.decodeEffect(Schema.fromJsonString(Counts))(
           reported!.slice(reported!.indexOf("{")),
         )
         expect(counts.files.completed).toBeLessThan(counts.files.expected)

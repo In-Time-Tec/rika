@@ -146,19 +146,18 @@ export const loadIdentityConfig = Effect.fn("IdentityConfig.load")(function* (en
   if (production && resendApiKey === undefined)
     return yield* failure("RESEND_API_KEY and EMAIL_FROM are required in production")
   const emailFrom = configuredEmailFrom === undefined ? undefined : yield* parseEmailFrom(configuredEmailFrom)
-  return {
+  const config: IdentityConfig = {
     ...database,
     production,
     port: yield* required(environment, "PORT").pipe(Effect.flatMap(parsePort)),
     baseUrl,
     trustedOrigins: Array.from(new Set([baseUrl, ...trustedOrigins])),
     authSecret: yield* required(environment, "BETTER_AUTH_SECRET").pipe(Effect.flatMap(parseSecret)),
-    ...(githubClientId === undefined
-      ? {}
-      : { github: { clientId: githubClientId, clientSecret: Redacted.make(githubClientSecret!) } }),
-    ...(resendApiKey === undefined
-      ? {}
-      : { mail: { resendApiKey: Redacted.make(resendApiKey), emailFrom: emailFrom! } }),
     resource: `${baseUrl}/api/v1`,
-  } satisfies IdentityConfig
+  }
+  if (githubClientId !== undefined)
+    Object.assign(config, { github: { clientId: githubClientId, clientSecret: Redacted.make(githubClientSecret!) } })
+  if (resendApiKey !== undefined)
+    Object.assign(config, { mail: { resendApiKey: Redacted.make(resendApiKey), emailFrom: emailFrom! } })
+  return config
 })

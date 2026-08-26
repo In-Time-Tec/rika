@@ -10,7 +10,7 @@ import * as ThreadSummaryRepository from "@rika/product/thread-summary-repositor
 import { Function, Effect, Ref, Cause, Semaphore } from "effect"
 import { type InteractiveEvent } from "../session-event"
 import { queueItem } from "../turn/queue"
-import { OperationError, operationError } from "../../operation-error"
+import { OperationError, operationError } from "../../error"
 import { promptUnit } from "./transcript-window"
 import { type InteractiveSession, type InteractiveSessionSelectionInput } from "../session"
 
@@ -99,7 +99,7 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
     setSelectedThreadId(String(thread.id))
     yield* Ref.set(interactiveThread, thread)
     dispatch({ _tag: "ThreadActivated", threadId: String(thread.id), title: thread.title })
-    dispatch({
+    const loaded: Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }> = {
       _tag: "SelectionLoaded",
       selectionEpoch: epoch,
       activitySequence,
@@ -110,8 +110,8 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
       queueRevision: queue.revision,
       queuedCount: queue.queuedCount,
       queue: queue.turns.map(queueItem),
-      ...(activeTurn === undefined ? {} : { activeTurn }),
-    })
+    }
+    dispatch(activeTurn === undefined ? loaded : { ...loaded, activeTurn })
   })
   return {
     openSelectionProjectionFeed,
@@ -154,15 +154,15 @@ export const makeInteractiveSessionSelection = (
             const previous = yield* Ref.get(typedInteractiveThread)
             const loaded = getSelectionLoad()
             const joined = loaded?.epoch === 0 && loaded.threadId === id ? loaded : undefined
-            setSelectionLoad({
+            const loading = {
               epoch: next,
               threadId: id,
               previousEpoch: typedGetCurrentSelectionEpoch(),
               previousThreadId: previous === undefined ? undefined : String(previous.id),
               events: joined?.events ?? [],
               committed: false,
-              ...(joined?.overflow === undefined ? {} : { overflow: joined.overflow }),
-            })
+            }
+            setSelectionLoad(joined?.overflow === undefined ? loading : { ...loading, overflow: joined.overflow })
             yield* Ref.set(typedSelectionRequest, next)
             return next
           }),

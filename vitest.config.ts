@@ -1,13 +1,28 @@
-import { readFile } from "node:fs/promises"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import * as os from "node:os"
-import { dirname, resolve } from "node:path"
+import { Config, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import { defineConfig } from "vitest/config"
+import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
 /**
  * Half the machine's cores, bounded so a laptop gets real parallelism while a four-core CI
  * runner never oversubscribes into starvation timeouts on timing-sensitive tests.
  */
 const laneWorkers = (cap: number) => Math.min(cap, Math.max(2, Math.ceil(os.cpus().length / 2)))
-const tenetkit = process.env.RIKA_TENETKIT_WORKTREE
+const platform = Layer.merge(BunFileSystem.layer, BunPath.layer)
+const runPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R, E>) =>
+  Effect.scoped(Layer.build(layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))).pipe(
+    Effect.runSync,
+  )
+const configured = Effect.gen(function* () {
+  const path = yield* Path.Path
+  const tenetkit = yield* Config.option(Config.string("RIKA_TENETKIT_WORKTREE"))
+  return { path, tenetkit }
+}).pipe((effect) => runPlatform(effect, platform))
+const tenetkit = configured.tenetkit._tag === "Some" ? configured.tenetkit.value : undefined
+const resolve = configured.path.resolve
+const dirname = configured.path.dirname
 const tenetkitPackage = tenetkit === undefined ? undefined : resolve(tenetkit, "packages/tenetkit/dist")
 const tenetkitAliases =
   tenetkitPackage === undefined
@@ -29,9 +44,6 @@ const tenetkitAliases =
         { find: /^tenetkit\/test$/, replacement: resolve(tenetkitPackage, "test/index.js") },
         { find: /^@tenetkit\/pg$/, replacement: resolve(tenetkit, "packages/pg/dist/postgres/index.js") },
       ]
-import { defineConfig } from "vitest/config"
-import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
-
 export default defineConfig({
   resolve: {
     dedupe: ["effect"],
@@ -45,9 +57,18 @@ export default defineConfig({
         if (!id.endsWith(".prompt.txt")) return undefined
         return importer === undefined ? id : resolve(dirname(importer), id)
       },
-      async load(id) {
+      load(id) {
         if (!id.endsWith(".prompt.txt")) return undefined
-        return `export default ${JSON.stringify(await readFile(id, "utf8"))}`
+        return Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const content = yield* fileSystem.readFileString(id)
+          const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(content)
+          return `export default ${encoded}`
+        }).pipe((effect) =>
+          Effect.scoped(
+            Layer.build(BunFileSystem.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context))),
+          ).pipe(Effect.runPromise),
+        )
       },
     },
   ],

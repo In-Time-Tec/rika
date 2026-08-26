@@ -1,6 +1,6 @@
 id: effect-prefer-scheduling
 language: TypeScript
-severity: warning
+severity: error
 message: Effect TS advisory — prefer Effect.sleep, Schedule, and scoped Fibers instead of raw timers or microtasks.
 rule:
   any:

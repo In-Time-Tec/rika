@@ -1,19 +1,26 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { moduleNames } from "@rika/kernel/binding-modules"
 import { globals, source } from "@rika/kernel/kernel-bootstrap"
 
 type HostResult<A> = ReturnType<typeof Effect.runPromise<A, never>>
-type Call = (input: unknown) => HostResult<unknown>
+type Call = (input: Schema.Json) => HostResult<Schema.Json>
 
-interface Sandbox {
-  readonly rika: Record<string, Record<string, Call>> & { readonly mcp: Record<string, Record<string, Call>> }
-  readonly context: unknown
+interface McpSandbox {
+  readonly servers: Call
+  readonly tools: Call
+  readonly call: Call
+  readonly files: Record<string, Call>
 }
 
-const server = (sandbox: Sandbox, name: string): Record<string, Call> => sandbox.rika.mcp[name]!
-const flat = (sandbox: Sandbox, name: string): Call => (sandbox.rika.mcp as unknown as Record<string, Call>)[name]!
-const invoke = (call: Call, input: unknown): Effect.Effect<unknown> => Effect.tryPromise(() => call(input))
+interface Sandbox {
+  readonly rika: { readonly mcp: McpSandbox; readonly workspace: object }
+  readonly context: Schema.Json
+}
+
+const server = (sandbox: Sandbox): Record<string, Call> => sandbox.rika.mcp.files
+const flat = (sandbox: Sandbox): Call => sandbox.rika.mcp.servers
+const invoke = (call: Call, input: Schema.Json): Effect.Effect<Schema.Json> => Effect.tryPromise(() => call(input))
 
 const discovered = [
   { name: "read", rawName: "raw_read" },
@@ -21,8 +28,8 @@ const discovered = [
 ]
 
 interface Recorder {
-  readonly calls: Array<unknown>
-  readonly toolCalls: Array<unknown>
+  readonly calls: Array<Schema.Json>
+  readonly toolCalls: Array<Schema.Json>
 }
 
 const evaluate = (
@@ -31,15 +38,14 @@ const evaluate = (
   availableTools: Array<(typeof discovered)[number]> = discovered,
 ): Effect.Effect<Sandbox> =>
   Effect.tryPromise(() => {
-    const scope: Record<string, unknown> = {}
-    for (const name of moduleNames) scope[name] = {}
+    const scope = Object.fromEntries(moduleNames.map((name) => [name, {}]))
     scope.mcp = {
       servers: () => Effect.runPromise(Effect.succeed([{ name: "files", kind: "local", enabled: true }])),
-      tools: (input: unknown) => {
+      tools: (input: Schema.Json) => {
         recorder.toolCalls.push(input)
         return Effect.runPromise(Effect.succeed(availableTools))
       },
-      call: (input: unknown) => {
+      call: (input: Schema.Json) => {
         recorder.calls.push(input)
         return Effect.runPromise(Effect.succeed({ content: { ok: true }, isError: false }))
       },
@@ -54,7 +60,7 @@ const evaluate = (
       scope.workspace = { stale: true }
     }
     const body = `return (async () => { ${source().replaceAll("globalThis", "host")} ; return { rika: host.rika, context: host.context } })()`
-    const run = new Function("host", body) as (host: Record<string, unknown>) => HostResult<Sandbox>
+    const run = new Function("host", body)
     return run({ ...scope })
   })
 
@@ -82,7 +88,7 @@ describe("kernel bootstrap", () => {
   it.effect("re-mounts live globals after a snapshot restores stale user values", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder(), true)
-      expect(typeof sandbox.rika).toBe("object")
+      expect(sandbox.rika).toBeInstanceOf(Object)
       expect(sandbox.rika.workspace).toEqual({})
       expect(sandbox.context).toEqual({ threadId: "thread", workspace: "/repo", trustMode: "trusted-local" })
     }),
@@ -91,7 +97,7 @@ describe("kernel bootstrap", () => {
   it.effect("keeps the flat mcp contract reachable beside the proxy", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder())
-      const servers = yield* invoke(flat(sandbox, "servers"), {})
+      const servers = yield* invoke(flat(sandbox), {})
       expect(servers).toEqual([{ name: "files", kind: "local", enabled: true }])
     }),
   )
@@ -100,7 +106,7 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      const response = yield* invoke(server(sandbox, "files").read!, { path: "a" })
+      const response = yield* invoke(server(sandbox).read!, { path: "a" })
       expect(recording.calls).toEqual([{ server: "files", tool: "read", input: { path: "a" } }])
       expect(response).toEqual({ content: { ok: true }, isError: false })
     }),
@@ -110,8 +116,8 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      yield* invoke(server(sandbox, "files").read!, {})
-      yield* invoke(server(sandbox, "files").write!, {})
+      yield* invoke(server(sandbox).read!, {})
+      yield* invoke(server(sandbox).write!, {})
       expect(recording.toolCalls).toEqual([{ server: "files" }])
     }),
   )
@@ -119,7 +125,7 @@ describe("kernel bootstrap", () => {
   it.effect("returns typed data for an unknown tool rather than throwing undefined is not a function", () =>
     Effect.gen(function* () {
       const sandbox = yield* evaluate(recorder())
-      const response = yield* invoke(server(sandbox, "files").ghost!, {})
+      const response = yield* invoke(server(sandbox).ghost!, {})
       expect(response).toMatchObject({ _tag: "McpBindingNotFound", module: "files", operation: "ghost" })
     }),
   )
@@ -129,10 +135,10 @@ describe("kernel bootstrap", () => {
       const recording = recorder()
       const availableTools = [discovered[0]!]
       const sandbox = yield* evaluate(recording, false, availableTools)
-      yield* invoke(server(sandbox, "files").read!, {})
+      yield* invoke(server(sandbox).read!, {})
       availableTools.push(discovered[1]!)
 
-      const response = yield* invoke(server(sandbox, "files").write!, {})
+      const response = yield* invoke(server(sandbox).write!, {})
 
       expect(recording.toolCalls).toEqual([{ server: "files" }])
       expect(recording.calls).toEqual([{ server: "files", tool: "read", input: {} }])
@@ -150,7 +156,7 @@ describe("kernel bootstrap", () => {
     Effect.gen(function* () {
       const recording = recorder()
       const sandbox = yield* evaluate(recording)
-      yield* invoke(server(sandbox, "files").raw_write!, { x: 1 })
+      yield* invoke(server(sandbox).raw_write!, { x: 1 })
       expect(recording.calls).toEqual([{ server: "files", tool: "raw_write", input: { x: 1 } }])
     }),
   )

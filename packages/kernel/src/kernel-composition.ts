@@ -5,10 +5,7 @@ import { BunKernelPool, workerModule, workerSupportModules } from "tenetkit/repl
  * Where the kernel worker lives in an ordinary install. A packaging step needs it to ship the worker
  * beside a compiled binary, and only the package that owns the worker can answer where it is.
  */
-export const defaultWorkerModules: {
-  readonly worker: string
-  readonly support: ReadonlyArray<string>
-} = { worker: workerModule, support: workerSupportModules }
+export const defaultWorkerModules = { worker: workerModule, support: workerSupportModules }
 
 /**
  * Where a kernel's worker and the runtime that runs it live, given whether the module path this
@@ -31,7 +28,7 @@ import { Duration, Layer } from "effect"
 import type { FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as KernelBootstrap from "./kernel-bootstrap"
-import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/binding-modules"
+import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/modules"
 import { make as makeProfile, type Options as ProfileOptions } from "./kernel-profile-registration"
 import { layer as stateStoreLayer } from "./kernel-state-store-file-system"
 
@@ -68,10 +65,11 @@ const moduleOptions = (options: Options): ModuleOptions => ({
  * The profile a pool is built from carries the same environment the surface is mounted over, so a
  * kernel never runs cells against a skill set or server set the epoch was not reconstructed from.
  */
-const profileOptions = (options: Options): ProfileOptions => ({
-  ...options,
-  environment: { ...(options.skills === undefined ? {} : { skills: options.skills }), servers: options.servers },
-})
+const profileOptions = (options: Options): ProfileOptions => {
+  const environment: ProfileOptions["environment"] =
+    options.skills === undefined ? { servers: options.servers } : { servers: options.servers, skills: options.skills }
+  return { ...options, environment }
+}
 
 /** The mounted `rika.*` surface, closed over the services that back it. */
 export const bindings = (
@@ -101,20 +99,19 @@ export const pool = (
 > =>
   (() => {
     const stateStore = state(options.dataRoot)
-    return Layer.merge(
-      BunKernelPool.layer({
-        profile: makeProfile(profileOptions(options)),
-        runtimeCommand: options.runtimeCommand ?? "bun",
-        workerModule: options.workerModule ?? workerModule,
-        startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
-        ...(options.bootstrap === false ? {} : { bootstrap: KernelBootstrap.source() }),
-        interruptGraceMillis: options.interruptGraceMillis ?? 250,
-        maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
-        idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
-        environment: options.environment ?? {},
-      }).pipe(Layer.provide(stateStore)),
-      stateStore,
-    )
+    const basePoolOptions = {
+      profile: makeProfile(profileOptions(options)),
+      runtimeCommand: options.runtimeCommand ?? "bun",
+      workerModule: options.workerModule ?? workerModule,
+      startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
+      interruptGraceMillis: options.interruptGraceMillis ?? 250,
+      maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
+      idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
+      environment: options.environment ?? {},
+    }
+    const poolOptions: Parameters<typeof BunKernelPool.layer>[0] =
+      options.bootstrap === false ? basePoolOptions : { ...basePoolOptions, bootstrap: KernelBootstrap.source() }
+    return Layer.merge(BunKernelPool.layer(poolOptions).pipe(Layer.provide(stateStore)), stateStore)
   })()
 
 /**
