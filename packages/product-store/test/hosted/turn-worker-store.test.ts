@@ -39,7 +39,7 @@ const readFileString = (url: URL) =>
     ),
   )
 
-const request = (workerId: string, claimToken: string, leaseMillis = 100) => ({
+const request = (workerId: string, claimToken: string, leaseMillis = 30_000) => ({
   workerId,
   claimToken,
   leaseMillis,
@@ -174,7 +174,7 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         const first = claims.find((claim) => claim !== undefined)
         if (first === undefined) return yield* Effect.die("Turn was not claimed")
         expect(first.input).toMatchObject({ turnId: "turn-1", threadId: "thread-1", prompt: "first" })
-        expect(first.expiresAt - first.claimedAt).toBe(100)
+        expect(first.expiresAt - first.claimedAt).toBe(30_000)
         expect(yield* store.renew(first, 5_000)).toBe(true)
         const access: Access = {
           assignmentId: ExecutorAssignmentId.make("assignment-1"),
