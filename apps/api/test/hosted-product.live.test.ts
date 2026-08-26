@@ -128,9 +128,12 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
       const first = yield* product.createConnection(input)
       expect(yield* product.createConnection(input)).toEqual(first)
       expect(
-        yield* Effect.all(Array.from({ length: 8 }, () => product.createConnection(input)), {
-          concurrency: "unbounded",
-        }),
+        yield* Effect.all(
+          Array.from({ length: 8 }, () => product.createConnection(input)),
+          {
+            concurrency: "unbounded",
+          },
+        ),
       ).toEqual(Array.from({ length: 8 }, () => first))
       const records = yield* query(
         pool,

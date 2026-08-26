@@ -49,7 +49,12 @@ export interface ProjectContext {
 }
 
 export type AdmittedRun =
-  | { readonly _tag: "Admitted"; readonly commandId: string; readonly turnId: string; readonly status: "accepted" | "queued" }
+  | {
+      readonly _tag: "Admitted"
+      readonly commandId: string
+      readonly turnId: string
+      readonly status: "accepted" | "queued"
+    }
   | { readonly _tag: "Cancelled"; readonly commandId: string }
 
 export interface ThreadAuthority {

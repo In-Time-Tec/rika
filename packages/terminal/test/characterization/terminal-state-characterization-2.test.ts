@@ -276,14 +276,14 @@ test("toggles every transcript detail as one reducer action", () => {
   model = update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual([])
 })
-test("toggles all error details with uppercase D only when the composer is empty", () => {
+test("keeps CLI-style errors non-expandable when uppercase D is pressed", () => {
   const base = {
     ...initial("/work"),
     blocks: [{ _tag: "Error", title: "Execution failed", detail: "Model unavailable" }],
   } as Model
 
-  const expanded = update(base, { _tag: "KeyPressed", key: key({ name: "d", sequence: "D", shift: true }) })
-  expect(expanded.expandedRowKeys).toEqual(["block:Error:0"])
+  const unchanged = update(base, { _tag: "KeyPressed", key: key({ name: "d", sequence: "D", shift: true }) })
+  expect(unchanged.expandedRowKeys).toEqual([])
 
   const typed = update(
     { ...base, input: "draft", cursor: 5 },

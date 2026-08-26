@@ -155,9 +155,7 @@ test("keeps the active turn running and restores text when steering fails", () =
   expect(failed.activeTurnId).toBe("turn-a")
   expect(failed.steeringRequests).toEqual([])
   expect(failed.input).toBe("focus on the fixture")
-  expect(failed.blocks).toContainEqual(
-    expect.objectContaining({ _tag: "Notification", title: "Steering not delivered" }),
-  )
+  expect(failed.blocks).toContainEqual(expect.objectContaining({ _tag: "Error", title: "Steering not delivered" }))
 })
 test("ignores steering failures for an unknown request identity", () => {
   const active: Model = {
@@ -206,6 +204,28 @@ test("does not issue another cancel while cancellation is pending", () => {
     cancelPending: true,
   }
   expect(update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
+})
+test("settles cancellation after a queued turn promotes before the response arrives", () => {
+  const promoted: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: "turn-b",
+    cancelPending: true,
+  }
+  const cancelled = update(promoted, {
+    _tag: "ExecutionCancelled",
+    turnId: "turn-a",
+    agentResponseArrived: false,
+  })
+  expect(cancelled).toMatchObject({ busy: true, activeTurnId: "turn-b", cancelPending: false })
+
+  const failed = update(promoted, {
+    _tag: "CancelFailed",
+    turnId: "turn-a",
+    message: "turn settled before cancellation",
+  })
+  expect(failed).toMatchObject({ busy: true, activeTurnId: "turn-b", cancelPending: false })
+  expect(failed.blocks).toContainEqual(expect.objectContaining({ _tag: "Error", title: "Cancellation not completed" }))
 })
 test("targets an unresolved submission when Ctrl+C arrives before Turn admission", () => {
   const submitted = update(

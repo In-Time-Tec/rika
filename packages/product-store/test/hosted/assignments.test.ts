@@ -9,6 +9,7 @@ import {
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
   CheckpointId,
+  DeviceId,
   ExecutorAssignmentId,
   ExecutorInstanceId,
   OwnerId,
@@ -17,6 +18,7 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
+import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { layer } from "../../src/hosted/memory-assignments"
 
 const ids = {
@@ -173,17 +175,52 @@ it.layer(layer)("executor assignments", (test) => {
       const { assignments, active, access } = yield* open("replacement")
       const replacement = yield* assignments.beginReplacement({
         ...version(active),
+        placement: { _tag: "OrbPlacement", templateBuildId: "template-v2", providerScope: "scope" },
         bootstrapCredentialDigest: Redacted.make("replacement-bootstrap"),
         bootstrapLifetimeMillis: 60_000,
       })
 
       expect(replacement.generation).toBe("2")
+      expect(replacement.placement).toEqual({
+        _tag: "OrbPlacement",
+        templateBuildId: "template-v2",
+        providerScope: "scope",
+      })
       expect(replacement.lifecycle).toMatchObject({ _tag: "Provisioning", providerInstanceId: null })
       expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
       expect(yield* Effect.result(assignments.authenticate(access))).toMatchObject({
         _tag: "Failure",
         failure: { reason: "stale-fence" },
       })
+    }),
+  )
+
+  test.effect("rejects replacement attempts that change immutable placement authority", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-01-01T00:00:00.000Z"))
+      const { assignments, active } = yield* open("replacement-authority")
+
+      for (const placement of [
+        { _tag: "OrbPlacement" as const, templateBuildId: "template-v2", providerScope: "another-scope" },
+        {
+          _tag: "RunnerPlacement" as const,
+          deviceId: DeviceId.make("another-device"),
+          checkoutFingerprint: CheckoutFingerprint.make("another-checkout"),
+          requestingDeviceId: DeviceId.make("another-requester"),
+        },
+      ])
+        expect(
+          yield* Effect.result(
+            assignments.beginReplacement({
+              ...version(active),
+              placement,
+              bootstrapCredentialDigest: Redacted.make("replacement-bootstrap"),
+              bootstrapLifetimeMillis: 60_000,
+            }),
+          ),
+        ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+
+      expect(yield* assignments.get(active.id)).toEqual(active)
     }),
   )
 
@@ -202,6 +239,7 @@ it.layer(layer)("executor assignments", (test) => {
       expect(paused.capabilities).toEqual(refreshedCapabilities)
       const replacement = yield* assignments.beginReplacement({
         ...version(paused),
+        placement: paused.placement,
         bootstrapCredentialDigest: Redacted.make("replacement-capabilities"),
         bootstrapLifetimeMillis: 60_000,
       })

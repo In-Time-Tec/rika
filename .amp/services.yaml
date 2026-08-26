@@ -1,8 +1,10 @@
 services:
+  docker-daemon:
+    command: sudo dockerd --group "$(id -gn)"
   secret-service:
     command: bun scripts/development/secret-service.ts
   rika:
-    command: bun run dev
+    command: for attempt in $(seq 1 60); do if docker info >/dev/null 2>&1; then exec bun run dev; fi; sleep 0.2; done; echo "Docker did not become ready" >&2; exit 1
     health: /readyz
     portal:
       title: Rika

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import { ExecutorInstanceId } from "@rika/product/hosted-model"
 import type { Access } from "@rika/remote-execution/protocol"
-import { Effect, Redacted, Schema } from "effect"
+import { Deferred, Effect, Fiber, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { CheckpointError } from "../src/checkpoint"
 import * as Controller from "../src/controller"
@@ -164,17 +165,71 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("rejects an assignment whose immutable build is not controller-approved", () => {
+  it.effect("advances generation and atomically adopts the approved build before provisioning", () => {
     const harness = makeHarness({ templateBuildId: "approved-build" })
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* Effect.flip(service.provision(assignmentInput.id, setupAuthorization))).toMatchObject({
-        kind: "provider",
-        message: "Assignment template build is not approved",
+      expect(yield* service.provision(assignmentInput.id, setupAuthorization)).toMatchObject({
+        generation: 2,
+        sandboxId: "sandbox-1",
+        templateBuildId: "approved-build",
       })
-      expect(harness.provider.creates).toEqual([])
-      expect(harness.provider.bootstraps).toEqual([])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        placement: { _tag: "OrbPlacement", templateBuildId: "approved-build", providerScope: "test" },
+        lifecycle: { _tag: "AwaitingBootstrap", providerInstanceId: "sandbox-1" },
+      })
+      expect(harness.provider.creates).toHaveLength(1)
+      expect(harness.provider.creates[0]).toMatchObject({ templateBuildId: "approved-build", generation: 2 })
+      expect(harness.provider.bootstraps[0]).toMatchObject({
+        identity: { assignmentGeneration: 2, templateBuildId: "approved-build", lifecycle: "replacement" },
+      })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("never reconnects an active old-build sandbox and replaces it with the approved exact build", () => {
+    const harness = makeHarness({ templateBuildId: "approved-build" })
+    return Effect.gen(function* () {
+      const assignments = yield* ExecutorAssignments
+      const assignment = yield* createAssignment()
+      const provisioning = yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("old-bootstrap"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      const bound = yield* assignments.bindProviderInstance({
+        assignmentId: provisioning.id,
+        generation: provisioning.generation,
+        revision: provisioning.revision,
+        providerInstanceId: "sandbox-old-build",
+      })
+      yield* assignments.openSession({
+        assignmentId: bound.id,
+        generation: bound.generation,
+        revision: bound.revision,
+        providerInstanceId: "sandbox-old-build",
+        executorInstanceId: ExecutorInstanceId.make("executor-old-build"),
+        processIncarnation: "process-old-build",
+        capabilities: workspaceCapabilities,
+        presentedBootstrapCredentialDigest: Redacted.make("old-bootstrap"),
+        sessionCredentialDigest: Redacted.make("old-session"),
+        leaseLifetimeMillis: 60_000,
+      })
+
+      const service = yield* controller
+      expect(yield* service.provision(assignment.id, runtimeAuthorization)).toMatchObject({
+        generation: 2,
+        sandboxId: "sandbox-1",
+        templateBuildId: "approved-build",
+      })
+      expect(harness.provider.connects).toEqual([])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        placement: { _tag: "OrbPlacement", templateBuildId: "approved-build", providerScope: "test" },
+      })
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -211,6 +266,33 @@ describe("Controller", () => {
       ])
       expect((yield* service.kill({ assignmentId: "assignment-1", generation: 1 })).state).toBe("terminated")
       expect(harness.provider.kills).toEqual(["sandbox-1"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("replaces an active sandbox whose authoritative lease expired", () => {
+    const harness = makeHarness({ leaseLifetimeMillis: 60_000 })
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      yield* authenticate(harness, 1)
+      yield* TestClock.adjust("1 minute")
+
+      expect(yield* service.provision("assignment-1", runtimeAuthorization)).toMatchObject({
+        assignmentId: "assignment-1",
+        generation: 2,
+        sandboxId: "sandbox-2",
+        state: "provisioning",
+      })
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        lifecycle: { _tag: "AwaitingBootstrap", providerInstanceId: "sandbox-2" },
+      })
+      expect(harness.provider.creates).toHaveLength(2)
+      expect(harness.provider.connects).toEqual([])
+      expect(harness.provider.bootstraps[1]).toMatchObject({
+        sandboxId: "sandbox-2",
+        identity: { assignmentGeneration: 2, lifecycle: "replacement" },
+      })
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -331,7 +413,7 @@ describe("Controller", () => {
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
       const replacement = yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
       expect(replacement).toMatchObject({ generation: 2, sandboxId: "sandbox-2", state: "provisioning" })
-      expect(harness.provider.kills).toContain("sandbox-1")
+      expect(harness.provider.kills).not.toContain("sandbox-1")
       expect((yield* Effect.flip(service.reconnect(first.access))).kind).toBe("fenced")
       expect((yield* authenticate(harness, 2)).welcome.cursor).toEqual({ sequence: 4, value: "executor:4" })
     }).pipe(provideLayer(harness.layer))
@@ -644,7 +726,7 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("adopts an existing generation after create result loss and removes duplicate sandboxes", () => {
+  it.effect("adopts an existing generation and reaps duplicates only after durable binding and grace", () => {
     const harness = makeHarness()
     harness.provider.createFailure = true
     const metadata = {
@@ -690,11 +772,111 @@ describe("Controller", () => {
         { sandboxId: "sandbox-a-adopt", timeoutMillis: Controller.IdleTimeoutMillis },
       ])
       expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-a-adopt"])
+      expect(harness.provider.kills).toEqual([])
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-z-duplicate"])
       expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("adopts the usable sandbox when duplicate cleanup fails", () => {
+  it.effect("proves a usable candidate before removing unconnectable duplicates", () => {
+    const harness = makeHarness()
+    harness.provider.createFailure = true
+    harness.provider.connectFailures.add("sandbox-a-broken")
+    const metadata = {
+      "rika.managed": "e2b-executor",
+      "rika.app-id": "rika",
+      "rika.deployment-id": "test",
+      "rika.assignment-id": "assignment-1",
+      "rika.generation": "1",
+    }
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-a-broken",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+      {
+        sandboxId: "sandbox-b-adopt",
+        state: "paused",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+      {
+        sandboxId: "sandbox-z-duplicate",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata,
+      },
+    ]
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const assignment = yield* createAssignment()
+      const assignments = yield* ExecutorAssignments
+      yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("lost-bootstrap-credential"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+
+      expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
+        sandboxId: "sandbox-b-adopt",
+      })
+      expect(harness.provider.connects).toEqual([
+        { sandboxId: "sandbox-a-broken", timeoutMillis: Controller.IdleTimeoutMillis },
+        { sandboxId: "sandbox-b-adopt", timeoutMillis: Controller.IdleTimeoutMillis },
+      ])
+      expect(harness.provider.kills).toEqual([])
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* service.cleanupOrphans).toEqual(["sandbox-a-broken", "sandbox-z-duplicate"])
+      expect(harness.provider.kills).toEqual(["sandbox-a-broken", "sandbox-z-duplicate"])
+      expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-b-adopt"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("reconciles a committed provider binding after its response is lost", () => {
+    const harness = makeHarness()
+    harness.bindResponseFailures = 1
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+
+      expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
+        sandboxId: "sandbox-1",
+        state: "provisioning",
+      })
+      expect(harness.provider.bootstraps.map((entry) => entry.sandboxId)).toEqual(["sandbox-1"])
+      expect(harness.provider.kills).toEqual([])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("does not kill a sandbox when provider binding and reconciliation outcomes are both unknown", () => {
+    const harness = makeHarness()
+    harness.bindResponseFailures = 1
+    harness.failReadAfterBind = true
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* createAssignment()
+
+      expect((yield* Effect.flip(service.provision("assignment-1", setupAuthorization))).kind).toBe("repository")
+      expect(harness.provider.bootstraps).toEqual([])
+      expect(harness.provider.kills).toEqual([])
+      expect((yield* readAssignment()).lifecycle).toMatchObject({
+        _tag: "AwaitingBootstrap",
+        providerInstanceId: "sandbox-1",
+      })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("keeps the adopted sandbox when authority-backed duplicate cleanup fails", () => {
     const harness = makeHarness()
     harness.provider.createFailure = true
     harness.provider.killFailure = true
@@ -736,6 +918,10 @@ describe("Controller", () => {
         sandboxId: "sandbox-a-adopt",
         state: "provisioning",
       })
+      expect(harness.provider.kills).toEqual([])
+      expect(yield* service.cleanupOrphans).toEqual([])
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* service.cleanupOrphans).toEqual([])
       expect(harness.provider.kills).toEqual(["sandbox-z-duplicate"])
       expect(harness.provider.connects).toEqual([
         { sandboxId: "sandbox-a-adopt", timeoutMillis: Controller.IdleTimeoutMillis },
@@ -798,7 +984,7 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("kills only managed inventory entries without a durable assignment", () => {
+  it.effect("preserves app-owned inventory without durable assignment authority", () => {
     const harness = makeHarness()
     harness.provider.inventory = [
       {
@@ -816,6 +1002,19 @@ describe("Controller", () => {
         metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
       },
       {
+        sandboxId: "sandbox-malformed",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: {
+          "rika.managed": "e2b-executor",
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-unknown",
+          "rika.generation": "not-a-generation",
+        },
+      },
+      {
         sandboxId: "sandbox-other-app",
         state: "running",
         templateId: "ar7-template-alias",
@@ -829,8 +1028,8 @@ describe("Controller", () => {
       yield* authenticate(harness, 1)
       expect(yield* service.cleanupOrphans).toEqual([])
       yield* TestClock.adjust("5 minutes")
-      expect(yield* service.cleanupOrphans).toEqual(["sandbox-orphan"])
-      expect(harness.provider.kills).toEqual(["sandbox-orphan"])
+      expect(yield* service.cleanupOrphans).toEqual([])
+      expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -846,7 +1045,12 @@ describe("Controller", () => {
           state: "running",
           templateId: "ar7-template-alias",
           templateBuildId: "template-build-v1-immutable",
-          metadata: { "rika.app-id": "rika", "rika.deployment-id": "test" },
+          metadata: {
+            "rika.app-id": "rika",
+            "rika.deployment-id": "test",
+            "rika.assignment-id": "assignment-1",
+            "rika.generation": "1",
+          },
         },
       ]
       expect(yield* service.cleanupOrphans).toEqual([])
@@ -914,11 +1118,23 @@ describe("Controller", () => {
         state: "paused",
         templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
-        metadata: { "rika.app-id": "rika", "rika.deployment-id": "previous-deployment" },
+        metadata: {
+          "rika.app-id": "rika",
+          "rika.deployment-id": "previous-deployment",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
       },
     ]
     return Effect.gen(function* () {
       const service = yield* controller
+      const assignment = yield* createAssignment()
+      const assignments = yield* ExecutorAssignments
+      yield* assignments.terminate({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+      })
       expect(yield* service.cleanupOrphans).toEqual([])
       yield* TestClock.adjust("5 minutes")
 
@@ -1000,10 +1216,66 @@ describe("Controller", () => {
       expect(yield* service.cleanupOrphans).toEqual([])
       yield* TestClock.adjust("1 minute")
       expect(yield* service.cleanupOrphans).toEqual([])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "1",
+        lifecycle: { _tag: "Provisioning" },
+      })
       yield* TestClock.adjust("5 minutes")
       expect(yield* service.cleanupOrphans).toEqual(["sandbox-expired-provisioning"])
       expect(harness.provider.kills).toEqual(["sandbox-expired-provisioning"])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        lifecycle: { _tag: "Pending" },
+      })
     }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("fences adoption before an authority-claimed sandbox is killed", () => {
+    const harness = makeHarness({ orphanGraceMillis: 0 })
+    harness.provider.inventory = [
+      {
+        sandboxId: "sandbox-claimed",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: {
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-1",
+          "rika.generation": "1",
+        },
+      },
+    ]
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* controller
+        const assignments = yield* ExecutorAssignments
+        const assignment = yield* createAssignment()
+        yield* assignments.beginProvisioning({
+          assignmentId: assignment.id,
+          generation: assignment.generation,
+          revision: assignment.revision,
+          bootstrapCredentialDigest: Redacted.make("expired-bootstrap"),
+          bootstrapLifetimeMillis: 0,
+        })
+        const killGate = yield* Deferred.make<void>()
+        harness.provider.killGate = killGate
+        const cleanup = yield* service.cleanupOrphans.pipe(Effect.forkScoped)
+        yield* Deferred.await(harness.provider.killStarted)
+
+        expect(yield* service.provision("assignment-1", setupAuthorization)).toMatchObject({
+          generation: 2,
+          sandboxId: "sandbox-1",
+        })
+        expect(yield* readAssignment()).toMatchObject({
+          generation: "2",
+          lifecycle: { _tag: "AwaitingBootstrap", providerInstanceId: "sandbox-1" },
+        })
+        yield* Deferred.succeed(killGate, undefined)
+        expect(yield* Fiber.join(cleanup)).toEqual(["sandbox-claimed"])
+        expect(harness.provider.kills).toEqual(["sandbox-claimed"])
+      }).pipe(provideLayer(harness.layer)),
+    )
   })
 
   it.effect("rejects a cell dispatch access after its lease expires or is replaced", () => {

@@ -160,4 +160,14 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "a96925eb0745ef830c407242e207e940d50d16bedfcdd319c9ea0932d95f4f90",
     url: new URL("../../migrations/postgres/0031-transactional-thread-notifications.sql", import.meta.url),
   },
+  {
+    id: "product/0032_terminalize_unrecoverable_turns",
+    checksum: "8415b8c0d19007964eafc2484560896e5e88fde1902f5a4a96f60e2e62ee3cab",
+    url: new URL("../../migrations/postgres/0032-terminalize-unrecoverable-turns.sql", import.meta.url),
+  },
+  {
+    id: "product/0033_transcript_projection_notifications",
+    checksum: "36c17d4c225409f17a13e1ad97e37cea7070a58c08b5d6fbfaef69550b860e7e",
+    url: new URL("../../migrations/postgres/0033-transcript-projection-notifications.sql", import.meta.url),
+  },
 ]

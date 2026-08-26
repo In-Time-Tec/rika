@@ -8,8 +8,17 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 echo "Preparing the Rika orb"
 
-sudo apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates caddy curl dbus-x11 gnome-keyring libsecret-1-0 unzip
+system_packages=(ca-certificates caddy curl dbus-x11 gnome-keyring libsecret-1-0 unzip)
+missing_system_packages=()
+for package in "${system_packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fqx 'install ok installed'; then
+    missing_system_packages+=("$package")
+  fi
+done
+if (( ${#missing_system_packages[@]} > 0 )); then
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_system_packages[@]}"
+fi
 
 if ! command -v docker >/dev/null; then
   sudo install -m 0755 -d /etc/apt/keyrings

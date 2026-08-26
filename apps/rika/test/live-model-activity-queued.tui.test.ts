@@ -24,10 +24,10 @@ test(
         yield* Effect.tryPromise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
+        yield* app.waitModelRequests(1)
         yield* Effect.tryPromise(() => app.type("Promote me after the head."))
         app.pressEnter()
         yield* app.waitFrame("Promote me after the head.")
-        yield* app.waitModelRequests(1)
 
         // Cancel the head; the queued turn promotes through pending-turn-promotion and must stream live.
         app.pressKey("c", { ctrl: true })

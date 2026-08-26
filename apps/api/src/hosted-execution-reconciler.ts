@@ -36,9 +36,7 @@ interface WorkerState {
   readonly lastFailure: { readonly at: number; readonly message: string } | undefined
 }
 
-export const layer = (options: {
-  readonly pollIntervalMillis: number
-}) =>
+export const layer = (options: { readonly pollIntervalMillis: number }) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const turns = yield* TurnRepository.Service

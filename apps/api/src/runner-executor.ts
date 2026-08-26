@@ -230,6 +230,7 @@ export const layer = Layer.effect(
               preparing = yield* assignments
                 .beginReplacement({
                   ...version(assignment),
+                  placement: assignment.placement,
                   bootstrapCredentialDigest: ticketDigest,
                   bootstrapLifetimeMillis: admissionLifetimeMillis,
                 })

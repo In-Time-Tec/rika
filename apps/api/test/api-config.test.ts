@@ -65,7 +65,7 @@ describe("API configuration", () => {
       const loaded = yield* loadApiConfig(development)
       expect(loaded.executor).toBeUndefined()
       expect(loaded.github).toBeUndefined()
-      expect(loaded.developmentModel).toBe("minimax/minimax-m2.7:free")
+      expect(loaded.developmentModel).toBe("openai/gpt-5-mini")
       expect(loaded.developmentSeedEnabled).toBe(false)
       expect((yield* loadApiConfig({ ...development, RIKA_DEV_SEED: "1" })).developmentSeedEnabled).toBe(true)
     }),

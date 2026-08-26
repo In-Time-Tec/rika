@@ -35,12 +35,14 @@ import {
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import {
+  cancelledResponse,
   GatewayError,
   makeGateway,
   type ExecutionOutcome,
   type ExecutionResult,
   type Gateway,
   type LifecycleStore,
+  type OperationIdentity,
 } from "./executor-gateway"
 import { HostedEnvironment } from "./hosted-environment"
 import type { AuthenticatedPrincipal } from "./hosted-product"
@@ -227,6 +229,9 @@ export interface Runtime {
     },
     ControllerError | GatewayError
   >
+  readonly cancel: (
+    input: Omit<OperationIdentity, "assignmentId">,
+  ) => Effect.Effect<ExecutionResult, ControllerError | GatewayError>
   readonly ready: Effect.Effect<void, ControllerError>
   readonly pause: (key: AssignmentKey) => Effect.Effect<void, ControllerError | GatewayError>
   readonly resume: (key: AssignmentKey) => Effect.Effect<void, ControllerError>
@@ -268,6 +273,59 @@ export const service = Layer.effect(
       _tag: "DomainFailure",
       failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
     }
+    const identifyOperation = (input: OperationIdentity) =>
+      crypto
+        .digest(
+          "SHA-256",
+          new TextEncoder().encode(
+            encodeOperationIdentity({
+              workspaceId: input.workspaceId,
+              sessionId: input.sessionId,
+              threadId: input.threadId,
+              turnId: input.turnId,
+              runId: input.runId,
+              rootRunId: input.rootRunId,
+              toolCallId: input.toolCallId,
+              code: input.code,
+              attempt: input.attempt,
+              replayPolicy: input.replayPolicy,
+            }),
+          ),
+        )
+        .pipe(
+          Effect.map(Encoding.encodeHex),
+          Effect.mapError(() =>
+            GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
+          ),
+        )
+    const matchesOperation = (
+      input: OperationIdentity,
+      row: {
+        readonly requestDigest: string
+        readonly workspaceId: string
+        readonly sessionId: string
+        readonly threadId: string
+        readonly turnId: string
+        readonly runId: string
+        readonly rootRunId: string
+        readonly toolCallId: string
+        readonly code: string
+        readonly attempt: string
+        readonly replayPolicy: "pure" | "provider-idempotent" | "never"
+      },
+      digest: string,
+    ) =>
+      row.requestDigest === digest &&
+      row.workspaceId === input.workspaceId &&
+      row.sessionId === input.sessionId &&
+      row.threadId === input.threadId &&
+      row.turnId === input.turnId &&
+      row.runId === input.runId &&
+      row.rootRunId === input.rootRunId &&
+      row.toolCallId === input.toolCallId &&
+      row.code === input.code &&
+      Number(row.attempt) === input.attempt &&
+      row.replayPolicy === input.replayPolicy
     const terminalResult = Effect.fn("Executor.terminalResult")(function* (row: {
       readonly response: unknown | null
       readonly terminalOutcome: ExecutionOutcome | null
@@ -490,27 +548,7 @@ export const service = Layer.effect(
         ),
       prepare: (input) =>
         Effect.gen(function* () {
-          const encoded = encodeOperationIdentity({
-            workspaceId: input.workspaceId,
-            sessionId: input.sessionId,
-            threadId: input.threadId,
-            turnId: input.turnId,
-            runId: input.runId,
-            rootRunId: input.rootRunId,
-            toolCallId: input.toolCallId,
-            code: input.code,
-            attempt: input.attempt,
-            replayPolicy: input.replayPolicy,
-          })
-          const requestDigest = Encoding.encodeHex(
-            yield* crypto
-              .digest("SHA-256", new TextEncoder().encode(encoded))
-              .pipe(
-                Effect.mapError(() =>
-                  GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
-                ),
-              ),
-          )
+          const requestDigest = yield* identifyOperation(input)
           yield* sql`INSERT INTO rika_hosted_executor_operations
             (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
              turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, admitted_at, deadline_at, state)
@@ -544,20 +582,7 @@ export const service = Layer.effect(
             WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
               AND attempt = ${input.attempt}::bigint`
           const row = rows[0]
-          if (
-            row === undefined ||
-            row.requestDigest !== requestDigest ||
-            row.workspaceId !== input.workspaceId ||
-            row.sessionId !== input.sessionId ||
-            row.threadId !== input.threadId ||
-            row.turnId !== input.turnId ||
-            row.runId !== input.runId ||
-            row.rootRunId !== input.rootRunId ||
-            row.toolCallId !== input.toolCallId ||
-            row.code !== input.code ||
-            Number(row.attempt) !== input.attempt ||
-            row.replayPolicy !== input.replayPolicy
-          )
+          if (row === undefined || !matchesOperation(input, row, requestDigest))
             return yield* GatewayError.make({
               kind: "fenced",
               message: "Executor operation key conflicts with a different request",
@@ -694,6 +719,67 @@ export const service = Layer.effect(
           .pipe(
             Effect.catchTag("SqlError", () =>
               GatewayError.make({ kind: "transport", message: "Could not persist executor dispatch" }),
+            ),
+          ),
+      cancel: (input) =>
+        sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const requestDigest = yield* identifyOperation(input)
+              const rows = yield* sql<{
+                readonly state: "accepted" | "dispatched" | "completed" | "unknown"
+                readonly response: unknown | null
+                readonly terminalOutcome: ExecutionOutcome | null
+                readonly requestDigest: string
+                readonly workspaceId: string
+                readonly sessionId: string
+                readonly threadId: string
+                readonly turnId: string
+                readonly runId: string
+                readonly rootRunId: string
+                readonly toolCallId: string
+                readonly code: string
+                readonly attempt: string
+                readonly replayPolicy: "pure" | "provider-idempotent" | "never"
+              }>`SELECT state, response, terminal_outcome AS "terminalOutcome",
+                request_digest AS "requestDigest", workspace_id AS "workspaceId", session_id AS "sessionId",
+                thread_id AS "threadId", turn_id AS "turnId", run_id AS "runId", root_run_id AS "rootRunId",
+                tool_call_id AS "toolCallId", code, attempt::text AS attempt, replay_policy AS "replayPolicy"
+              FROM rika_hosted_executor_operations
+              WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
+                AND attempt = ${input.attempt}::bigint
+              FOR UPDATE`
+              const row = rows[0]
+              if (row === undefined)
+                return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
+              if (!matchesOperation(input, row, requestDigest))
+                return yield* GatewayError.make({
+                  kind: "fenced",
+                  message: "Executor operation key conflicts with a different request",
+                })
+              if (row.state === "completed" || row.state === "unknown")
+                return { _tag: "AlreadyTerminal", result: yield* terminalResult(row) } as const
+              if (row.state === "dispatched") return { _tag: "Dispatched" } as const
+              const updated = yield* sql`UPDATE rika_hosted_executor_operations SET
+                state = 'completed', response = ${sql.json(cancelledResponse)}, terminal_outcome = 'cancelled',
+                updated_at = clock_timestamp()
+              WHERE assignment_id = ${input.assignmentId} AND operation_key = ${input.operationKey}
+                AND attempt = ${input.attempt}::bigint AND state = 'accepted'
+              RETURNING operation_key`
+              if (updated[0] === undefined)
+                return yield* GatewayError.make({
+                  kind: "fenced",
+                  message: "Executor operation changed before cancellation",
+                })
+              return {
+                _tag: "Cancelled",
+                result: { response: cancelledResponse, outcome: "cancelled" },
+              } as const
+            }),
+          )
+          .pipe(
+            Effect.catchTag("SqlError", () =>
+              GatewayError.make({ kind: "transport", message: "Could not cancel executor operation" }),
             ),
           ),
       resolveDeadline: (input) =>
@@ -966,10 +1052,7 @@ export const service = Layer.effect(
                   current.capabilities !== null
                 )
                   return current
-                if (
-                  current.lifecycle._tag !== "Provisioning" &&
-                  current.lifecycle._tag !== "AwaitingBootstrap"
-                )
+                if (current.lifecycle._tag !== "Provisioning" && current.lifecycle._tag !== "AwaitingBootstrap")
                   return yield* ControllerError.make({
                     kind: "assignment-conflict",
                     message: "Executor workspace stopped preparing before its capabilities became ready",
@@ -1113,6 +1196,25 @@ export const service = Layer.effect(
             return { ...result, eventPersisted: false as const }
           }),
         )
+      }),
+      cancel: Effect.fn("Executor.cancel")(function* (input) {
+        const assignment = yield* assignments
+          .getForThread(ThreadId.make(input.threadId))
+          .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
+        if (assignment === undefined)
+          return yield* ControllerError.make({
+            kind: "assignment-missing",
+            message: "Executor assignment is unavailable",
+          })
+        if (assignment.workspaceId !== input.workspaceId)
+          return yield* ControllerError.make({
+            kind: "fenced",
+            message: "Executor workspace identity does not match the assignment",
+          })
+        const request = { assignmentId: assignment.id, ...input }
+        return assignment.placement._tag === "RunnerPlacement"
+          ? yield* runnerGateway.cancel(request)
+          : yield* gateway.cancel(request)
       }),
       pause: (key) =>
         gateway.quiesce(key.assignmentId).pipe(

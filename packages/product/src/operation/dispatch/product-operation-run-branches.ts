@@ -84,13 +84,10 @@ const runInteractiveOperationImpl = (
         .pipe(Effect.mapError((error) => unavailable(factory, input, String(error))))
       if (thread === undefined) return yield* unavailable(factory, input, `Thread ${initialThreadId} does not exist`)
     }
-    const made = yield* typedMakeInteractiveSession(
-      input.workspace ?? factory.options.defaultWorkspace,
-      {
-        ...(initialThreadId === undefined ? {} : { initialThreadId }),
-        observeExecution: factory.options.executionProjectionOwner !== "external",
-      },
-    )
+    const made = yield* typedMakeInteractiveSession(input.workspace ?? factory.options.defaultWorkspace, {
+      ...(initialThreadId === undefined ? {} : { initialThreadId }),
+      observeExecution: factory.options.executionProjectionOwner !== "external",
+    })
     yield* typedInteractiveRun(input, made.session).pipe(Effect.ensuring(made.close))
   })
 

@@ -629,13 +629,33 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             const updated = yield* assignments.updateCapabilities({ access, capabilities: refreshedCapabilities })
             expect(updated.capabilityGeneration).toBe(updated.generation)
             expect(updated.capabilities).toEqual(refreshedCapabilities)
+            expect(
+              yield* Effect.result(
+                assignments.beginReplacement({
+                  ...version(updated),
+                  placement: {
+                    _tag: "OrbPlacement",
+                    templateBuildId: "template-v2",
+                    providerScope: "another-scope",
+                  },
+                  bootstrapCredentialDigest: Redacted.make("invalid-replacement"),
+                  bootstrapLifetimeMillis: 60_000,
+                }),
+              ),
+            ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
             const replacement = yield* assignments.beginReplacement({
               ...version(updated),
+              placement: { _tag: "OrbPlacement", templateBuildId: "template-v2", providerScope: "scope" },
               bootstrapCredentialDigest: Redacted.make("replacement"),
               bootstrapLifetimeMillis: 60_000,
             })
             expect((yield* Effect.result(assignments.authenticate(access)))._tag).toBe("Failure")
             expect(replacement.generation).toBe("2")
+            expect(replacement.placement).toEqual({
+              _tag: "OrbPlacement",
+              templateBuildId: "template-v2",
+              providerScope: "scope",
+            })
             expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
             const reprovisioned = yield* assignments.bindProviderInstance({
               ...version(
@@ -673,6 +693,51 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             const reconnected = yield* assignments.reconnect({ access: replacementAccess, leaseLifetimeMillis: 60_000 })
             expect((yield* Effect.result(assignments.validateFence(replacementAccess)))._tag).toBe("Failure")
             expect(reconnected.lifecycle._tag === "Active" && reconnected.lifecycle.leaseEpoch).toBe("2")
+            const orphan = yield* assignments.create({
+              id: ExecutorAssignmentId.make("assignment-orphan-live"),
+              ownerId: ids.personalOwner,
+              threadId: ids.personalThread,
+              workspaceId: ids.personalWorkspace,
+              placement: { _tag: "OrbPlacement", templateBuildId: "template", providerScope: "scope" },
+              checkout: null,
+            })
+            const orphanProvisioning = yield* assignments.beginProvisioning({
+              ...version(orphan),
+              bootstrapCredentialDigest: Redacted.make("orphan-bootstrap"),
+              bootstrapLifetimeMillis: 60_000,
+            })
+            const orphanIdentity = {
+              providerInstanceId: "sandbox-orphan-live",
+              assignmentId: orphanProvisioning.id,
+              generation: orphanProvisioning.generation,
+            }
+            expect(yield* assignments.claimOrphan({ providerInstanceId: "sandbox-unbound-live" })).toBe("preserved")
+            expect(
+              yield* assignments.claimOrphan({
+                providerInstanceId: "sandbox-unknown-live",
+                assignmentId: ExecutorAssignmentId.make("assignment-unknown-live"),
+                generation: orphanProvisioning.generation,
+              }),
+            ).toBe("preserved")
+            expect(yield* assignments.claimOrphan(orphanIdentity)).toBe("preserved")
+            yield* Effect.tryPromise(() =>
+              migrated!.query(`UPDATE rika_hosted_executor_assignments
+                SET bootstrap_expires_at = clock_timestamp() - interval '1 second'
+                WHERE id = 'assignment-orphan-live'`),
+            )
+            expect(yield* assignments.claimOrphan(orphanIdentity)).toBe("claimed")
+            expect(yield* assignments.get(orphan.id)).toMatchObject({
+              generation: "2",
+              lifecycle: { _tag: "Pending" },
+            })
+            expect(
+              (yield* Effect.result(
+                assignments.bindProviderInstance({
+                  ...version(orphanProvisioning),
+                  providerInstanceId: "sandbox-orphan-live",
+                }),
+              ))._tag,
+            ).toBe("Failure")
           }).pipe(Effect.provideContext(context))
         }),
       )

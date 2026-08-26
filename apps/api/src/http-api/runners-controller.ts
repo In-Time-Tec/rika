@@ -109,10 +109,8 @@ export const runnersHandlers = (dependencies: HttpDependencies) =>
               activeAssignmentIds: payload.activeAssignmentIds,
             })
             .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Runner polling failed" })))
-          if (!candidate.claimed)
-            return { _tag: "Waiting" as const, reason: "runner-owned" as const }
-          if (candidate.assignment === undefined)
-            return { _tag: "Waiting" as const, reason: "no-work" as const }
+          if (!candidate.claimed) return { _tag: "Waiting" as const, reason: "runner-owned" as const }
+          if (candidate.assignment === undefined) return { _tag: "Waiting" as const, reason: "no-work" as const }
           const assignment = candidate.assignment
           if (assignment.resume) {
             if (assignment.leaseExpiresAt === null)

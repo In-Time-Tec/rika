@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
 import { HostBindingRegistry } from "tenetkit/repl"
+import * as Bash from "@rika/coding-tools/bash-tool"
+import * as ShellCommandStatus from "@rika/coding-tools/shell-command-status-tool"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { make as makeModules, moduleNames, type BindingRequirements } from "@rika/kernel/binding-modules"
 
@@ -69,6 +71,33 @@ describe("binding schema round trip", () => {
       const result = Schema.decodeUnknownExit(codec(operation.input))({})
       expect(`${module}.${operation.name}:${result._tag}`).toMatch(/:(Success|Failure)$/)
     }
+  })
+
+  it("rejects process waits longer than the runtime accepts before execution", () => {
+    const start = every.find(({ module, operation }) => module === "processes" && operation.name === "start")!
+    const status = every.find(({ module, operation }) => module === "processes" && operation.name === "status")!
+    const decodes = (operation: Op["operation"], input: unknown) =>
+      Schema.decodeUnknownExit(codec(operation.input))(input)._tag
+
+    expect(decodes(start.operation, { command: "sleep 1", timeoutMillis: Bash.initialWaitMaximumMillis })).toBe(
+      "Success",
+    )
+    expect(decodes(start.operation, { command: "sleep 1", timeoutMillis: Bash.initialWaitMaximumMillis + 1 })).toBe(
+      "Failure",
+    )
+    expect(
+      decodes(status.operation, {
+        processId: "1",
+        waitMillis: ShellCommandStatus.statusWaitMaximumMillis,
+      }),
+    ).toBe("Success")
+    expect(
+      decodes(status.operation, {
+        processId: "1",
+        waitMillis: ShellCommandStatus.statusWaitMaximumMillis + 1,
+      }),
+    ).toBe("Failure")
+    expect(decodes(status.operation, { processId: "1", waitMillis: 125_000 })).toBe("Failure")
   })
 
   it("declares a failure schema that is a discriminated tagged shape the cell can branch on", () => {

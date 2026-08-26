@@ -81,7 +81,9 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTi
 const eventuallyLive = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTimeout> =>
   Effect.suspend(() => {
     const value = read()
-    return value === undefined ? Effect.sleep("10 millis").pipe(Effect.andThen(eventuallyLive(read))) : Effect.succeed(value)
+    return value === undefined
+      ? Effect.sleep("10 millis").pipe(Effect.andThen(eventuallyLive(read)))
+      : Effect.succeed(value)
   }).pipe(
     Effect.timeoutOrElse({
       duration: "2 seconds",
@@ -354,6 +356,29 @@ describe.sequential("foreground Runner", () => {
                 )
                 .map((message: any) => message.frame._tag),
             ).toEqual(["Accepted", "Started", "Terminal"])
+            socket.message({
+              _tag: "MachineExecute",
+              access,
+              operationKey: "operation-cancel",
+              attempt: 0,
+              machineId: "call-cancel:late",
+              requestDigest: "a".repeat(64),
+              request: {
+                _tag: "CodingTool",
+                request: { _tag: "Write", path: "forbidden-after-cancel.txt", content: "must-not-land" },
+              },
+            })
+            const fencedMachine = yield* eventually(
+              () =>
+                socket.sent.find(
+                  (message: any) => message._tag === "MachineResult" && message.machineId === "call-cancel:late",
+                ) as any,
+            )
+            expect(fencedMachine.outcome).toEqual({
+              _tag: "Fenced",
+              message: "Parent Cell is no longer running",
+            })
+            expect(yield* fileSystem.exists(`${workspacePath}/forbidden-after-cancel.txt`)).toBe(false)
             const deadlineRequest = {
               ...request,
               operationKey: "operation-deadline",
@@ -784,8 +809,7 @@ describe.sequential("foreground Runner", () => {
             ).toHaveLength(1)
             expect(
               [...firstSocket.sent, ...secondSocket.sent].filter(
-                (message: any) =>
-                  message._tag === "BindingInvoke" && message.callId === firstBinding.callId,
+                (message: any) => message._tag === "BindingInvoke" && message.callId === firstBinding.callId,
               ),
             ).toHaveLength(2)
             yield* Fiber.interrupt(runner)

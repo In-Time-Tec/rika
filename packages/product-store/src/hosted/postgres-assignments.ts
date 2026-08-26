@@ -69,6 +69,15 @@ interface CheckpointRow {
   readonly verifiedAt: string
 }
 
+interface OrphanAuthorityRow {
+  readonly id: string
+  readonly generation: string
+  readonly revision: string
+  readonly lifecycle: AssignmentLifecycle
+  readonly providerInstanceId: string | null
+  readonly bootstrapLive: boolean
+}
+
 const databaseError = (cause: unknown) =>
   AssignmentError.make({
     reason: "database",
@@ -263,6 +272,69 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     return yield* decodeAssignment(yield* locked(assignmentId, "UPDATE"))
   })
 
+  const lockOrphanAuthority = Effect.fn("PostgresAssignments.lockOrphanAuthority")(function* (input: {
+    readonly providerInstanceId: string
+    readonly assignmentId?: string
+    readonly generation?: string
+  }) {
+    const identifiedId = input.assignmentId ?? null
+    const rows = yield* query(sql<OrphanAuthorityRow>`SELECT id, generation::text AS generation,
+      revision::text AS revision, lifecycle, provider_instance_id AS "providerInstanceId",
+      COALESCE(bootstrap_expires_at > clock_timestamp(), false) AS "bootstrapLive"
+      FROM rika_hosted_executor_assignments
+      WHERE provider_instance_id = ${input.providerInstanceId}
+        OR (${identifiedId}::text IS NOT NULL AND id = ${identifiedId})
+      ORDER BY id FOR UPDATE`)
+    const bound = rows.find((row) => row.providerInstanceId === input.providerInstanceId)
+    const identified = rows.find((row) => row.id === input.assignmentId)
+    let row = bound
+    if (row === undefined) {
+      if (identified === undefined) return { status: "preserved" } as const
+      if (identified.generation !== input.generation) return { status: "candidate" } as const
+      row = identified
+    }
+    if (row.lifecycle === "active" || row.lifecycle === "paused")
+      return bound === undefined ? ({ status: "candidate" } as const) : ({ status: "preserved" } as const)
+    if (row.lifecycle === "terminated") return { status: "candidate" } as const
+    if ((row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap") && row.bootstrapLive)
+      return row.providerInstanceId === null || bound !== undefined
+        ? ({ status: "preserved" } as const)
+        : ({ status: "candidate" } as const)
+    return { status: "candidate", retire: row } as const
+  })
+
+  const inspectOrphan: AssignmentsService["inspectOrphan"] = Effect.fn("PostgresAssignments.inspectOrphan")(
+    function* (input) {
+      return yield* transaction(sql, lockOrphanAuthority(input).pipe(Effect.map((authority) => authority.status)))
+    },
+  )
+
+  const claimOrphan: AssignmentsService["claimOrphan"] = Effect.fn("PostgresAssignments.claimOrphan")(
+    function* (input) {
+      return yield* transaction(
+        sql,
+        Effect.gen(function* () {
+          const authority = yield* lockOrphanAuthority(input)
+          if (authority.status === "preserved") return "preserved"
+          if (!("retire" in authority)) return "claimed"
+          const row = authority.retire
+          const retired = yield* query(sql`UPDATE rika_hosted_executor_assignments SET
+            generation = generation + 1, revision = revision + 1, last_lease_epoch = 0,
+            lifecycle = 'pending', provider_instance_id = NULL,
+            bootstrap_digest = NULL, bootstrap_expires_at = NULL,
+            executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
+            lease_epoch = NULL, lease_expires_at = NULL,
+            capability_generation = NULL, capability_snapshot = NULL,
+            updated_at = transaction_timestamp()
+            WHERE id = ${row.id} AND generation = ${row.generation}::bigint
+              AND revision = ${row.revision}::bigint RETURNING id`)
+          if (retired[0] === undefined) return yield* failure("conflict", "Executor assignment changed concurrently")
+          return "claimed"
+        }),
+      )
+    },
+  )
+
   const create: AssignmentsService["create"] = Effect.fn("PostgresAssignments.create")(function* (input) {
     return yield* transaction(
       sql,
@@ -328,10 +400,28 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           const row = yield* locked(input.assignmentId, "UPDATE")
           yield* checkVersion(row, input)
           if (row.lifecycle === "terminated") return yield* failure("invalid-state", "Assignment cannot be replaced")
+          const assignment = yield* decodeAssignment(row)
+          if (assignment.placement._tag !== input.placement._tag)
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Executor kind")
+          if (
+            assignment.placement._tag === "OrbPlacement" &&
+            input.placement._tag === "OrbPlacement" &&
+            assignment.placement.providerScope !== input.placement.providerScope
+          )
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Orb provider scope")
+          if (
+            assignment.placement._tag === "RunnerPlacement" &&
+            input.placement._tag === "RunnerPlacement" &&
+            (assignment.placement.deviceId !== input.placement.deviceId ||
+              assignment.placement.checkoutFingerprint !== input.placement.checkoutFingerprint ||
+              assignment.placement.requestingDeviceId !== input.placement.requestingDeviceId)
+          )
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Runner authority")
           return yield* updated(
             input.assignmentId,
             sql`UPDATE rika_hosted_executor_assignments SET
-        generation = generation + 1, revision = revision + 1, last_lease_epoch = 0,
+        placement = ${sql.json(input.placement)}, generation = generation + 1,
+        revision = revision + 1, last_lease_epoch = 0,
         lifecycle = 'provisioning', provider_instance_id = NULL,
         capability_generation = NULL, capability_snapshot = NULL,
         bootstrap_digest = ${Redacted.value(input.bootstrapCredentialDigest)},
@@ -642,16 +732,16 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
       return rows[0] === undefined ? undefined : yield* get(ExecutorAssignmentId.make(rows[0].id))
     },
   )
-  const isBootstrapLive: AssignmentsService["isBootstrapLive"] = Effect.fn(
-    "PostgresAssignments.isBootstrapLive",
-  )(function* (input) {
-    const rows = yield* select(input.assignmentId)
-    const row = rows[0]
-    if (row === undefined) return yield* failure("not-found", "Executor assignment does not exist")
-    if (row.generation !== input.generation)
-      return yield* failure("stale-fence", "Executor assignment fence is stale")
-    return (row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap") && row.bootstrapLive
-  })
+  const isBootstrapLive: AssignmentsService["isBootstrapLive"] = Effect.fn("PostgresAssignments.isBootstrapLive")(
+    function* (input) {
+      const rows = yield* select(input.assignmentId)
+      const row = rows[0]
+      if (row === undefined) return yield* failure("not-found", "Executor assignment does not exist")
+      if (row.generation !== input.generation)
+        return yield* failure("stale-fence", "Executor assignment fence is stale")
+      return (row.lifecycle === "provisioning" || row.lifecycle === "awaiting_bootstrap") && row.bootstrapLive
+    },
+  )
 
   const latestCheckpoint: AssignmentsService["latestCheckpoint"] = Effect.fn("PostgresAssignments.latestCheckpoint")(
     function* (assignmentId) {
@@ -699,6 +789,8 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
     get,
     getForThread,
     isBootstrapLive,
+    inspectOrphan,
+    claimOrphan,
     beginProvisioning,
     beginReplacement,
     bindProviderInstance,

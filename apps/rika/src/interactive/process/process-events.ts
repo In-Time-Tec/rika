@@ -94,6 +94,7 @@ export const makeEventRouter = (runtime: Runtime) => {
           ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
         })
     } else if (event._tag === "SubmissionRejected") {
+      if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {
         _tag: "SubmissionRejected",
         message: event.message,
@@ -139,10 +140,14 @@ export const makeEventRouter = (runtime: Runtime) => {
           message: event.failure.message,
         })
       if (event.action === "approve" || event.action === "deny")
-        loop.renderer?.surface.showToast(
-          `${event.action === "approve" ? "Approval" : "Denial"} failed: ${event.failure.message}`,
-          "#e06c75",
-        )
+        loop.model = update(loop.model, {
+          _tag: "BlockAdded",
+          block: {
+            _tag: "Error",
+            title: `${event.action === "approve" ? "Approval" : "Denial"} failed`,
+            detail: event.failure.message,
+          },
+        })
     } else if (event._tag === "ContextDiagnostics") {
       if (loop.model.currentThreadId !== event.threadId) return
       loop.model = update(loop.model, {

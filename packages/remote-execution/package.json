@@ -12,6 +12,7 @@
     "./cells": "./src/cells.ts",
     "./binding-proxy": "./src/binding-proxy.ts",
     "./machine": "./src/machine.ts",
+    "./machine-process": "./src/machine-process.ts",
     "./protocol": "./src/protocol.ts",
     "./pty": "./src/pty.ts",
     "./repository-services": "./src/repository-services.ts",

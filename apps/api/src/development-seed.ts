@@ -1,7 +1,7 @@
 import type { IdentityRuntime } from "@rika/identity"
 import { BetterAuthUserId, OrganizationId } from "@rika/product/hosted-model"
-import { Effect, Redacted, Schema } from "effect"
-import type { Pool } from "pg"
+import { Effect, Exit, Redacted, Schema } from "effect"
+import type { Pool, PoolClient } from "pg"
 import type { HostedProductService } from "./hosted-product"
 import type { HostedProviderCredentialsService } from "./hosted-provider-credentials"
 
@@ -42,14 +42,39 @@ const request = (identity: IdentityRuntime, baseUrl: string, path: string, body:
 const requireSuccess = (response: Response, operation: string) =>
   response.ok ? Effect.void : Effect.fail(failure(`${operation} failed with status ${response.status}`))
 
-export const seedDevelopment = Effect.fn("DevelopmentSeed.seed")(function* (input: {
+interface DevelopmentSeedInput {
   readonly baseUrl: string
   readonly identity: IdentityRuntime
   readonly pool: Pool
-  readonly product: HostedProductService
+  readonly product: Pick<HostedProductService, "projects">
   readonly credentials: HostedProviderCredentialsService
   readonly openRouterApiKey: Redacted.Redacted<string>
-}) {
+}
+
+const lockName = "rika-development-seed"
+
+const acquireSeedLock = (pool: Pool) =>
+  Effect.gen(function* () {
+    const client = yield* Effect.tryPromise({
+      try: () => pool.connect(),
+      catch: () => failure("Development seed database connection failed"),
+    })
+    return yield* Effect.tryPromise({
+      try: () => client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockName]),
+      catch: () => failure("Development seed lock could not be acquired"),
+    }).pipe(
+      Effect.as(client),
+      Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : Effect.sync(() => client.release()))),
+    )
+  })
+
+const releaseSeedLock = (client: PoolClient) =>
+  Effect.tryPromise(() => client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockName])).pipe(
+    Effect.ignore,
+    Effect.ensuring(Effect.sync(() => client.release())),
+  )
+
+const seedUnlocked = Effect.fn("DevelopmentSeed.seedUnlocked")(function* (input: DevelopmentSeedInput) {
   let users = yield* query<{ readonly id: string; readonly email_verified: boolean }>(
     input.pool,
     `SELECT id, email_verified FROM "user" WHERE email = $1`,
@@ -147,4 +172,8 @@ export const seedDevelopment = Effect.fn("DevelopmentSeed.seed")(function* (inpu
       Effect.mapError(() => failure("Development provider credential seeding failed")),
     )
   }
+})
+
+export const seedDevelopment = Effect.fn("DevelopmentSeed.seed")(function* (input: DevelopmentSeedInput) {
+  yield* Effect.acquireUseRelease(acquireSeedLock(input.pool), () => seedUnlocked(input), releaseSeedLock)
 })

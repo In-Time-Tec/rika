@@ -28,7 +28,7 @@ import {
   type WorkspaceProof,
 } from "@rika/remote-execution/protocol"
 import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/workspace-archive"
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Result, Schema } from "effect"
 import { StoredArchive, Vault } from "./checkpoint"
 import { Credentials, type Credential } from "./checkout"
 import { Provider, type CreateRequest, type Handle, type ProviderError } from "./provider"
@@ -484,20 +484,22 @@ export const layer = (
           matchesGeneration(assignment, entry.templateId, entry.templateBuildId, entry.metadata),
         )
         if (matches.length === 0) return Option.none()
-        const [adopt, ...duplicates] = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
-        yield* Effect.forEach(
-          duplicates,
-          (entry) =>
-            HostedObservability.observe(
-              "attach",
-              { ...assignmentCorrelation(assignment), sandboxId: entry.sandboxId },
-              provider.kill(entry.sandboxId).pipe(Effect.mapError(providerFailure)),
-            ).pipe(Effect.ignore),
-          { discard: true },
-        )
-        return Option.some(
-          yield* provider.connect(adopt!.sandboxId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure)),
-        )
+        const candidates = [...matches].sort((left, right) => left.sandboxId.localeCompare(right.sandboxId))
+        let adopted: Handle | undefined
+        let connectError: ControllerError | undefined
+        for (const candidate of candidates) {
+          const connected = yield* Effect.result(
+            provider.connect(candidate.sandboxId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure)),
+          )
+          if (Result.isSuccess(connected)) {
+            adopted = connected.success
+            break
+          }
+          connectError = connected.failure
+        }
+        if (adopted === undefined)
+          return yield* connectError ?? failure("provider", "No matching sandbox could be connected")
+        return Option.some(adopted)
       })
 
       const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
@@ -519,7 +521,9 @@ export const layer = (
         const existingProviderId = provisioning.lifecycle.providerInstanceId
         let sandbox: Handle
         if (existingProviderId !== null)
-          sandbox = yield* provider.connect(existingProviderId, idleTimeoutMillis).pipe(Effect.mapError(providerFailure))
+          sandbox = yield* provider
+            .connect(existingProviderId, idleTimeoutMillis)
+            .pipe(Effect.mapError(providerFailure))
         else {
           const created = yield* findCreatedSandbox(provisioning)
           sandbox = Option.isSome(created)
@@ -528,30 +532,43 @@ export const layer = (
                 .create(yield* createRequest(provisioning, authorization))
                 .pipe(Effect.catch(() => reconcileCreate(provisioning)))
         }
-        const bound = yield* assignments
-          .bindProviderInstance({
+        const binding = yield* Effect.result(
+          assignments.bindProviderInstance({
             ...version(provisioning),
             providerInstanceId: sandbox.sandboxId,
-          })
-          .pipe(
-            Effect.mapError(assignmentFailure),
-            Effect.tapError(() =>
-              existingProviderId === null ? provider.kill(sandbox.sandboxId).pipe(Effect.ignore) : Effect.void,
-            ),
+          }),
+        )
+        let bound: ExecutorAssignment
+        if (Result.isSuccess(binding)) bound = binding.success
+        else {
+          const latest = yield* Effect.result(assignments.get(provisioning.id))
+          if (
+            Result.isSuccess(latest) &&
+            latest.success !== undefined &&
+            providerInstanceId(latest.success) === sandbox.sandboxId &&
+            latest.success.lifecycle._tag !== "Provisioning"
           )
-        yield* provider
-          .bootstrap({
-            sandboxId: sandbox.sandboxId,
-            credential,
-            identity: yield* bootstrapIdentity(
-              provisioning,
-              sandbox.sandboxId,
-              lifecycle,
-              authorization.environmentDigest,
-            ),
-            restore,
-          })
-          .pipe(Effect.mapError(providerFailure))
+            bound = latest.success
+          else {
+            if (Result.isFailure(latest)) yield* HostedObservability.unknownOutcome(assignmentCorrelation(provisioning))
+            else if (existingProviderId === null) yield* provider.kill(sandbox.sandboxId).pipe(Effect.ignore)
+            return yield* assignmentFailure(binding.failure)
+          }
+        }
+        if (bound.lifecycle._tag === "AwaitingBootstrap")
+          yield* provider
+            .bootstrap({
+              sandboxId: sandbox.sandboxId,
+              credential,
+              identity: yield* bootstrapIdentity(
+                provisioning,
+                sandbox.sandboxId,
+                lifecycle,
+                authorization.environmentDigest,
+              ),
+              restore,
+            })
+            .pipe(Effect.mapError(providerFailure))
         return publicAssignment(bound)
       })
 
@@ -609,22 +626,66 @@ export const layer = (
         )
       })
 
+      const replaceAssignment = Effect.fn("Controller.replaceAssignment")(function* (
+        previous: ExecutorAssignment,
+        authorization: WorkspaceAuthorization,
+      ) {
+        return yield* HostedObservability.observe(
+          "attach",
+          assignmentCorrelation(previous),
+          Effect.gen(function* () {
+            const placement = yield* orbPlacement(previous)
+            const checkpoint = yield* assignments.latestCheckpoint(previous.id).pipe(Effect.mapError(assignmentFailure))
+            yield* authorizeWorkspace(
+              authorization,
+              previous.lifecycle._tag === "Active" || previous.lifecycle._tag === "Paused" || checkpoint !== undefined
+                ? "runtime"
+                : "setup",
+            )
+            const restore = checkpoint === undefined ? null : yield* restoreCheckpoint(previous)
+            const identity = yield* issueSecret("executor-bootstrap")
+            const replacing = yield* assignments
+              .beginReplacement({
+                ...version(previous),
+                placement: { ...placement, templateBuildId: options.templateBuildId },
+                bootstrapCredentialDigest: yield* digest(identity),
+                bootstrapLifetimeMillis,
+              })
+              .pipe(Effect.mapError(assignmentFailure))
+            return yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
+          }),
+        )
+      })
+
       const provision = Effect.fn("Controller.provision")(function* (
         assignmentId: string,
         authorization: WorkspaceAuthorization,
       ) {
         const assignment = yield* load(assignmentId)
         return yield* Effect.gen(function* () {
-          yield* approvedPlacement(assignment)
+          if (assignment.lifecycle._tag === "Terminated")
+            return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
+          const placement = yield* orbPlacement(assignment)
+          if (placement.templateBuildId !== options.templateBuildId)
+            return yield* replaceAssignment(assignment, authorization)
           if (assignment.lifecycle._tag === "Active") {
+            const lease = yield* Effect.result(
+              assignments.validateFence({
+                assignmentId: assignment.id,
+                assignmentGeneration: assignment.generation,
+                leaseEpoch: assignment.lifecycle.leaseEpoch,
+              }),
+            )
+            if (Result.isFailure(lease)) {
+              if (lease.failure.reason !== "stale-fence") return yield* assignmentFailure(lease.failure)
+              return yield* replaceAssignment(assignment, authorization)
+            }
             yield* provider
               .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
               .pipe(Effect.mapError(providerFailure))
             return publicAssignment(assignment)
           }
           if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, authorization)
-          if (assignment.lifecycle._tag === "Terminated")
-            return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
           return yield* beginProvisioning(assignment, authorization)
         }).pipe(
           Effect.tapError((error) =>
@@ -642,35 +703,10 @@ export const layer = (
         key: AssignmentKey,
         authorization: WorkspaceAuthorization,
       ) {
-        yield* authorizeWorkspace(authorization, "runtime")
         const previous = yield* current(key)
-        return yield* HostedObservability.observe(
-          "attach",
-          assignmentCorrelation(previous),
-          Effect.gen(function* () {
-            yield* approvedPlacement(previous)
-            if (previous.lifecycle._tag !== "Active")
-              return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
-            const retiringProviderId = providerInstanceId(previous)
-            const restore = yield* restoreCheckpoint(previous)
-            const identity = yield* issueSecret("executor-bootstrap")
-            const replacing = yield* assignments
-              .beginReplacement({
-                ...version(previous),
-                bootstrapCredentialDigest: yield* digest(identity),
-                bootstrapLifetimeMillis,
-              })
-              .pipe(Effect.mapError(assignmentFailure))
-            const replacement = yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
-            if (retiringProviderId !== undefined)
-              yield* HostedObservability.observe(
-                "attach",
-                { ...assignmentCorrelation(previous), sandboxId: retiringProviderId },
-                provider.kill(retiringProviderId),
-              ).pipe(Effect.ignore)
-            return replacement
-          }),
-        )
+        if (previous.lifecycle._tag !== "Active")
+          return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
+        return yield* replaceAssignment(previous, authorization)
       })
 
       const resume = Effect.fn("Controller.resume")(function* (
@@ -1130,65 +1166,72 @@ export const layer = (
           .pipe(Effect.mapError(providerFailure))
       })
 
+      const cleanupClaim = (sandbox: {
+        readonly sandboxId: string
+        readonly metadata: Readonly<Record<string, string>>
+      }) => {
+        const assignmentId = sandbox.metadata["rika.assignment-id"]
+        const generation = sandbox.metadata["rika.generation"]
+        const parsedGeneration = generation === undefined ? Number.NaN : Number(generation)
+        if (
+          assignmentId !== undefined &&
+          assignmentId.length > 0 &&
+          assignmentId.length <= 512 &&
+          generation !== undefined &&
+          Number.isSafeInteger(parsedGeneration) &&
+          parsedGeneration >= 1
+        )
+          return {
+            providerInstanceId: sandbox.sandboxId,
+            assignmentId: ExecutorAssignmentId.make(assignmentId),
+            generation: FencingGeneration.make(generation),
+          }
+        return { providerInstanceId: sandbox.sandboxId }
+      }
+
       const cleanupOrphans = Effect.gen(function* () {
-        const durable = yield* assignments.listManaged.pipe(Effect.mapError(assignmentFailure))
-        const livePreparing = new Set(
-          (
-            yield* Effect.forEach(
-              durable.filter(
-                (assignment) =>
-                  assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap",
-              ),
-              (assignment) =>
-                assignments.isBootstrapLive({ assignmentId: assignment.id, generation: assignment.generation }).pipe(
-                  Effect.mapError(assignmentFailure),
-                  Effect.map((live) => (live ? String(assignment.id) : undefined)),
-                ),
-            )
-          ).flatMap((assignmentId) => (assignmentId === undefined ? [] : [assignmentId])),
-        )
-        const active = new Set(
-          durable.flatMap((assignment) => {
-            const id = providerInstanceId(assignment)
-            return (assignment.lifecycle._tag !== "Active" && assignment.lifecycle._tag !== "Paused") || id === undefined
-              ? []
-              : [id]
-          }),
-        )
         const inventory = yield* provider.inventory.pipe(Effect.mapError(providerFailure))
-        const preserved = (sandbox: (typeof inventory)[number]) =>
-          active.has(sandbox.sandboxId) ||
-          durable.some(
-            (assignment) =>
-              assignment.lifecycle._tag !== "Terminated" &&
-              (assignment.lifecycle._tag === "Provisioning" || assignment.lifecycle._tag === "AwaitingBootstrap") &&
-              livePreparing.has(String(assignment.id)) &&
-              matchesGeneration(assignment, sandbox.templateId, sandbox.templateBuildId, sandbox.metadata),
-          )
-        const candidates = inventory.filter(
-          (sandbox) => sandbox.metadata["rika.app-id"] === options.appId && !preserved(sandbox),
-        )
-        const candidateIds = new Set(candidates.map((sandbox) => sandbox.sandboxId))
+        const candidates = inventory.filter((sandbox) => sandbox.metadata["rika.app-id"] === options.appId)
+        const inspected = (yield* Effect.forEach(candidates, (sandbox) =>
+          assignments.inspectOrphan(cleanupClaim(sandbox)).pipe(
+            Effect.mapError(assignmentFailure),
+            Effect.map((status) => {
+              if (status === "candidate") return sandbox
+              orphanCandidates.delete(sandbox.sandboxId)
+              return null
+            }),
+          ),
+        )).flatMap((sandbox) => (sandbox === null ? [] : [sandbox]))
+        const candidateIds = new Set(inspected.map((sandbox) => sandbox.sandboxId))
         for (const sandboxId of orphanCandidates.keys())
           if (!candidateIds.has(sandboxId)) orphanCandidates.delete(sandboxId)
         const now = yield* Clock.currentTimeMillis
-        const orphans = candidates.filter((sandbox) => {
+        const orphans = inspected.filter((sandbox) => {
           const firstSeenAt = orphanCandidates.get(sandbox.sandboxId) ?? now
           orphanCandidates.set(sandbox.sandboxId, firstSeenAt)
           return now - firstSeenAt >= orphanGraceMillis
         })
         const reaped = yield* Effect.forEach(orphans, (sandbox) =>
-          HostedObservability.health("orphan_sandbox", { sandboxId: sandbox.sandboxId }).pipe(
-            Effect.andThen(
-              HostedObservability.observe(
-                "attach",
-                { sandboxId: sandbox.sandboxId },
-                provider.kill(sandbox.sandboxId).pipe(Effect.mapError(providerFailure)),
-              ),
-            ),
-            Effect.as(sandbox.sandboxId),
-            Effect.tap((id) => Effect.sync(() => orphanCandidates.delete(id))),
-            Effect.orElseSucceed(() => null),
+          assignments.claimOrphan(cleanupClaim(sandbox)).pipe(
+            Effect.mapError(assignmentFailure),
+            Effect.flatMap((claim) => {
+              if (claim === "preserved") {
+                orphanCandidates.delete(sandbox.sandboxId)
+                return Effect.succeed(null)
+              }
+              return HostedObservability.health("orphan_sandbox", { sandboxId: sandbox.sandboxId }).pipe(
+                Effect.andThen(
+                  HostedObservability.observe(
+                    "attach",
+                    { sandboxId: sandbox.sandboxId },
+                    provider.kill(sandbox.sandboxId).pipe(Effect.mapError(providerFailure)),
+                  ),
+                ),
+                Effect.as(sandbox.sandboxId),
+                Effect.tap((id) => Effect.sync(() => orphanCandidates.delete(id))),
+                Effect.orElseSucceed(() => null),
+              )
+            }),
           ),
         )
         return reaped.flatMap((sandboxId) => (sandboxId === null ? [] : [sandboxId]))

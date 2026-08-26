@@ -147,6 +147,7 @@ describe("hosted phase environment", () => {
               },
               access,
               frames,
+              operations: yield* Ref.make(new Map()),
               cells,
               emit: append,
             })
@@ -236,6 +237,7 @@ describe("hosted phase environment", () => {
           message: { _tag: "CellCancel", access, operationKey, attempt },
           access,
           frames,
+          operations: yield* Ref.make(new Map()),
           cells: {
             admit: () => Effect.die("unused"),
             execute: () => Effect.die("unused"),
@@ -315,19 +317,34 @@ describe("hosted phase environment", () => {
         const frames = yield* Ref.make(
           new Map<string, ReadonlyArray<CellLifecycleFrame>>([[key, [{ _tag: "Accepted", attribution, cursor: 1 }]]]),
         )
+        expect(testing.machineParentActive(yield* Ref.get(frames), operationKey, attempt)).toBe(true)
+        const machineInterrupted = yield* Deferred.make<void>()
+        const machine = yield* Effect.forkChild(
+          Effect.never.pipe(Effect.ensuring(Deferred.succeed(machineInterrupted, undefined)), Effect.asVoid),
+          { startImmediately: true },
+        )
+        const operations = yield* Ref.make<Map<string, Fiber.Fiber<void, unknown>>>(
+          new Map([[`${key}\u0000machine-1`, machine]]),
+        )
         const emit = (_access: CellRequest["access"], frame: CellLifecycleFrame) =>
-          Ref.modify(frames, (current) => {
-            const retained = current.get(key) ?? []
-            return [true, new Map(current).set(key, [...retained, frame])] as const
+          Effect.gen(function* () {
+            if (frame._tag === "Terminal") yield* Deferred.await(machineInterrupted)
+            return yield* Ref.modify(frames, (current) => {
+              const retained = current.get(key) ?? []
+              return [true, new Map(current).set(key, [...retained, frame])] as const
+            })
           })
 
         yield* testing.cancelCell({
           message: { _tag: "CellCancel", access, operationKey, attempt },
           access,
           frames,
+          operations,
           cells: hosted,
           emit,
         })
+        expect((yield* Deferred.poll(machineInterrupted))._tag).toBe("Some")
+        expect(testing.machineParentActive(yield* Ref.get(frames), operationKey, attempt)).toBe(false)
         const terminal = (yield* Ref.get(frames)).get(key)?.at(-1)
         const response = terminal?._tag === "Terminal" ? terminal.response : undefined
         expect(response).toEqual({

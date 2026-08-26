@@ -124,7 +124,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-1", ticket: "ticket-1" })
     yield* admission.setRemoteThreadCreation(registration, "denied")
     expect(yield* Ref.get(preferences)).toEqual(["allowed", "denied"])
-    expect(yield* Ref.get(statuses)).toEqual(["Waiting"])
+    expect(yield* Ref.get(statuses)).toEqual(["Ready", "Waiting"])
     expect(yield* Ref.get(polls)).toBe(2)
     expect(yield* Ref.get(activeAssignments)).toEqual([["assignment-local"], ["assignment-local"]])
     expect(yield* Ref.get(registrations)).toEqual([
@@ -200,17 +200,14 @@ it.effect("keeps polling after a transient hosted outage", () =>
         registration,
         supervisorId,
         (status) =>
-          Ref.update(statuses, (values) => [
-            ...values,
-            status._tag === "Waiting" ? status.message : status._tag,
-          ]),
+          Ref.update(statuses, (values) => [...values, status._tag === "Waiting" ? status.message : status._tag]),
         Effect.succeed([]),
       )
       .pipe(Effect.forkChild)
     yield* TestClock.adjust("1 second")
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-restart" })
     expect(yield* Ref.get(polls)).toBe(2)
-    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting"])
+    expect(yield* Ref.get(statuses)).toEqual(["Ready", "the hosted service is reconnecting"])
   }),
 )
 
@@ -263,16 +260,13 @@ it.effect("keeps the Runner alive when registration overlaps a hosted restart", 
         registration,
         supervisorId,
         (status) =>
-          Ref.update(statuses, (values) => [
-            ...values,
-            status._tag === "Waiting" ? status.message : status._tag,
-          ]),
+          Ref.update(statuses, (values) => [...values, status._tag === "Waiting" ? status.message : status._tag]),
         Effect.succeed([]),
       )
       .pipe(Effect.forkChild)
     yield* TestClock.adjust("1 second")
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-registration" })
     expect(yield* Ref.get(registrations)).toBe(2)
-    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting"])
+    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting", "Ready"])
   }),
 )

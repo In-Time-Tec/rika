@@ -12,6 +12,7 @@ import { authenticated, selectedProfile } from "../hosted/hosted-account"
 const statusLine = (status: RunnerStatus) => {
   if (status._tag === "Registering")
     return `Registering Runner ${status.registration.workspaceIdentity} for device ${status.registration.deviceId}`
+  if (status._tag === "Ready") return `Runner ready ${status.workspaceIdentity}`
   if (status._tag === "Waiting") return `Waiting for Runner: ${status.message}.`
   if (status._tag === "Connecting") return `Connecting Runner ${status.workspaceIdentity}`
   if (status._tag === "Connected") return `Runner connected ${status.workspaceIdentity}`
@@ -85,6 +86,7 @@ export const liveAdmissionLayer = Layer.effect(
             yield* status({ _tag: "Waiting", message: "the hosted service is reconnecting" })
             yield* Effect.sleep("1 second")
           }
+          yield* status({ _tag: "Ready", workspaceIdentity: registration.workspaceIdentity })
           let waitingReason: "no-work" | "runner-owned" | undefined
           while (true) {
             const polled = yield* Effect.result(
@@ -216,7 +218,11 @@ export const runRunner = Effect.fn("Runner.run")(function* (
   const admission = yield* RunnerAdmission
   const crypto = yield* Crypto.Crypto
   const supervisorId = yield* crypto.randomUUIDv4
-  const report = (status: RunnerStatus) => Console.log(statusLine(status))
+  const report = (status: RunnerStatus) =>
+    (status._tag === "Ready" && firstConnection !== undefined
+      ? Deferred.succeed(firstConnection, undefined)
+      : Effect.void
+    ).pipe(Effect.andThen(Console.log(statusLine(status))))
   const receiptStore = makeRunnerReceiptStore({ origin: profile.origin, deviceId: String(profile.deviceId) })
   const running = yield* Ref.make(new Set<string>())
   yield* report({ _tag: "Registering", registration: checkout.registration })

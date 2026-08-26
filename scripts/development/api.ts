@@ -1,8 +1,9 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Data, Deferred, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess } from "effect/unstable/process"
 import { DevelopmentTemplateIdentity } from "../../packages/e2b-executor/src/development-template"
+import { spawnOwned } from "./owned-child-process"
 
 class DevelopmentApiError extends Data.TaggedError("DevelopmentApiError")<{
   readonly message: string
@@ -10,7 +11,8 @@ class DevelopmentApiError extends Data.TaggedError("DevelopmentApiError")<{
 }> {}
 
 const failure = (message: string, cause?: unknown) => new DevelopmentApiError({ message, cause })
-const apiCommand = ChildProcess.make("bun", ["--cwd", "apps/api", "start"], {
+const apiCommand = ChildProcess.make("bun", ["./src/main.ts"], {
+  cwd: "apps/api",
   stdin: "ignore",
   stdout: "inherit",
   stderr: "inherit",
@@ -20,10 +22,9 @@ const exitSuccessfully = (process: string, exitCode: number) =>
   exitCode === 0 ? Effect.void : Effect.fail(failure(`${process} exited with code ${exitCode}`))
 
 const program = Effect.gen(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const target = yield* Config.option(Config.string("RIKA_DEV_EXECUTOR_ORIGIN"))
   if (Option.isNone(target)) {
-    const api = yield* spawner.spawn(apiCommand)
+    const api = yield* spawnOwned(apiCommand)
     return yield* api.exitCode.pipe(Effect.flatMap((exitCode) => exitSuccessfully("API", Number(exitCode))))
   }
 
@@ -37,7 +38,7 @@ const program = Effect.gen(function* () {
   if (identity.sourceDigest !== sourceDigest)
     return yield* failure("Development E2B template does not match the current source")
 
-  const tunnel = yield* spawner.spawn(
+  const tunnel = yield* spawnOwned(
     ChildProcess.make("cloudflared", ["tunnel", "--no-autoupdate", "--url", target.value], {
       stdin: "ignore",
       stdout: "ignore",
@@ -59,8 +60,9 @@ const program = Effect.gen(function* () {
   )
   const executor = new URL("/api/v1/executors", publicExecutorOrigin)
   executor.protocol = "wss:"
-  const api = yield* spawner.spawn(
-    ChildProcess.make("bun", ["--cwd", "apps/api", "start"], {
+  const api = yield* spawnOwned(
+    ChildProcess.make("bun", ["./src/main.ts"], {
+      cwd: "apps/api",
       env: {
         E2B_TEMPLATE_ID: identity.templateId,
         E2B_TEMPLATE_BUILD_ID: identity.buildId,
@@ -76,10 +78,6 @@ const program = Effect.gen(function* () {
     api.exitCode.pipe(Effect.map((exitCode) => ({ process: "API", exitCode: Number(exitCode) }))),
     tunnel.exitCode.pipe(Effect.map((exitCode) => ({ process: "Cloudflare tunnel", exitCode: Number(exitCode) }))),
   )
-  yield* Effect.all([api.kill().pipe(Effect.ignore), tunnel.kill().pipe(Effect.ignore)], {
-    concurrency: 2,
-    discard: true,
-  })
   if (exited.process !== "API")
     return yield* failure(`${exited.process} exited unexpectedly with code ${exited.exitCode}`)
   return yield* exitSuccessfully(exited.process, exited.exitCode)

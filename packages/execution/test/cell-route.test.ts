@@ -187,6 +187,7 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
             dispatched.push(input)
             return Effect.succeed({ _tag: "Success", result: result(input.operationKey) })
           },
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },
@@ -212,6 +213,191 @@ it.effect("routes a cell through the explicit remote adapter without a kernel po
         replayPolicy: "provider-idempotent",
       }),
     ])
+  }).pipe(Effect.scoped),
+)
+
+it.effect("cancels the exact admitted remote cell identity and redelivers it unchanged", () =>
+  Effect.gen(function* () {
+    const cancellations: Array<RemoteCells.CancellationRequest> = []
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      executionIdentity,
+      kernel,
+      cell: {
+        _tag: "Remote",
+        cells: RemoteCells.layer({
+          execute: () => Effect.die("unused"),
+          cancel: (input) => {
+            cancellations.push(input)
+            return Effect.succeed({
+              _tag: "DomainFailure",
+              failure: { kind: "cancelled", message: "Cell operation cancelled" },
+            })
+          },
+        }),
+        admit: () => Effect.void,
+      },
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const execution = request("await rika.processes.start({ command: 'sleep 30' })", "session-cancel")
+    const cancellation: ToolExecutor.CancellationRequest = {
+      operationKey: "operation-cancel",
+      attempt: 3,
+      sessionId: "session-cancel",
+      runId: "run-cancel",
+      rootRunId: "root-cancel",
+      toolCallId: execution.call.id,
+      toolName: CellTool.name,
+      execution,
+    }
+    const cancel = executor.cancel!(cancellation).pipe(
+      Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-cancel")),
+    )
+    expect(executor.cancellable?.(execution)).toBe(true)
+    expect(yield* cancel).toEqual({ _tag: "Cancelled" })
+    expect(yield* cancel).toEqual({ _tag: "Cancelled" })
+    expect(cancellations).toEqual([
+      {
+        operationKey: "operation-cancel",
+        workspaceId: "/workspace",
+        sessionId: "session-cancel",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        runId: "run-cancel",
+        rootRunId: "root-cancel",
+        toolCallId: "call-1",
+        code: "await rika.processes.start({ command: 'sleep 30' })",
+        attempt: 3,
+        replayPolicy: "provider-idempotent",
+      },
+      {
+        operationKey: "operation-cancel",
+        workspaceId: "/workspace",
+        sessionId: "session-cancel",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        runId: "run-cancel",
+        rootRunId: "root-cancel",
+        toolCallId: "call-1",
+        code: "await rika.processes.start({ command: 'sleep 30' })",
+        attempt: 3,
+        replayPolicy: "provider-idempotent",
+      },
+    ])
+  }).pipe(Effect.scoped),
+)
+
+it.effect("reports a remote success or domain failure that won the cancellation race", () =>
+  Effect.gen(function* () {
+    const completed = result("operation-terminal", "finished")
+    const failed = {
+      _tag: "tenetkit/repl/CellExecutionFailed" as const,
+      cellId: "call-1",
+      epoch: 0,
+      sequence: 1,
+      name: "Error",
+      message: "execution completed with a failure",
+      stdout: "",
+      stderr: "",
+      durationMillis: 1,
+      truncation: [],
+    }
+    const responses: Array<unknown> = [
+      { _tag: "Success", result: completed },
+      { _tag: "DomainFailure", failure: failed },
+    ]
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      executionIdentity,
+      kernel,
+      cell: {
+        _tag: "Remote",
+        cells: RemoteCells.layer({
+          execute: () => Effect.die("unused"),
+          cancel: () => Effect.succeed(responses.shift()!),
+        }),
+        admit: () => Effect.void,
+      },
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const execution = request("work()", "session-terminal")
+    const cancellation: ToolExecutor.CancellationRequest = {
+      operationKey: "operation-terminal",
+      attempt: 0,
+      sessionId: "session-terminal",
+      runId: "run-terminal",
+      rootRunId: "run-terminal",
+      toolCallId: execution.call.id,
+      toolName: CellTool.name,
+      execution,
+    }
+    const cancel = () =>
+      executor.cancel!(cancellation).pipe(
+        Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-terminal")),
+      )
+    expect(yield* cancel()).toEqual({
+      _tag: "AlreadyTerminal",
+      outcome: { _tag: "Success", result: completed, encodedResult: completed },
+    })
+    const failedOutcome = yield* cancel()
+    expect(failedOutcome).toMatchObject({
+      _tag: "AlreadyTerminal",
+      outcome: {
+        _tag: "DomainFailure",
+        failure: { _tag: "tenetkit/repl/CellExecutionFailed", message: "execution completed with a failure" },
+        encodedFailure: {
+          _tag: "tenetkit/repl/CellExecutionFailed",
+          message: "execution completed with a failure",
+        },
+      },
+    })
+  }).pipe(Effect.scoped),
+)
+
+it.effect("keeps an unknown cancellation outcome pending for TenetKit recovery", () =>
+  Effect.gen(function* () {
+    const configured = yield* configure({
+      executionRoute: testExecutionRoute(),
+      workspace: "/workspace",
+      executionIdentity,
+      kernel,
+      cell: {
+        _tag: "Remote",
+        cells: RemoteCells.layer({
+          execute: () => Effect.die("unused"),
+          cancel: () =>
+            Effect.succeed({
+              _tag: "DomainFailure",
+              failure: { kind: "unknown", message: "cancellation delivery is not definitive" },
+            }),
+        }),
+        admit: () => Effect.void,
+      },
+    })
+    const context = yield* Layer.build(executorFor(configured, "rika-root"))
+    const executor = Context.get(context, ToolExecutor.ToolExecutor)
+    const execution = request("work()", "session-unknown-cancel")
+    const failure = yield* Effect.flip(
+      executor.cancel!({
+        operationKey: "operation-unknown-cancel",
+        attempt: 0,
+        sessionId: "session-unknown-cancel",
+        runId: "run-unknown-cancel",
+        rootRunId: "run-unknown-cancel",
+        toolCallId: execution.call.id,
+        toolName: CellTool.name,
+        execution,
+      }).pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-unknown-cancel"))),
+    )
+    expect(failure).toMatchObject({
+      _tag: "@tenetkit/core/CancellationFailure",
+      tool: CellTool.name,
+      message: "cancellation delivery is not definitive",
+    })
   }).pipe(Effect.scoped),
 )
 
@@ -273,6 +459,7 @@ it.effect("decodes an encoded remote cell failure before returning it to TenetKi
                 truncation: [],
               },
             }),
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },
@@ -307,6 +494,7 @@ it.effect("turns a remote transport loss into a model-visible uncertain cell out
               _tag: "DomainFailure",
               failure: { kind: "unknown", message: "Executor disconnected after accepting the cell" },
             }),
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },
@@ -339,6 +527,7 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
         _tag: "Remote",
         cells: RemoteCells.layer({
           execute: () => Effect.succeed({ _tag: "Success", result: { value: 2 } }),
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },
@@ -373,6 +562,7 @@ it.effect("does not blindly retry a remote cell whose outcome is unknown", () =>
             dispatched.push(input)
             return RemoteCells.UnknownOutcome.make({ message: "dispatch acknowledgement was lost" })
           },
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },
@@ -416,6 +606,7 @@ it.effect("accepts the same deduplicated remote result after recovered dispatch"
             cached.set(input.operationKey, response)
             return Effect.succeed(response)
           },
+          cancel: () => Effect.die("unused"),
         }),
         admit: () => Effect.void,
       },

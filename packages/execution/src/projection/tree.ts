@@ -504,6 +504,7 @@ const make = (
         if (event.resolution._tag === "Denied") resolveAuthorization(node, event.waitId, "denied")
         return
       case "OperationUnknown":
+        if (core.rootStatus === "cancelling") return
         // A replayPolicy:"never" operation interrupted mid-flight parks the Run in needs-resolution
         // until it is resolved. The Run is waiting, not working, so stop accruing active time.
         if (node.lifecycle === "active") deactivate(node, event, "waiting")

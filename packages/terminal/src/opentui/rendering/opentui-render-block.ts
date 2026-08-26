@@ -7,7 +7,12 @@ import type { TranscriptBlock } from "../../state/model/terminal-transcript-stat
 import type { ChangedFile } from "../../state/model/terminal-changed-file"
 import type { Model } from "../../state/model/terminal-state"
 import { colors, modeColor } from "../../presentation/terminal/terminal-theme"
-import { escapeControlCharacters, formatBytes, truncateToWidth } from "../../presentation/terminal/terminal-format"
+import {
+  escapeControlCharacters,
+  formatBytes,
+  formatCliError,
+  truncateToWidth,
+} from "../../presentation/terminal/terminal-format"
 import { renderDiff } from "../../presentation/tool/diff-renderer"
 import { fg, dim, bg, underline, StyledText } from "@opentui/core"
 import { boundedThreadSidebarWidth } from "../../state/model/terminal-layout-state"
@@ -91,10 +96,8 @@ export const renderBlock: {
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
       case "Error": {
-        const title = wrapTextToWidth(block.title, Math.max(1, width)).join("\n")
-        const detail =
-          block.detail.length === 0 ? "" : `\n${wrapTextToWidth(block.detail, Math.max(1, width)).join("\n")}`
-        return `${title}${detail}`
+        const message = block.detail.length === 0 ? block.title : `${block.title}: ${block.detail}`
+        return wrapTextToWidth(formatCliError(message), Math.max(1, width)).join("\n")
       }
       case "SubagentCard": {
         let icon = "✗"

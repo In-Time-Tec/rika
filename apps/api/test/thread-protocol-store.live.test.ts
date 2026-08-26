@@ -25,7 +25,7 @@ import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/postgres-layer"
-import { FileSystem, Config, Context, DateTime, Deferred, Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, DateTime, Deferred, Effect, Fiber, Layer, Random, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "./live-platform"
@@ -915,6 +915,13 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
     Effect.gen(function* () {
       const protocolStore = yield* setup(pool)
       let currentSnapshot: HostedThreadSnapshot = snapshot
+      let snapshotBarrier:
+        | {
+            readonly started: Deferred.Deferred<void>
+            readonly release: Deferred.Deferred<void>
+            reads: number
+          }
+        | undefined
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -933,7 +940,17 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       }
       const operations: HostedThreadApplicationService = {
         thread: () => Effect.succeed(currentSnapshot.view.thread),
-        snapshot: () => Effect.succeed(currentSnapshot),
+        snapshot: () =>
+          Effect.gen(function* () {
+            const captured = currentSnapshot
+            const barrier = snapshotBarrier
+            if (barrier !== undefined) {
+              barrier.reads += 1
+              if (barrier.reads === 2) yield* Deferred.succeed(barrier.started, undefined)
+              yield* Deferred.await(barrier.release)
+            }
+            return captured
+          }),
         interactive: () => Effect.die("unused"),
       }
       const dependencies = Layer.mergeAll(
@@ -1048,6 +1065,93 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       yield* publish(3)
       const second = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
       expect(second.map(eventCursors)).toEqual([["2"], ["2"]])
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Projected checkpoint wake" },
+          revision: 4,
+        },
+      }
+      yield* query(pool, `INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES ($1, $2, 4)`, [
+        ownerId,
+        workspaceId,
+      ])
+      yield* query(
+        pool,
+        `INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
+         VALUES ($1, $2, $3, 'Checkpoint notification', 4, 4)`,
+        [threadId, ownerId, workspaceId],
+      )
+      yield* query(
+        pool,
+        `INSERT INTO rika_turns
+          (id, thread_id, prompt, status, created_at, updated_at, shell_command, turn_kind)
+         VALUES ('checkpoint-notify-turn', $1, '$ printf projection', 'running', 4, 4, 'printf projection', 'RecordedShell')`,
+        [threadId],
+      )
+      yield* query(
+        pool,
+        `INSERT INTO rika_transcript_checkpoints
+          (turn_id, thread_id, checkpoint_generation, revision, projection_version, state_json, updated_at)
+         VALUES ('checkpoint-notify-turn', $1, 1, 0, $2, '{}', 4)`,
+        [threadId, ExecutionProjection.projectionVersion],
+      )
+      const projected = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
+      expect(projected).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
+      ])
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Running before terminal transition" },
+          revision: 5,
+        },
+      }
+      snapshotBarrier = {
+        started: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+        reads: 0,
+      }
+      const firstWake = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
+        concurrency: "unbounded",
+      }).pipe(Effect.forkChild)
+      yield* query(
+        pool,
+        `UPDATE rika_transcript_checkpoints SET updated_at = 5 WHERE turn_id = 'checkpoint-notify-turn'`,
+      )
+      yield* Deferred.await(snapshotBarrier.started).pipe(Effect.timeout("5 seconds"))
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Completed after terminal transition" },
+          revision: 6,
+        },
+      }
+      yield* query(
+        pool,
+        `UPDATE rika_turns SET status = 'completed', updated_at = 6,
+          shell_result_text = '', shell_result_truncated = 0, shell_result_exit_code = 0
+         WHERE id = 'checkpoint-notify-turn'`,
+      )
+      yield* Deferred.succeed(snapshotBarrier.release, undefined)
+      expect(yield* Fiber.join(firstWake)).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
+      ])
+      snapshotBarrier = undefined
+      const terminal = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
+        concurrency: "unbounded",
+      }).pipe(Effect.timeout("5 seconds"))
+      expect(terminal).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
+      ])
     }),
   ),
 )
@@ -1427,9 +1531,9 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         admittedAt: later,
       })
       const replayClaimToken = "cursor-replay-claim"
-      expect(yield* protocolStore.claimNextCommand({ claimToken: replayClaimToken, claimMillis: 60_000 })).toMatchObject(
-        { commandId: replayCommandId },
-      )
+      expect(
+        yield* protocolStore.claimNextCommand({ claimToken: replayClaimToken, claimMillis: 60_000 }),
+      ).toMatchObject({ commandId: replayCommandId })
       yield* protocolStore.completeCommand({
         ownerId,
         threadId,
@@ -1591,7 +1695,9 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         admittedAt: now,
       })
       const organizationClaimToken = "organization-claim"
-      expect(yield* protocol.claimNextCommand({ claimToken: organizationClaimToken, claimMillis: 60_000 })).toMatchObject({
+      expect(
+        yield* protocol.claimNextCommand({ claimToken: organizationClaimToken, claimMillis: 60_000 }),
+      ).toMatchObject({
         commandId: organizationAdmission.command.commandId,
       })
       yield* protocol.completeCommand({

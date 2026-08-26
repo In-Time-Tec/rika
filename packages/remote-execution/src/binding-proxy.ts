@@ -29,9 +29,7 @@ interface PendingCall {
   readonly outcome: Ref.Ref<BindingOutcome | undefined>
 }
 
-type OutcomeResolution =
-  | { readonly _tag: "New" }
-  | { readonly _tag: "Known"; readonly outcome: BindingOutcome }
+type OutcomeResolution = { readonly _tag: "New" } | { readonly _tag: "Known"; readonly outcome: BindingOutcome }
 
 export interface Transport {
   readonly send: (message: {
@@ -225,12 +223,14 @@ export const make: (options: {
           next.delete(requestKey(request.sessionId, request.toolCallId))
           return next
         }),
-        Ref.update(pending, (current) =>
-          new Map(
-            Array.from(current).filter(
-              ([, call]) => call.operationKey !== request.operationKey || call.attempt !== request.attempt,
+        Ref.update(
+          pending,
+          (current) =>
+            new Map(
+              Array.from(current).filter(
+                ([, call]) => call.operationKey !== request.operationKey || call.attempt !== request.attempt,
+              ),
             ),
-          ),
         ),
       ],
       { discard: true },
@@ -263,8 +263,9 @@ export const make: (options: {
   const replay = (access: AccessWire) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
-      yield* Ref.update(active, (current) =>
-        new Map(Array.from(current, ([key, cell]) => [key, { ...cell, access }] as const)),
+      yield* Ref.update(
+        active,
+        (current) => new Map(Array.from(current, ([key, cell]) => [key, { ...cell, access }] as const)),
       )
       const calls = Array.from((yield* Ref.get(pending)).values()).sort((left, right) => left.ordinal - right.ordinal)
       yield* Effect.forEach(
@@ -274,10 +275,7 @@ export const make: (options: {
             if (call.deadlineAtMillis <= now) {
               const removed = yield* removePending(call)
               if (removed)
-                yield* Deferred.fail(
-                  call.result,
-                  BindingProxyError.make({ message: "cell binding deadline exceeded" }),
-                )
+                yield* Deferred.fail(call.result, BindingProxyError.make({ message: "cell binding deadline exceeded" }))
               return
             }
             const outcome = yield* Ref.get(call.outcome)

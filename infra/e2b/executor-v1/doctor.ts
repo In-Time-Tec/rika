@@ -52,12 +52,25 @@ await check("workspace:ready", async () => {
     `GH_CONFIG_DIR=${process.env.GH_CONFIG_DIR ?? ""}`,
     "sh",
     "-ceu",
-    '[ "$(id -un)" = rika-workspace ]\n[ "$HOME" = /home/rika-workspace ]\ncase "$PATH" in /run/rika/bin:*) ;; *) exit 1 ;; esac\n[ "$GH_CONFIG_DIR" = /run/rika/gh ]\n[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]\ninstall -d -m 0770 "$2"\ntouch "$2/write"\nprintf workspace-ready',
+    '[ "$(id -un)" = rika-workspace ]\n[ "$HOME" = /home/rika-workspace ]\ncase "$PATH" in /run/rika/bin:*) ;; *) exit 1 ;; esac\n[ "$GH_CONFIG_DIR" = /run/rika/gh ]\n[ -r "$1" ] && [ -w "$1" ] && [ -x "$1" ]\ninstall -d -m 0750 "$2"\ntouch "$2/write"\nprintf workspace-ready',
     "sh",
     workspaceParent,
     temp,
   ])
   if (output !== "workspace-ready") throw new Error(`unexpected workspace probe: ${output}`)
+  return output
+})
+await check("machine:workspace-user", async () => {
+  await command(["sudo", "-n", "-u", "rika-workspace", "sh", "-c", `printf before > '${join(temp, "existing.txt")}'`])
+  await command(["test", "!", "-w", join(temp, "existing.txt")])
+  const output = await command(["bun", "run", "/opt/rika/packages/remote-execution/src/machine-doctor.ts", temp])
+  if (output !== "rika-workspace:machine-environment") throw new Error(`unexpected machine probe: ${output}`)
+  if ((await readFile(join(temp, "existing.txt"), "utf8")) !== "after")
+    throw new Error("machine did not edit workspace file")
+  if ((await readFile(join(temp, "created.txt"), "utf8")) !== "created-by-machine")
+    throw new Error("machine did not create workspace file")
+  if ((await command(["stat", "-c", "%U", join(temp, "created.txt")])) !== "rika-workspace")
+    throw new Error("machine file has the wrong owner")
   return output
 })
 await check("kernel:persistence", async () =>

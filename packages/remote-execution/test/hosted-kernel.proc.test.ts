@@ -133,6 +133,65 @@ describe("hosted TypeScript kernel", () => {
     ),
   )
 
+  it.effect("retires a binding-blocked kernel before cancellation becomes definitive", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-binding-cancel-" })
+        const manifest = yield* bindingManifest([{ module: "blocking", operations: ["wait"] }])
+        const states = yield* Ref.make(new Map<string, import("../src/cells").State>())
+        const bindingSent = yield* Deferred.make<Parameters<HostedKernel.Options["sendBinding"]>[0]>()
+        const kernel = yield* HostedKernel.make({
+          workspaceIdentity: "workspace-1",
+          workspacePath: root,
+          dataRoot: root,
+          read: (operationKey) => Effect.map(Ref.get(states), (current) => current.get(operationKey)),
+          write: (operationKey, state) => Ref.update(states, (current) => new Map(current).set(operationKey, state)),
+          sendBinding: (message) => Deferred.succeed(bindingSent, message).pipe(Effect.asVoid),
+        })
+        const blocked = request(
+          manifest,
+          "operation-binding-cancel",
+          "call-binding-cancel",
+          "await rika.blocking.wait({})",
+        )
+        const running = yield* Effect.forkChild(
+          kernel.execute(blocked, () => Effect.void),
+          {
+            startImmediately: true,
+          },
+        )
+        yield* Deferred.await(bindingSent)
+
+        const cancellation = yield* kernel.cancel(blocked.operationKey, blocked.attempt)
+        expect(cancellation).toEqual({
+          _tag: "DomainFailure",
+          failure: { kind: "cancelled", message: "Cell operation cancelled" },
+        })
+        expect(yield* Fiber.join(running)).toEqual(cancellation)
+
+        const recovered = yield* kernel.execute(
+          request(
+            manifest,
+            "operation-after-binding-cancel",
+            "call-after-binding-cancel",
+            '"available after binding cancellation"',
+          ),
+          () => Effect.void,
+        )
+        expect(resultValue(recovered)).toBe("available after binding cancellation")
+      }).pipe(
+        provideLayer(BunFileSystem.layer),
+        Effect.provideServiceEffect(
+          Crypto.Crypto,
+          Effect.scoped(Layer.build(Layer.merge(BunCrypto.layer, BunFileSystem.layer))).pipe(
+            Effect.map((context) => Context.get(context, Crypto.Crypto)),
+          ),
+        ),
+      ),
+    ),
+  )
+
   it.effect("keeps Session state, invokes real rika bindings, and suspends API-owned approval", () =>
     Effect.scoped(
       Effect.gen(function* () {

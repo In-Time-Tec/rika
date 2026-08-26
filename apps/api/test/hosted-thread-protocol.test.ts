@@ -96,6 +96,7 @@ const memoryStore = () => {
   let latestSnapshot: HostedThreadSnapshot | undefined
   let latestSnapshotCursor = 0n
   let latestSnapshotVersion = 0n
+  let snapshotSaves = 0
   const claims = new Map<string, string>()
   const acknowledgements: Array<{ readonly threadId: string; readonly cursor: string }> = []
   const events: Array<{
@@ -181,6 +182,7 @@ const memoryStore = () => {
       }),
     saveSnapshot: (input) =>
       Effect.sync(() => {
+        snapshotSaves += 1
         latestSnapshot = input.snapshot
         latestSnapshotCursor = BigInt(input.cursor)
         latestSnapshotVersion = BigInt(input.threadVersion)
@@ -244,6 +246,7 @@ const memoryStore = () => {
     admissions: () => admissions,
     acknowledgements: () => acknowledgements,
     command: (id: string) => commands.get(id),
+    snapshotSaves: () => snapshotSaves,
     dropSnapshot: () => {
       latestSnapshot = undefined
       latestSnapshotCursor = 0n
@@ -365,9 +368,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
   return Effect.scoped(
     Effect.gen(function* () {
       const protocol = Context.get(
-        yield* Layer.build(
-          hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies)),
-        ),
+        yield* Layer.build(hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies))),
         HostedThreadProtocol,
       )
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
@@ -988,9 +989,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
         createdAt: timestamp,
       })
       const protocol = Context.get(
-        yield* Layer.build(
-          hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies)),
-        ),
+        yield* Layer.build(hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies))),
         HostedThreadProtocol,
       )
       const connection = yield* protocol.connect("ticket", "/api/v1/threads/socket")
@@ -1016,7 +1015,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "1",
             threadVersion: "0",
-            snapshot: durableAhead,
+            snapshot: currentSnapshot,
           },
         },
       ])
@@ -1037,7 +1036,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "2",
             threadVersion: "0",
-            snapshot: durableBehind,
+            snapshot: currentSnapshot,
           },
         },
       ])
@@ -1058,10 +1057,26 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
             _tag: "ThreadSnapshot",
             cursor: "3",
             threadVersion: "0",
-            snapshot: durableCompacted,
+            snapshot: currentSnapshot,
           },
         },
       ])
+
+      currentSnapshot = snapshotWithTitle("Projection at the same cursor")
+      const savesBeforeProjection = store.snapshotSaves()
+      expect(yield* pollOutbound(connection)).toMatchObject([
+        {
+          payload: {
+            _tag: "ThreadSnapshot",
+            cursor: "3",
+            threadVersion: "0",
+            snapshot: currentSnapshot,
+          },
+        },
+      ])
+      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
+      expect(yield* pollOutbound(connection)).toEqual([])
+      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
     }),
   )
 })

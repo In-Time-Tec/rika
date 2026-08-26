@@ -58,6 +58,7 @@ export const InteractiveEventSchema = Schema.Union([
   }),
   Schema.Struct({
     _tag: Schema.tag("SubmissionRejected"),
+    threadId: Schema.optionalKey(Thread.ThreadId),
     message: Schema.String,
     submissionId: Schema.optionalKey(Schema.String),
   }),

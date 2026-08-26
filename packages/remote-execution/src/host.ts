@@ -744,6 +744,16 @@ const sameAttribution = (left: ReturnType<typeof attribution>, right: ReturnType
   left.attempt === right.attempt
 
 const executionKey = (operationKey: string, attempt: number) => `${operationKey}\u0000${attempt}`
+const machineExecutionKey = (operationKey: string, attempt: number, machineId: string) =>
+  `${executionKey(operationKey, attempt)}\u0000${machineId}`
+const machineParentActive = (
+  frames: Map<string, ReadonlyArray<CellLifecycleFrame>>,
+  operationKey: string,
+  attempt: number,
+) => {
+  const retained = frames.get(executionKey(operationKey, attempt))
+  return retained !== undefined && !retained.some((frame) => frame._tag === "Terminal")
+}
 
 const redactText = (value: string, secrets: ReadonlyArray<string>) =>
   secrets.reduce((text, secret) => (secret.length === 0 ? text : text.split(secret).join("REDACTED")), value)
@@ -965,6 +975,7 @@ const cancelCell = Effect.fn("ExecutorHost.cancelCell")(function* (input: {
   readonly message: Extract<IncomingMessage, { readonly _tag: "CellCancel" }>
   readonly access: CellRequest["access"]
   readonly frames: Ref.Ref<Map<string, ReadonlyArray<CellLifecycleFrame>>>
+  readonly operations: Ref.Ref<Map<string, Fiber.Fiber<void, unknown>>>
   readonly cells: HostedKernel.Interface
   readonly emit: (access: CellRequest["access"], frame: CellLifecycleFrame) => Effect.Effect<boolean, HostError>
 }) {
@@ -981,6 +992,11 @@ const cancelCell = Effect.fn("ExecutorHost.cancelCell")(function* (input: {
   const response = yield* input.cells
     .cancel(input.message.operationKey, input.message.attempt)
     .pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+  const machinePrefix = `${key}\u0000`
+  const machines = [...(yield* Ref.get(input.operations))]
+    .filter(([operationKey]) => operationKey.startsWith(machinePrefix))
+    .map(([, fiber]) => fiber)
+  yield* Effect.forEach(machines, Fiber.interrupt, { discard: true })
   const interrupted = (yield* Ref.get(input.frames)).get(key)
   if (interrupted !== undefined && !interrupted.some((frame) => frame._tag === "Terminal")) {
     yield* input.emit(input.message.access, {
@@ -1078,32 +1094,56 @@ const consumeApi = (
         )
         if (!sameAccess(access, message.access))
           return yield* HostError.make({ message: "Machine request has a stale executor fence" })
-        yield* Effect.sync(() =>
-          runWorker(
-            machine
-              .execute({
-                machineId: message.machineId,
-                requestDigest: message.requestDigest,
-                request: message.request,
-              })
-              .pipe(
-                Effect.flatMap((outcome) =>
-                  writer(
-                    encodeExecutorMessage({
-                      _tag: "MachineResult",
-                      access: message.access,
-                      operationKey: message.operationKey,
-                      attempt: message.attempt,
-                      machineId: message.machineId,
-                      requestDigest: message.requestDigest,
-                      outcome,
-                    }),
-                  ),
+        if (!machineParentActive(yield* Ref.get(frames), message.operationKey, message.attempt)) {
+          yield* writer(
+            encodeExecutorMessage({
+              _tag: "MachineResult",
+              access: message.access,
+              operationKey: message.operationKey,
+              attempt: message.attempt,
+              machineId: message.machineId,
+              requestDigest: message.requestDigest,
+              outcome: { _tag: "Fenced", message: "Parent Cell is no longer running" },
+            }),
+          ).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+          return
+        }
+        const key = machineExecutionKey(message.operationKey, message.attempt, message.machineId)
+        if (!(yield* Ref.get(operations)).has(key)) {
+          const gate = yield* Deferred.make<void>()
+          const operation = machine
+            .execute({
+              machineId: message.machineId,
+              requestDigest: message.requestDigest,
+              request: message.request,
+            })
+            .pipe(
+              Effect.flatMap((outcome) =>
+                writer(
+                  encodeExecutorMessage({
+                    _tag: "MachineResult",
+                    access: message.access,
+                    operationKey: message.operationKey,
+                    attempt: message.attempt,
+                    machineId: message.machineId,
+                    requestDigest: message.requestDigest,
+                    outcome,
+                  }),
                 ),
-                Effect.mapError((error) => HostError.make({ message: error.message })),
               ),
-          ),
-        )
+              Effect.mapError((error) => HostError.make({ message: error.message })),
+              Effect.ensuring(
+                Ref.update(operations, (current) => {
+                  const next = new Map(current)
+                  next.delete(key)
+                  return next
+                }),
+              ),
+            )
+          const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
+          yield* Ref.update(operations, (current) => new Map(current).set(key, fiber))
+          yield* Deferred.succeed(gate, undefined)
+        }
       }
       if (yield* dispatchPty(message, writer, ptyDelivery)) return
       if (yield* dispatchWorkspace(message, writer)) return
@@ -1247,7 +1287,9 @@ const consumeApi = (
               (frame) => writer(encodeExecutorMessage({ _tag: "CellLifecycle", access, frame })),
               { discard: true },
             )
-            yield* cells.replayBindings(access).pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
+            yield* cells
+              .replayBindings(access)
+              .pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
             return
           }
         }
@@ -1363,7 +1405,7 @@ const consumeApi = (
         const access = yield* runtime.access.pipe(
           Effect.mapError((cause) => HostError.make({ message: cause.message })),
         )
-        yield* cancelCell({ message, access, frames, cells, emit })
+        yield* cancelCell({ message, access, frames, operations, cells, emit })
       }
       if (message._tag === "CellReplay") {
         const access = yield* runtime.access.pipe(
@@ -1673,6 +1715,7 @@ export const testing = {
   cancelCell,
   dispatchPty,
   dispatchWorkspace,
+  machineParentActive,
   operationReceiptStore,
   receiveBootstrap,
   redactOutput,
@@ -1881,9 +1924,16 @@ const host = Effect.scoped(
         })
         const hostScope = yield* Effect.scope
         const makeMachine = yield* Effect.cached(
-          Layer.buildWithScope(machineLayer({ workspace: root, read: readMachine, write: writeMachine }), hostScope).pipe(
-            Effect.map((context) => Context.get(context, Machine)),
-          ),
+          Layer.buildWithScope(
+            machineLayer({
+              workspace: root,
+              workspaceUser,
+              environment: executionEnvironment,
+              read: readMachine,
+              write: writeMachine,
+            }),
+            hostScope,
+          ).pipe(Effect.map((context) => Context.get(context, Machine))),
         )
         const operations = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
         const frames = yield* Ref.make(yield* receipts.load)

@@ -25,6 +25,7 @@ export const canonicalPublicRequest = (input: { readonly request: Request; reado
 type SessionGateway = Pick<Gateway, "receive" | "disconnected" | "active">
 
 interface Session {
+  readonly kind: "executor" | "runner" | "thread"
   readonly attach: (socket: Bun.ServerWebSocket<Session>) => void
   readonly receive: (socket: Socket, message: unknown) => void
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
@@ -63,10 +64,12 @@ export const pollAuthority = (sessions: ReadonlySet<AuthoritySession>) =>
   )
 
 const ownedSession = (handler: {
+  readonly kind: Session["kind"]
   readonly opened?: (socket: Socket) => Effect.Effect<void>
   readonly receive: (socket: Socket, message: unknown) => Effect.Effect<void>
   readonly disconnected: (socket: Socket | undefined) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
+  readonly durable?: (message: unknown) => boolean
   readonly concurrent?: (message: unknown) => boolean
   readonly runConcurrent?: (effect: Effect.Effect<void>) => void
   readonly maximumQueuedBytes?: number
@@ -86,17 +89,43 @@ const ownedSession = (handler: {
   let accepting = true
   let closing = false
   let queuedBytes = 0
+  let durableReceives = 0
+  const durableDrained = Deferred.makeUnsafe<void>()
+  const runDurable = (receive: Effect.Effect<void>) =>
+    Effect.suspend(() => {
+      durableReceives += 1
+      const processed = Deferred.makeUnsafe<void>()
+      ;(handler.runConcurrent ?? run)(
+        receive.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              durableReceives -= 1
+            }).pipe(
+              Effect.andThen(Deferred.succeed(processed, undefined)),
+              Effect.andThen(
+                Effect.suspend(() =>
+                  closing && durableReceives === 0 ? Deferred.succeed(durableDrained, undefined) : Effect.void,
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+      return Deferred.await(processed)
+    })
   const stop = (socket: Socket | undefined) =>
     Effect.suspend(() => {
       accepting = false
       if (closing) return Deferred.await(closed)
       closing = true
       return Scope.close(scope, Exit.void).pipe(
+        Effect.andThen(Effect.suspend(() => (durableReceives === 0 ? Effect.void : Deferred.await(durableDrained)))),
         Effect.andThen(handler.disconnected(socket)),
         Effect.ensuring(Deferred.succeed(closed, undefined)),
       )
     })
   return {
+    kind: handler.kind,
     attach: (socket) => {
       activeSocket = socket
       if (handler.opened !== undefined) run(handler.opened(socket))
@@ -118,8 +147,9 @@ const ownedSession = (handler: {
           }),
         ),
       )
-      if (handler.concurrent?.(message) === true) (handler.runConcurrent ?? run)(receive)
-      else if (!Queue.offerUnsafe(serial, receive)) {
+      const owned = handler.durable?.(message) === true ? runDurable(receive) : receive
+      if (handler.concurrent?.(message) === true) (handler.runConcurrent ?? run)(owned)
+      else if (!Queue.offerUnsafe(serial, owned)) {
         queuedBytes -= bytes
         accepting = false
         socket.close(1013, "session overloaded")
@@ -154,11 +184,30 @@ const reverse = (message: unknown) => {
   return Exit.isSuccess(decodeReverseMessage(text))
 }
 
-const session = (gateway: SessionGateway, runConcurrent: (effect: Effect.Effect<void>) => void): Session =>
+const DurableMessage = Schema.fromJsonString(
+  Schema.Struct({
+    _tag: Schema.Literals(["CellLifecycle", "CellResult"]),
+    payload: Schema.optional(Schema.Unknown),
+  }),
+)
+const decodeDurableMessage = Schema.decodeUnknownExit(DurableMessage)
+
+const durable = (message: unknown) => {
+  const text = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer)
+  return Exit.isSuccess(decodeDurableMessage(text))
+}
+
+const session = (
+  kind: "executor" | "runner",
+  gateway: SessionGateway,
+  runConcurrent: (effect: Effect.Effect<void>) => void,
+): Session =>
   ownedSession({
+    kind,
     receive: gateway.receive,
     disconnected: (socket) => (socket === undefined ? Effect.void : gateway.disconnected(socket)),
     active: gateway.active,
+    durable,
     concurrent: reverse,
     runConcurrent,
   })
@@ -252,6 +301,7 @@ const threadSession = (
       Effect.forever,
     )
   return ownedSession({
+    kind: "thread",
     opened: (socket) => Effect.raceFirst(write(socket), process(socket)),
     receive: (socket, message) => {
       const body = typeof message === "string" ? message : Buffer.from(message as Uint8Array).toString("utf8")
@@ -370,7 +420,11 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
                 pathname === "/api/v1/executors"
                   ? input.dependencies.executor.gateway
                   : input.dependencies.executor.runnerGateway
-              const current = session(gateway, runReverseMessage)
+              const current = session(
+                pathname === "/api/v1/executors" ? "executor" : "runner",
+                gateway,
+                runReverseMessage,
+              )
               sessions.add(current)
               authoritySessions.add(current)
               if (bunServer.upgrade(request, { data: current })) return undefined
@@ -394,10 +448,18 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
               socket.data!.attach(socket)
             },
             message: (socket, message) => socket.data!.receive(socket, message),
-            close: (socket) => {
+            close: (socket, code) => {
               sessions.delete(socket.data!)
               authoritySessions.delete(socket.data!)
-              runSessionClose(socket.data!.disconnected(socket))
+              runSessionClose(
+                Effect.logInfo("hosted.websocket.closed").pipe(
+                  Effect.annotateLogs({
+                    "rika.websocket.kind": socket.data!.kind,
+                    "rika.websocket.code": code,
+                  }),
+                  Effect.andThen(socket.data!.disconnected(socket)),
+                ),
+              )
             },
           },
         })

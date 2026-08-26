@@ -33,10 +33,7 @@ export interface TurnClaim {
 export interface HostedTurnWorkerStoreService {
   readonly claimNext: (request: ClaimRequest) => Effect.Effect<TurnClaim | undefined, HostedTurnWorkerStoreError>
   readonly claimRecovery: (request: ClaimRequest) => Effect.Effect<TurnClaim | undefined, HostedTurnWorkerStoreError>
-  readonly renew: (
-    claim: TurnClaim,
-    leaseMillis: number,
-  ) => Effect.Effect<boolean, HostedTurnWorkerStoreError>
+  readonly renew: (claim: TurnClaim, leaseMillis: number) => Effect.Effect<boolean, HostedTurnWorkerStoreError>
   readonly prepare: (
     claim: TurnClaim,
     prepared: ExecutionGateway.PreparedTurn,
@@ -117,7 +114,10 @@ const claim = (
       const databaseNow = sql`floor(extract(epoch from transaction_timestamp()) * 1000)::bigint`
       yield* query(sql`DELETE FROM rika_hosted_turn_claims
             WHERE thread_id = ${row.threadId} AND expires_at <= ${databaseNow}`)
-      const claims = yield* query(sql<{ readonly claimedAt: string; readonly expiresAt: string }>`INSERT INTO rika_hosted_turn_claims
+      const claims = yield* query(sql<{
+        readonly claimedAt: string
+        readonly expiresAt: string
+      }>`INSERT INTO rika_hosted_turn_claims
             (turn_id, owner_id, thread_id, worker_id, claim_token, claimed_at, heartbeat_at, expires_at)
             VALUES (${row.turnId}, ${row.ownerId}, ${row.threadId}, ${request.workerId}, ${request.claimToken},
               ${databaseNow}, ${databaseNow}, ${databaseNow} + ${request.leaseMillis})

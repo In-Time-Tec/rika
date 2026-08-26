@@ -6,6 +6,7 @@ import * as RemoteCells from "../src/remote-cells"
 export const remoteCell = remoteCells({
   cells: RemoteCells.layer({
     execute: () => RemoteCells.Unavailable.make({ message: "test remote cells are unavailable" }),
+    cancel: () => RemoteCells.Unavailable.make({ message: "test remote cells are unavailable" }),
   }),
   admit: () => Effect.void,
 })
@@ -19,6 +20,7 @@ export const successfulRemoteCell = (result: unknown) =>
   remoteCells({
     cells: RemoteCells.layer({
       execute: () => Effect.succeed({ _tag: "Success", result }),
+      cancel: () => Effect.die("unused"),
     }),
     admit: () => Effect.void,
   })

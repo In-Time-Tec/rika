@@ -103,6 +103,7 @@ export const layer = (options: {
               Effect.forever,
             ),
           ),
+          Effect.onError(() => store.release(claim).pipe(Effect.ignore)),
           Effect.ensuring(
             Ref.update(activeClaims, (claims) => {
               const current = claims.get(claim.input.turnId)
@@ -160,7 +161,11 @@ export const layer = (options: {
                 Effect.flatMap((at) =>
                   SubscriptionRef.update(health, (state) => ({ ...state, lastFailure: { at, message } })),
                 ),
-                Effect.andThen(Effect.logError("hosted-turn-worker.failed")),
+                Effect.andThen(
+                  Effect.logError("hosted-turn-worker.failed").pipe(
+                    Effect.annotateLogs("rika.failure.message", Cause.pretty(cause)),
+                  ),
+                ),
               )
             }),
           ),
@@ -183,7 +188,11 @@ export const layer = (options: {
                 lastFailure: { at, message },
               })),
             ),
-            Effect.andThen(Effect.logError("hosted-turn-worker.poll-failed")),
+            Effect.andThen(
+              Effect.logError("hosted-turn-worker.poll-failed").pipe(
+                Effect.annotateLogs("rika.failure.message", Cause.pretty(cause)),
+              ),
+            ),
             Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
           )
         }),

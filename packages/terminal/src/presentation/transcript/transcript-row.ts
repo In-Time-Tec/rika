@@ -221,10 +221,7 @@ export const isExpandableUnit: {
   if (unit.kind !== "tool") {
     if (unit.kind === "block") {
       const block = model.blocks[unit.block] as TranscriptBlock
-      return (
-        (block._tag === "Error" && block.detail.length > 0) ||
-        (block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0))
-      )
+      return block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0)
     }
     if (unit.kind === "cell") {
       const block = model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "Cell" }>

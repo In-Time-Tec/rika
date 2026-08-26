@@ -360,7 +360,7 @@ test("renders every transcript block variant and sidebar state", () => {
   expect(renderedBlocks).toContain("❋ Auto-compacted\n  Kept recent turns")
   expect(renderedBlocks).toContain("❋ Auto-compacted\n  No checkpoint")
   expect(renderedBlocks).not.toContain(" at 42")
-  expect(renderedBlocks).toContain("Execution failed\nModel unavailable")
+  expect(renderedBlocks).toContain("ERROR\n  Execution failed: Model unavailable")
   expect(renderedBlocks).toContain("2×3 · 4 B")
   expect(renderedBlocks).toContain('⠿ ts await rika.workspace.read({ path: "a.ts" })')
   expect(renderedBlocks).toContain("✓ $ await Bun.$`bun test` 1.2s truncated")
@@ -416,15 +416,13 @@ test("shows the error cause on the first lines with no instructions", () => {
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
 
-  expect(text).toContain("Execution failed")
-  expect(text).toContain("Model unavailable")
+  expect(text).toContain("ERROR\n  Execution failed: Model unavailable")
   expect(text).not.toContain("Next:")
   expect(text).not.toContain("▸")
   expect(text).not.toContain("▾")
   expect(text).not.toContain("✖")
   expect(
-    buildTranscript(model({ blocks: [block] })).styled.chunks.find((chunk) => chunk.text.includes("Execution failed"))
-      ?.fg,
+    buildTranscript(model({ blocks: [block] })).styled.chunks.find((chunk) => chunk.text.includes("ERROR"))?.fg,
   ).toBe(colors.red)
 })
 test("keeps tool cards generic without removed activity assumptions", () => {

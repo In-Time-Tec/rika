@@ -16,10 +16,7 @@ import { auditHandlers } from "./http-api/audit-controller"
 export { RikaApi } from "./http-api/contract"
 
 export const isRikaApiPath = (pathname: string) =>
-  pathname === "/healthz" ||
-  pathname === "/readyz" ||
-  pathname === "/api/account" ||
-  pathname.startsWith("/api/v1/")
+  pathname === "/healthz" || pathname === "/readyz" || pathname === "/api/account" || pathname.startsWith("/api/v1/")
 
 export const makeRikaApiHandler = (dependencies: HttpDependencies) => {
   const authenticated = Layer.mergeAll(

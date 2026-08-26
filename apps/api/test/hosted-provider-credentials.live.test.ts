@@ -161,6 +161,14 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         const firstLoaded = yield* store.load(first.credentialIdentity)
         expect(Option.isSome(firstLoaded) && Redacted.value(firstLoaded.value)).toBe("provider-secret-one")
         expect(
+          yield* credentials.put({
+            principal: principal("owner-user"),
+            owner: personal("owner-user"),
+            provider: "openrouter",
+            apiKey: Redacted.make("provider-secret-one"),
+          }),
+        ).toEqual(first)
+        expect(
           yield* credentials.openAiAccountStatus({
             principal: principal("owner-user"),
             owner: personal("owner-user"),

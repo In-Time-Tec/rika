@@ -73,9 +73,7 @@ export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: Runti
     developmentSeedEnabled: !identity.production && environment.RIKA_DEV_SEED?.trim() === "1",
     ...(executor === undefined ? {} : { executor }),
     ...(hasGithubAppId ? { github: { appId: githubAppId, privateKey: Redacted.make(githubPrivateKey!) } } : {}),
-    ...(identity.production
-      ? {}
-      : { developmentModel: environment.RIKA_DEV_MODEL?.trim() || "minimax/minimax-m2.7:free" }),
+    ...(identity.production ? {} : { developmentModel: environment.RIKA_DEV_MODEL?.trim() || "openai/gpt-5-mini" }),
     providerCredentialKey: Redacted.make(encodedCredentialKey),
   }
 })

@@ -6,10 +6,11 @@ import { makeEventRouter } from "../src/interactive/process/process-events"
 
 const router = () => {
   const showToast = vi.fn()
+  const update = vi.fn()
   const loop = {
     closed: false,
     model: { ...initial("/workspace", "medium"), currentThreadId: "thread" },
-    renderer: { surface: { showToast } },
+    renderer: { surface: { showToast, update } },
     submittedSinceIdle: false,
   }
   const eventRouter = makeEventRouter({
@@ -20,15 +21,15 @@ const router = () => {
     refreshTerminalTitle: () => undefined,
     requestSelectionResync: () => undefined,
   } as never)
-  return { ...eventRouter, showToast }
+  return { ...eventRouter, showToast, loop, update }
 }
 
 describe("approval control failures", () => {
   it.each([
     ["approve", "Approval"],
     ["deny", "Denial"],
-  ] as const)("shows a nonterminal red toast when %s fails", (action, label) => {
-    const { dispatch, showToast } = router()
+  ] as const)("shows a nonterminal structured error when %s fails", (action, label) => {
+    const { dispatch, loop, showToast } = router()
     dispatch({
       _tag: "ExecutionControlFailed",
       threadId: Thread.ThreadId.make("thread"),
@@ -43,7 +44,12 @@ describe("approval control failures", () => {
         actor: "user",
       },
     })
-    expect(showToast).toHaveBeenCalledWith(`${label} failed: Authorization is no longer pending`, "#e06c75")
+    expect(showToast).not.toHaveBeenCalled()
+    expect(loop.model.blocks).toContainEqual({
+      _tag: "Error",
+      title: `${label} failed`,
+      detail: "Authorization is no longer pending",
+    })
   })
 
   it("does not surface another thread's approval failure", () => {

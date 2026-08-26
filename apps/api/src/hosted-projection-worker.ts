@@ -45,10 +45,7 @@ export interface HostedProjectionWorkerStatus extends WorkerState {
 
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 
-export const layer = (options: {
-  readonly concurrency: number
-  readonly pollIntervalMillis: number
-}) =>
+export const layer = (options: { readonly concurrency: number; readonly pollIntervalMillis: number }) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const turns = yield* TurnRepository.Service

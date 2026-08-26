@@ -1,4 +1,16 @@
-import { Cause, Clock, Context, Crypto, DateTime, Effect, FiberMap, Layer, Schema, SubscriptionRef } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  FiberMap,
+  Function,
+  Layer,
+  Schema,
+  SubscriptionRef,
+} from "effect"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
@@ -59,6 +71,32 @@ type InteractiveMutatingCommand = Exclude<
   { readonly _tag: "CreateThread" | "SubmitPrompt" | "EnsureRepositoryService" | "StopRepositoryService" }
 >
 
+const commandControlFailureImpl = (
+  command: Pick<InteractiveMutatingCommand, "_tag">,
+  events: ReadonlyArray<InteractiveEvent>,
+) => {
+  let expectedAction: "approve" | "cancel" | "deny" | undefined
+  if (command._tag === "Approve") expectedAction = "approve"
+  else if (command._tag === "Deny") expectedAction = "deny"
+  else if (command._tag === "Cancel") expectedAction = "cancel"
+  return expectedAction === undefined
+    ? undefined
+    : events.find(
+        (event): event is Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> =>
+          event._tag === "ExecutionControlFailed" && event.action === expectedAction,
+      )
+}
+
+export const commandControlFailure: {
+  (
+    events: ReadonlyArray<InteractiveEvent>,
+  ): (command: Pick<InteractiveMutatingCommand, "_tag">) => ReturnType<typeof commandControlFailureImpl>
+  (
+    command: Pick<InteractiveMutatingCommand, "_tag">,
+    events: ReadonlyArray<InteractiveEvent>,
+  ): ReturnType<typeof commandControlFailureImpl>
+} = Function.dual(2, commandControlFailureImpl)
+
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 const commandFailure = (error: unknown) => {
   if (Schema.is(CommandApplicationError)(error)) return error
@@ -107,6 +145,7 @@ const rejectionEvents = (
     return [
       {
         _tag: "SubmissionRejected",
+        threadId: ProductThreadId.make(command.threadId),
         message: error.message,
         submissionId: command.submissionId ?? command.commandId,
       },
@@ -359,14 +398,7 @@ export const layer = (options: {
               if (batch.failure !== undefined)
                 return yield* CommandApplicationError.make({ kind: "unavailable", message: batch.failure.message })
               const events = batch.events.filter(isDurableThreadEvent)
-              let rejection: Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> | undefined
-              if (command._tag === "Approve" || command._tag === "Deny") {
-                const expectedAction = command._tag === "Approve" ? "approve" : "deny"
-                rejection = events.find(
-                  (event): event is Extract<InteractiveEvent, { readonly _tag: "ExecutionControlFailed" }> =>
-                    event._tag === "ExecutionControlFailed" && event.action === expectedAction,
-                )
-              }
+              const rejection = commandControlFailure(command, events)
               return yield* protocol.completeCommand({
                 ownerId: record.ownerId,
                 threadId: record.threadId,
@@ -447,8 +479,7 @@ export const layer = (options: {
           claimToken,
           claimMillis: options.claimMillis,
         })
-        if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
-        else
+        if (command !== undefined)
           yield* FiberMap.run(
             active,
             `${command.threadId}:${command.commandId}`,
@@ -473,6 +504,7 @@ export const layer = (options: {
           poll: { _tag: "Succeeded", at: succeededAt } as const,
           lastSuccessfulPollAt: succeededAt,
         }))
+        if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)

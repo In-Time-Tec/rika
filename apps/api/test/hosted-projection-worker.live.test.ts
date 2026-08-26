@@ -170,7 +170,10 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
             JOIN rika_transcript_units unit_record ON unit_record.turn_id = turn_record.id
             WHERE turn_record.id = 'projection-turn'`),
         ),
-        (result) => result.rows[0]?.status === "completed",
+        (result) =>
+          result.rows[0]?.status === "completed" &&
+          result.rows[0]?.revision === 1 &&
+          result.rows[0]?.projector_cursor === "cursor-completed",
       )
       yield* Scope.close(secondScope, Exit.void)
       expect(cursors).toEqual([undefined, "cursor-running"])

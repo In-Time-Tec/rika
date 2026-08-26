@@ -114,7 +114,8 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain("capped at 16KB")
   expect(text).toContain("rather than piping it through head or tail")
   expect(text).toContain("Run shell commands with rika.processes.start")
-  expect(text).toContain("rika.processes.status({ processId, waitMillis })")
+  expect(text).toContain("rika.processes -> start({ command, workdir, timeoutMillis: 0-60000 })")
+  expect(text).toContain("status({ processId, waitMillis: 0-10000 })")
 })
 
 /**

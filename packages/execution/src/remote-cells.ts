@@ -24,6 +24,8 @@ export const Request = Schema.Struct({
 
 export type Request = typeof Request.Type
 
+export type CancellationRequest = Omit<Request, "admittedAt" | "deadlineAt">
+
 export const InfrastructureFailure = Schema.Struct({
   kind: Schema.Literals(["unknown", "timeout", "cancelled", "execution", "fenced", "workspace"]),
   message: Schema.String,
@@ -69,6 +71,7 @@ export interface Interface {
     request: Request,
     authority: Context.Context<ExecutorRuntime.CellServices>,
   ) => Effect.Effect<unknown, Unavailable | UnknownOutcome>
+  readonly cancel: (request: CancellationRequest) => Effect.Effect<unknown, Unavailable | UnknownOutcome>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/execution/remote-cells/Service") {}

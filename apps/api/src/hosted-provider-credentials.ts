@@ -319,6 +319,34 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
           const rows = yield* sql
             .withTransaction(
               Effect.gen(function* () {
+                const existing = (yield* sql<CredentialRow>`SELECT
+                    credential_reference_id AS credential_identity, owner_id, provider, status,
+                    revision::text AS revision, key_version, nonce, ciphertext, authentication_tag
+                  FROM rika_hosted_provider_credentials
+                  WHERE owner_id = ${ownerId} AND provider = ${input.provider}
+                  FOR UPDATE`)[0]
+                if (
+                  existing?.status === "active" &&
+                  existing.key_version === 1 &&
+                  existing.nonce !== null &&
+                  existing.ciphertext !== null &&
+                  existing.authentication_tag !== null
+                ) {
+                  const storedCiphertext = {
+                    keyVersion: 1 as const,
+                    nonce: existing.nonce,
+                    ciphertext: existing.ciphertext,
+                    authenticationTag: existing.authentication_tag,
+                  }
+                  const stored = yield* Effect.option(
+                    Effect.try({
+                      try: () => cipher.decrypt(`${ownerId}/${input.provider}`, storedCiphertext),
+                      catch: () => undefined,
+                    }),
+                  )
+                  if (Option.isSome(stored) && Redacted.value(stored.value) === Redacted.value(input.apiKey))
+                    return [existing]
+                }
                 const references = yield* sql<{ readonly id: string }>`INSERT INTO rika_hosted_credential_references
                   (id, owner_id, provider, purpose, external_reference, metadata, created_by_user_id, created_at, updated_at)
                 VALUES (

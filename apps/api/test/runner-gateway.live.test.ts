@@ -104,6 +104,10 @@ const response = {
   _tag: "Success" as const,
   result: { stdout: "restart", stderr: "", exitCode: 0 },
 }
+const cancelledResponse = {
+  _tag: "DomainFailure" as const,
+  failure: { kind: "cancelled" as const, message: "Cell operation was cancelled" },
+}
 const environmentDigest = `sha256:${"0".repeat(64)}`
 const workspaceCapabilities = {
   environmentDigest,
@@ -524,8 +528,7 @@ it.effect.skipIf(!live)(
               secondSocket.sent
                 .map((value) => decode(value))
                 .find(
-                  (message) =>
-                    message._tag === "CellExecute" && message.request.operationKey === "operation-restart",
+                  (message) => message._tag === "CellExecute" && message.request.operationKey === "operation-restart",
                 ),
             ),
           ).toMatchObject({
@@ -620,6 +623,89 @@ it.effect.skipIf(!live)("replays the exact durable cancelled terminal without di
               FROM rika_hosted_executor_operations WHERE operation_key = 'operation-cancelled'`,
           )).rows,
         ).toEqual([{ state: "completed", terminalOutcome: "cancelled", response: cancelled }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("terminalizes repeated cancellation before Runner dispatch", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancel-accepted"
+        yield* seed(pool, operationKey, { state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+
+        const first = yield* gateway.cancel(cellRequest(operationKey))
+        const repeated = yield* gateway.cancel(cellRequest(operationKey))
+
+        expect(repeated).toEqual(first)
+        expect(first).toMatchObject({ outcome: "cancelled", eventPersisted: true })
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .filter(
+              (message) =>
+                (message._tag === "CellExecute" && message.request.operationKey === operationKey) ||
+                (message._tag === "CellCancel" && message.operationKey === operationKey),
+            ),
+        ).toEqual([])
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("waits for a dispatched Runner cancellation terminal and redelivers after restart", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancel-restart"
+        const cancelled = {
+          _tag: "DomainFailure" as const,
+          failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+        }
+        yield* seed(pool, operationKey)
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const firstSocket = socket()
+        yield* first.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+        const interrupted = yield* Effect.forkChild(first.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          firstSocket.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "dispatched", events: 0 }])
+        yield* first.disconnected(firstSocket)
+        yield* Fiber.interrupt(interrupted)
+
+        const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const secondSocket = socket()
+        yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+        const cancelling = yield* Effect.forkChild(restarted.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          secondSocket.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "dispatched", events: 0 }])
+
+        yield* persistTerminal(restarted, secondSocket, access, operationKey, cancelled, "cancelled")
+        yield* TestClock.adjust("100 millis")
+        expect(yield* Fiber.join(cancelling)).toMatchObject({
+          response: cancelled,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
+        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
       }),
     ),
   ),
@@ -737,6 +823,139 @@ it.effect.skipIf(!live)("atomically persists one accepted deadline result across
           (yield* query(pool, `SELECT event FROM rika_hosted_thread_events WHERE idempotency_key = $1`, [operationKey]))
             .rows,
         ).toEqual([{ event: { _tag: "CellResult", operationKey, response: timeout } }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("settles active Local Runner machine work before accepting a cancelled Cell terminal", () =>
+  isolated(({ url, pool }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancelled-machine"
+        yield* seed(pool, operationKey, { state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest(operationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
+        )
+        const machine = yield* Effect.forkChild(
+          gateway.machine(assignmentId, operationKey, 0, {
+            _tag: "CodingTool",
+            request: { _tag: "Bash", command: "sleep 30" },
+          }),
+        )
+        const machineRequest = yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "MachineExecute" && message.operationKey === operationKey),
+        )
+        if (machineRequest._tag !== "MachineExecute") return yield* Effect.die("machine request was not sent")
+
+        for (const frame of [
+          { _tag: "Accepted" as const, attribution: operationAttribution(operationKey), cursor: 1 },
+          { _tag: "Started" as const, attribution: operationAttribution(operationKey), cursor: 2 },
+        ])
+          yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+        yield* Fiber.interrupt(running)
+        const cancelling = yield* Effect.forkChild(gateway.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "CellLifecycle",
+            access,
+            frame: {
+              _tag: "Terminal",
+              attribution: operationAttribution(operationKey),
+              cursor: 3,
+              outcome: "cancelled",
+              response: cancelledResponse,
+            },
+          }),
+        )
+        expect(machine.pollUnsafe()).toBeDefined()
+        expect(yield* Fiber.join(machine)).toEqual({ _tag: "Cancelled" })
+        expect(yield* Fiber.join(cancelling)).toEqual({
+          access,
+          response: cancelledResponse,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
+
+        const nextOperationKey = "operation-after-cancelled-machine"
+        yield* query(
+          pool,
+          `INSERT INTO rika_hosted_executor_operations
+          (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
+            turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, deadline_at, state, updated_at)
+          VALUES ('assignment-local-gateway', 'organization-owner-local-gateway', $1, $2,
+            'workspace-local-gateway', 'assignment-local-gateway', 'thread-local-gateway', 'turn-local-gateway',
+            'run-local-gateway', 'run-local-gateway', 'call-local-gateway', $3, 0, 'pure',
+            '2999-01-01T00:00:00.000Z', 'accepted', now())`,
+          [nextOperationKey, operationDigest(cellRequest(nextOperationKey)), code],
+        )
+        const next = yield* Effect.forkChild(gateway.execute(cellRequest(nextOperationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellExecute" && message.request.operationKey === nextOperationKey),
+        )
+        const nextMachine = yield* Effect.forkChild(
+          gateway.machine(assignmentId, nextOperationKey, 0, {
+            _tag: "ProcessStop",
+            processId: "process-after-cancel",
+          }),
+        )
+        const nextMachineRequest = yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "MachineExecute" && message.operationKey === nextOperationKey),
+        )
+        if (nextMachineRequest._tag !== "MachineExecute") return yield* Effect.die("next machine request was not sent")
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "MachineResult",
+            access,
+            operationKey: nextOperationKey,
+            attempt: 0,
+            machineId: nextMachineRequest.machineId,
+            requestDigest: nextMachineRequest.requestDigest,
+            outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+          }),
+        )
+        expect(yield* Fiber.join(nextMachine)).toEqual({ _tag: "Success", value: { _tag: "ProcessStopped" } })
+        yield* persistTerminal(gateway, target, access, nextOperationKey)
+        expect(yield* Fiber.join(next)).toMatchObject({ response, outcome: "completed", eventPersisted: true })
+
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "MachineResult",
+            access,
+            operationKey,
+            attempt: 0,
+            machineId: machineRequest.machineId,
+            requestDigest: machineRequest.requestDigest,
+            outcome: {
+              _tag: "Success",
+              value: { _tag: "CodingTool", result: { text: "late", truncated: false } },
+            },
+          }),
+        )
+        expect(target.closed).toEqual([])
       }),
     ),
   ),
@@ -1049,9 +1268,7 @@ it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay"
           target.sent.map((value) => decode(value)).find((message) => message._tag === "CellExecute"),
         )
         yield* Fiber.interrupt(running)
-        expect(
-          target.sent.map((value) => decode(value)).some((message) => message._tag === "CellCancel"),
-        ).toBe(false)
+        expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "CellCancel")).toBe(false)
         expect((yield* operationState(pool, "operation-personal")).rows).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),

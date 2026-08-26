@@ -302,6 +302,7 @@ export const MachineFailure = Schema.Union([
 export const MachineOutcome = Schema.Union([
   Schema.TaggedStruct("Success", { value: MachineSuccess }),
   Schema.TaggedStruct("Failure", { failure: MachineFailure }),
+  Schema.TaggedStruct("Cancelled", {}),
   Schema.TaggedStruct("Unknown", { message: Schema.String }),
   Schema.TaggedStruct("Fenced", { message: Schema.String }),
 ])

@@ -133,7 +133,7 @@ COPY infra/e2b/executor-v1/kernel-doctor.ts ./kernel-doctor.ts
 COPY infra/e2b/executor-v1/rika ./rika
 RUN chmod 0555 /opt/rika/start.sh /opt/rika/rika \
   && ln -s /opt/rika/rika /usr/local/bin/rika \
-  && chown -R root:rika-executor /opt/rika \
+  && chown -R root:rika-workspace /opt/rika \
   && chmod -R u=rwX,g=rX,o= /opt/rika \
   && sudo -n -u rika-workspace -- test -w /home/rika-workspace/workspace
 
