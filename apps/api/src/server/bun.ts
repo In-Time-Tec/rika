@@ -1,6 +1,14 @@
 import { Deferred, Effect, Exit, FiberSet, Function, Queue, Schema, Scope } from "effect"
 import type { IdentityConfig } from "@rika/identity"
-import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
+import {
+  ClientMessage,
+  inspectClientProtocolVersion,
+  protocolMismatchCloseCode,
+  protocolMismatchFrame,
+  protocolMismatchMessage,
+  protocolVersion,
+  ServerFrame,
+} from "@rika/product/client-protocol"
 import type { Gateway, Socket } from "../executor/gateway"
 import * as Api from "../api"
 import { threadWebSocketAudience, type HostedThreadConnection } from "../hosted/thread/protocol"
@@ -303,6 +311,12 @@ const threadSession = (
     opened: (socket) => Effect.raceFirst(write(socket), process(socket)),
     receive: (socket, message) => {
       const body = Buffer.from(message).toString("utf8")
+      const inspected = inspectClientProtocolVersion(body)
+      if (inspected.protocolVersion !== protocolVersion)
+        return Effect.sync(() => {
+          socket.send(protocolMismatchFrame(inspected))
+          socket.close(protocolMismatchCloseCode, protocolMismatchMessage)
+        })
       return decodeThreadMessage(body).pipe(
         Effect.flatMap((decoded) =>
           Effect.gen(function* () {

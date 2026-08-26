@@ -19,7 +19,14 @@ import {
   ThreadVersion,
   Timestamp,
 } from "../../../src/hosted/model"
-import { ClientMessage, ServerFrame, protocolVersion } from "../../../src/hosted/protocol/client"
+import {
+  ClientMessage,
+  inspectClientProtocolVersion,
+  protocolMismatchFrame,
+  protocolMismatchMessage,
+  protocolVersion,
+  ServerFrame,
+} from "../../../src/hosted/protocol/client"
 
 const roundTrip = <A, I>(schema: Schema.Codec<A, I, never, never>, value: A) => {
   const jsonCodec = Schema.fromJsonString(schema)
@@ -108,8 +115,6 @@ describe("hosted Thread client protocol", () => {
         service: { serviceId: "docs", command: "bun", args: ["run", "dev"], cwd: "." },
       }),
       envelope({ _tag: "StopRepositoryService", ...mutation, serviceId: "docs" }),
-      envelope({ _tag: "PauseOrb", ...mutation }),
-      envelope({ _tag: "ResumeOrb", ...mutation }),
       envelope({ _tag: "InspectWorkspaceFile", threadId, path: "src/main.ts", maximumBytes: 1024 }),
       envelope({ _tag: "AcknowledgeCursor", threadId, cursor }),
       envelope({ _tag: "UpdatePresence", threadId, status: "viewing" }),
@@ -141,7 +146,7 @@ describe("hosted Thread client protocol", () => {
     ]) {
       expect(() => Schema.decodeSync(ClientMessage)(forged)).toThrow()
     }
-    expect(() => Schema.decodeSync(ClientMessage)({ ...base, protocolVersion: 2 })).toThrow()
+    expect(() => Schema.decodeSync(ClientMessage)({ ...base, protocolVersion: 1 })).toThrow()
     expect(() => Schema.decodeSync(ClientMessage)(envelope({ _tag: "Cancel", ...mutation, extra: true }))).toThrow()
     expect(() =>
       Schema.decodeSync(ClientMessage)(
@@ -164,6 +169,22 @@ describe("hosted Thread client protocol", () => {
         }),
       ),
     ).toThrow()
+  })
+
+  it("rejects a previous protocol version and encodes a mismatch frame the caller can still read", () => {
+    const body = JSON.stringify({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })
+    expect(inspectClientProtocolVersion(body)).toEqual({ protocolVersion: 1, requestId: "request-1" })
+    const frame = Schema.decodeSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          protocolVersion: Schema.Finite,
+          payload: Schema.Struct({ message: Schema.String, requestId: Schema.String }),
+        }),
+      ),
+    )(protocolMismatchFrame({ protocolVersion: 1, requestId: "request-1" }))
+    expect(frame.protocolVersion).toBe(1)
+    expect(frame.payload.requestId).toBe("request-1")
+    expect(frame.payload.message).toBe(protocolMismatchMessage)
   })
 
   it("round trips accepted, rejected, event, and heartbeat server frames", () => {

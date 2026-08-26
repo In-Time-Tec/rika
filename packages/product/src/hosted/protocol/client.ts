@@ -1,4 +1,4 @@
-import { Function, Schema } from "effect"
+import { Function, Option, Schema } from "effect"
 import * as ExecutionProjection from "../../execution/projection/contract"
 import { InteractiveEventSchema, type InteractiveEvent } from "../../operation/interactive/event"
 import * as Turn from "../../thread/turn/record"
@@ -21,7 +21,52 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 1 as const
+export const protocolVersion = 2 as const
+export const protocolMismatchCloseCode = 1003
+export const protocolMismatchMessage = "Client outdated, upgrade rika"
+
+const ProtocolInspection = Schema.Struct({
+  protocolVersion: Schema.optionalKey(Schema.Unknown),
+  requestId: Schema.optionalKey(Schema.Unknown),
+})
+export type ProtocolInspection = typeof ProtocolInspection.Type
+
+const ProtocolMismatchWire = Schema.Struct({
+  protocolVersion: Schema.Finite,
+  payload: Schema.TaggedStruct("CommandRejected", {
+    requestId: Schema.NonEmptyString,
+    reason: Schema.Literal("unavailable"),
+    message: Schema.String,
+    details: Schema.Struct({
+      expectedProtocolVersion: Schema.Finite,
+      receivedProtocolVersion: Schema.NullOr(Schema.Unknown),
+    }),
+  }),
+})
+
+export const inspectClientProtocolVersion = (body: string): ProtocolInspection =>
+  Option.getOrElse(Schema.decodeOption(Schema.fromJsonString(ProtocolInspection))(body), () => ({}))
+
+const mismatchProtocolVersion = (value: ProtocolInspection["protocolVersion"]) =>
+  Schema.is(Schema.Finite)(value) ? value : 1
+
+const mismatchRequestId = (value: ProtocolInspection["requestId"]) =>
+  Schema.is(Schema.NonEmptyString)(value) ? value : "protocol"
+
+export const protocolMismatchFrame = (inspection: ProtocolInspection): string =>
+  Schema.encodeSync(Schema.fromJsonString(ProtocolMismatchWire))({
+    protocolVersion: mismatchProtocolVersion(inspection.protocolVersion),
+    payload: {
+      _tag: "CommandRejected",
+      requestId: mismatchRequestId(inspection.requestId),
+      reason: "unavailable",
+      message: protocolMismatchMessage,
+      details: {
+        expectedProtocolVersion: protocolVersion,
+        receivedProtocolVersion: inspection.protocolVersion ?? null,
+      },
+    },
+  })
 
 export const isDurableThreadEvent = (event: InteractiveEvent) =>
   event._tag !== "ExecutionModelPreviewChanged" &&
@@ -142,8 +187,6 @@ export const MutatingThreadCommand = Schema.Union([
       serviceId: Schema.NonEmptyString,
     }),
   ),
-  strict(Schema.TaggedStruct("PauseOrb", mutating)),
-  strict(Schema.TaggedStruct("ResumeOrb", mutating)),
 ])
 export type MutatingThreadCommand = typeof MutatingThreadCommand.Type
 

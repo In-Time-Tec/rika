@@ -2,8 +2,8 @@
   │ > thread                 │
   │ new                      │
   │ new in Orb               │
-  │ enable remote Thread cre │
-  │ disable remote Thread cr │
+  │ switch                   │
+  │                          │
   ╰──────────────────────────╯
 ╭─────────────────────── high ─╮
 │                              │

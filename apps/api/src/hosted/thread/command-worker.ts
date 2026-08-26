@@ -270,12 +270,7 @@ export const layer = (options: {
         )
         let action: AuthorizationAction = "thread:control"
         if (command._tag === "SubmitPrompt") action = "thread:operate"
-        if (
-          command._tag === "EnsureRepositoryService" ||
-          command._tag === "StopRepositoryService" ||
-          command._tag === "PauseOrb" ||
-          command._tag === "ResumeOrb"
-        )
+        if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService")
           action = "workspace:service:control"
         yield* hosted.authorizeThread({
           ownerId: record.ownerId,
@@ -318,11 +313,6 @@ export const layer = (options: {
               submissionId: command.submissionId ?? command.commandId,
             },
           ])
-        }
-
-        if (command._tag === "PauseOrb" || command._tag === "ResumeOrb") {
-          yield* command._tag === "PauseOrb" ? workspace.pause(record.threadId) : workspace.resume(record.threadId)
-          return yield* complete(record, claimToken, { _tag: "Applied" }, [])
         }
 
         if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {

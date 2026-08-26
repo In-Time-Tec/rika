@@ -1,7 +1,7 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { HostedTurnWorkerStore, type TurnClaim } from "@rika/product-store/turn-worker-store"
-import { Cause, Clock, Context, Crypto, Effect, FiberMap, Layer, Ref, Schema, SubscriptionRef } from "effect"
+import { Cause, Clock, Context, Crypto, Effect, FiberMap, Layer, Ref, Schedule, Schema, SubscriptionRef } from "effect"
 
 export class HostedTurnWorkerError extends Schema.TaggedError<HostedTurnWorkerError>()("HostedTurnWorkerError", {
   message: Schema.String,
@@ -40,6 +40,12 @@ export interface HostedTurnWorkerStatus extends WorkerState {
 
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 
+const isTransientPrepareFailure = (error: ExecutionGateway.PrepareTurnFailure) =>
+  error.kind === "unavailable" ||
+  error.message.includes("unavailable workspace capabilities") ||
+  error.message.includes("workspace root is unavailable") ||
+  error.message.includes("workspace lifecycle is not ready")
+
 export const layer = (options: {
   readonly workerId: string
   readonly leaseMillis: number
@@ -64,7 +70,13 @@ export const layer = (options: {
       const executeClaim = Effect.fn("HostedTurnWorker.execute")(function* (claim: TurnClaim) {
         let prepared = claim.preparedExecution
         if (prepared === undefined) {
-          prepared = yield* gateway.prepareTurn(claim.input)
+          prepared = yield* gateway.prepareTurn(claim.input).pipe(
+            Effect.retry({
+              times: 80,
+              schedule: Schedule.spaced("100 millis"),
+              while: isTransientPrepareFailure,
+            }),
+          )
           const persisted = yield* store.prepare(claim, prepared, yield* Clock.currentTimeMillis)
           if (!persisted) {
             yield* store.release(claim)

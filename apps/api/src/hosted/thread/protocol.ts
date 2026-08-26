@@ -544,8 +544,6 @@ export const layerWithOptions = (
             if (
               command._tag === "EnsureRepositoryService" ||
               command._tag === "StopRepositoryService" ||
-              command._tag === "PauseOrb" ||
-              command._tag === "ResumeOrb" ||
               command._tag === "OpenPortal"
             )
               requiredAction = "workspace:service:control"

@@ -375,7 +375,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   readonly profile: Profile
   readonly threadId: string
   readonly createThread: (executorKind: "runner" | "orb") => Effect.Effect<string, HostedError>
-  readonly setRemoteThreadCreation: (preference: "allowed" | "denied") => Effect.Effect<void, HostedError>
 }) {
   const profile = input.profile
   const http = yield* Http
@@ -1280,32 +1279,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const threadId = yield* input.createThread("orb")
       yield* requestSelection(threadId)
     }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newOrbThread", error))),
-    pauseOrb: Effect.gen(function* () {
-      const commandId = yield* nextCommandId("pause-orb")
-      yield* mutate("InteractiveSession.pauseOrb", commandId, (threadId, version) => ({
-        _tag: "PauseOrb",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-      }))
-    }),
-    resumeOrb: Effect.gen(function* () {
-      const commandId = yield* nextCommandId("resume-orb")
-      yield* mutate("InteractiveSession.resumeOrb", commandId, (threadId, version) => ({
-        _tag: "ResumeOrb",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-      }))
-    }),
-    enableRemoteThreadCreation: input
-      .setRemoteThreadCreation("allowed")
-      .pipe(Effect.mapError((error) => unavailable("InteractiveSession.enableRemoteThreadCreation", error))),
-    disableRemoteThreadCreation: input
-      .setRemoteThreadCreation("denied")
-      .pipe(Effect.mapError((error) => unavailable("InteractiveSession.disableRemoteThreadCreation", error))),
     archiveThread: unsupported("InteractiveSession.archiveThread"),
     archiveAndNewThread: unsupported("InteractiveSession.archiveAndNewThread"),
     selectThread: (threadId) =>

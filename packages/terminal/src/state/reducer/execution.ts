@@ -43,20 +43,29 @@ const reduceExecutionImpl = (
       if (model.submittedDrafts.some((draft) => draft.turnId === undefined)) return model
       const submission = classifyPrompt(model.input)
       if (submission._tag === "Shell" && submission.command.length === 0) return model
+      const prompt = expandPastedText(model.input, model.pastedText)
       const submittedDraft = {
         input: model.input,
         attachments: model.pastedText,
         cursor: model.cursor,
       }
-      if (message.submissionId !== undefined) {
-        return {
-          ...model,
-          submittedDrafts: [...model.submittedDrafts, { ...submittedDraft, submissionId: message.submissionId }],
-        }
-      }
-      return {
+      const submitted = {
         ...model,
-        submittedDrafts: [...model.submittedDrafts, submittedDraft],
+        input: "",
+        cursor: 0,
+        pastedText: [],
+        submittedDrafts: [
+          ...model.submittedDrafts,
+          message.submissionId === undefined
+            ? submittedDraft
+            : { ...submittedDraft, submissionId: message.submissionId },
+        ],
+      }
+      if (submission._tag !== "Prompt" || model.busy) return submitted
+      return {
+        ...appendProvisionalUserEntry(submitted, prompt, message.submissionId),
+        busy: true,
+        activity: { _tag: "Sending" as const },
       }
     }
     case "SubmissionAdmitted": {

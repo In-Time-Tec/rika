@@ -147,8 +147,8 @@ for (const width of [80, 50] as const) {
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))
           setup.mockInput.pressEnter()
-          expect(model).toMatchObject({ input: "retry", busy: false, activity: undefined })
-          expect(model.entries).toEqual([])
+          expect(model).toMatchObject({ input: "", busy: true, activity: { _tag: "Sending" } })
+          expect(model.entries).toEqual([{ role: "user", text: "retry" }])
           model = update(model, {
             _tag: "SubmissionAdmitted",
             turnId: "turn-retry",
@@ -383,7 +383,7 @@ test("renders input and resize updates while the renderer remains event-driven",
       }
     }),
   ))
-test("keeps the submitted draft editable until admission and echoes it exactly once", () =>
+test("renders a submitted prompt immediately and preserves later composer typing", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
@@ -405,15 +405,16 @@ test("keeps the submitted draft editable until admission and echoes it exactly o
         setup.mockInput.pressEnter()
         yield* openTui(() => setup.mockInput.typeText("ExE"))
         expect(submittedPrompt).toBe("Explore in depth")
-        expect(model.input).toBe("Explore in depthExE")
-        expect(model.entries).toEqual([])
+        expect(model.input).toBe("ExE")
+        expect(model.entries).toEqual([{ role: "user", text: "Explore in depth" }])
+        expect(model.busy).toBe(true)
         model = update(model, {
           _tag: "SubmissionAdmitted",
           turnId: "turn-explore",
           status: "active",
           submissionId: "explore-submission",
         })
-        expect(model.input).toBe("Explore in depthExE")
+        expect(model.input).toBe("ExE")
         expect(model.entries.at(-1)).toEqual({
           role: "user",
           text: "Explore in depth",

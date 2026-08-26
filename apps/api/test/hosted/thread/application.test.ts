@@ -6,7 +6,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
-import { ServerFrame } from "@rika/product/client-protocol"
+import { ServerFrame, protocolVersion } from "@rika/product/client-protocol"
 import { OwnerId, ThreadEventCursor, ThreadId as HostedThreadId, ThreadVersion } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId } from "@rika/product/thread-record"
@@ -188,7 +188,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           pendingAuthorizations: [],
         })
         const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(ServerFrame))({
-          protocolVersion: 1,
+          protocolVersion,
           payload: {
             _tag: "ThreadSnapshot",
             threadId: yield* Schema.decodeEffect(HostedThreadId)("read-only-thread"),

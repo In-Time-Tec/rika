@@ -105,6 +105,77 @@ it.effect("persists staged admission before activation", () =>
   ),
 )
 
+it.effect("retries transient workspace capability prepare failures inside the claim", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const completed = yield* Deferred.make<void>()
+      const attempts = yield* Ref.make(0)
+      const claim: TurnClaim = {
+        workerId: "worker-test",
+        claimToken: "claim-test",
+        expiresAt: 30,
+        activationRequested: false,
+        ownerId: "owner-test",
+        claimedAt: 0,
+        input: {
+          threadId: "thread-test",
+          turnId: "turn-test",
+          workspaceId: "workspace-test",
+          prompt: "test",
+          executionRoute: ExecutionRoute.testExecutionRoute(),
+        },
+      }
+      let claimed = false
+      const store: HostedTurnWorkerStoreService = {
+        claimRecovery: () => Effect.succeed(unavailableClaim),
+        claimNext: () =>
+          Effect.sync(() => {
+            if (claimed) return unavailableClaim
+            claimed = true
+            return claim
+          }),
+        renew: () => Effect.succeed(true),
+        prepare: () => Effect.succeed(true),
+        completeAdmission: () => Effect.void,
+        requestActivation: () => Effect.succeed(true),
+        completeActivation: () => Deferred.succeed(completed, undefined),
+        release: () => Effect.void,
+      }
+      const gateway = ExecutionGateway.Service.of({
+        ...ExecutionGateway.makeTest(),
+        prepareTurn: (input) =>
+          Ref.getAndUpdate(attempts, (value) => value + 1).pipe(
+            Effect.flatMap((attempt) =>
+              attempt < 2
+                ? Effect.fail(
+                    ExecutionGateway.PrepareTurnFailure.make({
+                      kind: "unavailable",
+                      message:
+                        "Run requires unavailable workspace capabilities: filesystem: workspace root is unavailable",
+                    }),
+                  )
+                : Effect.succeed(preparedFor(input)),
+            ),
+          ),
+      })
+      yield* Layer.build(
+        hostedTurnWorkerLayer({ workerId: "worker-test", leaseMillis: 30_000, pollIntervalMillis: 10 }).pipe(
+          Layer.provide(Layer.succeed(HostedTurnWorkerStore, store)),
+          Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+          Layer.provide(BunCrypto.layer),
+        ),
+      )
+      for (let step = 0; step < 6; step += 1) {
+        yield* Effect.yieldNow
+        if (yield* Deferred.isDone(completed)) break
+        yield* TestClock.adjust("100 millis")
+      }
+      yield* Deferred.await(completed)
+      expect(yield* Ref.get(attempts)).toBe(3)
+    }),
+  ),
+)
+
 it.effect("releases a failed pre-admission claim for immediate retry", () =>
   Effect.scoped(
     Effect.gen(function* () {

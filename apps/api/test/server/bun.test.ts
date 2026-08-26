@@ -3,7 +3,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope, Stream }
 import { TestClock } from "effect/testing"
 import * as Socket from "effect/unstable/socket/Socket"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
-import { ServerFrame } from "@rika/product/client-protocol"
+import { protocolVersion, ServerFrame } from "@rika/product/client-protocol"
 import { Timestamp } from "@rika/product/hosted-model"
 import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { HostedProductService } from "../../src/hosted/product"
@@ -358,7 +358,7 @@ it.effect("closes a slow Thread consumer before buffering another frame", () =>
     }
     yield* sendThreadFrames(socket, [
       {
-        protocolVersion: 1,
+        protocolVersion,
         payload: { _tag: "Heartbeat", at: Timestamp.make("2026-08-21T00:00:00.000Z") },
       },
     ])
@@ -438,7 +438,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
                 ),
                 Effect.as([
                   {
-                    protocolVersion: 1 as const,
+                    protocolVersion,
                     payload: {
                       _tag: "Heartbeat" as const,
                       at: Timestamp.make("2026-08-21T00:00:00.000Z"),
@@ -523,7 +523,9 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
                 .pipe(Effect.forkScoped)
               yield* Deferred.await(opened)
               yield* Deferred.await(outboundStarted)
-              yield* writer('{"protocolVersion":1,"requestId":"request-1","command":{"_tag":"Detach"}}')
+              yield* writer(
+                `{"protocolVersion":${protocolVersion},"requestId":"request-1","command":{"_tag":"Detach"}}`,
+              )
               return yield* Deferred.await(response)
             }),
             context,
@@ -548,7 +550,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
         detachedScope,
       )
       yield* Deferred.await(opened)
-      yield* writer('{"protocolVersion":1,"requestId":"request-detached","command":{"_tag":"Detach"}}')
+      yield* writer(`{"protocolVersion":${protocolVersion},"requestId":"request-detached","command":{"_tag":"Detach"}}`)
     }).pipe(Effect.provide(detachedContext))
     yield* Deferred.await(detachedReceiveEntered)
     yield* Scope.close(detachedScope, Exit.void)
@@ -558,13 +560,13 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
     expect(received).toEqual({
-      protocolVersion: 1,
+      protocolVersion,
       requestId: "request-1",
       command: { _tag: "Detach" },
     })
     expect(receiveStartedAfterOutboundStopped).toBe(true)
     expect(yield* Schema.decodeEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
-      protocolVersion: 1,
+      protocolVersion,
       payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
     })
   }),

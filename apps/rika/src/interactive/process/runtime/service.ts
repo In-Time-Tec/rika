@@ -386,16 +386,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const newOrbThread = session.newOrbThread
   if (newOrbThread !== undefined) adapter.newOrbThread = () => startSelection(() => newOrbThread, true)
-  const pauseOrb = session.pauseOrb
-  if (pauseOrb !== undefined) adapter.pauseOrb = () => run(pauseOrb)
-  const resumeOrb = session.resumeOrb
-  if (resumeOrb !== undefined) adapter.resumeOrb = () => run(resumeOrb)
-  const enableRemoteThreadCreation = session.enableRemoteThreadCreation
-  if (enableRemoteThreadCreation !== undefined)
-    adapter.enableRemoteThreadCreation = () => run(enableRemoteThreadCreation)
-  const disableRemoteThreadCreation = session.disableRemoteThreadCreation
-  if (disableRemoteThreadCreation !== undefined)
-    adapter.disableRemoteThreadCreation = () => run(disableRemoteThreadCreation)
   const SetSubagentLimit = Schema.TaggedStruct("SetSubagentLimit", {
     limit: Schema.Literals(["maxDepth", "maxSubagents"]),
     value: Schema.Finite,
@@ -431,10 +421,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     Schema.TaggedStruct("Quit", {}),
     Schema.TaggedStruct("NewThread", {}),
     Schema.TaggedStruct("NewOrbThread", {}),
-    Schema.TaggedStruct("PauseOrb", {}),
-    Schema.TaggedStruct("ResumeOrb", {}),
-    Schema.TaggedStruct("EnableRemoteThreadCreation", {}),
-    Schema.TaggedStruct("DisableRemoteThreadCreation", {}),
     Schema.TaggedStruct("SelectThread", { id: Schema.String }),
   ])
   const consumePendingAction = () => {

@@ -5,7 +5,7 @@ import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
+import { ClientMessage, protocolVersion, ServerFrame } from "@rika/product/client-protocol"
 import { connectThread as connectThreadEffect, frameEventName, sendPrompt } from "../../src/client/thread-socket"
 
 declare global {
@@ -109,7 +109,7 @@ const attach = (
 ) => {
   const request = Schema.decodeUnknownSync(ClientMessage)(connection.sent[0])
   connection.receive({
-    protocolVersion: 1,
+    protocolVersion,
     payload: {
       _tag: "ThreadAttached",
       requestId: request.requestId,
@@ -126,7 +126,7 @@ const attach = (
 }
 
 const threadEvent = (threadId: string, cursor: string, threadVersion: string) => ({
-  protocolVersion: 1,
+  protocolVersion,
   payload: {
     _tag: "ThreadEvent",
     event: {
@@ -205,7 +205,7 @@ it.effect("acknowledges every committed attachment, event, and snapshot cursor",
       command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "4" },
     })
     connection.receive({
-      protocolVersion: 1,
+      protocolVersion,
       payload: {
         _tag: "ThreadSnapshot",
         threadId: "thread-ack",
@@ -235,7 +235,7 @@ it.effect("keeps A active while B attaches, then makes late A frames and close i
       const connectingB = yield* Effect.forkChild(Effect.result(connectThread("thread-b")))
       const second = yield* nextConnection(1)
       first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: {
           _tag: "ThreadSnapshot",
           threadId: "thread-a",
@@ -254,11 +254,11 @@ it.effect("keeps A active while B attaches, then makes late A frames and close i
       expect(frames).toHaveLength(1)
 
       first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: { _tag: "PresenceSnapshot", threadId: "thread-a", participants: [] },
       })
       second.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: { _tag: "PresenceSnapshot", threadId: "thread-a", participants: [] },
       })
       expect(frames).toHaveLength(1)
@@ -287,7 +287,7 @@ it.effect("leaves committed A and its prompt route usable when B is mismatched o
     const rejectedSocket = yield* nextConnection(2)
     const request = yield* Schema.decodeUnknownEffect(ClientMessage)(rejectedSocket.sent[0])
     rejectedSocket.receive({
-      protocolVersion: 1,
+      protocolVersion,
       payload: {
         _tag: "CommandRejected",
         requestId: request.requestId,
@@ -336,7 +336,7 @@ it.effect(
       attach(first, "thread-cursor")
       yield* Fiber.join(connectingA)
       first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: {
           _tag: "ThreadSnapshot",
           threadId: "thread-cursor",
@@ -350,7 +350,7 @@ it.effect(
       const second = yield* nextConnection(1)
       expect(second.sent[0]).toMatchObject({ command: { _tag: "AttachThread", afterCursor: "1" } })
       first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: {
           _tag: "ThreadSnapshot",
           threadId: "thread-cursor",
@@ -385,7 +385,7 @@ it.effect(
         expect(replacement.sent[0]).toMatchObject({ command: { _tag: "AttachThread", afterCursor: "5" } })
         const request = yield* Schema.decodeUnknownEffect(ClientMessage)(replacement.sent[0])
         replacement.receive({
-          protocolVersion: 1,
+          protocolVersion,
           payload: {
             _tag: "ThreadAttached",
             requestId: request.requestId,
@@ -439,7 +439,7 @@ it.effect(
         })
         const request = yield* Schema.decodeUnknownEffect(ClientMessage)(replacement.sent[0])
         replacement.receive({
-          protocolVersion: 1,
+          protocolVersion,
           payload: {
             _tag: "ThreadAttached",
             requestId: request.requestId,
@@ -520,7 +520,7 @@ it.effect("preserves selected identity after failed automatic recovery and allow
     const failed = yield* nextConnection(1)
     const failedRequest = yield* Schema.decodeUnknownEffect(ClientMessage)(failed.sent[0])
     failed.receive({
-      protocolVersion: 1,
+      protocolVersion,
       payload: {
         _tag: "CommandRejected",
         requestId: failedRequest.requestId,
@@ -552,7 +552,7 @@ it.effect("quarantines semantic view gaps and nested foreign snapshot identities
       yield* Fiber.join(connectingView)
       frames.length = 0
       viewSocket.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: {
           _tag: "ThreadEvent",
           event: {
@@ -587,7 +587,7 @@ it.effect("quarantines semantic view gaps and nested foreign snapshot identities
       yield* Fiber.join(connectingSnapshot)
       frames.length = 0
       snapshotSocket.receive({
-        protocolVersion: 1,
+        protocolVersion,
         payload: {
           _tag: "ThreadSnapshot",
           threadId: "thread-snapshot",

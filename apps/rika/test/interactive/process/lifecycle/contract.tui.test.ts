@@ -37,7 +37,7 @@ test(
         app.pressEnter()
         const held = yield* app.nextFrame
         expect(held).toContain("HELD_ROOT_PROMPT")
-        expect(held).not.toContain("Sending")
+        expect(held).toContain("Sending")
         expect(held).not.toContain("HELD_CHILD_PROMPT")
         expect(yield* app.modelRequestCount).toBe(0)
 

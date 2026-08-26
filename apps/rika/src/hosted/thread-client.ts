@@ -1,6 +1,7 @@
 import {
   ClientMessage,
   type ClientTicketResponse,
+  protocolMismatchMessage,
   protocolVersion,
   ServerFrame,
   type ServerFrame as ServerFrameValue,
@@ -29,7 +30,8 @@ const failure = (kind: HostedError["kind"], message: string) => HostedError.make
 const rejection = (payload: Extract<ServerFrameValue["payload"], { readonly _tag: "CommandRejected" }>) => {
   let kind: HostedError["kind"] = "protocol"
   if (payload.reason === "forbidden") kind = "denied"
-  if (payload.reason === "unavailable") kind = "network"
+  if (payload.message === protocolMismatchMessage) kind = "protocol"
+  else if (payload.reason === "unavailable") kind = "network"
   return failure(kind, payload.message)
 }
 

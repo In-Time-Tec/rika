@@ -19,7 +19,7 @@ import {
 } from "@rika/product/hosted-model"
 import { StoreError } from "@rika/product/hosted-store"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
-import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import { protocolVersion, type HostedThreadSnapshot } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import {
@@ -405,7 +405,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       )
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
       const created = yield* first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("request-create"),
         command: {
           _tag: "CreateThread",
@@ -454,7 +454,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       store.dropSnapshot()
       expect(
         yield* first.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-bootstrap"),
           command: {
             _tag: "AttachThread",
@@ -478,7 +478,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
 
       expect(
         (yield* first.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-inspect"),
           command: {
             _tag: "InspectWorkspaceFile",
@@ -498,7 +498,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       expect(authorizedActions).toContain("workspace:file:view")
 
       const submit = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("request-submit"),
         command: {
           _tag: "SubmitPrompt" as const,
@@ -541,7 +541,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       expect(applied).toEqual([])
 
       const cancel = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("request-cancel"),
         command: {
           _tag: "Cancel" as const,
@@ -571,7 +571,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       const second = yield* protocol.connect("ticket-2", "/api/v1/threads/socket")
       expect(
         yield* second.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-attach"),
           command: {
             _tag: "AttachThread",
@@ -592,7 +592,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       ])
       expect(
         (yield* second.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-attach-thread-2"),
           command: {
             _tag: "AttachThread",
@@ -603,7 +603,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       ).toMatchObject({ _tag: "ThreadAttached", threadId: "thread-2" })
       expect(
         (yield* second.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-create-failed"),
           command: {
             _tag: "CreateThread",
@@ -628,7 +628,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       })
       expect(
         (yield* second.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-acknowledge-thread-1"),
           command: {
             _tag: "AcknowledgeCursor",
@@ -692,7 +692,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       })
 
       const approval = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("request-approval"),
         command: {
           _tag: "Approve" as const,
@@ -726,7 +726,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       expect(applied).toEqual([])
 
       const ensureService = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("request-service"),
         command: {
           _tag: "EnsureRepositoryService" as const,
@@ -754,44 +754,9 @@ it.effect("derives personal authority, admits a retried submission once, and res
       ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "5" })
       expect(authorizedActions).toContain("workspace:service:control")
       expect(workspaceRequests).toEqual(["WorkspaceFileInspect"])
-      const pauseOrb = {
-        protocolVersion: 1 as const,
-        requestId: RequestId.make("request-pause-orb"),
-        command: {
-          _tag: "PauseOrb" as const,
-          threadId,
-          commandId: CommandId.make("pause-orb-1"),
-          idempotencyKey: IdempotencyKey.make("pause-orb-key"),
-          expectedThreadVersion: ThreadVersion.make("5"),
-        },
-      }
-      expect((yield* first.receive(pauseOrb))[0]?.payload).toMatchObject({
-        _tag: "CommandAdmitted",
-        threadVersion: "6",
-      })
-      expect(store.command("pause-orb-1")?.state).toBe("admitted")
       expect(
         (yield* first.receive({
-          ...pauseOrb,
-          requestId: RequestId.make("request-pause-orb-retry"),
-        }))[0]?.payload,
-      ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "6" })
-      expect(
-        (yield* first.receive({
-          protocolVersion: 1,
-          requestId: RequestId.make("request-resume-orb"),
-          command: {
-            _tag: "ResumeOrb",
-            threadId,
-            commandId: CommandId.make("resume-orb-1"),
-            idempotencyKey: IdempotencyKey.make("resume-orb-key"),
-            expectedThreadVersion: ThreadVersion.make("6"),
-          },
-        }))[0]?.payload,
-      ).toMatchObject({ _tag: "CommandAdmitted", threadVersion: "7" })
-      expect(
-        (yield* first.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-portal"),
           command: { _tag: "OpenPortal", threadId, port: 3000 },
         }))[0]?.payload,
@@ -802,35 +767,35 @@ it.effect("derives personal authority, admits a retried submission once, and res
       })
       expect(workspaceLifecycle).toEqual([])
       const cancellationFirst = yield* first.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("request-cancel-before-submit"),
         command: {
           _tag: "Cancel",
           threadId,
           commandId: CommandId.make("cancel-before-submit"),
           idempotencyKey: IdempotencyKey.make("cancel-before-submit-key"),
-          expectedThreadVersion: ThreadVersion.make("7"),
+          expectedThreadVersion: ThreadVersion.make("5"),
           target: {
             _tag: "Command",
             commandId: CommandId.make("submit-cancelled"),
           },
         },
       })
-      expect(cancellationFirst).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "8" } }])
+      expect(cancellationFirst).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "6" } }])
       expect(
         yield* first.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("request-submit-after-cancel"),
           command: {
             _tag: "SubmitPrompt",
             threadId,
             commandId: CommandId.make("submit-cancelled"),
             idempotencyKey: IdempotencyKey.make("submit-cancelled-key"),
-            expectedThreadVersion: ThreadVersion.make("8"),
+            expectedThreadVersion: ThreadVersion.make("6"),
             text: "must not create a Turn",
           },
         }),
-      ).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "9" } }])
+      ).toMatchObject([{ payload: { _tag: "CommandAdmitted", threadVersion: "7" } }])
       expect(admittedRuns.some((run) => run.operationKey === "submit-cancelled")).toBe(false)
       expect(applied).toEqual([])
     }),
@@ -924,7 +889,7 @@ it.effect("admits authorization decisions without applying them in the socket se
       )
       const session = yield* protocol.connect("ticket", "/api/v1/threads/socket")
       const attached = yield* session.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("attach-authorization"),
         command: {
           _tag: "AttachThread",
@@ -944,7 +909,7 @@ it.effect("admits authorization decisions without applying them in the socket se
       ])
 
       const approve = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("approve-request"),
         command: {
           _tag: "Approve" as const,
@@ -969,7 +934,7 @@ it.effect("admits authorization decisions without applying them in the socket se
       const repaired = yield* protocol.connect("ticket-repaired", "/api/v1/threads/socket")
       expect(
         yield* repaired.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("attach-repaired"),
           command: {
             _tag: "AttachThread",
@@ -993,7 +958,7 @@ it.effect("admits authorization decisions without applying them in the socket se
 
       expect(
         yield* session.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("stale-request"),
           command: {
             ...approve.command,
@@ -1030,7 +995,7 @@ it.effect("admits authorization decisions without applying them in the socket se
       }
       expect(
         yield* session.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("deny-request"),
           command: {
             _tag: "Deny",
@@ -1121,7 +1086,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
       )
       const connection = yield* protocol.connect("ticket", "/api/v1/threads/socket")
       yield* connection.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("attach-snapshot-race"),
         command: {
           _tag: "AttachThread",

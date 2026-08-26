@@ -19,7 +19,7 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
-import type { HostedThreadSnapshot, ServerFrame } from "@rika/product/client-protocol"
+import { protocolVersion, type HostedThreadSnapshot, type ServerFrame } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
@@ -621,12 +621,16 @@ it.effect.skipIf(!live)("does not let command cancellation overtake a non-prompt
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const firstInput = command("pause-before-cancel", "0")
+      const firstInput = command("service-before-cancel", "0")
       const first = {
         ...firstInput,
-        command: { _tag: "PauseOrb", commandId: firstInput.commandId },
+        command: {
+          _tag: "EnsureRepositoryService",
+          commandId: firstInput.commandId,
+          service: { serviceId: "docs", command: "bun", args: ["run", "dev"], cwd: "." },
+        },
       }
-      const secondInput = command("cancel-pause", "1")
+      const secondInput = command("cancel-service", "1")
       const second = {
         ...secondInput,
         command: {
@@ -639,13 +643,13 @@ it.effect.skipIf(!live)("does not let command cancellation overtake a non-prompt
       yield* protocol.admitCommand(second)
       expect(
         yield* protocol.claimNextCommand({
-          claimToken: "pause-before-cancel-claim",
+          claimToken: "service-before-cancel-claim",
           claimMillis: 60_000,
         }),
       ).toMatchObject({ commandId: first.commandId })
       expect(
         yield* protocol.claimNextCommand({
-          claimToken: "cancel-pause-claim",
+          claimToken: "cancel-service-claim",
           claimMillis: 60_000,
         }),
       ).toBeUndefined()
@@ -1132,7 +1136,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
           const connection = yield* protocol.connect(ticket.ticket, threadWebSocketAudience)
           expect(
             yield* connection.receive({
-              protocolVersion: 1,
+              protocolVersion,
               requestId: RequestId.make(requestId),
               command: {
                 _tag: "AttachThread",
@@ -1183,7 +1187,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       expect(eventCursors(yield* connectionA.outbound)).toEqual(["1"])
       expect(
         yield* connectionA.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("replica-a-ack"),
           command: {
             _tag: "AcknowledgeCursor",
@@ -1490,7 +1494,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       ] as const)
         expect(
           yield* session.receive({
-            protocolVersion: 1,
+            protocolVersion,
             requestId: RequestId.make(requestId),
             command: {
               _tag: "AttachThread",
@@ -1511,7 +1515,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         ])
 
       const duplicate = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("duplicate-a"),
         command: {
           _tag: "SubmitPrompt" as const,
@@ -1564,7 +1568,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make(requestId),
         command: {
           _tag: "SubmitPrompt" as const,
@@ -1634,7 +1638,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const approvalController = yield* open(protocolA)
       expect(
         yield* approvalController.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("approval-attach"),
           command: {
             _tag: "AttachThread",
@@ -1662,7 +1666,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         },
       ])
       const approval = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("approval-request"),
         command: {
           _tag: "Approve" as const,
@@ -1741,7 +1745,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       }
       expect(
         yield* awaitCompletion(approvalController, {
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("denial-request"),
           command: {
             _tag: "Deny",
@@ -1851,7 +1855,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       )
       const replayController = yield* open(protocolB)
       const replay = yield* replayController.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("replay-attach"),
         command: {
           _tag: "AttachThread",
@@ -1872,7 +1876,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       expect(attachedReplay.events).toEqual([])
       expect(
         (yield* replayController.receive({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: RequestId.make("large-replay-ack"),
           command: {
             _tag: "AcknowledgeCursor",
@@ -1900,7 +1904,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           ),
       )
       const appendOnlyReplay = yield* replayController.receive({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: RequestId.make("append-only-replay"),
         command: {
           _tag: "AttachThread",
@@ -1919,7 +1923,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       expect(appendOnlyAttachment.events).toEqual([])
 
       const duplicateControl = {
-        protocolVersion: 1 as const,
+        protocolVersion,
         requestId: RequestId.make("duplicate-control-a"),
         command: {
           _tag: "Cancel" as const,

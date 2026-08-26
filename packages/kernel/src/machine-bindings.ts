@@ -45,9 +45,6 @@ export interface Interface {
 
 export class Client extends Context.Service<Client, Interface>()("@rika/kernel/machine-bindings/Client") {}
 
-const uncertain = <A>(message: string): Effect.Effect<A> =>
-  Effect.logWarning(message).pipe(Effect.andThen(Effect.interrupt))
-
 const cancelledTool = (request: typeof CodingToolRuntime.Request.Type) =>
   CodingToolRuntime.ToolError.make({
     tool: request._tag === "Shell" ? "bash" : request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
@@ -57,6 +54,17 @@ const cancelledTool = (request: typeof CodingToolRuntime.Request.Type) =>
     outcome: "known",
     recovery: "never",
     nextAction: "Submit a new request if this work should continue",
+  })
+
+const uncertainTool = (request: typeof CodingToolRuntime.Request.Type, message: string) =>
+  CodingToolRuntime.ToolError.make({
+    tool: request._tag === "Shell" ? "bash" : request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
+    message,
+    kind: "operation",
+    category: "operation",
+    outcome: "unknown",
+    recovery: "later",
+    nextAction: "Retry this operation",
   })
 
 const codingTools = Layer.effect(
@@ -71,9 +79,9 @@ const codingTools = Layer.effect(
             if (outcome._tag === "Failure" && Schema.is(CodingToolRuntime.ToolError)(outcome.failure))
               return Effect.fail(outcome.failure)
             if (outcome._tag === "Cancelled") return Effect.fail(cancelledTool(request))
-            return uncertain<CodingToolResult.Result>("machine coding-tool outcome is not safely observable")
+            return Effect.fail(uncertainTool(request, "machine coding-tool outcome is not safely observable"))
           }),
-          Effect.catchTag("MachineBindingUnavailable", (error) => uncertain<CodingToolResult.Result>(error.message)),
+          Effect.catchTag("MachineBindingUnavailable", (error) => Effect.fail(uncertainTool(request, error.message))),
         ),
     }),
   ),
@@ -97,9 +105,15 @@ const processes = Layer.effect(
                   message: `Cell operation was cancelled before process ${processId} was stopped`,
                 }),
               )
-            return uncertain("machine process-stop outcome is not safely observable")
+            return Effect.fail(
+              new ShellProcessRegistry.ProcessNotFound({
+                message: "machine process-stop outcome is not safely observable",
+              }),
+            )
           }),
-          Effect.catchTag("MachineBindingUnavailable", (error) => uncertain(error.message)),
+          Effect.catchTag("MachineBindingUnavailable", (error) =>
+            Effect.fail(new ShellProcessRegistry.ProcessNotFound({ message: error.message })),
+          ),
         ),
     }),
   ),
@@ -123,7 +137,13 @@ const mcp = Layer.effect(
                 }),
               )
             if (outcome._tag !== "Success" || outcome.value._tag !== "McpDiscovered")
-              return uncertain<McpToolSource.Interface>("machine MCP discovery outcome is not safely observable")
+              return Effect.fail(
+                McpRuntime.Diagnostic.make({
+                  server: server.name,
+                  phase: "discover",
+                  message: "machine MCP discovery outcome is not safely observable",
+                }),
+              )
             const tools = outcome.value.tools
             return Effect.succeed(
               McpToolSource.McpToolSource.of({
@@ -151,18 +171,38 @@ const mcp = Layer.effect(
                               message: "Cell operation was cancelled before the MCP call completed",
                             }),
                           )
-                        return uncertain<McpToolSource.JsonValue>("machine MCP call outcome is not safely observable")
+                        return Effect.fail(
+                          McpToolSource.McpToolCallFailed.make({
+                            server: server.name,
+                            tool,
+                            message: "machine MCP call outcome is not safely observable",
+                          }),
+                        )
                       },
                     ),
                     Effect.catchTag("MachineBindingUnavailable", (error) =>
-                      uncertain<McpToolSource.JsonValue>(error.message),
+                      Effect.fail(
+                        McpToolSource.McpToolCallFailed.make({
+                          server: server.name,
+                          tool,
+                          message: error.message,
+                        }),
+                      ),
                     ),
                   ),
                 aiTools: Effect.succeed([]),
               }),
             )
           }),
-          Effect.catchTag("MachineBindingUnavailable", (error) => uncertain<McpToolSource.Interface>(error.message)),
+          Effect.catchTag("MachineBindingUnavailable", (error) =>
+            Effect.fail(
+              McpRuntime.Diagnostic.make({
+                server: server.name,
+                phase: "discover",
+                message: error.message,
+              }),
+            ),
+          ),
         ),
     }),
   ),

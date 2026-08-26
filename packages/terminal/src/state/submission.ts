@@ -164,6 +164,13 @@ export const overlayPendingSubmissions: {
     if (items.some((candidate) => isSubmissionItem(candidate) && itemMatches(candidate, item))) continue
     const entry = previous.entries[item.index]
     if (entry === undefined) continue
+    const previousCount = previous.entries.filter(
+      (candidate) => candidate.role === entry.role && candidate.text === entry.text,
+    ).length
+    const currentCount = entries.filter(
+      (candidate) => candidate.role === entry.role && candidate.text === entry.text,
+    ).length
+    if (currentCount >= previousCount) continue
     const index = entries.length
     entries.push(entry)
     items.push({ ...item, index })
@@ -172,11 +179,15 @@ export const overlayPendingSubmissions: {
   for (const item of previous.queue) {
     if (item.provisional === true && !queue.some((candidate) => candidate.id === item.id)) queue.push(item)
   }
-  return {
+  const restoreSending =
+    previous.busy && !model.busy && previous.submittedDrafts.some((draft) => draft.turnId === undefined)
+  const overlaid = {
     ...model,
     entries,
     items,
     queue,
     queueSelection: queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : queue.at(-1)?.id,
   }
+  if (!restoreSending) return overlaid
+  return { ...overlaid, busy: true, activity: previous.activity ?? { _tag: "Sending" as const } }
 })

@@ -566,21 +566,22 @@ describe("interactive ThreadView controller", () => {
     })
   })
 
-  it("shows a submission only after authoritative admission and deduplicates the durable turn", () => {
+  it("shows a submitted prompt immediately and deduplicates the durable turn", () => {
     const initial = state()
     const typed = { ...initial, model: { ...initial.model, input: "hello", cursor: 5 } }
     const submitted = reduceModel(typed.model, { _tag: "Submitted", submissionId: "submission-1" })
     const echo = (model: ViewState.Model) =>
       model.entries.filter((entry) => entry.role === "user" && entry.text === "hello").length
-    expect(echo(submitted)).toBe(0)
-    expect(submitted.busy).toBe(false)
+    expect(echo(submitted)).toBe(1)
+    expect(submitted.busy).toBe(true)
 
     const loaded = InteractiveController.update(
       { ...typed, model: submitted },
       { _tag: "ThreadViewSnapshot", snapshot: snapshot() },
     )
     expect(loaded.resync).toBeUndefined()
-    expect(echo(loaded.state.model)).toBe(0)
+    expect(echo(loaded.state.model)).toBe(1)
+    expect(loaded.state.model.busy).toBe(true)
 
     const admitted = reduceModel(loaded.state.model, {
       _tag: "SubmissionAdmitted",
@@ -677,11 +678,8 @@ describe("interactive ThreadView controller", () => {
     )
     const previousTranscript = {
       ...submitted,
-      entries: [...submitted.entries, { role: "assistant" as const, text: "previous assistant" }],
-      items: [
-        ...submitted.items,
-        { _tag: "Entry" as const, index: submitted.entries.length, id: "previous-assistant" },
-      ],
+      entries: [{ role: "assistant" as const, text: "previous assistant" }],
+      items: [{ _tag: "Entry" as const, index: 0, id: "previous-assistant" }],
       steeringRequests: [
         { requestId: "previous-steering", turnId: "previous-turn", text: "redirect", origin: "composer" as const },
       ],
@@ -900,7 +898,7 @@ describe("interactive ThreadView controller", () => {
     expect(disposed.state.model.steeringRequests).toEqual([])
   })
 
-  it("leaves the welcome state only when the accepted submission becomes authoritative", () => {
+  it("leaves the welcome state on submit and does not duplicate the accepted turn snapshot", () => {
     const welcome = (model: ViewState.Model) => model.entries.length === 0 && model.blocks.length === 0
     const initial = state()
     const typed = { ...initial, model: { ...initial.model, input: "hello", cursor: 5 } }
@@ -908,8 +906,8 @@ describe("interactive ThreadView controller", () => {
       ...typed,
       model: reduceModel(typed.model, { _tag: "Submitted", submissionId: "submission-1" }),
     }
-    expect(welcome(current.model)).toBe(true)
-    expect(current.model.busy).toBe(false)
+    expect(welcome(current.model)).toBe(false)
+    expect(current.model.busy).toBe(true)
     const loaded = InteractiveController.update(current, {
       _tag: "ThreadViewSnapshot",
       snapshot: {
@@ -946,5 +944,8 @@ describe("interactive ThreadView controller", () => {
     expect(welcome(loaded.state.model)).toBe(false)
     expect(loaded.state.model.busy).toBe(true)
     expect(loaded.state.model.activeTurnId).toBe("turn")
+    expect(loaded.state.model.entries.filter((entry) => entry.role === "user" && entry.text === "hello")).toHaveLength(
+      1,
+    )
   })
 })

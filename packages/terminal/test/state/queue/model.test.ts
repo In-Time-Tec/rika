@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
 
+import { overlayPendingSubmissions } from "../../../src/state/submission"
 import { applyQueueDelta, resetQueue } from "../../../src/state/queue/model"
 import { initial, type Model } from "../../../src/state/model"
 import { update } from "../../../src/state/reducer/model"
@@ -308,16 +309,62 @@ test("blocks a duplicate submission while admission is pending", () => {
   ])
 })
 
-test("keeps the captured draft visible until active admission and then clears it", () => {
+test("snapshot overlay restores a pending optimistic prompt onto an empty projection", () => {
   const submitted = update(
     { ...initial("/work"), input: "optimistic prompt", cursor: 17 },
     { _tag: "Submitted", submissionId: "sub-optimistic" },
   )
-  expect(submitted.input).toBe("optimistic prompt")
-  expect(submitted.entries).toEqual([])
-  expect(submitted.items).toEqual([])
-  expect(submitted.busy).toBe(false)
-  expect(submitted.activity).toBeUndefined()
+  const empty = {
+    ...submitted,
+    entries: [],
+    items: [],
+    busy: false,
+    activity: undefined,
+    activeTurnId: undefined,
+  }
+  const overlaid = overlayPendingSubmissions(empty, submitted)
+  expect(overlaid.entries).toEqual([{ role: "user", text: "optimistic prompt" }])
+  expect(overlaid.busy).toBe(true)
+  expect(overlaid.activity).toEqual({ _tag: "Sending" })
+})
+
+test("snapshot overlay keeps a pending optimistic prompt without duplicating an authoritative copy", () => {
+  const submitted = update(
+    { ...initial("/work"), input: "hello", cursor: 5 },
+    { _tag: "Submitted", submissionId: "sub-1" },
+  )
+  const authoritative = {
+    ...submitted,
+    entries: [{ role: "user" as const, text: "hello", turnId: "turn-1" }],
+    items: [{ _tag: "Entry" as const, index: 0, id: "turn:turn-1:user", turnId: "turn-1" }],
+    busy: true,
+    activeTurnId: "turn-1",
+    activity: { _tag: "Waiting" as const },
+  }
+  const overlaid = overlayPendingSubmissions(authoritative, submitted)
+  expect(overlaid.entries).toEqual([{ role: "user", text: "hello", turnId: "turn-1" }])
+  expect(overlaid.items).toHaveLength(1)
+})
+
+test("renders a submitted prompt immediately and reconciles it on active admission", () => {
+  const submitted = update(
+    { ...initial("/work"), input: "optimistic prompt", cursor: 17 },
+    { _tag: "Submitted", submissionId: "sub-optimistic" },
+  )
+  expect(submitted.input).toBe("")
+  expect(submitted.cursor).toBe(0)
+  expect(submitted.entries).toEqual([{ role: "user", text: "optimistic prompt" }])
+  expect(submitted.items).toEqual([
+    {
+      _tag: "Entry",
+      index: 0,
+      id: "submission:sub-optimistic:user",
+      submissionId: "sub-optimistic",
+      provisional: true,
+    },
+  ])
+  expect(submitted.busy).toBe(true)
+  expect(submitted.activity).toEqual({ _tag: "Sending" })
 
   const admitted = update(submitted, {
     _tag: "SubmissionAdmitted",

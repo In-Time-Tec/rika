@@ -655,7 +655,7 @@
           "width": 1
         },
         {
-          "text": "enable remote Thread cre",
+          "text": "switch",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -673,10 +673,10 @@
             }
           },
           "attributes": 1,
-          "width": 24
+          "width": 6
         },
         {
-          "text": " ",
+          "text": "                   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -694,7 +694,7 @@
             }
           },
           "attributes": 0,
-          "width": 1
+          "width": 19
         },
         {
           "text": "│",
@@ -785,7 +785,7 @@
           "width": 1
         },
         {
-          "text": " ",
+          "text": "                          ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -803,49 +803,7 @@
             }
           },
           "attributes": 0,
-          "width": 1
-        },
-        {
-          "text": "disable remote Thread cr",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 1,
-          "width": 24
-        },
-        {
-          "text": " ",
-          "fg": {
-            "buffer": {
-              "0": 255,
-              "1": 255,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 1
+          "width": 26
         },
         {
           "text": "│",

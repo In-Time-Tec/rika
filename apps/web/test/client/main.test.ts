@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it } from "vitest"
+import { protocolVersion } from "@rika/product/client-protocol"
 import {
   ChangedDraft,
   ChangedThreadId,
@@ -26,13 +27,13 @@ describe("FoldKit Thread client story", () => {
       ConnectedThread({
         epoch: 1,
         threadId: "thread-1",
-        frame: { protocolVersion: 1, payload: { _tag: "ThreadAttached", threadId: "thread-1", threadVersion: "6" } },
+        frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "thread-1", threadVersion: "6" } },
       }),
     )
     expect(connected).toMatchObject({ attachedThreadId: "thread-1", connectionEpoch: 1, threadVersion: "6" })
     const [withFrame] = update(
       connected,
-      GotThreadFrame({ frame: { protocolVersion: 1, payload: { _tag: "ThreadSnapshot", threadVersion: "7" } } }),
+      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadVersion: "7" } } }),
     )
     expect(withFrame.threadVersion).toBe("7")
     expect(withFrame.frames).toHaveLength(2)
@@ -41,7 +42,7 @@ describe("FoldKit Thread client story", () => {
       withFrame,
       GotThreadFrame({
         frame: {
-          protocolVersion: 1,
+          protocolVersion,
           payload: {
             _tag: "ThreadEvent",
             event: { threadId: "thread-1", threadVersion: "8" },
@@ -54,7 +55,7 @@ describe("FoldKit Thread client story", () => {
       withEvent,
       GotThreadFrame({
         frame: {
-          protocolVersion: 1,
+          protocolVersion,
           payload: { _tag: "PortalOpened", threadId: "thread-old", threadVersion: "99", url: "https://stale" },
         },
       }),
@@ -91,7 +92,7 @@ describe("FoldKit Thread client story", () => {
       ConnectedThread({
         epoch: 2,
         threadId: "thread-b",
-        frame: { protocolVersion: 1, payload: { _tag: "ThreadAttached", threadId: "thread-b", threadVersion: "2" } },
+        frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "thread-b", threadVersion: "2" } },
       }),
     )
     const [afterLateFailure] = update(connectedB, FailedThreadConnection({ epoch: 1, message: "superseded A failed" }))
@@ -102,7 +103,7 @@ describe("FoldKit Thread client story", () => {
       editingC,
       GotThreadFrame({
         frame: {
-          protocolVersion: 1,
+          protocolVersion,
           payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "3" },
         },
       }),
@@ -114,7 +115,7 @@ describe("FoldKit Thread client story", () => {
     const [duringCandidate] = update(
       connectingC,
       GotThreadFrame({
-        frame: { protocolVersion: 1, payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "4" } },
+        frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "4" } },
       }),
     )
     expect(duringCandidate).toMatchObject({
@@ -131,7 +132,7 @@ describe("FoldKit Thread client story", () => {
     const [foreign] = update(
       restored,
       GotThreadFrame({
-        frame: { protocolVersion: 1, payload: { _tag: "ThreadSnapshot", threadId: "thread-c", threadVersion: "99" } },
+        frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadId: "thread-c", threadVersion: "99" } },
       }),
     )
     expect(foreign).toEqual(restored)
@@ -148,13 +149,13 @@ describe("FoldKit Thread client story", () => {
     }
     const [recovering] = update(
       selected,
-      GotThreadFrame({ frame: { protocolVersion: 1, payload: { _tag: "ClientReconnecting", threadId: "thread-a" } } }),
+      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ClientReconnecting", threadId: "thread-a" } } }),
     )
     expect(recovering).toMatchObject({ connection: "connecting", attachedThreadId: "thread-a", threadVersion: "8" })
     const [failed] = update(
       recovering,
       GotThreadFrame({
-        frame: { protocolVersion: 1, payload: { _tag: "ClientReconnectFailed", threadId: "thread-a" } },
+        frame: { protocolVersion, payload: { _tag: "ClientReconnectFailed", threadId: "thread-a" } },
       }),
     )
     expect(failed).toMatchObject({ connection: "failed", attachedThreadId: "thread-a", threadVersion: "8" })

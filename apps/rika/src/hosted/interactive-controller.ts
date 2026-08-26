@@ -79,10 +79,6 @@ export const makeDeferredSession = (
     quit: deferredEffect((value) => value.quit),
     newThread: deferredEffect((value) => value.newThread),
     newOrbThread: deferredEffect((value) => value.newOrbThread ?? unavailable()),
-    pauseOrb: deferredEffect((value) => value.pauseOrb ?? unavailable()),
-    resumeOrb: deferredEffect((value) => value.resumeOrb ?? unavailable()),
-    enableRemoteThreadCreation: deferredEffect((value) => value.enableRemoteThreadCreation ?? unavailable()),
-    disableRemoteThreadCreation: deferredEffect((value) => value.disableRemoteThreadCreation ?? unavailable()),
     archiveThread: deferredEffect((value) => value.archiveThread),
     archiveAndNewThread: deferredEffect((value) => value.archiveAndNewThread),
     selectThread: (...args) => deferredEffect((value) => value.selectThread(...args)),
@@ -168,32 +164,11 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
             : HostedError.make({ kind: "host", message: "Could not create a hosted Thread identifier" }),
         ),
       )
-    const setRemoteThreadCreation = (preference: "allowed" | "denied") =>
-      prepare.pipe(
-        Effect.flatMap((prepared) =>
-          authenticated(profile, (session) =>
-            http.setRemoteThreadCreation(
-              profile.origin,
-              prepared.checkout.registration.checkoutFingerprint,
-              preference,
-              session,
-            ),
-          ),
-        ),
-        Effect.provideService(Http, http),
-        Effect.provideService(CredentialStore, credentials),
-        Effect.mapError((error) =>
-          Schema.is(HostedError)(error)
-            ? error
-            : HostedError.make({ kind: "host", message: "Could not update Runner admission" }),
-        ),
-      )
     const threadId = input.threadId ?? (yield* createThread("runner"))
     const hosted = yield* HostedInteractiveSession.makeHostedInteractiveSession({
       profile,
       threadId,
       createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
-      setRemoteThreadCreation,
     })
     const runnerReady = yield* Deferred.make<void>()
     let runnerConnected = false

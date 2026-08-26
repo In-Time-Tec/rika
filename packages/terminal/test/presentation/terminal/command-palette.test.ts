@@ -31,7 +31,7 @@ test("adds only an open active interval to accumulated time", () => {
 test("tracks only the five turn activity states", () => {
   let model = { ...initial("/work", "medium"), input: "run it", cursor: 6 }
   model = update(model, { _tag: "Submitted", submissionId: "submission" })
-  expect(model.activity).toBeUndefined()
+  expect(model.activity).toEqual({ _tag: "Sending" })
   model = update(model, {
     _tag: "SubmissionAdmitted",
     turnId: "turn",
@@ -98,10 +98,6 @@ test("exposes local and Orb Thread creation plus the current command controls", 
   expect(commands.map((command) => command.id)).toEqual([
     "new-thread",
     "new-orb-thread",
-    "pause-orb",
-    "resume-orb",
-    "enable-remote-thread-creation",
-    "disable-remote-thread-creation",
     "threads",
     "mode",
     "context",
@@ -196,7 +192,7 @@ test("edits, moves, and submits input", () => {
   model = update(model, { _tag: "KeyPressed", key: key({ name: "right" }) })
   expect(model.input).toBe("xi")
   model = update(model, { _tag: "Submitted", submissionId: "submission-xi" })
-  expect(model.entries).toEqual([])
+  expect(model.entries).toEqual([{ role: "user", text: "xi" }])
   model = update(model, {
     _tag: "SubmissionAdmitted",
     turnId: "xi",
@@ -414,7 +410,7 @@ test("streams, completes, and reports failures", () => {
   expect(model.busy).toBe(false)
   model = { ...model, input: "try again", cursor: 9 }
   model = update(model, { _tag: "Submitted", submissionId: "retry-submission" })
-  expect(model.entries.at(-1)).toEqual({ role: "assistant", text: "completion only" })
+  expect(model.entries.at(-1)).toEqual({ role: "user", text: "try again" })
   model = update(model, {
     _tag: "SubmissionAdmitted",
     turnId: "retry",
@@ -514,7 +510,7 @@ test("submitting while a turn is active stays an ordinary submission", () => {
     input: "queued follow-up",
   }
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-q" })
-  expect(submitted.input).toBe("queued follow-up")
+  expect(submitted.input).toBe("")
   expect(submitted.busy).toBe(true)
   expect(submitted.pendingSteering).toEqual([])
   expect(submitted.pendingAction).toBeUndefined()
@@ -538,7 +534,7 @@ test("submitting while busy waits for admission before adding a provisional queu
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-1" })
   expect(submitted.queue).toEqual([])
   expect(submitted.queueRevision).toBe(3)
-  expect(submitted.input).toBe("queued prompt")
+  expect(submitted.input).toBe("")
   const admitted = update(submitted, {
     _tag: "SubmissionAdmitted",
     turnId: "turn-1",

@@ -9,9 +9,10 @@ import { Subscription } from "foldkit"
 import { connectThread, frameEventName, openPortal, sendPrompt } from "./thread-socket"
 import * as Socket from "effect/unstable/socket/Socket"
 import { htmlScope } from "./html"
+import { protocolVersion } from "@rika/product/client-protocol"
 
 const ClientFrame = Schema.Struct({
-  protocolVersion: Schema.Literal(1),
+  protocolVersion: Schema.Literal(protocolVersion),
   payload: Schema.Union([
     Schema.TaggedStruct("ClientDecodeFailed", { message: Schema.String }),
     Schema.TaggedStruct("ClientReconnecting", { threadId: Schema.optionalKey(Schema.String) }),
@@ -22,7 +23,7 @@ const ClientFrame = Schema.Struct({
   ]),
 })
 const DisplayFrame = Schema.Struct({
-  protocolVersion: Schema.Literal(1),
+  protocolVersion: Schema.Literal(protocolVersion),
   payload: Schema.Struct({
     _tag: Schema.String,
     threadId: Schema.optionalKey(Schema.String),

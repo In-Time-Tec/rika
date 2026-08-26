@@ -179,8 +179,8 @@ const reduceOverlayImpl = (
       const reference: SubmissionReference = {}
       if (taken.draft?.submissionId !== undefined) reference.submissionId = taken.draft.submissionId
       if (taken.draft?.turnId !== undefined) reference.turnId = taken.draft.turnId
-      const restore = taken.draft !== undefined && model.input.length === 0
-      const settled = settleProvisionalUserEntry(model, reference, restore)
+      const restoreComposer = taken.draft !== undefined && model.input.length === 0
+      const settled = settleProvisionalUserEntry(model, reference, true)
       const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId ?? message.submissionId)
       const remainsBusy = model.activeTurnId !== undefined || taken.rest.length > 0
       const rejected = {
@@ -196,7 +196,7 @@ const reduceOverlayImpl = (
         busy: remainsBusy,
         activity: settledActivity(model.activeTurnId, model.activity, taken.rest.length),
       }
-      if (!restore || taken.draft === undefined) return rejected
+      if (!restoreComposer || taken.draft === undefined) return rejected
       return { ...rejected, input: taken.draft.input, cursor: taken.draft.cursor, pastedText: taken.draft.attachments }
     }
     case "TurnRetryScheduled": {

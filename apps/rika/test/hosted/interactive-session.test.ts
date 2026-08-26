@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import {
   ClientMessage,
+  protocolVersion,
   ServerFrame,
   type HostedThreadSnapshot,
   type ThreadProtocolEvent,
@@ -173,7 +174,7 @@ class FakeWebSocket extends EventTarget {
 
   frame(payload: Frame["payload"]) {
     if (this.readyState === 1)
-      this.dispatchEvent(new MessageEvent("message", { data: encode({ protocolVersion: 1, payload }) }))
+      this.dispatchEvent(new MessageEvent("message", { data: encode({ protocolVersion, payload }) }))
   }
 
   close(code = 1006, reason = "closed") {
@@ -294,7 +295,6 @@ const runSession = Effect.fn("test.runSession")(function* (
     profile,
     threadId: "thread-1",
     createThread: () => Effect.die("unused"),
-    setRemoteThreadCreation: () => Effect.void,
   }).pipe(Effect.provide(context))
   const states: Array<{ target: string; activity?: string; connectivity: string }> = []
   const stateFiber = yield* Stream.runForEach(hosted.connection.stateChanges, (state) =>

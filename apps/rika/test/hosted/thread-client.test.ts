@@ -1,6 +1,6 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
-import { ClientMessage, ServerFrame } from "@rika/product/client-protocol"
+import { ClientMessage, protocolVersion, ServerFrame } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { CommandId, Sequence, ThreadEventCursor, ThreadId, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
@@ -38,7 +38,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                 if (message.command._tag === "CreateThread") {
                   socket.send(
                     encode({
-                      protocolVersion: 1,
+                      protocolVersion,
                       payload: {
                         _tag: "CommandAdmitted",
                         requestId: message.requestId,
@@ -50,7 +50,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                   )
                   socket.send(
                     encode({
-                      protocolVersion: 1,
+                      protocolVersion,
                       payload: {
                         _tag: "CommandAccepted",
                         requestId: message.requestId,
@@ -67,7 +67,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                 if (message.command._tag === "AttachThread") {
                   socket.send(
                     encode({
-                      protocolVersion: 1,
+                      protocolVersion,
                       payload: {
                         _tag: "ThreadAttached",
                         requestId: message.requestId,
@@ -114,7 +114,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                 ) {
                   socket.send(
                     encode({
-                      protocolVersion: 1,
+                      protocolVersion,
                       payload: {
                         _tag: "CommandAccepted",
                         requestId: message.requestId,
@@ -135,7 +135,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                   if (message.command._tag === "SubmitPrompt" && message.command.commandId !== "submit-replay")
                     socket.send(
                       encode({
-                        protocolVersion: 1,
+                        protocolVersion,
                         payload: {
                           _tag: "ThreadEvent",
                           event: {
@@ -160,7 +160,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                 if (message.command._tag === "OpenPortal")
                   socket.send(
                     encode({
-                      protocolVersion: 1,
+                      protocolVersion,
                       payload: {
                         _tag: "PortalOpened",
                         requestId: message.requestId,
@@ -288,7 +288,7 @@ it.effect("returns a hosted rejection instead of accepting a failed command", ()
                 }
                 socket.send(
                   encode({
-                    protocolVersion: 1,
+                    protocolVersion,
                     payload: commandId === undefined ? rejection : { ...rejection, commandId },
                   }),
                 )
@@ -339,7 +339,7 @@ it.effect("rejects a command response with another durable command identity", ()
                 if (message.command._tag !== "CreateThread") return
                 socket.send(
                   encode({
-                    protocolVersion: 1,
+                    protocolVersion,
                     payload: {
                       _tag: "CommandAccepted",
                       requestId: message.requestId,

@@ -147,8 +147,8 @@ for (const width of [80, 50] as const) {
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))
           setup.mockInput.pressEnter()
-          expect(model).toMatchObject({ input: "retry", busy: false, activity: undefined })
-          expect(model.entries).toEqual([])
+          expect(model).toMatchObject({ input: "", busy: true, activity: { _tag: "Sending" } })
+          expect(model.entries).toEqual([{ role: "user", text: "retry" }])
           model = update(model, {
             _tag: "SubmissionAdmitted",
             turnId: "turn-retry",

@@ -1,7 +1,12 @@
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
-import { hostedThreadSnapshotMatches, interactiveEventThreadId, ServerFrame } from "@rika/product/client-protocol"
+import {
+  hostedThreadSnapshotMatches,
+  interactiveEventThreadId,
+  protocolVersion,
+  ServerFrame,
+} from "@rika/product/client-protocol"
 import * as ThreadView from "@rika/product/thread-view"
 
 export const frameEventName = "rika:thread-frame"
@@ -23,7 +28,7 @@ const decodeFrame = Schema.decodeUnknownSync(Schema.fromJsonString(ServerFrame))
 type Payload = typeof ServerFrame.Type.payload
 type Attachment = Extract<Payload, { readonly _tag: "ThreadAttached" }>
 type ClientFrame = {
-  readonly protocolVersion: 1
+  readonly protocolVersion: typeof protocolVersion
   readonly payload:
     | { readonly _tag: "ClientDecodeFailed"; readonly message: string }
     | { readonly _tag: "ClientReconnecting"; readonly threadId: string | undefined }
@@ -102,7 +107,7 @@ const acknowledge = (current: WebSocket, threadId: string, cursor: bigint) => {
   try {
     current.send(
       encodeJson({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: requestId("ack"),
         command: { _tag: "AcknowledgeCursor", threadId, cursor: cursor.toString() },
       }),
@@ -171,7 +176,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
           reject("The Thread attachment response was invalid")
           return
         }
-        emit({ protocolVersion: 1, payload: { _tag: "ClientDecodeFailed", message: "Server frame was invalid" } })
+        emit({ protocolVersion, payload: { _tag: "ClientDecodeFailed", message: "Server frame was invalid" } })
         quarantine(current, "invalid Server frame")
         return
       }
@@ -285,7 +290,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         socket = undefined
         const recoveryThreadId = attachedThreadId
         const recoveryGeneration = generation
-        emit({ protocolVersion: 1, payload: { _tag: "ClientReconnecting", threadId: recoveryThreadId } })
+        emit({ protocolVersion, payload: { _tag: "ClientReconnecting", threadId: recoveryThreadId } })
         if (recoveryThreadId !== undefined)
           Effect.runForkWith(context)(
             connectThread(recoveryThreadId).pipe(
@@ -298,7 +303,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
                       attachedThreadId === recoveryThreadId
                     )
                       emit({
-                        protocolVersion: 1,
+                        protocolVersion,
                         payload: { _tag: "ClientReconnectFailed", threadId: recoveryThreadId, message: error.message },
                       })
                   }),
@@ -312,7 +317,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
     current.addEventListener("close", closed)
     current.send(
       encodeJson({
-        protocolVersion: 1,
+        protocolVersion,
         requestId: attachRequestId,
         command: { _tag: "AttachThread", threadId, afterCursor: String(afterCursor) },
       }),
@@ -341,7 +346,7 @@ export const sendPrompt = Effect.fn("ThreadSocket.sendPrompt")(function* (input:
     try: () =>
       current.send(
         encodeJson({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: `${id}:request`,
           command: {
             _tag: "SubmitPrompt",
@@ -366,7 +371,7 @@ export const openPortal = Effect.fn("ThreadSocket.openPortal")(function* (port: 
     try: () =>
       current.send(
         encodeJson({
-          protocolVersion: 1,
+          protocolVersion,
           requestId: requestId("portal"),
           command: { _tag: "OpenPortal", threadId, port },
         }),

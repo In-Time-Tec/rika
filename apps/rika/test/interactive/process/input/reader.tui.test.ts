@@ -48,7 +48,7 @@ test(
 )
 
 test(
-  "keeps an idle draft editable until server admission",
+  "renders a submitted prompt before server admission",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -60,16 +60,12 @@ test(
 
         yield* Effect.tryPromise(() => app.type("OPTIMISTIC_ECHO_PROMPT"))
         app.pressEnter()
-        const held = yield* app.nextFrame
-        expect(held).toContain("│ OPTIMISTIC_ECHO_PROMPT")
-        expect(held).not.toContain("Sending")
+        const held = yield* app.waitFrame("OPTIMISTIC_ECHO_PROMPT")
+        expect(hasGreenText(app, "OPTIMISTIC_ECHO_PROMPT")).toBe(true)
+        expect(held).toContain("Sending")
         expect((yield* app.queue(Thread.ThreadId.make("tui-thread-0"))).turns).toHaveLength(0)
         expect(yield* app.modelRequestCount).toBe(0)
 
-        yield* Effect.tryPromise(() => app.type("_EDITED"))
-        const edited = yield* app.nextFrame
-        expect(edited).toContain("│ OPTIMISTIC_ECHO_PROMPT_EDITED")
-        expect(edited).not.toContain("OPTIMISTIC_ECHO_COMPLETE")
         yield* Deferred.succeed(admission, undefined)
         yield* app.waitFrame("OPTIMISTIC_ECHO_COMPLETE")
         yield* app.quit
