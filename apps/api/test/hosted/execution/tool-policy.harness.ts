@@ -1,10 +1,32 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
+import {
+  rikaHostedClientAuthorities,
+  rikaHostedClients,
+  rikaHostedDevices,
+  rikaHostedExecutorAssignments,
+  rikaHostedOwners,
+  rikaHostedProjectRepositories,
+  rikaHostedProjects,
+  rikaHostedThreadProtocolCommands,
+  rikaHostedThreadProtocolState,
+  rikaHostedThreads,
+  rikaHostedToolAuditRecords,
+  rikaHostedWorkspaces,
+  rikaThreads,
+  rikaTranscriptCheckpoints,
+  rikaTurns,
+  rikaWorkspaces,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/layer"
-import { FileSystem, Config, Context, Crypto, Effect, Layer, Random, Redacted, Schema } from "effect"
+import type { AccessWire, BindingRequest } from "@rika/remote-execution/protocol"
+import { FileSystem, Config, Context, Crypto, DateTime, Effect, Layer, Random, Redacted, Schema } from "effect"
+import { and, count, eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { inspect } from "node:util"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import {
@@ -14,12 +36,11 @@ import {
   organizationOwner,
   personalOwner,
   policyFor,
+  type RecordDecisionInput,
 } from "../../../src/hosted/execution/tool-policy"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+const Json = Schema.fromJsonString(Schema.Json)
 
 const personalActor = Schema.decodeSync(ActorAttribution)({
   _tag: "PersonalActor",
@@ -38,10 +59,10 @@ const organizationActor = Schema.decodeSync(ActorAttribution)({
   deviceId: "organization-device",
 })
 
-const access = (assignmentId: string, instanceId: string) => ({
-  version: 1 as const,
+const access = (assignmentId: string, instanceId: string): AccessWire => ({
+  version: 1,
   fence: {
-    target: "orb" as const,
+    target: "orb",
     assignmentId,
     assignmentGeneration: 1,
     instanceId,
@@ -52,77 +73,6 @@ const access = (assignmentId: string, instanceId: string) => ({
   sessionToken: `${assignmentId}-session`,
 })
 
-const seed = (pool: Pool) =>
-  query(
-    pool,
-    `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
-      ('personal-user', 'personal-user', 'personal@example.test', true, now(), now()),
-      ('foreign-user', 'foreign-user', 'foreign@example.test', true, now(), now()),
-      ('organization-user', 'organization-user', 'organization@example.test', true, now(), now());
-     INSERT INTO "organization" (id, name, slug, created_at)
-      VALUES ('organization-1', 'organization-1', 'organization-1', now());
-     INSERT INTO "member" (id, organization_id, user_id, role, created_at)
-      VALUES ('organization-member', 'organization-1', 'organization-user', 'member', now());
-     INSERT INTO rika_hosted_owners (id, kind, user_id, organization_id) VALUES
-      ('personal-owner', 'personal', 'personal-user', NULL),
-      ('organization-owner', 'organization', NULL, 'organization-1');
-     INSERT INTO rika_hosted_projects
-      (id, owner_id, name, created_by_user_id, created_at, updated_at) VALUES
-      ('personal-project', 'personal-owner', 'personal-project', 'personal-user', now(), now()),
-      ('organization-project', 'organization-owner', 'organization-project', 'organization-user', now(), now());
-     INSERT INTO rika_hosted_workspaces
-      (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at) VALUES
-      ('personal-workspace', 'personal-owner', 'personal-project', 'personal-user', 'orb', false, now()),
-      ('organization-workspace', 'organization-owner', 'organization-project', 'organization-user', 'orb', false, now());
-     INSERT INTO rika_hosted_threads
-      (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at) VALUES
-      ('personal-thread', 'personal-owner', 'personal-project', 'personal-workspace', 'personal-user', 'orb', false, now()),
-      ('organization-thread', 'organization-owner', 'organization-project', 'organization-workspace', 'organization-user', 'orb', false, now());
-     INSERT INTO rika_hosted_project_repositories
-      (project_id, owner_id, repository_id, installation_id, installation_account_id,
-       installation_account_login, installation_account_type, repository_owner, repository_name,
-       default_ref, private) VALUES
-      ('personal-project', 'personal-owner', 'repository-personal', 'installation', 'account-personal',
-       'owner', 'Organization', 'owner', 'repo', 'main', true),
-      ('organization-project', 'organization-owner', 'repository-organization', 'installation',
-       'account-organization', 'owner', 'Organization', 'owner', 'repo', 'main', true);
-     INSERT INTO rika_hosted_devices
-      (id, user_id, display_name, public_key_fingerprint, created_at, last_seen_at) VALUES
-      ('personal-device', 'personal-user', 'personal', 'personal-key', now(), now()),
-      ('organization-device', 'organization-user', 'organization', 'organization-key', now(), now());
-     INSERT INTO rika_hosted_clients
-      (id, user_id, device_id, authenticated_at, last_seen_at, expires_at) VALUES
-      ('personal-client', 'personal-user', 'personal-device', now(), now(), now() + interval '4 minutes'),
-      ('organization-client', 'organization-user', 'organization-device', now(), now(), now() + interval '4 minutes');
-     INSERT INTO rika_hosted_client_authorities (client_id, owner_id, issued_at, expires_at) VALUES
-      ('personal-client', 'personal-owner', now(), now() + interval '4 minutes'),
-      ('organization-client', 'organization-owner', now(), now() + interval '4 minutes');
-     INSERT INTO rika_hosted_executor_assignments
-      (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
-       last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-       session_digest, lease_epoch, lease_expires_at) VALUES
-      ('personal-assignment', 'personal-owner', 'personal-thread', 'personal-workspace', 'orb',
-       '{"_tag":"OrbPlacement","templateBuildId":"build","providerScope":"scope"}',
-       '{"ownerId":"personal-owner","projectId":"personal-project","repositoryId":"repository-personal","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"1111111111111111111111111111111111111111","private":true,"gitIdentity":{"name":"Personal User","email":"personal@example.test"}}',
-       1, 0, 1, 'active', 'personal-instance', 'personal-assignment-executor', 'personal-assignment-process',
-       'personal-session-digest', 1, now() + interval '4 minutes'),
-      ('organization-assignment', 'organization-owner', 'organization-thread', 'organization-workspace', 'orb',
-       '{"_tag":"OrbPlacement","templateBuildId":"build","providerScope":"scope"}',
-       '{"ownerId":"organization-owner","projectId":"organization-project","repositoryId":"repository-organization","installationId":"installation","owner":"owner","name":"repo","ref":"main","commitSha":"2222222222222222222222222222222222222222","private":true,"gitIdentity":{"name":"Organization User","email":"organization@example.test"}}',
-       1, 0, 1, 'active', 'organization-instance', 'organization-assignment-executor', 'organization-assignment-process',
-       'organization-session-digest', 1, now() + interval '4 minutes');
-     INSERT INTO rika_hosted_thread_protocol_state (owner_id, thread_id) VALUES
-      ('personal-owner', 'personal-thread'),
-      ('organization-owner', 'organization-thread');
-     INSERT INTO rika_hosted_thread_protocol_commands
-      (owner_id, thread_id, command_id, idempotency_key, expected_version, thread_version, actor, command,
-       state, admitted_at) VALUES
-      ('personal-owner', 'personal-thread', 'personal-turn', 'personal-command', 0, 1,
-       '${JSON.stringify(personalActor)}', '{"_tag":"SubmitPrompt"}', 'admitted', now()),
-      ('organization-owner', 'organization-thread', 'organization-turn', 'organization-command', 0, 1,
-       '${JSON.stringify(organizationActor)}', '{"_tag":"SubmitPrompt"}', 'admitted', now())`,
-  )
-
 it.effect.skipIf(databaseUrl === "")(
   "persists secret-free exact tool decisions and enforces personal and organization audit ownership",
   () =>
@@ -130,11 +80,12 @@ it.effect.skipIf(databaseUrl === "")(
       Effect.gen(function* () {
         const database = `rika_tool_policy_${Math.abs(yield* Random.nextInt)}`
         const admin = new Pool({ connectionString: databaseUrl })
-        yield* query(admin, `CREATE DATABASE "${database}"`)
+        yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
         const parsed = new URL(databaseUrl)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         const pool = new Pool({ connectionString: url })
+        const db = drizzle({ client: pool })
         try {
           for (const migration of [...identityMigrations, ...productMigrations])
             yield* runMigration({
@@ -145,7 +96,300 @@ it.effect.skipIf(databaseUrl === "")(
                 fileSystem.readFileString(migration.url.pathname),
               ),
             })
-          yield* seed(pool)
+          const current = DateTime.nowUnsafe()
+          const now = DateTime.toDate(current)
+          const expiresAt = DateTime.toDate(DateTime.add(current, { minutes: 4 }))
+          yield* Effect.tryPromise(() =>
+            db.insert(identityUser).values([
+              {
+                id: "personal-user",
+                name: "personal-user",
+                email: "personal@example.test",
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+              {
+                id: "foreign-user",
+                name: "foreign-user",
+                email: "foreign@example.test",
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+              {
+                id: "organization-user",
+                name: "organization-user",
+                email: "organization@example.test",
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(identityOrganization).values({
+              id: "organization-1",
+              name: "organization-1",
+              slug: "organization-1",
+              createdAt: now,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(identityMember).values({
+              id: "organization-member",
+              organizationId: "organization-1",
+              userId: "organization-user",
+              role: "member",
+              createdAt: now,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedOwners).values([
+              { id: "personal-owner", kind: "personal", userId: "personal-user" },
+              { id: "organization-owner", kind: "organization", organizationId: "organization-1" },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedProjects).values([
+              {
+                id: "personal-project",
+                ownerId: "personal-owner",
+                name: "personal-project",
+                createdByUserId: "personal-user",
+                createdAt: now,
+                updatedAt: now,
+              },
+              {
+                id: "organization-project",
+                ownerId: "organization-owner",
+                name: "organization-project",
+                createdByUserId: "organization-user",
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedWorkspaces).values([
+              {
+                id: "personal-workspace",
+                ownerId: "personal-owner",
+                projectId: "personal-project",
+                createdByUserId: "personal-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              },
+              {
+                id: "organization-workspace",
+                ownerId: "organization-owner",
+                projectId: "organization-project",
+                createdByUserId: "organization-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedThreads).values([
+              {
+                id: "personal-thread",
+                ownerId: "personal-owner",
+                projectId: "personal-project",
+                workspaceId: "personal-workspace",
+                createdByUserId: "personal-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              },
+              {
+                id: "organization-thread",
+                ownerId: "organization-owner",
+                projectId: "organization-project",
+                workspaceId: "organization-workspace",
+                createdByUserId: "organization-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedProjectRepositories).values([
+              {
+                projectId: "personal-project",
+                ownerId: "personal-owner",
+                repositoryId: "repository-personal",
+                installationId: "installation",
+                installationAccountId: "account-personal",
+                installationAccountLogin: "owner",
+                installationAccountType: "Organization",
+                repositoryOwner: "owner",
+                repositoryName: "repo",
+                defaultRef: "main",
+                private: true,
+              },
+              {
+                projectId: "organization-project",
+                ownerId: "organization-owner",
+                repositoryId: "repository-organization",
+                installationId: "installation",
+                installationAccountId: "account-organization",
+                installationAccountLogin: "owner",
+                installationAccountType: "Organization",
+                repositoryOwner: "owner",
+                repositoryName: "repo",
+                defaultRef: "main",
+                private: true,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedDevices).values([
+              {
+                id: "personal-device",
+                userId: "personal-user",
+                displayName: "personal",
+                publicKeyFingerprint: "personal-key",
+                createdAt: now,
+                lastSeenAt: now,
+              },
+              {
+                id: "organization-device",
+                userId: "organization-user",
+                displayName: "organization",
+                publicKeyFingerprint: "organization-key",
+                createdAt: now,
+                lastSeenAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedClients).values([
+              {
+                id: "personal-client",
+                userId: "personal-user",
+                deviceId: "personal-device",
+                authenticatedAt: now,
+                lastSeenAt: now,
+                expiresAt,
+              },
+              {
+                id: "organization-client",
+                userId: "organization-user",
+                deviceId: "organization-device",
+                authenticatedAt: now,
+                lastSeenAt: now,
+                expiresAt,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedClientAuthorities).values([
+              { clientId: "personal-client", ownerId: "personal-owner", issuedAt: now, expiresAt },
+              { clientId: "organization-client", ownerId: "organization-owner", issuedAt: now, expiresAt },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedExecutorAssignments).values([
+              {
+                id: "personal-assignment",
+                ownerId: "personal-owner",
+                threadId: "personal-thread",
+                workspaceId: "personal-workspace",
+                executorKind: "orb",
+                placement: { _tag: "OrbPlacement", templateBuildId: "build", providerScope: "scope" },
+                checkout: {
+                  ownerId: "personal-owner",
+                  projectId: "personal-project",
+                  repositoryId: "repository-personal",
+                  installationId: "installation",
+                  owner: "owner",
+                  name: "repo",
+                  ref: "main",
+                  commitSha: "1111111111111111111111111111111111111111",
+                  private: true,
+                  gitIdentity: { name: "Personal User", email: "personal@example.test" },
+                },
+                generation: 1,
+                revision: 0,
+                lastLeaseEpoch: 1,
+                lifecycle: "active",
+                providerInstanceId: "personal-instance",
+                executorInstanceId: "personal-assignment-executor",
+                processIncarnation: "personal-assignment-process",
+                sessionDigest: "personal-session-digest",
+                leaseEpoch: 1,
+                leaseExpiresAt: expiresAt,
+              },
+              {
+                id: "organization-assignment",
+                ownerId: "organization-owner",
+                threadId: "organization-thread",
+                workspaceId: "organization-workspace",
+                executorKind: "orb",
+                placement: { _tag: "OrbPlacement", templateBuildId: "build", providerScope: "scope" },
+                checkout: {
+                  ownerId: "organization-owner",
+                  projectId: "organization-project",
+                  repositoryId: "repository-organization",
+                  installationId: "installation",
+                  owner: "owner",
+                  name: "repo",
+                  ref: "main",
+                  commitSha: "2222222222222222222222222222222222222222",
+                  private: true,
+                  gitIdentity: { name: "Organization User", email: "organization@example.test" },
+                },
+                generation: 1,
+                revision: 0,
+                lastLeaseEpoch: 1,
+                lifecycle: "active",
+                providerInstanceId: "organization-instance",
+                executorInstanceId: "organization-assignment-executor",
+                processIncarnation: "organization-assignment-process",
+                sessionDigest: "organization-session-digest",
+                leaseEpoch: 1,
+                leaseExpiresAt: expiresAt,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedThreadProtocolState).values([
+              { ownerId: "personal-owner", threadId: "personal-thread" },
+              { ownerId: "organization-owner", threadId: "organization-thread" },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedThreadProtocolCommands).values([
+              {
+                ownerId: "personal-owner",
+                threadId: "personal-thread",
+                commandId: "personal-turn",
+                idempotencyKey: "personal-command",
+                expectedVersion: 0,
+                threadVersion: 1,
+                actor: personalActor,
+                command: { _tag: "SubmitPrompt" },
+                state: "admitted",
+                admittedAt: now,
+              },
+              {
+                ownerId: "organization-owner",
+                threadId: "organization-thread",
+                commandId: "organization-turn",
+                idempotencyKey: "organization-command",
+                expectedVersion: 0,
+                threadVersion: 1,
+                actor: organizationActor,
+                command: { _tag: "SubmitPrompt" },
+                state: "admitted",
+                admittedAt: now,
+              },
+            ]),
+          )
           const dependencies = Layer.merge(
             HostedPostgres.layer({
               url: Redacted.make(url),
@@ -167,7 +411,7 @@ it.effect.skipIf(databaseUrl === "")(
             },
             sessionId: "personal-thread",
             cellId: "personal-call",
-          } as const
+          } satisfies BindingRequest
           const admission = yield* policy.begin({
             threadId: "personal-thread",
             turnId: "personal-turn",
@@ -204,29 +448,43 @@ it.effect.skipIf(databaseUrl === "")(
               ],
             ],
           }
-          const authorizationState = encodeJson(authorizationProjectionState)
-          yield* query(
-            pool,
-            `INSERT INTO rika_workspaces (owner_id, path, created_at) VALUES ('personal-owner', 'hosted', 1)`,
+          const authorizationState = yield* Schema.encodeEffect(Json)(authorizationProjectionState)
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaWorkspaces).values({ ownerId: "personal-owner", path: "hosted", createdAt: 1 }),
           )
-          yield* query(
-            pool,
-            `INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-               VALUES ('personal-thread', 'personal-owner', 'hosted', 'Personal Thread', 1, 1)`,
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaThreads).values({
+              id: "personal-thread",
+              ownerId: "personal-owner",
+              workspace: "hosted",
+              title: "Personal Thread",
+              createdAt: 1,
+              updatedAt: 1,
+            }),
           )
-          yield* query(
-            pool,
-            `INSERT INTO rika_turns
-               (id, thread_id, prompt, status, execution_route_json, created_at, updated_at)
-               VALUES ('personal-turn', 'personal-thread', 'prompt', 'waiting', '{}', 1, 1)`,
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaTurns).values({
+              id: "personal-turn",
+              threadId: "personal-thread",
+              prompt: "prompt",
+              status: "waiting",
+              executionRouteJson: "{}",
+              createdAt: 1,
+              updatedAt: 1,
+            }),
           )
-          yield* query(
-            pool,
-            `INSERT INTO rika_transcript_checkpoints
-               (turn_id, thread_id, revision, projection_version, state_json, projector_version,
-                projector_cursor, projector_state, updated_at)
-               VALUES ('personal-turn', 'personal-thread', 0, 4, '{}', 4, 'current-cursor', $1, 1)`,
-            [authorizationState],
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaTranscriptCheckpoints).values({
+              turnId: "personal-turn",
+              threadId: "personal-thread",
+              revision: 0,
+              projectionVersion: 4,
+              stateJson: "{}",
+              projectorVersion: 4,
+              projectorCursor: "current-cursor",
+              projectorState: authorizationState,
+              updatedAt: 1,
+            }),
           )
           expect(
             yield* Effect.result(
@@ -241,7 +499,11 @@ it.effect.skipIf(databaseUrl === "")(
               }),
             ),
           ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
-          const authorizationDecision = {
+          const checkpointState = yield* Schema.encodeEffect(Json)({
+            ...authorizationProjectionState,
+            marker: `checkpoint-with-${rawMarker}`,
+          })
+          const authorizationDecision: RecordDecisionInput = {
             ownerId: "personal-owner",
             threadId: "personal-thread",
             turnId: "personal-turn",
@@ -250,41 +512,41 @@ it.effect.skipIf(databaseUrl === "")(
             checkpoint: {
               version: 4,
               cursor: "checkpoint-cursor",
-              state: encodeJson({
-                ...authorizationProjectionState,
-                marker: `checkpoint-with-${rawMarker}`,
-              }),
+              state: checkpointState,
             },
             decision: "approved",
-          } as const
+          }
+          const conflictingState = yield* Schema.encodeEffect(Json)({
+            authorizations: [
+              [
+                "internal-approval",
+                {
+                  authorizationId: "internal-approval",
+                  rawRunId: "different-run",
+                  approvalId: "different-approval",
+                  unitKey: "different-authorization",
+                },
+              ],
+            ],
+          })
           expect(
             yield* Effect.result(
               policy.recordDecision({
                 ...authorizationDecision,
                 checkpoint: {
                   ...authorizationDecision.checkpoint,
-                  state: encodeJson({
-                    authorizations: [
-                      [
-                        "internal-approval",
-                        {
-                          authorizationId: "internal-approval",
-                          rawRunId: "different-run",
-                          approvalId: "different-approval",
-                          unitKey: "different-authorization",
-                        },
-                      ],
-                    ],
-                  }),
+                  state: conflictingState,
                 },
               }),
             ),
           ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
           expect(
-            (yield* query(
-              pool,
-              `SELECT count(*)::int AS count FROM rika_hosted_tool_audit_records WHERE phase = 'decision'`,
-            )).rows[0]?.count,
+            (yield* Effect.tryPromise(() =>
+              db
+                .select({ count: count() })
+                .from(rikaHostedToolAuditRecords)
+                .where(eq(rikaHostedToolAuditRecords.phase, "decision")),
+            ))[0]?.count,
           ).toBe(0)
           yield* policy.recordDecision(authorizationDecision)
           yield* policy.recordDecision(authorizationDecision)
@@ -324,22 +586,24 @@ it.effect.skipIf(databaseUrl === "")(
               cursor: "checkpoint-cursor",
             },
           })
-          const stored = yield* Schema.decodeUnknownEffect(Schema.String)(
-            (yield* query(
-              pool,
-              `SELECT jsonb_agg(to_jsonb(record))::text AS value FROM rika_hosted_tool_audit_records record`,
-            )).rows[0]?.value,
-          )
+          const stored = inspect(yield* Effect.tryPromise(() => db.select().from(rikaHostedToolAuditRecords)), {
+            depth: null,
+          })
           expect(stored).not.toContain(rawMarker)
           expect(stored).not.toContain("command")
           const mutation = yield* Effect.result(
             Effect.tryPromise(() =>
-              pool.query(`UPDATE rika_hosted_tool_audit_records SET outcome = 'failed' WHERE sequence = 1`),
+              db
+                .update(rikaHostedToolAuditRecords)
+                .set({ outcome: "failed" })
+                .where(eq(rikaHostedToolAuditRecords.sequence, 1)),
             ),
           )
           expect(mutation._tag).toBe("Failure")
           const deletion = yield* Effect.result(
-            Effect.tryPromise(() => pool.query(`DELETE FROM rika_hosted_tool_audit_records WHERE sequence = 1`)),
+            Effect.tryPromise(() =>
+              db.delete(rikaHostedToolAuditRecords).where(eq(rikaHostedToolAuditRecords.sequence, 1)),
+            ),
           )
           expect(deletion._tag).toBe("Failure")
           const foreign = yield* Effect.result(
@@ -353,10 +617,17 @@ it.effect.skipIf(databaseUrl === "")(
             _tag: "Failure",
             failure: { kind: "forbidden" },
           })
-          yield* query(
-            pool,
-            `UPDATE rika_hosted_client_authorities SET revoked_at = now()
-              WHERE client_id = 'personal-client' AND owner_id = 'personal-owner'`,
+          const revokedAt = DateTime.toDate(DateTime.nowUnsafe())
+          yield* Effect.tryPromise(() =>
+            db
+              .update(rikaHostedClientAuthorities)
+              .set({ revokedAt })
+              .where(
+                and(
+                  eq(rikaHostedClientAuthorities.clientId, "personal-client"),
+                  eq(rikaHostedClientAuthorities.ownerId, "personal-owner"),
+                ),
+              ),
           )
           expect(
             yield* Effect.result(
@@ -380,7 +651,7 @@ it.effect.skipIf(databaseUrl === "")(
             input: { path: "README.md" },
             sessionId: "organization-thread",
             cellId: "organization-call",
-          } as const
+          } satisfies BindingRequest
           const organizationAdmission = yield* policy.begin({
             threadId: "organization-thread",
             turnId: "organization-turn",
@@ -405,7 +676,7 @@ it.effect.skipIf(databaseUrl === "")(
               limit: 100,
             }),
           ).toHaveLength(2)
-          yield* query(pool, `DELETE FROM "member" WHERE id = 'organization-member'`)
+          yield* Effect.tryPromise(() => db.delete(identityMember).where(eq(identityMember.id, "organization-member")))
           expect(
             yield* Effect.result(
               policy.list({
@@ -417,7 +688,7 @@ it.effect.skipIf(databaseUrl === "")(
           ).toMatchObject({ _tag: "Failure", failure: { kind: "forbidden" } })
         } finally {
           yield* Effect.tryPromise(() => pool.end())
-          yield* query(admin, `DROP DATABASE "${database}" WITH (FORCE)`)
+          yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
           yield* Effect.tryPromise(() => admin.end())
         }
       }),

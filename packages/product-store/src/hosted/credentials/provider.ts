@@ -61,6 +61,7 @@ export interface PutCredentialInput {
   readonly provider: Provider
   readonly actorUserId: string
   readonly encrypted: EncryptedCredential
+  readonly matches: (current: CredentialRecord) => boolean
   readonly now: Date
 }
 
@@ -272,6 +273,22 @@ const operations = (db: Executor): ProviderCredentialOperations => {
       db
         .transaction((tx) =>
           Effect.gen(function* () {
+            const existingRows = yield* query(
+              tx
+                .select()
+                .from(rikaHostedProviderCredentials)
+                .where(
+                  and(
+                    eq(rikaHostedProviderCredentials.ownerId, input.ownerId),
+                    eq(rikaHostedProviderCredentials.provider, input.provider),
+                  ),
+                )
+                .for("update"),
+            )
+            if (existingRows[0] !== undefined) {
+              const existing = yield* credentialRecord(existingRows[0])
+              if (input.matches(existing)) return existing
+            }
             const references = yield* query(
               tx
                 .insert(rikaHostedCredentialReferences)

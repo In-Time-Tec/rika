@@ -118,6 +118,27 @@ const make = Effect.gen(function* () {
     revision: AssignmentRevision.make(increment(assignment.revision)),
     updatedAt: now,
   })
+  const replacementAuthority = (
+    assignment: ExecutorAssignment,
+    placement: ExecutorAssignment["placement"],
+  ): FailedMutation | undefined => {
+    if (assignment.placement._tag !== placement._tag)
+      return fail("invalid-authority", "Replacement placement must preserve the Executor kind")
+    if (assignment.placement._tag === "OrbPlacement" && placement._tag === "OrbPlacement") {
+      if (assignment.placement.providerScope !== placement.providerScope)
+        return fail("invalid-authority", "Replacement placement must preserve the Orb provider scope")
+      return undefined
+    }
+    if (
+      assignment.placement._tag === "RunnerPlacement" &&
+      placement._tag === "RunnerPlacement" &&
+      (assignment.placement.deviceId !== placement.deviceId ||
+        assignment.placement.checkoutFingerprint !== placement.checkoutFingerprint ||
+        assignment.placement.requestingDeviceId !== placement.requestingDeviceId)
+    )
+      return fail("invalid-authority", "Replacement placement must preserve the Runner authority")
+    return undefined
+  }
   const orphanAuthority = (
     current: State,
     input: { readonly providerInstanceId: string; readonly assignmentId?: string; readonly generation?: string },
@@ -256,7 +277,10 @@ const make = Effect.gen(function* () {
         const invalid = version(assignment, input)
         if (invalid !== undefined) return invalid
         if (assignment!.lifecycle._tag === "Terminated") return fail("invalid-state", "Assignment cannot be replaced")
+        const unauthorized = replacementAuthority(assignment!, input.placement)
+        if (unauthorized !== undefined) return unauthorized
         const next = revised(assignment!, now, {
+          placement: input.placement,
           generation: FencingGeneration.make(increment(assignment!.generation)),
           lastLeaseEpoch: Sequence.make("0"),
           capabilityGeneration: null,

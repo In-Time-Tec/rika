@@ -64,10 +64,12 @@ type CheckpointRow = Omit<CheckpointRecord, "assignmentGeneration" | "leaseEpoch
 }
 
 const databaseError = (cause: unknown) =>
-  AssignmentError.make({
-    reason: "database",
-    message: `Executor assignment database operation failed: ${String(cause)}`,
-  })
+  Schema.is(AssignmentError)(cause)
+    ? cause
+    : AssignmentError.make({
+        reason: "database",
+        message: `Executor assignment database operation failed: ${String(cause)}`,
+      })
 const failure = (reason: AssignmentError["reason"], message: string) => AssignmentError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
@@ -499,12 +501,30 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
           const row = yield* locked(tx, input.assignmentId, "update")
           yield* checkVersion(row, input)
           if (row.lifecycle === "terminated") return yield* failure("invalid-state", "Assignment cannot be replaced")
+          const assignment = yield* decodeAssignment(row)
+          if (assignment.placement._tag !== input.placement._tag)
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Executor kind")
+          if (
+            assignment.placement._tag === "OrbPlacement" &&
+            input.placement._tag === "OrbPlacement" &&
+            assignment.placement.providerScope !== input.placement.providerScope
+          )
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Orb provider scope")
+          if (
+            assignment.placement._tag === "RunnerPlacement" &&
+            input.placement._tag === "RunnerPlacement" &&
+            (assignment.placement.deviceId !== input.placement.deviceId ||
+              assignment.placement.checkoutFingerprint !== input.placement.checkoutFingerprint ||
+              assignment.placement.requestingDeviceId !== input.placement.requestingDeviceId)
+          )
+            return yield* failure("invalid-authority", "Replacement placement must preserve the Runner authority")
           return yield* updated(
             tx,
             input.assignmentId,
             tx
               .update(rikaHostedExecutorAssignments)
               .set({
+                placement: input.placement,
                 generation: expression`${rikaHostedExecutorAssignments.generation} + 1`,
                 revision: expression`${rikaHostedExecutorAssignments.revision} + 1`,
                 lastLeaseEpoch: 0,

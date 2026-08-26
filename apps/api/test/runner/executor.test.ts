@@ -1,14 +1,31 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { Controller, ControllerError, type Interface as ControllerService } from "@rika/e2b-executor/controller"
-import { identityMigrations, runMigration } from "@rika/identity"
+import {
+  cliRegistration,
+  identityMember,
+  identityMigrations,
+  oauthClient,
+  identityOrganization,
+  identityUser,
+  runMigration,
+} from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { BetterAuthUserId, DeviceId, OrganizationId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedRunnerAdmissions,
+  rikaHostedRunnerRegistrations,
+  rikaHostedThreads,
+  rikaHostedWorkspaceCapabilityAdmissions,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/layer"
 import { emptyCursor, type Access, type RunnerHelloWire } from "@rika/remote-execution/protocol"
-import { Config, Data, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
+import { and, count, eq, sql } from "drizzle-orm"
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
+import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../support/live-platform"
 import { Executor, service as executorLayer } from "../../src/executor/service"
@@ -26,7 +43,6 @@ import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const helloReadiness = {
   capabilities: { cells: true, checkpoints: false, pty: true },
   workspaceCapabilities: {
@@ -91,14 +107,6 @@ const availableHostedEnvironment: HostedEnvironmentService = {
     } satisfies ResolvedPhaseEnvironment),
 }
 
-class TestDatabaseError extends Data.TaggedError("TestDatabaseError")<{ readonly cause: unknown }> {}
-
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise({
-    try: () => pool.query(text, [...values]),
-    catch: (cause) => new TestDatabaseError({ cause }),
-  })
-
 const personal = (userId: string) => ({
   _tag: "PersonalOwner" as const,
   userId: BetterAuthUserId.make(userId),
@@ -115,28 +123,46 @@ const principal = (userId: string, clientId: string, deviceId: string): Authenti
   dpopJkt: `thumbprint-${clientId}`,
 })
 
-const seedPrincipal = (pool: Pool, input: AuthenticatedPrincipal) =>
+const seedPrincipal = (databaseClient: NodePgDatabase, input: AuthenticatedPrincipal) =>
   Effect.gen(function* () {
-    yield* query(
-      pool,
-      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-       VALUES ($1, $1, $2, true, now(), now()) ON CONFLICT (id) DO NOTHING`,
-      [input.userId, `${input.userId}@example.test`],
+    const dpopJkt = input.dpopJkt
+    if (dpopJkt === undefined) return yield* Effect.die("Seeded principal is missing a DPoP thumbprint")
+    const now = yield* DateTime.nowAsDate
+    yield* Effect.tryPromise(() =>
+      databaseClient
+        .insert(identityUser)
+        .values({
+          id: input.userId,
+          name: input.userId,
+          email: `${input.userId}@example.test`,
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing({ target: identityUser.id }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO oauth_client (id, client_id, user_id, redirect_uris, created_at)
-       VALUES ($1, $1, $2, '[]'::jsonb, now())`,
-      [input.clientId, input.userId],
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(oauthClient).values({
+        id: input.clientId,
+        clientId: input.clientId,
+        userId: input.userId,
+        redirectUris: [],
+        createdAt: now,
+      }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO rika_cli_registration
-         (client_id, device_id, public_jwk, jwk_thumbprint, user_id)
-       VALUES ($1, $2::uuid,
-         '{"kty":"EC","crv":"P-256","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","y":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}',
-         $3, $4)`,
-      [input.clientId, input.deviceId, input.dpopJkt, input.userId],
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(cliRegistration).values({
+        clientId: input.clientId,
+        deviceId: input.deviceId,
+        publicJwk: {
+          kty: "EC",
+          crv: "P-256",
+          x: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          y: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
+        jwkThumbprint: dpopJkt,
+        userId: input.userId,
+      }),
     )
   })
 
@@ -192,8 +218,8 @@ const failureKind = <A>(effect: Effect.Effect<A, { readonly kind: string }>) =>
 
 const isolated = <A, E, R>(
   label: string,
-  use: (pool: Pool) => Effect.Effect<A, E, R | Executor | HostedProduct | RunnerExecutor>,
-  services?: (pool: Pool) => {
+  use: (databaseClient: NodePgDatabase) => Effect.Effect<A, E, R | Executor | HostedProduct | RunnerExecutor>,
+  services?: (databaseClient: NodePgDatabase) => {
     readonly controller?: ControllerService
     readonly environment?: HostedEnvironmentService
   },
@@ -202,7 +228,7 @@ const isolated = <A, E, R>(
     Effect.gen(function* () {
       const database = `rika_local_authority_${label}_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
@@ -210,18 +236,19 @@ const isolated = <A, E, R>(
       try {
         const activePool = new Pool({ connectionString: url })
         pool = activePool
+        const databaseClient = drizzle({ client: activePool })
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          const migrationSql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.readFileString(migration.url.pathname),
           )
           yield* runMigration({
             pool: activePool,
             id: migration.id,
             checksum: migration.checksum,
-            sql,
+            sql: migrationSql,
           })
         }
-        const overrides = services?.(activePool)
+        const overrides = services?.(databaseClient)
         const base = Layer.mergeAll(
           productPostgres({ url: Redacted.make(url), maxConnections: 8 }),
           AuthorizationPolicy.layer,
@@ -246,7 +273,7 @@ const isolated = <A, E, R>(
             executorLayer.pipe(Layer.provide(runnerExecutor), Layer.provide(base)),
           ),
         )
-        return yield* use(activePool).pipe(Effect.provide(context))
+        return yield* use(databaseClient).pipe(Effect.provide(context))
       } finally {
         const cleanupPool = pool
         yield* cleanupPool === undefined ? Effect.void : Effect.orDie(Effect.tryPromise(() => cleanupPool.end()))
@@ -257,10 +284,10 @@ const isolated = <A, E, R>(
   ).pipe(livePlatform)
 
 it.effect.skipIf(!live)("keeps real personal local authority active without organization membership", () =>
-  isolated("personal", (pool) =>
+  isolated("personal", (databaseClient) =>
     Effect.gen(function* () {
       const owner = principal("personal-user", "personal-client", "10000000-0000-4000-8000-000000000001")
-      yield* seedPrincipal(pool, owner)
+      yield* seedPrincipal(databaseClient, owner)
       const authority = yield* RunnerExecutor
       const connection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
       const product = yield* HostedProduct
@@ -275,17 +302,24 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         executor: { kind: "runner", generation: "1", lifecycle: "pending" },
       })
       expect(context.executor.assignmentId).not.toBe(connection.threadId)
-      expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
+      expect(yield* Effect.tryPromise(() => databaseClient.select({ count: count() }).from(identityMember))).toEqual([
+        { count: 0 },
+      ])
       const admission = yield* authority.admit({
         threadId: connection.threadId,
         workspaceFingerprint: connection.checkoutFingerprint,
         principal: owner,
         executorUrl: "ws://executor.test/local",
       })
-      const workspace = yield* query(pool, `SELECT workspace_id FROM rika_hosted_threads WHERE id = $1`, [
-        connection.threadId,
-      ])
-      expect(admission.workspaceIdentity).toBe(workspace.rows[0].workspace_id)
+      const workspace = yield* Effect.tryPromise(() =>
+        databaseClient
+          .select({ workspaceId: rikaHostedThreads.workspaceId })
+          .from(rikaHostedThreads)
+          .where(eq(rikaHostedThreads.id, connection.threadId)),
+      )
+      const workspaceRow = workspace[0]
+      if (workspaceRow === undefined) return yield* Effect.die("Expected the personal thread workspace to exist")
+      expect(admission.workspaceIdentity).toBe(workspaceRow.workspaceId)
       const welcome = yield* authority.hello({
         admissionId: admission.admissionId,
         ticket: admission.ticket,
@@ -314,10 +348,9 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
           activeAssignmentIds: [],
         }),
       ).toEqual({ claimed: false })
+      const expiredSupervisorAt = DateTime.toDate(DateTime.subtract(yield* DateTime.now, { seconds: 1 }))
       yield* Effect.tryPromise(() =>
-        pool.query(
-          `UPDATE rika_hosted_runner_registrations SET supervisor_expires_at = clock_timestamp() - interval '1 second'`,
-        ),
+        databaseClient.update(rikaHostedRunnerRegistrations).set({ supervisorExpiresAt: expiredSupervisorAt }),
       )
       expect(
         yield* product.pollRunner({
@@ -340,13 +373,13 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
       })
       const access = accessFrom(welcome)
       yield* authority.validateAccess(access)
-      expect(yield* authority.workspaceIdentity(access)).toBe(workspace.rows[0].workspace_id)
+      expect(yield* authority.workspaceIdentity(access)).toBe(workspaceRow.workspaceId)
+      const expiredLeaseAt = DateTime.toDate(DateTime.subtract(yield* DateTime.now, { seconds: 1 }))
       yield* Effect.tryPromise(() =>
-        pool.query(
-          `UPDATE rika_hosted_executor_assignments SET lease_expires_at = clock_timestamp() - interval '1 second'
-           WHERE id = $1`,
-          [admission.assignmentId],
-        ),
+        databaseClient
+          .update(rikaHostedExecutorAssignments)
+          .set({ leaseExpiresAt: expiredLeaseAt })
+          .where(eq(rikaHostedExecutorAssignments.id, admission.assignmentId)),
       )
       const reconnected = yield* authority.reconnect(access)
       expect(reconnected.leaseExpiresAt).toBeGreaterThan(welcome.leaseExpiresAt)
@@ -367,19 +400,22 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
           executor.admitRun({
             threadId: connection.threadId,
             turnId: admitted.turnId,
-            workspaceId: workspace.rows[0].workspace_id,
+            workspaceId: workspaceRow.workspaceId,
           }),
         ),
       )
       expect(
-        (yield* query(pool, `SELECT consumed_at IS NOT NULL AS consumed FROM rika_hosted_runner_admissions`)).rows,
+        (yield* Effect.tryPromise(() =>
+          databaseClient.select({ consumedAt: rikaHostedRunnerAdmissions.consumedAt }).from(rikaHostedRunnerAdmissions),
+        )).map((row) => ({ consumed: row.consumedAt !== null })),
       ).toEqual([{ consumed: true }])
       expect(
-        (yield* query(
-          pool,
-          `SELECT required_capabilities FROM rika_hosted_workspace_capability_admissions WHERE turn_id = $1`,
-          [admitted.turnId],
-        )).rows,
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .select({ required_capabilities: rikaHostedWorkspaceCapabilityAdmissions.requiredCapabilities })
+            .from(rikaHostedWorkspaceCapabilityAdmissions)
+            .where(eq(rikaHostedWorkspaceCapabilityAdmissions.turnId, admitted.turnId)),
+        ),
       ).toEqual([
         {
           required_capabilities: ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"],
@@ -393,10 +429,10 @@ it.effect.skipIf(!live)("leaves a blank Orb pending and provisions its first cap
   let provisionCount = 0
   return isolated(
     "orb-provisioning-owner",
-    (pool) =>
+    (databaseClient) =>
       Effect.gen(function* () {
         const owner = principal("orb-user", "orb-client", "15000000-0000-4000-8000-000000000001")
-        yield* seedPrincipal(pool, owner)
+        yield* seedPrincipal(databaseClient, owner)
         const product = yield* HostedProduct
         const connection = yield* product.createConnection({
           principal: owner,
@@ -411,28 +447,35 @@ it.effect.skipIf(!live)("leaves a blank Orb pending and provisions its first cap
           prompt: "run in the Orb",
         })
         if (admitted._tag !== "Admitted") return yield* Effect.die("Orb prompt was cancelled unexpectedly")
-        const assignment = (yield* query(
-          pool,
-          `SELECT id, workspace_id FROM rika_hosted_executor_assignments WHERE thread_id = $1`,
-          [connection.threadId],
-        )).rows[0]
+        const assignment = (yield* Effect.tryPromise(() =>
+          databaseClient
+            .select({ id: rikaHostedExecutorAssignments.id, workspaceId: rikaHostedExecutorAssignments.workspaceId })
+            .from(rikaHostedExecutorAssignments)
+            .where(eq(rikaHostedExecutorAssignments.threadId, connection.threadId)),
+        ))[0]
+        if (assignment === undefined) return yield* Effect.die("Expected the Orb executor assignment to exist")
         const executor = yield* Executor
         yield* executor.admitRun({
           threadId: connection.threadId,
           turnId: admitted.turnId,
-          workspaceId: assignment.workspace_id,
+          workspaceId: assignment.workspaceId,
         })
         expect(provisionCount).toBe(1)
         expect(
-          (yield* query(
-            pool,
-            `SELECT count(*)::int AS count FROM rika_hosted_workspace_capability_admissions
-               WHERE thread_id = $1 AND turn_id = $2`,
-            [connection.threadId, admitted.turnId],
-          )).rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ count: count() })
+              .from(rikaHostedWorkspaceCapabilityAdmissions)
+              .where(
+                and(
+                  eq(rikaHostedWorkspaceCapabilityAdmissions.threadId, connection.threadId),
+                  eq(rikaHostedWorkspaceCapabilityAdmissions.turnId, admitted.turnId),
+                ),
+              ),
+          ),
         ).toEqual([{ count: 1 }])
       }),
-    (pool) => ({
+    (databaseClient) => ({
       environment: availableHostedEnvironment,
       controller: {
         ...unusedController,
@@ -440,31 +483,44 @@ it.effect.skipIf(!live)("leaves a blank Orb pending and provisions its first cap
         provision: (assignmentId: string) =>
           Effect.gen(function* () {
             provisionCount += 1
+            const activatedAt = yield* DateTime.now
+            const activatedAtDate = DateTime.toDate(activatedAt)
             const rows = yield* Effect.tryPromise({
               try: () =>
-                pool.query(
-                  `UPDATE rika_hosted_executor_assignments SET
-                 revision = revision + 1, last_lease_epoch = 1, lifecycle = 'active',
-                 provider_instance_id = 'orb-sandbox', executor_instance_id = 'orb-executor',
-                 process_incarnation = 'orb-process', session_digest = 'orb-session-digest',
-                 lease_epoch = 1, lease_expires_at = clock_timestamp() + interval '1 minute',
-                 capability_generation = generation, capability_snapshot = $2::jsonb,
-                 last_active_at = clock_timestamp(), updated_at = clock_timestamp()
-               WHERE id = $1
-               RETURNING thread_id, generation`,
-                  [assignmentId, encodeJson(helloReadiness.workspaceCapabilities)],
-                ),
+                databaseClient
+                  .update(rikaHostedExecutorAssignments)
+                  .set({
+                    revision: sql`${rikaHostedExecutorAssignments.revision} + 1`,
+                    lastLeaseEpoch: 1,
+                    lifecycle: "active",
+                    providerInstanceId: "orb-sandbox",
+                    executorInstanceId: "orb-executor",
+                    processIncarnation: "orb-process",
+                    sessionDigest: "orb-session-digest",
+                    leaseEpoch: 1,
+                    leaseExpiresAt: DateTime.toDate(DateTime.add(activatedAt, { minutes: 1 })),
+                    capabilityGeneration: sql`${rikaHostedExecutorAssignments.generation}`,
+                    capabilitySnapshot: helloReadiness.workspaceCapabilities,
+                    lastActiveAt: activatedAtDate,
+                    updatedAt: activatedAtDate,
+                  })
+                  .where(eq(rikaHostedExecutorAssignments.id, assignmentId))
+                  .returning({
+                    threadId: rikaHostedExecutorAssignments.threadId,
+                    generation: rikaHostedExecutorAssignments.generation,
+                  }),
               catch: (error) =>
                 ControllerError.make({
                   kind: "repository",
                   message: `Could not activate fake Orb assignment: ${String(error)}`,
                 }),
             })
-            const row = rows.rows[0]
+            const row = rows[0]
+            if (row === undefined) return yield* Effect.die(`Expected Orb assignment ${assignmentId} to be activated`)
             return {
               assignmentId,
-              threadId: row.thread_id,
-              generation: Number(row.generation),
+              threadId: row.threadId,
+              generation: row.generation,
               templateBuildId: "local-authority-live",
               sandboxId: "orb-sandbox",
               state: "running" as const,
@@ -477,19 +533,24 @@ it.effect.skipIf(!live)("leaves a blank Orb pending and provisions its first cap
 })
 
 it.effect.skipIf(!live)("fences organization access immediately while preserving a personal session", () =>
-  isolated("membership", (pool) =>
+  isolated("membership", (databaseClient) =>
     Effect.gen(function* () {
       const owner = principal("shared-user", "shared-client", "20000000-0000-4000-8000-000000000002")
-      yield* seedPrincipal(pool, owner)
-      yield* query(
-        pool,
-        `INSERT INTO organization (id, name, slug, created_at) VALUES ('local-org', 'Local org', 'local-org', now())`,
+      yield* seedPrincipal(databaseClient, owner)
+      const now = yield* DateTime.nowAsDate
+      yield* Effect.tryPromise(() =>
+        databaseClient
+          .insert(identityOrganization)
+          .values({ id: "local-org", name: "Local org", slug: "local-org", createdAt: now }),
       )
-      yield* query(
-        pool,
-        `INSERT INTO member (id, organization_id, user_id, role, created_at)
-         VALUES ('local-member', 'local-org', $1, 'member', now())`,
-        [owner.userId],
+      yield* Effect.tryPromise(() =>
+        databaseClient.insert(identityMember).values({
+          id: "local-member",
+          organizationId: "local-org",
+          userId: owner.userId,
+          role: "member",
+          createdAt: now,
+        }),
       )
       const authority = yield* RunnerExecutor
       const personalConnection = yield* localConnection(owner, personal(owner.userId), "personal-workspace")
@@ -514,7 +575,7 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
       const personalAccess = accessFrom(personalWelcome)
       const organizationAccess = accessFrom(organizationWelcome)
       yield* authority.validateAccess(organizationAccess)
-      yield* query(pool, `DELETE FROM member WHERE id = 'local-member'`)
+      yield* Effect.tryPromise(() => databaseClient.delete(identityMember).where(eq(identityMember.id, "local-member")))
       for (const operation of [
         authority.validateAccess(organizationAccess),
         authority.reconnect(organizationAccess),
@@ -541,14 +602,14 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
 )
 
 it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before issuing usable tickets", () =>
-  isolated("cross_binding", (pool) =>
+  isolated("cross_binding", (databaseClient) =>
     Effect.gen(function* () {
       const owner = principal("owner-user", "owner-client", "30000000-0000-4000-8000-000000000003")
       const stranger = principal("stranger-user", "stranger-client", "40000000-0000-4000-8000-000000000004")
       const otherDevice = principal("owner-user", "other-client", "50000000-0000-4000-8000-000000000005")
-      yield* seedPrincipal(pool, owner)
-      yield* seedPrincipal(pool, stranger)
-      yield* seedPrincipal(pool, otherDevice)
+      yield* seedPrincipal(databaseClient, owner)
+      yield* seedPrincipal(databaseClient, stranger)
+      yield* seedPrincipal(databaseClient, otherDevice)
       const authority = yield* RunnerExecutor
       const connection = yield* localConnection(owner, personal(owner.userId), "cross-owner")
       expect(
@@ -571,9 +632,9 @@ it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before 
           }),
         ),
       ).toBe("fenced")
-      expect((yield* query(pool, `SELECT count(*)::int AS count FROM rika_hosted_runner_admissions`)).rows).toEqual([
-        { count: 0 },
-      ])
+      expect(
+        yield* Effect.tryPromise(() => databaseClient.select({ count: count() }).from(rikaHostedRunnerAdmissions)),
+      ).toEqual([{ count: 0 }])
     }),
   ),
 )

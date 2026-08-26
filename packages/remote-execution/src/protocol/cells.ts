@@ -100,10 +100,8 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
     Effect.gen(function* () {
       const registry = yield* Ref.make<Registry>({ entries: new Map(), attempts: new Map() })
       const executions = yield* FiberSet.make<CellResponseValue, CellError>()
-      const interruptions = yield* FiberSet.make<void, never>()
       const commits = yield* FiberSet.make<void, never>()
-      const interrupt = (fiber: Fiber.Fiber<CellResponseValue, CellError>) =>
-        FiberSet.run(interruptions, Fiber.interrupt(fiber).pipe(Effect.asVoid)).pipe(Effect.asVoid)
+      const interrupt = (fiber: Fiber.Fiber<CellResponseValue, CellError>) => Fiber.interrupt(fiber).pipe(Effect.asVoid)
       const entryFor = Effect.fn("Cells.entry")(function* (operationKey: string, attempt: number) {
         const initialization = yield* Ref.make<"fresh" | "retained" | "completed" | undefined>(undefined)
         const result = yield* Deferred.make<CellResponseValue, CellError>()

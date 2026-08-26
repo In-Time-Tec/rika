@@ -1,6 +1,6 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthMemberId,
@@ -24,9 +24,21 @@ import type { InteractiveCommand } from "@rika/product/interactive-command"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
+import {
+  rikaHostedClientAuthorities,
+  rikaHostedThreadProtocolCommands,
+  rikaHostedThreadProtocolEvents,
+  rikaHostedThreadProtocolSnapshots,
+  rikaThreads,
+  rikaTranscriptCheckpoints,
+  rikaTurns,
+  rikaWorkspaces,
+} from "@rika/product-store/database-schema"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/layer"
-import { FileSystem, Config, Context, DateTime, Deferred, Effect, Layer, Random, Redacted } from "effect"
+import { and, count, eq, gt } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { FileSystem, Config, Context, DateTime, Deferred, Effect, Fiber, Layer, Random, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -91,9 +103,6 @@ const snapshot = {
   pendingAuthorizations: [],
 }
 
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
-
 const withDatabase = <A, E, R>(
   use: (pool: Pool, url: string) => Effect.Effect<A, E, R | HostedStore | ThreadProtocolStore>,
 ) =>
@@ -102,7 +111,7 @@ const withDatabase = <A, E, R>(
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_thread_protocol_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
@@ -136,11 +145,16 @@ const withDatabase = <A, E, R>(
 
 const setup = (pool: Pool) =>
   Effect.gen(function* () {
-    yield* query(
-      pool,
-      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-        VALUES ($1, $1, $2, true, now(), now())`,
-      [userId, "protocol@example.test"],
+    const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+    yield* Effect.tryPromise(() =>
+      drizzle({ client: pool }).insert(identityUser).values({
+        id: userId,
+        name: userId,
+        email: "protocol@example.test",
+        emailVerified: true,
+        createdAt,
+        updatedAt: createdAt,
+      }),
     )
     const hosted = yield* HostedStore
     yield* hosted.putOwner({ id: ownerId, identity: actor.owner, now })
@@ -199,6 +213,7 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
+      const db = drizzle({ client: pool })
       const duplicate = command("duplicate", "0")
       const deliveries = yield* Effect.all([protocol.admitCommand(duplicate), protocol.admitCommand(duplicate)], {
         concurrency: "unbounded",
@@ -220,12 +235,16 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
           claimMillis: 60_000,
         }),
       ).toBeUndefined()
-      yield* query(
-        pool,
-        `UPDATE rika_hosted_thread_protocol_commands
-         SET claim_expires_at = transaction_timestamp() - interval '1 second'
-         WHERE thread_id = $1 AND command_id = $2`,
-        [threadId, duplicate.commandId],
+      yield* Effect.tryPromise(() =>
+        db
+          .update(rikaHostedThreadProtocolCommands)
+          .set({ claimExpiresAt: DateTime.toDate(DateTime.makeUnsafe(0)) })
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolCommands.threadId, threadId),
+              eq(rikaHostedThreadProtocolCommands.commandId, duplicate.commandId),
+            ),
+          ),
       )
       const claimToken = "duplicate-claim-recovered"
       expect(yield* protocol.claimNextCommand({ claimToken, claimMillis: 60_000 })).toMatchObject({
@@ -450,6 +469,7 @@ it.effect.skipIf(!live)("claims one admitted command, reclaims expiry, and inclu
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
+      const db = drizzle({ client: pool })
       const input = command("worker-command", "0")
       yield* protocol.admitCommand(input)
       const claims = yield* Effect.all(
@@ -463,12 +483,16 @@ it.effect.skipIf(!live)("claims one admitted command, reclaims expiry, and inclu
         commandId: input.commandId,
       })
 
-      yield* query(
-        pool,
-        `UPDATE rika_hosted_thread_protocol_commands
-         SET claim_expires_at = transaction_timestamp() - interval '1 second'
-         WHERE thread_id = $1 AND command_id = $2`,
-        [threadId, input.commandId],
+      yield* Effect.tryPromise(() =>
+        db
+          .update(rikaHostedThreadProtocolCommands)
+          .set({ claimExpiresAt: DateTime.toDate(DateTime.makeUnsafe(0)) })
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolCommands.threadId, threadId),
+              eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+            ),
+          ),
       )
       const recovered = yield* protocol.claimNextCommand({
         claimToken: "worker-claim-recovered",
@@ -709,14 +733,18 @@ it.effect.skipIf(!live)("keeps event versions and snapshots monotonic when comma
         ["1", "2"],
         ["2", "2"],
       ])
+      const snapshots = yield* Effect.tryPromise(() =>
+        drizzle({ client: pool })
+          .select({
+            threadVersion: rikaHostedThreadProtocolSnapshots.threadVersion,
+            cursor: rikaHostedThreadProtocolSnapshots.cursor,
+          })
+          .from(rikaHostedThreadProtocolSnapshots)
+          .where(eq(rikaHostedThreadProtocolSnapshots.threadId, threadId)),
+      )
       expect(
-        yield* query(
-          pool,
-          `SELECT thread_version::text AS version, cursor::text AS cursor
-           FROM rika_hosted_thread_protocol_snapshots WHERE thread_id = $1`,
-          [threadId],
-        ),
-      ).toMatchObject({ rows: [{ version: "2", cursor: "2" }] })
+        snapshots.map(({ threadVersion, cursor }) => ({ version: String(threadVersion), cursor: String(cursor) })),
+      ).toMatchObject([{ version: "2", cursor: "2" }])
     }),
   ),
 )
@@ -1032,7 +1060,15 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
   withDatabase((pool, url) =>
     Effect.gen(function* () {
       const protocolStore = yield* setup(pool)
+      const db = drizzle({ client: pool })
       let currentSnapshot: HostedThreadSnapshot = snapshot
+      let snapshotBarrier:
+        | {
+            readonly started: Deferred.Deferred<void>
+            readonly release: Deferred.Deferred<void>
+            reads: number
+          }
+        | undefined
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -1051,7 +1087,17 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       }
       const operations: HostedThreadApplicationService = {
         thread: () => Effect.succeed(currentSnapshot.view.thread),
-        snapshot: () => Effect.succeed(currentSnapshot),
+        snapshot: () =>
+          Effect.gen(function* () {
+            const captured = currentSnapshot
+            const barrier = snapshotBarrier
+            if (barrier !== undefined) {
+              barrier.reads += 1
+              if (barrier.reads === 2) yield* Deferred.succeed(barrier.started, undefined)
+              yield* Deferred.await(barrier.release)
+            }
+            return captured
+          }),
         interactive: () => Effect.die("unused"),
       }
       const dependencies = Layer.mergeAll(
@@ -1102,9 +1148,10 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       })
       const listenerPids = Effect.gen(function* () {
         for (let attempt = 0; attempt < 200; attempt += 1) {
-          const listeners = yield* query(
-            pool,
-            `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN rika_thread_protocol'`,
+          const listeners = yield* Effect.tryPromise(() =>
+            pool.query(
+              `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN rika_thread_protocol'`,
+            ),
           )
           if (listeners.rows.length === 2) return listeners.rows.map((row) => Number(row.pid))
           yield* TestClock.adjust("25 millis")
@@ -1145,13 +1192,13 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
           },
         }),
       ).toMatchObject([{ payload: { _tag: "CommandAccepted", cursor: "1" } }])
-      expect(
-        Number(
-          (yield* query(pool, `SELECT count(*) FROM rika_hosted_thread_protocol_events WHERE thread_id = $1`, [
-            threadId,
-          ])).rows[0].count,
-        ),
-      ).toBe(0)
+      const eventCounts = yield* Effect.tryPromise(() =>
+        db
+          .select({ value: count() })
+          .from(rikaHostedThreadProtocolEvents)
+          .where(eq(rikaHostedThreadProtocolEvents.threadId, threadId)),
+      )
+      expect(eventCounts[0]?.value).toBe(0)
       expect(yield* connectionB.outbound).toMatchObject([
         {
           payload: {
@@ -1161,15 +1208,18 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
           },
         },
       ])
-      yield* query(pool, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = ANY($1::int[])`, [
-        initialListeners,
-      ])
+      yield* Effect.tryPromise(() =>
+        pool.query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = ANY($1::int[])`, [
+          initialListeners,
+        ]),
+      )
       yield* TestClock.adjust("1 second")
       let recoveredListeners: ReadonlyArray<number> = []
       for (let attempt = 0; attempt < 240; attempt += 1) {
-        const listeners = yield* query(
-          pool,
-          `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN rika_thread_protocol'`,
+        const listeners = yield* Effect.tryPromise(() =>
+          pool.query(
+            `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND query = 'LISTEN rika_thread_protocol'`,
+          ),
         )
         recoveredListeners = listeners.rows.map((row) => Number(row.pid))
         if (recoveredListeners.length === 2 && recoveredListeners.every((pid) => !initialListeners.includes(pid))) break
@@ -1180,6 +1230,111 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       yield* publish(3)
       const second = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
       expect(second.map(eventCursors)).toEqual([["2"], ["2"]])
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Projected checkpoint wake" },
+          revision: 4,
+        },
+      }
+      yield* Effect.tryPromise(() => db.insert(rikaWorkspaces).values({ ownerId, path: workspaceId, createdAt: 4 }))
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaThreads).values({
+          id: threadId,
+          ownerId,
+          workspace: workspaceId,
+          title: "Checkpoint notification",
+          createdAt: 4,
+          updatedAt: 4,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaTurns).values({
+          id: "checkpoint-notify-turn",
+          threadId,
+          prompt: "$ printf projection",
+          status: "running",
+          createdAt: 4,
+          updatedAt: 4,
+          shellCommand: "printf projection",
+          turnKind: "RecordedShell",
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaTranscriptCheckpoints).values({
+          turnId: "checkpoint-notify-turn",
+          threadId,
+          checkpointGeneration: 1,
+          revision: 0,
+          projectionVersion: ExecutionProjection.projectionVersion,
+          stateJson: "{}",
+          updatedAt: 4,
+        }),
+      )
+      const projected = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
+      expect(projected).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
+      ])
+
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Running before terminal transition" },
+          revision: 5,
+        },
+      }
+      snapshotBarrier = {
+        started: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>(),
+        reads: 0,
+      }
+      const firstWake = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
+        concurrency: "unbounded",
+      }).pipe(Effect.forkChild)
+      yield* Effect.tryPromise(() =>
+        db
+          .update(rikaTranscriptCheckpoints)
+          .set({ updatedAt: 5 })
+          .where(eq(rikaTranscriptCheckpoints.turnId, "checkpoint-notify-turn")),
+      )
+      yield* Deferred.await(snapshotBarrier.started).pipe(Effect.timeout("5 seconds"))
+      currentSnapshot = {
+        ...currentSnapshot,
+        view: {
+          ...currentSnapshot.view,
+          thread: { ...currentSnapshot.view.thread, title: "Completed after terminal transition" },
+          revision: 6,
+        },
+      }
+      yield* Effect.tryPromise(() =>
+        db
+          .update(rikaTurns)
+          .set({
+            status: "completed",
+            updatedAt: 6,
+            shellResultText: "",
+            shellResultTruncated: 0,
+            shellResultExitCode: 0,
+          })
+          .where(eq(rikaTurns.id, "checkpoint-notify-turn")),
+      )
+      yield* Deferred.succeed(snapshotBarrier.release, undefined)
+      expect(yield* Fiber.join(firstWake)).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
+      ])
+      snapshotBarrier = undefined
+      const terminal = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
+        concurrency: "unbounded",
+      }).pipe(Effect.timeout("5 seconds"))
+      expect(terminal).toMatchObject([
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
+        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
+      ])
     }),
   ),
 )
@@ -1188,6 +1343,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocolStore = yield* setup(pool)
+      const db = drizzle({ client: pool })
       const checkpoint = {
         version: ExecutionProjection.projectionVersion,
         cursor: "authorization-cursor",
@@ -1603,12 +1759,17 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         effects.filter((input) => input._tag === "DenyAuthorization" && input.authorizationId === "authorization-2"),
       ).toHaveLength(1)
 
-      const audit = yield* query(
-        pool,
-        `SELECT actor, command, result FROM rika_hosted_thread_protocol_commands WHERE command_id = $1`,
-        ["approval-command"],
+      const audit = yield* Effect.tryPromise(() =>
+        db
+          .select({
+            actor: rikaHostedThreadProtocolCommands.actor,
+            command: rikaHostedThreadProtocolCommands.command,
+            result: rikaHostedThreadProtocolCommands.result,
+          })
+          .from(rikaHostedThreadProtocolCommands)
+          .where(eq(rikaHostedThreadProtocolCommands.commandId, "approval-command")),
       )
-      expect(audit.rows).toMatchObject([
+      expect(audit).toMatchObject([
         {
           actor,
           command: {
@@ -1620,12 +1781,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           result: { _tag: "Applied" },
         },
       ])
-      const denialAudit = yield* query(
-        pool,
-        `SELECT result FROM rika_hosted_thread_protocol_commands WHERE command_id = $1`,
-        ["denial-command"],
+      const denialAudit = yield* Effect.tryPromise(() =>
+        db
+          .select({ result: rikaHostedThreadProtocolCommands.result })
+          .from(rikaHostedThreadProtocolCommands)
+          .where(eq(rikaHostedThreadProtocolCommands.commandId, "denial-command")),
       )
-      expect(denialAudit.rows).toMatchObject([
+      expect(denialAudit).toMatchObject([
         {
           result: { _tag: "Applied" },
         },
@@ -1677,9 +1839,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         })),
         completedAt: later,
       })
-      yield* query(pool, `DELETE FROM rika_hosted_thread_protocol_snapshots WHERE thread_id = $1 AND cursor > 3`, [
-        threadId,
-      ])
+      yield* Effect.tryPromise(() =>
+        db
+          .delete(rikaHostedThreadProtocolSnapshots)
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolSnapshots.threadId, threadId),
+              gt(rikaHostedThreadProtocolSnapshots.cursor, 3),
+            ),
+          ),
+      )
       const replayController = yield* open(protocolB)
       const replay = yield* replayController.receive({
         protocolVersion: 1,
@@ -1720,9 +1889,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         snapshot: currentSnapshot,
         createdAt: later,
       })
-      yield* query(pool, `DELETE FROM rika_hosted_thread_protocol_snapshots WHERE thread_id = $1 AND cursor > 3`, [
-        threadId,
-      ])
+      yield* Effect.tryPromise(() =>
+        db
+          .delete(rikaHostedThreadProtocolSnapshots)
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolSnapshots.threadId, threadId),
+              gt(rikaHostedThreadProtocolSnapshots.cursor, 3),
+            ),
+          ),
+      )
       const appendOnlyReplay = yield* replayController.receive({
         protocolVersion: 1,
         requestId: RequestId.make("append-only-replay"),
@@ -1780,6 +1956,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
+      const db = drizzle({ client: pool })
       const hosted = yield* HostedStore
       const organizationId = OrganizationId.make("protocol-organization")
       const membershipId = BetterAuthMemberId.make("protocol-membership")
@@ -1794,17 +1971,23 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         clientId,
         deviceId,
       }
-      yield* query(
-        pool,
-        `INSERT INTO "organization" (id, name, slug, created_at)
-          VALUES ($1, 'Protocol', 'protocol', now())`,
-        [organizationId],
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        db.insert(identityOrganization).values({
+          id: organizationId,
+          name: "Protocol",
+          slug: "protocol",
+          createdAt,
+        }),
       )
-      yield* query(
-        pool,
-        `INSERT INTO member (id, organization_id, user_id, role, created_at)
-          VALUES ($1, $2, $3, 'owner', now())`,
-        [membershipId, organizationId, userId],
+      yield* Effect.tryPromise(() =>
+        db.insert(identityMember).values({
+          id: membershipId,
+          organizationId,
+          userId,
+          role: "owner",
+          createdAt,
+        }),
       )
       yield* hosted.putOwner({
         id: organizationOwnerId,
@@ -1885,15 +2068,24 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         expiresAt: presenceExpiresAt,
       })
 
-      yield* query(pool, `DELETE FROM member WHERE id = $1`, [membershipId])
+      yield* Effect.tryPromise(() => db.delete(identityMember).where(eq(identityMember.id, membershipId)))
 
-      const authorities = yield* query(
-        pool,
-        `SELECT owner_id AS "ownerId", revoked_at IS NOT NULL AS revoked
-          FROM rika_hosted_client_authorities WHERE client_id = $1 ORDER BY owner_id`,
-        [clientId],
+      const authorityRecords = yield* Effect.tryPromise(() =>
+        db
+          .select({
+            ownerId: rikaHostedClientAuthorities.ownerId,
+            revokedAt: rikaHostedClientAuthorities.revokedAt,
+          })
+          .from(rikaHostedClientAuthorities)
+          .where(eq(rikaHostedClientAuthorities.clientId, clientId))
+          .orderBy(rikaHostedClientAuthorities.ownerId),
       )
-      expect(authorities.rows).toEqual([
+      expect(
+        authorityRecords.map(({ ownerId: recordOwnerId, revokedAt }) => ({
+          ownerId: recordOwnerId,
+          revoked: revokedAt !== null,
+        })),
+      ).toEqual([
         { ownerId: organizationOwnerId, revoked: true },
         { ownerId, revoked: false },
       ])

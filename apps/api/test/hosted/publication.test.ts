@@ -170,6 +170,7 @@ it.effect("pushes an approved ref, creates the pull request through API authorit
       admitRunner: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
       run: () => Effect.die("unused"),
+      cancel: () => Effect.die("unused"),
       ready: Effect.die("unused"),
       pause: () => Effect.die("unused"),
       resume: () => Effect.die("unused"),

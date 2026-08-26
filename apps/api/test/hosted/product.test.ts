@@ -1,14 +1,28 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import { BetterAuthUserId, DeviceId, OrganizationId, WorkspaceId } from "@rika/product/hosted-model"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedOwners,
+  rikaHostedProjects,
+  rikaHostedThreadCommands,
+  rikaHostedThreadGrants,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
+  rikaThreadQueueState,
+  rikaTurnAdmissionOutbox,
+  rikaTurns,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { FileSystem, Config, Effect, Layer, Random, Redacted, Ref, Schema } from "effect"
-import { Pool, type QueryResult } from "pg"
+import { asc, count as rowCount, eq, inArray } from "drizzle-orm"
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
+import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted, Ref, Schema } from "effect"
+import { Pool } from "pg"
 import { live as livePlatform } from "../support/live-platform"
 import {
   HostedProduct,
@@ -39,28 +53,6 @@ const organization = (organizationId: string) => ({
   organizationId: OrganizationId.make(organizationId),
 })
 
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
-
-const user = (pool: Pool, id: string) =>
-  query(
-    pool,
-    `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES ($1, $1, $2, true, now(), now())`,
-    [id, `${id}@example.test`],
-  )
-
-const org = (pool: Pool, id: string) =>
-  query(pool, `INSERT INTO "organization" (id, name, slug, created_at) VALUES ($1, $1, $1, now())`, [id])
-
-const member = (pool: Pool, id: string, organizationId: string, userId: string) =>
-  query(
-    pool,
-    `INSERT INTO "member" (id, organization_id, user_id, role, created_at)
-      VALUES ($1, $2, $3, 'member', now())`,
-    [id, organizationId, userId],
-  )
-
 const failureKind = <A>(effect: Effect.Effect<A, HostedProductError>) =>
   effect.pipe(
     Effect.flip,
@@ -76,7 +68,7 @@ const requireAdmitted = <E, R>(effect: Effect.Effect<AdmittedRun, E, R>) =>
 
 const withDatabase = <A, E, R>(
   label: string,
-  use: (pool: Pool) => Effect.Effect<A, E, R | HostedProduct>,
+  use: (database: NodePgDatabase) => Effect.Effect<A, E, R | HostedProduct>,
   promptAdmissionReadiness: Effect.Effect<boolean> = Effect.succeed(true),
 ) =>
   Effect.scoped(
@@ -84,7 +76,7 @@ const withDatabase = <A, E, R>(
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_product_${label}_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
@@ -111,7 +103,7 @@ const withDatabase = <A, E, R>(
             promptAdmissionReadiness,
           }).pipe(Layer.provide(BunCrypto.layer)),
         )
-        return yield* use(activePool).pipe(Effect.provide(context))
+        return yield* use(drizzle({ client: activePool })).pipe(Effect.provide(context))
       } finally {
         const cleanupPool = pool
         yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
@@ -122,10 +114,20 @@ const withDatabase = <A, E, R>(
   ).pipe(livePlatform)
 
 it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost response", () =>
-  withDatabase("create-retry", (pool) =>
+  withDatabase("create-retry", (database) =>
     Effect.gen(function* () {
       const authenticated = principal("create-retry-user")
-      yield* user(pool, authenticated.userId)
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       const input = {
         principal: authenticated,
@@ -143,15 +145,22 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
           },
         ),
       ).toEqual(Array.from({ length: 8 }, () => first))
-      const records = yield* query(
-        pool,
-        `SELECT
-          (SELECT count(*)::int FROM rika_hosted_threads WHERE id = $1) AS threads,
-          (SELECT count(*)::int FROM rika_hosted_workspaces WHERE id = $2) AS workspaces,
-          (SELECT count(*)::int FROM rika_hosted_executor_assignments WHERE thread_id = $1) AS assignments`,
-        [input.threadId, `${input.threadId}-workspace`],
-      )
-      expect(records.rows).toEqual([{ threads: 1, workspaces: 1, assignments: 1 }])
+      const [threads, workspaces, assignments] = yield* Effect.all([
+        Effect.orDie(
+          Effect.tryPromise(() => database.$count(rikaHostedThreads, eq(rikaHostedThreads.id, input.threadId))),
+        ),
+        Effect.orDie(
+          Effect.tryPromise(() =>
+            database.$count(rikaHostedWorkspaces, eq(rikaHostedWorkspaces.id, `${input.threadId}-workspace`)),
+          ),
+        ),
+        Effect.orDie(
+          Effect.tryPromise(() =>
+            database.$count(rikaHostedExecutorAssignments, eq(rikaHostedExecutorAssignments.threadId, input.threadId)),
+          ),
+        ),
+      ])
+      expect([{ threads, workspaces, assignments }]).toEqual([{ threads: 1, workspaces: 1, assignments: 1 }])
       const project = yield* product.createProject({
         principal: authenticated,
         owner: personal(authenticated.userId),
@@ -163,9 +172,19 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
 )
 
 it.effect.skipIf(!live)("supports a projectless personal connection for a user with no organizations", () =>
-  withDatabase("personal", (pool) =>
+  withDatabase("personal", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "personal-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: "personal-user",
+          name: "personal-user",
+          email: "personal-user@example.test",
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       expect(yield* product.projects(principal("personal-user"))).toEqual([])
       const connection = yield* product.createConnection({
@@ -184,24 +203,31 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       expect(yield* product.admitRun(admissionInput)).toEqual(admitted)
       expect(yield* failureKind(product.admitRun({ ...admissionInput, prompt: "different prompt" }))).toBe("conflict")
       expect(yield* failureKind(product.admitRun({ ...admissionInput, mode: "low" }))).toBe("conflict")
-      const facts = yield* query(
-        pool,
-        `SELECT owner_record.id AS owner_id, owner_record.user_id, thread.created_by_user_id,
-          assignment.id AS assignment_id,
-          command.actor, command.turn_id, turn.status, turn.prompt,
-          (SELECT count(*)::int FROM "member" WHERE user_id = $1) AS memberships,
-          (SELECT count(*)::int FROM rika_turns WHERE thread_id = thread.id) AS turn_count,
-          (SELECT queued_count FROM rika_thread_queue_state WHERE thread_id = thread.id) AS queued_count
-        FROM rika_hosted_thread_commands command
-        JOIN rika_hosted_threads thread ON thread.id = command.thread_id
-        JOIN rika_hosted_executor_assignments assignment ON assignment.thread_id = thread.id
-        JOIN rika_hosted_owners owner_record ON owner_record.id = command.owner_id
-        JOIN rika_turns turn ON turn.id = command.turn_id`,
-        ["personal-user"],
+      const facts = yield* Effect.tryPromise(() =>
+        database
+          .select({
+            owner_id: rikaHostedOwners.id,
+            user_id: rikaHostedOwners.userId,
+            created_by_user_id: rikaHostedThreads.createdByUserId,
+            assignment_id: rikaHostedExecutorAssignments.id,
+            actor: rikaHostedThreadCommands.actor,
+            turn_id: rikaHostedThreadCommands.turnId,
+            status: rikaTurns.status,
+            prompt: rikaTurns.prompt,
+            memberships: database.$count(identityMember, eq(identityMember.userId, "personal-user")),
+            turn_count: database.$count(rikaTurns, eq(rikaTurns.threadId, rikaHostedThreads.id)),
+            queued_count: rikaThreadQueueState.queuedCount,
+          })
+          .from(rikaHostedThreadCommands)
+          .innerJoin(rikaHostedThreads, eq(rikaHostedThreads.id, rikaHostedThreadCommands.threadId))
+          .innerJoin(rikaHostedExecutorAssignments, eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id))
+          .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedThreadCommands.ownerId))
+          .innerJoin(rikaTurns, eq(rikaTurns.id, rikaHostedThreadCommands.turnId))
+          .innerJoin(rikaThreadQueueState, eq(rikaThreadQueueState.threadId, rikaHostedThreads.id)),
       )
-      expect(facts.rows).toHaveLength(1)
-      expect(facts.rows[0].assignment_id).not.toBe(connection.threadId)
-      expect(facts.rows[0]).toMatchObject({
+      expect(facts).toHaveLength(1)
+      expect(facts[0]?.assignment_id).not.toBe(connection.threadId)
+      expect(facts[0]).toMatchObject({
         user_id: "personal-user",
         created_by_user_id: "personal-user",
         memberships: 0,
@@ -225,25 +251,32 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
       )
       expect(queued.status).toBe("queued")
       expect(
-        yield* query(
-          pool,
-          `SELECT turn.id, turn.status, queue.queued_count
-            FROM rika_turns turn
-            JOIN rika_thread_queue_state queue ON queue.thread_id = turn.thread_id
-            WHERE turn.id = $1`,
-          [queued.turnId],
+        yield* Effect.tryPromise(() =>
+          database
+            .select({ id: rikaTurns.id, status: rikaTurns.status, queued_count: rikaThreadQueueState.queuedCount })
+            .from(rikaTurns)
+            .innerJoin(rikaThreadQueueState, eq(rikaThreadQueueState.threadId, rikaTurns.threadId))
+            .where(eq(rikaTurns.id, queued.turnId)),
         ),
-      ).toMatchObject({
-        rows: [{ id: queued.turnId, status: "queued", queued_count: 1 }],
-      })
+      ).toMatchObject([{ id: queued.turnId, status: "queued", queued_count: 1 }])
     }),
   ),
 )
 
 it.effect.skipIf(!live)("serializes prompt admission against cancellation in both commit orders", () =>
-  withDatabase("prompt-cancellation", (pool) =>
+  withDatabase("prompt-cancellation", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "cancellation-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: "cancellation-user",
+          name: "cancellation-user",
+          email: "cancellation-user@example.test",
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
       const authenticated = principal("cancellation-user")
       const product = yield* HostedProduct
       const connection = yield* product.createConnection({
@@ -284,14 +317,14 @@ it.effect.skipIf(!live)("serializes prompt admission against cancellation in bot
         }),
       ).toEqual({ turnId: admitted.turnId })
       expect(
-        yield* query(
-          pool,
-          `SELECT command_id, turn_id FROM rika_hosted_thread_commands WHERE thread_id = $1 ORDER BY command_id`,
-          [connection.threadId],
+        yield* Effect.tryPromise(() =>
+          database
+            .select({ command_id: rikaHostedThreadCommands.commandId, turn_id: rikaHostedThreadCommands.turnId })
+            .from(rikaHostedThreadCommands)
+            .where(eq(rikaHostedThreadCommands.threadId, connection.threadId))
+            .orderBy(asc(rikaHostedThreadCommands.commandId)),
         ),
-      ).toMatchObject({
-        rows: [{ command_id: "submit-admitted", turn_id: admitted.turnId }],
-      })
+      ).toMatchObject([{ command_id: "submit-admitted", turn_id: admitted.turnId }])
     }),
   ),
 )
@@ -301,9 +334,19 @@ it.effect.skipIf(!live)("rejects new prompts without mutation and replays them t
     const ready = yield* Ref.make(false)
     yield* withDatabase(
       "prompt-readiness",
-      (pool) =>
+      (database) =>
         Effect.gen(function* () {
-          yield* user(pool, "prompt-readiness-user")
+          const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+          yield* Effect.tryPromise(() =>
+            database.insert(identityUser).values({
+              id: "prompt-readiness-user",
+              name: "prompt-readiness-user",
+              email: "prompt-readiness-user@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            }),
+          )
           const product = yield* HostedProduct
           const connection = yield* product.createConnection({
             principal: principal("prompt-readiness-user"),
@@ -317,16 +360,22 @@ it.effect.skipIf(!live)("rejects new prompts without mutation and replays them t
             prompt: "ready prompt",
           } as const
           expect(yield* failureKind(product.admitRun(input))).toBe("unavailable")
-          expect(
-            yield* query(
-              pool,
-              `SELECT
-                (SELECT count(*)::int FROM rika_hosted_thread_commands WHERE thread_id = $1) AS commands,
-                (SELECT count(*)::int FROM rika_turns WHERE thread_id = $1) AS turns,
-                (SELECT count(*)::int FROM rika_thread_queue_state WHERE thread_id = $1) AS queues`,
-              [connection.threadId],
+          const [commands, turns, queues] = yield* Effect.all([
+            Effect.orDie(
+              Effect.tryPromise(() =>
+                database.$count(rikaHostedThreadCommands, eq(rikaHostedThreadCommands.threadId, connection.threadId)),
+              ),
             ),
-          ).toMatchObject({ rows: [{ commands: 0, turns: 0, queues: 0 }] })
+            Effect.orDie(
+              Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
+            ),
+            Effect.orDie(
+              Effect.tryPromise(() =>
+                database.$count(rikaThreadQueueState, eq(rikaThreadQueueState.threadId, connection.threadId)),
+              ),
+            ),
+          ])
+          expect([{ commands, turns, queues }]).toMatchObject([{ commands: 0, turns: 0, queues: 0 }])
           yield* Ref.set(ready, true)
           const admitted = yield* product.admitRun(input)
           yield* Ref.set(ready, false)
@@ -355,9 +404,19 @@ it.effect.skipIf(!live)("admits concurrent duplicate prompts with one mutation",
     const readiness = Ref.update(checks, (count) => count + 1).pipe(Effect.as(true))
     yield* withDatabase(
       "prompt-readiness-race",
-      (pool) =>
+      (database) =>
         Effect.gen(function* () {
-          yield* user(pool, "prompt-readiness-race-user")
+          const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+          yield* Effect.tryPromise(() =>
+            database.insert(identityUser).values({
+              id: "prompt-readiness-race-user",
+              name: "prompt-readiness-race-user",
+              email: "prompt-readiness-race-user@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            }),
+          )
           const product = yield* HostedProduct
           const connection = yield* product.createConnection({
             principal: principal("prompt-readiness-race-user"),
@@ -374,10 +433,8 @@ it.effect.skipIf(!live)("admits concurrent duplicate prompts with one mutation",
           expect(results[1]).toEqual(results[0])
           expect(yield* Ref.get(checks)).toBe(2)
           expect(
-            yield* query(pool, `SELECT count(*)::int AS count FROM rika_turns WHERE thread_id = $1`, [
-              connection.threadId,
-            ]),
-          ).toMatchObject({ rows: [{ count: 1 }] })
+            yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
+          ).toBe(1)
         }),
       readiness,
     )
@@ -385,9 +442,19 @@ it.effect.skipIf(!live)("admits concurrent duplicate prompts with one mutation",
 )
 
 it.effect.skipIf(!live)("serializes the first prompt lane without queue-count drift", () =>
-  withDatabase("prompt-lane", (pool) =>
+  withDatabase("prompt-lane", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "prompt-lane-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: "prompt-lane-user",
+          name: "prompt-lane-user",
+          email: "prompt-lane-user@example.test",
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       const connection = yield* product.createConnection({
         principal: principal("prompt-lane-user"),
@@ -404,22 +471,27 @@ it.effect.skipIf(!live)("serializes the first prompt lane without queue-count dr
         inputs.map((input) => requireAdmitted(product.admitRun(input))),
         { concurrency: "unbounded" },
       )
-      const lanes = yield* query(
-        pool,
-        `SELECT status, count(*)::int AS count
-          FROM rika_turns WHERE thread_id = $1 GROUP BY status ORDER BY status`,
-        [connection.threadId],
+      const lanes = yield* Effect.tryPromise(() =>
+        database
+          .select({ status: rikaTurns.status, count: rowCount() })
+          .from(rikaTurns)
+          .where(eq(rikaTurns.threadId, connection.threadId))
+          .groupBy(rikaTurns.status)
+          .orderBy(asc(rikaTurns.status)),
       )
-      expect(lanes.rows).toEqual([
+      expect(lanes).toEqual([
         { status: "accepted", count: 1 },
         { status: "queued", count: 7 },
       ])
       expect(
-        yield* query(pool, `SELECT queued_count FROM rika_thread_queue_state WHERE thread_id = $1`, [
-          connection.threadId,
-        ]),
-      ).toMatchObject({ rows: [{ queued_count: 7 }] })
-      const accepted = lanes.rows.find((lane) => lane.status === "accepted")
+        yield* Effect.tryPromise(() =>
+          database
+            .select({ queued_count: rikaThreadQueueState.queuedCount })
+            .from(rikaThreadQueueState)
+            .where(eq(rikaThreadQueueState.threadId, connection.threadId)),
+        ),
+      ).toMatchObject([{ queued_count: 7 }])
+      const accepted = lanes.find((lane) => lane.status === "accepted")
       expect(accepted?.count).toBe(1)
       expect(admitted.map((item) => item.status).toSorted()).toEqual([
         "accepted",
@@ -436,11 +508,21 @@ it.effect.skipIf(!live)("serializes the first prompt lane without queue-count dr
 )
 
 it.effect.skipIf(!live)("admits a current local Thread without recovering an unrelated stale admission", () =>
-  withDatabase("local-admission", (pool) =>
+  withDatabase("local-admission", (database) =>
     Effect.gen(function* () {
       const authenticated = principal("local-user")
       const fingerprint = CheckoutFingerprint.make("local-checkout")
-      yield* user(pool, authenticated.userId)
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       const workspaceIdentity = yield* Schema.decodeEffect(WorkspaceId)("local-workspace")
       yield* product.registerRunner({
@@ -474,31 +556,44 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
           prompt: "stale prompt",
         }),
       )
-      const staleRows = yield* query(
-        pool,
-        `SELECT hosted.workspace_id, turn.execution_route_json
-          FROM rika_turns turn
-          JOIN rika_hosted_threads hosted ON hosted.id = turn.thread_id
-          WHERE turn.id = $1`,
-        [staleRun.turnId],
+      const staleRows = yield* Effect.tryPromise(() =>
+        database
+          .select({
+            workspace_id: rikaHostedThreads.workspaceId,
+            execution_route_json: rikaTurns.executionRouteJson,
+          })
+          .from(rikaTurns)
+          .innerJoin(rikaHostedThreads, eq(rikaHostedThreads.id, rikaTurns.threadId))
+          .where(eq(rikaTurns.id, staleRun.turnId)),
       )
+      const staleRow = staleRows[0]
+      if (staleRow === undefined) return yield* Effect.die("Stale Turn was not persisted")
       const staleInput = {
         threadId: staleThread.threadId,
         turnId: staleRun.turnId,
-        workspaceId: staleRows.rows[0].workspace_id,
+        workspaceId: staleRow.workspace_id,
         prompt: "stale prompt",
-        executionRoute: decodeExecutionRoute(staleRows.rows[0].execution_route_json),
+        executionRoute: decodeExecutionRoute(staleRow.execution_route_json),
       }
-      yield* query(pool, `UPDATE rika_turns SET status = 'running' WHERE id = $1`, [staleRun.turnId])
-      yield* query(pool, `UPDATE rika_thread_queue_state SET queued_count = 0 WHERE thread_id = $1`, [
-        staleThread.threadId,
-      ])
-      yield* query(
-        pool,
-        `INSERT INTO rika_turn_admission_outbox (turn_id, start_input_json, prepared_at) VALUES ($1, $2, 1)`,
-        [staleRun.turnId, encodeStartTurn(staleInput)],
+      yield* Effect.tryPromise(() =>
+        database.update(rikaTurns).set({ status: "running" }).where(eq(rikaTurns.id, staleRun.turnId)),
       )
-      yield* query(pool, `DELETE FROM rika_hosted_executor_assignments WHERE thread_id = $1`, [staleThread.threadId])
+      yield* Effect.tryPromise(() =>
+        database
+          .update(rikaThreadQueueState)
+          .set({ queuedCount: 0 })
+          .where(eq(rikaThreadQueueState.threadId, staleThread.threadId)),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .insert(rikaTurnAdmissionOutbox)
+          .values({ turnId: staleRun.turnId, startInputJson: encodeStartTurn(staleInput), preparedAt: 1 }),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .delete(rikaHostedExecutorAssignments)
+          .where(eq(rikaHostedExecutorAssignments.threadId, staleThread.threadId)),
+      )
 
       const currentThread = yield* createLocal()
       const promptParts = [
@@ -519,16 +614,23 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
           mode: "high",
         }),
       )
-      const turns = yield* query(
-        pool,
-        `SELECT id, status, prompt_parts_json, execution_route_json
-          FROM rika_turns WHERE id IN ($1, $2) ORDER BY id`,
-        [staleRun.turnId, currentRun.turnId],
+      const turns = yield* Effect.tryPromise(() =>
+        database
+          .select({
+            id: rikaTurns.id,
+            status: rikaTurns.status,
+            prompt_parts_json: rikaTurns.promptPartsJson,
+            execution_route_json: rikaTurns.executionRouteJson,
+          })
+          .from(rikaTurns)
+          .where(inArray(rikaTurns.id, [staleRun.turnId, currentRun.turnId]))
+          .orderBy(asc(rikaTurns.id)),
       )
-      const stale = turns.rows.find((row) => row.id === staleRun.turnId)
-      const current = turns.rows.find((row) => row.id === currentRun.turnId)
+      const stale = turns.find((row) => row.id === staleRun.turnId)
+      const current = turns.find((row) => row.id === currentRun.turnId)
       expect(stale).toMatchObject({ status: "running" })
       expect(current).toMatchObject({ status: "accepted" })
+      if (current === undefined) return yield* Effect.die("Current Turn was not persisted")
       expect(decodePromptParts(current.prompt_parts_json)).toEqual(promptParts)
       const route = decodeExecutionRoute(current.execution_route_json)
       expect(route.mode).toBe("high")
@@ -542,20 +644,42 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
         ),
       ).toBe(true)
       expect(
-        yield* query(pool, `SELECT count(*)::int AS count FROM rika_turn_admission_outbox WHERE turn_id = $1`, [
-          staleRun.turnId,
-        ]),
-      ).toMatchObject({ rows: [{ count: 1 }] })
+        yield* Effect.tryPromise(() =>
+          database.$count(rikaTurnAdmissionOutbox, eq(rikaTurnAdmissionOutbox.turnId, staleRun.turnId)),
+        ),
+      ).toBe(1)
     }),
   ),
 )
 
 it.effect.skipIf(!live)("revokes organization admission immediately without affecting personal threads", () =>
-  withDatabase("revocation", (pool) =>
+  withDatabase("revocation", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "member-user")
-      yield* org(pool, "revoked-org")
-      yield* member(pool, "revoked-membership", "revoked-org", "member-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: "member-user",
+          name: "member-user",
+          email: "member-user@example.test",
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .insert(identityOrganization)
+          .values({ id: "revoked-org", name: "revoked-org", slug: "revoked-org", createdAt }),
+      )
+      yield* Effect.tryPromise(() =>
+        database.insert(identityMember).values({
+          id: "revoked-membership",
+          organizationId: "revoked-org",
+          userId: "member-user",
+          role: "member",
+          createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       const personalConnection = yield* product.createConnection({
         principal: principal("member-user"),
@@ -573,7 +697,7 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
         operationKey: "org-before-revocation",
         prompt: "allowed",
       })
-      yield* query(pool, `DELETE FROM "member" WHERE id = 'revoked-membership'`)
+      yield* Effect.tryPromise(() => database.delete(identityMember).where(eq(identityMember.id, "revoked-membership")))
       expect(
         yield* failureKind(
           product.admitRun({
@@ -595,13 +719,52 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
 )
 
 it.effect.skipIf(!live)("requires a direct grant for a non-creator organization projectless thread", () =>
-  withDatabase("grant", (pool) =>
+  withDatabase("grant", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "creator-user")
-      yield* user(pool, "operator-user")
-      yield* org(pool, "grant-org")
-      yield* member(pool, "creator-membership", "grant-org", "creator-user")
-      yield* member(pool, "operator-membership", "grant-org", "operator-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values([
+          {
+            id: "creator-user",
+            name: "creator-user",
+            email: "creator-user@example.test",
+            emailVerified: true,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          {
+            id: "operator-user",
+            name: "operator-user",
+            email: "operator-user@example.test",
+            emailVerified: true,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ]),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .insert(identityOrganization)
+          .values({ id: "grant-org", name: "grant-org", slug: "grant-org", createdAt }),
+      )
+      yield* Effect.tryPromise(() =>
+        database.insert(identityMember).values([
+          {
+            id: "creator-membership",
+            organizationId: "grant-org",
+            userId: "creator-user",
+            role: "member",
+            createdAt,
+          },
+          {
+            id: "operator-membership",
+            organizationId: "grant-org",
+            userId: "operator-user",
+            role: "member",
+            createdAt,
+          },
+        ]),
+      )
       const product = yield* HostedProduct
       const connection = yield* product.createConnection({
         principal: principal("creator-user"),
@@ -615,20 +778,33 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
         prompt: "operate",
       })
       expect(yield* failureKind(operate)).toBe("forbidden")
-      const owner = yield* query(pool, `SELECT owner_id FROM rika_hosted_threads WHERE id = $1`, [connection.threadId])
-      yield* query(
-        pool,
-        `INSERT INTO rika_hosted_thread_grants
-          (owner_id, thread_id, membership_id, role, granted_by_user_id, created_at, updated_at)
-          VALUES ($1, $2, 'operator-membership', 'operator', 'creator-user', now(), now())`,
-        [owner.rows[0].owner_id, connection.threadId],
+      const owners = yield* Effect.tryPromise(() =>
+        database
+          .select({ owner_id: rikaHostedThreads.ownerId })
+          .from(rikaHostedThreads)
+          .where(eq(rikaHostedThreads.id, connection.threadId)),
+      )
+      const owner = owners[0]
+      if (owner === undefined) return yield* Effect.die("Organization Thread owner was not persisted")
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaHostedThreadGrants).values({
+          ownerId: owner.owner_id,
+          threadId: connection.threadId,
+          membershipId: "operator-membership",
+          role: "operator",
+          grantedByUserId: "creator-user",
+          createdAt,
+          updatedAt: createdAt,
+        }),
       )
       yield* operate
-      const command = yield* query(
-        pool,
-        `SELECT actor FROM rika_hosted_thread_commands WHERE command_id = 'operator-run'`,
+      const commands = yield* Effect.tryPromise(() =>
+        database
+          .select({ actor: rikaHostedThreadCommands.actor })
+          .from(rikaHostedThreadCommands)
+          .where(eq(rikaHostedThreadCommands.commandId, "operator-run")),
       )
-      expect(command.rows[0].actor).toMatchObject({
+      expect(commands[0]?.actor).toMatchObject({
         _tag: "OrganizationActor",
         userId: "operator-user",
         membershipId: "operator-membership",
@@ -639,11 +815,34 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
 )
 
 it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", () =>
-  withDatabase("forgery", (pool) =>
+  withDatabase("forgery", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "first-user")
-      yield* user(pool, "second-user")
-      yield* org(pool, "foreign-org")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values([
+          {
+            id: "first-user",
+            name: "first-user",
+            email: "first-user@example.test",
+            emailVerified: true,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          {
+            id: "second-user",
+            name: "second-user",
+            email: "second-user@example.test",
+            emailVerified: true,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ]),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .insert(identityOrganization)
+          .values({ id: "foreign-org", name: "foreign-org", slug: "foreign-org", createdAt }),
+      )
       const product = yield* HostedProduct
       expect(
         yield* failureKind(
@@ -679,12 +878,23 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
         ),
       ).toBe("forbidden")
       yield* product.projects(principal("first-user"))
-      const secondOwner = yield* query(pool, `SELECT id FROM rika_hosted_owners WHERE user_id = 'second-user'`)
-      yield* query(
-        pool,
-        `INSERT INTO rika_hosted_projects (id, owner_id, name, created_by_user_id, created_at, updated_at)
-          VALUES ('foreign-project', $1, 'Foreign', 'second-user', now(), now())`,
-        [secondOwner.rows[0].id],
+      const secondOwners = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedOwners.id })
+          .from(rikaHostedOwners)
+          .where(eq(rikaHostedOwners.userId, "second-user")),
+      )
+      const secondOwner = secondOwners[0]
+      if (secondOwner === undefined) return yield* Effect.die("Second personal owner was not persisted")
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaHostedProjects).values({
+          id: "foreign-project",
+          ownerId: secondOwner.id,
+          name: "Foreign",
+          createdByUserId: "second-user",
+          createdAt,
+          updatedAt: createdAt,
+        }),
       )
       expect(
         yield* failureKind(
@@ -701,11 +911,33 @@ it.effect.skipIf(!live)("fails closed for forged and cross-owner selections", ()
 )
 
 it.effect.skipIf(!live)("provisions stable opaque personal and organization owners under concurrency", () =>
-  withDatabase("owners", (pool) =>
+  withDatabase("owners", (database) =>
     Effect.gen(function* () {
-      yield* user(pool, "owner-user")
-      yield* org(pool, "owner-org")
-      yield* member(pool, "owner-membership", "owner-org", "owner-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: "owner-user",
+          name: "owner-user",
+          email: "owner-user@example.test",
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        database
+          .insert(identityOrganization)
+          .values({ id: "owner-org", name: "owner-org", slug: "owner-org", createdAt }),
+      )
+      yield* Effect.tryPromise(() =>
+        database.insert(identityMember).values({
+          id: "owner-membership",
+          organizationId: "owner-org",
+          userId: "owner-user",
+          role: "member",
+          createdAt,
+        }),
+      )
       const product = yield* HostedProduct
       yield* Effect.all(
         Array.from({ length: 8 }, () => product.projects(principal("owner-user"))),
@@ -713,16 +945,23 @@ it.effect.skipIf(!live)("provisions stable opaque personal and organization owne
           concurrency: "unbounded",
         },
       )
-      const owners: QueryResult<{ id: string; kind: string }> = yield* query(
-        pool,
-        `SELECT id, kind FROM rika_hosted_owners ORDER BY kind`,
+      const owners = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedOwners.id, kind: rikaHostedOwners.kind })
+          .from(rikaHostedOwners)
+          .orderBy(asc(rikaHostedOwners.kind)),
       )
-      expect(owners.rows).toHaveLength(2)
-      expect(owners.rows.map(({ kind }) => kind).sort()).toEqual(["organization", "personal"])
-      expect(owners.rows.every(({ id }) => id !== "owner-user" && id !== "owner-org")).toBe(true)
+      expect(owners).toHaveLength(2)
+      expect(owners.map(({ kind }) => kind).sort()).toEqual(["organization", "personal"])
+      expect(owners.every(({ id }) => id !== "owner-user" && id !== "owner-org")).toBe(true)
       yield* product.projects(principal("owner-user"))
-      const repeated = yield* query(pool, `SELECT id, kind FROM rika_hosted_owners ORDER BY kind`)
-      expect(repeated.rows).toEqual(owners.rows)
+      const repeated = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedOwners.id, kind: rikaHostedOwners.kind })
+          .from(rikaHostedOwners)
+          .orderBy(asc(rikaHostedOwners.kind)),
+      )
+      expect(repeated).toEqual(owners)
     }),
   ),
 )

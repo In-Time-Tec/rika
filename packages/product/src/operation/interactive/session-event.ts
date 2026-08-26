@@ -129,6 +129,7 @@ export type InteractiveEvent =
   | {
       readonly _tag: "SubmissionRejected"
       readonly selectionEpoch: number
+      readonly threadId?: Thread.ThreadId
       readonly message: string
       readonly submissionId?: string
     }
@@ -308,6 +309,7 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("SubmissionRejected"),
     selectionEpoch: Schema.Int,
+    threadId: Schema.optionalKey(Thread.ThreadId),
     message: Schema.String,
     submissionId: Schema.optionalKey(Schema.String),
   }),

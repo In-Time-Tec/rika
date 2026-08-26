@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest"
 
 import * as BunServices from "@effect/platform-bun/BunServices"
+import { identityMember, identityOrganization, identityUser } from "@rika/identity"
 import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import {
@@ -25,11 +26,14 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedStore } from "@rika/product/hosted-store"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
+import { sql as drizzleSql } from "drizzle-orm"
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Config, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/database/migrations"
 import { runMigration } from "../../../identity/src/database/postgres"
+import * as schema from "../../src/database/schema/product"
 import { migrations } from "../../src/hosted/migrations"
 import * as HostedPostgres from "../../src/hosted/layer"
 
@@ -103,7 +107,13 @@ const apply = (
     }
   })
 
-const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: Pool }) => Effect.Effect<A, E, R>) =>
+const isolated = <A, E, R>(
+  run: (input: {
+    readonly url: string
+    readonly pool: Pool
+    readonly database: NodePgDatabase
+  }) => Effect.Effect<A, E, R>,
+) =>
   Effect.gen(function* () {
     const database = `rika_local_recovery_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
@@ -112,8 +122,9 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     const pool = new Pool({ connectionString: url })
+    const databaseClient = drizzle({ client: pool })
     try {
-      return yield* run({ url, pool })
+      return yield* run({ url, pool, database: databaseClient })
     } finally {
       yield* Effect.tryPromise(() => pool.end())
       yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
@@ -121,19 +132,35 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
     }
   })
 
-const seedIdentity = (pool: Pool) =>
+const seedIdentity = (database: NodePgDatabase) =>
   Effect.gen(function* () {
+    const now = drizzleSql`transaction_timestamp()`
     yield* Effect.tryPromise(() =>
-      pool.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-        VALUES ('user-recovery', 'Recovery', 'recovery@example.test', true, now(), now())`),
+      database.insert(identityUser).values({
+        id: "user-recovery",
+        name: "Recovery",
+        email: "recovery@example.test",
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      }),
     )
     yield* Effect.tryPromise(() =>
-      pool.query(`INSERT INTO "organization" (id, name, slug, created_at)
-        VALUES ('organization-recovery', 'Recovery', 'recovery', now())`),
+      database.insert(identityOrganization).values({
+        id: "organization-recovery",
+        name: "Recovery",
+        slug: "recovery",
+        createdAt: now,
+      }),
     )
     yield* Effect.tryPromise(() =>
-      pool.query(`INSERT INTO member (id, organization_id, user_id, role, created_at)
-        VALUES ('member-recovery', 'organization-recovery', 'user-recovery', 'owner', now())`),
+      database.insert(identityMember).values({
+        id: "member-recovery",
+        organizationId: "organization-recovery",
+        userId: "user-recovery",
+        role: "owner",
+        createdAt: now,
+      }),
     )
   })
 
@@ -176,37 +203,67 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
 )
 
 it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconstructable fence", () =>
-  isolated(({ pool }) =>
+  isolated(({ pool, database }) =>
     Effect.gen(function* () {
       yield* apply(pool, [...identityMigrations, ...migrations])
-      yield* seedIdentity(pool)
+      yield* seedIdentity(database)
       yield* Effect.tryPromise(() =>
-        pool.query(`INSERT INTO rika_hosted_owners (id, kind, organization_id, created_at)
-          VALUES ('owner-recovery', 'organization', 'organization-recovery', now())`),
+        database
+          .insert(schema.rikaHostedOwners)
+          .values({ id: "owner-recovery", kind: "organization", organizationId: "organization-recovery" }),
       )
       yield* Effect.tryPromise(() =>
-        pool.query(`INSERT INTO rika_hosted_projects
-          (id, owner_id, name, created_by_user_id, created_at, updated_at)
-          VALUES ('project-recovery', 'owner-recovery', 'Recovery', 'user-recovery', now(), now())`),
+        database.insert(schema.rikaHostedProjects).values({
+          id: "project-recovery",
+          ownerId: "owner-recovery",
+          name: "Recovery",
+          createdByUserId: "user-recovery",
+          createdAt: drizzleSql`transaction_timestamp()`,
+          updatedAt: drizzleSql`transaction_timestamp()`,
+        }),
       )
       yield* Effect.tryPromise(() =>
-        pool.query(`INSERT INTO rika_hosted_workspaces
-          (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-          VALUES ('workspace-recovery', 'owner-recovery', 'project-recovery', 'user-recovery', 'runner', false, now())`),
+        database.insert(schema.rikaHostedWorkspaces).values({
+          id: "workspace-recovery",
+          ownerId: "owner-recovery",
+          projectId: "project-recovery",
+          createdByUserId: "user-recovery",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt: drizzleSql`transaction_timestamp()`,
+        }),
       )
       yield* Effect.tryPromise(() =>
-        pool.query(`INSERT INTO rika_hosted_threads
-          (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-          VALUES ('thread-recovery', 'owner-recovery', 'project-recovery', 'workspace-recovery', 'user-recovery', 'runner', false, now())`),
+        database.insert(schema.rikaHostedThreads).values({
+          id: "thread-recovery",
+          ownerId: "owner-recovery",
+          projectId: "project-recovery",
+          workspaceId: "workspace-recovery",
+          createdByUserId: "user-recovery",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt: drizzleSql`transaction_timestamp()`,
+        }),
       )
       yield* Effect.tryPromise(() =>
-        pool.query(`INSERT INTO rika_hosted_executor_assignments
-          (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision, last_lease_epoch,
-            lifecycle, provider_instance_id, executor_instance_id, process_incarnation, session_digest, lease_epoch,
-            lease_expires_at)
-          VALUES ('assignment-recovery', 'owner-recovery', 'thread-recovery', 'workspace-recovery', 'runner',
-            '{"_tag":"RunnerPlacement","deviceId":"device-recovery"}', 2, 1, 2, 'active',
-            'device-recovery', 'executor-recovery', 'process-recovery', 'session-digest', 2, now() + interval '5 minutes')`),
+        database.insert(schema.rikaHostedExecutorAssignments).values({
+          id: "assignment-recovery",
+          ownerId: "owner-recovery",
+          threadId: "thread-recovery",
+          workspaceId: "workspace-recovery",
+          executorKind: "runner",
+          placement: { _tag: "RunnerPlacement", deviceId: "device-recovery" },
+          generation: 2,
+          revision: 1,
+          lastLeaseEpoch: 2,
+          lifecycle: "active",
+          providerInstanceId: "device-recovery",
+          executorInstanceId: "executor-recovery",
+          processIncarnation: "process-recovery",
+          sessionDigest: "session-digest",
+          leaseEpoch: 2,
+          leaseExpiresAt: drizzleSql`transaction_timestamp() + interval '5 minutes'`,
+        }),
       )
       const failed = yield* Effect.tryPromise(() =>
         pool.query(
@@ -223,10 +280,10 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
 it.effect.skipIf(!live)(
   "accepts an exact old-fence recovered event and rejects the wrong generation, lease, executor, and process",
   () =>
-    isolated(({ url, pool }) =>
+    isolated(({ url, pool, database }) =>
       Effect.gen(function* () {
         yield* apply(pool, [...identityMigrations, ...migrations])
-        yield* seedIdentity(pool)
+        yield* seedIdentity(database)
         const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -353,26 +410,29 @@ it.effect.skipIf(!live)(
                 presentedSessionCredentialDigest: Redacted.make("session"),
               }
               yield* Effect.tryPromise(() =>
-                pool.query(
-                  `INSERT INTO rika_hosted_executor_operations
-                (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-                  turn_id, run_id, root_run_id, tool_call_id, code, attempt, deadline_at, state, dispatched_generation,
-                  dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation, response,
-                  terminal_outcome)
-                VALUES ($1, $2, 'operation-recovered', 'digest', 'workspace-recovery', 'thread-recovery',
-                  'thread-recovery', 'turn-recovery', 'run-recovery', 'run-recovery', 'call-recovery',
-                  'printf recover', 0, '2999-01-01T00:00:00.000Z', 'unknown', $3, $4, $5, $6,
-                  '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"Local operation outcome is unknown after executor disconnect"}}'::jsonb,
-                  'unknown')`,
-                  [
-                    access.assignmentId,
-                    ids.owner,
-                    access.assignmentGeneration,
-                    access.leaseEpoch,
-                    access.executorInstanceId,
-                    access.processIncarnation,
-                  ],
-                ),
+                database.insert(schema.rikaHostedExecutorOperations).values({
+                  assignmentId: access.assignmentId,
+                  ownerId: ids.owner,
+                  operationKey: "operation-recovered",
+                  requestDigest: "digest",
+                  workspaceId: "workspace-recovery",
+                  sessionId: "thread-recovery",
+                  threadId: "thread-recovery",
+                  turnId: "turn-recovery",
+                  runId: "run-recovery",
+                  rootRunId: "run-recovery",
+                  toolCallId: "call-recovery",
+                  code: "printf recover",
+                  attempt: 0,
+                  deadlineAt: drizzleSql`'2999-01-01T00:00:00.000Z'::timestamptz`,
+                  state: "unknown",
+                  dispatchedGeneration: Number(access.assignmentGeneration),
+                  dispatchedLeaseEpoch: Number(access.leaseEpoch),
+                  dispatchedExecutorInstanceId: access.executorInstanceId,
+                  dispatchedProcessIncarnation: access.processIncarnation,
+                  response: unknownEvent.response,
+                  terminalOutcome: "unknown",
+                }),
               )
               const recovered = {
                 eventId: EventId.make("operation-recovered"),

@@ -4,6 +4,10 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
+import { eq, sql as drizzleSql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { identityMember, identityOrganization, identityUser } from "@rika/identity"
+import * as schema from "../../src/database/schema/product"
 import { runMigration } from "../../../identity/src/database/postgres"
 import { identityMigrations } from "../../../identity/src/database/migrations"
 import { migrations } from "../../src/hosted/migrations"
@@ -115,17 +119,29 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
     let migrated: Pool | undefined
     try {
       migrated = yield* applyMigrations(url)
+      const db = drizzle({ client: migrated })
+      const now = drizzleSql`now()`
       yield* Effect.tryPromise(() =>
-        migrated!.query(`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES ('user-live', 'Live', 'live@example.com', true, now(), now())`),
+        db.insert(identityUser).values({
+          id: "user-live",
+          name: "Live",
+          email: "live@example.com",
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        }),
       )
       yield* Effect.tryPromise(() =>
-        migrated!.query(`INSERT INTO "organization" (id, name, slug, created_at)
-      VALUES ('organization-live', 'Live', 'live', now())`),
+        db.insert(identityOrganization).values({ id: "organization-live", name: "Live", slug: "live", createdAt: now }),
       )
       yield* Effect.tryPromise(() =>
-        migrated!.query(`INSERT INTO member (id, organization_id, user_id, role, created_at)
-      VALUES ('member-live', 'organization-live', 'user-live', 'owner', now())`),
+        db.insert(identityMember).values({
+          id: "member-live",
+          organizationId: "organization-live",
+          userId: "user-live",
+          role: "owner",
+          createdAt: now,
+        }),
       )
       const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
       yield* Effect.scoped(
@@ -350,13 +366,18 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               })).candidates,
             ).toEqual([])
             const revokedMaterial = yield* Effect.tryPromise(() =>
-              migrated!.query(
-                `SELECT key_version, nonce, ciphertext, authentication_tag
-                 FROM rika_hosted_environment_values WHERE id = 'environment-live'`,
-              ),
+              db
+                .select({
+                  keyVersion: schema.rikaHostedEnvironmentValues.keyVersion,
+                  nonce: schema.rikaHostedEnvironmentValues.nonce,
+                  ciphertext: schema.rikaHostedEnvironmentValues.ciphertext,
+                  authenticationTag: schema.rikaHostedEnvironmentValues.authenticationTag,
+                })
+                .from(schema.rikaHostedEnvironmentValues)
+                .where(eq(schema.rikaHostedEnvironmentValues.id, "environment-live")),
             )
-            expect(revokedMaterial.rows).toEqual([
-              { key_version: null, nonce: null, ciphertext: null, authentication_tag: null },
+            expect(revokedMaterial).toEqual([
+              { keyVersion: null, nonce: null, ciphertext: null, authenticationTag: null },
             ])
             yield* store.registerDevice({
               id: ids.device,
@@ -512,10 +533,19 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               ))._tag,
             ).toBe("Failure")
             yield* Effect.tryPromise(() =>
-              migrated!.query(`INSERT INTO rika_workspaces (owner_id, path, created_at)
-                VALUES ('organization-owner-live', 'workspace-live', 1);
-                INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-                VALUES ('thread-live', 'organization-owner-live', 'workspace-live', 'Live', 1, 1)`),
+              db
+                .insert(schema.rikaWorkspaces)
+                .values({ ownerId: ids.organizationOwner, path: "workspace-live", createdAt: 1 }),
+            )
+            yield* Effect.tryPromise(() =>
+              db.insert(schema.rikaThreads).values({
+                id: ids.thread,
+                ownerId: ids.organizationOwner,
+                workspace: "workspace-live",
+                title: "Live",
+                createdAt: 1,
+                updatedAt: 1,
+              }),
             )
             const promptInput = {
               ...command(4, "observability-admission-key"),
@@ -528,9 +558,12 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             const promptAdmission = yield* store.admitPrompt(promptInput)
             expect(yield* store.admitPrompt({ ...promptInput, readinessProof: false })).toEqual(promptAdmission)
             const durableAdmission = yield* Effect.tryPromise(() =>
-              migrated!.query(`SELECT thread_id, id FROM rika_turns WHERE id = 'observability-turn-live'`),
+              db
+                .select({ threadId: schema.rikaTurns.threadId, id: schema.rikaTurns.id })
+                .from(schema.rikaTurns)
+                .where(eq(schema.rikaTurns.id, "observability-turn-live")),
             )
-            expect(durableAdmission.rows).toEqual([{ thread_id: "thread-live", id: "observability-turn-live" }])
+            expect(durableAdmission).toEqual([{ threadId: "thread-live", id: "observability-turn-live" }])
             const admissionLogs = observations.filter((record) =>
               Inspectable.toStringUnknown(record).includes("hosted.admission.success"),
             )
@@ -541,14 +574,24 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             for (const secret of ["organization-owner-live", "command-4", "private-observability-prompt"])
               expect(renderedAdmission).not.toContain(secret)
             yield* Effect.tryPromise(() =>
-              migrated!.query(`INSERT INTO rika_hosted_git_identities (owner_id, name, email)
-                VALUES ('organization-owner-live', 'Rika Live', 'rika-live@example.test');
-                INSERT INTO rika_hosted_project_repositories
-                  (project_id, owner_id, repository_id, installation_id, installation_account_id,
-                    installation_account_login, installation_account_type, repository_owner, repository_name,
-                    default_ref, private)
-                VALUES ('project-live', 'organization-owner-live', 'repository-live', 'installation-live',
-                  'account-live', 'In-Time-Tec', 'Organization', 'In-Time-Tec', 'rika', 'main', true)`),
+              db
+                .insert(schema.rikaHostedGitIdentities)
+                .values({ ownerId: ids.organizationOwner, name: "Rika Live", email: "rika-live@example.test" }),
+            )
+            yield* Effect.tryPromise(() =>
+              db.insert(schema.rikaHostedProjectRepositories).values({
+                projectId: ids.project,
+                ownerId: ids.organizationOwner,
+                repositoryId: "repository-live",
+                installationId: "installation-live",
+                installationAccountId: "account-live",
+                installationAccountLogin: "In-Time-Tec",
+                installationAccountType: "Organization",
+                repositoryOwner: "In-Time-Tec",
+                repositoryName: "rika",
+                defaultRef: "main",
+                private: true,
+              }),
             )
             const assignments = yield* ExecutorAssignments
             const created = yield* assignments.create({
@@ -584,9 +627,10 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               }),
             ).toBe(true)
             yield* Effect.tryPromise(() =>
-              migrated!.query(`UPDATE rika_hosted_executor_assignments
-                SET bootstrap_expires_at = clock_timestamp() - interval '1 second'
-                WHERE id = 'assignment-live'`),
+              db
+                .update(schema.rikaHostedExecutorAssignments)
+                .set({ bootstrapExpiresAt: drizzleSql`clock_timestamp() - interval '1 second'` })
+                .where(eq(schema.rikaHostedExecutorAssignments.id, ids.assignment)),
             )
             expect(
               yield* assignments.isBootstrapLive({
@@ -595,9 +639,10 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               }),
             ).toBe(false)
             yield* Effect.tryPromise(() =>
-              migrated!.query(`UPDATE rika_hosted_executor_assignments
-                SET bootstrap_expires_at = clock_timestamp() + interval '1 minute'
-                WHERE id = 'assignment-live'`),
+              db
+                .update(schema.rikaHostedExecutorAssignments)
+                .set({ bootstrapExpiresAt: drizzleSql`clock_timestamp() + interval '1 minute'` })
+                .where(eq(schema.rikaHostedExecutorAssignments.id, ids.assignment)),
             )
             const bound = yield* assignments.bindProviderInstance({
               ...version(provisioning),
@@ -630,13 +675,33 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
             const updated = yield* assignments.updateCapabilities({ access, capabilities: refreshedCapabilities })
             expect(updated.capabilityGeneration).toBe(updated.generation)
             expect(updated.capabilities).toEqual(refreshedCapabilities)
+            expect(
+              yield* Effect.result(
+                assignments.beginReplacement({
+                  ...version(updated),
+                  placement: {
+                    _tag: "OrbPlacement",
+                    templateBuildId: "template-v2",
+                    providerScope: "another-scope",
+                  },
+                  bootstrapCredentialDigest: Redacted.make("invalid-replacement"),
+                  bootstrapLifetimeMillis: 60_000,
+                }),
+              ),
+            ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
             const replacement = yield* assignments.beginReplacement({
               ...version(updated),
+              placement: { _tag: "OrbPlacement", templateBuildId: "template-v2", providerScope: "scope" },
               bootstrapCredentialDigest: Redacted.make("replacement"),
               bootstrapLifetimeMillis: 60_000,
             })
             expect((yield* Effect.result(assignments.authenticate(access)))._tag).toBe("Failure")
             expect(replacement.generation).toBe("2")
+            expect(replacement.placement).toEqual({
+              _tag: "OrbPlacement",
+              templateBuildId: "template-v2",
+              providerScope: "scope",
+            })
             expect(replacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
             const reprovisioned = yield* assignments.bindProviderInstance({
               ...version(
@@ -692,11 +757,20 @@ it.effect.skipIf(!live)("proves hosted PostgreSQL authority, rollback, concurren
               assignmentId: orphanProvisioning.id,
               generation: orphanProvisioning.generation,
             }
+            expect(yield* assignments.claimOrphan({ providerInstanceId: "sandbox-unbound-live" })).toBe("preserved")
+            expect(
+              yield* assignments.claimOrphan({
+                providerInstanceId: "sandbox-unknown-live",
+                assignmentId: ExecutorAssignmentId.make("assignment-unknown-live"),
+                generation: orphanProvisioning.generation,
+              }),
+            ).toBe("preserved")
             expect(yield* assignments.claimOrphan(orphanIdentity)).toBe("preserved")
             yield* Effect.tryPromise(() =>
-              migrated!.query(`UPDATE rika_hosted_executor_assignments
-                SET bootstrap_expires_at = clock_timestamp() - interval '1 second'
-                WHERE id = 'assignment-orphan-live'`),
+              db
+                .update(schema.rikaHostedExecutorAssignments)
+                .set({ bootstrapExpiresAt: drizzleSql`clock_timestamp() - interval '1 second'` })
+                .where(eq(schema.rikaHostedExecutorAssignments.id, orphan.id)),
             )
             expect(yield* assignments.claimOrphan(orphanIdentity)).toBe("claimed")
             expect(yield* assignments.get(orphan.id)).toMatchObject({

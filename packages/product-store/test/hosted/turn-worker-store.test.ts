@@ -16,11 +16,15 @@ import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { HostedTurnWorkerStore, layer as workerStoreLayer } from "../../src/hosted/turn-worker-store"
 import { layer as workspacePreparationLayer } from "../../src/hosted/workspace-preparations"
 import { Config, Context, Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted, Schema } from "effect"
+import { eq, sql as drizzleSql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/database/migrations"
 import { runMigration } from "../../../identity/src/database/postgres"
 import { migrations } from "../../src/hosted/migrations"
+import { identityUser } from "@rika/identity"
+import * as schema from "../../src/database/schema/product"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const readFileString = (url: URL) =>
@@ -53,6 +57,7 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
+      const db = drizzle({ client: pool })
       try {
         for (const migration of [...identityMigrations, ...migrations]) {
           const sql = yield* readFileString(migration.url)
@@ -61,46 +66,98 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         const route = yield* Schema.encodeEffect(Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot))(
           ExecutionRoute.testExecutionRoute(),
         )
+        const now = drizzleSql`now()`
         yield* Effect.tryPromise(() =>
-          pool.query(
-            `INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
-               VALUES ('worker-user','Worker','worker@example.test',true,now(),now());
-             INSERT INTO rika_hosted_owners (id,kind,user_id,organization_id)
-               VALUES ('worker-owner','personal','worker-user',NULL);
-             INSERT INTO rika_hosted_workspaces
-               (id,owner_id,project_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-               VALUES ('workspace-1','worker-owner',NULL,'worker-user','orb',false,now());
-             INSERT INTO rika_hosted_threads
-               (id,owner_id,project_id,workspace_id,created_by_user_id,executor_kind,inherit_project_grants,created_at)
-               VALUES ('thread-1','worker-owner',NULL,'workspace-1','worker-user','orb',false,now());
-             INSERT INTO rika_workspaces (owner_id,path,created_at)
-               VALUES ('worker-owner','workspace-1',1);
-             INSERT INTO rika_threads (id,owner_id,workspace,title,created_at,updated_at)
-               VALUES ('thread-1','worker-owner','workspace-1','Worker',1,1)`,
-          ),
+          db.insert(identityUser).values({
+            id: "worker-user",
+            name: "Worker",
+            email: "worker@example.test",
+            emailVerified: true,
+            createdAt: now,
+            updatedAt: now,
+          }),
         )
         yield* Effect.tryPromise(() =>
-          pool.query(
-            `INSERT INTO rika_turns
-               (id,thread_id,prompt,status,created_at,updated_at,execution_route_json)
-               VALUES ('turn-1','thread-1','first','queued',2,2,$1),
-                 ('turn-2','thread-1','second','queued',3,3,$1)`,
-            [route],
-          ),
+          db.insert(schema.rikaHostedOwners).values({ id: "worker-owner", kind: "personal", userId: "worker-user" }),
         )
         yield* Effect.tryPromise(() =>
-          pool.query(`INSERT INTO rika_thread_queue_state (thread_id,revision,queued_count)
-            VALUES ('thread-1',2,2)`),
+          db.insert(schema.rikaHostedWorkspaces).values({
+            id: "workspace-1",
+            ownerId: "worker-owner",
+            createdByUserId: "worker-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt: now,
+          }),
         )
         yield* Effect.tryPromise(() =>
-          pool.query(`INSERT INTO rika_hosted_executor_assignments
-            (id, owner_id, thread_id, workspace_id, executor_kind, placement, checkout, generation, revision,
-              last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-              session_digest, lease_epoch, lease_expires_at)
-            VALUES ('assignment-1', 'worker-owner', 'thread-1', 'workspace-1', 'orb',
-              '{"_tag":"OrbPlacement","templateBuildId":"build-1","providerScope":"test"}', NULL,
-              1, 0, 1, 'active', 'sandbox-1', 'executor-1', 'process-1', 'session-1', 1,
-              clock_timestamp() + interval '4 minutes')`),
+          db.insert(schema.rikaHostedThreads).values({
+            id: "thread-1",
+            ownerId: "worker-owner",
+            workspaceId: "workspace-1",
+            createdByUserId: "worker-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt: now,
+          }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaWorkspaces).values({ ownerId: "worker-owner", path: "workspace-1", createdAt: 1 }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaThreads).values({
+            id: "thread-1",
+            ownerId: "worker-owner",
+            workspace: "workspace-1",
+            title: "Worker",
+            createdAt: 1,
+            updatedAt: 1,
+          }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaTurns).values([
+            {
+              id: "turn-1",
+              threadId: "thread-1",
+              prompt: "first",
+              status: "queued",
+              createdAt: 2,
+              updatedAt: 2,
+              executionRouteJson: route,
+            },
+            {
+              id: "turn-2",
+              threadId: "thread-1",
+              prompt: "second",
+              status: "queued",
+              createdAt: 3,
+              updatedAt: 3,
+              executionRouteJson: route,
+            },
+          ]),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaThreadQueueState).values({ threadId: "thread-1", revision: 2, queuedCount: 2 }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaHostedExecutorAssignments).values({
+            id: "assignment-1",
+            ownerId: "worker-owner",
+            threadId: "thread-1",
+            workspaceId: "workspace-1",
+            executorKind: "orb",
+            placement: { _tag: "OrbPlacement", templateBuildId: "build-1", providerScope: "test" },
+            generation: 1,
+            revision: 0,
+            lastLeaseEpoch: 1,
+            lifecycle: "active",
+            providerInstanceId: "sandbox-1",
+            executorInstanceId: "executor-1",
+            processIncarnation: "process-1",
+            sessionDigest: "session-1",
+            leaseEpoch: 1,
+            leaseExpiresAt: drizzleSql`clock_timestamp() + interval '4 minutes'`,
+          }),
         )
         const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const context = yield* Layer.build(
@@ -181,9 +238,12 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
             ._tag,
         ).toBe("Failure")
         const durableClaim = yield* Effect.tryPromise(() =>
-          pool.query(`SELECT thread_id, turn_id FROM rika_hosted_turn_claims WHERE turn_id = 'turn-1'`),
+          db
+            .select({ threadId: schema.rikaHostedTurnClaims.threadId, turnId: schema.rikaHostedTurnClaims.turnId })
+            .from(schema.rikaHostedTurnClaims)
+            .where(eq(schema.rikaHostedTurnClaims.turnId, "turn-1")),
         )
-        expect(durableClaim.rows).toEqual([{ thread_id: "thread-1", turn_id: "turn-1" }])
+        expect(durableClaim).toEqual([{ threadId: "thread-1", turnId: "turn-1" }])
         const claimLogs = observations.filter((record) =>
           Inspectable.toStringUnknown(record).includes("hosted.turn_claim.success"),
         )
@@ -201,7 +261,10 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         expect(yield* store.prepare(first, preparedExecution, 101)).toBe(true)
         expect(yield* store.claimRecovery(request("early", "early-claim"))).toBeUndefined()
         yield* Effect.tryPromise(() =>
-          pool.query(`UPDATE rika_hosted_turn_claims SET heartbeat_at = 0, expires_at = 1 WHERE turn_id = 'turn-1'`),
+          db
+            .update(schema.rikaHostedTurnClaims)
+            .set({ heartbeatAt: 0, expiresAt: 1 })
+            .where(eq(schema.rikaHostedTurnClaims.turnId, "turn-1")),
         )
         const recovered = yield* store.claimRecovery(request("recovery", "recovery-claim"))
         if (recovered === undefined) return yield* Effect.die("Prepared Turn was not recovered")
@@ -210,38 +273,62 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         yield* store.completeAdmission(recovered, link, 202)
         expect(yield* store.requestActivation(recovered, 203)).toBe(true)
         const durable = yield* Effect.tryPromise(() =>
-          pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-1'`),
+          db
+            .select({ status: schema.rikaTurns.status, executionLinkJson: schema.rikaTurns.executionLinkJson })
+            .from(schema.rikaTurns)
+            .where(eq(schema.rikaTurns.id, "turn-1")),
         )
-        expect(durable.rows[0]).toMatchObject({ status: "accepted" })
+        expect(durable[0]).toMatchObject({ status: "accepted" })
         const executionLink = yield* Schema.decodeEffect(Schema.fromJsonString(ExecutionGateway.ExecutionLink))(
-          String(durable.rows[0].execution_link_json),
+          String(durable[0]?.executionLinkJson),
         )
         expect(executionLink).toEqual(link)
         expect((yield* Effect.result(store.completeActivation(first, "running", 203)))._tag).toBe("Failure")
         expect(
           Number(
-            (yield* Effect.tryPromise(() => pool.query(`SELECT count(*) FROM rika_turn_admission_outbox`))).rows[0]
-              .count,
+            (yield* Effect.tryPromise(() =>
+              db.select({ count: drizzleSql<number>`count(*)` }).from(schema.rikaTurnAdmissionOutbox),
+            ))[0]?.count,
           ),
         ).toBe(1)
         yield* store.completeActivation(recovered, "running", 204)
         expect(
-          (yield* Effect.tryPromise(() => pool.query(`SELECT status FROM rika_turns WHERE id = 'turn-1'`))).rows[0],
+          (yield* Effect.tryPromise(() =>
+            db
+              .select({ status: schema.rikaTurns.status })
+              .from(schema.rikaTurns)
+              .where(eq(schema.rikaTurns.id, "turn-1")),
+          ))[0],
         ).toEqual({ status: "running" })
         expect(
           Number(
-            (yield* Effect.tryPromise(() =>
-              pool.query(`SELECT count(*) FROM rika_turn_admission_outbox UNION ALL
-                  SELECT count(*) FROM rika_hosted_turn_claims`),
-            )).rows.reduce((total, row) => total + Number(row.count), 0),
+            (yield* Effect.all([
+              Effect.orDie(
+                Effect.tryPromise(() =>
+                  db.select({ count: drizzleSql<number>`count(*)` }).from(schema.rikaTurnAdmissionOutbox),
+                ),
+              ),
+              Effect.orDie(
+                Effect.tryPromise(() =>
+                  db.select({ count: drizzleSql<number>`count(*)` }).from(schema.rikaHostedTurnClaims),
+                ),
+              ),
+            ]))
+              .flat()
+              .reduce((total, row) => total + Number(row.count), 0),
           ),
         ).toBe(0)
-        yield* Effect.tryPromise(() => pool.query(`UPDATE rika_turns SET status = 'completed' WHERE id = 'turn-1'`))
+        yield* Effect.tryPromise(() =>
+          db.update(schema.rikaTurns).set({ status: "completed" }).where(eq(schema.rikaTurns.id, "turn-1")),
+        )
         const second = yield* store.claimNext(request("worker-a", "second-a"))
         if (second === undefined) return yield* Effect.die("Second Turn was not claimed")
         expect(yield* store.claimNext(request("worker-b", "second-b-early"))).toBeUndefined()
         yield* Effect.tryPromise(() =>
-          pool.query(`UPDATE rika_hosted_turn_claims SET heartbeat_at = 0, expires_at = 1 WHERE turn_id = 'turn-2'`),
+          db
+            .update(schema.rikaHostedTurnClaims)
+            .set({ heartbeatAt: 0, expiresAt: 1 })
+            .where(eq(schema.rikaHostedTurnClaims.turnId, "turn-2")),
         )
         const replacement = yield* store.claimNext(request("worker-b", "second-b"))
         if (replacement === undefined) return yield* Effect.die("Expired Turn claim was not recovered")
@@ -249,17 +336,35 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         expect(yield* store.renew(replacement, 100)).toBe(true)
         yield* store.release(second)
         const authority = yield* Effect.tryPromise(() =>
-          pool.query(`SELECT worker_id, claim_token FROM rika_hosted_turn_claims WHERE turn_id = 'turn-2'`),
+          db
+            .select({
+              workerId: schema.rikaHostedTurnClaims.workerId,
+              claimToken: schema.rikaHostedTurnClaims.claimToken,
+            })
+            .from(schema.rikaHostedTurnClaims)
+            .where(eq(schema.rikaHostedTurnClaims.turnId, "turn-2")),
         )
-        expect(authority.rows[0]).toEqual({ worker_id: "worker-b", claim_token: "second-b" })
+        expect(authority[0]).toEqual({ workerId: "worker-b", claimToken: "second-b" })
         expect(
           yield* store.prepare(replacement, { ...preparedExecution, turnId: "turn-2", runId: "turn-2" }, 301),
         ).toBe(true)
         yield* Effect.tryPromise(() =>
-          pool.query(`UPDATE rika_turns SET status = 'cancelled', updated_at = 302 WHERE id = 'turn-2';
-            UPDATE rika_hosted_executor_assignments
-              SET lease_expires_at = clock_timestamp() - interval '1 second' WHERE id = 'assignment-1';
-            UPDATE rika_hosted_turn_claims SET heartbeat_at = 0, expires_at = 1 WHERE turn_id = 'turn-2'`),
+          db
+            .update(schema.rikaTurns)
+            .set({ status: "cancelled", updatedAt: 302 })
+            .where(eq(schema.rikaTurns.id, "turn-2")),
+        )
+        yield* Effect.tryPromise(() =>
+          db
+            .update(schema.rikaHostedExecutorAssignments)
+            .set({ leaseExpiresAt: drizzleSql`clock_timestamp() - interval '1 second'` })
+            .where(eq(schema.rikaHostedExecutorAssignments.id, "assignment-1")),
+        )
+        yield* Effect.tryPromise(() =>
+          db
+            .update(schema.rikaHostedTurnClaims)
+            .set({ heartbeatAt: 0, expiresAt: 1 })
+            .where(eq(schema.rikaHostedTurnClaims.turnId, "turn-2")),
         )
         const cancelledRecovery = yield* store.claimRecovery(request("cancellation", "cancellation-claim"))
         if (cancelledRecovery === undefined) return yield* Effect.die("Cancelled staged admission was not recovered")
@@ -272,14 +377,20 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         expect(yield* store.requestActivation(cancelledRecovery, 304)).toBe(false)
         yield* store.completeActivation(cancelledRecovery, "cancelled", 305)
         const cancelled = yield* Effect.tryPromise(() =>
-          pool.query(`SELECT status, execution_link_json FROM rika_turns WHERE id = 'turn-2'`),
+          db
+            .select({ status: schema.rikaTurns.status, executionLinkJson: schema.rikaTurns.executionLinkJson })
+            .from(schema.rikaTurns)
+            .where(eq(schema.rikaTurns.id, "turn-2")),
         )
-        expect(cancelled.rows[0]).toEqual({ status: "cancelled", execution_link_json: null })
+        expect(cancelled[0]).toEqual({ status: "cancelled", executionLinkJson: null })
         expect(
           Number(
             (yield* Effect.tryPromise(() =>
-              pool.query(`SELECT count(*) FROM rika_turn_admission_outbox WHERE turn_id = 'turn-2'`),
-            )).rows[0].count,
+              db
+                .select({ count: drizzleSql<number>`count(*)` })
+                .from(schema.rikaTurnAdmissionOutbox)
+                .where(eq(schema.rikaTurnAdmissionOutbox.turnId, "turn-2")),
+            ))[0]?.count,
           ),
         ).toBe(0)
       } finally {

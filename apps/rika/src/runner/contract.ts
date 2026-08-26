@@ -16,6 +16,7 @@ export { RepositoryMetadata }
 
 export const RunnerStatus = Schema.Union([
   Schema.TaggedStruct("Registering", { registration: RunnerRegistrationSchema }),
+  Schema.TaggedStruct("Ready", { workspaceIdentity: Schema.NonEmptyString }),
   Schema.TaggedStruct("Waiting", { message: Schema.NonEmptyString }),
   Schema.TaggedStruct("Connecting", { workspaceIdentity: Schema.NonEmptyString }),
   Schema.TaggedStruct("Connected", { workspaceIdentity: Schema.NonEmptyString }),

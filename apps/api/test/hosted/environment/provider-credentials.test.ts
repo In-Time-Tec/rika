@@ -1,12 +1,20 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import { BetterAuthUserId, OrganizationId, OwnerId } from "@rika/product/hosted-model"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import {
+  rikaHostedCredentialReferences,
+  rikaHostedOpenaiAccountCredentials,
+  rikaHostedOwners,
+  rikaHostedProviderCredentials,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as postgresLayer } from "@rika/product-store/layer"
-import { FileSystem, Config, Context, Effect, Layer, Option, Random, Redacted, Schema } from "effect"
+import { eq, sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { FileSystem, Config, Context, DateTime, Effect, Layer, Option, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { HostedModelRegistry, layer as modelRegistryLayer } from "../../../src/hosted/environment/model-registry"
@@ -27,8 +35,6 @@ const organization = (organizationId: string) => ({
   _tag: "OrganizationOwner" as const,
   organizationId: OrganizationId.make(organizationId),
 })
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
 const jwt = (payload: JwtPayload) => `e30.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
 
 const failureKind = <A>(effect: Effect.Effect<A, HostedProviderCredentialError>) =>
@@ -42,7 +48,7 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
     Effect.gen(function* () {
       const database = `rika_provider_credentials_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
@@ -58,28 +64,61 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
             ),
           })
         }
-        yield* query(
-          pool,
-          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-              VALUES
-                ('owner-user', 'owner-user', 'owner@example.test', true, now(), now()),
-                ('other-user', 'other-user', 'other@example.test', true, now(), now())`,
+        const db = drizzle({ client: pool })
+        const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+        yield* Effect.tryPromise(() =>
+          db.insert(identityUser).values([
+            {
+              id: "owner-user",
+              name: "owner-user",
+              email: "owner@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            },
+            {
+              id: "other-user",
+              name: "other-user",
+              email: "other@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            },
+          ]),
         )
-        yield* query(
-          pool,
-          `INSERT INTO rika_hosted_owners (id, kind, user_id)
-              VALUES ('personal-owner', 'personal', 'owner-user')`,
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaHostedOwners).values({ id: "personal-owner", kind: "personal", userId: "owner-user" }),
         )
-        yield* query(
-          pool,
-          `INSERT INTO "organization" (id, name, slug, created_at)
-              VALUES ('organization-1', 'organization-1', 'organization-1', now());
-             INSERT INTO "member" (id, organization_id, user_id, role, created_at)
-              VALUES
-                ('organization-owner', 'organization-1', 'owner-user', 'owner', now()),
-                ('organization-member', 'organization-1', 'other-user', 'member', now());
-             INSERT INTO rika_hosted_owners (id, kind, organization_id)
-              VALUES ('organization-owner-record', 'organization', 'organization-1')`,
+        yield* Effect.tryPromise(() =>
+          db.insert(identityOrganization).values({
+            id: "organization-1",
+            name: "organization-1",
+            slug: "organization-1",
+            createdAt,
+          }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(identityMember).values([
+            {
+              id: "organization-owner",
+              organizationId: "organization-1",
+              userId: "owner-user",
+              role: "owner",
+              createdAt,
+            },
+            {
+              id: "organization-member",
+              organizationId: "organization-1",
+              userId: "other-user",
+              role: "member",
+              createdAt,
+            },
+          ]),
+        )
+        yield* Effect.tryPromise(() =>
+          db
+            .insert(rikaHostedOwners)
+            .values({ id: "organization-owner-record", kind: "organization", organizationId: "organization-1" }),
         )
         const accountIdentity = {
           "https://api.openai.com/auth": {
@@ -162,6 +201,14 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         const firstLoaded = yield* store.load(first.credentialIdentity)
         expect(Option.isSome(firstLoaded) && Redacted.value(firstLoaded.value)).toBe("provider-secret-one")
         expect(
+          yield* credentials.put({
+            principal: principal("owner-user"),
+            owner: personal("owner-user"),
+            provider: "openrouter",
+            apiKey: Redacted.make("provider-secret-one"),
+          }),
+        ).toEqual(first)
+        expect(
           yield* credentials.openAiAccountStatus({
             principal: principal("owner-user"),
             owner: personal("owner-user"),
@@ -193,23 +240,32 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         })
         expect(encodeJson(route)).not.toContain("provider-secret-one")
         expect(encodeJson(route)).not.toContain("provider-secret-two")
-        const databaseRecord = yield* query(
-          pool,
-          `SELECT encode(ciphertext, 'escape') AS ciphertext, external_reference, metadata::text
-              FROM rika_hosted_provider_credentials credential
-              JOIN rika_hosted_credential_references reference
-                ON reference.id = credential.credential_reference_id
-              WHERE credential.owner_id = 'personal-owner'`,
+        const databaseRecord = yield* Effect.tryPromise(() =>
+          db
+            .select({
+              ciphertext: sql`encode(${rikaHostedProviderCredentials.ciphertext}, 'escape')`.mapWith(String),
+              external_reference: rikaHostedCredentialReferences.externalReference,
+              metadata: sql`${rikaHostedCredentialReferences.metadata}::text`.mapWith(String),
+            })
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(
+              rikaHostedCredentialReferences,
+              eq(rikaHostedCredentialReferences.id, rikaHostedProviderCredentials.credentialReferenceId),
+            )
+            .where(eq(rikaHostedProviderCredentials.ownerId, "personal-owner")),
         )
-        expect(encodeJson(databaseRecord.rows)).not.toContain("provider-secret-one")
-        expect(encodeJson(databaseRecord.rows)).not.toContain("provider-secret-two")
-        const accountDatabaseRecord = yield* query(
-          pool,
-          `SELECT encode(ciphertext, 'escape') AS ciphertext, fingerprint
-              FROM rika_hosted_openai_account_credentials
-              WHERE owner_id = 'personal-owner'`,
+        expect(encodeJson(databaseRecord)).not.toContain("provider-secret-one")
+        expect(encodeJson(databaseRecord)).not.toContain("provider-secret-two")
+        const accountDatabaseRecord = yield* Effect.tryPromise(() =>
+          db
+            .select({
+              ciphertext: sql`encode(${rikaHostedOpenaiAccountCredentials.ciphertext}, 'escape')`.mapWith(String),
+              fingerprint: rikaHostedOpenaiAccountCredentials.fingerprint,
+            })
+            .from(rikaHostedOpenaiAccountCredentials)
+            .where(eq(rikaHostedOpenaiAccountCredentials.ownerId, "personal-owner")),
         )
-        const encodedAccountRecord = encodeJson(accountDatabaseRecord.rows)
+        const encodedAccountRecord = encodeJson(accountDatabaseRecord)
         for (const secret of [
           firstAccessToken,
           firstIdToken,
@@ -242,24 +298,34 @@ it.effect.skipIf(databaseUrl === "")("encrypts, rotates, revokes, and resolves o
         expect(revoked).toMatchObject({ state: "revoked", revision: "3" })
         expect(Option.isNone(yield* store.load(revoked.credentialIdentity))).toBe(true)
         expect(yield* failureKind(credentials.require("personal-owner", "openrouter"))).toBe("revoked")
-        const cleared = yield* query(
-          pool,
-          `SELECT ciphertext, nonce, authentication_tag FROM rika_hosted_provider_credentials
-              WHERE owner_id = 'personal-owner'`,
+        const cleared = yield* Effect.tryPromise(() =>
+          db
+            .select({
+              ciphertext: rikaHostedProviderCredentials.ciphertext,
+              nonce: rikaHostedProviderCredentials.nonce,
+              authentication_tag: rikaHostedProviderCredentials.authenticationTag,
+            })
+            .from(rikaHostedProviderCredentials)
+            .where(eq(rikaHostedProviderCredentials.ownerId, "personal-owner")),
         )
-        expect(cleared.rows).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
+        expect(cleared).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
         const revokedAccount = yield* credentials.revokeOpenAiAccount({
           principal: principal("owner-user"),
           owner: personal("owner-user"),
         })
         expect(revokedAccount).toMatchObject({ state: "revoked", revision: "3" })
         expect(yield* Effect.flip(accountAccess.acquire)).toMatchObject({ kind: "login-required" })
-        const clearedAccount = yield* query(
-          pool,
-          `SELECT ciphertext, nonce, authentication_tag FROM rika_hosted_openai_account_credentials
-              WHERE owner_id = 'personal-owner'`,
+        const clearedAccount = yield* Effect.tryPromise(() =>
+          db
+            .select({
+              ciphertext: rikaHostedOpenaiAccountCredentials.ciphertext,
+              nonce: rikaHostedOpenaiAccountCredentials.nonce,
+              authentication_tag: rikaHostedOpenaiAccountCredentials.authenticationTag,
+            })
+            .from(rikaHostedOpenaiAccountCredentials)
+            .where(eq(rikaHostedOpenaiAccountCredentials.ownerId, "personal-owner")),
         )
-        expect(clearedAccount.rows).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
+        expect(clearedAccount).toEqual([{ ciphertext: null, nonce: null, authentication_tag: null }])
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

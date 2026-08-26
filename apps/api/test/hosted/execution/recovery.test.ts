@@ -1,40 +1,47 @@
 import "./recovery.harness"
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMigrations, identityUser, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedExecutorOperations,
+  rikaHostedOwners,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { FileSystem, Config, Context, Effect, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { Prompt } from "effect/unstable/ai"
+import { and, asc, eq, ne } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import { Address, ExecutableManifest, ExecutableResolver, Message } from "tenetkit/runtime"
 import { encodeExecutableManifest, encodeExecutableRef, encodeMessage } from "tenetkit/runtime/driver/sql/codecs"
 import { HostedRecovery, layer as hostedRecoveryLayer } from "../../../src/hosted/execution/recovery"
+import {
+  runOperations as tenetkitRunOperations,
+  runs as tenetkitRuns,
+} from "../../../src/hosted/execution/tenetkit-schema"
 import { live as livePlatform } from "../../support/live-platform"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }
 const executable = ExecutableManifest.makeTest("recovery", "test")
-const sqlText = (value: string) => `'${value.replaceAll("'", "''")}'`
-const executableRef = sqlText(encodeExecutableRef(executable.ref))
-const executableManifest = sqlText(encodeExecutableManifest(executable.manifest))
+const executableRef = encodeExecutableRef(executable.ref)
+const executableManifest = encodeExecutableManifest(executable.manifest)
 const storedMessage = (suffix: string) =>
-  sqlText(
-    encodeMessage(
-      Message.make({
-        id: `message-${suffix}`,
-        to: Address.make("agent:recovery"),
-        sessionId: `session-${suffix}`,
-        prompt: Prompt.make("recover"),
-        idempotencyKey: `run-${suffix}`,
-        correlationId: `run-${suffix}`,
-      }),
-    ),
+  encodeMessage(
+    Message.make({
+      id: `message-${suffix}`,
+      to: Address.make("agent:recovery"),
+      sessionId: `session-${suffix}`,
+      prompt: Prompt.make("recover"),
+      idempotencyKey: `run-${suffix}`,
+      correlationId: `run-${suffix}`,
+    }),
   )
-
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
 
 const migrate = (url: string, pool: Pool) =>
   Effect.gen(function* () {
@@ -47,85 +54,6 @@ const migrate = (url: string, pool: Pool) =>
     yield* ExecutionPostgres.applySchema({ url, source: "hosted-recovery-live" })
   })
 
-const seed = (pool: Pool) =>
-  query(
-    pool,
-    `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES ('recovery-user', 'Recovery', 'recovery@example.test', true, now(), now()),
-        ('other-user', 'Other', 'other@example.test', true, now(), now());
-    INSERT INTO rika_hosted_owners (id, kind, user_id)
-      VALUES ('recovery-owner', 'personal', 'recovery-user');
-    INSERT INTO rika_hosted_workspaces
-      (id, owner_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES ('recovery-workspace', 'recovery-owner', 'recovery-user', 'orb', false, now());
-    INSERT INTO rika_hosted_threads
-      (id, owner_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES ('recovery-thread', 'recovery-owner', 'recovery-workspace', 'recovery-user', 'orb', false, now());
-    INSERT INTO rika_hosted_executor_assignments
-      (id, owner_id, thread_id, workspace_id, executor_kind, placement, generation, revision,
-        last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-        session_digest, lease_epoch, lease_expires_at)
-      VALUES ('recovery-assignment', 'recovery-owner', 'recovery-thread', 'recovery-workspace', 'orb',
-        '{"_tag":"OrbPlacement","templateBuildId":"build-recovery"}'::jsonb, 1, 1, 1, 'active',
-        'provider-recovery', 'executor-recovery', 'process-recovery', 'session-recovery', 1,
-        now() + interval '5 minutes');
-    INSERT INTO tenetkit_runs
-      (run_id, status, address, session_id, message_id, message_json, message_digest, idempotency_key,
-        executable_ref_json, executable_manifest_json, root_run_id, depth, max_depth, max_subagents,
-        accepted_sequence, responded_wait_ids_json, created_at, updated_at)
-      VALUES
-        ('run-retry', 'needs-resolution', 'agent:recovery', 'session-retry', 'message-retry',
-          ${storedMessage("retry")}, 'retry-message-digest', 'run-retry', ${executableRef}, ${executableManifest},
-          'run-retry', 0, 8, 8, 1, '[]', now(), now()),
-        ('run-accept', 'needs-resolution', 'agent:recovery', 'session-accept', 'message-accept',
-          ${storedMessage("accept")}, 'accept-message-digest', 'run-accept', ${executableRef}, ${executableManifest},
-          'run-accept', 0, 8, 8, 1, '[]', now(), now()),
-        ('run-abort', 'needs-resolution', 'agent:recovery', 'session-abort', 'message-abort',
-          ${storedMessage("abort")}, 'abort-message-digest', 'run-abort', ${executableRef}, ${executableManifest},
-          'run-abort', 0, 8, 8, 1, '[]', now(), now()),
-        ('run-auto', 'needs-resolution', 'agent:recovery', 'session-auto', 'message-auto',
-          ${storedMessage("auto")}, 'auto-message-digest', 'run-auto', ${executableRef}, ${executableManifest},
-          'run-auto', 0, 8, 8, 1, '[]', now(), now());
-    INSERT INTO tenetkit_run_operations
-      (run_id, operation_id, operation_key, kind, status, input_digest, input_json, replay_policy,
-        attempt, started_at, finished_at)
-      VALUES
-        ('run-retry', 'tenet-retry', 'operation-retry', 'tool', 'unknown', 'retry-digest', '{}',
-          'pure', 0, now(), now()),
-        ('run-accept', 'tenet-accept', 'operation-accept', 'tool', 'unknown', 'accept-digest', '{}',
-          'never', 0, now(), now()),
-        ('run-abort', 'tenet-abort', 'operation-abort', 'tool', 'unknown', 'abort-digest', '{}',
-          'never', 0, now(), now()),
-        ('run-auto', 'tenet-auto', 'operation-auto', 'tool', 'unknown', 'auto-digest', '{}',
-          'never', 0, now(), now());
-    INSERT INTO rika_hosted_executor_operations
-      (assignment_id, owner_id, operation_key, request_digest, code, attempt, state,
-        dispatched_generation, dispatched_lease_epoch, dispatched_executor_instance_id,
-        dispatched_process_incarnation, response, workspace_id, session_id, thread_id, turn_id,
-        run_id, root_run_id, tool_call_id, replay_policy, started_at, deadline_at, terminal_outcome)
-      VALUES
-        ('recovery-assignment', 'recovery-owner', 'operation-retry', 'retry-digest', 'retry()', 0, 'dispatched',
-          1, 1, 'executor-recovery', 'process-recovery',
-          NULL,
-          'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-retry', 'run-retry',
-          'run-retry', 'call-retry', 'pure', now(), '2999-01-01T00:00:00.000Z', NULL),
-        ('recovery-assignment', 'recovery-owner', 'operation-accept', 'accept-digest', 'accept()', 0, 'unknown',
-          1, 1, 'executor-recovery', 'process-recovery',
-          '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
-          'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-accept', 'run-accept',
-          'run-accept', 'call-accept', 'never', now(), '2999-01-01T00:00:00.000Z', 'unknown'),
-        ('recovery-assignment', 'recovery-owner', 'operation-abort', 'abort-digest', 'abort()', 0, 'unknown',
-          1, 1, 'executor-recovery', 'process-recovery',
-          '{"_tag":"DomainFailure","failure":{"kind":"unknown","message":"unknown"}}'::jsonb,
-          'recovery-workspace', 'session-recovery', 'recovery-thread', 'turn-abort', 'run-abort',
-          'run-abort', 'call-abort', 'never', now(), '2999-01-01T00:00:00.000Z', 'unknown'),
-        ('recovery-assignment', 'recovery-owner', 'operation-auto', 'auto-digest', '6 * 7', 0, 'completed',
-          1, 1, 'executor-recovery', 'process-recovery',
-          '{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]}}'::jsonb,
-          'recovery-workspace', 'session-auto', 'recovery-thread', 'turn-auto', 'run-auto',
-          'run-auto', 'call-auto', 'never', now(), '2999-01-01T00:00:00.000Z', 'completed')`,
-  )
-
 it.effect.skipIf(databaseUrl === "")(
   "persists deterministic inspect, retry, accept, and abort resolutions through the TenetKit contract",
   () =>
@@ -134,14 +62,275 @@ it.effect.skipIf(databaseUrl === "")(
         const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
         const database = `rika_hosted_recovery_${suffix}`
         const admin = new Pool({ connectionString: databaseUrl })
-        yield* query(admin, `CREATE DATABASE "${database}"`)
+        yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
         const parsed = new URL(databaseUrl)
         parsed.pathname = `/${database}`
         const url = parsed.toString()
         const pool = new Pool({ connectionString: url })
+        const db = drizzle({ client: pool })
         try {
           yield* migrate(url, pool)
-          yield* seed(pool)
+          const current = DateTime.nowUnsafe()
+          const now = DateTime.toDate(current)
+          yield* Effect.tryPromise(() =>
+            db.insert(identityUser).values([
+              {
+                id: "recovery-user",
+                name: "Recovery",
+                email: "recovery@example.test",
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+              {
+                id: "other-user",
+                name: "Other",
+                email: "other@example.test",
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedOwners).values({ id: "recovery-owner", kind: "personal", userId: "recovery-user" }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedWorkspaces).values({
+              id: "recovery-workspace",
+              ownerId: "recovery-owner",
+              createdByUserId: "recovery-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt: now,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedThreads).values({
+              id: "recovery-thread",
+              ownerId: "recovery-owner",
+              workspaceId: "recovery-workspace",
+              createdByUserId: "recovery-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt: now,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedExecutorAssignments).values({
+              id: "recovery-assignment",
+              ownerId: "recovery-owner",
+              threadId: "recovery-thread",
+              workspaceId: "recovery-workspace",
+              executorKind: "orb",
+              placement: { _tag: "OrbPlacement", templateBuildId: "build-recovery" },
+              generation: 1,
+              revision: 1,
+              lastLeaseEpoch: 1,
+              lifecycle: "active",
+              providerInstanceId: "provider-recovery",
+              executorInstanceId: "executor-recovery",
+              processIncarnation: "process-recovery",
+              sessionDigest: "session-recovery",
+              leaseEpoch: 1,
+              leaseExpiresAt: DateTime.toDate(DateTime.add(current, { minutes: 5 })),
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(tenetkitRuns).values(
+              ["retry", "accept", "abort", "auto"].map((runKind) => ({
+                runId: `run-${runKind}`,
+                status: "needs-resolution",
+                address: "agent:recovery",
+                sessionId: `session-${runKind}`,
+                messageId: `message-${runKind}`,
+                messageJson: storedMessage(runKind),
+                messageDigest: `${runKind}-message-digest`,
+                idempotencyKey: `run-${runKind}`,
+                executableRefJson: executableRef,
+                executableManifestJson: executableManifest,
+                rootRunId: `run-${runKind}`,
+                depth: 0,
+                maxDepth: 8,
+                maxSubagents: 8,
+                acceptedSequence: 1,
+                respondedWaitIdsJson: "[]",
+                createdAt: now,
+                updatedAt: now,
+              })),
+            ),
+          )
+          yield* Effect.tryPromise(() =>
+            db.insert(tenetkitRunOperations).values([
+              {
+                runId: "run-retry",
+                operationId: "tenet-retry",
+                operationKey: "operation-retry",
+                kind: "tool",
+                status: "unknown",
+                inputDigest: "retry-digest",
+                inputJson: "{}",
+                replayPolicy: "pure",
+                attempt: 0,
+                startedAt: now,
+                finishedAt: now,
+              },
+              {
+                runId: "run-accept",
+                operationId: "tenet-accept",
+                operationKey: "operation-accept",
+                kind: "tool",
+                status: "unknown",
+                inputDigest: "accept-digest",
+                inputJson: "{}",
+                replayPolicy: "never",
+                attempt: 0,
+                startedAt: now,
+                finishedAt: now,
+              },
+              {
+                runId: "run-abort",
+                operationId: "tenet-abort",
+                operationKey: "operation-abort",
+                kind: "tool",
+                status: "unknown",
+                inputDigest: "abort-digest",
+                inputJson: "{}",
+                replayPolicy: "never",
+                attempt: 0,
+                startedAt: now,
+                finishedAt: now,
+              },
+              {
+                runId: "run-auto",
+                operationId: "tenet-auto",
+                operationKey: "operation-auto",
+                kind: "tool",
+                status: "unknown",
+                inputDigest: "auto-digest",
+                inputJson: "{}",
+                replayPolicy: "never",
+                attempt: 0,
+                startedAt: now,
+                finishedAt: now,
+              },
+            ]),
+          )
+          const deadlineAt = DateTime.toDate(DateTime.makeUnsafe("2999-01-01T00:00:00.000Z"))
+          yield* Effect.tryPromise(() =>
+            db.insert(rikaHostedExecutorOperations).values([
+              {
+                assignmentId: "recovery-assignment",
+                ownerId: "recovery-owner",
+                operationKey: "operation-retry",
+                requestDigest: "retry-digest",
+                code: "retry()",
+                attempt: 0,
+                state: "dispatched",
+                dispatchedGeneration: 1,
+                dispatchedLeaseEpoch: 1,
+                dispatchedExecutorInstanceId: "executor-recovery",
+                dispatchedProcessIncarnation: "process-recovery",
+                workspaceId: "recovery-workspace",
+                sessionId: "session-recovery",
+                threadId: "recovery-thread",
+                turnId: "turn-retry",
+                runId: "run-retry",
+                rootRunId: "run-retry",
+                toolCallId: "call-retry",
+                replayPolicy: "pure",
+                startedAt: now,
+                deadlineAt,
+              },
+              {
+                assignmentId: "recovery-assignment",
+                ownerId: "recovery-owner",
+                operationKey: "operation-accept",
+                requestDigest: "accept-digest",
+                code: "accept()",
+                attempt: 0,
+                state: "unknown",
+                dispatchedGeneration: 1,
+                dispatchedLeaseEpoch: 1,
+                dispatchedExecutorInstanceId: "executor-recovery",
+                dispatchedProcessIncarnation: "process-recovery",
+                response: { _tag: "DomainFailure", failure: { kind: "unknown", message: "unknown" } },
+                workspaceId: "recovery-workspace",
+                sessionId: "session-recovery",
+                threadId: "recovery-thread",
+                turnId: "turn-accept",
+                runId: "run-accept",
+                rootRunId: "run-accept",
+                toolCallId: "call-accept",
+                replayPolicy: "never",
+                startedAt: now,
+                deadlineAt,
+                terminalOutcome: "unknown",
+              },
+              {
+                assignmentId: "recovery-assignment",
+                ownerId: "recovery-owner",
+                operationKey: "operation-abort",
+                requestDigest: "abort-digest",
+                code: "abort()",
+                attempt: 0,
+                state: "unknown",
+                dispatchedGeneration: 1,
+                dispatchedLeaseEpoch: 1,
+                dispatchedExecutorInstanceId: "executor-recovery",
+                dispatchedProcessIncarnation: "process-recovery",
+                response: { _tag: "DomainFailure", failure: { kind: "unknown", message: "unknown" } },
+                workspaceId: "recovery-workspace",
+                sessionId: "session-recovery",
+                threadId: "recovery-thread",
+                turnId: "turn-abort",
+                runId: "run-abort",
+                rootRunId: "run-abort",
+                toolCallId: "call-abort",
+                replayPolicy: "never",
+                startedAt: now,
+                deadlineAt,
+                terminalOutcome: "unknown",
+              },
+              {
+                assignmentId: "recovery-assignment",
+                ownerId: "recovery-owner",
+                operationKey: "operation-auto",
+                requestDigest: "auto-digest",
+                code: "6 * 7",
+                attempt: 0,
+                state: "completed",
+                dispatchedGeneration: 1,
+                dispatchedLeaseEpoch: 1,
+                dispatchedExecutorInstanceId: "executor-recovery",
+                dispatchedProcessIncarnation: "process-recovery",
+                response: {
+                  _tag: "Success",
+                  result: {
+                    cellId: "call-auto",
+                    epoch: 0,
+                    sequence: 0,
+                    value: "42",
+                    stdout: "",
+                    stderr: "",
+                    durationMillis: 1,
+                    truncation: [],
+                  },
+                },
+                workspaceId: "recovery-workspace",
+                sessionId: "session-auto",
+                threadId: "recovery-thread",
+                turnId: "turn-auto",
+                runId: "run-auto",
+                rootRunId: "run-auto",
+                toolCallId: "call-auto",
+                replayPolicy: "never",
+                startedAt: now,
+                deadlineAt,
+                terminalOutcome: "completed",
+              },
+            ]),
+          )
           const context = yield* Layer.build(
             hostedRecoveryLayer.pipe(
               Layer.provide(
@@ -169,11 +358,16 @@ it.effect.skipIf(databaseUrl === "")(
           )
           const recovery = Context.get(context, HostedRecovery)
           yield* recovery.reconcileCompleted
-          const automaticallyRecovered = yield* query(
-            pool,
-            `SELECT status, resolution_idempotency_key, resolution_json FROM tenetkit_run_operations
-              WHERE operation_id = 'tenet-auto'`,
-          ).pipe(Effect.map((result) => result.rows[0]))
+          const automaticallyRecovered = (yield* Effect.tryPromise(() =>
+            db
+              .select({
+                status: tenetkitRunOperations.status,
+                resolution_idempotency_key: tenetkitRunOperations.resolutionIdempotencyKey,
+                resolution_json: tenetkitRunOperations.resolutionJson,
+              })
+              .from(tenetkitRunOperations)
+              .where(eq(tenetkitRunOperations.operationId, "tenet-auto")),
+          ))[0]
           expect(automaticallyRecovered).toEqual({
             status: "succeeded",
             resolution_idempotency_key: "tenet-auto:executor-terminal",
@@ -191,27 +385,42 @@ it.effect.skipIf(databaseUrl === "")(
           expect(operations.every((operation) => operation.actions.join(",") === "inspect,retry,accept,abort")).toBe(
             true,
           )
-          const retryInput = {
+          const retryInput: Parameters<typeof recovery.resolve>[0] = {
             principal,
             threadId: "recovery-thread",
             runId: "run-retry",
             operationId: "tenet-retry",
             idempotencyKey: "resolve-retry",
-            resolution: { _tag: "Retry" as const },
+            resolution: { _tag: "Retry" },
           }
           expect(yield* recovery.resolve(retryInput)).toMatchObject({ state: "retrying", actions: ["inspect"] })
           expect(yield* recovery.resolve(retryInput)).toMatchObject({ state: "retrying", actions: ["inspect"] })
           expect(
             (yield* Effect.result(recovery.resolve({ ...retryInput, idempotencyKey: "conflicting-retry" })))._tag,
           ).toBe("Failure")
-          yield* query(
-            pool,
-            `UPDATE tenetkit_run_operations SET status = 'succeeded', result_json = '{"answer":42}',
-              resolution_idempotency_key = 'resolve-accept',
-              resolution_json = '{"_tag":"Succeeded","value":{"answer":42}}', finished_at = now()
-              WHERE run_id = 'run-accept' AND operation_id = 'tenet-accept';
-            UPDATE tenetkit_runs SET status = 'queued', owner_worker_id = NULL, updated_at = now()
-              WHERE run_id = 'run-accept'`,
+          const resolvedAt = DateTime.toDate(DateTime.nowUnsafe())
+          yield* Effect.tryPromise(() =>
+            db
+              .update(tenetkitRunOperations)
+              .set({
+                status: "succeeded",
+                resultJson: '{"answer":42}',
+                resolutionIdempotencyKey: "resolve-accept",
+                resolutionJson: '{"_tag":"Succeeded","value":{"answer":42}}',
+                finishedAt: resolvedAt,
+              })
+              .where(
+                and(
+                  eq(tenetkitRunOperations.runId, "run-accept"),
+                  eq(tenetkitRunOperations.operationId, "tenet-accept"),
+                ),
+              ),
+          )
+          yield* Effect.tryPromise(() =>
+            db
+              .update(tenetkitRuns)
+              .set({ status: "queued", ownerWorkerId: null, updatedAt: resolvedAt })
+              .where(eq(tenetkitRuns.runId, "run-accept")),
           )
           expect(
             yield* recovery.resolve({
@@ -232,19 +441,25 @@ it.effect.skipIf(databaseUrl === "")(
             }),
           ).toMatchObject({ state: "aborted" })
           expect(
-            (yield* query(
-              pool,
-              `SELECT column_name FROM information_schema.columns
-                WHERE table_name = 'rika_hosted_executor_operations'
-                  AND column_name IN ('resolution_state', 'resolution_idempotency_key', 'resolution', 'resolved_at')`,
+            (yield* Effect.tryPromise(() =>
+              pool.query(`SELECT column_name FROM information_schema.columns
+                  WHERE table_name = 'rika_hosted_executor_operations'
+                    AND column_name IN ('resolution_state', 'resolution_idempotency_key', 'resolution', 'resolved_at')`),
             )).rows,
           ).toEqual([])
           expect(
-            (yield* query(
-              pool,
-              `SELECT operation_id, status, resolution_idempotency_key, resolution_json
-                FROM tenetkit_run_operations WHERE operation_id <> 'tenet-auto' ORDER BY operation_id`,
-            )).rows,
+            yield* Effect.tryPromise(() =>
+              db
+                .select({
+                  operation_id: tenetkitRunOperations.operationId,
+                  status: tenetkitRunOperations.status,
+                  resolution_idempotency_key: tenetkitRunOperations.resolutionIdempotencyKey,
+                  resolution_json: tenetkitRunOperations.resolutionJson,
+                })
+                .from(tenetkitRunOperations)
+                .where(ne(tenetkitRunOperations.operationId, "tenet-auto"))
+                .orderBy(asc(tenetkitRunOperations.operationId)),
+            ),
           ).toEqual([
             {
               operation_id: "tenet-abort",

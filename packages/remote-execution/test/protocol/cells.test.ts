@@ -371,7 +371,7 @@ describe("Cells", () => {
     ),
   )
 
-  it.effect("returns canonical cancellation before interrupted execution cleanup finishes", () =>
+  it.effect("returns canonical cancellation after interrupted execution cleanup finishes", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const state = stored()
@@ -400,7 +400,15 @@ describe("Cells", () => {
         yield* service.admit(cell)
         const running = yield* Effect.forkChild(service.execute(cell), { startImmediately: true })
         yield* Deferred.await(executionStarted)
-        const response = yield* service.cancel(cell.operationKey, cell.attempt)
+        const cancelling = yield* Effect.forkChild(service.cancel(cell.operationKey, cell.attempt), {
+          startImmediately: true,
+        })
+        yield* Deferred.await(cleanupStarted)
+        expect(cancelling.pollUnsafe()).toBeUndefined()
+
+        yield* Deferred.succeed(releaseCleanup, undefined)
+        yield* Deferred.await(cleanupCompleted)
+        const response = yield* Fiber.join(cancelling)
         expect(response).toEqual({
           _tag: "DomainFailure",
           failure: { kind: "cancelled", message: "Cell operation cancelled" },
@@ -410,11 +418,6 @@ describe("Cells", () => {
           attempt: 0,
           response,
         })
-        yield* Deferred.await(cleanupStarted)
-        expect((yield* Deferred.poll(cleanupCompleted))._tag).toBe("None")
-
-        yield* Deferred.succeed(releaseCleanup, undefined)
-        yield* Deferred.await(cleanupCompleted)
         expect(yield* Fiber.join(running)).toEqual(response)
       }),
     ),
@@ -474,7 +477,7 @@ describe("Cells", () => {
     }),
   )
 
-  it.effect("persists the deadline while scoped interruption owns finalizer cleanup", () =>
+  it.effect("returns a deadline after interrupted execution cleanup finishes", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const state = stored()
@@ -503,6 +506,11 @@ describe("Cells", () => {
         )
         yield* Effect.yieldNow
         yield* TestClock.adjust("1 second")
+        yield* Deferred.await(cleanupStarted)
+        expect(executing.pollUnsafe()).toBeUndefined()
+
+        yield* Deferred.succeed(releaseCleanup, undefined)
+        yield* Deferred.await(cleanupCompleted)
         const response = yield* Fiber.join(executing)
         expect(response).toEqual({
           _tag: "DomainFailure",
@@ -513,10 +521,6 @@ describe("Cells", () => {
           attempt: 0,
           response,
         })
-        yield* Deferred.await(cleanupStarted)
-        expect((yield* Deferred.poll(releaseCleanup))._tag).toBe("None")
-        yield* Deferred.succeed(releaseCleanup, undefined)
-        yield* Deferred.await(cleanupCompleted)
       }),
     ),
   )

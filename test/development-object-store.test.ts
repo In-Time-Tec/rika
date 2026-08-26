@@ -1,9 +1,14 @@
 import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { initializeBucket } from "../scripts/development/initialize-object-store"
+import {
+  initializeBucket,
+  isMissingBucket,
+  isRejectedObjectStoreCredential,
+} from "../scripts/development/initialize-object-store"
+import { postgresUnavailableMessage } from "../scripts/development/wait-for-services"
 
-const bucketClient = <E = never>(headFailure?: E) => {
+const bucketClient = <E>(headFailure?: E) => {
   const commands: string[] = []
   return {
     commands,
@@ -19,6 +24,26 @@ const bucketClient = <E = never>(headFailure?: E) => {
     },
   }
 }
+
+it("creates only when object storage proves the bucket is missing", () => {
+  expect(isMissingBucket({ name: "NotFound" })).toBe(true)
+  expect(isMissingBucket({ name: "NoSuchBucket" })).toBe(true)
+  expect(isMissingBucket({ name: "S3ServiceException", $metadata: { httpStatusCode: 404 } })).toBe(true)
+  expect(isMissingBucket({ name: "AccessDenied", $metadata: { httpStatusCode: 403 } })).toBe(false)
+  expect(isMissingBucket({ name: "InternalError", $metadata: { httpStatusCode: 500 } })).toBe(false)
+  expect(isMissingBucket({ name: "NotFound", $metadata: { httpStatusCode: 403 } })).toBe(false)
+  expect(isMissingBucket({ name: "NoSuchBucket", $metadata: { httpStatusCode: 500 } })).toBe(false)
+  expect(isMissingBucket({ name: "NotFound", $metadata: { httpStatusCode: "404" } })).toBe(false)
+  expect(isMissingBucket(new Error("connection refused"))).toBe(false)
+})
+
+it("identifies stale development service credentials without guessing from connectivity failures", () => {
+  expect(isRejectedObjectStoreCredential({ name: "AccessDenied", $metadata: { httpStatusCode: 403 } })).toBe(true)
+  expect(isRejectedObjectStoreCredential({ name: "InvalidAccessKeyId" })).toBe(true)
+  expect(isRejectedObjectStoreCredential({ name: "InternalError", $metadata: { httpStatusCode: 500 } })).toBe(false)
+  expect(postgresUnavailableMessage({ code: "28P01" })).toContain("different Alchemy state")
+  expect(postgresUnavailableMessage({ code: "ECONNREFUSED" })).toBe("PostgreSQL is not ready")
+})
 
 it.effect("does not create a bucket that already exists", () =>
   Effect.gen(function* () {

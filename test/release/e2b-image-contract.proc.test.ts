@@ -197,6 +197,7 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             expect(names.size).toBe(result.checks.length)
             for (const name of [
               "workspace:ready",
+              "machine:workspace-user",
               "kernel:persistence",
               "browser:headless",
               "network:outbound",

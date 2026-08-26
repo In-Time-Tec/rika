@@ -277,7 +277,8 @@ const reduceOverlayImpl = (
           ? { ...cancelled, input: draft.input, cursor: draft.cursor, pastedText: draft.attachments }
           : cancelled
       }
-      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      if (message.turnId !== undefined && model.activeTurnId !== message.turnId)
+        return model.cancelPending ? { ...model, cancelPending: false } : model
       if (!model.busy) return model
       return {
         ...model,

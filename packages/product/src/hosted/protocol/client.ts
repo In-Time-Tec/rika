@@ -52,10 +52,10 @@ export const interactiveEventThreadId = (event: InteractiveEvent): string | unde
     case "ExecutionFailed":
     case "ExecutionControlFailed":
     case "ExecutionControlled":
+    case "SubmissionRejected":
       return event.threadId === undefined ? undefined : String(event.threadId)
     case "ThreadsListed":
     case "AssistantCompleted":
-    case "SubmissionRejected":
       return undefined
   }
 }

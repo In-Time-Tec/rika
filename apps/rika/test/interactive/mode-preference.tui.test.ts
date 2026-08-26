@@ -34,7 +34,7 @@ test(
             ]),
             model.turn([
               model.binding(
-                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 25_000 } },
+                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 10_000 } },
                 "wait-final",
               ),
             ]),
@@ -53,7 +53,7 @@ test(
         expect(cells?.map(({ source }) => source.text)).toEqual([
           `await rika.processes.start({"command":"${command}","timeoutMillis":0})`,
           'await rika.processes.status({"processId":"1","waitMillis":0})',
-          'await rika.processes.status({"processId":"1","waitMillis":25000})',
+          'await rika.processes.status({"processId":"1","waitMillis":10000})',
         ])
         expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain("processId: '1'")
         expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain("running: true")

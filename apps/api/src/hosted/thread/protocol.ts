@@ -744,6 +744,7 @@ export const layerWithOptions = (
                 Effect.gen(function* () {
                   const commandFrames = new Array<ServerFrame>()
                   for (const entry of [...pendingCommands.values()]) {
+                    const notificationGeneration = changes.generation(entry.command.threadId)
                     const refreshed = yield* store
                       .admitCommand({
                         ownerId: entry.command.ownerId,
@@ -763,11 +764,12 @@ export const layerWithOptions = (
                       pendingCommands.set(String(entry.command.commandId), {
                         ...entry,
                         command: refreshed.command,
-                        notificationGeneration: changes.generation(entry.command.threadId),
+                        notificationGeneration,
                       })
                     }
                   }
                   if (current === undefined || attached !== current) return commandFrames
+                  const notificationGeneration = changes.generation(current.threadId)
                   yield* materializeSnapshot(current.authority, current.threadId, current.cursor)
                   let replay = yield* store
                     .replay({
@@ -841,7 +843,7 @@ export const layerWithOptions = (
                     cursor,
                     knownHead: replay.cursor,
                     snapshotFingerprint,
-                    notificationGeneration: changes.generation(current.threadId),
+                    notificationGeneration,
                   }
                   const frames =
                     reset && projectedSnapshot !== undefined

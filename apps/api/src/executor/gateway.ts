@@ -38,6 +38,7 @@ import {
   type WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
 import {
+  Cause,
   Clock,
   Context,
   Crypto,
@@ -46,6 +47,7 @@ import {
   Effect,
   Encoding,
   Layer,
+  Exit,
   Option,
   PubSub,
   Redacted,
@@ -191,20 +193,7 @@ export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGa
   message: Schema.String,
 }) {}
 
-export interface ExecutorDataPlane {
-  readonly receive: (socket: Socket, frame: SocketFrame) => Effect.Effect<void>
-  readonly disconnected: (socket: Socket) => Effect.Effect<void>
-  readonly active: (socket: Socket) => Effect.Effect<boolean>
-  readonly cancel: (assignmentId: string, operationKey: string) => Effect.Effect<void, GatewayError>
-  readonly machine: (
-    assignmentId: string,
-    operationKey: string,
-    attempt: number,
-    request: MachineBindings.Request,
-  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
-}
-
-export interface ExecuteInput {
+export interface OperationIdentity {
   readonly assignmentId: string
   readonly operationKey: string
   readonly workspaceId: string
@@ -217,8 +206,27 @@ export interface ExecuteInput {
   readonly rootRunId: string
   readonly attempt: number
   readonly replayPolicy: "pure" | "provider-idempotent" | "never"
+}
+
+export interface OperationInput extends OperationIdentity {
   readonly admittedAt: string | null
   readonly deadlineAt: string
+}
+
+export interface ExecutorDataPlane {
+  readonly receive: (socket: Socket, frame: SocketFrame) => Effect.Effect<void>
+  readonly disconnected: (socket: Socket) => Effect.Effect<void>
+  readonly active: (socket: Socket) => Effect.Effect<boolean>
+  readonly cancel: (input: OperationIdentity) => Effect.Effect<ExecutionResult, GatewayError>
+  readonly machine: (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+    request: MachineBindings.Request,
+  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
+}
+
+export interface ExecuteInput extends OperationInput {
   readonly bindings: BindingAuthority
 }
 
@@ -257,14 +265,14 @@ export interface LifecycleStore {
     }>,
     GatewayError
   >
-  readonly prepare: (input: ExecuteInput) => Effect.Effect<
+  readonly prepare: (input: OperationInput) => Effect.Effect<
     {
       readonly admittedAt: string | null
       readonly deadlineAt: string
     },
     GatewayError
   >
-  readonly inspect: (input: ExecuteInput) => Effect.Effect<
+  readonly inspect: (input: OperationIdentity) => Effect.Effect<
     {
       readonly state: "accepted" | "dispatched" | "completed" | "unknown"
       readonly started: boolean
@@ -276,8 +284,16 @@ export interface LifecycleStore {
     },
     GatewayError
   >
-  readonly dispatch: (input: ExecuteInput, access: AccessWire) => Effect.Effect<void, GatewayError>
-  readonly resolveDeadline: (input: ExecuteInput) => Effect.Effect<DeadlineResolution, GatewayError>
+  readonly dispatch: (input: OperationInput, access: AccessWire) => Effect.Effect<void, GatewayError>
+  readonly cancel: (
+    input: OperationIdentity,
+  ) => Effect.Effect<
+    | { readonly _tag: "Cancelled"; readonly result: ExecutionResult }
+    | { readonly _tag: "Dispatched" }
+    | { readonly _tag: "AlreadyTerminal"; readonly result: ExecutionResult },
+    GatewayError
+  >
+  readonly resolveDeadline: (input: OperationInput) => Effect.Effect<DeadlineResolution, GatewayError>
 }
 
 export interface PhaseEnvironmentGrant {
@@ -392,6 +408,11 @@ const accessFailure = (error: ControllerError) =>
   })
 
 const expired = () => GatewayError.make({ kind: "fenced", message: "Executor lease expired before work could be sent" })
+
+export const cancelledResponse: CellResponse = {
+  _tag: "DomainFailure",
+  failure: { kind: "cancelled", message: "Cell operation cancelled" },
+}
 
 const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
   switch (message._tag) {
@@ -822,6 +843,40 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
 
+  const retireOperation = Effect.fn("ExecutorGateway.retireOperation")(function* (
+    pendingKey: string,
+    operation: Pick<Pending, "assignmentId" | "operationKey" | "attempt" | "result">,
+  ) {
+    const retired = yield* Ref.modify(pending, (current) => {
+      if (current.get(pendingKey)?.result !== operation.result) return [false, current] as const
+      const next = new Map(current)
+      next.delete(pendingKey)
+      return [true, next] as const
+    })
+    if (!retired) return
+    yield* Effect.all(
+      [
+        Ref.update(terminals, (current) => {
+          const next = new Map(current)
+          next.delete(pendingKey)
+          return next
+        }),
+        Ref.update(frames, (current) => {
+          const next = new Map(current)
+          next.delete(pendingKey)
+          return next
+        }),
+        machineLock.withPermits(1)(
+          Ref.update(machineCalls, (current) => {
+            const prefix = `${operation.assignmentId}\u0000${operation.operationKey}\u0000${operation.attempt}\u0000`
+            return new Map(Array.from(current).filter(([callKey]) => !callKey.startsWith(prefix)))
+          }),
+        ),
+      ],
+      { discard: true },
+    )
+  })
+
   const complete = Effect.fn("ExecutorGateway.complete")(function* (
     socket: Socket,
     access: AccessWire,
@@ -849,6 +904,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (session === undefined || session.socket !== socket || !sameAccess(session.access, operation.access)) return
         if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) {
           yield* Deferred.fail(operation.result, expired())
+          yield* retireOperation(key(assignmentId, operationKey, attempt), operation)
           return
         }
         yield* controller.validateAccess(redactAccess(operation.access)).pipe(
@@ -862,8 +918,35 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
               }),
           }),
         )
+        yield* retireOperation(key(assignmentId, operationKey, attempt), operation)
       }),
     )
+  })
+
+  const settleCancelledOperation = Effect.fn("ExecutorGateway.settleCancelledOperation")(function* (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+  ) {
+    yield* machineLock.withPermits(1)(
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(machineCalls)
+          const next = new Map(current)
+          for (const [mapKey, call] of current) {
+            if (call.assignmentId !== assignmentId || call.operationKey !== operationKey || call.attempt !== attempt)
+              continue
+            yield* Deferred.succeed(call.result, { _tag: "Cancelled" })
+            next.delete(mapKey)
+          }
+          yield* Ref.set(machineCalls, next)
+        }),
+      ),
+    )
+    const operation = (yield* Ref.get(pending)).get(key(assignmentId, operationKey, attempt))
+    if (operation === undefined) return
+    const calls = [...(yield* Ref.get(operation.bindingCalls)).values()]
+    yield* Effect.forEach(calls, (call) => Deferred.await(call.result), { concurrency: "unbounded", discard: true })
   })
 
   const persistLifecycle = Effect.fn("ExecutorGateway.persistLifecycle")(function* (
@@ -930,6 +1013,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             cellId: attribution.toolCallId,
           })
         if (frame._tag === "Terminal") {
+          if ((disposition._tag === "AlreadyTerminal" ? disposition.result.outcome : frame.outcome) === "cancelled")
+            yield* settleCancelledOperation(assignmentId, attribution.operationKey, attribution.attempt)
           if (disposition._tag === "Appended" && frame.outcome !== "unknown") {
             let outcome: "success" | "interrupted" | "failure" = "failure"
             if (frame.outcome === "completed") outcome = "success"
@@ -2052,36 +2137,17 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         return created
       }),
     )
-    const removePending = admission.withPermits(1)(
-      Effect.all(
-        [
-          Ref.update(pending, (current) => {
-            const known = current.get(pendingKey)
-            if (known === undefined || known.result !== operation.result) return current
-            const next = new Map(current)
-            if (known.waiters === 1) next.delete(pendingKey)
-            else next.set(pendingKey, { ...known, waiters: known.waiters - 1 })
-            return next
-          }),
-          Ref.update(terminals, (current) => {
-            const next = new Map(current)
-            next.delete(pendingKey)
-            return next
-          }),
-          Ref.update(frames, (current) => {
-            const next = new Map(current)
-            next.delete(pendingKey)
-            return next
-          }),
-          machineLock.withPermits(1)(
-            Ref.update(machineCalls, (current) => {
-              const prefix = `${request.assignmentId}\u0000${request.operationKey}\u0000${request.attempt}\u0000`
-              return new Map(Array.from(current).filter(([callKey]) => !callKey.startsWith(prefix)))
-            }),
-          ),
-        ],
-        { discard: true },
-      ),
+    const releaseWaiter = admission.withPermits(1)(
+      Effect.gen(function* () {
+        const retire = yield* Ref.modify(pending, (current) => {
+          const known = current.get(pendingKey)
+          if (known === undefined || known.result !== operation.result) return [false, current] as const
+          if (known.waiters > 1)
+            return [false, new Map(current).set(pendingKey, { ...known, waiters: known.waiters - 1 })] as const
+          return [true, current] as const
+        })
+        if (retire) yield* retireOperation(pendingKey, operation)
+      }),
     )
     const sendCancel = Effect.try({
       try: () =>
@@ -2101,24 +2167,49 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (Option.isSome(completed)) return Effect.succeed(completed.value)
         return resolveDeadline().pipe(Effect.tap((result) => (result.outcome === "unknown" ? sendCancel : Effect.void)))
       }),
-      Effect.ensuring(removePending),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : releaseWaiter,
+      ),
     )
   })
 
-  const cancel = Effect.fn("ExecutorGateway.cancel")(function* (assignmentId: string, operationKey: string) {
-    const operation = [...(yield* Ref.get(pending)).values()].find(
-      (candidate) => candidate.assignmentId === assignmentId && candidate.operationKey === operationKey,
-    )
-    const session = (yield* Ref.get(sessions)).get(assignmentId)
-    if (operation === undefined || session === undefined || operation.socket !== session.socket)
-      return yield* GatewayError.make({ kind: "disconnected", message: "Executor operation is not running" })
-    yield* Effect.try({
-      try: () =>
-        session.socket.send(
-          encode({ _tag: "CellCancel", access: session.access, operationKey, attempt: operation.attempt }),
-        ),
-      catch: () => GatewayError.make({ kind: "transport", message: "Could not cancel executor operation" }),
-    })
+  const cancel = Effect.fn("ExecutorGateway.cancel")(function* (input: OperationIdentity) {
+    const resolution = yield* lifecycle.cancel(input)
+    if (resolution._tag !== "Dispatched") return resolution.result
+    const pendingKey = key(input.assignmentId, input.operationKey, input.attempt)
+    const awaitTerminal = (sentTo?: Socket): Effect.Effect<ExecutionResult, GatewayError> =>
+      Effect.gen(function* () {
+        const durable = yield* lifecycle.inspect(input)
+        const terminal = yield* durableResult(durable)
+        if (terminal !== undefined) return terminal
+        const session = (yield* Ref.get(sessions)).get(input.assignmentId)
+        const nextSocket = session === undefined || !session.ready ? sentTo : session.socket
+        if (session !== undefined && session.ready && session.socket !== sentTo) {
+          yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+          yield* Effect.try({
+            try: () =>
+              session.socket.send(
+                encode({
+                  _tag: "CellCancel",
+                  access: session.access,
+                  operationKey: input.operationKey,
+                  attempt: input.attempt,
+                }),
+              ),
+            catch: () => GatewayError.make({ kind: "transport", message: "Could not cancel executor operation" }),
+          })
+        }
+        const pendingOperation = (yield* Ref.get(pending)).get(pendingKey)
+        if (pendingOperation !== undefined) {
+          const completed = yield* Effect.raceFirst(
+            Deferred.await(pendingOperation.result).pipe(Effect.map(Option.some)),
+            Effect.sleep("100 millis").pipe(Effect.as(Option.none<ExecutionResult>())),
+          )
+          if (Option.isSome(completed)) return completed.value
+        } else yield* Effect.sleep("100 millis")
+        return yield* awaitTerminal(nextSocket)
+      })
+    return yield* awaitTerminal()
   })
 
   const machine = Effect.fn("ExecutorGateway.machine")(function* (
@@ -2229,15 +2320,20 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       if (current === undefined || current.socket !== socket) return false
       return yield* controller.validateAccess(redactAccess(current.access)).pipe(
         Effect.matchEffect({
-          onFailure: (error) =>
-            Effect.logError("executor-gateway.authority-invalid").pipe(
+          onFailure: (error) => {
+            const log =
+              error.kind === "repository"
+                ? Effect.logWarning("executor-gateway.authority-unavailable")
+                : Effect.logError("executor-gateway.authority-invalid")
+            return log.pipe(
               Effect.annotateLogs({
                 "rika.executor.assignment.id": assignmentId,
                 "rika.error.kind": error.kind,
                 "rika.error.message": error.message,
               }),
-              Effect.as(false),
-            ),
+              Effect.as(error.kind === "repository"),
+            )
+          },
           onSuccess: () => Effect.succeed(true),
         }),
       )

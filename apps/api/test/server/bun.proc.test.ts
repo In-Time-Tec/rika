@@ -96,6 +96,7 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     admitRunner: () => Effect.die("unused"),
     admitRun: () => Effect.die("unused"),
     run: () => Effect.die("unused"),
+    cancel: () => Effect.die("unused"),
     pause: () => Effect.die("unused"),
     resume: () => Effect.die("unused"),
     replace: () => Effect.die("unused"),
@@ -205,7 +206,7 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
         }).pipe(Effect.tap(() => (socket === oldSocket ? Deferred.succeed(oldDisconnected, undefined) : Effect.void))),
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
-      cancel: () => Effect.void,
+      cancel: () => Effect.die("unused"),
       machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),
@@ -254,6 +255,67 @@ it.effect("keeps Runner reverse receives alive after their WebSocket disconnects
   verifiesSessionReplacement("runners"),
 )
 
+const verifiesDurableReceive = (frame: "CellLifecycle" | "CellResult") =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const completed = yield* Deferred.make<void>()
+    const disconnected = yield* Deferred.make<void>()
+    let interrupted = false
+    const gateway: Gateway = {
+      receive: () =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(Deferred.succeed(completed, undefined)),
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              interrupted = true
+            }),
+          ),
+        ),
+      disconnected: () => Deferred.succeed(disconnected, undefined),
+      active: () => Effect.succeed(true),
+      execute: () => Effect.die("unused"),
+      cancel: () => Effect.die("unused"),
+      machine: () => Effect.die("unused"),
+      workspace: () => Effect.die("unused"),
+      sendPty: () => Effect.die("unused"),
+      ptyEvents: () => Stream.empty,
+      retryPreparation: () => Effect.void,
+      quiesce: () => Effect.die("unused"),
+      pushBranch: () => Effect.die("unused"),
+    }
+    const resourceScope = yield* Scope.make()
+    const running = yield* serveApi({ config, dependencies: dependencies(gateway) }).pipe(
+      Effect.provideService(Scope.Scope, resourceScope),
+    )
+    const connected = yield* connect(`ws://127.0.0.1:${running.server.port}/api/v1/executors`)
+    const message = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Struct({ _tag: Schema.String })))({
+      _tag: frame,
+    })
+    yield* connected.send(message)
+    yield* Deferred.await(started)
+    yield* connected.close
+    yield* Effect.yieldNow
+
+    expect(interrupted).toBe(false)
+    expect((yield* Deferred.poll(disconnected))._tag).toBe("None")
+
+    yield* Deferred.succeed(release, undefined)
+    yield* Deferred.await(completed)
+    yield* Deferred.await(disconnected)
+    expect(interrupted).toBe(false)
+    yield* Scope.close(resourceScope, Exit.void)
+  })
+
+it.effect("finishes Cell lifecycle persistence before disconnecting its WebSocket session", () =>
+  verifiesDurableReceive("CellLifecycle"),
+)
+
+it.effect("finishes Cell result delivery before disconnecting its WebSocket session", () =>
+  verifiesDurableReceive("CellResult"),
+)
+
 it.effect("gives reverse-channel receives a bounded graceful server shutdown", () =>
   Effect.gen(function* () {
     const terminalized = yield* Deferred.make<void>()
@@ -273,7 +335,7 @@ it.effect("gives reverse-channel receives a bounded graceful server shutdown", (
       disconnected: () => Effect.void,
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
-      cancel: () => Effect.void,
+      cancel: () => Effect.die("unused"),
       machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),
@@ -343,7 +405,7 @@ it.effect("race-closes admission and forces bounded shutdown after session clean
       disconnected: () => Effect.void,
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
-      cancel: () => Effect.void,
+      cancel: () => Effect.die("unused"),
       machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),

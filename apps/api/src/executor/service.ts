@@ -35,12 +35,14 @@ import { bindingManifest, CellResponse, type CellResponse as CellResponseValue }
 import { HostBindingRegistry } from "tenetkit/repl"
 import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import {
+  cancelledResponse,
   ExecutorGateway,
   GatewayError,
   gatewayLayer,
   type ExecutionResult,
   type Gateway,
   type LifecycleStore,
+  type OperationIdentity,
 } from "./gateway"
 import { HostedEnvironment } from "../hosted/environment/runtime"
 import type { AuthenticatedPrincipal } from "../hosted/product"
@@ -228,6 +230,9 @@ export interface Runtime {
     },
     ControllerError | GatewayError
   >
+  readonly cancel: (
+    input: Omit<OperationIdentity, "assignmentId">,
+  ) => Effect.Effect<ExecutionResult, ControllerError | GatewayError>
   readonly ready: Effect.Effect<void, ControllerError>
   readonly pause: (key: AssignmentKey) => Effect.Effect<void, ControllerError | GatewayError>
   readonly resume: (key: AssignmentKey) => Effect.Effect<void, ControllerError>
@@ -276,6 +281,43 @@ export const service = Layer.effect(
       _tag: "DomainFailure",
       failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
     }
+    const identifyOperation = (input: OperationIdentity) =>
+      crypto
+        .digest(
+          "SHA-256",
+          new TextEncoder().encode(
+            encodeOperationIdentity({
+              workspaceId: input.workspaceId,
+              sessionId: input.sessionId,
+              threadId: input.threadId,
+              turnId: input.turnId,
+              runId: input.runId,
+              rootRunId: input.rootRunId,
+              toolCallId: input.toolCallId,
+              code: input.code,
+              attempt: input.attempt,
+              replayPolicy: input.replayPolicy,
+            }),
+          ),
+        )
+        .pipe(
+          Effect.map(Encoding.encodeHex),
+          Effect.mapError(() =>
+            GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
+          ),
+        )
+    const matchesOperation = (input: OperationIdentity, row: OperationRecord, digest: string) =>
+      row.requestDigest === digest &&
+      row.workspaceId === input.workspaceId &&
+      row.sessionId === input.sessionId &&
+      row.threadId === input.threadId &&
+      row.turnId === input.turnId &&
+      row.runId === input.runId &&
+      row.rootRunId === input.rootRunId &&
+      row.toolCallId === input.toolCallId &&
+      row.code === input.code &&
+      row.attempt === input.attempt &&
+      row.replayPolicy === input.replayPolicy
     const terminalResult = Effect.fn("Executor.terminalResult")(function* (
       row: Pick<OperationRecord, "response" | "terminalOutcome">,
     ): Effect.fn.Return<ExecutionResult, GatewayError> {
@@ -414,44 +456,11 @@ export const service = Layer.effect(
         operations.replayQueue(assignmentId).pipe(persistenceFailure("Could not load executor replay queue")),
       prepare: (input) =>
         Effect.gen(function* () {
-          const encoded = encodeOperationIdentity({
-            workspaceId: input.workspaceId,
-            sessionId: input.sessionId,
-            threadId: input.threadId,
-            turnId: input.turnId,
-            runId: input.runId,
-            rootRunId: input.rootRunId,
-            toolCallId: input.toolCallId,
-            code: input.code,
-            attempt: input.attempt,
-            replayPolicy: input.replayPolicy,
-          })
-          const requestDigest = Encoding.encodeHex(
-            yield* crypto
-              .digest("SHA-256", new TextEncoder().encode(encoded))
-              .pipe(
-                Effect.mapError(() =>
-                  GatewayError.make({ kind: "transport", message: "Could not identify executor operation" }),
-                ),
-              ),
-          )
+          const requestDigest = yield* identifyOperation(input)
           const row = yield* operations
             .upsertOperation({ ...input, requestDigest })
             .pipe(persistenceFailure("Could not persist executor operation"))
-          if (
-            row === undefined ||
-            row.requestDigest !== requestDigest ||
-            row.workspaceId !== input.workspaceId ||
-            row.sessionId !== input.sessionId ||
-            row.threadId !== input.threadId ||
-            row.turnId !== input.turnId ||
-            row.runId !== input.runId ||
-            row.rootRunId !== input.rootRunId ||
-            row.toolCallId !== input.toolCallId ||
-            row.code !== input.code ||
-            row.attempt !== input.attempt ||
-            row.replayPolicy !== input.replayPolicy
-          )
+          if (row === undefined || !matchesOperation(input, row, requestDigest))
             return yield* GatewayError.make({
               kind: "fenced",
               message: "Executor operation key conflicts with a different request",
@@ -494,6 +503,41 @@ export const service = Layer.effect(
               return GatewayError.make({ kind: "fenced", message: "Executor dispatch fence is no longer current" })
             }),
           ),
+      cancel: (input) =>
+        Effect.gen(function* () {
+          const digest = yield* identifyOperation(input)
+          const current = yield* operations
+            .findOperation(input)
+            .pipe(persistenceFailure("Could not cancel executor operation"))
+          if (current === undefined)
+            return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
+          if (!matchesOperation(input, current, digest))
+            return yield* GatewayError.make({
+              kind: "fenced",
+              message: "Executor operation key conflicts with a different request",
+            })
+          if (current.state === "completed" || current.state === "unknown")
+            return { _tag: "AlreadyTerminal", result: yield* terminalResult(current) } as const
+          if (current.state === "dispatched") return { _tag: "Dispatched" } as const
+          const terminalized = yield* operations
+            .terminalizeAccepted(input, cancelledResponse, "cancelled")
+            .pipe(persistenceFailure("Could not cancel executor operation"))
+          if (terminalized !== undefined)
+            return {
+              _tag: "Cancelled",
+              result: { response: cancelledResponse, outcome: "cancelled" },
+            } as const
+          const changed = yield* operations
+            .findOperation(input)
+            .pipe(persistenceFailure("Could not cancel executor operation"))
+          if (changed?.state === "completed" || changed?.state === "unknown")
+            return { _tag: "AlreadyTerminal", result: yield* terminalResult(changed) } as const
+          if (changed?.state === "dispatched") return { _tag: "Dispatched" } as const
+          return yield* GatewayError.make({
+            kind: "fenced",
+            message: "Executor operation changed before cancellation",
+          })
+        }),
       resolveDeadline: (input) =>
         Effect.gen(function* () {
           const row = yield* operations
@@ -506,7 +550,7 @@ export const service = Layer.effect(
           if (row.state === "dispatched")
             return { _tag: "Resolved", result: { response: unknownResponse, outcome: "unknown" } } as const
           const timedOut = yield* operations
-            .timeoutAccepted(input, timeoutResponse)
+            .terminalizeAccepted(input, timeoutResponse, "failed")
             .pipe(persistenceFailure("Could not resolve executor operation deadline"))
           if (timedOut === undefined) {
             const current = yield* operations
@@ -885,6 +929,25 @@ export const service = Layer.effect(
             return { ...result, eventPersisted: false as const }
           }),
         )
+      }),
+      cancel: Effect.fn("Executor.cancel")(function* (input) {
+        const assignment = yield* assignments
+          .getForThread(ThreadId.make(input.threadId))
+          .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
+        if (assignment === undefined)
+          return yield* ControllerError.make({
+            kind: "assignment-missing",
+            message: "Executor assignment is unavailable",
+          })
+        if (assignment.workspaceId !== input.workspaceId)
+          return yield* ControllerError.make({
+            kind: "fenced",
+            message: "Executor workspace identity does not match the assignment",
+          })
+        const request = { assignmentId: assignment.id, ...input }
+        return assignment.placement._tag === "RunnerPlacement"
+          ? yield* runnerGateway.cancel(request)
+          : yield* gateway.cancel(request)
       }),
       pause: (key) =>
         gateway.quiesce(key.assignmentId).pipe(

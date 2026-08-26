@@ -212,6 +212,27 @@ export const layer = (options: { readonly encryptionKey: Redacted.Redacted<strin
               provider: input.provider,
               actorUserId: input.principal.userId,
               encrypted: cipher.encrypt(`${ownerId}/${input.provider}`, input.apiKey),
+              matches: (current) => {
+                if (
+                  current.status !== "active" ||
+                  current.keyVersion !== 1 ||
+                  current.nonce === null ||
+                  current.ciphertext === null ||
+                  current.authenticationTag === null
+                )
+                  return false
+                try {
+                  const stored = cipher.decrypt(`${ownerId}/${input.provider}`, {
+                    keyVersion: 1,
+                    nonce: current.nonce,
+                    ciphertext: current.ciphertext,
+                    authenticationTag: current.authenticationTag,
+                  })
+                  return Redacted.value(stored) === Redacted.value(input.apiKey)
+                } catch {
+                  return false
+                }
+              },
               now: yield* now,
             })
             .pipe(Effect.mapError(mapDatabaseError))

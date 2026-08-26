@@ -7,6 +7,7 @@ import {
   FilesystemCheckpoint,
   ExecutorMessage,
   BranchPushRequest,
+  MachineOutcome,
   RunnerMessage,
 } from "../../src/protocol/messages"
 import { workspaceCapabilities } from "../support/workspace-capabilities"
@@ -21,6 +22,12 @@ const fence = {
 }
 
 describe("executor protocol v1", () => {
+  it.effect("represents a machine call definitively cancelled with its parent Cell", () =>
+    Effect.gen(function* () {
+      expect(yield* Schema.decodeEffect(MachineOutcome)({ _tag: "Cancelled" })).toEqual({ _tag: "Cancelled" })
+    }),
+  )
+
   it.effect("accepts both execution targets and rejects every other protocol version", () =>
     Effect.gen(function* () {
       const decode = Schema.decodeUnknownEffect(ExecutorMessage)

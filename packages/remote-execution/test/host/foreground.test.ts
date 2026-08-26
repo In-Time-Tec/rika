@@ -375,6 +375,26 @@ describe.sequential("foreground Runner", () => {
                 .filter((message) => message.frame.attribution.operationKey === "operation-cancel")
                 .map((message) => message.frame._tag),
             ).toEqual(["Accepted", "Started", "Terminal"])
+            socket.message({
+              _tag: "MachineExecute",
+              access,
+              operationKey: "operation-cancel",
+              attempt: 0,
+              machineId: "call-cancel:late",
+              requestDigest: "a".repeat(64),
+              request: {
+                _tag: "CodingTool",
+                request: { _tag: "Write", path: "forbidden-after-cancel.txt", content: "must-not-land" },
+              },
+            })
+            const fencedMachine = yield* eventually(() =>
+              socket.messages("MachineResult").find((message) => message.machineId === "call-cancel:late"),
+            )
+            expect(fencedMachine.outcome).toEqual({
+              _tag: "Fenced",
+              message: "Parent Cell is no longer running",
+            })
+            expect(yield* fileSystem.exists(`${workspacePath}/forbidden-after-cancel.txt`)).toBe(false)
             const deadlineRequest = {
               ...request,
               operationKey: "operation-deadline",

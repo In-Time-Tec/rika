@@ -376,6 +376,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
     submissionId?: string,
   ) {
     let observerTurn: Turn.Turn | undefined
+    let submissionThreadId: Thread.ThreadId | undefined
     let executionLaunched = false
     let created = false
     const program = Effect.gen(function* () {
@@ -390,6 +391,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
         })
         created = true
       }
+      submissionThreadId = thread.id
       const turns = yield* TurnRepository.Service
       if (thread.title === "New thread" && (yield* turns.list(thread.id)).length === 1) {
         const renamed = yield* threads.renameIfTitle(
@@ -446,6 +448,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
               selectionEpoch: 0,
               message: OperationFailure.makeFailure(error).message,
             }
+            if (submissionThreadId !== undefined) event = { ...event, threadId: submissionThreadId }
             if (submissionId !== undefined) event = { ...event, submissionId }
             emitEvent(input, dispatch, event)
           }),

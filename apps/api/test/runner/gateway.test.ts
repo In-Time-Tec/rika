@@ -1,9 +1,34 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
-import { identityMigrations, runMigration } from "@rika/identity"
-import { ActorAttribution } from "@rika/product/hosted-model"
-import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import {
+  cliRegistration,
+  identityMember,
+  identityMigrations,
+  oauthClient,
+  identityOrganization,
+  identityUser,
+  runMigration,
+} from "@rika/identity"
+import {
+  rikaHostedClients,
+  rikaHostedDevices,
+  rikaHostedExecutorAssignments,
+  rikaHostedExecutorOperations,
+  rikaHostedOwnerCounters,
+  rikaHostedOwners,
+  rikaHostedProjects,
+  rikaHostedRunnerAdmissions,
+  rikaHostedRunnerRegistrations,
+  rikaHostedThreadCommands,
+  rikaHostedThreadEvents,
+  rikaHostedThreads,
+  rikaHostedWorkspaceCapabilityAdmissions,
+  rikaHostedWorkspaces,
+  rikaThreads,
+  rikaTurns,
+  rikaWorkspaces,
+} from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/layer"
 import {
@@ -15,6 +40,9 @@ import {
 } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
+import { and, count, eq, sql } from "drizzle-orm"
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
+import { type PgInsertValue } from "drizzle-orm/pg-core"
 import { FileSystem, Config, Context, Deferred, Effect, Fiber, Layer, Random, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { createHash } from "node:crypto"
@@ -35,8 +63,6 @@ const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
 const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const bindingRequestDigest = (request: BindingRequest) =>
   createHash("sha256").update(encodeBindingRequest(request)).digest("hex")
-const encodeActor = Schema.encodeUnknownSync(Schema.fromJsonString(ActorAttribution))
-const encodeWorkspaceCapabilities = Schema.encodeUnknownSync(Schema.fromJsonString(WorkspaceCapabilitySnapshot))
 const code = 'printf "restart"'
 const emptyCellContext = Effect.runSync(CellAuthority.capture())
 const bindings: BindingAuthority = {
@@ -105,6 +131,10 @@ const access: AccessWire = {
 const response = {
   _tag: "Success" as const,
   result: { stdout: "restart", stderr: "", exitCode: 0 },
+}
+const cancelledResponse = {
+  _tag: "DomainFailure" as const,
+  failure: { kind: "cancelled" as const, message: "Cell operation was cancelled" },
 }
 const environmentDigest = `sha256:${"0".repeat(64)}`
 const workspaceCapabilities = {
@@ -204,19 +234,16 @@ const migrate = (url: string) =>
   Effect.gen(function* () {
     const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
     for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+      const migrationSql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
         fileSystem.readFileString(migration.url.pathname),
       )
-      yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
+      yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql: migrationSql })
     }
     return pool
   })
 
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
-
 const seed = (
-  pool: Pool,
+  databaseClient: NodePgDatabase,
   operationKey: string,
   options?: {
     readonly ownerKind?: "organization" | "personal"
@@ -232,149 +259,207 @@ const seed = (
     const digest = operationDigest(cellRequest(operationKey, deadlineAt))
     const ownerKind = options?.ownerKind ?? "organization"
     const ownerId = `${ownerKind}-owner-local-gateway`
-    yield* query(
-      pool,
-      `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES ('user-local-gateway', 'Local', 'local-gateway@example.test', true, now(), now())`,
+    const now = sql`transaction_timestamp()`
+    const future = sql`transaction_timestamp() + interval '5 minutes'`
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(identityUser).values({
+        id: "user-local-gateway",
+        name: "Local",
+        email: "local-gateway@example.test",
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      }),
     )
     if (ownerKind === "organization") {
-      yield* query(
-        pool,
-        `INSERT INTO "organization" (id, name, slug, created_at)
-        VALUES ('organization-local-gateway', 'Local', 'local-gateway', now())`,
+      yield* Effect.tryPromise(() =>
+        databaseClient.insert(identityOrganization).values({
+          id: "organization-local-gateway",
+          name: "Local",
+          slug: "local-gateway",
+          createdAt: now,
+        }),
       )
-      yield* query(
-        pool,
-        `INSERT INTO member (id, organization_id, user_id, role, created_at)
-        VALUES ('member-local-gateway', 'organization-local-gateway', 'user-local-gateway', 'owner', now())`,
+      yield* Effect.tryPromise(() =>
+        databaseClient.insert(identityMember).values({
+          id: "member-local-gateway",
+          organizationId: "organization-local-gateway",
+          userId: "user-local-gateway",
+          role: "owner",
+          createdAt: now,
+        }),
       )
     }
-    yield* query(
-      pool,
-      `INSERT INTO oauth_client (id, client_id, redirect_uris, created_at)
-      VALUES ('oauth-local-gateway', 'client-local-gateway', '[]'::jsonb, now())`,
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(oauthClient).values({
+        id: "oauth-local-gateway",
+        clientId: "client-local-gateway",
+        redirectUris: [],
+        createdAt: now,
+      }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO rika_cli_registration (client_id, device_id, public_jwk, jwk_thumbprint, user_id)
-      VALUES ('client-local-gateway', $1::uuid,
-        '{"kty":"EC","crv":"P-256","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","y":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}',
-        'thumbprint-local-gateway', 'user-local-gateway')`,
-      [deviceId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_owners (id, kind, user_id, organization_id)
-      VALUES ($1, $2, CASE WHEN $2 = 'personal' THEN 'user-local-gateway' END,
-        CASE WHEN $2 = 'organization' THEN 'organization-local-gateway' END)`,
-      [ownerId, ownerKind],
-    )
-    yield* query(pool, `INSERT INTO rika_hosted_owner_counters (owner_id) VALUES ($1)`, [ownerId])
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_projects
-      (id, owner_id, name, created_by_user_id, created_at, updated_at)
-      VALUES ('project-local-gateway', $1, 'Local', 'user-local-gateway', now(), now())`,
-      [ownerId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_workspaces
-      (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-      VALUES ('workspace-local-gateway', $1, 'project-local-gateway',
-        'user-local-gateway', 'runner', false, now())`,
-      [ownerId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_threads
-      (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind,
-        inherit_project_grants, next_command_sequence, next_event_sequence, created_at)
-      VALUES ('thread-local-gateway', $1, 'project-local-gateway',
-        'workspace-local-gateway', 'user-local-gateway', 'runner', false, 2, 1, now())`,
-      [ownerId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_workspaces (owner_id, path, created_at)
-      VALUES ($1, 'workspace-local-gateway', 1)`,
-      [ownerId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-      VALUES ('thread-local-gateway', $1, 'workspace-local-gateway', 'Local', 1, 1)`,
-      [ownerId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_turns
-      (id, thread_id, prompt, status, created_at, updated_at, execution_route_json)
-      VALUES ('turn-local-gateway', 'thread-local-gateway', 'restart', 'accepted', 1, 1, '{}')`,
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_devices
-      (id, user_id, display_name, public_key_fingerprint, created_at, last_seen_at)
-      VALUES ($1, 'user-local-gateway', 'Local', 'sha256:local-gateway', now(), now())`,
-      [deviceId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_clients
-      (id, user_id, device_id, authenticated_at, last_seen_at, expires_at)
-      VALUES ('client-local-gateway', 'user-local-gateway', $1, now(), now(), now() + interval '5 minutes')`,
-      [deviceId],
-    )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_executor_assignments
-      (id, owner_id, thread_id, executor_kind, placement, checkout, generation, revision,
-        last_lease_epoch, lifecycle, provider_instance_id, executor_instance_id, process_incarnation,
-        session_digest, lease_epoch, lease_expires_at, last_active_at, created_at, updated_at, workspace_id,
-        capability_generation, capability_snapshot)
-      VALUES ('assignment-local-gateway', $4, 'thread-local-gateway', 'runner',
-        '{"_tag":"RunnerPlacement","deviceId":"11111111-1111-4111-8111-111111111111"}'::jsonb, NULL, 1, 1, 1, 'active',
-        $1, 'executor-local-gateway', 'process-local-gateway', $2, 1,
-        CASE WHEN $3 = 'past' THEN now() - interval '1 second' ELSE now() + interval '5 minutes' END,
-        now(), now(), now(), 'workspace-local-gateway', 1, $5::jsonb)`,
-      [
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(cliRegistration).values({
+        clientId: "client-local-gateway",
         deviceId,
-        sessionDigest,
-        options?.leaseExpires ?? "future",
+        publicJwk: {
+          kty: "EC",
+          crv: "P-256",
+          x: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          y: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
+        jwkThumbprint: "thumbprint-local-gateway",
+        userId: "user-local-gateway",
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedOwners).values({
+        id: ownerId,
+        kind: ownerKind,
+        userId: ownerKind === "personal" ? "user-local-gateway" : null,
+        organizationId: ownerKind === "organization" ? "organization-local-gateway" : null,
+      }),
+    )
+    yield* Effect.tryPromise(() => databaseClient.insert(rikaHostedOwnerCounters).values({ ownerId }))
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedProjects).values({
+        id: "project-local-gateway",
         ownerId,
-        encodeWorkspaceCapabilities(workspaceCapabilities),
-      ],
+        name: "Local",
+        createdByUserId: "user-local-gateway",
+        createdAt: now,
+        updatedAt: now,
+      }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_runner_admissions
-      (id, assignment_id, owner_id, device_id, client_id, user_id, process_incarnation,
-        generation, workspace_fingerprint, ticket_digest, expires_at, consumed_at)
-      VALUES ('admission-local-gateway', 'assignment-local-gateway', $2, $1,
-        'client-local-gateway', 'user-local-gateway', 'process-local-gateway',
-        1, 'workspace-binding', 'ticket-digest', now() + interval '5 minutes', now())`,
-      [deviceId, ownerId],
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedWorkspaces).values({
+        id: "workspace-local-gateway",
+        ownerId,
+        projectId: "project-local-gateway",
+        createdByUserId: "user-local-gateway",
+        executorKind: "runner",
+        inheritProjectGrants: false,
+        createdAt: now,
+      }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_workspace_capability_admissions
-      (thread_id, turn_id, assignment_id, workspace_id, assignment_generation,
-        environment_digest, required_capabilities)
-      VALUES ('thread-local-gateway', 'turn-local-gateway', 'assignment-local-gateway',
-        'workspace-local-gateway', 1, $1, '["filesystem","typescriptKernel","git","process","workspaceLifecycle"]')`,
-      [environmentDigest],
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedThreads).values({
+        id: "thread-local-gateway",
+        ownerId,
+        projectId: "project-local-gateway",
+        workspaceId: "workspace-local-gateway",
+        createdByUserId: "user-local-gateway",
+        executorKind: "runner",
+        inheritProjectGrants: false,
+        nextCommandSequence: 2,
+        nextEventSequence: 1,
+        createdAt: now,
+      }),
     )
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_thread_commands
-      (owner_id, thread_id, command_id, idempotency_key, actor, sequence, commit_cursor, command, admitted_at,
-        turn_id, admission_status)
-      VALUES ($3, 'thread-local-gateway', $1 || '-command', $1 || '-submission', $2::jsonb,
-        1, 1, '{"_tag":"SubmitPrompt","prompt":"restart"}', now(), 'turn-local-gateway', 'accepted')`,
-      [
-        operationKey,
-        encodeActor(
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaWorkspaces).values({ ownerId, path: "workspace-local-gateway", createdAt: 1 }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaThreads).values({
+        id: "thread-local-gateway",
+        ownerId,
+        workspace: "workspace-local-gateway",
+        title: "Local",
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaTurns).values({
+        id: "turn-local-gateway",
+        threadId: "thread-local-gateway",
+        prompt: "restart",
+        status: "accepted",
+        createdAt: 1,
+        updatedAt: 1,
+        executionRouteJson: "{}",
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedDevices).values({
+        id: deviceId,
+        userId: "user-local-gateway",
+        displayName: "Local",
+        publicKeyFingerprint: "sha256:local-gateway",
+        createdAt: now,
+        lastSeenAt: now,
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedClients).values({
+        id: "client-local-gateway",
+        userId: "user-local-gateway",
+        deviceId,
+        authenticatedAt: now,
+        lastSeenAt: now,
+        expiresAt: future,
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedExecutorAssignments).values({
+        id: assignmentId,
+        ownerId,
+        threadId,
+        executorKind: "runner",
+        placement: { _tag: "RunnerPlacement", deviceId },
+        checkout: null,
+        generation: 1,
+        revision: 1,
+        lastLeaseEpoch: 1,
+        lifecycle: "active",
+        providerInstanceId: deviceId,
+        executorInstanceId: "executor-local-gateway",
+        processIncarnation: "process-local-gateway",
+        sessionDigest,
+        leaseEpoch: 1,
+        leaseExpiresAt: options?.leaseExpires === "past" ? sql`transaction_timestamp() - interval '1 second'` : future,
+        lastActiveAt: now,
+        createdAt: now,
+        updatedAt: now,
+        workspaceId: "workspace-local-gateway",
+        capabilityGeneration: 1,
+        capabilitySnapshot: workspaceCapabilities,
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedRunnerAdmissions).values({
+        id: "admission-local-gateway",
+        assignmentId,
+        ownerId,
+        deviceId,
+        clientId: "client-local-gateway",
+        userId: "user-local-gateway",
+        processIncarnation: "process-local-gateway",
+        generation: 1,
+        workspaceFingerprint: "workspace-binding",
+        ticketDigest: "ticket-digest",
+        expiresAt: future,
+        consumedAt: now,
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedWorkspaceCapabilityAdmissions).values({
+        threadId,
+        turnId: "turn-local-gateway",
+        assignmentId,
+        workspaceId: "workspace-local-gateway",
+        assignmentGeneration: 1,
+        environmentDigest,
+        requiredCapabilities: ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"],
+      }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedThreadCommands).values({
+        ownerId,
+        threadId,
+        commandId: `${operationKey}-command`,
+        idempotencyKey: `${operationKey}-submission`,
+        actor:
           ownerKind === "personal"
             ? {
                 _tag: "PersonalActor",
@@ -391,48 +476,67 @@ const seed = (
                 clientId: "client-local-gateway",
                 deviceId,
               },
-        ),
-        ownerId,
-      ],
+        sequence: 1,
+        commitCursor: 1,
+        command: { _tag: "SubmitPrompt", prompt: "restart" },
+        admittedAt: now,
+        turnId: "turn-local-gateway",
+        admissionStatus: "accepted",
+      }),
     )
-    yield* query(pool, `UPDATE rika_hosted_owner_counters SET next_commit_cursor = 2 WHERE owner_id = $1`, [ownerId])
+    yield* Effect.tryPromise(() =>
+      databaseClient
+        .update(rikaHostedOwnerCounters)
+        .set({ nextCommitCursor: 2 })
+        .where(eq(rikaHostedOwnerCounters.ownerId, ownerId)),
+    )
+    const operation: PgInsertValue<typeof rikaHostedExecutorOperations> = {
+      assignmentId,
+      ownerId,
+      operationKey,
+      requestDigest: digest,
+      workspaceId: "workspace-local-gateway",
+      sessionId: assignmentId,
+      threadId,
+      turnId: "turn-local-gateway",
+      runId: "run-local-gateway",
+      rootRunId: "run-local-gateway",
+      toolCallId: "call-local-gateway",
+      code,
+      attempt: 0,
+      replayPolicy: "pure",
+      deadlineAt: sql`${deadlineAt}::timestamptz`,
+      updatedAt: now,
+    }
     if (state === "accepted") {
-      yield* query(
-        pool,
-        `INSERT INTO rika_hosted_executor_operations
-        (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-          turn_id, run_id, root_run_id, tool_call_id, code, attempt, replay_policy, deadline_at, state, updated_at)
-        VALUES ('assignment-local-gateway', $4, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
-          'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-          'call-local-gateway', $3, 0, 'pure', $5, 'accepted', now())`,
-        [operationKey, digest, code, ownerId, deadlineAt],
+      yield* Effect.tryPromise(() =>
+        databaseClient.insert(rikaHostedExecutorOperations).values({ ...operation, state: "accepted" }),
       )
       return
     }
-    yield* query(
-      pool,
-      `INSERT INTO rika_hosted_executor_operations
-      (assignment_id, owner_id, operation_key, request_digest, workspace_id, session_id, thread_id,
-        turn_id, run_id, root_run_id, tool_call_id, code, attempt, deadline_at, state, dispatched_generation,
-        replay_policy, dispatched_lease_epoch, dispatched_executor_instance_id, dispatched_process_incarnation,
-        updated_at)
-      VALUES ('assignment-local-gateway', $6, $1, $2, 'workspace-local-gateway', 'assignment-local-gateway',
-        'thread-local-gateway', 'turn-local-gateway', 'run-local-gateway', 'run-local-gateway',
-        'call-local-gateway', $3, 0, $4, 'dispatched', 1, 'pure', $5,
-        'executor-local-gateway', 'process-local-gateway', now())`,
-      [operationKey, digest, code, deadlineAt, options?.leaseEpoch ?? 1, ownerId],
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedExecutorOperations).values({
+        ...operation,
+        state: "dispatched",
+        dispatchedGeneration: 1,
+        dispatchedLeaseEpoch: options?.leaseEpoch ?? 1,
+        dispatchedExecutorInstanceId: "executor-local-gateway",
+        dispatchedProcessIncarnation: "process-local-gateway",
+      }),
     )
   })
 
-const operationState = (pool: Pool, operationKey: string) =>
-  query(
-    pool,
-    `SELECT operation.state, count(event.event_id)::int AS events
-      FROM rika_hosted_executor_operations operation
-      LEFT JOIN rika_hosted_thread_events event ON event.idempotency_key = operation.operation_key
-      WHERE operation.operation_key = $1
-      GROUP BY operation.state`,
-    [operationKey],
+const operationState = (databaseClient: NodePgDatabase, operationKey: string) =>
+  Effect.tryPromise(() =>
+    databaseClient
+      .select({ state: rikaHostedExecutorOperations.state, events: count(rikaHostedThreadEvents.eventId) })
+      .from(rikaHostedExecutorOperations)
+      .leftJoin(
+        rikaHostedThreadEvents,
+        eq(rikaHostedThreadEvents.idempotencyKey, rikaHostedExecutorOperations.operationKey),
+      )
+      .where(eq(rikaHostedExecutorOperations.operationKey, operationKey))
+      .groupBy(rikaHostedExecutorOperations.state),
   )
 
 const eventually = <A>(read: () => A | undefined): Effect.Effect<A> =>
@@ -441,18 +545,30 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A> =>
     return value === undefined ? Effect.yieldNow.pipe(Effect.andThen(eventually(read))) : Effect.succeed(value)
   })
 
-const pauseAssignment = (pool: Pool) =>
-  query(
-    pool,
-    `UPDATE rika_hosted_executor_assignments SET
-      revision = revision + 1, lifecycle = 'paused', bootstrap_digest = NULL, bootstrap_expires_at = NULL,
-      executor_instance_id = NULL, process_incarnation = NULL, session_digest = NULL,
-      lease_epoch = NULL, lease_expires_at = NULL, updated_at = clock_timestamp()
-      WHERE id = $1 AND lifecycle = 'active'`,
-    [assignmentId],
+const pauseAssignment = (databaseClient: NodePgDatabase) =>
+  Effect.tryPromise(() =>
+    databaseClient
+      .update(rikaHostedExecutorAssignments)
+      .set({
+        revision: sql`${rikaHostedExecutorAssignments.revision} + 1`,
+        lifecycle: "paused",
+        bootstrapDigest: null,
+        bootstrapExpiresAt: null,
+        executorInstanceId: null,
+        processIncarnation: null,
+        sessionDigest: null,
+        leaseEpoch: null,
+        leaseExpiresAt: null,
+        updatedAt: sql`clock_timestamp()`,
+      })
+      .where(
+        and(eq(rikaHostedExecutorAssignments.id, assignmentId), eq(rikaHostedExecutorAssignments.lifecycle, "active")),
+      ),
   )
 
-const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: Pool }) => Effect.Effect<A, E, R>) =>
+const isolated = <A, E, R>(
+  run: (input: { readonly url: string; readonly databaseClient: NodePgDatabase }) => Effect.Effect<A, E, R>,
+) =>
   Effect.gen(function* () {
     const database = `rika_local_gateway_${Math.abs(yield* Random.nextInt)}`
     const admin = new Pool({ connectionString: databaseUrl })
@@ -464,7 +580,7 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
     try {
       const activePool = yield* migrate(url)
       pool = activePool
-      return yield* run({ url, pool: activePool })
+      return yield* run({ url, databaseClient: drizzle({ client: activePool }) })
     } finally {
       const cleanupPool = pool
       yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
@@ -476,10 +592,10 @@ const isolated = <A, E, R>(run: (input: { readonly url: string; readonly pool: P
 it.effect.skipIf(!live)(
   "keeps a dispatched operation after a passive disconnect and accepts the retained result after restart",
   () =>
-    isolated(({ url, pool }) =>
+    isolated(({ url, databaseClient }) =>
       Effect.scoped(
         Effect.gen(function* () {
-          yield* seed(pool, "operation-restart")
+          yield* seed(databaseClient, "operation-restart")
           const context = yield* Layer.build(
             Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
           )
@@ -497,10 +613,12 @@ it.effect.skipIf(!live)(
           )
           yield* first.disconnected(firstSocket)
           expect(
-            (yield* query(
-              pool,
-              `SELECT state FROM rika_hosted_executor_operations WHERE operation_key = 'operation-restart'`,
-            )).rows,
+            yield* Effect.tryPromise(() =>
+              databaseClient
+                .select({ state: rikaHostedExecutorOperations.state })
+                .from(rikaHostedExecutorOperations)
+                .where(eq(rikaHostedExecutorOperations.operationKey, "operation-restart")),
+            ),
           ).toEqual([{ state: "dispatched" }])
 
           const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
@@ -581,17 +699,19 @@ it.effect.skipIf(!live)(
           expect(
             secondSocket.sent.map((value) => decode(value)).filter((message) => message._tag === "LocalCellReceipt"),
           ).toHaveLength(2)
-          expect((yield* operationState(pool, "operation-restart")).rows).toEqual([{ state: "completed", events: 1 }])
+          expect(yield* operationState(databaseClient, "operation-restart")).toEqual([
+            { state: "completed", events: 1 },
+          ])
         }),
       ),
     ),
 )
 
 it.effect.skipIf(!live)("replays the exact durable cancelled terminal without dispatching", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-cancelled")
+        yield* seed(databaseClient, "operation-cancelled")
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -615,23 +735,111 @@ it.effect.skipIf(!live)("replays the exact durable cancelled terminal without di
             ),
         ).toEqual([])
         expect(
-          (yield* query(
-            pool,
-            `SELECT state, terminal_outcome AS "terminalOutcome", response
-              FROM rika_hosted_executor_operations WHERE operation_key = 'operation-cancelled'`,
-          )).rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({
+                state: rikaHostedExecutorOperations.state,
+                terminalOutcome: rikaHostedExecutorOperations.terminalOutcome,
+                response: rikaHostedExecutorOperations.response,
+              })
+              .from(rikaHostedExecutorOperations)
+              .where(eq(rikaHostedExecutorOperations.operationKey, "operation-cancelled")),
+          ),
         ).toEqual([{ state: "completed", terminalOutcome: "cancelled", response: cancelled }])
       }),
     ),
   ),
 )
 
+it.effect.skipIf(!live)("terminalizes repeated cancellation before Runner dispatch", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancel-accepted"
+        yield* seed(databaseClient, operationKey, { state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+
+        const first = yield* gateway.cancel(cellRequest(operationKey))
+        const repeated = yield* gateway.cancel(cellRequest(operationKey))
+
+        expect(repeated).toEqual(first)
+        expect(first).toMatchObject({ outcome: "cancelled", eventPersisted: true })
+        expect(
+          target.sent
+            .map((value) => decode(value))
+            .filter(
+              (message) =>
+                (message._tag === "CellExecute" && message.request.operationKey === operationKey) ||
+                (message._tag === "CellCancel" && message.operationKey === operationKey),
+            ),
+        ).toEqual([])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("waits for a dispatched Runner cancellation terminal and redelivers after restart", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancel-restart"
+        const cancelled = {
+          _tag: "DomainFailure" as const,
+          failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+        }
+        yield* seed(databaseClient, operationKey)
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const firstSocket = socket()
+        yield* first.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+        const interrupted = yield* Effect.forkChild(first.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          firstSocket.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
+        yield* first.disconnected(firstSocket)
+        yield* Fiber.interrupt(interrupted)
+
+        const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const secondSocket = socket()
+        yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+        const cancelling = yield* Effect.forkChild(restarted.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          secondSocket.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
+
+        yield* persistTerminal(restarted, secondSocket, access, operationKey, cancelled, "cancelled")
+        yield* TestClock.adjust("100 millis")
+        expect(yield* Fiber.join(cancelling)).toMatchObject({
+          response: cancelled,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
+      }),
+    ),
+  ),
+)
+
 it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the caller deadline", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const deadlineAt = "1970-01-01T00:00:01.000Z"
-        yield* seed(pool, "operation-deadline-first", { deadlineAt })
+        yield* seed(databaseClient, "operation-deadline-first", { deadlineAt })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -678,11 +886,16 @@ it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the call
             ),
         ).toBe(true)
         expect(
-          (yield* query(
-            pool,
-            `SELECT state, terminal_outcome AS "terminalOutcome", response
-              FROM rika_hosted_executor_operations WHERE operation_key = 'operation-deadline-first'`,
-          )).rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({
+                state: rikaHostedExecutorOperations.state,
+                terminalOutcome: rikaHostedExecutorOperations.terminalOutcome,
+                response: rikaHostedExecutorOperations.response,
+              })
+              .from(rikaHostedExecutorOperations)
+              .where(eq(rikaHostedExecutorOperations.operationKey, "operation-deadline-first")),
+          ),
         ).toEqual([{ state: "completed", terminalOutcome: "cancelled", response: cancelled }])
       }),
     ),
@@ -690,31 +903,29 @@ it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the call
 )
 
 it.effect.skipIf(!live)("atomically persists one accepted deadline result across concurrent gateways", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const deadlineAt = "1970-01-01T00:00:00.000Z"
         const operationKey = "operation-accepted-deadline"
-        yield* seed(pool, operationKey, { deadlineAt, state: "accepted" })
+        yield* seed(databaseClient, operationKey, { deadlineAt, state: "accepted" })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
-        yield* query(
-          pool,
-          `CREATE FUNCTION rika_test_reject_deadline_event() RETURNS trigger LANGUAGE plpgsql AS $$
+        yield* Effect.tryPromise(() =>
+          databaseClient.execute(sql`CREATE FUNCTION rika_test_reject_deadline_event() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN RAISE EXCEPTION 'injected deadline event failure'; END
           $$;
           CREATE TRIGGER rika_test_reject_deadline_event
             BEFORE INSERT ON rika_hosted_thread_events
-            FOR EACH ROW EXECUTE FUNCTION rika_test_reject_deadline_event()`,
+            FOR EACH ROW EXECUTE FUNCTION rika_test_reject_deadline_event()`),
         )
         const faulty = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         expect((yield* Effect.result(faulty.execute(cellRequest(operationKey, deadlineAt))))._tag).toBe("Failure")
-        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "accepted", events: 0 }])
-        yield* query(
-          pool,
-          `DROP TRIGGER rika_test_reject_deadline_event ON rika_hosted_thread_events;
-          DROP FUNCTION rika_test_reject_deadline_event()`,
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "accepted", events: 0 }])
+        yield* Effect.tryPromise(() =>
+          databaseClient.execute(sql`DROP TRIGGER rika_test_reject_deadline_event ON rika_hosted_thread_events;
+          DROP FUNCTION rika_test_reject_deadline_event()`),
         )
         const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const second = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
@@ -733,18 +944,165 @@ it.effect.skipIf(!live)("atomically persists one accepted deadline result across
 
         const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         expect(yield* restarted.execute(cellRequest(operationKey, deadlineAt))).toEqual(results[0])
-        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
         expect(
-          (yield* query(pool, `SELECT event FROM rika_hosted_thread_events WHERE idempotency_key = $1`, [operationKey]))
-            .rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ event: rikaHostedThreadEvents.event })
+              .from(rikaHostedThreadEvents)
+              .where(eq(rikaHostedThreadEvents.idempotencyKey, operationKey)),
+          ),
         ).toEqual([{ event: { _tag: "CellResult", operationKey, response: timeout } }])
       }),
     ),
   ),
 )
 
+it.effect.skipIf(!live)("settles active Local Runner machine work before accepting a cancelled Cell terminal", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-cancelled-machine"
+        yield* seed(databaseClient, operationKey, { state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest(operationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
+        )
+        const machine = yield* Effect.forkChild(
+          gateway.machine(assignmentId, operationKey, 0, {
+            _tag: "CodingTool",
+            request: { _tag: "Bash", command: "sleep 30" },
+          }),
+        )
+        const machineRequest = yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "MachineExecute" && message.operationKey === operationKey),
+        )
+        if (machineRequest._tag !== "MachineExecute") return yield* Effect.die("machine request was not sent")
+
+        for (const frame of [
+          { _tag: "Accepted" as const, attribution: operationAttribution(operationKey), cursor: 1 },
+          { _tag: "Started" as const, attribution: operationAttribution(operationKey), cursor: 2 },
+        ])
+          yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+        yield* Fiber.interrupt(running)
+        const cancelling = yield* Effect.forkChild(gateway.cancel(cellRequest(operationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+        )
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "CellLifecycle",
+            access,
+            frame: {
+              _tag: "Terminal",
+              attribution: operationAttribution(operationKey),
+              cursor: 3,
+              outcome: "cancelled",
+              response: cancelledResponse,
+            },
+          }),
+        )
+        expect(machine.pollUnsafe()).toBeDefined()
+        expect(yield* Fiber.join(machine)).toEqual({ _tag: "Cancelled" })
+        expect(yield* Fiber.join(cancelling)).toEqual({
+          access,
+          response: cancelledResponse,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
+
+        const nextOperationKey = "operation-after-cancelled-machine"
+        yield* Effect.tryPromise(() =>
+          databaseClient.insert(rikaHostedExecutorOperations).values({
+            assignmentId,
+            ownerId: "organization-owner-local-gateway",
+            operationKey: nextOperationKey,
+            requestDigest: operationDigest(cellRequest(nextOperationKey)),
+            workspaceId: "workspace-local-gateway",
+            sessionId: assignmentId,
+            threadId,
+            turnId: "turn-local-gateway",
+            runId: "run-local-gateway",
+            rootRunId: "run-local-gateway",
+            toolCallId: "call-local-gateway",
+            code,
+            attempt: 0,
+            replayPolicy: "pure",
+            deadlineAt: sql`'2999-01-01T00:00:00.000Z'::timestamptz`,
+            state: "accepted",
+            updatedAt: sql`transaction_timestamp()`,
+          }),
+        )
+        const next = yield* Effect.forkChild(gateway.execute(cellRequest(nextOperationKey)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "CellExecute" && message.request.operationKey === nextOperationKey),
+        )
+        const nextMachine = yield* Effect.forkChild(
+          gateway.machine(assignmentId, nextOperationKey, 0, {
+            _tag: "ProcessStop",
+            processId: "process-after-cancel",
+          }),
+        )
+        const nextMachineRequest = yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find((message) => message._tag === "MachineExecute" && message.operationKey === nextOperationKey),
+        )
+        if (nextMachineRequest._tag !== "MachineExecute") return yield* Effect.die("next machine request was not sent")
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "MachineResult",
+            access,
+            operationKey: nextOperationKey,
+            attempt: 0,
+            machineId: nextMachineRequest.machineId,
+            requestDigest: nextMachineRequest.requestDigest,
+            outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+          }),
+        )
+        expect(yield* Fiber.join(nextMachine)).toEqual({ _tag: "Success", value: { _tag: "ProcessStopped" } })
+        yield* persistTerminal(gateway, target, access, nextOperationKey)
+        expect(yield* Fiber.join(next)).toMatchObject({ response, outcome: "completed", eventPersisted: true })
+
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "MachineResult",
+            access,
+            operationKey,
+            attempt: 0,
+            machineId: machineRequest.machineId,
+            requestDigest: machineRequest.requestDigest,
+            outcome: {
+              _tag: "Success",
+              value: { _tag: "CodingTool", result: { text: "late", truncated: false } },
+            },
+          }),
+        )
+        expect(target.closed).toEqual([])
+      }),
+    ),
+  ),
+)
+
 it.effect.skipIf(!live)("bounds reconnected binding and machine work by the parent deadline", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const deadlineAt = "1970-01-01T00:00:01.000Z"
@@ -790,7 +1148,7 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
           context: Context.merge(bindingContext, emptyCellContext),
           manifest: { digest: "c".repeat(64), descriptors: registry.descriptors },
         }
-        yield* seed(pool, operationKey, { deadlineAt, state: "accepted" })
+        yield* seed(databaseClient, operationKey, { deadlineAt, state: "accepted" })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -900,23 +1258,25 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
 )
 
 it.effect.skipIf(!live)("fences organization dispatch immediately after membership deletion", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-revoked-membership", { state: "accepted" })
+        yield* seed(databaseClient, "operation-revoked-membership", { state: "accepted" })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
-        yield* query(pool, `DELETE FROM member WHERE id = 'member-local-gateway'`)
+        yield* Effect.tryPromise(() =>
+          databaseClient.delete(identityMember).where(eq(identityMember.id, "member-local-gateway")),
+        )
         const error = yield* gateway.execute(cellRequest("operation-revoked-membership")).pipe(Effect.flip)
         expect(error).toMatchObject({
           kind: "fenced",
           message: "Runner fence is no longer current",
         })
-        expect((yield* operationState(pool, "operation-revoked-membership")).rows).toEqual([
+        expect(yield* operationState(databaseClient, "operation-revoked-membership")).toEqual([
           { state: "accepted", events: 0 },
         ])
       }),
@@ -925,17 +1285,20 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
 )
 
 it.effect.skipIf(!live)("durably revokes a Runner immediately after device revocation", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-revoked-device", { state: "accepted" })
-        yield* query(
-          pool,
-          `INSERT INTO rika_hosted_runner_registrations
-            (device_id, user_id, checkout_fingerprint, workspace_id, repository, kernel_profile, capabilities)
-            VALUES ($1, 'user-local-gateway', 'checkout-local-gateway', 'workspace-local-gateway',
-              '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)`,
-          [deviceId],
+        yield* seed(databaseClient, "operation-revoked-device", { state: "accepted" })
+        yield* Effect.tryPromise(() =>
+          databaseClient.insert(rikaHostedRunnerRegistrations).values({
+            deviceId,
+            userId: "user-local-gateway",
+            checkoutFingerprint: "checkout-local-gateway",
+            workspaceId: "workspace-local-gateway",
+            repository: {},
+            kernelProfile: {},
+            capabilities: {},
+          }),
         )
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
@@ -952,10 +1315,11 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
         yield* Effect.yieldNow
         expect(yield* gateway.active(target)).toBe(true)
 
-        yield* query(
-          pool,
-          `UPDATE rika_cli_registration SET revoked_at = transaction_timestamp()
-            WHERE client_id = 'client-local-gateway'`,
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(cliRegistration)
+            .set({ revokedAt: sql`transaction_timestamp()` })
+            .where(eq(cliRegistration.clientId, "client-local-gateway")),
         )
 
         active = false
@@ -972,21 +1336,36 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
         )
         yield* Effect.yieldNow
         expect(target.closed).toContainEqual([1008, "fenced"])
+        const revoked = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select({
+              deviceRevokedAt: rikaHostedDevices.revokedAt,
+              clientRevokedAt: rikaHostedClients.revokedAt,
+              admissionRevokedAt: rikaHostedRunnerAdmissions.revokedAt,
+              lifecycle: rikaHostedExecutorAssignments.lifecycle,
+              generation: rikaHostedExecutorAssignments.generation,
+            })
+            .from(rikaHostedDevices)
+            .innerJoin(rikaHostedClients, eq(rikaHostedClients.deviceId, rikaHostedDevices.id))
+            .innerJoin(rikaHostedRunnerAdmissions, eq(rikaHostedRunnerAdmissions.clientId, rikaHostedClients.id))
+            .innerJoin(
+              rikaHostedExecutorAssignments,
+              eq(rikaHostedExecutorAssignments.id, rikaHostedRunnerAdmissions.assignmentId),
+            )
+            .where(eq(rikaHostedDevices.id, deviceId)),
+        )
+        const registered = yield* Effect.tryPromise(() =>
+          databaseClient.select({ count: count() }).from(rikaHostedRunnerRegistrations),
+        )
         expect(
-          (yield* query(
-            pool,
-            `SELECT device.revoked_at IS NOT NULL AS "deviceRevoked",
-                  client_record.revoked_at IS NOT NULL AS "clientRevoked",
-                  admission.revoked_at IS NOT NULL AS "admissionRevoked",
-                  assignment.lifecycle, assignment.generation::int AS generation,
-                  EXISTS (SELECT 1 FROM rika_hosted_runner_registrations) AS "runnerRegistered"
-                FROM rika_hosted_devices device
-                JOIN rika_hosted_clients client_record ON client_record.device_id = device.id
-                JOIN rika_hosted_runner_admissions admission ON admission.client_id = client_record.id
-                JOIN rika_hosted_executor_assignments assignment ON assignment.id = admission.assignment_id
-                WHERE device.id = $1`,
-            [deviceId],
-          )).rows,
+          revoked.map((row) => ({
+            deviceRevoked: row.deviceRevokedAt !== null,
+            clientRevoked: row.clientRevokedAt !== null,
+            admissionRevoked: row.admissionRevokedAt !== null,
+            lifecycle: row.lifecycle,
+            generation: row.generation,
+            runnerRegistered: (registered[0]?.count ?? 0) !== 0,
+          })),
         ).toEqual([
           {
             deviceRevoked: true,
@@ -1003,16 +1382,15 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
 )
 
 it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environment digest changes", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-environment-changed", { state: "accepted" })
-        yield* query(
-          pool,
-          `UPDATE rika_hosted_executor_assignments
-            SET capability_snapshot = jsonb_set(capability_snapshot, '{environmentDigest}', to_jsonb($1::text))
-            WHERE id = $2`,
-          [`sha256:${"1".repeat(64)}`, assignmentId],
+        yield* seed(databaseClient, "operation-environment-changed", { state: "accepted" })
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(rikaHostedExecutorAssignments)
+            .set({ capabilitySnapshot: { ...workspaceCapabilities, environmentDigest: `sha256:${"1".repeat(64)}` } })
+            .where(eq(rikaHostedExecutorAssignments.id, assignmentId)),
         )
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
@@ -1024,7 +1402,7 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
           kind: "fenced",
           message: "Runner fence is no longer current",
         })
-        expect((yield* operationState(pool, "operation-environment-changed")).rows).toEqual([
+        expect(yield* operationState(databaseClient, "operation-environment-changed")).toEqual([
           { state: "accepted", events: 0 },
         ])
       }),
@@ -1033,11 +1411,13 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
 )
 
 it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-personal", { ownerKind: "personal", state: "accepted" })
-        expect((yield* query(pool, `SELECT count(*)::int AS count FROM member`)).rows).toEqual([{ count: 0 }])
+        yield* seed(databaseClient, "operation-personal", { ownerKind: "personal", state: "accepted" })
+        expect(yield* Effect.tryPromise(() => databaseClient.select({ count: count() }).from(identityMember))).toEqual([
+          { count: 0 },
+        ])
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1051,7 +1431,9 @@ it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay"
         )
         yield* Fiber.interrupt(running)
         expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "CellCancel")).toBe(false)
-        expect((yield* operationState(pool, "operation-personal")).rows).toEqual([{ state: "dispatched", events: 0 }])
+        expect(yield* operationState(databaseClient, "operation-personal")).toEqual([
+          { state: "dispatched", events: 0 },
+        ])
       }),
     ),
   ),
@@ -1060,10 +1442,10 @@ it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay"
 it.effect.skipIf(!live)(
   "rejects a completion whose current assignment lease does not match the presented session",
   () =>
-    isolated(({ url, pool }) =>
+    isolated(({ url, databaseClient }) =>
       Effect.scoped(
         Effect.gen(function* () {
-          yield* seed(pool, "operation-stale", { leaseEpoch: 1 })
+          yield* seed(databaseClient, "operation-stale", { leaseEpoch: 1 })
           const context = yield* Layer.build(
             Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
           )
@@ -1074,10 +1456,12 @@ it.effect.skipIf(!live)(
           yield* persistTerminal(gateway, target, renewed, "operation-stale")
           expect(target.closed).toEqual([[1008, "fenced"]])
           expect(
-            (yield* query(
-              pool,
-              `SELECT state FROM rika_hosted_executor_operations WHERE operation_key = 'operation-stale'`,
-            )).rows,
+            yield* Effect.tryPromise(() =>
+              databaseClient
+                .select({ state: rikaHostedExecutorOperations.state })
+                .from(rikaHostedExecutorOperations)
+                .where(eq(rikaHostedExecutorOperations.operationKey, "operation-stale")),
+            ),
           ).toEqual([{ state: "dispatched" }])
         }),
       ),
@@ -1085,14 +1469,15 @@ it.effect.skipIf(!live)(
 )
 
 it.effect.skipIf(!live)("accepts a retained completion after reconnect renews the assignment lease", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-renewed")
-        yield* query(
-          pool,
-          `UPDATE rika_hosted_executor_assignments SET last_lease_epoch = 2, lease_epoch = 2 WHERE id = $1`,
-          [assignmentId],
+        yield* seed(databaseClient, "operation-renewed")
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(rikaHostedExecutorAssignments)
+            .set({ lastLeaseEpoch: 2, leaseEpoch: 2 })
+            .where(eq(rikaHostedExecutorAssignments.id, assignmentId)),
         )
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
@@ -1116,17 +1501,17 @@ it.effect.skipIf(!live)("accepts a retained completion after reconnect renews th
         expect(
           target.sent.map((value) => decode(value)).filter((message) => message._tag === "LocalCellReceipt"),
         ).toHaveLength(1)
-        expect((yield* operationState(pool, "operation-renewed")).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, "operation-renewed")).toEqual([{ state: "completed", events: 1 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("rejects a conflicting completion after a durable result already exists", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-conflict")
+        yield* seed(databaseClient, "operation-conflict")
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1155,18 +1540,18 @@ it.effect.skipIf(!live)("rejects a conflicting completion after a durable result
           }),
         )
         expect(target.closed).toEqual([[1008, "fenced"]])
-        expect((yield* operationState(pool, "operation-conflict")).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, "operation-conflict")).toEqual([{ state: "completed", events: 1 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("reports an overdue dispatch without replacing the Runner's terminal authority", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const deadlineAt = "1970-01-01T00:00:01.000Z"
-        yield* seed(pool, "operation-overdue", { deadlineAt })
+        yield* seed(databaseClient, "operation-overdue", { deadlineAt })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1191,22 +1576,22 @@ it.effect.skipIf(!live)("reports an overdue dispatch without replacing the Runne
           },
         ])
         expect(results.map((result) => result.eventPersisted)).toEqual([false, false])
-        expect((yield* operationState(pool, "operation-overdue")).rows).toEqual([{ state: "dispatched", events: 0 }])
+        expect(yield* operationState(databaseClient, "operation-overdue")).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("does not infer an operation outcome from assignment lease expiry", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-expired-lease", { leaseExpires: "past" })
+        yield* seed(databaseClient, "operation-expired-lease", { leaseExpires: "past" })
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
-        expect((yield* operationState(pool, "operation-expired-lease")).rows).toEqual([
+        expect(yield* operationState(databaseClient, "operation-expired-lease")).toEqual([
           { state: "dispatched", events: 0 },
         ])
       }),
@@ -1215,11 +1600,11 @@ it.effect.skipIf(!live)("does not infer an operation outcome from assignment lea
 )
 
 it.effect.skipIf(!live)("publishes a durable terminal receipt after the assignment lease expires", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const operationKey = "operation-terminal-expired-lease"
-        yield* seed(pool, operationKey)
+        yield* seed(databaseClient, operationKey)
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1227,10 +1612,11 @@ it.effect.skipIf(!live)("publishes a durable terminal receipt after the assignme
         const target = socket()
         yield* connected.receive(target, encode({ _tag: "ExecutorReconnect", access }))
         yield* persistTerminal(connected, target, access, operationKey)
-        yield* query(
-          pool,
-          `UPDATE rika_hosted_executor_assignments SET lease_expires_at = now() - interval '1 second' WHERE id = $1`,
-          [assignmentId],
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(rikaHostedExecutorAssignments)
+            .set({ leaseExpiresAt: sql`transaction_timestamp() - interval '1 second'` })
+            .where(eq(rikaHostedExecutorAssignments.id, assignmentId)),
         )
 
         const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
@@ -1239,24 +1625,24 @@ it.effect.skipIf(!live)("publishes a durable terminal receipt after the assignme
           outcome: "completed",
           eventPersisted: true,
         })
-        expect((yield* operationState(pool, operationKey)).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("releases the assignment without inventing terminal work on explicit goodbye", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-goodbye")
+        yield* seed(databaseClient, "operation-goodbye")
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeRunnerGateway(
           authority({
             release: () =>
-              pauseAssignment(pool).pipe(
+              pauseAssignment(databaseClient).pipe(
                 Effect.asVoid,
                 Effect.mapError((error) => ControllerError.make({ kind: "checkpoint", message: error.message })),
               ),
@@ -1267,20 +1653,24 @@ it.effect.skipIf(!live)("releases the assignment without inventing terminal work
         yield* gateway.receive(target, encode({ _tag: "RunnerGoodbye", access }))
         expect(target.closed).toEqual([[1000, "shutdown"]])
         expect(
-          (yield* query(pool, `SELECT lifecycle FROM rika_hosted_executor_assignments WHERE id = $1`, [assignmentId]))
-            .rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ lifecycle: rikaHostedExecutorAssignments.lifecycle })
+              .from(rikaHostedExecutorAssignments)
+              .where(eq(rikaHostedExecutorAssignments.id, assignmentId)),
+          ),
         ).toEqual([{ lifecycle: "paused" }])
-        expect((yield* operationState(pool, "operation-goodbye")).rows).toEqual([{ state: "dispatched", events: 0 }])
+        expect(yield* operationState(databaseClient, "operation-goodbye")).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("accepts a retained completion on the same gateway after a passive disconnect", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-live")
+        yield* seed(databaseClient, "operation-live")
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1289,10 +1679,12 @@ it.effect.skipIf(!live)("accepts a retained completion on the same gateway after
         yield* gateway.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
         yield* gateway.disconnected(firstSocket)
         expect(
-          (yield* query(
-            pool,
-            `SELECT state FROM rika_hosted_executor_operations WHERE operation_key = 'operation-live'`,
-          )).rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ state: rikaHostedExecutorOperations.state })
+              .from(rikaHostedExecutorOperations)
+              .where(eq(rikaHostedExecutorOperations.operationKey, "operation-live")),
+          ),
         ).toEqual([{ state: "dispatched" }])
         const secondSocket = socket()
         yield* gateway.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
@@ -1308,17 +1700,17 @@ it.effect.skipIf(!live)("accepts a retained completion on the same gateway after
           }),
         )
         expect(secondSocket.closed).toEqual([])
-        expect((yield* operationState(pool, "operation-live")).rows).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, "operation-live")).toEqual([{ state: "completed", events: 1 }])
       }),
     ),
   ),
 )
 
 it.effect.skipIf(!live)("closes a local PTY frame as malformed", () =>
-  isolated(({ url, pool }) =>
+  isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(pool, "operation-pty")
+        yield* seed(databaseClient, "operation-pty")
         const context = yield* Layer.build(
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
@@ -1331,10 +1723,12 @@ it.effect.skipIf(!live)("closes a local PTY frame as malformed", () =>
         )
         expect(target.closed).toEqual([[1007, "malformed"]])
         expect(
-          (yield* query(
-            pool,
-            `SELECT state FROM rika_hosted_executor_operations WHERE operation_key = 'operation-pty'`,
-          )).rows,
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ state: rikaHostedExecutorOperations.state })
+              .from(rikaHostedExecutorOperations)
+              .where(eq(rikaHostedExecutorOperations.operationKey, "operation-pty")),
+          ),
         ).toEqual([{ state: "dispatched" }])
       }),
     ),

@@ -16,7 +16,11 @@ export const cliRegistration = pgTable("rika_cli_registration", {
 })
 
 export const oauthClient = pgTable("oauth_client", {
+  id: text().primaryKey(),
   clientId: text("client_id").notNull(),
+  userId: text("user_id"),
+  redirectUris: jsonb("redirect_uris").$type<ReadonlyArray<string>>().notNull(),
+  createdAt: timestamp("created_at"),
 })
 
 const oauthGrantColumns = {

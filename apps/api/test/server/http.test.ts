@@ -140,6 +140,7 @@ const executor: Executor = {
   admitRunner: () => Effect.die("unused"),
   admitRun: () => Effect.die("unused"),
   run: () => Effect.die("unused"),
+  cancel: () => Effect.die("unused"),
   pause: () => Effect.die("unused"),
   resume: () => Effect.die("unused"),
   replace: () => Effect.die("unused"),

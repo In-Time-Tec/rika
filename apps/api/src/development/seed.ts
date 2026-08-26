@@ -193,10 +193,7 @@ const seedUnlocked = Effect.fn("DevelopmentSeed.seedUnlocked")(function* (input:
       provider: "openrouter" as const,
       apiKey: input.openRouterApiKey,
     }
-    yield* input.credentials.require(ownerId, "openrouter").pipe(
-      Effect.catch((error) =>
-        error.kind === "missing" || error.kind === "revoked" ? input.credentials.put(put) : Effect.fail(error),
-      ),
+    yield* input.credentials.put(put).pipe(
       Effect.asVoid,
       Effect.mapError(() => failure("Development provider credential seeding failed")),
     )

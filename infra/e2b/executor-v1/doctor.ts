@@ -154,6 +154,30 @@ const program = Effect.gen(function* () {
     ),
   )
   yield* check(
+    "machine:workspace-user",
+    Effect.gen(function* () {
+      const existingFile = path.join(temp, "existing.txt")
+      const createdFile = path.join(temp, "created.txt")
+      yield* command(["sudo", "-n", "-u", "rika-workspace", "sh", "-c", `printf before > '${existingFile}'`])
+      yield* command(["test", "!", "-w", existingFile])
+      const output = yield* command([
+        "bun",
+        "run",
+        "/opt/rika/packages/remote-execution/src/host/machine-doctor.ts",
+        temp,
+      ])
+      if (output !== "rika-workspace:machine-environment")
+        return yield* DoctorError.make({ message: `unexpected machine probe: ${output}` })
+      if ((yield* fileSystem.readFileString(existingFile)) !== "after")
+        return yield* DoctorError.make({ message: "machine did not edit workspace file" })
+      if ((yield* fileSystem.readFileString(createdFile)) !== "created-by-machine")
+        return yield* DoctorError.make({ message: "machine did not create workspace file" })
+      const owner = yield* command(["stat", "-c", "%U", createdFile])
+      if (owner !== "rika-workspace") return yield* DoctorError.make({ message: "machine file has the wrong owner" })
+      return output
+    }),
+  )
+  yield* check(
     "kernel:persistence",
     command(["bun", "run", "/opt/rika/kernel-doctor.ts", temp, path.join(temp, "kernel")]),
   )

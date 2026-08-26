@@ -170,6 +170,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     tuning?: ModelTuning,
     submissionId?: string,
   ) => {
+    const submissionThreadId = loop.model.currentThreadId
     const classified = classifyPrompt(prompt)
     const effect =
       classified._tag === "Shell"
@@ -192,6 +193,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
               loop.renderer?.surface.showToast(failure.message, "#e06c75")
               return
             }
+            if (submissionThreadId !== undefined && loop.model.currentThreadId !== submissionThreadId) return
             loop.model = update(loop.model, {
               _tag: "SubmissionRejected",
               submissionId,

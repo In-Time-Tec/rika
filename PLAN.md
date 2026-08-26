@@ -30,7 +30,7 @@ The earliest bad decision is duplicated lifecycle authority. Polling loops, watc
 
 ## External evidence and complexity standard
 
-This design follows Amp's documented runtime rather than its UI alone. Amp's [security reference](https://ampcode.com/security) says the client executes tools requested by the server, while the hosted server owns authentication, Thread storage, and inference-provider access. Its [Runner manual](https://ampcode.com/manual/runners.md) describes a local process waiting for remotely created Threads in its current checkout. Its [Orb manual](https://ampcode.com/manual/orbs.md) describes a fresh isolated remote environment per Orb Thread that sleeps and later resumes with its files and services. Amp's Orb setup contract runs `.agents/setup` when a fresh environment is created and `.agents/resume` whenever it wakes. Those facts lead directly to one hosted control plane and two execution placements; they do not justify a local model loop or local workspace provisioning.
+This design follows Amp's documented runtime rather than its UI alone. Amp's [security reference](https://ampcode.com/security) says the client executes tools requested by the server, while the hosted server owns authentication, Thread storage, and inference-provider access. Its [Runner manual](https://ampcode.com/manual/runners.md) describes a local process waiting for remotely created Threads in its current checkout. Its [Orb manual](https://ampcode.com/manual/orbs.md) describes a fresh isolated remote environment per Orb Thread that sleeps and later resumes with its files and services. Amp's [Portal contract](https://ampcode.com/docs/orbs/portals) assigns fresh-machine preparation to `.agents/setup`, optional fast wake repair to the ten-second `.agents/resume` hook, and every long-running process plus Portal readiness to `.amp/services.yaml`. Rika has no separate quick wake repair, so it omits `.agents/resume` and declares Docker, the credential service, Alchemy, health, and the Portal in one service manifest. Those facts lead directly to one hosted control plane and two execution placements; they do not justify a local model loop, local workspace provisioning, or a second service supervisor in a wake hook.
 
 Effect's current `HttpApi` contract defines schema-owned endpoint groups separately from `HttpApiBuilder.group` implementations. Rika uses that boundary for typed ordinary HTTP capabilities and leaves WebSocket upgrade handling in the Bun transport adapter. PostgreSQL's [NOTIFY documentation](https://www.postgresql.org/docs/current/sql-notify.html) explicitly treats notification as a committed signal to inspect table data, not durable event content. Stripe's [idempotency guidance](https://docs.stripe.com/api/idempotent_requests) and [advanced error guidance](https://docs.stripe.com/error-low-level) distinguish a stable retry identity from an indeterminate mutation outcome. Rika therefore keeps PostgreSQL rows and TenetKit Runs authoritative, uses notifications only as wakeups, and retries only byte-equivalent commands under the same identity.
 
@@ -46,7 +46,7 @@ This matches the desired Amp-like control-plane model: clients authenticate to a
 
 ### Use real PostgreSQL for development
 
-The hosted design depends on concurrent connections, transactions, row locking, worker claims, and cross-replica notification. PGlite or an embedded compatibility layer cannot prove those semantics. Alchemy will run a pinned PostgreSQL 17 Alpine container with a named volume and a bounded readiness check.
+The hosted design depends on concurrent connections, transactions, row locking, worker claims, and cross-replica notification. PGlite or an embedded compatibility layer cannot prove those semantics. Alchemy will run PostgreSQL 17 and MinIO from immutable image digests with named volumes and a bounded readiness check. Tags describe a release but remain mutable registry pointers; a digest makes every developer and Amp orb execute the reviewed image bytes.
 
 The cost is requiring Docker. That is an honest prerequisite for reproducing the deployed architecture and is simpler than maintaining a second development database behavior.
 
@@ -56,7 +56,7 @@ Root `bun run dev` will invoke the current Alchemy v2 stack. Alchemy will own Do
 
 Alchemy's Docker container health status is not a dependency output. A finite readiness command will therefore verify PostgreSQL before migrations and API startup. Long-running Caddy, cloudflared, API, and web processes use `Command.Dev`; no background shell process, polling supervisor, `nohup`, or tmux service is added.
 
-Amp invokes `.agents/resume` at every Orb wake. Its service readiness command can return after its own bounded wait while an already supervised Alchemy process is still building a changed E2B template. Resume therefore starts Docker, then makes a bounded series of observable `amp orb services ensure` attempts against the same supervised service. Each failed attempt prints service status, success requires the real `/readyz` check, and the script eventually fails with an exact log command. It never launches a second stack, fakes readiness, or silently accepts a permanent startup failure.
+Amp waits only ten seconds for `.agents/resume`, and `amp orb service start` itself may consume that whole bound while registering a daemon. Rika therefore has no resume hook. The committed `.amp/services.yaml` is the sole owner of the Docker daemon, credential service, Alchemy process, `/readyz` check, and Portal. The Rika service waits boundedly for the concurrently declared Docker daemon before launching Alchemy. `amp orb services ensure` or opening the Portal starts or repairs that one declaration and may be repeated while a changed E2B template builds; no hook launches a duplicate stack or fakes readiness.
 
 ### Keep the interactive TUI as a separate command
 
@@ -74,7 +74,7 @@ The development seed runs only when both `NODE_ENV=development` and `RIKA_DEV_SE
 
 The seed runs before the API reports ready and is idempotent. There is no public seed route, login bypass, direct fake password hash, or production fallback. Browser automation and the TUI authenticate the seeded account through the ordinary Better Auth email/password flow and then use the same session and device authorization boundaries as any other account. Development-only fixed credentials are an input to the seed, not an unauthenticated HTTP capability.
 
-An active seeded provider credential is not rewritten on startup. Re-encrypting the same secret would still change revision and ciphertext and would turn every development restart into a credential rotation. PostgreSQL serializes the entire development seed under one session advisory lock, so concurrent Alchemy/API startup cannot both observe absence and rotate the second write. The seed writes only when the owner has no credential or its credential is revoked. Replacement keeps the durable credential identity, advances its revision, and restores encrypted active material. A real PostgreSQL test runs two seed calls concurrently through the real `HostedProduct.projects` owner-materialization path and proves full encrypted-row stability plus revoked replacement; it does not manufacture owner rows in a test fake.
+An active seeded provider credential is not rewritten on startup. Re-encrypting the same secret would still change revision and ciphertext and would turn every development restart into a credential rotation. The authenticated credential `put` locks the owner-and-provider row, decrypts active material, and returns its existing identity and revision when the plaintext is unchanged. A changed key rotates under the same identity, while a revoked or corrupt row is repaired. PostgreSQL serializes the entire development seed under one session advisory lock, so concurrent Alchemy/API startup cannot race account and owner materialization. A real PostgreSQL test runs two seed calls concurrently through the real `HostedProduct.projects` path and proves full encrypted-row stability, changed-key convergence, and revoked replacement; it does not manufacture owner rows in a test fake.
 
 ### Make development integrations an explicit capability set
 
@@ -85,9 +85,11 @@ Production remains strict: configured E2B, repository publication, GitHub identi
 - A partial three-value E2B controller tuple is a startup error. When it is complete, Alchemy hashes the exact local Executor image definition, reuses only a ready build attested against that digest, or builds and attests a new template. The generated immutable template and build IDs are then passed to the API; developers do not duplicate them in local configuration.
 - Repository checkout and publication are unavailable without a GitHub App.
 - Development uses password login and a no-op mail sender without requiring GitHub OAuth or Resend.
-- Every hosted model role and mode resolves to `RIKA_DEV_MODEL`, whose default is the pinned free tool-capable `minimax/minimax-m2.7:free`, using the same encrypted opaque credential identity as production. OpenRouter's `openrouter/free` randomly changes the model behind consecutive turns; that is useful for exploration but makes agent-loop failures irreproducible. The pinned default was selected from OpenRouter's live model capability catalog and verified with real required function-calling requests; unlike the other available free candidates tested, it returned the requested tool name and schema-valid arguments. `RIKA_DEV_MODEL` remains the explicit escape hatch when the free catalog changes.
+- Every hosted model role and mode resolves to `RIKA_DEV_MODEL`, whose default is the pinned tool-capable `openai/gpt-5-mini`, using the same encrypted opaque credential identity as production. OpenRouter's free routing and pinned free Minimax model both failed composed release acceptance: the former changed providers between Turns, while the latter emitted unregistered calls, repeated successful tools instead of completing, and sometimes produced schema-invalid streams. The paid pinned default was selected only after those real failures because local development needs reproducible function calling more than a nominally free request. `RIKA_DEV_MODEL` remains the explicit override for another pinned model.
 
 The application edge chooses concrete capabilities. Core callers receive typed unavailable results rather than fake credentials, fake provider identifiers, or conditionals spread throughout the codebase.
+
+E2B development-template creation is the one startup call observed to fail transiently after a successful upload. The template builder retries that complete idempotent build under the same alias and source digest at most three times, with bounded exponential delay and jitter, only for E2B 500/502/503/504 responses, documented retryable E2B internals, missing upload handshake state, and recognized transport interruption. Authentication, validation, image, and every other deterministic failure stop immediately. The retry belongs at this provider boundary; adding a stack supervisor retry would restart PostgreSQL, MinIO, Caddy, and the API without making the E2B request safer.
 
 ### Select the hosted Thread before accepting commands
 
@@ -109,7 +111,17 @@ The restricted listener starts first and must echo the new Caddy process's rando
 
 Development checkpoint storage uses MinIO with generated access credentials, a named volume, and an idempotently created private bucket. The E2B checkpoint adapter will set S3 `forcePathStyle` only when a custom endpoint is configured. Generated database, auth, encryption, and object-store secrets remain redacted Alchemy outputs. Alchemy state and the one unavoidable generated identity file stay ignored and owner-only; PostgreSQL and MinIO credentials also exist in local Docker container metadata, so the Docker daemon is an explicit trusted development boundary. Secrets are never shell-interpolated, logged, sent to an Executor, or included in recordings.
 
+The generated credentials and named volumes are one development-state unit. Losing `.alchemy` while preserving either volume loses the only valid generated credential; silently adopting the data with a new secret cannot work, and automatically deleting it would risk developer data. PostgreSQL authentication and MinIO authorization therefore detect that exact mismatch, fail startup with the stale resource name, and require the developer to restore `.alchemy` or explicitly remove that development container and volume. Ordinary connectivity failures retain their ordinary error and are never misdiagnosed as a reset request.
+
 Bucket initialization distinguishes absence from failure. An explicit HTTP status is authoritative: only 404 permits `CreateBucket`; 403, 5xx, malformed status, and connectivity failures stop startup. Without a status, only the S3 missing-bucket names are accepted. This avoids turning an authentication or storage outage into a misleading create attempt.
+
+### Run Orb tools as the workspace owner
+
+The Executor control host and the workspace have different authorities. The image runs the network-facing host as `rika-executor`, while the checkout belongs to `rika-workspace` with directories that are intentionally not writable by the host. Running coding tools in the host process made reads succeed and writes fail, which looked like a tool defect even though it was a Unix ownership violation.
+
+The image now launches one persistent Unix-socket machine subprocess as `rika-workspace`. The `rika-executor` host retains assignment fencing, durable operation receipts, cancellation, and protocol authority, but delegates only accepted machine requests to that subprocess. Keeping one subprocess preserves the shell-process registry and MCP session across calls; spawning one process per tool would lose the very state that `processes.start` and `processes.status` promise. Each request receives only its authorized runtime environment without mutating global process state. `/opt/rika` remains immutable and root-owned, so workspace authority does not become permission to modify the Executor implementation.
+
+The image doctor proves both halves of the boundary: the host cannot edit the checkout, the machine subprocess can create a file there, and that file is owned by `rika-workspace`. Local Runner execution has no `workspaceUser` and remains in-process, so the Orb privilege boundary does not add another local execution path.
 
 ### Map URL schemes instead of forcing TLS
 
@@ -120,6 +132,8 @@ The API will derive WebSocket URLs by mapping `http:` to `ws:` and `https:` to `
 Runner registration and assignment admission will establish a current fenced connection before the TUI enables submission. Local execution has no workspace-preparation row. A disconnected Runner makes the Thread visibly wait for its local workspace; it does not become Orb preparation and does not move automatically.
 
 Creating an Orb Thread persists only a pending assignment; it does not call E2B. Once prompt admission durably creates an executable Turn, the Turn worker claims it and remote-cell admission starts Executor provisioning. The assignment transaction persists its generation, provisioning lifecycle, and bootstrap deadline before the E2B call, so the UI can project that bounded state as workspace preparation while the sandbox starts. PostgreSQL evaluates bootstrap liveness with `clock_timestamp()`; API-host clock skew cannot preserve or reap a sandbox. The Executor then persists the finer preparation attempt and phase before setup work. A database compare-and-set expiry operation fails overdue attempts. Completion from an expired attempt or stale generation cannot make the workspace ready. Retry or replacement increments the relevant attempt or generation and fences old work.
+
+An E2B template build identifies one assignment generation, not the lifetime of a Thread. When the API's exact approved build changes, demand never reconnects or resumes an old-build sandbox. The authoritative assignment replacement transaction increments generation and installs the new build in the same write before issuing credentials or calling E2B. Orb provider scope, Runner device, checkout, and requesting-device authority cannot change through that transition. This makes normal image rollout a fenced replacement instead of a permanent provisioning error, while every create, bootstrap identity, inventory match, and Executor handshake continues to require the exact build recorded for that generation.
 
 E2B inventory is observation, never deletion authority. Recovery may connect the first usable sandbox whose immutable app, deployment, assignment, generation, template, and build metadata match, but it binds that sandbox in PostgreSQL before any duplicate can be removed. The orphan reaper first asks PostgreSQL whether each observed provider identity is a candidate, starts its grace clock only while that classification remains true, then atomically rechecks authority immediately before kill. Exact expired bootstrap state is retired by incrementing generation before kill; Active, Paused, and live exact bootstrap bindings are preserved. A duplicate against a different bound provider, an old generation, or terminal state can be killed after grace because no real controller path can bind its immutable stale metadata. Missing, malformed, or assignment-less metadata without an exact durable provider binding is preserved rather than guessed. E2B sandbox IDs are immutable unique live capabilities, so two crashed or concurrent cleaners may harmlessly repeat `kill` for the same old ID; adding a claim lease and recovery scheduler merely to deduplicate that idempotent cleanup would create more failure state without protecting the replacement. Provider failure may leak a sandbox and retry later; it cannot justify killing one without durable authority.
 
@@ -147,13 +161,15 @@ A small terminal reconciler reads released TenetKit Runtime snapshots for determ
 
 Transcript projection may replay rich TenetKit history from a cursor, but projection health cannot cancel execution or invent terminal state. Projection failure remains visible and retryable, and a terminal Turn remains eligible for projection until its matching terminal checkpoint is stored. The old Root Turn start/recovery path, heartbeat claims, forced ten-second cancellation settlement, projection watchdog cancellation, and duplicate lifecycle methods will be removed after the new path passes recovery tests.
 
+A live OpenRouter failure exposed a TenetKit boundary defect: the model route durably appended terminal `ModelAttemptFailed` and `ModelCallFailed(stream-decode)` evidence, but in-memory `DateTime.Utc` response metadata was validated as wire JSON while settling the encompassing operation. That rejected the atomic failure transaction, so recovery later found a non-replayable operation still running and correctly changed it to `unknown`. The pinned TenetKit release includes the owning Type-to-wire validation repair, so known terminal model failure now atomically settles the operation and Run as failed. Rika must not restore its deleted bounded event scan, fabricate a `resolveOperation` decision, cancel the Run, or add a second provider-failure lifecycle.
+
 ### Declare replay safety at the concrete executor boundary
 
 A remote TypeScript cell has two different failure boundaries that must not be conflated. Losing the API process does not lose the Runner or Orb process, while losing the executor process can lose a locally running JavaScript fiber. The API therefore cannot turn either transport loss into cancellation or fabricate a tool result.
 
 TenetKit previously recorded every Agent tool operation with replay policy `never`, including a Rika remote cell whose gateway already deduplicates dispatch by stable operation key and attempt. After an API crash, TenetKit consequently changed the outer tool operation to `unknown` and blocked the Run before a replacement Rika process could attach to the surviving executor operation. Keeping the operation alive only in Rika would create a second agent-loop owner; blindly rerunning TypeScript would duplicate side effects.
 
-TenetKit 0.38.3 supplies the required boundary through the optional synchronous `ToolExecutor.replayPolicy(request)` selector. Rika pins `tenetkit` and `@tenetkit/pg` to that release together; no schema migration is required.
+TenetKit 0.39.1 includes the required per-request replay policy, durable ToolExecutor cancellation callback, and interrupted Bun-kernel lease retirement. Rika pins `tenetkit` and `@tenetkit/pg` to that release together; no schema migration is required.
 
 The durable boundary expresses the real guarantee:
 
@@ -166,6 +182,26 @@ The durable boundary expresses the real guarantee:
 - A Runner or Orb process restart cannot resume an in-memory JavaScript fiber. Its persisted running cell state is therefore executor-authored uncertainty, not permission to run the code again. The executor reports that uncertainty through the existing terminal contract, after which Rika and TenetKit expose the real failed/unknown outcome without inventing success or cancellation.
 
 This adds no Rika retry queue and no second durable operation ledger. TenetKit owns whether the Agent operation may be re-entered; the executor's existing receipt store owns whether the external operation was accepted, is still live, completed, or became unknown; Rika only joins those two authorities by stable identity.
+
+### Make semantic tool cancellation a durable TenetKit operation
+
+Effect interruption cannot carry cancellation authority across the hosted boundary. TenetKit uses the same interruption mechanism for explicit `Runtime.cancel`, worker lease loss, API shutdown, and execution-host replacement. Rika must not send `CellCancel` from an `onInterrupt` finalizer: doing that would suppress the immediate Ctrl+C symptom by converting crash recovery into user cancellation.
+
+TenetKit therefore owns cancellation from request through executor acknowledgement. A durable Run cancellation closes operation admission for that Run tree, and every already-admitted cancellable tool operation remains nonterminal until the concrete `ToolExecutor` reports a definitive cancelled or already-terminal result. The cancellation call uses the same route precedence and stable operation identity as execution. It is idempotent, so a replacement worker can redeliver it after a crash between external cancellation and acknowledgement persistence. Lease loss and ordinary host interruption never invoke semantic cancellation and retain the existing replay-or-unknown recovery rules.
+
+Rika implements that concrete cancellation operation for hosted cells without adding another Run cancellation ledger:
+
+- The TenetKit remote-cell route forwards the exact operation identity to the Rika Executor service.
+- The Executor resolves the current Thread assignment and asks the matching Runner or Orb gateway to cancel the exact operation attempt.
+- An accepted but undispatched Rika executor row terminalizes as cancelled without sending work. A dispatched row sends one fenced `CellCancel` to its assigned executor and waits for the executor's durable Terminal lifecycle frame. A row that is already terminal returns that authoritative result.
+- API or WebSocket loss does not guess. TenetKit retains the cancellation request and redelivers after reclaim; the gateway inspects its existing executor operation row and the host deduplicates by operation key and attempt.
+- The host's existing `HostedKernel.cancel` remains the process owner. It interrupts the cell, closes an active workspace-machine connection, interrupts the delegated subprocess tree, persists the cancelled cell response, and acknowledges that terminal before TenetKit may settle the Run as cancelled.
+
+This ordering closes both dangerous races. Work cannot start after cancellation commits, and a process crash after that commit cannot lose the external cancellation obligation. Rika does not scan by root Run, duplicate child-tree state, treat an unknown outcome as cancelled, or retry under a new identity.
+
+Caller interruption still kills a running Bun kernel worker so delayed side effects cannot escape cancellation. TenetKit 0.39.1 retires that exact killed lease generation from its session cache before another same-session Cell runs. The generation check prevents old cleanup from evicting a newer worker, while immediate invalidation prevents the five-minute idle cache from returning the dead command channel. Rika therefore keeps one kernel path and does not retry EPIPE, create a second session identity, or restart an Orb assignment to compensate for a dependency-owned lifecycle defect.
+
+The model-facing process bindings must also agree with the machine request they construct. `processes.start.timeoutMillis` reuses the coding runtime's 60,000 ms maximum, and `processes.status.waitMillis` reuses its 10,000 ms maximum. Those bounds are printed on the mounted `rika` surface, so the model can issue repeated bounded polls. An out-of-range value is rejected while decoding the cell binding, before a nested operation, machine request, or external side effect exists. This prevents local schema drift from surfacing later as a codec defect and being conservatively misreported as lost authority.
 
 ### Serialize commands by stable identity, not by one client semaphore
 
@@ -219,7 +255,7 @@ Thread sockets never participate in authority-session polling. While unattached,
 
 TenetKit's operation row is the sole recovery-resolution authority. The recovery API calls `Runtime.resolveOperation` and derives `retrying`, `accepted`, or `aborted` directly from TenetKit's persisted resolution. Rika does not write a second resolution state, idempotency key, payload, or timestamp, so loss after TenetKit commits is an exact Runtime retry rather than a cross-store repair problem.
 
-User cancellation does not use that recovery API and does not infer unresolved operations from bounded history. TenetKit 0.38.3 already accepts cancellation from `needs-resolution`, recursively terminalizes the Run tree, and preserves every unknown operation without fabricating a resolution. Rika calls `Runtime.cancel` once and waits on `RunTree.awaitTerminal`; it has no event-count limit, operation-ID scan, retry clock, or second settlement rule.
+User cancellation does not use that recovery API and does not infer unresolved operations from bounded history. The pinned TenetKit Runtime accepts cancellation from `needs-resolution`, recursively terminalizes the Run tree, and preserves every unknown operation without fabricating a resolution. Rika calls `Runtime.cancel` once and waits on `RunTree.awaitTerminal`; it has no event-count limit, operation-ID scan, retry clock, or second settlement rule.
 
 The staged-admission cutover has one explicit clean break for Turns already corrupted by the old lifecycle. A nonqueued Agent Turn with neither an execution link nor a prepared staged-admission record has no Runtime identity to inspect, cancel, or resume. Migration 0032 marks only that provably unrecoverable state failed. A prepared outbox row remains recoverable and is never terminalized by the migration. This removes the permanent `link_missing` retry/log loop for the two already-stuck Threads without inventing a Run or touching any recoverable execution.
 
@@ -242,7 +278,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 - Ignore Alchemy local state before the first run and keep generated credentials in ignored files with restrictive permissions.
 - Add pinned PostgreSQL, network, volume, readiness, migrations, local Caddy, API, and web resources.
 - Add MinIO and bucket initialization, plus restricted Caddy Executor ingress and cloudflared when the three-value E2B controller tuple exists. Generate and attest the exact development template/build from the current image source before API startup.
-- Add `.amp/services.yaml` for the hosted development portal and update orb setup/resume so Docker is installed and its daemon is supervised by an Amp orb service rather than an unsupervised background shell.
+- Add `.amp/services.yaml` for the Docker daemon, credential service, hosted development stack, health check, and Portal; keep `.agents/setup` limited to installation and omit a wake hook because no fast repair remains.
 - Split production and development configuration at the composition edge.
 - Add seed-before-serve and development OpenRouter model routing.
 - Prove that starting the stack twice preserves data and repeats migration and seed safely.
@@ -287,7 +323,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 
 - Run focused tests during each ownership change.
 - Run all deterministic unit, process, and TUI suites.
-- Run the complete local stack through the seeded account and free OpenRouter route.
+- Run the complete local stack through the seeded account and pinned OpenRouter route.
 - Run a real projectless E2B Orb through preparation, model response, and filesystem tool execution.
 - Record both real TUI flows as required by `VERIFICATION.md` and inspect the recordings.
 - Audit environment, wire payloads, and logs for secrets.
@@ -298,7 +334,7 @@ The snapshot exposes one typed placement state rather than inferring preparation
 - A replica disconnected from PostgreSQL can miss notifications. Its supervised listener reconnects and issues one recovery wake; durable cursor replay then catches up every local socket without making notification authoritative or running a periodic sweep.
 - An admission or activation result can still be lost. The persisted prepared envelope, deterministic identity, staged TenetKit contract, and runtime inspection make recovery converge; external tool effects remain `accepted`, `dispatched`, `completed`, or `unknown`, never falsely exactly-once.
 - A quick tunnel URL can change. Alchemy input dependency restarts the API with the new immutable URL; current Executor generations fence old connections.
-- A free OpenRouter route can be rate-limited or removed from the catalog. It proves external integration only; deterministic assertions use a scripted model, while the development default pins one currently available tool-capable model instead of introducing random routing into every diagnosis.
+- The pinned OpenRouter route can be rate-limited, changed, or temporarily unavailable. It proves external integration only; deterministic assertions use a scripted model, while the development default stays on one explicitly selected tool-capable model instead of introducing random routing into every diagnosis.
 - E2B or Cloudflare can be unavailable. Orb preparation reaches an explicit deadline-bound failure while local Runner development remains available.
 - Clean-break migration can strand ambiguous legacy work. Blocking those Threads is safer than fabricating terminal state or launching duplicate Runs.
 

@@ -101,6 +101,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         loop.model = update(loop.model, action)
       }
     } else if (event._tag === "SubmissionRejected") {
+      if (event.threadId !== undefined && loop.model.currentThreadId !== event.threadId) return
       const action: TerminalMessage = {
         _tag: "SubmissionRejected",
         message: event.message,

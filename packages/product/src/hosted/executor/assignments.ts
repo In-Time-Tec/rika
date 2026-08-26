@@ -71,6 +71,7 @@ export interface BeginProvisioningInput extends Version {
 }
 
 export interface BeginReplacementInput extends Version {
+  readonly placement: ExecutorPlacement
   readonly bootstrapCredentialDigest: Redacted.Redacted<string>
   readonly bootstrapLifetimeMillis: number
 }

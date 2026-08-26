@@ -1,7 +1,9 @@
 import { Effect, Schema } from "effect"
 import type { HostBindingRegistry } from "tenetkit/repl"
+import * as Bash from "@rika/coding-tools/bash-tool"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ShellCommandStatus from "@rika/coding-tools/shell-command-status-tool"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
 
@@ -9,7 +11,14 @@ export const name = "processes"
 
 const Failure = Schema.Union([CodingToolResult.ToolFailure, NestedOperationFailed])
 
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const InitialWaitMillis = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(Bash.initialWaitMaximumMillis),
+)
+const StatusWaitMillis = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(ShellCommandStatus.statusWaitMaximumMillis),
+)
 
 const Output = Schema.Struct({
   text: Schema.String,
@@ -26,9 +35,9 @@ const Stopped = Schema.Struct({ text: Schema.String, truncated: Schema.Boolean }
 const StartInput = Schema.Struct({
   command: Schema.String,
   workdir: Schema.optionalKey(Schema.String),
-  timeoutMillis: Schema.optionalKey(NonNegativeInt),
+  timeoutMillis: Schema.optionalKey(InitialWaitMillis),
 })
-const StatusInput = Schema.Struct({ processId: Schema.String, waitMillis: Schema.optionalKey(NonNegativeInt) })
+const StatusInput = Schema.Struct({ processId: Schema.String, waitMillis: Schema.optionalKey(StatusWaitMillis) })
 const StopInput = Schema.Struct({ processId: Schema.String })
 
 const run = (request: typeof CodingToolRuntime.Request.Type) =>

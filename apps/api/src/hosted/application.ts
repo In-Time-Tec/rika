@@ -179,6 +179,15 @@ export const layer = (options: {
                       : Effect.succeed(result.response),
                   ),
                 ),
+              cancel: (request) =>
+                executor.cancel(request).pipe(
+                  Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
+                  Effect.flatMap((result) =>
+                    result.outcome === "unknown"
+                      ? RemoteCells.UnknownOutcome.make({ message: "Remote operation outcome is unknown" })
+                      : Effect.succeed(result.response),
+                  ),
+                ),
             }),
             admit: (input) =>
               executor

@@ -145,7 +145,6 @@ const reduceExecutionImpl = (
       }
     }
     case "CancelFailed":
-      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       return {
         ...model,
         cancelPending: false,

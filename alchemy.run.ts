@@ -73,22 +73,12 @@ export default Alchemy.Stack(
       Redacted.make(`postgresql://rika:${Redacted.value(password)}@127.0.0.1:15432/rika`),
     )
 
-    const postgresImage = yield* Docker.RemoteImage("PostgresImage", {
-      name: "postgres",
-      tag: "17.6-alpine3.22",
-      alwaysPull: false,
-    })
-    const minioImage = yield* Docker.RemoteImage("MinioImage", {
-      name: "minio/minio",
-      tag: "RELEASE.2025-07-23T15-54-02Z",
-      alwaysPull: false,
-    })
     const network = yield* Docker.Network("DevelopmentNetwork", { name: "rika-development" })
     const postgresData = yield* Docker.Volume("PostgresData", { name: "rika-development-postgres" })
     const minioData = yield* Docker.Volume("MinioData", { name: "rika-development-minio" })
     const postgres = yield* Docker.Container("Postgres", {
       name: "rika-development-postgres",
-      image: postgresImage,
+      image: "postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
       environment: {
         POSTGRES_DB: "rika",
         POSTGRES_USER: "rika",
@@ -103,7 +93,7 @@ export default Alchemy.Stack(
     })
     const minio = yield* Docker.Container("Minio", {
       name: "rika-development-minio",
-      image: minioImage,
+      image: "minio/minio@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0",
       command: ["server", "/data"],
       environment: {
         MINIO_ROOT_USER: "rika-development",

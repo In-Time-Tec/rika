@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Cause, Context, Effect, Exit, Fiber, FileSystem, Layer } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect"
 import { CellExecutor, layer } from "../src/cell-executor"
 
 const withExecutor = <A, E, R>(use: (executor: CellExecutor["Service"]) => Effect.Effect<A, E, R>) =>
@@ -63,17 +63,31 @@ describe("hosted cell executor", () => {
 
         expect(failure._tag === "DomainFailure" && failure.failure._tag).toBe("tenetkit/repl/CellExecutionFailed")
 
+        const started = yield* Deferred.make<void>()
         const running = yield* Effect.forkChild(
           executor.execute({
             sessionId: "interrupt",
             cellId: "interrupt-1",
-            code: "await new Promise(() => {})",
+            code: "console.log('started'); await new Promise(() => {})",
+            emit: (event) =>
+              event._tag === "Stdout" && event.text.includes("started")
+                ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+                : Effect.void,
           }),
         )
-        yield* Effect.yieldNow
+        yield* Deferred.await(started)
         yield* Fiber.interrupt(running)
         const interrupted = yield* Fiber.await(running)
         expect(Exit.isFailure(interrupted) && Cause.hasInterruptsOnly(interrupted.cause)).toBe(true)
+
+        const recovered = yield* executor.execute({
+          sessionId: "interrupt",
+          cellId: "interrupt-2",
+          code: "'available after interruption'",
+        })
+        expect(recovered._tag === "Success" ? recovered.result.value : recovered.failure).toBe(
+          "available after interruption",
+        )
       }),
     ),
   )

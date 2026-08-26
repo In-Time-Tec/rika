@@ -1,14 +1,37 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMigrations, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import {
+  rikaHostedOwners,
+  rikaThreads,
+  rikaTranscriptCheckpoints,
+  rikaTranscriptUnits,
+  rikaTurns,
+  rikaWorkspaces,
+} from "@rika/product-store/database-schema"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { FileSystem, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema, Scope, Stream } from "effect"
+import {
+  FileSystem,
+  Config,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Random,
+  Redacted,
+  Schema,
+  Scope,
+  Stream,
+} from "effect"
+import { eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
@@ -47,6 +70,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
     parsed.pathname = `/${database}`
     const url = parsed.toString()
     const pool = new Pool({ connectionString: url })
+    const db = drizzle({ client: pool })
     try {
       for (const migration of [...identityMigrations, ...productMigrations]) {
         const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
@@ -65,25 +89,44 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         threadId: "projection-thread",
         turnId: "projection-turn",
       })
+      const now = DateTime.toDate(DateTime.nowUnsafe())
       yield* Effect.tryPromise(() =>
-        pool.query(
-          `INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
-             VALUES ('projection-user','Projection','projection@example.test',true,now(),now());
-           INSERT INTO rika_hosted_owners (id,kind,user_id,organization_id)
-             VALUES ('projection-owner','personal','projection-user',NULL);
-           INSERT INTO rika_workspaces (owner_id,path,created_at)
-             VALUES ('projection-owner','projection-workspace',1);
-           INSERT INTO rika_threads (id,owner_id,workspace,title,created_at,updated_at)
-             VALUES ('projection-thread','projection-owner','projection-workspace','Projection',1,1)`,
-        ),
+        db.insert(identityUser).values({
+          id: "projection-user",
+          name: "Projection",
+          email: "projection@example.test",
+          emailVerified: true,
+          createdAt: now,
+          updatedAt: now,
+        }),
       )
       yield* Effect.tryPromise(() =>
-        pool.query(
-          `INSERT INTO rika_turns
-             (id,thread_id,prompt,status,created_at,updated_at,execution_route_json,execution_link_json)
-             VALUES ('projection-turn','projection-thread','project', 'running',2,2,$1,$2)`,
-          [route, link],
-        ),
+        db.insert(rikaHostedOwners).values({ id: "projection-owner", kind: "personal", userId: "projection-user" }),
+      )
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaWorkspaces).values({ ownerId: "projection-owner", path: "projection-workspace", createdAt: 1 }),
+      )
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaThreads).values({
+          id: "projection-thread",
+          ownerId: "projection-owner",
+          workspace: "projection-workspace",
+          title: "Projection",
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaTurns).values({
+          id: "projection-turn",
+          threadId: "projection-thread",
+          prompt: "project",
+          status: "running",
+          createdAt: 2,
+          updatedAt: 2,
+          executionRouteJson: route,
+          executionLinkJson: link,
+        }),
       )
       const unitKey = "assistant:projection"
       const running: ExecutionProjection.Change = {
@@ -158,9 +201,12 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       )
       yield* eventually(
         Effect.tryPromise(() =>
-          pool.query(`SELECT projector_cursor FROM rika_transcript_checkpoints WHERE turn_id = 'projection-turn'`),
+          db
+            .select({ projectorCursor: rikaTranscriptCheckpoints.projectorCursor })
+            .from(rikaTranscriptCheckpoints)
+            .where(eq(rikaTranscriptCheckpoints.turnId, "projection-turn")),
         ),
-        (result) => result.rows[0]?.projector_cursor === "cursor-running",
+        (result) => result[0]?.projectorCursor === "cursor-running",
       )
       yield* Scope.close(firstScope, Exit.void)
       expect(cursors).toEqual([undefined])
@@ -183,23 +229,31 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       )
       const persisted = yield* eventually(
         Effect.tryPromise(() =>
-          pool.query(`SELECT turn_record.status, checkpoint.revision, checkpoint.projector_cursor,
-              unit_record.unit_json
-            FROM rika_turns turn_record
-            JOIN rika_transcript_checkpoints checkpoint ON checkpoint.turn_id = turn_record.id
-            JOIN rika_transcript_units unit_record ON unit_record.turn_id = turn_record.id
-            WHERE turn_record.id = 'projection-turn'`),
+          db
+            .select({
+              status: rikaTurns.status,
+              revision: rikaTranscriptCheckpoints.revision,
+              projector_cursor: rikaTranscriptCheckpoints.projectorCursor,
+              unit_json: rikaTranscriptUnits.unitJson,
+            })
+            .from(rikaTurns)
+            .innerJoin(rikaTranscriptCheckpoints, eq(rikaTranscriptCheckpoints.turnId, rikaTurns.id))
+            .innerJoin(rikaTranscriptUnits, eq(rikaTranscriptUnits.turnId, rikaTurns.id))
+            .where(eq(rikaTurns.id, "projection-turn")),
         ),
-        (result) => result.rows[0]?.status === "completed",
+        (result) =>
+          result[0]?.status === "completed" &&
+          result[0]?.revision === 1 &&
+          result[0]?.projector_cursor === "cursor-completed",
       )
       yield* Scope.close(secondScope, Exit.void)
       expect(cursors).toEqual([undefined, "cursor-running"])
-      expect(persisted.rows[0]).toMatchObject({
+      expect(persisted[0]).toMatchObject({
         status: "completed",
         revision: 1,
         projector_cursor: "cursor-completed",
       })
-      expect(yield* Schema.decodeEffect(JsonUnit)(String(persisted.rows[0].unit_json))).toMatchObject({
+      expect(yield* Schema.decodeEffect(JsonUnit)(String(persisted[0]?.unit_json))).toMatchObject({
         content: { text: "complete" },
       })
     } finally {

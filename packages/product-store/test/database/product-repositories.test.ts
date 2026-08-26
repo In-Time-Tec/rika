@@ -12,6 +12,8 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { and, eq, sql as drizzleSql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Pool } from "pg"
@@ -19,6 +21,8 @@ import { identityMigrations } from "../../../identity/src/database/migrations"
 import { runMigration } from "../../../identity/src/database/postgres"
 import * as ProductRepositories from "../../src/database/product-repositories"
 import { migrations } from "../../src/hosted/migrations"
+import { identityOrganization, identityUser } from "@rika/identity"
+import * as schema from "../../src/database/schema/product"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const readFileString = (url: URL) =>
@@ -80,17 +84,38 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
       let migrated: Pool | undefined
       try {
         migrated = yield* applyMigrations(url)
+        const db = drizzle({ client: migrated })
+        const now = drizzleSql`now()`
         yield* Effect.tryPromise(() =>
-          migrated!.query(`
-              INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at) VALUES
-                ('product-personal-user','Personal','product-personal@example.test',true,now(),now()),
-                ('product-org-user','Org','product-org@example.test',true,now(),now());
-              INSERT INTO organization (id,name,slug,created_at)
-                VALUES ('product-org','Product Org','product-org',now());
-              INSERT INTO rika_hosted_owners (id,kind,user_id,organization_id) VALUES
-                ('product-personal-owner','personal','product-personal-user',NULL),
-                ('product-organization-owner','organization',NULL,'product-org');
-            `),
+          db.insert(identityUser).values([
+            {
+              id: "product-personal-user",
+              name: "Personal",
+              email: "product-personal@example.test",
+              emailVerified: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+            {
+              id: "product-org-user",
+              name: "Org",
+              email: "product-org@example.test",
+              emailVerified: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ]),
+        )
+        yield* Effect.tryPromise(() =>
+          db
+            .insert(identityOrganization)
+            .values({ id: "product-org", name: "Product Org", slug: "product-org", createdAt: now }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(schema.rikaHostedOwners).values([
+            { id: personalOwner, kind: "personal", userId: "product-personal-user" },
+            { id: organizationOwner, kind: "organization", organizationId: "product-org" },
+          ]),
         )
         const personal = yield* Layer.build(repositoryLayer(url, personalOwner))
         const organization = yield* Layer.build(repositoryLayer(url, organizationOwner))
@@ -203,8 +228,17 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             ),
           ).toMatchObject({ _tag: "Failure", failure: { _tag: "ThreadRepositoryError" } })
           expect(
-            yield* sql`SELECT path FROM rika_workspaces
-                WHERE owner_id = ${personalOwner} AND path = '/work/rollback'`,
+            yield* Effect.tryPromise(() =>
+              db
+                .select({ path: schema.rikaWorkspaces.path })
+                .from(schema.rikaWorkspaces)
+                .where(
+                  and(
+                    eq(schema.rikaWorkspaces.ownerId, personalOwner),
+                    eq(schema.rikaWorkspaces.path, "/work/rollback"),
+                  ),
+                ),
+            ),
           ).toEqual([])
           yield* sql`DROP TRIGGER reject_product_thread ON rika_threads`
           yield* sql`DROP FUNCTION reject_product_thread()`
@@ -240,8 +274,22 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           expect(yield* threads.get(threadId)).toBeUndefined()
           expect(yield* threads.pendingDeletions).toEqual([{ threadId, requestedAt: 34 }])
           yield* threads.completeDeletion(threadId)
-          expect(yield* sql`SELECT id FROM rika_turns WHERE thread_id = ${threadId}`).toEqual([])
-          expect(yield* sql`SELECT thread_id FROM rika_goals WHERE thread_id = ${threadId}`).toEqual([])
+          expect(
+            yield* Effect.tryPromise(() =>
+              db
+                .select({ id: schema.rikaTurns.id })
+                .from(schema.rikaTurns)
+                .where(eq(schema.rikaTurns.threadId, threadId)),
+            ),
+          ).toEqual([])
+          expect(
+            yield* Effect.tryPromise(() =>
+              db
+                .select({ threadId: schema.rikaGoals.threadId })
+                .from(schema.rikaGoals)
+                .where(eq(schema.rikaGoals.threadId, threadId)),
+            ),
+          ).toEqual([])
         }).pipe(Effect.provide(personal))
       } finally {
         if (migrated !== undefined) yield* Effect.tryPromise(() => migrated!.end())

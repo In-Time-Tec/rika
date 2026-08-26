@@ -1,14 +1,25 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
-import { identityMigrations, makeBetterAuthIdentityRuntime, noOpMailSender, runMigration } from "@rika/identity"
+import {
+  identityMember,
+  identityMigrations,
+  identityOrganization,
+  identityUser,
+  makeBetterAuthIdentityRuntime,
+  noOpMailSender,
+  runMigration,
+} from "@rika/identity"
 import { BetterAuthUserId } from "@rika/product/hosted-model"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import { rikaHostedOwners, rikaHostedProviderCredentials } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as postgresLayer } from "@rika/product-store/layer"
+import { and, asc, count, eq, or } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { Config, Context, Effect, FileSystem, Layer, Random, Redacted } from "effect"
-import { Pool, type QueryResultRow } from "pg"
+import { Pool } from "pg"
 import { developmentAccount, seedDevelopment } from "../../src/development/seed"
 import { HostedProduct, postgresTest } from "../../src/hosted/product"
 import { HostedProviderCredentials, layer as credentialsLayer } from "../../src/hosted/environment/provider-credentials"
@@ -17,52 +28,35 @@ import { live as livePlatform } from "../support/live-platform"
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const encryptionKey = Redacted.make("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 const openRouterApiKey = Redacted.make("development-openrouter-key")
-const query = <A extends QueryResultRow>(pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query<A>(text, [...values])).pipe(Effect.map((result) => result.rows))
-
-interface SeededCredentialRow extends QueryResultRow {
-  readonly credential_identity: string
-  readonly owner_id: string
-  readonly revision: string
-  readonly userId: string | null
-  readonly status: "active" | "revoked"
-  readonly keyVersion: number | null
-  readonly nonce: string | null
-  readonly ciphertext: string | null
-  readonly authenticationTag: string | null
-  readonly createdAt: string
-  readonly updatedAt: string
-  readonly rotatedAt: string | null
-  readonly revokedAt: string | null
+const credentialSelection = {
+  credential_identity: rikaHostedProviderCredentials.credentialReferenceId,
+  owner_id: rikaHostedProviderCredentials.ownerId,
+  revision: rikaHostedProviderCredentials.revision,
+  userId: rikaHostedOwners.userId,
+  status: rikaHostedProviderCredentials.status,
+  keyVersion: rikaHostedProviderCredentials.keyVersion,
+  nonce: rikaHostedProviderCredentials.nonce,
+  ciphertext: rikaHostedProviderCredentials.ciphertext,
+  authenticationTag: rikaHostedProviderCredentials.authenticationTag,
+  createdAt: rikaHostedProviderCredentials.createdAt,
+  updatedAt: rikaHostedProviderCredentials.updatedAt,
+  rotatedAt: rikaHostedProviderCredentials.rotatedAt,
+  revokedAt: rikaHostedProviderCredentials.revokedAt,
 }
-
-const readCredentials = (pool: Pool) =>
-  query<SeededCredentialRow>(
-    pool,
-    `SELECT credential.credential_reference_id AS credential_identity, credential.owner_id,
-       credential.revision::text AS revision, owner_record.user_id AS "userId", credential.status,
-       credential.key_version AS "keyVersion", encode(credential.nonce, 'hex') AS nonce,
-       encode(credential.ciphertext, 'hex') AS ciphertext,
-       encode(credential.authentication_tag, 'hex') AS "authenticationTag",
-       credential.created_at::text AS "createdAt", credential.updated_at::text AS "updatedAt",
-       credential.rotated_at::text AS "rotatedAt", credential.revoked_at::text AS "revokedAt"
-     FROM rika_hosted_provider_credentials credential
-     JOIN rika_hosted_owners owner_record ON owner_record.id = credential.owner_id
-     ORDER BY credential.owner_id`,
-  )
 
 it.effect.skipIf(databaseUrl === "")("seeds one stable encrypted development account repeatedly in PostgreSQL", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const database = `rika_development_seed_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       const databaseContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
-      const drizzle = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(databaseContext))
+      const identityDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(databaseContext))
+      const databaseClient = drizzle({ client: pool })
       try {
         for (const migration of [...identityMigrations, ...productMigrations]) {
           yield* runMigration({
@@ -113,7 +107,7 @@ it.effect.skipIf(databaseUrl === "")("seeds one stable encrypted development acc
         )
         const input = {
           baseUrl,
-          database: drizzle,
+          database: identityDatabase,
           identity,
           pool,
           product: Context.get(productContext, HostedProduct),
@@ -122,13 +116,49 @@ it.effect.skipIf(databaseUrl === "")("seeds one stable encrypted development acc
         }
 
         yield* Effect.all([seedDevelopment(input), seedDevelopment(input)], { concurrency: 2, discard: true })
-        const first = yield* readCredentials(pool)
+        const firstRows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select(credentialSelection)
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedProviderCredentials.ownerId))
+            .orderBy(asc(rikaHostedProviderCredentials.ownerId)),
+        )
+        const first = firstRows.map((row) => ({ ...row, revision: String(row.revision) }))
         yield* seedDevelopment(input)
-        const second = yield* readCredentials(pool)
+        const secondRows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select(credentialSelection)
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedProviderCredentials.ownerId))
+            .orderBy(asc(rikaHostedProviderCredentials.ownerId)),
+        )
+        const second = secondRows.map((row) => ({ ...row, revision: String(row.revision) }))
 
         expect(second).toEqual(first)
         expect(second).toHaveLength(2)
         expect(second.map((row) => row.revision)).toEqual(["1", "1"])
+        const rotatedInput = { ...input, openRouterApiKey: Redacted.make("replacement-development-openrouter-key") }
+        yield* seedDevelopment(rotatedInput)
+        const rotatedRows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select(credentialSelection)
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedProviderCredentials.ownerId))
+            .orderBy(asc(rikaHostedProviderCredentials.ownerId)),
+        )
+        const rotated = rotatedRows.map((row) => ({ ...row, revision: String(row.revision) }))
+        expect(rotated.map((row) => row.revision)).toEqual(["2", "2"])
+        expect(rotated.map((row) => row.credential_identity)).toEqual(second.map((row) => row.credential_identity))
+        expect(rotated.map((row) => row.ciphertext)).not.toEqual(second.map((row) => row.ciphertext))
+        yield* seedDevelopment(rotatedInput)
+        const repeatedRows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select(credentialSelection)
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedProviderCredentials.ownerId))
+            .orderBy(asc(rikaHostedProviderCredentials.ownerId)),
+        )
+        expect(repeatedRows.map((row) => ({ ...row, revision: String(row.revision) }))).toEqual(rotated)
         const personalCredential = second.find((row) => row.userId !== null)
         if (personalCredential?.userId === null || personalCredential === undefined)
           return yield* Effect.die("Development personal credential was not seeded")
@@ -137,41 +167,82 @@ it.effect.skipIf(databaseUrl === "")("seeds one stable encrypted development acc
           owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(personalCredential.userId) },
           provider: "openrouter",
         })
-        yield* seedDevelopment(input)
-        const replaced = yield* readCredentials(pool)
+        yield* seedDevelopment(rotatedInput)
+        const replacedRows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select(credentialSelection)
+            .from(rikaHostedProviderCredentials)
+            .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedProviderCredentials.ownerId))
+            .orderBy(asc(rikaHostedProviderCredentials.ownerId)),
+        )
+        const replaced = replacedRows.map((row) => ({ ...row, revision: String(row.revision) }))
         expect(replaced.find((row) => row.userId !== null)).toMatchObject({
           credential_identity: personalCredential.credential_identity,
-          revision: "3",
+          revision: "4",
           status: "active",
         })
-        expect(replaced.find((row) => row.userId === null)).toEqual(second.find((row) => row.userId === null))
-        expect(
-          yield* query<{ readonly users: number; readonly organizations: number; readonly members: number }>(
-            pool,
-            `SELECT
-              (SELECT count(*)::int FROM "user" WHERE email = $1) AS users,
-              (SELECT count(*)::int FROM "organization" WHERE slug = $2) AS organizations,
-              (SELECT count(*)::int FROM "member" member_record
-                JOIN "organization" organization_record ON organization_record.id = member_record.organization_id
-                JOIN "user" user_record ON user_record.id = member_record.user_id
-                WHERE organization_record.slug = $2 AND user_record.email = $1) AS members`,
-            [developmentAccount.email, developmentAccount.organizationSlug],
+        expect(replaced.find((row) => row.userId === null)).toEqual(rotated.find((row) => row.userId === null))
+        const [users, organizations, memberCounts] = yield* Effect.all([
+          Effect.orDie(
+            Effect.tryPromise(() =>
+              databaseClient.$count(identityUser, eq(identityUser.email, developmentAccount.email)),
+            ),
           ),
-        ).toEqual([{ users: 1, organizations: 1, members: 1 }])
-        expect(
-          yield* query<{ readonly owners: number; readonly credentials: number; readonly encrypted: boolean }>(
-            pool,
-            `SELECT
-              (SELECT count(*)::int FROM rika_hosted_owners
-                WHERE user_id = (SELECT id FROM "user" WHERE email = $2)
-                  OR organization_id = (SELECT id FROM "organization" WHERE slug = $3)) AS owners,
-              count(*)::int AS credentials,
-              bool_and(key_version = 1 AND nonce IS NOT NULL AND ciphertext IS NOT NULL
-                AND authentication_tag IS NOT NULL AND ciphertext <> convert_to($1, 'UTF8')) AS encrypted
-             FROM rika_hosted_provider_credentials`,
-            [Redacted.value(openRouterApiKey), developmentAccount.email, developmentAccount.organizationSlug],
+          Effect.orDie(
+            Effect.tryPromise(() =>
+              databaseClient.$count(
+                identityOrganization,
+                eq(identityOrganization.slug, developmentAccount.organizationSlug),
+              ),
+            ),
           ),
-        ).toEqual([{ owners: 2, credentials: 2, encrypted: true }])
+          Effect.orDie(
+            Effect.tryPromise(() =>
+              databaseClient
+                .select({ members: count() })
+                .from(identityMember)
+                .innerJoin(identityOrganization, eq(identityOrganization.id, identityMember.organizationId))
+                .innerJoin(identityUser, eq(identityUser.id, identityMember.userId))
+                .where(
+                  and(
+                    eq(identityOrganization.slug, developmentAccount.organizationSlug),
+                    eq(identityUser.email, developmentAccount.email),
+                  ),
+                ),
+            ),
+          ),
+        ])
+        expect([{ users, organizations, members: memberCounts[0]?.members ?? 0 }]).toEqual([
+          { users: 1, organizations: 1, members: 1 },
+        ])
+        const ownerCounts = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select({ owners: count() })
+            .from(rikaHostedOwners)
+            .leftJoin(identityUser, eq(identityUser.id, rikaHostedOwners.userId))
+            .leftJoin(identityOrganization, eq(identityOrganization.id, rikaHostedOwners.organizationId))
+            .where(
+              or(
+                eq(identityUser.email, developmentAccount.email),
+                eq(identityOrganization.slug, developmentAccount.organizationSlug),
+              ),
+            ),
+        )
+        const encrypted = replaced.every(
+          (row) =>
+            row.keyVersion === 1 &&
+            Buffer.isBuffer(row.nonce) &&
+            Buffer.isBuffer(row.ciphertext) &&
+            Buffer.isBuffer(row.authenticationTag) &&
+            !row.ciphertext.equals(Buffer.from(Redacted.value(openRouterApiKey))),
+        )
+        expect([
+          {
+            owners: ownerCounts[0]?.owners ?? 0,
+            credentials: replaced.length,
+            encrypted,
+          },
+        ]).toEqual([{ owners: 2, credentials: 2, encrypted: true }])
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

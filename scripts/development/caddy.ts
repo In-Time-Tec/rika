@@ -2,20 +2,20 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Config, Console, Crypto, Data, Effect, Layer, Schedule } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess } from "effect/unstable/process"
+import { spawnOwned } from "./owned-child-process"
 
 class CaddyError extends Data.TaggedError("CaddyError")<{ readonly message: string }> {}
 
 const program = Effect.gen(function* () {
   const publicUrl = yield* Config.string("PUBLIC_URL")
   const executorPort = yield* Config.string("EXECUTOR_PORT")
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const http = yield* HttpClient.HttpClient
   const crypto = yield* Crypto.Crypto
   const readinessToken = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => new CaddyError({ message: "Caddy readiness identity could not be created" })),
   )
-  const caddy = yield* spawner.spawn(
+  const caddy = yield* spawnOwned(
     ChildProcess.make("caddy", ["run", "--config", "infra/development/Caddyfile", "--adapter", "caddyfile"], {
       env: { READINESS_TOKEN: readinessToken },
       extendEnv: true,
@@ -26,7 +26,7 @@ const program = Effect.gen(function* () {
   )
   const ready = http
     .get(`http://127.0.0.1:${executorPort}/.rika-ready`, {
-      headers: { host: "executor.rika.test", "x-rika-readiness": readinessToken },
+      headers: { host: "executor.rika.invalid", "x-rika-readiness": readinessToken },
     })
     .pipe(
       Effect.filterOrFail(

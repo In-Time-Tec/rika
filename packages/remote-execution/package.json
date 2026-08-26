@@ -17,7 +17,8 @@
     "./repository-services": "./src/workspace/repositories.ts",
     "./workspace-files": "./src/workspace/files.ts",
     "./workspace-archive": "./src/workspace/archive.ts",
-    "./foreground": "./src/host/foreground.ts"
+    "./foreground": "./src/host/foreground.ts",
+    "./machine-process": "./src/host/machine-process.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",

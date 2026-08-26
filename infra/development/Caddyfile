@@ -3,7 +3,9 @@
 	auto_https off
 }
 
-http://127.0.0.1:{$PUBLIC_PORT} {
+http://:{$PUBLIC_PORT} {
+	bind 127.0.0.1
+
 	@api path /api/* /healthz /readyz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
 	handle @api {
 		reverse_proxy 127.0.0.1:{$API_PORT}

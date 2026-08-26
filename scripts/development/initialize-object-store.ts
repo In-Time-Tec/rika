@@ -18,8 +18,8 @@ const BucketFailure = Schema.Struct({
 })
 const decodeBucketFailure = Schema.decodeUnknownOption(BucketFailure)
 
-const isMissingBucket = (error: ObjectStoreInitializationError) =>
-  Option.match(decodeBucketFailure(error.cause), {
+export const isMissingBucket = (cause: unknown) =>
+  Option.match(decodeBucketFailure(cause), {
     onNone: () => false,
     onSome: (failure) =>
       failure.$metadata?.httpStatusCode === undefined
@@ -27,9 +27,21 @@ const isMissingBucket = (error: ObjectStoreInitializationError) =>
         : failure.$metadata.httpStatusCode === 404,
   })
 
+export const isRejectedObjectStoreCredential = (cause: unknown) =>
+  Option.match(decodeBucketFailure(cause), {
+    onNone: () => false,
+    onSome: (failure) =>
+      failure.$metadata?.httpStatusCode === 403 ||
+      failure.name === "AccessDenied" ||
+      failure.name === "InvalidAccessKeyId",
+  })
+
 interface BucketClient<E> {
   readonly send: (command: HeadBucketCommand | CreateBucketCommand) => Effect.Effect<unknown, E>
 }
+
+const clientFailureCause = <E>(failure: E | ObjectStoreClientError) =>
+  failure instanceof ObjectStoreClientError ? failure.cause : failure
 
 export const initializeBucket = Effect.fn("DevelopmentObjectStore.initializeBucket")(function* <E>(
   client: BucketClient<E>,
@@ -40,19 +52,21 @@ export const initializeBucket = Effect.fn("DevelopmentObjectStore.initializeBuck
       (cause) =>
         new ObjectStoreInitializationError({
           message: "Object store bucket is unavailable",
-          cause: cause instanceof ObjectStoreClientError ? cause.cause : cause,
+          cause: clientFailureCause(cause),
         }),
     ),
-    Effect.catchIf(isMissingBucket, () =>
-      client.send(new CreateBucketCommand({ Bucket: bucket })).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ObjectStoreInitializationError({
-              message: "Object store bucket creation failed",
-              cause: cause instanceof ObjectStoreClientError ? cause.cause : cause,
-            }),
+    Effect.catchIf(
+      (error) => isMissingBucket(error.cause),
+      () =>
+        client.send(new CreateBucketCommand({ Bucket: bucket })).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ObjectStoreInitializationError({
+                message: "Object store bucket creation failed",
+                cause: clientFailureCause(cause),
+              }),
+          ),
         ),
-      ),
     ),
   )
 })
@@ -70,7 +84,18 @@ const program = Effect.gen(function* () {
   const bucket = yield* Config.string("RIKA_WORKSPACE_CHECKPOINT_BUCKET")
   const region = yield* Config.string("AWS_REGION")
   const client = new S3Client({ endpoint: endpoint.toString(), region, forcePathStyle: true })
-  yield* initializeBucket(s3BucketClient(client), bucket).pipe(Effect.ensuring(Effect.sync(() => client.destroy())))
+  yield* initializeBucket(s3BucketClient(client), bucket).pipe(
+    Effect.mapError((error) =>
+      isRejectedObjectStoreCredential(error.cause)
+        ? new ObjectStoreInitializationError({
+            message:
+              "Object storage rejected the development credential because the rika-development-minio volume belongs to different Alchemy state; restore .alchemy or explicitly remove the stale development container and volume",
+            cause: error.cause,
+          })
+        : error,
+    ),
+    Effect.ensuring(Effect.sync(() => client.destroy())),
+  )
   yield* Console.log(`Object store bucket ${bucket} is ready`)
 })
 

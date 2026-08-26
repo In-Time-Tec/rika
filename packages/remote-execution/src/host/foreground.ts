@@ -123,6 +123,12 @@ const attribution = (request: CellRequest): CellAttribution => ({
 })
 
 const executionKey = (operationKey: string, attempt: number) => `${operationKey}\u0000${attempt}`
+const machineExecutionKey = (operationKey: string, attempt: number, machineId: string) =>
+  `${executionKey(operationKey, attempt)}\u0000${machineId}`
+const machineParentActive = (receipts: Map<string, PendingResult>, operationKey: string, attempt: number) => {
+  const retained = receipts.get(executionKey(operationKey, attempt))
+  return retained !== undefined && !retained.frames.some((frame) => frame._tag === "Terminal")
+}
 
 const redactOutput = (text: string) => {
   const redacted = text
@@ -433,6 +439,11 @@ const consumeApi = (
       const response = yield* cells
         .cancel(message.operationKey, message.attempt)
         .pipe(Effect.mapError((error) => failure(error.message)))
+      const machinePrefix = `${key}\u0000`
+      const machines = [...(yield* Ref.get(liveOperations))]
+        .filter(([operationKey]) => operationKey.startsWith(machinePrefix))
+        .map(([, fiber]) => fiber)
+      yield* Effect.forEach(machines, Fiber.interrupt, { discard: true })
       const interrupted = (yield* Ref.get(receipts)).get(key)
       if (interrupted !== undefined && !interrupted.frames.some((frame) => frame._tag === "Terminal")) {
         yield* append(
@@ -455,40 +466,66 @@ const consumeApi = (
       yield* cells.completeBinding(message).pipe(Effect.mapError((error) => failure(error.message)))
     }
     if (message._tag === "MachineExecute") {
-      const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access))
+      const currentSession = yield* Ref.get(session)
+      if (currentSession === undefined || !sameAccess(access(currentSession), message.access))
         return yield* failure("Local machine request has a stale session")
-      yield* Effect.sync(() =>
-        runWorker(
-          machine
-            .execute({
+      if (!machineParentActive(yield* Ref.get(receipts), message.operationKey, message.attempt)) {
+        const currentWriter = yield* Ref.get(activeWriter)
+        if (currentWriter !== undefined)
+          yield* currentWriter(
+            encodeRunnerMessage({
+              _tag: "MachineResult",
+              access: message.access,
+              operationKey: message.operationKey,
+              attempt: message.attempt,
               machineId: message.machineId,
               requestDigest: message.requestDigest,
-              request: message.request,
-            })
-            .pipe(
-              Effect.flatMap((outcome) =>
-                Effect.gen(function* () {
-                  const latest = yield* Ref.get(session)
-                  const currentWriter = yield* Ref.get(activeWriter)
-                  if (latest === undefined || currentWriter === undefined) return
-                  yield* currentWriter(
-                    encodeRunnerMessage({
-                      _tag: "MachineResult",
-                      access: access(latest),
-                      operationKey: message.operationKey,
-                      attempt: message.attempt,
-                      machineId: message.machineId,
-                      requestDigest: message.requestDigest,
-                      outcome,
-                    }),
-                  ).pipe(Effect.mapError(() => failure("Could not write local machine result")))
-                }),
-              ),
-              Effect.mapError((error) => failure(error.message)),
+              outcome: { _tag: "Fenced", message: "Parent Cell is no longer running" },
+            }),
+          ).pipe(Effect.mapError(() => failure("Could not write fenced local machine result")))
+        return
+      }
+      const key = machineExecutionKey(message.operationKey, message.attempt, message.machineId)
+      if (!(yield* Ref.get(liveOperations)).has(key)) {
+        const gate = yield* Deferred.make<void>()
+        const operation = machine
+          .execute({
+            machineId: message.machineId,
+            requestDigest: message.requestDigest,
+            request: message.request,
+          })
+          .pipe(
+            Effect.flatMap((outcome) =>
+              Effect.gen(function* () {
+                const latest = yield* Ref.get(session)
+                const currentWriter = yield* Ref.get(activeWriter)
+                if (latest === undefined || currentWriter === undefined) return
+                yield* currentWriter(
+                  encodeRunnerMessage({
+                    _tag: "MachineResult",
+                    access: access(latest),
+                    operationKey: message.operationKey,
+                    attempt: message.attempt,
+                    machineId: message.machineId,
+                    requestDigest: message.requestDigest,
+                    outcome,
+                  }),
+                ).pipe(Effect.mapError(() => failure("Could not write local machine result")))
+              }),
             ),
-        ),
-      )
+            Effect.mapError((error) => failure(error.message)),
+            Effect.ensuring(
+              Ref.update(liveOperations, (current) => {
+                const next = new Map(current)
+                next.delete(key)
+                return next
+              }),
+            ),
+          )
+        const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
+        yield* Ref.update(liveOperations, (current) => new Map(current).set(key, fiber))
+        yield* Deferred.succeed(gate, undefined)
+      }
     }
     if (message._tag === "CellExecute") {
       const current = yield* Ref.get(session)

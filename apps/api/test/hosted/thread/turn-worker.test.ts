@@ -105,6 +105,54 @@ it.effect("persists staged admission before activation", () =>
   ),
 )
 
+it.effect("releases a failed pre-admission claim for immediate retry", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const released = yield* Deferred.make<void>()
+      const claimed = yield* Ref.make(false)
+      const claim: TurnClaim = {
+        workerId: "worker-test",
+        claimToken: "claim-test",
+        expiresAt: 30,
+        activationRequested: false,
+        ownerId: "owner-test",
+        claimedAt: 0,
+        input: {
+          threadId: "thread-test",
+          turnId: "turn-test",
+          workspaceId: "workspace-test",
+          prompt: "test",
+          executionRoute: ExecutionRoute.testExecutionRoute(),
+        },
+      }
+      const store: HostedTurnWorkerStoreService = {
+        claimRecovery: () => Effect.succeed(unavailableClaim),
+        claimNext: () =>
+          Ref.getAndSet(claimed, true).pipe(Effect.map((alreadyClaimed) => (alreadyClaimed ? undefined : claim))),
+        renew: () => Effect.succeed(true),
+        prepare: () => Effect.die("failed preparation must not persist"),
+        completeAdmission: () => Effect.die("failed preparation must not admit"),
+        requestActivation: () => Effect.die("failed preparation must not activate"),
+        completeActivation: () => Effect.die("failed preparation must not complete"),
+        release: () => Deferred.succeed(released, undefined),
+      }
+      const gateway = ExecutionGateway.Service.of({
+        ...ExecutionGateway.makeTest(),
+        prepareTurn: () => Effect.die("workspace unavailable"),
+      })
+      yield* Layer.build(
+        hostedTurnWorkerLayer({ workerId: "worker-test", leaseMillis: 30, pollIntervalMillis: 10 }).pipe(
+          Layer.provide(Layer.succeed(HostedTurnWorkerStore, store)),
+          Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+          Layer.provide(BunCrypto.layer),
+        ),
+      )
+
+      yield* Deferred.await(released)
+    }),
+  ),
+)
+
 it.effect("cancels a durably admitted Runtime Run when cancellation won before the admission link was persisted", () =>
   Effect.scoped(
     Effect.gen(function* () {

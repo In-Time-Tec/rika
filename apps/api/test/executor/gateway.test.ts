@@ -15,6 +15,7 @@ import { HostBindingRegistry } from "tenetkit/repl"
 import { Context, Crypto, Deferred, Effect, Fiber, Layer, Logger, Option, Redacted, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
+  cancelledResponse,
   GatewayError,
   makeGateway as makeGatewayService,
   type BindingAuthority,
@@ -161,6 +162,31 @@ const lifecycleStore = (
             dispatchedProcessIncarnation: access.fence.processIncarnation,
           }),
       ),
+    cancel: (input) =>
+      Effect.sync(() => {
+        const operationId = operation(input)
+        const current = operations.get(operationId) ?? { state: "accepted" as const, started: false }
+        if (
+          (current.state === "completed" || current.state === "unknown") &&
+          current.response !== undefined &&
+          current.outcome !== undefined
+        )
+          return {
+            _tag: "AlreadyTerminal" as const,
+            result: { response: current.response, outcome: current.outcome },
+          }
+        if (current.state === "dispatched") return { _tag: "Dispatched" as const }
+        operations.set(operationId, {
+          ...current,
+          state: "completed",
+          response: cancelledResponse,
+          outcome: "cancelled",
+        })
+        return {
+          _tag: "Cancelled" as const,
+          result: { response: cancelledResponse, outcome: "cancelled" as const },
+        }
+      }),
     resolveDeadline: (input) =>
       Effect.sync(() => {
         const current = operations.get(operation(input)) ?? { state: "accepted" as const, started: false }
@@ -654,11 +680,10 @@ describe("executor gateway", () => {
   it.effect("reports a registered executor inactive when its durable authority is revoked", () =>
     Effect.gen(function* () {
       const target = socket()
-      let active = true
+      let failure: ControllerError | undefined
       const gateway = yield* makeGateway(
         controller({
-          validateAccess: () =>
-            active ? Effect.void : Effect.fail(ControllerError.make({ kind: "fenced", message: "revoked" })),
+          validateAccess: () => (failure === undefined ? Effect.void : Effect.fail(failure)),
         }),
       )
       yield* gateway.receive(
@@ -681,7 +706,9 @@ describe("executor gateway", () => {
         }),
       )
       expect(yield* gateway.active(target)).toBe(true)
-      active = false
+      failure = ControllerError.make({ kind: "repository", message: "temporarily unavailable" })
+      expect(yield* gateway.active(target)).toBe(true)
+      failure = ControllerError.make({ kind: "fenced", message: "revoked" })
       expect(yield* gateway.active(target)).toBe(false)
     }),
   )
@@ -965,7 +992,7 @@ describe("executor gateway", () => {
     }),
   )
 
-  it.effect("replays a durable Orb receipt request after API replacement", () =>
+  it.effect("replays a durable Orb receipt and redelivers cancellation after API replacement", () =>
     Effect.gen(function* () {
       const retained = lifecycleStore()
       const firstSocket = socket()
@@ -1044,6 +1071,43 @@ describe("executor gateway", () => {
         attempt: 0,
         afterCursor: 2,
       })
+      const cancelling = yield* Effect.forkChild(
+        restarted.cancel({
+          assignmentId: "assignment-1",
+          operationKey: "operation-api-restart",
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "wait for api restart",
+        }),
+      )
+      yield* Effect.yieldNow
+      expect(
+        restartedSocket.sent
+          .map((message) => decode(message))
+          .find((message) => message._tag === "CellCancel" && message.operationKey === "operation-api-restart"),
+      ).toEqual({
+        _tag: "CellCancel",
+        access,
+        operationKey: "operation-api-restart",
+        attempt: 0,
+      })
+      yield* restarted.receive(
+        restartedSocket,
+        encode({
+          _tag: "CellLifecycle",
+          access,
+          frame: {
+            _tag: "Terminal",
+            attribution: attribution("operation-api-restart"),
+            cursor: 3,
+            outcome: "cancelled",
+            response: cancelledResponse,
+          },
+        }),
+      )
+      yield* TestClock.adjust("100 millis")
+      expect(yield* Fiber.join(cancelling)).toEqual({ response: cancelledResponse, outcome: "cancelled" })
     }),
   )
 
@@ -1199,6 +1263,145 @@ describe("executor gateway", () => {
       )
       expect(yield* Fiber.join(next)).toEqual({ access, response, outcome: "completed" })
       expect(target.closed).toEqual([])
+    }),
+  )
+
+  it.effect("settles active machine work before accepting a cancelled Cell terminal", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const operationKey = "operation-cancelled-machine"
+      const input = {
+        assignmentId: "assignment-1",
+        operationKey,
+        workspaceId: "workspace-1",
+        sessionId: "thread-1",
+        ...cellIdentity,
+        code: "wait for machine",
+      }
+      const running = yield* Effect.forkChild(gateway.execute(input))
+      yield* Effect.yieldNow
+      const machine = yield* Effect.forkChild(
+        gateway.machine("assignment-1", operationKey, 0, {
+          _tag: "CodingTool",
+          request: { _tag: "Bash", command: "sleep 30" },
+        }),
+      )
+      yield* Effect.yieldNow
+      expect(
+        target.sent
+          .map((message) => decode(message))
+          .some((message) => message._tag === "MachineExecute" && message.operationKey === operationKey),
+      ).toBe(true)
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution(operationKey), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution(operationKey), cursor: 2 },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* Fiber.interrupt(running)
+      const cancelling = yield* Effect.forkChild(gateway.cancel(input))
+      yield* Effect.yieldNow
+      expect(
+        target.sent
+          .map((message) => decode(message))
+          .some((message) => message._tag === "CellCancel" && message.operationKey === operationKey),
+      ).toBe(true)
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellLifecycle",
+          access,
+          frame: {
+            _tag: "Terminal",
+            attribution: attribution(operationKey),
+            cursor: 3,
+            outcome: "cancelled",
+            response: cancelledResponse,
+          },
+        }),
+      )
+      expect(machine.pollUnsafe()).toBeDefined()
+      expect(yield* Fiber.join(machine)).toEqual({ _tag: "Cancelled" })
+      yield* gateway.receive(
+        target,
+        encode({ _tag: "CellResult", access, operationKey, attempt: 0, response: cancelledResponse }),
+      )
+      expect(yield* Fiber.join(cancelling)).toEqual({ access, response: cancelledResponse, outcome: "cancelled" })
+
+      const nextOperationKey = "operation-after-cancelled-machine"
+      const next = yield* Effect.forkChild(
+        gateway.execute({
+          assignmentId: "assignment-1",
+          operationKey: nextOperationKey,
+          workspaceId: "workspace-1",
+          sessionId: "thread-1",
+          ...cellIdentity,
+          code: "continue",
+        }),
+      )
+      yield* Effect.yieldNow
+      const nextMachine = yield* Effect.forkChild(
+        gateway.machine("assignment-1", nextOperationKey, 0, {
+          _tag: "ProcessStop",
+          processId: "process-after-cancel",
+        }),
+      )
+      yield* Effect.yieldNow
+      const nextRequest = target.sent
+        .map((message) => decode(message))
+        .findLast((message) => message._tag === "MachineExecute" && message.operationKey === nextOperationKey)
+      if (nextRequest?._tag !== "MachineExecute") return yield* Effect.die("next machine request was not sent")
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "MachineResult",
+          access,
+          operationKey: nextOperationKey,
+          attempt: 0,
+          machineId: nextRequest.machineId,
+          requestDigest: nextRequest.requestDigest,
+          outcome: { _tag: "Success", value: { _tag: "ProcessStopped" } },
+        }),
+      )
+      expect(yield* Fiber.join(nextMachine)).toEqual({ _tag: "Success", value: { _tag: "ProcessStopped" } })
+      const nextResponse = { _tag: "Success" as const, result: 42 }
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution(nextOperationKey), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution(nextOperationKey), cursor: 2 },
+        {
+          _tag: "Terminal" as const,
+          attribution: attribution(nextOperationKey),
+          cursor: 3,
+          outcome: "completed" as const,
+          response: nextResponse,
+        },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* gateway.receive(
+        target,
+        encode({ _tag: "CellResult", access, operationKey: nextOperationKey, attempt: 0, response: nextResponse }),
+      )
+      expect(yield* Fiber.join(next)).toEqual({ access, response: nextResponse, outcome: "completed" })
     }),
   )
 
@@ -2168,25 +2371,68 @@ describe("executor gateway", () => {
         }),
       )
       yield* workspaceReady(gateway, target)
-      const running = yield* Effect.forkChild(
-        gateway.execute({
-          assignmentId: "assignment-1",
-          operationKey: "operation-cancel",
-          workspaceId: "workspace-1",
-          sessionId: "thread-1",
-          ...cellIdentity,
-          code: "await never",
-        }),
-      )
+      const request = {
+        assignmentId: "assignment-1",
+        operationKey: "operation-cancel",
+        workspaceId: "workspace-1",
+        sessionId: "thread-1",
+        ...cellIdentity,
+        code: "await never",
+      }
+      const running = yield* Effect.forkChild(gateway.execute(request))
       yield* Effect.yieldNow
-      yield* gateway.cancel("assignment-1", "operation-cancel")
+      const { bindings: _bindings, ...operation } = request
+      const cancelling = yield* Effect.forkChild(gateway.cancel(operation), { startImmediately: true })
+      yield* Effect.yieldNow
       expect(decode(target.sent.at(-1)!)).toEqual({
         _tag: "CellCancel",
         access,
         operationKey: "operation-cancel",
         attempt: 0,
       })
-      yield* Fiber.interrupt(running)
+      const identity = attribution("operation-cancel")
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
+        { _tag: "Started" as const, attribution: identity, cursor: 2 },
+        {
+          _tag: "Terminal" as const,
+          attribution: identity,
+          cursor: 3,
+          outcome: "cancelled" as const,
+          response: cancelledResponse,
+        },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellResult",
+          access,
+          operationKey: "operation-cancel",
+          attempt: 0,
+          response: cancelledResponse,
+        }),
+      )
+      expect(yield* Fiber.join(cancelling)).toEqual({ access, response: cancelledResponse, outcome: "cancelled" })
+      expect(yield* Fiber.join(running)).toEqual({ access, response: cancelledResponse, outcome: "cancelled" })
+    }),
+  )
+
+  it.effect("terminalizes repeated cancellation before executor dispatch", () =>
+    Effect.gen(function* () {
+      const gateway = yield* makeGateway(controller())
+      const { bindings: _bindings, ...operation } = {
+        assignmentId: "assignment-1",
+        operationKey: "operation-cancel-accepted",
+        workspaceId: "workspace-1",
+        sessionId: "thread-1",
+        ...cellIdentity,
+        code: "mustNotRun()",
+      }
+      const first = yield* gateway.cancel(operation)
+      const repeated = yield* gateway.cancel(operation)
+      expect(first).toEqual({ response: cancelledResponse, outcome: "cancelled" })
+      expect(repeated).toEqual(first)
     }),
   )
 

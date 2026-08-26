@@ -1,13 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import { MediaAnalysisError, analyzerTestLayer } from "@rika/coding-tools/media-view-service"
-import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
-import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
-import * as WebSearch from "@rika/coding-tools/web-search-service"
-import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import { Cause, Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
 import { MachineOutcome, MachineRequest, type MachineOutcome as MachineOutcomeValue } from "../protocol/messages"
+import * as MachineExecution from "./machine-execution"
+import * as MachineProcess from "./machine-process"
 
 export const State = Schema.Union([
   Schema.TaggedStruct("Running", { requestDigest: Schema.String }),
@@ -39,61 +34,14 @@ interface Entry {
   readonly result: Deferred.Deferred<MachineOutcomeValue, MachineError>
 }
 
-const run = (
-  request: MachineRequest,
-): Effect.Effect<
-  MachineOutcomeValue,
-  never,
-  CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService
-> => {
-  switch (request._tag) {
-    case "CodingTool":
-      return Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request.request)).pipe(
-        Effect.match({
-          onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
-          onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "CodingTool" as const, result } }),
-        }),
-      )
-    case "ProcessStop":
-      return Effect.flatMap(ShellProcessRegistry.Service, (processes) => processes.cancel(request.processId)).pipe(
-        Effect.match({
-          onFailure: (failure) => ({
-            _tag: "Failure" as const,
-            failure: { _tag: "ProcessStopFailed" as const, message: failure.message },
-          }),
-          onSuccess: () => ({ _tag: "Success" as const, value: { _tag: "ProcessStopped" as const } }),
-        }),
-      )
-    case "McpDiscover":
-      return Effect.scoped(McpRuntime.discover(request.server)).pipe(
-        Effect.match({
-          onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
-          onSuccess: (tools) => ({ _tag: "Success" as const, value: { _tag: "McpDiscovered" as const, tools } }),
-        }),
-      )
-    case "McpCall":
-      return Effect.scoped(McpRuntime.call(request.server, request.tool, request.input)).pipe(
-        Effect.match({
-          onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
-          onSuccess: (content) => ({ _tag: "Success" as const, value: { _tag: "McpCalled" as const, content } }),
-        }),
-      )
-  }
-}
-
-export const layer = (
+const layerWith = <R>(
   options: Options,
-): Layer.Layer<
-  Machine,
-  never,
-  CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService
-> =>
+  executeRequest: (request: MachineRequest) => Effect.Effect<MachineOutcomeValue, never, R>,
+): Layer.Layer<Machine, never, R> =>
   Layer.effect(
     Machine,
     Effect.gen(function* () {
-      const services = yield* Effect.context<
-        CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService
-      >()
+      const services = yield* Effect.context<R>()
       const entries = yield* Ref.make(new Map<string, Entry>())
       const execute: Interface["execute"] = Effect.fn("Machine.execute")(function* (input) {
         const result = yield* Deferred.make<MachineOutcomeValue, MachineError>()
@@ -116,7 +64,7 @@ export const layer = (
                 : ({ _tag: "Unknown", message: "machine call outcome is unknown after executor restart" } as const)
             }
             yield* options.write(input.machineId, { _tag: "Running", requestDigest: input.requestDigest })
-            const outcome = yield* run(input.request).pipe(Effect.provideContext(services))
+            const outcome = yield* executeRequest(input.request).pipe(Effect.provideContext(services))
             yield* options.write(input.machineId, { _tag: "Completed", requestDigest: input.requestDigest, outcome })
             return outcome
           })
@@ -136,17 +84,37 @@ export const layer = (
     }),
   )
 
-export const workspaceLayer = (options: Options & { readonly workspace: string }): Layer.Layer<Machine> => {
-  const tools = Layer.orDie(
-    CodingToolRuntime.layerWithRegistry(options.workspace).pipe(
-      Layer.provide(
-        analyzerTestLayer(() => Effect.fail(MediaAnalysisError.make({ message: "Media analysis is unavailable" }))),
-      ),
-      Layer.provide(
-        Layer.merge(WebSearch.factoryLayer([]), ReadWebPage.layer({})).pipe(Layer.provide(FetchHttpClient.layer)),
-      ),
-      Layer.provide(BunServices.layer),
-    ),
-  )
-  return layer(options).pipe(Layer.provide(Layer.merge(tools, McpRuntime.layer)), Layer.provide(BunServices.layer))
+export const layer = (options: Options): Layer.Layer<Machine, never, MachineExecution.Requirements> =>
+  layerWith(options, MachineExecution.execute)
+
+export const workspaceLayer = (
+  options: Options & {
+    readonly workspace: string
+    readonly workspaceUser?: string
+    readonly environment?: Readonly<Record<string, string>>
+  },
+): Layer.Layer<Machine> => {
+  const workspaceUser = options.workspaceUser
+  return (
+    workspaceUser === undefined
+      ? layer(options).pipe(Layer.provide(MachineExecution.layer(options.workspace)))
+      : Layer.effect(
+          Machine,
+          Effect.gen(function* () {
+            const process = yield* MachineProcess.make({
+              workspace: options.workspace,
+              workspaceUser,
+              environment: options.environment ?? {},
+            }).pipe(Effect.orDie)
+            const context = yield* Layer.build(
+              layerWith(options, (request) =>
+                process
+                  .execute(request)
+                  .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
+              ),
+            )
+            return Context.get(context, Machine)
+          }),
+        )
+  ).pipe(Layer.provide(BunServices.layer))
 }

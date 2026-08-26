@@ -639,22 +639,66 @@ export const layer = (
         )
       })
 
+      const replaceAssignment = Effect.fn("Controller.replaceAssignment")(function* (
+        previous: ExecutorAssignment,
+        authorization: WorkspaceAuthorization,
+      ) {
+        return yield* HostedObservability.observe(
+          "attach",
+          assignmentCorrelation(previous),
+          Effect.gen(function* () {
+            const placement = yield* orbPlacement(previous)
+            const checkpoint = yield* assignments.latestCheckpoint(previous.id).pipe(Effect.mapError(assignmentFailure))
+            yield* authorizeWorkspace(
+              authorization,
+              previous.lifecycle._tag === "Active" || previous.lifecycle._tag === "Paused" || checkpoint !== undefined
+                ? "runtime"
+                : "setup",
+            )
+            const restore = checkpoint === undefined ? null : yield* restoreCheckpoint(previous)
+            const identity = yield* issueSecret("executor-bootstrap")
+            const replacing = yield* assignments
+              .beginReplacement({
+                ...version(previous),
+                placement: { ...placement, templateBuildId: options.templateBuildId },
+                bootstrapCredentialDigest: yield* digest(identity),
+                bootstrapLifetimeMillis,
+              })
+              .pipe(Effect.mapError(assignmentFailure))
+            return yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
+          }),
+        )
+      })
+
       const provision = Effect.fn("Controller.provision")(function* (
         assignmentId: string,
         authorization: WorkspaceAuthorization,
       ) {
         const assignment = yield* load(assignmentId)
         return yield* Effect.gen(function* () {
-          yield* approvedPlacement(assignment)
+          if (assignment.lifecycle._tag === "Terminated")
+            return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
+          const placement = yield* orbPlacement(assignment)
+          if (placement.templateBuildId !== options.templateBuildId)
+            return yield* replaceAssignment(assignment, authorization)
           if (assignment.lifecycle._tag === "Active") {
+            const lease = yield* Effect.result(
+              assignments.validateFence({
+                assignmentId: assignment.id,
+                assignmentGeneration: assignment.generation,
+                leaseEpoch: assignment.lifecycle.leaseEpoch,
+              }),
+            )
+            if (Result.isFailure(lease)) {
+              if (lease.failure.reason !== "stale-fence") return yield* assignmentFailure(lease.failure)
+              return yield* replaceAssignment(assignment, authorization)
+            }
             yield* provider
               .connect(assignment.lifecycle.providerInstanceId, idleTimeoutMillis)
               .pipe(Effect.mapError(providerFailure))
             return publicAssignment(assignment)
           }
           if (assignment.lifecycle._tag === "Paused") return yield* resumeAssignment(assignment, authorization)
-          if (assignment.lifecycle._tag === "Terminated")
-            return yield* failure("fenced", `Assignment ${assignmentId} is terminated`)
           return yield* beginProvisioning(assignment, authorization)
         }).pipe(
           Effect.tapError((error) =>
@@ -672,27 +716,10 @@ export const layer = (
         key: AssignmentKey,
         authorization: WorkspaceAuthorization,
       ) {
-        yield* authorizeWorkspace(authorization, "runtime")
         const previous = yield* current(key)
-        return yield* HostedObservability.observe(
-          "attach",
-          assignmentCorrelation(previous),
-          Effect.gen(function* () {
-            yield* approvedPlacement(previous)
-            if (previous.lifecycle._tag !== "Active")
-              return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
-            const restore = yield* restoreCheckpoint(previous)
-            const identity = yield* issueSecret("executor-bootstrap")
-            const replacing = yield* assignments
-              .beginReplacement({
-                ...version(previous),
-                bootstrapCredentialDigest: yield* digest(identity),
-                bootstrapLifetimeMillis,
-              })
-              .pipe(Effect.mapError(assignmentFailure))
-            return yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
-          }),
-        )
+        if (previous.lifecycle._tag !== "Active")
+          return yield* failure("assignment-conflict", "Only an active assignment can be replaced")
+        return yield* replaceAssignment(previous, authorization)
       })
 
       const resume = Effect.fn("Controller.resume")(function* (

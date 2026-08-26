@@ -1,12 +1,43 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import type { Account, CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
+import {
+  identityMember,
+  identityOrganization,
+  identityUser,
+  type Account,
+  type CliDeviceDirectory,
+  type IdentityDirectory,
+  type IdentityRuntime,
+} from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
+import {
+  rikaHostedEnvironmentValues,
+  rikaHostedExecutorAssignments,
+  rikaHostedOwners,
+  rikaHostedThreadCommands,
+  rikaHostedThreadEvents,
+  rikaHostedThreads,
+} from "@rika/product-store/database-schema"
 import * as HostedStore from "@rika/product-store/layer"
 import { ApiMessage, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
-import { Config, Context, Effect, FileSystem, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
+import { asc, eq, inArray } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import {
+  Clock,
+  Config,
+  Context,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Random,
+  Redacted,
+  Ref,
+  Schema,
+} from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { fileURLToPath } from "node:url"
@@ -121,28 +152,41 @@ it.layer(BunServices.layer)((test) => {
         let migrated: Pool | undefined
         try {
           migrated = yield* migrate(url)
+          const databaseClient = drizzle({ client: migrated })
+          const createdAt = DateTime.toDate(DateTime.makeUnsafe(yield* TestClock.withLive(Clock.currentTimeMillis)))
           yield* Effect.tryPromise(() =>
-            migrated!.query(
-              `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-            VALUES ($1, 'Rika User', 'rika@example.test', true, now(), now())`,
-              [account.user.id],
-            ),
+            databaseClient.insert(identityUser).values({
+              id: account.user.id,
+              name: account.user.name,
+              email: account.user.email,
+              emailVerified: account.user.emailVerified,
+              createdAt,
+              updatedAt: createdAt,
+            }),
           )
           yield* Effect.tryPromise(() =>
-            migrated!.query(
-              `WITH inserted_organization AS (
-                INSERT INTO "organization" (id, name, slug, created_at)
-                VALUES ('organization-cli-e2b', 'Rika Organization', 'rika-organization', now())
-                RETURNING id
-              ), inserted_member AS (
-                INSERT INTO "member" (id, organization_id, user_id, role, created_at)
-                SELECT 'member-cli-e2b', id, $1, 'owner', now() FROM inserted_organization
-                RETURNING organization_id
-              )
-              INSERT INTO rika_hosted_owners (id, kind, organization_id)
-              SELECT 'organization-owner-cli-e2b', 'organization', organization_id FROM inserted_member`,
-              [account.user.id],
-            ),
+            databaseClient.insert(identityOrganization).values({
+              id: "organization-cli-e2b",
+              name: "Rika Organization",
+              slug: "rika-organization",
+              createdAt,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            databaseClient.insert(identityMember).values({
+              id: "member-cli-e2b",
+              organizationId: "organization-cli-e2b",
+              userId: account.user.id,
+              role: "owner",
+              createdAt,
+            }),
+          )
+          yield* Effect.tryPromise(() =>
+            databaseClient.insert(rikaHostedOwners).values({
+              id: "organization-owner-cli-e2b",
+              kind: "organization",
+              organizationId: "organization-cli-e2b",
+            }),
           )
           let gateway: Gateway | undefined
           const runFork = Effect.runForkWith(yield* Effect.context<never>())
@@ -290,12 +334,7 @@ it.layer(BunServices.layer)((test) => {
           const toolPolicy = Context.get(context, HostedToolPolicy)
           const executor = Context.get(context, Executor)
           gateway = executor.gateway
-          const databaseTime = yield* Effect.tryPromise(() =>
-            migrated!.query<{ readonly millis: string }>(
-              "SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint::text AS millis",
-            ),
-          )
-          yield* TestClock.setTime(Number(databaseTime.rows[0]!.millis))
+          yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
           const connection = yield* product.createConnection({
             principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
             owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
@@ -325,14 +364,14 @@ it.layer(BunServices.layer)((test) => {
             value: Redacted.make("organization-value"),
           })
           const environmentOwners = yield* Effect.tryPromise(() =>
-            migrated!.query<{ readonly name: string; readonly ownerKind: string }>(
-              `SELECT environment.name, owner_record.kind AS "ownerKind"
-              FROM rika_hosted_environment_values environment
-              JOIN rika_hosted_owners owner_record ON owner_record.id = environment.owner_id
-              WHERE environment.name IN ('PERSONAL_ONLY', 'ORGANIZATION_ONLY') ORDER BY environment.name`,
-            ),
+            databaseClient
+              .select({ name: rikaHostedEnvironmentValues.name, ownerKind: rikaHostedOwners.kind })
+              .from(rikaHostedEnvironmentValues)
+              .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedEnvironmentValues.ownerId))
+              .where(inArray(rikaHostedEnvironmentValues.name, ["PERSONAL_ONLY", "ORGANIZATION_ONLY"]))
+              .orderBy(asc(rikaHostedEnvironmentValues.name)),
           )
-          expect(environmentOwners.rows).toEqual([
+          expect(environmentOwners).toEqual([
             { name: "ORGANIZATION_ONLY", ownerKind: "organization" },
             { name: "PERSONAL_ONLY", ownerKind: "personal" },
           ])
@@ -532,35 +571,41 @@ it.layer(BunServices.layer)((test) => {
           const [thread, assignment, commands, events] = yield* Effect.all(
             [
               Effect.tryPromise(() =>
-                migrated!.query(`SELECT executor_kind FROM rika_hosted_threads WHERE id = $1`, [connection.threadId]),
+                databaseClient
+                  .select({ executorKind: rikaHostedThreads.executorKind })
+                  .from(rikaHostedThreads)
+                  .where(eq(rikaHostedThreads.id, connection.threadId)),
               ).pipe(Effect.orDie),
               Effect.tryPromise(() =>
-                migrated!.query(`SELECT id, thread_id FROM rika_hosted_executor_assignments WHERE thread_id = $1`, [
-                  connection.threadId,
-                ]),
+                databaseClient
+                  .select({ id: rikaHostedExecutorAssignments.id, threadId: rikaHostedExecutorAssignments.threadId })
+                  .from(rikaHostedExecutorAssignments)
+                  .where(eq(rikaHostedExecutorAssignments.threadId, connection.threadId)),
               ).pipe(Effect.orDie),
               Effect.tryPromise(() =>
-                migrated!.query(`SELECT idempotency_key FROM rika_hosted_thread_commands WHERE thread_id = $1`, [
-                  connection.threadId,
-                ]),
+                databaseClient
+                  .select({ idempotencyKey: rikaHostedThreadCommands.idempotencyKey })
+                  .from(rikaHostedThreadCommands)
+                  .where(eq(rikaHostedThreadCommands.threadId, connection.threadId)),
               ).pipe(Effect.orDie),
               Effect.tryPromise(() =>
-                migrated!.query(`SELECT event FROM rika_hosted_thread_events WHERE thread_id = $1`, [
-                  connection.threadId,
-                ]),
+                databaseClient
+                  .select({ event: rikaHostedThreadEvents.event })
+                  .from(rikaHostedThreadEvents)
+                  .where(eq(rikaHostedThreadEvents.threadId, connection.threadId)),
               ).pipe(Effect.orDie),
             ],
             { concurrency: "unbounded" },
           )
-          expect(thread.rows).toEqual([{ executor_kind: "orb" }])
-          expect(assignment.rows).toHaveLength(1)
-          expect(assignment.rows[0]).toMatchObject({ thread_id: connection.threadId })
-          expect(assignment.rows[0]?.id).not.toBe(connection.threadId)
+          expect(thread).toEqual([{ executorKind: "orb" }])
+          expect(assignment).toHaveLength(1)
+          expect(assignment[0]).toMatchObject({ threadId: connection.threadId })
+          expect(assignment[0]?.id).not.toBe(connection.threadId)
           expect(helloAccepted).toBe(0)
           expect(closes).toEqual([])
-          expect(commands.rows).toHaveLength(1)
+          expect(commands).toHaveLength(1)
           expect(operations).toHaveLength(0)
-          expect(events.rows).toHaveLength(0)
+          expect(events).toHaveLength(0)
           expect(creates).toHaveLength(0)
           expect(bootstraps).toHaveLength(0)
           expect(yield* Ref.get(localServerSpawns)).toBe(0)

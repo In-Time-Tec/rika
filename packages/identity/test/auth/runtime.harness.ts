@@ -3,8 +3,11 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { serve } from "bun"
 import { Clock, Config, Context, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
+import { identityUser } from "../../src"
 import { IdentityRuntimeService, identityRuntimeLayer, type IdentityRuntime } from "../../src/auth/runtime"
 import { identityMigrations } from "../../src/database/migrations"
 import { runMigration } from "../../src/database/postgres"
@@ -93,6 +96,7 @@ it.layer(BunServices.layer)((test) => {
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
+      const databaseClient = drizzle({ client: pool })
       let runtime: IdentityRuntime | undefined
       const effectContext = yield* Effect.context<never>()
       const server = serve({
@@ -147,7 +151,9 @@ it.layer(BunServices.layer)((test) => {
         )
         expect(signedUp.status).toBe(200)
         expect(sent).toEqual([{ to: email }])
-        yield* Effect.tryPromise(() => pool.query(`UPDATE "user" SET email_verified = true WHERE email = $1`, [email]))
+        yield* Effect.tryPromise(() =>
+          databaseClient.update(identityUser).set({ emailVerified: true }).where(eq(identityUser.email, email)),
+        )
 
         const signedIn = yield* runtime.handle(
           request(baseUrl, "/api/auth/sign-in/email", { email, password, callbackURL: "/" }),

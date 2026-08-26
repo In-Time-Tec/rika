@@ -733,10 +733,7 @@ describe("TenetKit tree projector", () => {
     const projector = TreeProjector.make("turn-resolution", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
-    expect(projector.snapshot().state.status).toBe("cancelling")
 
-    // A replayPolicy:"never" tool interrupted mid-flight parks the Run in needs-resolution.
     const parked = projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
     expect(projector.snapshot().state.status).toBe("waiting")
     expect(parked.upsert.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")).toBe(
@@ -744,16 +741,18 @@ describe("TenetKit tree projector", () => {
     )
   })
 
-  it("keeps a parked root overridable by the terminal event that follows resolution", () => {
+  it("keeps cancellation authoritative when a never-replay nested operation becomes unknown", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-resolution-terminal", "cancel me")
     projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
     projector.apply(treeEvent("raw-root-run", { _tag: "RunCancellationRequested", reason: "Cancelled by user" }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
-    expect(projector.snapshot().state.status).toBe("waiting")
+    const unknown = projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
+    expect(projector.snapshot().state.status).toBe("cancelling")
+    expect(unknown.upsert.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")).toBe(
+      false,
+    )
 
-    // Resolving the parked operation lets the run reach its real terminal state.
     projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
     expect(projector.snapshot().state.status).toBe("cancelled")
   })
@@ -774,7 +773,6 @@ describe("TenetKit tree projector", () => {
     )
     expect(projector.snapshot().state.status).toBe("waiting")
 
-    // OperationUnknown arriving after the node already parked must not decrement active depth twice.
     expect(() =>
       projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" })),
     ).not.toThrow()

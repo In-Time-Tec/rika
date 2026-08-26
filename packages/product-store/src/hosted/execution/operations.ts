@@ -153,10 +153,11 @@ export interface HostedExecutionOperationsService {
   readonly finalizeOperation: (
     input: FinalizeOperationInput,
   ) => Effect.Effect<FinalizeOperationResult, HostedExecutionOperationsError>
-  readonly timeoutAccepted: (
+  readonly terminalizeAccepted: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
     response: CellResponseValue,
-    onTimeout?: (result: {
+    outcome: "failed" | "cancelled",
+    onTerminalize?: (result: {
       readonly operation: OperationRecord
       readonly commandSequence: number
       readonly assignmentGeneration: number
@@ -795,7 +796,12 @@ const make = Effect.gen(function* () {
         }),
       )
       .pipe(Effect.mapError(failure))
-  const timeoutAccepted: HostedExecutionOperationsService["timeoutAccepted"] = (input, response, onTimeout) =>
+  const terminalizeAccepted: HostedExecutionOperationsService["terminalizeAccepted"] = (
+    input,
+    response,
+    outcome,
+    onTerminalize,
+  ) =>
     db
       .transaction((tx) =>
         Effect.gen(function* () {
@@ -805,7 +811,7 @@ const make = Effect.gen(function* () {
           const updated = yield* query(
             tx
               .update(rikaHostedExecutorOperations)
-              .set({ state: "completed", response, terminalOutcome: "failed", updatedAt: sql`clock_timestamp()` })
+              .set({ state: "completed", response, terminalOutcome: outcome, updatedAt: sql`clock_timestamp()` })
               .where(and(operationKey(input), eq(rikaHostedExecutorOperations.state, "accepted")))
               .returning({ key: rikaHostedExecutorOperations.operationKey }),
           )
@@ -840,12 +846,12 @@ const make = Effect.gen(function* () {
           if (commands[0] === undefined || assignments[0]?.leaseEpoch === null || assignments[0] === undefined)
             return yield* failure("Runner deadline authority is unavailable")
           const result = {
-            operation: yield* decodeOperation({ ...row, state: "completed", response, terminalOutcome: "failed" }),
+            operation: yield* decodeOperation({ ...row, state: "completed", response, terminalOutcome: outcome }),
             commandSequence: commands[0].sequence,
             assignmentGeneration: assignments[0].generation,
             leaseEpoch: assignments[0].leaseEpoch,
           }
-          if (onTimeout !== undefined) yield* onTimeout(result)
+          if (onTerminalize !== undefined) yield* onTerminalize(result)
           return result
         }),
       )
@@ -1043,7 +1049,7 @@ const make = Effect.gen(function* () {
     replayQueue,
     complete,
     finalizeOperation,
-    timeoutAccepted,
+    terminalizeAccepted,
     admitWorkspaceCapabilities,
     validateWorkspaceCapabilities,
     verifyRunnerAuthority,

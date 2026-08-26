@@ -70,4 +70,43 @@ describe("created Thread selection", () => {
     expect(loop.model.input).toBe("")
     expect(loop.model.submittedDrafts).toMatchObject([{ submissionId: "submission-1", turnId: "turn-1" }])
   })
+
+  it("ignores a delayed submission rejection from the previously selected Thread", () => {
+    const submitted = update(
+      {
+        ...initial("/workspace", "medium"),
+        currentThreadId: "first-thread",
+        input: "first prompt",
+        cursor: "first prompt".length,
+      },
+      { _tag: "Submitted", submissionId: "submission-1" },
+    )
+    const loop = {
+      closed: false,
+      model: submitted,
+      threadView: undefined,
+      modelPreview: undefined,
+      requestedThreadId: "second-thread",
+      renderer: undefined,
+      submittedSinceIdle: true,
+    }
+    const { dispatch } = makeEventRouter({
+      loop,
+      render: () => undefined,
+      refreshTerminalTitle: () => undefined,
+      requestSelectionResync: () => undefined,
+    })
+
+    dispatch({ _tag: "ThreadViewSnapshot", snapshot: snapshot("second-thread") })
+    const selected = loop.model
+    dispatch({
+      _tag: "SubmissionRejected",
+      threadId: Thread.ThreadId.make("first-thread"),
+      message: "First Thread submission failed",
+      submissionId: "submission-1",
+    })
+
+    expect(loop.model.currentThreadId).toBe("second-thread")
+    expect(loop.model).toBe(selected)
+  })
 })

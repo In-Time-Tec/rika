@@ -33,6 +33,7 @@ export type Outcome =
         | McpRuntime.Diagnostic
         | { readonly _tag: "ProcessStopFailed"; readonly message: string }
     }
+  | { readonly _tag: "Cancelled" }
   | { readonly _tag: "Unknown"; readonly message: string }
   | { readonly _tag: "Fenced"; readonly message: string }
 
@@ -47,6 +48,17 @@ export class Client extends Context.Service<Client, Interface>()("@rika/kernel/m
 const uncertain = <A>(message: string): Effect.Effect<A> =>
   Effect.logWarning(message).pipe(Effect.andThen(Effect.interrupt))
 
+const cancelledTool = (request: typeof CodingToolRuntime.Request.Type) =>
+  CodingToolRuntime.ToolError.make({
+    tool: request._tag === "Shell" ? "bash" : request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
+    message: "Cell operation was cancelled before the machine tool completed.",
+    kind: "operation",
+    category: "operation",
+    outcome: "known",
+    recovery: "never",
+    nextAction: "Submit a new request if this work should continue",
+  })
+
 const codingTools = Layer.effect(
   CodingToolRuntime.Service,
   Effect.map(Client, (client) =>
@@ -58,6 +70,7 @@ const codingTools = Layer.effect(
               return Effect.succeed(outcome.value.result)
             if (outcome._tag === "Failure" && Schema.is(CodingToolRuntime.ToolError)(outcome.failure))
               return Effect.fail(outcome.failure)
+            if (outcome._tag === "Cancelled") return Effect.fail(cancelledTool(request))
             return uncertain<CodingToolResult.Result>("machine coding-tool outcome is not safely observable")
           }),
           Effect.catchTag("MachineBindingUnavailable", (error) => uncertain<CodingToolResult.Result>(error.message)),
@@ -78,6 +91,12 @@ const processes = Layer.effect(
             if (outcome._tag === "Success" && outcome.value._tag === "ProcessStopped") return Effect.void
             if (outcome._tag === "Failure" && outcome.failure._tag === "ProcessStopFailed")
               return Effect.fail(new ShellProcessRegistry.ProcessNotFound({ message: outcome.failure.message }))
+            if (outcome._tag === "Cancelled")
+              return Effect.fail(
+                new ShellProcessRegistry.ProcessNotFound({
+                  message: `Cell operation was cancelled before process ${processId} was stopped`,
+                }),
+              )
             return uncertain("machine process-stop outcome is not safely observable")
           }),
           Effect.catchTag("MachineBindingUnavailable", (error) => uncertain(error.message)),
@@ -95,6 +114,14 @@ const mcp = Layer.effect(
           Effect.flatMap((outcome): Effect.Effect<McpToolSource.Interface, McpRuntime.Diagnostic> => {
             if (outcome._tag === "Failure" && Schema.is(McpRuntime.Diagnostic)(outcome.failure))
               return Effect.fail(outcome.failure)
+            if (outcome._tag === "Cancelled")
+              return Effect.fail(
+                McpRuntime.Diagnostic.make({
+                  server: server.name,
+                  phase: "discover",
+                  message: "Cell operation was cancelled before MCP discovery completed",
+                }),
+              )
             if (outcome._tag !== "Success" || outcome.value._tag !== "McpDiscovered")
               return uncertain<McpToolSource.Interface>("machine MCP discovery outcome is not safely observable")
             const tools = outcome.value.tools
@@ -114,6 +141,14 @@ const mcp = Layer.effect(
                               server: server.name,
                               tool,
                               message: result.failure.message,
+                            }),
+                          )
+                        if (result._tag === "Cancelled")
+                          return Effect.fail(
+                            McpToolSource.McpToolCallFailed.make({
+                              server: server.name,
+                              tool,
+                              message: "Cell operation was cancelled before the MCP call completed",
                             }),
                           )
                         return uncertain<McpToolSource.JsonValue>("machine MCP call outcome is not safely observable")

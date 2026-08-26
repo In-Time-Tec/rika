@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
+import { ExecutorInstanceId } from "@rika/product/hosted-model"
 import type { Access } from "@rika/remote-execution/protocol"
 import { Deferred, Effect, Fiber, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -164,17 +165,71 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("rejects an assignment whose immutable build is not controller-approved", () => {
+  it.effect("advances generation and atomically adopts the approved build before provisioning", () => {
     const harness = makeHarness({ templateBuildId: "approved-build" })
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect(yield* Effect.flip(service.provision(assignmentInput.id, setupAuthorization))).toMatchObject({
-        kind: "provider",
-        message: "Assignment template build is not approved",
+      expect(yield* service.provision(assignmentInput.id, setupAuthorization)).toMatchObject({
+        generation: 2,
+        sandboxId: "sandbox-1",
+        templateBuildId: "approved-build",
       })
-      expect(harness.provider.creates).toEqual([])
-      expect(harness.provider.bootstraps).toEqual([])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        placement: { _tag: "OrbPlacement", templateBuildId: "approved-build", providerScope: "test" },
+        lifecycle: { _tag: "AwaitingBootstrap", providerInstanceId: "sandbox-1" },
+      })
+      expect(harness.provider.creates).toHaveLength(1)
+      expect(harness.provider.creates[0]).toMatchObject({ templateBuildId: "approved-build", generation: 2 })
+      expect(harness.provider.bootstraps[0]).toMatchObject({
+        identity: { assignmentGeneration: 2, templateBuildId: "approved-build", lifecycle: "replacement" },
+      })
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("never reconnects an active old-build sandbox and replaces it with the approved exact build", () => {
+    const harness = makeHarness({ templateBuildId: "approved-build" })
+    return Effect.gen(function* () {
+      const assignments = yield* ExecutorAssignments
+      const assignment = yield* createAssignment()
+      const provisioning = yield* assignments.beginProvisioning({
+        assignmentId: assignment.id,
+        generation: assignment.generation,
+        revision: assignment.revision,
+        bootstrapCredentialDigest: Redacted.make("old-bootstrap"),
+        bootstrapLifetimeMillis: 60_000,
+      })
+      const bound = yield* assignments.bindProviderInstance({
+        assignmentId: provisioning.id,
+        generation: provisioning.generation,
+        revision: provisioning.revision,
+        providerInstanceId: "sandbox-old-build",
+      })
+      yield* assignments.openSession({
+        assignmentId: bound.id,
+        generation: bound.generation,
+        revision: bound.revision,
+        providerInstanceId: "sandbox-old-build",
+        executorInstanceId: ExecutorInstanceId.make("executor-old-build"),
+        processIncarnation: "process-old-build",
+        capabilities: workspaceCapabilities,
+        presentedBootstrapCredentialDigest: Redacted.make("old-bootstrap"),
+        sessionCredentialDigest: Redacted.make("old-session"),
+        leaseLifetimeMillis: 60_000,
+      })
+
+      const service = yield* controller
+      expect(yield* service.provision(assignment.id, runtimeAuthorization)).toMatchObject({
+        generation: 2,
+        sandboxId: "sandbox-1",
+        templateBuildId: "approved-build",
+      })
+      expect(harness.provider.connects).toEqual([])
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        placement: { _tag: "OrbPlacement", templateBuildId: "approved-build", providerScope: "test" },
+      })
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -211,6 +266,33 @@ describe("Controller", () => {
       ])
       expect((yield* service.kill({ assignmentId: "assignment-1", generation: 1 })).state).toBe("terminated")
       expect(harness.provider.kills).toEqual(["sandbox-1"])
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("replaces an active sandbox whose authoritative lease expired", () => {
+    const harness = makeHarness({ leaseLifetimeMillis: 60_000 })
+    return Effect.gen(function* () {
+      const service = yield* controller
+      yield* provision()
+      yield* authenticate(harness, 1)
+      yield* TestClock.adjust("1 minute")
+
+      expect(yield* service.provision("assignment-1", runtimeAuthorization)).toMatchObject({
+        assignmentId: "assignment-1",
+        generation: 2,
+        sandboxId: "sandbox-2",
+        state: "provisioning",
+      })
+      expect(yield* readAssignment()).toMatchObject({
+        generation: "2",
+        lifecycle: { _tag: "AwaitingBootstrap", providerInstanceId: "sandbox-2" },
+      })
+      expect(harness.provider.creates).toHaveLength(2)
+      expect(harness.provider.connects).toEqual([])
+      expect(harness.provider.bootstraps[1]).toMatchObject({
+        sandboxId: "sandbox-2",
+        identity: { assignmentGeneration: 2, lifecycle: "replacement" },
+      })
     }).pipe(provideLayer(harness.layer))
   })
 
@@ -902,7 +984,7 @@ describe("Controller", () => {
     }).pipe(provideLayer(harness.layer))
   })
 
-  it.effect("preserves inventory entries without durable assignment authority", () => {
+  it.effect("preserves app-owned inventory without durable assignment authority", () => {
     const harness = makeHarness()
     harness.provider.inventory = [
       {
@@ -918,6 +1000,19 @@ describe("Controller", () => {
         templateId: "ar7-template-alias",
         templateBuildId: "template-build-v1-immutable",
         metadata: { "rika.managed": "e2b-executor", "rika.app-id": "rika", "rika.deployment-id": "test" },
+      },
+      {
+        sandboxId: "sandbox-malformed",
+        state: "running",
+        templateId: "ar7-template-alias",
+        templateBuildId: "template-build-v1-immutable",
+        metadata: {
+          "rika.managed": "e2b-executor",
+          "rika.app-id": "rika",
+          "rika.deployment-id": "test",
+          "rika.assignment-id": "assignment-unknown",
+          "rika.generation": "not-a-generation",
+        },
       },
       {
         sandboxId: "sandbox-other-app",

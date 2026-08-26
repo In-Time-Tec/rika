@@ -1,4 +1,16 @@
-import { Cause, Clock, Context, Crypto, DateTime, Effect, FiberMap, Layer, Schema, SubscriptionRef } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  FiberMap,
+  Function,
+  Layer,
+  Schema,
+  SubscriptionRef,
+} from "effect"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedStore, StoreError } from "@rika/product/hosted-store"
@@ -68,11 +80,11 @@ type CommandFailure =
   | HostedToolPolicyError
   | HostedThreadApplicationError
 
-const commandControlFailure = (
+const commandControlFailureImpl = (
   command: Pick<InteractiveMutatingCommand, "_tag">,
   events: ReadonlyArray<InteractiveEvent>,
 ) => {
-  let expectedAction: "approve" | "deny" | "cancel" | undefined
+  let expectedAction: "approve" | "cancel" | "deny" | undefined
   if (command._tag === "Approve") expectedAction = "approve"
   else if (command._tag === "Deny") expectedAction = "deny"
   else if (command._tag === "Cancel") expectedAction = "cancel"
@@ -83,6 +95,16 @@ const commandControlFailure = (
           event._tag === "ExecutionControlFailed" && event.action === expectedAction,
       )
 }
+
+export const commandControlFailure: {
+  (
+    events: ReadonlyArray<InteractiveEvent>,
+  ): (command: Pick<InteractiveMutatingCommand, "_tag">) => ReturnType<typeof commandControlFailureImpl>
+  (
+    command: Pick<InteractiveMutatingCommand, "_tag">,
+    events: ReadonlyArray<InteractiveEvent>,
+  ): ReturnType<typeof commandControlFailureImpl>
+} = Function.dual(2, commandControlFailureImpl)
 
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 const commandFailure = (error: CommandFailure) => {
@@ -132,6 +154,7 @@ const rejectionEvents = (
     return [
       {
         _tag: "SubmissionRejected",
+        threadId: ProductThreadId.make(command.threadId),
         message: error.message,
         submissionId: command.submissionId ?? command.commandId,
       },
@@ -475,14 +498,7 @@ export const layer = (options: {
           claimToken,
           claimMillis: options.claimMillis,
         })
-        const succeededAt = yield* Clock.currentTimeMillis
-        yield* SubscriptionRef.update(health, (state) => ({
-          ...state,
-          poll: { _tag: "Succeeded", at: succeededAt } as const,
-          lastSuccessfulPollAt: succeededAt,
-        }))
-        if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
-        else
+        if (command !== undefined)
           yield* FiberMap.run(
             active,
             `${command.threadId}:${command.commandId}`,
@@ -501,6 +517,13 @@ export const layer = (options: {
               }),
             ),
           )
+        const succeededAt = yield* Clock.currentTimeMillis
+        yield* SubscriptionRef.update(health, (state) => ({
+          ...state,
+          poll: { _tag: "Succeeded", at: succeededAt } as const,
+          lastSuccessfulPollAt: succeededAt,
+        }))
+        if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)

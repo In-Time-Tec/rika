@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { defaultBuildLogger, Template } from "e2b"
-import { Config, Console, Crypto, Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect"
+import { Config, Console, Crypto, Effect, FileSystem, Layer, Path, Redacted, Schedule, Schema } from "effect"
 import {
   DevelopmentTemplateIdentity,
   developmentTemplate,
@@ -15,10 +15,35 @@ const encodeIdentity = Schema.encodeEffect(IdentityJson)
 
 class DevelopmentTemplateError extends Schema.TaggedError<DevelopmentTemplateError>()("DevelopmentTemplateError", {
   message: Schema.String,
+  transient: Schema.Boolean,
 }) {}
 
 const failure = (cause: unknown, fallback: string) =>
-  DevelopmentTemplateError.make({ message: cause instanceof Error ? cause.message : fallback })
+  DevelopmentTemplateError.make({ message: cause instanceof Error ? cause.message : fallback, transient: false })
+
+const transientBuildFailure = [
+  /^(?:500|502|503|504):/,
+  /an internal error occurred\. please try again/i,
+  /error when requesting layer files upload/i,
+  /failed to (?:get file upload link|request build|get build status)$/i,
+  /failed to upload file:.*(?:fetch failed|econnreset|etimedout|eai_again|enetunreach|socket hang up|timed? ?out)/i,
+]
+
+export const isTransientDevelopmentTemplateBuildFailure = (cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return transientBuildFailure.some((pattern) => pattern.test(message))
+}
+
+export const retryDevelopmentTemplateBuild = <A, E extends { readonly transient: boolean }, R>(
+  build: Effect.Effect<A, E, R>,
+) =>
+  build.pipe(
+    Effect.retry({
+      times: 2,
+      while: (error) => error.transient,
+      schedule: Schedule.exponential("2 seconds").pipe(Schedule.jittered),
+    }),
+  )
 
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
@@ -35,7 +60,10 @@ const program = Effect.gen(function* () {
     catch: (cause) => failure(cause, "Could not hash the development E2B template"),
   })
   if (sourceDigest !== expectedDigest)
-    return yield* DevelopmentTemplateError.make({ message: "Development E2B source changed before template admission" })
+    return yield* DevelopmentTemplateError.make({
+      message: "Development E2B source changed before template admission",
+      transient: false,
+    })
 
   const cached = yield* fileSystem.readFileString(identityPath).pipe(
     Effect.flatMap(decodeIdentity),
@@ -53,20 +81,27 @@ const program = Effect.gen(function* () {
     if (!isReadyDevelopmentTemplate(cached, sourceDigest, status))
       return yield* DevelopmentTemplateError.make({
         message: "Cached development E2B template is not the exact ready build",
+        transient: false,
       })
     yield* Console.log(`E2B executor template ready: ${cached.templateId}:${cached.buildId}`)
     return
   }
 
   const alias = `rika-executor-dev-${sourceDigest.slice("sha256:".length, "sha256:".length + 20)}`
-  const built = yield* Effect.tryPromise({
-    try: () =>
-      Template.build(developmentTemplate(repositoryRoot), alias, {
-        apiKey: Redacted.value(apiKey),
-        onBuildLogs: defaultBuildLogger({ minLevel: "info" }),
-      }),
-    catch: (cause) => failure(cause, "Development E2B template build failed"),
-  })
+  const built = yield* retryDevelopmentTemplateBuild(
+    Effect.tryPromise({
+      try: () =>
+        Template.build(developmentTemplate(repositoryRoot), alias, {
+          apiKey: Redacted.value(apiKey),
+          onBuildLogs: defaultBuildLogger({ minLevel: "info" }),
+        }),
+      catch: (cause) =>
+        DevelopmentTemplateError.make({
+          message: cause instanceof Error ? cause.message : "Development E2B template build failed",
+          transient: isTransientDevelopmentTemplateBuildFailure(cause),
+        }),
+    }),
+  )
   const status = yield* Effect.tryPromise({
     try: () =>
       Template.getBuildStatus(
@@ -81,14 +116,20 @@ const program = Effect.gen(function* () {
     buildId: built.buildId,
   })
   if (!isReadyDevelopmentTemplate(identity, sourceDigest, status))
-    return yield* DevelopmentTemplateError.make({ message: "New development E2B template is not ready" })
+    return yield* DevelopmentTemplateError.make({
+      message: "New development E2B template is not ready",
+      transient: false,
+    })
 
   const currentDigest = yield* Effect.tryPromise({
     try: () => developmentTemplateSourceDigest(repositoryRoot),
     catch: (cause) => failure(cause, "Could not recheck the development E2B template source"),
   })
   if (currentDigest !== sourceDigest)
-    return yield* DevelopmentTemplateError.make({ message: "Development E2B source changed during template build" })
+    return yield* DevelopmentTemplateError.make({
+      message: "Development E2B source changed during template build",
+      transient: false,
+    })
 
   const encoded = yield* encodeIdentity(identity)
   const temporary = `${identityPath}.${yield* crypto.randomUUIDv4}.tmp`

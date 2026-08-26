@@ -1,7 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { identityMigrations, runMigration } from "@rika/identity"
+import { identityMigrations, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
@@ -15,7 +15,17 @@ import * as Turn from "@rika/product/turn-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { layer as hostedStoreLayer } from "@rika/product-store/store"
-import { FileSystem, Config, Context, Effect, Layer, Random, Redacted, Schema } from "effect"
+import {
+  rikaHostedOwners,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
+  rikaThreads,
+  rikaTurns,
+  rikaWorkspaces,
+} from "@rika/product-store/database-schema"
+import { eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
@@ -25,16 +35,13 @@ const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATA
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
 const JsonExecutionLink = Schema.fromJsonString(ExecutionGateway.ExecutionLink)
 
-const query = (pool: Pool, text: string, values: ReadonlyArray<unknown> = []) =>
-  Effect.tryPromise(() => pool.query(text, [...values]))
-
 it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hosted projection", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
       const database = `rika_hosted_operations_${suffix}`
       const admin = new Pool({ connectionString: databaseUrl })
-      yield* query(admin, `CREATE DATABASE "${database}"`)
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
       const parsed = new URL(databaseUrl)
       parsed.pathname = `/${database}`
       const url = parsed.toString()
@@ -46,16 +53,33 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           )
           yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
         }
-        yield* query(
-          pool,
-          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-            VALUES
-              ('owner-user', 'Owner', 'owner@example.test', true, now(), now()),
-              ('other-user', 'Other', 'other@example.test', true, now(), now());
-           INSERT INTO rika_hosted_owners (id, kind, user_id)
-            VALUES
-              ('personal-owner', 'personal', 'owner-user'),
-              ('other-owner', 'personal', 'other-user')`,
+        const db = drizzle({ client: pool })
+        const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+        yield* Effect.tryPromise(() =>
+          db.insert(identityUser).values([
+            {
+              id: "owner-user",
+              name: "Owner",
+              email: "owner@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            },
+            {
+              id: "other-user",
+              name: "Other",
+              email: "other@example.test",
+              emailVerified: true,
+              createdAt,
+              updatedAt: createdAt,
+            },
+          ]),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaHostedOwners).values([
+            { id: "personal-owner", kind: "personal", userId: "owner-user" },
+            { id: "other-owner", kind: "personal", userId: "other-user" },
+          ]),
         )
         const cancellations: Array<{ readonly runId: string; readonly reason: string }> = []
         const gateway = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
@@ -95,29 +119,58 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         )
         const context = yield* Layer.build(hostedThreadApplicationLayer.pipe(Layer.provideMerge(dependencies)))
         const application = Context.get(context, HostedThreadApplication)
-        yield* query(
-          pool,
-          `INSERT INTO rika_workspaces (owner_id, path, created_at)
-            VALUES ('personal-owner', 'workspace-1', 1);
-           INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-            VALUES ('owner-thread', 'personal-owner', 'workspace-1', 'New thread', 1, 1)`,
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaWorkspaces).values({ ownerId: "personal-owner", path: "workspace-1", createdAt: 1 }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaThreads).values({
+            id: "owner-thread",
+            ownerId: "personal-owner",
+            workspace: "workspace-1",
+            title: "New thread",
+            createdAt: 1,
+            updatedAt: 1,
+          }),
         )
         const threadId = ThreadId.make("owner-thread")
         const thread = yield* application.thread(OwnerId.make("personal-owner"), threadId)
         expect(thread).toMatchObject({ workspace: "workspace-1", title: "New thread" })
         expect(yield* application.thread(OwnerId.make("other-owner"), threadId)).toBeUndefined()
-        yield* query(
-          pool,
-          `INSERT INTO rika_workspaces (owner_id, path, created_at)
-            VALUES ('other-owner', 'read-only-workspace', 1);
-           INSERT INTO rika_threads (id, owner_id, workspace, title, created_at, updated_at)
-            VALUES ('read-only-thread', 'other-owner', 'read-only-workspace', 'Read only', 1, 1);
-           INSERT INTO rika_hosted_workspaces
-            (id, owner_id, project_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-            VALUES ('hosted-read-only-workspace', 'other-owner', NULL, 'other-user', 'orb', false, now());
-           INSERT INTO rika_hosted_threads
-            (id, owner_id, project_id, workspace_id, created_by_user_id, executor_kind, inherit_project_grants, created_at)
-            VALUES ('read-only-thread', 'other-owner', NULL, 'hosted-read-only-workspace', 'other-user', 'orb', false, now())`,
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaWorkspaces).values({ ownerId: "other-owner", path: "read-only-workspace", createdAt: 1 }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaThreads).values({
+            id: "read-only-thread",
+            ownerId: "other-owner",
+            workspace: "read-only-workspace",
+            title: "Read only",
+            createdAt: 1,
+            updatedAt: 1,
+          }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaHostedWorkspaces).values({
+            id: "hosted-read-only-workspace",
+            ownerId: "other-owner",
+            projectId: null,
+            createdByUserId: "other-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt,
+          }),
+        )
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaHostedThreads).values({
+            id: "read-only-thread",
+            ownerId: "other-owner",
+            projectId: null,
+            workspaceId: "hosted-read-only-workspace",
+            createdByUserId: "other-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt,
+          }),
         )
         const sql = Context.get(context, PgClient.PgClient)
         const snapshot = yield* sql.withTransaction(
@@ -160,20 +213,17 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           createdAt: 2,
           updatedAt: 3,
         }
-        yield* query(
-          pool,
-          `INSERT INTO rika_turns
-            (id, thread_id, prompt, status, created_at, updated_at, execution_route_json)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            turn.id,
-            turn.threadId,
-            turn.prompt,
-            turn.status,
-            turn.createdAt,
-            turn.updatedAt,
-            yield* Schema.encodeEffect(JsonRoute)(route),
-          ],
+        const executionRouteJson = yield* Schema.encodeEffect(JsonRoute)(route)
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaTurns).values({
+            id: turn.id,
+            threadId: turn.threadId,
+            prompt: turn.prompt,
+            status: turn.status,
+            createdAt: turn.createdAt,
+            updatedAt: turn.updatedAt,
+            executionRouteJson,
+          }),
         )
         const repositoryContext = yield* Layer.build(
           ProductRepositories.layer(OwnerId.make("other-owner")).pipe(Layer.provide(databaseLayer)),
@@ -266,7 +316,9 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           turnId: turn.id,
           threadId: turn.threadId,
         })
-        yield* query(pool, `UPDATE rika_turns SET execution_link_json = $1 WHERE id = $2`, [executionLink, turn.id])
+        yield* Effect.tryPromise(() =>
+          db.update(rikaTurns).set({ executionLinkJson: executionLink }).where(eq(rikaTurns.id, turn.id)),
+        )
         const cancellation = yield* application.interactive(
           {
             ownerId: OwnerId.make("other-owner"),
