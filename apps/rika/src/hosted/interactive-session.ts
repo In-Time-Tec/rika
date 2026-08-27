@@ -26,6 +26,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
 import { authenticated } from "./account"
+import { reconnectDelay, retryableConnectionFailure } from "./reconnect-policy"
 import { connect } from "./thread-client"
 import { Crypto, Deferred, Effect, Exit, Option, Queue, Schema, Semaphore, SubscriptionRef } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -80,43 +81,43 @@ type AttachmentValidation =
 const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
   const threadId = String(attachment.threadId)
   if (!hostedThreadSnapshotMatches(attachment.snapshot, threadId))
-    return { _tag: "Invalid", error: failure("Hosted Thread attachment snapshot identity did not match its response") }
+    return { _tag: "Invalid", error: failure("Thread attachment snapshot identity did not match its response") }
   if (
     attachment.events.some((event) => {
       const eventThreadId = interactiveEventThreadId(event.event)
       return String(event.threadId) !== threadId || (eventThreadId !== undefined && eventThreadId !== threadId)
     })
   )
-    return { _tag: "Invalid", error: failure("Hosted Thread attachment event identity did not match its response") }
+    return { _tag: "Invalid", error: failure("Thread attachment event identity did not match its response") }
   const snapshotCursor = BigInt(attachment.snapshotCursor)
   const terminalCursor = BigInt(attachment.cursor)
   if (snapshotCursor > terminalCursor)
-    return { _tag: "Invalid", error: failure("Hosted Thread attachment snapshot exceeded its terminal cursor") }
+    return { _tag: "Invalid", error: failure("Thread attachment snapshot exceeded its terminal cursor") }
   let expectedCursor = snapshotCursor + 1n
   let representedVersion = BigInt(attachment.snapshotThreadVersion)
   for (const event of attachment.events) {
     if (BigInt(event.cursor) !== expectedCursor)
-      return { _tag: "Invalid", error: failure("Hosted Thread attachment replay was not contiguous") }
+      return { _tag: "Invalid", error: failure("Thread attachment replay was not contiguous") }
     const eventVersion = BigInt(event.threadVersion)
     if (eventVersion < representedVersion)
-      return { _tag: "Invalid", error: failure("Hosted Thread attachment version regressed") }
+      return { _tag: "Invalid", error: failure("Thread attachment version regressed") }
     representedVersion = eventVersion
     expectedCursor += 1n
   }
   if (expectedCursor - 1n !== terminalCursor || representedVersion !== BigInt(attachment.threadVersion))
-    return { _tag: "Invalid", error: failure("Hosted Thread attachment terminal metadata was not represented") }
+    return { _tag: "Invalid", error: failure("Thread attachment terminal metadata was not represented") }
   let view = ThreadView.fromSnapshot(attachment.snapshot.view)
   if (view._tag === "Failure")
-    return { _tag: "Invalid", error: failure("Hosted Thread attachment snapshot was invalid") }
+    return { _tag: "Invalid", error: failure("Thread attachment snapshot was invalid") }
   for (const event of attachment.events) {
     if (event.event._tag === "ThreadViewSnapshot") {
       view = ThreadView.fromSnapshot(event.event.snapshot)
       if (view._tag === "Failure")
-        return { _tag: "Invalid", error: failure("Hosted Thread attachment view snapshot was invalid") }
+        return { _tag: "Invalid", error: failure("Thread attachment view snapshot was invalid") }
     } else if (event.event._tag === "ThreadViewPatch") {
       const applied = view.success.apply(event.event.patch)
       if (applied._tag === "Failure")
-        return { _tag: "Invalid", error: failure("Hosted Thread attachment view patch was invalid") }
+        return { _tag: "Invalid", error: failure("Thread attachment view patch was invalid") }
     }
   }
   return {
@@ -193,7 +194,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
   const credentials = yield* CredentialStore
   const crypto = yield* Crypto.Crypto
   const randomId = crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("Hosted Thread request identifier could not be created")),
+    Effect.mapError(() => failure("Thread request identifier could not be created")),
   )
   const ticket = yield* authenticated(input.profile, (session) =>
     http.issueThreadTicket(input.profile.origin, session),
@@ -262,7 +263,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         Effect.ensuring(Effect.sync(() => attachments.delete(requestId))),
       )
       if (String(attachment.threadId) !== threadId) {
-        const error = failure("Hosted Thread attachment response identity did not match its request")
+        const error = failure("Thread attachment response identity did not match its request")
         yield* Deferred.fail(waiter.processed, error)
         yield* failPending(error)
         return yield* error
@@ -284,7 +285,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         }),
       ),
     attach,
-    invalidate: failPending(failure("Hosted Thread attachment was invalidated")),
+    invalidate: failPending(failure("Thread attachment was invalidated")),
     detach: Effect.gen(function* () {
       yield* socket.send(envelope(`detach:${yield* randomId}`, { _tag: "Detach" }))
     }),
@@ -297,7 +298,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
       yield* input.receive(payload, physical)
       if (payload._tag === "ThreadAttached") {
         const waiter = attachments.get(payload.requestId)
-        if (waiter === undefined) return yield* failure("Hosted Thread attachment response was not requested")
+        if (waiter === undefined) return yield* failure("Thread attachment response was not requested")
         yield* Deferred.succeed(waiter.response, payload)
         yield* Deferred.await(waiter.processed)
       } else if (
@@ -308,7 +309,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         const waiter = outcomes.get(payload.requestId)
         if (waiter !== undefined) {
           if ("threadId" in waiter.command && String(payload.threadId) !== String(waiter.command.threadId)) {
-            const error = protocolFailure("Hosted Thread response identity did not match its command")
+            const error = protocolFailure("Thread response identity did not match its command")
             yield* failPending(error)
             return yield* error
           }
@@ -316,7 +317,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
             "commandId" in waiter.command &&
             (payload.commandId === undefined || String(payload.commandId) !== String(waiter.command.commandId))
           ) {
-            const error = protocolFailure("Hosted Thread response command identity did not match its command")
+            const error = protocolFailure("Thread response command identity did not match its command")
             yield* failPending(error)
             return yield* error
           }
@@ -335,7 +336,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
     }
   }).pipe(
     Effect.catch((error) => failPending(error)),
-    Effect.ensuring(failPending(failure("Hosted Thread connection closed"))),
+    Effect.ensuring(failPending(failure("Thread connection closed"))),
     Effect.forkScoped,
   )
   yield* input.opening(physical)
@@ -353,7 +354,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
             Effect.onExit((exit) =>
               Exit.isFailure(exit)
                 ? pending
-                    .fail(failure("Hosted Thread attachment processing did not complete"))
+                    .fail(failure("Thread attachment processing did not complete"))
                     .pipe(Effect.andThen(physical.invalidate))
                 : Effect.void,
             ),
@@ -385,7 +386,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const crypto = yield* Crypto.Crypto
   const webSocket = yield* Socket.WebSocketConstructor
   const randomId = crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("Hosted Thread request identifier could not be created")),
+    Effect.mapError(() => failure("Thread request identifier could not be created")),
   )
   const selectionAdmission = yield* Semaphore.make(1)
   const initialState: InteractiveConnection.State = {
@@ -432,7 +433,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     connectionChanged = Deferred.makeUnsafe<void>()
   }
   const awaitConnection: Effect.Effect<PhysicalConnection, HostedError> = Effect.suspend(() => {
-    if (stopped) return Effect.fail(failure("Hosted interactive session is closed"))
+    if (stopped) return Effect.fail(failure("Interactive session is closed"))
     return current === undefined
       ? Deferred.await(connectionChanged).pipe(Effect.andThen(awaitConnection))
       : Effect.succeed(current)
@@ -568,7 +569,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     deliveredFingerprint: string | undefined,
   ): Projection | HostedError => {
     const view = ThreadView.fromSnapshot(payload.snapshot.view)
-    if (view._tag === "Failure") return failure("Hosted Thread snapshot view was invalid")
+    if (view._tag === "Failure") return failure("Thread snapshot view was invalid")
     return {
       threadId: String(payload.threadId),
       view: view.success.snapshot(),
@@ -610,13 +611,13 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const threadId = String(payload.threadId)
       if (!selectedFrame(threadId)) return
       if (!hostedThreadSnapshotMatches(payload.snapshot, threadId))
-        return yield* failure("Hosted Thread snapshot identity did not match its response")
+        return yield* failure("Thread snapshot identity did not match its response")
       const previous = authority()!
       const cursor = BigInt(payload.cursor)
       const previousCursor = BigInt(previous.committedCursor)
       if (cursor < previousCursor) return
       if (BigInt(payload.threadVersion) < BigInt(previous.version))
-        return yield* failure("Hosted Thread snapshot version regressed")
+        return yield* failure("Thread snapshot version regressed")
       const candidate = projectionFromSnapshot(
         payload,
         previous.participants,
@@ -645,11 +646,11 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     if (currentCursor > prepared.terminalCursor)
       return {
         _tag: "Invalid" as const,
-        error: failure("Hosted Thread attachment terminal cursor regressed"),
+        error: failure("Thread attachment terminal cursor regressed"),
       }
     const view = ThreadView.fromSnapshot(prepared.view)
     if (view._tag === "Failure")
-      return { _tag: "Invalid" as const, error: failure("Hosted Thread committed view was invalid") }
+      return { _tag: "Invalid" as const, error: failure("Thread committed view was invalid") }
     const payload = prepared.attachment
     const candidate: Projection = {
       threadId,
@@ -746,14 +747,14 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         if (!currentFrame(connection) || !selectedFrame(threadId)) return
         const eventThreadId = interactiveEventThreadId(payload.event.event)
         if (eventThreadId !== undefined && eventThreadId !== threadId)
-          return yield* failure("Hosted Thread event identity did not match its response")
+          return yield* failure("Thread event identity did not match its response")
         const next = BigInt(payload.event.cursor)
         const projection = authority()!
         const previous = BigInt(projection.committedCursor)
         if (next <= previous) return
-        if (next !== previous + 1n) return yield* failure("Hosted Thread event cursor was not contiguous")
+        if (next !== previous + 1n) return yield* failure("Thread event cursor was not contiguous")
         if (BigInt(payload.event.threadVersion) < BigInt(projection.version))
-          return yield* failure("Hosted Thread event version regressed")
+          return yield* failure("Thread event version regressed")
         if (
           (payload.event.event._tag === "SubmissionAdmitted" || payload.event.event._tag === "SubmissionRejected") &&
           payload.event.event.submissionId !== undefined
@@ -762,13 +763,13 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         let nextView = projection.view
         if (payload.event.event._tag === "ThreadViewSnapshot") {
           const view = ThreadView.fromSnapshot(payload.event.event.snapshot)
-          if (view._tag === "Failure") return yield* failure("Hosted Thread event snapshot was invalid")
+          if (view._tag === "Failure") return yield* failure("Thread event snapshot was invalid")
           nextView = view.success.snapshot()
         } else if (payload.event.event._tag === "ThreadViewPatch") {
           const candidate = ThreadView.fromSnapshot(projection.view)
-          if (candidate._tag === "Failure") return yield* failure("Hosted Thread event view was invalid")
+          if (candidate._tag === "Failure") return yield* failure("Thread event view was invalid")
           const applied = candidate.success.apply(payload.event.event.patch)
-          if (applied._tag === "Failure") return yield* failure("Hosted Thread event patch was invalid")
+          if (applied._tag === "Failure") return yield* failure("Thread event patch was invalid")
           nextView = candidate.success.snapshot()
         }
         const candidate: Projection = {
@@ -889,7 +890,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                 if (Exit.isSuccess(exit)) return Effect.void
                 return Effect.gen(function* () {
                   if (pending !== undefined)
-                    yield* pending.fail(failure("Hosted Thread attachment processing did not complete"))
+                    yield* pending.fail(failure("Thread attachment processing did not complete"))
                   if (physical !== undefined) {
                     if (current === physical) publishConnection(undefined)
                     yield* physical.invalidate
@@ -938,75 +939,92 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       }),
     )
 
-  const superviseConnection = (connectedBefore: boolean): Effect.Effect<void> =>
+  const superviseConnection = (connectedBefore: boolean, failedAttempts: number): Effect.Effect<void, HostedError> =>
     Effect.suspend(() => {
       if (stopped) return Effect.void
-      let established = connectedBefore
+      let attached = false
       return updateState((previousState) => ({
         ...previousState,
         connectivity: connectedBefore ? "reconnecting" : "connecting",
         activity: "authenticating",
       })).pipe(
         Effect.andThen(
-          Effect.result(
-            Effect.scoped(
-              Effect.gen(function* () {
-                const physical = yield* makePhysicalConnection({
-                  profile,
-                  threadId: () => authority()?.threadId ?? input.threadId,
-                  cursor: (threadId) =>
-                    authority()?.threadId === threadId
-                      ? authority()!.deliveredCursor
-                      : (threadCursors.get(threadId) ?? "0"),
-                  resolving: () => selection._tag === "Loading" && selection.authority === undefined,
-                  opening: (connection) =>
-                    Effect.sync(() => {
-                      connecting = connection
-                    }),
-                  receive,
-                  attached: commitInitialAttachment,
-                  processed: (attachment, connection) =>
-                    acknowledge(connection, String(attachment.threadId), String(attachment.cursor)),
-                }).pipe(
-                  Effect.provideService(Http, http),
-                  Effect.provideService(CredentialStore, credentials),
-                  Effect.provideService(ProfileStore, profiles),
-                  Effect.provideService(Crypto.Crypto, crypto),
-                  Effect.provideService(Socket.WebSocketConstructor, webSocket),
-                )
-                publishConnection(physical)
-                established = true
-                yield* updateState((previousState) => ({
-                  ...previousState,
-                  connectivity: "connected",
-                  ownership: profile.owner.kind === "personal" ? "personal" : "organization",
-                }))
-                return yield* physical.done
-              }).pipe(
-                Effect.ensuring(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const physical = yield* makePhysicalConnection({
+                profile,
+                threadId: () => authority()?.threadId ?? input.threadId,
+                cursor: (threadId) =>
+                  authority()?.threadId === threadId
+                    ? authority()!.deliveredCursor
+                    : (threadCursors.get(threadId) ?? "0"),
+                resolving: () => selection._tag === "Loading" && selection.authority === undefined,
+                opening: (connection) =>
                   Effect.sync(() => {
-                    const threadId = authority()?.threadId
-                    if (threadId !== undefined) resetPreviews(threadId)
-                    publishConnection(undefined)
+                    connecting = connection
                   }),
-                ),
+                receive,
+                attached: commitInitialAttachment,
+                processed: (attachment, connection) =>
+                  acknowledge(connection, String(attachment.threadId), String(attachment.cursor)),
+              }).pipe(
+                Effect.provideService(Http, http),
+                Effect.provideService(CredentialStore, credentials),
+                Effect.provideService(ProfileStore, profiles),
+                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.provideService(Socket.WebSocketConstructor, webSocket),
+              )
+              publishConnection(physical)
+              attached = true
+              yield* updateState((previousState) => ({
+                ...previousState,
+                connectivity: "connected",
+                ownership: profile.owner.kind === "personal" ? "personal" : "organization",
+              }))
+              return yield* physical.done
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  const threadId = authority()?.threadId
+                  if (threadId !== undefined) resetPreviews(threadId)
+                  publishConnection(undefined)
+                }),
               ),
             ),
+          ).pipe(
+            Effect.matchEffect({
+              onFailure: (error) => {
+                if (stopped) return Effect.void
+                if (!retryableConnectionFailure(error)) return Effect.fail(error)
+                const attempt = attached ? 0 : failedAttempts
+                const delay = reconnectDelay(
+                  error.retryAfterMillis === undefined
+                    ? { attempt }
+                    : { attempt, retryAfterMillis: error.retryAfterMillis },
+                )
+                const reconnect = {
+                  "rika.failure.category": error.kind === "rate-limit" ? "rate_limited" : "dependency_unavailable",
+                  "rika.reconnect.attempt": attempt + 1,
+                  "rika.reconnect.delay.ms": delay,
+                }
+                const status = error.status === undefined ? reconnect : { ...reconnect, "rika.http.status": error.status }
+                const annotations =
+                  error.retryAfterMillis === undefined
+                    ? status
+                    : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
+                return updateState((previousState) => ({ ...previousState, connectivity: "reconnecting" })).pipe(
+                  Effect.andThen(Effect.logInfo("connection.reconnect.scheduled").pipe(Effect.annotateLogs(annotations))),
+                  Effect.andThen(Effect.sleep(delay)),
+                  Effect.andThen(superviseConnection(connectedBefore || attached, attempt + 1)),
+                )
+              },
+              onSuccess: () => Effect.void,
+            }),
           ),
-        ),
-        Effect.flatMap((result) =>
-          stopped
-            ? Effect.void
-            : (result._tag === "Failure"
-                ? updateState((previousState) => ({ ...previousState, connectivity: "reconnecting" })).pipe(
-                    Effect.andThen(Effect.sleep("250 millis")),
-                  )
-                : Effect.void
-              ).pipe(Effect.andThen(superviseConnection(established))),
         ),
       )
     })
-  const connectionLoop = superviseConnection(false)
+  const connectionLoop = superviseConnection(false, 0)
 
   const mutate = (
     operation: string,
@@ -1018,15 +1036,15 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   ) =>
     Effect.gen(function* () {
       const admitted = authority()
-      if (admitted === undefined) return yield* failure("Hosted Thread authority is unavailable")
+      if (admitted === undefined) return yield* failure("Thread authority is unavailable")
       const threadId = admitted.threadId
       const attempt = (retryStaleVersion: boolean): Effect.Effect<void, HostedError> =>
         Effect.suspend(() => {
-          if (stopped) return Effect.fail(failure("Hosted interactive session is closed"))
+          if (stopped) return Effect.fail(failure("Interactive session is closed"))
           return Effect.gen(function* () {
             const projection = authority()
             if (projection === undefined || projection.threadId !== threadId)
-              return yield* failure("Hosted Thread authority changed during command execution")
+              return yield* failure("Thread authority changed during command execution")
             const command = make(ThreadId.make(threadId), projection.version)
             const sendUntilKnown = (): Effect.Effect<CommandOutcome, HostedError> =>
               Effect.gen(function* () {
@@ -1063,7 +1081,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
                 replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
               if (completeOnAdmission) return
-              return yield* failure("Hosted Thread command completion was not pushed after durable admission")
+              return yield* failure("Thread command completion was not pushed after durable admission")
             }
             if (outcome._tag === "CommandAccepted") {
               const committed = authority()
@@ -1074,7 +1092,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
             if (retryStaleVersion && outcome.reason === "stale-version" && outcome.currentThreadVersion !== undefined) {
               const committed = authority()
               if (committed?.threadId !== threadId)
-                return yield* failure("Hosted Thread authority changed during command retry")
+                return yield* failure("Thread authority changed during command retry")
               if (BigInt(outcome.currentThreadVersion) > BigInt(committed.version))
                 replaceAuthority(committed, {
                   ...committed,
@@ -1136,7 +1154,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
             if (submissionId !== undefined && pendingCommandId === undefined)
               return yield* OperationUnavailable.make({
                 operation: "InteractiveSession.submit",
-                message: "Hosted submission identity is already pending",
+                message: "Submission identity is already pending",
               })
             const allocatedCommandId = yield* nextCommandId("submit").pipe(
               Effect.tapError((error) =>
@@ -1266,7 +1284,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         if (authority()?.threadId !== selectedThreadId)
           return yield* unavailable(
             "InteractiveSession.cancel",
-            failure("Hosted Thread authority changed before cancellation"),
+            failure("Thread authority changed before cancellation"),
           )
         const targetTurnId =
           requestedTarget.turnId ?? (requestedTarget.submissionId === undefined ? activeTurnId() : undefined)
@@ -1290,7 +1308,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         if (authority()?.threadId !== selectedThreadId)
           return yield* unavailable(
             "InteractiveSession.cancel",
-            failure("Hosted Thread authority changed during cancellation"),
+            failure("Thread authority changed during cancellation"),
           )
         yield* mutate(
           "InteractiveSession.cancel",

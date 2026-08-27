@@ -49,23 +49,19 @@ const runInput = (values: {
 
 const validateRunInput = (input: RunOperation) => {
   if (input.threadId === undefined)
-    return Effect.fail(
-      ProductOperation.InvalidInput.make({ message: "Hosted execution requires --thread <thread-id>" }),
-    )
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "Execution requires --thread <thread-id>" }))
   if (input.streamJsonInput && !input.streamJson)
     return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-input requires --stream-json" }))
   if (input.streamJsonThinking && !input.streamJson)
     return Effect.fail(ProductOperation.InvalidInput.make({ message: "--stream-json-thinking requires --stream-json" }))
   if (input.streamJson)
-    return Effect.fail(
-      ProductOperation.InvalidInput.make({ message: "Hosted execution does not support stream output" }),
-    )
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "Execution does not support stream output" }))
   if (input.workspace !== undefined)
     return Effect.fail(
-      ProductOperation.InvalidInput.make({ message: "Hosted execution uses the Thread workspace; remove --workspace" }),
+      ProductOperation.InvalidInput.make({ message: "Execution uses the Thread workspace; remove --workspace" }),
     )
   if (input.ephemeral)
-    return Effect.fail(ProductOperation.InvalidInput.make({ message: "Hosted Threads do not support --ephemeral" }))
+    return Effect.fail(ProductOperation.InvalidInput.make({ message: "Threads do not support --ephemeral" }))
   return Effect.succeed(input)
 }
 

@@ -83,6 +83,11 @@ const request = (baseUrl: string, path: string, body?: JsonValue, cookie?: strin
 const Registration = Schema.Struct({ client_id: Schema.String })
 const Authorization = Schema.Struct({ device_code: Schema.String, user_code: Schema.String })
 const Tokens = Schema.Struct({ access_token: Schema.String, refresh_token: Schema.String, token_type: Schema.String })
+const RefreshedTokens = Schema.Struct({
+  access_token: Schema.String,
+  refresh_token: Schema.optionalKey(Schema.String),
+  token_type: Schema.String,
+})
 const decodeResponse = <S extends Schema.Top>(schema: S, response: Response) =>
   Effect.tryPromise(() => response.json()).pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
@@ -266,6 +271,48 @@ it.layer(BunServices.layer)((test) => {
         expect(principal?.clientId).toBe(registration.client_id)
         expect(principal?.dpopJkt).toBeDefined()
         expect(principal?.userId).toBeDefined()
+
+        const refreshed = yield* runtime.handle(
+          new Request(tokenUrl, {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              "content-type": "application/x-www-form-urlencoded",
+              dpop: yield* dpopProof({
+                method: "POST",
+                url: tokenUrl,
+                privateKey: key.privateKey,
+                publicJwk: key.publicJwk,
+              }),
+            },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: tokens.refresh_token,
+              client_id: registration.client_id,
+              resource: `${baseUrl}/api/v1`,
+            }),
+          }),
+        )
+        expect(refreshed.status).toBe(200)
+        const refreshedTokens = yield* decodeResponse(RefreshedTokens, refreshed)
+        expect(refreshedTokens.token_type.toLowerCase()).toBe("dpop")
+        expect(refreshedTokens.access_token).not.toBe(tokens.access_token)
+
+        const refreshedPrincipal = yield* runtime.identify(
+          new Request(contextUrl, {
+            headers: {
+              authorization: `DPoP ${refreshedTokens.access_token}`,
+              dpop: yield* dpopProof({
+                method: "GET",
+                url: contextUrl,
+                privateKey: key.privateKey,
+                publicJwk: key.publicJwk,
+                accessToken: refreshedTokens.access_token,
+              }),
+            },
+          }),
+        )
+        expect(refreshedPrincipal).toEqual(principal)
       } finally {
         server.stop(true)
         yield* Effect.tryPromise(() => pool.end())

@@ -32,29 +32,29 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
         }
         if (profile.project !== undefined) Object.assign(diskProfile, { project: profile.project })
         const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))(diskProfile).pipe(
-          Effect.mapError(() => failure("Hosted profile could not be encoded")),
+          Effect.mapError(() => failure("Profile could not be encoded")),
         )
         const parent = path.dirname(target)
         const temporary = `${target}.tmp-${process.pid}`
         yield* fileSystem
           .makeDirectory(parent, { recursive: true, mode: 0o700 })
-          .pipe(Effect.mapError(() => failure("Hosted profile directory could not be created")))
+          .pipe(Effect.mapError(() => failure("Profile directory could not be created")))
         yield* fileSystem.writeFileString(temporary, text, { mode: 0o600 }).pipe(
           Effect.flatMap(() => fileSystem.rename(temporary, target)),
           Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
-          Effect.mapError(() => failure("Hosted profile could not be saved")),
+          Effect.mapError(() => failure("Profile could not be saved")),
         )
       })
       const load = Effect.gen(function* () {
         if (
-          !(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Hosted profile could not be read"))))
+          !(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Profile could not be read"))))
         )
           return Option.none<Profile>()
         const text = yield* fileSystem
           .readFileString(target)
-          .pipe(Effect.mapError(() => failure("Hosted profile could not be read")))
+          .pipe(Effect.mapError(() => failure("Profile could not be read")))
         const profile = yield* Schema.decodeEffect(Schema.fromJsonString(ProfileDisk))(text).pipe(
-          Effect.mapError(() => failure("Hosted profile is corrupt")),
+          Effect.mapError(() => failure("Profile is corrupt")),
         )
         const loaded: Profile = {
           origin: profile.origin,

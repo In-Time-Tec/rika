@@ -41,7 +41,7 @@ it.effect("persists the current owner format and rejects stale profiles", () =>
           clientId: profile.clientId,
         }),
       )
-      expect((yield* Effect.flip(store.load)).message).toBe("Hosted profile is corrupt")
+      expect((yield* Effect.flip(store.load)).message).toBe("Profile is corrupt")
     }),
   ),
 )

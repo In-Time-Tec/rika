@@ -11,6 +11,7 @@ import {
   Http,
   ProfileStore,
   ThreadClient,
+  type ActiveCredential,
   type Credential,
   type DeviceAuthorization,
   type PrivateJwk,
@@ -29,7 +30,7 @@ const emailSchema = Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s
 
 export const normalizeOrigin = Effect.fn("HostedAccount.normalizeOrigin")(function* (raw: string) {
   const decoded = yield* Schema.decodeEffect(Schema.URLFromString)(raw).pipe(
-    Effect.mapError(() => failure("invalid-input", "Hosted origin must be a valid HTTP or HTTPS URL")),
+    Effect.mapError(() => failure("invalid-input", "Server origin must be a valid HTTP or HTTPS URL")),
   )
   if (
     (decoded.protocol !== "https:" && decoded.protocol !== "http:") ||
@@ -38,7 +39,7 @@ export const normalizeOrigin = Effect.fn("HostedAccount.normalizeOrigin")(functi
     decoded.search.length > 0 ||
     decoded.hash.length > 0
   )
-    return yield* failure("invalid-input", "Hosted origin must be an HTTP or HTTPS base URL without credentials")
+    return yield* failure("invalid-input", "Server origin must be an HTTP or HTTPS base URL without credentials")
   return `${decoded.origin}${decoded.pathname === "/" ? "" : decoded.pathname.replace(/\/+$/, "")}`
 })
 
@@ -63,12 +64,18 @@ export const pollDeviceAuthorization = Effect.fn("HostedAccount.pollDeviceAuthor
       .pipe(
         Effect.matchEffect({
           onFailure: (error) =>
-            error.kind === "network" ? Effect.succeed({ _tag: "NetworkFailure" as const }) : Effect.fail(error),
+            error.kind === "network" || error.kind === "rate-limit"
+              ? Effect.succeed({ _tag: "TransientFailure" as const, retryAfterMillis: error.retryAfterMillis })
+              : Effect.fail(error),
           onSuccess: Effect.succeed,
         }),
       )
     if ((yield* Clock.currentTimeMillis) >= deadline) return yield* failure("expired", "Device authorization expired")
-    if (polled._tag === "NetworkFailure" || polled._tag === "Pending") continue
+    if (polled._tag === "TransientFailure") {
+      interval = Math.max(interval, polled.retryAfterMillis ?? 0)
+      continue
+    }
+    if (polled._tag === "Pending") continue
     if (polled._tag === "SlowDown") {
       interval += 5_000
       continue
@@ -79,15 +86,25 @@ export const pollDeviceAuthorization = Effect.fn("HostedAccount.pollDeviceAuthor
   }
 })
 
-const credentialFrom = (tokens: TokenSet, privateJwk: PrivateJwk): Credential => ({
+const credentialFrom = (tokens: TokenSet, privateJwk: PrivateJwk, receivedAt: number): ActiveCredential => ({
   refreshToken: Redacted.make(tokens.refreshToken),
   privateJwk,
+  accessToken: Redacted.make(tokens.accessToken),
+  accessTokenExpiresAt: receivedAt + tokens.expiresIn * 1_000,
 })
 
 const sessionFrom = (tokens: TokenSet, privateJwk: PrivateJwk): Session => ({
   accessToken: Redacted.make(tokens.accessToken),
   privateJwk,
 })
+
+const sessionFromCredential = (credential: ActiveCredential): Session => ({
+  accessToken: credential.accessToken,
+  privateJwk: credential.privateJwk,
+})
+
+const activeCredential = (credential: Credential, now: number): credential is ActiveCredential =>
+  credential.accessToken !== undefined && credential.accessTokenExpiresAt > now + 30_000
 
 export const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
   const store = yield* ProfileStore
@@ -101,33 +118,75 @@ const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, 
   const store = yield* CredentialStore
   return yield* Effect.uninterruptibleMask((restore) =>
     restore(http.refresh(profile.origin, profile.clientId, current.refreshToken, current.privateJwk)).pipe(
+      Effect.tap(() => Effect.logInfo("auth.refresh.success")),
+      Effect.tapError((error) => {
+        const category = {
+          "rika.failure.category": error.kind === "rate-limit" ? "rate_limited" : "dependency_unavailable",
+        }
+        const status = error.status === undefined ? category : { ...category, "rika.http.status": error.status }
+        const annotations =
+          error.retryAfterMillis === undefined
+            ? status
+            : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
+        return Effect.logWarning("auth.refresh.failure").pipe(Effect.annotateLogs(annotations))
+      }),
       Effect.flatMap((tokens) =>
-        store
-          .save(profile.origin, profile.deviceId, credentialFrom(tokens, current.privateJwk))
-          .pipe(Effect.as(sessionFrom(tokens, current.privateJwk))),
+        Clock.currentTimeMillis.pipe(
+          Effect.map((receivedAt) => credentialFrom(tokens, current.privateJwk, receivedAt)),
+          Effect.tap((credential) => store.save(profile.origin, profile.deviceId, credential)),
+        ),
       ),
     ),
   )
+})
+
+const acquireSession = Effect.fn("HostedAccount.acquireSession")(function* (profile: Profile) {
+  const store = yield* CredentialStore
+  const loaded = yield* store.load(profile.origin, profile.deviceId)
+  if (Option.isNone(loaded)) return yield* failure("login-required", "Run rika auth login first")
+  if (activeCredential(loaded.value, yield* Clock.currentTimeMillis)) return sessionFromCredential(loaded.value)
+  const credential = yield* store.serialized(
+    Effect.gen(function* () {
+      const current = yield* store.load(profile.origin, profile.deviceId)
+      if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
+      if (activeCredential(current.value, yield* Clock.currentTimeMillis)) return current.value
+      return yield* refresh(profile, current.value)
+    }),
+  )
+  return sessionFromCredential(credential)
+})
+
+const recoverSession = Effect.fn("HostedAccount.recoverSession")(function* (profile: Profile, failed: Session) {
+  const store = yield* CredentialStore
+  const credential = yield* store.serialized(
+    Effect.gen(function* () {
+      const current = yield* store.load(profile.origin, profile.deviceId)
+      if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
+      if (
+        activeCredential(current.value, yield* Clock.currentTimeMillis) &&
+        Redacted.value(current.value.accessToken) !== Redacted.value(failed.accessToken)
+      )
+        return current.value
+      return yield* refresh(profile, current.value)
+    }),
+  )
+  return sessionFromCredential(credential)
 })
 
 export const authenticated = Effect.fn("HostedAccount.authenticated")(function* <A>(
   profile: Profile,
   request: (session: Session) => Effect.Effect<A, HostedError>,
 ) {
-  const store = yield* CredentialStore
-  const session = yield* store.serialized(
-    Effect.gen(function* () {
-      const current = yield* store.load(profile.origin, profile.deviceId)
-      if (Option.isNone(current)) return yield* failure("login-required", "Run rika auth login first")
-      return yield* refresh(profile, current.value)
-    }),
-  )
-  return yield* request(session)
+  const session = yield* acquireSession(profile)
+  const result = yield* Effect.result(request(session))
+  if (result._tag === "Success") return result.success
+  if (result.failure.kind !== "login-required") return yield* result.failure
+  return yield* request(yield* recoverSession(profile, session))
 })
 
 const json = <A>(value: A) =>
   Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
-    Effect.mapError(() => failure("protocol", "Hosted output could not be encoded")),
+    Effect.mapError(() => failure("protocol", "Output could not be encoded")),
   )
 
 const validOwner = (profile: Profile, identity: IdentityContext) => {
@@ -209,11 +268,12 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
       .open(verification)
       .pipe(Effect.catch((error) => Console.log(`${error.message}; continue with the URL above`)))
   const tokens = yield* pollDeviceAuthorization(nextProfile, started.privateJwk, started.authorization, issuedAt)
+  const tokensReceivedAt = yield* Clock.currentTimeMillis
   const identity = yield* http.context(origin, sessionFrom(tokens, started.privateJwk))
   const selected = validOwner(nextProfile, identity)
     ? nextProfile
     : { ...nextProfile, owner: { kind: "personal" as const }, project: undefined }
-  yield* credentials.save(origin, started.deviceId, credentialFrom(tokens, started.privateJwk))
+  yield* credentials.save(origin, started.deviceId, credentialFrom(tokens, started.privateJwk, tokensReceivedAt))
   yield* profiles.save(selected)
   if (previous !== undefined && previous.origin === origin && previous.deviceId !== started.deviceId) {
     const revoked = yield* Effect.result(
@@ -485,7 +545,7 @@ const threadControl = Effect.fn("HostedAccount.threadControl")(function* <A>(
   const threads = yield* ThreadClient
   const crypto = yield* Crypto.Crypto
   const operationId = yield* crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
+    Effect.mapError(() => failure("host", "Could not create an operation identifier")),
   )
   return yield* authenticated(profile, (session) =>
     http
@@ -557,7 +617,7 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
   const threads = yield* ThreadClient
   const crypto = yield* Crypto.Crypto
   const commandId = yield* crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("host", "Could not create a hosted Thread identifier")),
+    Effect.mapError(() => failure("host", "Could not create a Thread identifier")),
   )
   const threadId = yield* authenticated(profile, (session) =>
     http.context(profile.origin, session).pipe(
@@ -585,7 +645,7 @@ export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadI
   const http = yield* Http
   const threads = yield* ThreadClient
   const key = yield* crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("host", "Could not create a hosted operation identifier")),
+    Effect.mapError(() => failure("host", "Could not create an operation identifier")),
   )
   const result = yield* authenticated(profile, (session) =>
     http

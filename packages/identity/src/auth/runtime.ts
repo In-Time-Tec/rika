@@ -167,6 +167,9 @@ export const makeBetterAuthIdentityRuntime = (input: {
           },
     advanced: {
       useSecureCookies: config.production,
+      ipAddress: {
+        ipAddressHeaders: ["x-rika-client-ip"],
+      },
     },
     plugins: [
       snakeCasePlugin(

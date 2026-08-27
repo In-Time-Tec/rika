@@ -9,7 +9,12 @@ const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const origin = "https://hosted.example.test"
 const deviceId = "device-1"
-const credential = { refreshToken: Redacted.make("refresh-secret"), privateJwk: key }
+const credential = {
+  refreshToken: Redacted.make("refresh-secret"),
+  privateJwk: key,
+  accessToken: Redacted.make("access-secret"),
+  accessTokenExpiresAt: 1_800_000,
+}
 
 it.layer(platform)((test) => {
   test.effect("persists one owner-only hosted credential across store instances", () =>
@@ -25,9 +30,10 @@ it.layer(platform)((test) => {
 
         expect(yield* first.load(origin, deviceId)).toEqual(Option.none())
         yield* first.save(origin, deviceId, credential)
-        expect(Redacted.value(Option.getOrThrow(yield* second.load(origin, deviceId)).refreshToken)).toBe(
-          "refresh-secret",
-        )
+        const loaded = Option.getOrThrow(yield* second.load(origin, deviceId))
+        expect(Redacted.value(loaded.refreshToken)).toBe("refresh-secret")
+        expect(loaded).toMatchObject({ accessTokenExpiresAt: 1_800_000 })
+        expect(loaded.accessToken === undefined ? undefined : Redacted.value(loaded.accessToken)).toBe("access-secret")
         expect(yield* second.load(origin, "another-device")).toEqual(Option.none())
         expect(yield* second.load("https://another.example.test", deviceId)).toEqual(Option.none())
         expect((yield* fileSystem.stat(root)).mode & 0o777).toBe(0o700)
@@ -36,11 +42,13 @@ it.layer(platform)((test) => {
           .readFileString(filename)
           .pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))))
         expect(persisted).toEqual({
-          formatVersion: 1,
+          formatVersion: 2,
           origin,
           deviceId,
           refreshToken: "refresh-secret",
           privateJwk: key,
+          accessToken: "access-secret",
+          accessTokenExpiresAt: 1_800_000,
         })
         expect(yield* second.remove(origin, "another-device")).toBe(false)
         expect(yield* second.remove(origin, deviceId)).toBe(true)

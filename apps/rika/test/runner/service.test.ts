@@ -24,7 +24,12 @@ const profile: Profile = {
   owner: { kind: "personal" },
   project: "project-1",
 }
-const credential: Credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
+const credential: Credential = {
+  refreshToken: Redacted.make("refresh"),
+  privateJwk: key,
+  accessToken: Redacted.make("access"),
+  accessTokenExpiresAt: 2_000_000_000_000,
+}
 const supervisorId = "10000000-0000-4000-8000-000000000001"
 const registration: RunnerRegistration = {
   deviceId: DeviceId.make("device-1"),
@@ -209,7 +214,7 @@ it.effect("keeps polling after a transient hosted outage", () =>
     yield* TestClock.adjust("1 second")
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-restart" })
     expect(yield* Ref.get(polls)).toBe(2)
-    expect(yield* Ref.get(statuses)).toEqual(["Ready", "the hosted service is reconnecting"])
+    expect(yield* Ref.get(statuses)).toEqual(["Ready", "the service is reconnecting"])
   }),
 )
 
@@ -269,6 +274,67 @@ it.effect("keeps the Runner alive when registration overlaps a hosted restart", 
     yield* TestClock.adjust("1 second")
     expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-registration" })
     expect(yield* Ref.get(registrations)).toBe(2)
-    expect(yield* Ref.get(statuses)).toEqual(["the hosted service is reconnecting", "Ready"])
+    expect(yield* Ref.get(statuses)).toEqual(["the service is reconnecting", "Ready"])
+  }),
+)
+
+it.effect("honors the retry delay when Runner polling is rate limited", () =>
+  Effect.gen(function* () {
+    const polls = yield* Ref.make(0)
+    const http = Http.of({
+      ...unusedHttp,
+      registerRunner: () => Effect.void,
+      setRemoteThreadCreation: () => Effect.void,
+      pollRunner: () =>
+        Ref.getAndUpdate(polls, (value) => value + 1).pipe(
+          Effect.flatMap((attempt) =>
+            attempt === 0
+              ? Effect.fail(
+                  HostedError.make({
+                    kind: "rate-limit",
+                    message: "Runner admission was rate limited; retry in 3 seconds",
+                    status: 429,
+                    retryAfterMillis: 3_000,
+                  }),
+                )
+              : Effect.succeed({
+                  _tag: "Admitted" as const,
+                  assignmentId: ExecutorAssignmentId.make("assignment-after-rate-limit"),
+                  admissionId: "admission-after-rate-limit",
+                  ticket: "ticket-after-rate-limit",
+                  executorUrl: "wss://hosted.example.test/executor",
+                  workspaceIdentity: "workspace-1",
+                  expiresAt: 2_000_000_000_000,
+                }),
+          ),
+        ),
+    })
+    const dependencies = Layer.mergeAll(
+      Layer.succeed(Http, http),
+      Layer.succeed(
+        ProfileStore,
+        ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void }),
+      ),
+      Layer.succeed(
+        CredentialStore,
+        CredentialStore.of({
+          load: () => Effect.succeed(Option.some(credential)),
+          save: () => Effect.void,
+          remove: () => Effect.succeed(true),
+          serialized: (effect) => effect,
+        }),
+      ),
+    )
+    const context = yield* Layer.build(liveAdmissionLayer.pipe(Layer.provide(dependencies)))
+    const admission = Context.get(context, RunnerAdmission)
+    const fiber = yield* admission
+      .awaitAdmission(registration, supervisorId, () => Effect.void, Effect.succeed([]))
+      .pipe(Effect.forkChild)
+
+    yield* TestClock.adjust("2999 millis")
+    expect(yield* Ref.get(polls)).toBe(1)
+    yield* TestClock.adjust("1 milli")
+    expect(yield* Fiber.join(fiber)).toMatchObject({ admissionId: "admission-after-rate-limit" })
+    expect(yield* Ref.get(polls)).toBe(2)
   }),
 )

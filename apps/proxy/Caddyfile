@@ -35,6 +35,7 @@
 			}
 			lb_retries 0
 			header_up Host {upstream_hostport}
+			header_up X-Rika-Client-IP {client_ip}
 		}
 	}
 
@@ -50,6 +51,7 @@
 			}
 			lb_retries 0
 			header_up Host {upstream_hostport}
+			header_up X-Rika-Client-IP {client_ip}
 		}
 	}
 

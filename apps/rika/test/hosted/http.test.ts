@@ -7,10 +7,15 @@ import { Http } from "../../src/hosted/contract"
 import { layer } from "../../src/hosted/http"
 import { WorkspaceId } from "@rika/product/hosted-model"
 
-const response = (request: HttpClientRequest.HttpClientRequest, body: Schema.Json, status = 200) =>
+const response = (
+  request: HttpClientRequest.HttpClientRequest,
+  body: Schema.Json,
+  status = 200,
+  headers: Record<string, string> = {},
+) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } }),
   )
 
 const bodyText = (request: HttpClientRequest.HttpClientRequest) => {
@@ -263,6 +268,34 @@ it.effect("identifies a stale CLI registration from device authorization", () =>
       expect(result).toMatchObject({
         _tag: "Failure",
         failure: { kind: "registration-required", message: "CLI registration is no longer valid" },
+      })
+    }),
+  ),
+)
+
+it.effect("reports the retry delay when token refresh is rate limited", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = HttpClient.make((request) =>
+        Effect.succeed(
+          response(request, { message: "Too many requests" }, 429, {
+            "x-retry-after": "42",
+          }),
+        ),
+      )
+      const context = yield* Layer.build(
+        layer.pipe(Layer.provide(Layer.merge(BunCrypto.layer, Layer.succeed(HttpClient.HttpClient, client)))),
+      )
+      const http = Context.get(context, Http)
+      const result = yield* Effect.flip(
+        http.refresh("https://hosted.example.test", "client-id", Redacted.make("refresh-token"), yield* generate()),
+      )
+
+      expect(result).toMatchObject({
+        kind: "rate-limit",
+        message: "Token refresh was rate limited; retry in 42 seconds",
+        status: 429,
+        retryAfterMillis: 42_000,
       })
     }),
   ),

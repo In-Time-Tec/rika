@@ -161,7 +161,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
         Effect.mapError((error) =>
           Schema.is(HostedError)(error)
             ? error
-            : HostedError.make({ kind: "host", message: "Could not create a hosted Thread identifier" }),
+            : HostedError.make({ kind: "host", message: "Could not create a Thread identifier" }),
         ),
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))

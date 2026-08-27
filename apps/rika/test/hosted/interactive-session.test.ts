@@ -24,6 +24,7 @@ import { TestClock } from "effect/testing"
 import * as Socket from "effect/unstable/socket/Socket"
 import {
   CredentialStore,
+  HostedError,
   Http,
   ProfileStore,
   type HttpInterface,
@@ -31,6 +32,7 @@ import {
   type Profile,
 } from "../../src/hosted/contract"
 import { makeHostedInteractiveSession } from "../../src/hosted/interactive-session"
+import { reconnectDelay, retryableConnectionFailure } from "../../src/hosted/reconnect-policy"
 
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(ClientMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
@@ -177,6 +179,10 @@ class FakeWebSocket extends EventTarget {
       this.dispatchEvent(new MessageEvent("message", { data: encode({ protocolVersion, payload }) }))
   }
 
+  invalidFrame() {
+    if (this.readyState === 1) this.dispatchEvent(new MessageEvent("message", { data: "not-json" }))
+  }
+
   close(code = 1006, reason = "closed") {
     if (this.readyState >= 2) return
     this.readyState = 3
@@ -203,7 +209,7 @@ const unusedHttp: HttpInterface = {
   register: () => Effect.die("unused"),
   startDeviceAuthorization: () => Effect.die("unused"),
   pollDeviceAuthorization: () => Effect.die("unused"),
-  refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+  refresh: () => Effect.die("a valid access token must not be refreshed"),
   context: () => Effect.die("unused"),
   invite: () => Effect.die("unused"),
   devices: () => Effect.die("unused"),
@@ -248,7 +254,15 @@ const makeHarness = (receive: (socket: FakeWebSocket, message: Message, harness:
     Layer.succeed(
       CredentialStore,
       CredentialStore.of({
-        load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+        load: () =>
+          Effect.succeed(
+            Option.some({
+              refreshToken: Redacted.make("refresh"),
+              privateJwk: key,
+              accessToken: Redacted.make("access"),
+              accessTokenExpiresAt: 2_000_000_000_000,
+            }),
+          ),
         save: () => Effect.void,
         remove: () => Effect.succeed(true),
         serialized: (effect) => effect,
@@ -314,6 +328,45 @@ const defaultReceive = (socket: FakeWebSocket, message: Message) => {
   if (message.command._tag === "AttachThread")
     socket.frame(attached(message, snapshot(String(message.command.threadId), 0)))
 }
+
+it("backs transient connection failures off to five seconds", () => {
+  expect([0, 1, 2, 3, 4, 5, 6].map((attempt) => reconnectDelay({ attempt }))).toEqual([
+    250,
+    500,
+    1_000,
+    2_000,
+    4_000,
+    5_000,
+    5_000,
+  ])
+})
+
+it("honors a larger server retry delay without exceeding one minute", () => {
+  expect(reconnectDelay({ attempt: 0, retryAfterMillis: 42_000 })).toBe(42_000)
+  expect(reconnectDelay({ attempt: 6, retryAfterMillis: 90_000 })).toBe(60_000)
+})
+
+it("retries only network and rate-limit failures", () => {
+  expect(retryableConnectionFailure(HostedError.make({ kind: "network", message: "closed" }))).toBe(true)
+  expect(retryableConnectionFailure(HostedError.make({ kind: "rate-limit", message: "limited" }))).toBe(true)
+  expect(retryableConnectionFailure(HostedError.make({ kind: "login-required", message: "login" }))).toBe(false)
+  expect(retryableConnectionFailure(HostedError.make({ kind: "protocol", message: "invalid frame" }))).toBe(false)
+})
+
+it.effect("stops instead of reconnecting after a terminal protocol failure", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = makeHarness(defaultReceive)
+      const hosted = yield* runSession(harness)
+      harness.sockets[0]!.invalidFrame()
+      expect(yield* Effect.flip(Fiber.join(hosted.eventFiber))).toMatchObject({
+        operation: "InteractiveSession.events",
+      })
+      yield* TestClock.adjust("1 minute")
+      expect(harness.sockets).toHaveLength(1)
+    }),
+  ),
+)
 
 it.effect("does not poll AttachThread while an idle WebSocket remains connected", () =>
   Effect.scoped(

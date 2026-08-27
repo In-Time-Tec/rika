@@ -166,7 +166,7 @@ const hostedCommandLayer = Layer.effect(
             catch: () =>
               ProductOperation.OperationUnavailable.make({
                 operation: input._tag,
-                message: "Hosted account support could not be loaded",
+                message: "Account support could not be loaded",
               }),
           })
           return yield* provideLayerScoped(hosted.liveLayer(home))(hosted.run(input))

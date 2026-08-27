@@ -63,7 +63,7 @@ const tokensFrom = (
     wire.expires_in <= 0 ||
     (wire.token_type !== undefined && wire.token_type.toLowerCase() !== "dpop")
   )
-    return Effect.fail(failure("protocol", "Hosted token response was not a valid DPoP token response"))
+    return Effect.fail(failure("protocol", "Token response was not a valid DPoP token response"))
   return Effect.succeed({
     accessToken: wire.access_token,
     refreshToken,
@@ -87,18 +87,34 @@ export const layer = Layer.effect(
         Effect.timeoutOption("30 seconds"),
         Effect.flatMap(
           Option.match({
-            onNone: () => Effect.fail(failure("network", "Hosted server request timed out")),
+            onNone: () => Effect.fail(failure("network", "Server request timed out")),
             onSome: Effect.succeed,
           }),
         ),
         Effect.mapError((error) =>
-          Schema.is(HostedError)(error) ? error : failure("network", "Hosted server request failed"),
+          Schema.is(HostedError)(error) ? error : failure("network", "Server request failed"),
         ),
       )
-    const responseError = (status: number, action: string) =>
-      status === 401
-        ? failure("login-required", "Hosted identity login is required")
-        : failure(status >= 500 || status === 429 ? "network" : "protocol", `${action} failed`)
+    const responseError = (response: HttpClientResponse.HttpClientResponse, action: string) => {
+      if (response.status === 401) return failure("login-required", "Identity login is required")
+      if (response.status === 429) {
+        const value = response.headers["x-retry-after"] ?? response.headers["retry-after"]
+        const seconds = value === undefined ? Number.NaN : Number(value)
+        const retryAfterMillis = Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
+        const suffix = retryAfterMillis === undefined ? "" : `; retry in ${Math.ceil(retryAfterMillis / 1_000)} seconds`
+        const limited = {
+          kind: "rate-limit",
+          message: `${action} was rate limited${suffix}`,
+          status: response.status,
+        } as const
+        return HostedError.make(retryAfterMillis === undefined ? limited : { ...limited, retryAfterMillis })
+      }
+      return HostedError.make({
+        kind: response.status >= 500 ? "network" : "protocol",
+        message: `${action} failed`,
+        status: response.status,
+      })
+    }
     const withDpop = Effect.fn("HostedHttp.withDpop")(function* (
       request: HttpClientRequest.HttpClientRequest,
       method: string,
@@ -134,8 +150,8 @@ export const layer = Layer.effect(
         )
       const oauth = yield* decode(response, OAuthErrorWire, `${action} failed`).pipe(Effect.option)
       if (Option.isSome(oauth) && (oauth.value.error === "invalid_grant" || oauth.value.error === "invalid_token"))
-        return yield* failure("login-required", "Hosted identity login is required")
-      return yield* responseError(response.status, action)
+        return yield* failure("login-required", "Identity login is required")
+      return yield* responseError(response, action)
     })
     const authenticatedJson = <S extends Schema.Constraint>(
       method: "GET" | "POST" | "PUT" | "DELETE",
@@ -150,7 +166,7 @@ export const layer = Layer.effect(
         Effect.flatMap((response) =>
           response.status >= 200 && response.status < 300
             ? decode(response, schema, `${action} returned an invalid response`)
-            : Effect.fail(responseError(response.status, action)),
+            : Effect.fail(responseError(response, action)),
         ),
       )
     const authenticatedEmpty = (
@@ -165,7 +181,7 @@ export const layer = Layer.effect(
         Effect.flatMap((response) =>
           response.status >= 200 && response.status < 300
             ? Effect.void
-            : Effect.fail(responseError(response.status, action)),
+            : Effect.fail(responseError(response, action)),
         ),
       )
     return Http.of({
@@ -187,7 +203,7 @@ export const layer = Layer.effect(
           Effect.flatMap((response) =>
             response.status >= 200 && response.status < 300
               ? decode(response, RegistrationWire, "CLI registration returned an invalid response")
-              : Effect.fail(responseError(response.status, "CLI registration")),
+              : Effect.fail(responseError(response, "CLI registration")),
           ),
           Effect.map((wire) => Registration.make({ clientId: wire.client_id })),
         )
@@ -212,7 +228,7 @@ export const layer = Layer.effect(
                   )
                   if (Option.isSome(oauth) && oauth.value.error === "invalid_client")
                     return yield* failure("registration-required", "CLI registration is no longer valid")
-                  return yield* responseError(response.status, "Device authorization")
+                  return yield* responseError(response, "Device authorization")
                 }),
           ),
           Effect.flatMap((wire) => {
@@ -258,7 +274,7 @@ export const layer = Layer.effect(
                 Effect.map((tokens) => ({ _tag: "Complete" as const, tokens })),
               )
             if (response.status >= 500 || response.status === 429)
-              return Effect.fail(failure("network", "Device token request failed"))
+              return Effect.fail(responseError(response, "Device token request"))
             return decode(response, OAuthErrorWire, "Device token response was invalid").pipe(
               Effect.flatMap((body): Effect.Effect<DevicePoll, HostedError> => {
                 if (body.error === "authorization_pending") return Effect.succeed({ _tag: "Pending" as const })
@@ -287,7 +303,7 @@ export const layer = Layer.effect(
           privateJwk,
         ).pipe(
           Effect.flatMap(execute),
-          Effect.flatMap((response) => tokenResponse(response, "Hosted token refresh", Redacted.value(refreshToken))),
+          Effect.flatMap((response) => tokenResponse(response, "Token refresh", Redacted.value(refreshToken))),
         )
       },
       context: (origin, session) => {
@@ -302,7 +318,7 @@ export const layer = Layer.effect(
           HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ email })),
           session,
           Invitation,
-          "Hosted organization invitation",
+          "Organization invitation",
         )
       },
       devices: (origin, session) => {
@@ -333,7 +349,7 @@ export const layer = Layer.effect(
           HttpClientRequest.post(url),
           session,
           ClientTicketResponse,
-          "Hosted Thread session",
+          "Thread session",
         )
       },
       registerRunner: (origin, checkoutFingerprint, registration, session) => {

@@ -8,6 +8,7 @@ import * as Preference from "./preference"
 import * as RunnerReceiptStore from "./receipt-store"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "../hosted/contract"
 import { authenticated, selectedProfile } from "../hosted/account"
+import { reconnectDelay, retryableConnectionFailure } from "../hosted/reconnect-policy"
 
 const statusLine = (status: RunnerStatus) => {
   if (status._tag === "Registering")
@@ -58,7 +59,30 @@ export const liveAdmissionLayer = Layer.effect(
     return RunnerAdmission.of({
       awaitAdmission: (registration, supervisorId, status, activeAssignmentIds) =>
         Effect.gen(function* () {
+          const waitForReconnect = (error: HostedError, attempt: number) => {
+            const delay = reconnectDelay(
+              error.retryAfterMillis === undefined
+                ? { attempt }
+                : { attempt, retryAfterMillis: error.retryAfterMillis },
+            )
+            const reconnect = {
+              "rika.failure.category": error.kind === "rate-limit" ? "rate_limited" : "dependency_unavailable",
+              "rika.reconnect.attempt": attempt + 1,
+              "rika.reconnect.delay.ms": delay,
+            }
+            const statusAnnotations =
+              error.status === undefined ? reconnect : { ...reconnect, "rika.http.status": error.status }
+            const annotations =
+              error.retryAfterMillis === undefined
+                ? statusAnnotations
+                : { ...statusAnnotations, "rika.retry_after.ms": error.retryAfterMillis }
+            return status({ _tag: "Waiting", message: "the service is reconnecting" }).pipe(
+              Effect.andThen(Effect.logInfo("runner.reconnect.scheduled").pipe(Effect.annotateLogs(annotations))),
+              Effect.andThen(Effect.sleep(delay)),
+            )
+          }
           let profile: Profile | undefined
+          let registrationFailures = 0
           while (profile === undefined) {
             const synchronized = yield* Effect.result(
               Effect.gen(function* () {
@@ -78,13 +102,14 @@ export const liveAdmissionLayer = Layer.effect(
               profile = synchronized.success
               break
             }
-            if (!Schema.is(HostedError)(synchronized.failure) || synchronized.failure.kind !== "network")
+            if (!Schema.is(HostedError)(synchronized.failure) || !retryableConnectionFailure(synchronized.failure))
               return yield* synchronized.failure
-            yield* status({ _tag: "Waiting", message: "the hosted service is reconnecting" })
-            yield* Effect.sleep("1 second")
+            yield* waitForReconnect(synchronized.failure, registrationFailures)
+            registrationFailures += 1
           }
           yield* status({ _tag: "Ready", workspaceIdentity: registration.workspaceIdentity })
           let waitingReason: "no-work" | "runner-owned" | undefined
+          let pollFailures = 0
           while (true) {
             const polled = yield* Effect.result(
               Effect.flatMap(activeAssignmentIds, (active) =>
@@ -94,12 +119,13 @@ export const liveAdmissionLayer = Layer.effect(
               ),
             )
             if (polled._tag === "Failure") {
-              if (!Schema.is(HostedError)(polled.failure) || polled.failure.kind !== "network")
+              if (!Schema.is(HostedError)(polled.failure) || !retryableConnectionFailure(polled.failure))
                 return yield* polled.failure
-              yield* status({ _tag: "Waiting", message: "the hosted service is reconnecting" })
-              yield* Effect.sleep("1 second")
+              yield* waitForReconnect(polled.failure, pollFailures)
+              pollFailures += 1
               continue
             }
+            pollFailures = 0
             const result = polled.success
             if (result._tag !== "Waiting") return result
             if (waitingReason !== result.reason) {

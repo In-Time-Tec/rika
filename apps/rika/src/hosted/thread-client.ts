@@ -51,7 +51,7 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
     .runString(
       (value) =>
         decodeServerFrame(value).pipe(
-          Effect.mapError(() => failure("protocol", "Hosted Thread server sent an invalid frame")),
+          Effect.mapError(() => failure("protocol", "Thread server sent an invalid frame")),
           Effect.flatMap((frame) => Queue.offer(frames, frame)),
         ),
       { onOpen: Deferred.succeed(opened, undefined).pipe(Effect.asVoid) },
@@ -60,11 +60,11 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
       Effect.catch((error) =>
         Deferred.fail(
           disconnected,
-          Schema.is(HostedError)(error) ? error : failure("network", "Hosted Thread connection was interrupted"),
+          Schema.is(HostedError)(error) ? error : failure("network", "Thread connection was interrupted"),
         ).pipe(Effect.asVoid),
       ),
       Effect.ensuring(
-        Deferred.fail(disconnected, failure("network", "Hosted Thread connection closed")).pipe(Effect.ignore),
+        Deferred.fail(disconnected, failure("network", "Thread connection closed")).pipe(Effect.ignore),
       ),
       Effect.forkScoped,
     )
@@ -74,11 +74,11 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
   const send = (message: ClientMessage) =>
     Effect.try({
       try: () => encodeClientMessage(message),
-      catch: () => failure("protocol", "Hosted Thread command could not be encoded"),
+      catch: () => failure("protocol", "Thread command could not be encoded"),
     }).pipe(
       Effect.flatMap(writer),
       Effect.mapError((error) =>
-        Schema.is(HostedError)(error) ? error : failure("network", "Hosted Thread command could not be sent"),
+        Schema.is(HostedError)(error) ? error : failure("network", "Thread command could not be sent"),
       ),
       whileConnected,
     )
@@ -109,9 +109,9 @@ const awaitCommand = Effect.fn("HostedThreadClient.awaitCommand")(function* (
       payload.requestId === requestId
     ) {
       if (payload.commandId === undefined || String(payload.commandId) !== commandId)
-        return yield* failure("protocol", "Hosted Thread response command identity did not match its command")
+        return yield* failure("protocol", "Thread response command identity did not match its command")
       if (threadId !== undefined && String(payload.threadId) !== threadId)
-        return yield* failure("protocol", "Hosted Thread response identity did not match its command")
+        return yield* failure("protocol", "Thread response identity did not match its command")
       if (payload._tag === "CommandRejected") return yield* rejection(payload)
       return payload
     }
@@ -147,12 +147,12 @@ const attach = Effect.fn("HostedThreadClient.attach")(function* (
     const payload = (yield* connection.next).payload
     if (payload._tag === "CommandRejected" && payload.requestId === requestId) {
       if (String(payload.threadId) !== threadId)
-        return yield* failure("protocol", "Hosted Thread attachment rejection identity did not match its request")
+        return yield* failure("protocol", "Thread attachment rejection identity did not match its request")
       return yield* rejection(payload)
     }
     if (payload._tag === "ThreadAttached" && payload.requestId === requestId) {
       if (String(payload.threadId) !== threadId)
-        return yield* failure("protocol", "Hosted Thread attachment response identity did not match its request")
+        return yield* failure("protocol", "Thread attachment response identity did not match its request")
       return payload
     }
   }
@@ -183,9 +183,9 @@ export const layer = Layer.effect(
             if (input.runnerTarget !== undefined) command.runnerTarget = input.runnerTarget
             const accepted = yield* applyCommand(connection, envelope(requestId, command), input.commandId)
             if (accepted.result._tag !== "ThreadCreated")
-              return yield* failure("protocol", "Hosted Thread creation returned the wrong result")
+              return yield* failure("protocol", "Thread creation returned the wrong result")
             if (String(accepted.threadId) !== String(accepted.result.threadId))
-              return yield* failure("protocol", "Hosted Thread creation returned mismatched identity")
+              return yield* failure("protocol", "Thread creation returned mismatched identity")
             return HostedThreadId.make(String(accepted.result.threadId))
           }),
         ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
@@ -193,7 +193,7 @@ export const layer = Layer.effect(
         Effect.scoped(
           Effect.gen(function* () {
             const text = input.request.prompt.join("\n").trim()
-            if (text.length === 0) return yield* failure("invalid-input", "Hosted prompt must not be empty")
+            if (text.length === 0) return yield* failure("invalid-input", "Prompt must not be empty")
             const connection = yield* connect(input.ticket)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:submit`
@@ -213,7 +213,7 @@ export const layer = Layer.effect(
               input.threadId,
             )
             if (accepted.result._tag !== "PromptAdmitted")
-              return yield* failure("protocol", "Hosted prompt returned the wrong result")
+              return yield* failure("protocol", "Prompt returned the wrong result")
             return { commandId: input.commandId, status: accepted.result.status }
           }),
         ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
@@ -279,12 +279,12 @@ export const layer = Layer.effect(
               const payload = (yield* connection.next).payload
               if (payload._tag === "CommandRejected" && payload.requestId === input.requestId) {
                 if (String(payload.threadId) !== input.threadId)
-                  return yield* failure("protocol", "Hosted portal rejection identity did not match its request")
+                  return yield* failure("protocol", "Portal rejection identity did not match its request")
                 return yield* rejection(payload)
               }
               if (payload._tag === "PortalOpened" && payload.requestId === input.requestId) {
                 if (String(payload.threadId) !== input.threadId)
-                  return yield* failure("protocol", "Hosted portal response identity did not match its request")
+                  return yield* failure("protocol", "Portal response identity did not match its request")
                 return payload.url
               }
             }

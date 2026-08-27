@@ -25,9 +25,12 @@ export class HostedError extends Schema.TaggedError<HostedError>()("HostedError"
     "registration-required",
     "network",
     "protocol",
+    "rate-limit",
     "storage",
   ]),
   message: Schema.String,
+  status: Schema.optionalKey(Schema.Int),
+  retryAfterMillis: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 }) {}
 
 export const PublicJwk = Schema.Struct({
@@ -71,9 +74,26 @@ export type DevicePoll =
   | { readonly _tag: "Expired" }
   | { readonly _tag: "Complete"; readonly tokens: TokenSet }
 
-export interface Credential {
+interface CredentialBase {
   readonly refreshToken: Redacted.Redacted<string>
   readonly privateJwk: PrivateJwk
+}
+
+export type Credential = CredentialBase &
+  (
+    | {
+        readonly accessToken: Redacted.Redacted<string>
+        readonly accessTokenExpiresAt: number
+      }
+    | {
+        readonly accessToken?: undefined
+        readonly accessTokenExpiresAt?: undefined
+      }
+  )
+
+export type ActiveCredential = CredentialBase & {
+  readonly accessToken: Redacted.Redacted<string>
+  readonly accessTokenExpiresAt: number
 }
 
 export interface Session {
@@ -340,7 +360,7 @@ export class Http extends Context.Service<Http, HttpInterface>()("@rika/cli/host
 
 export interface CredentialStoreInterface {
   readonly load: (origin: string, deviceId: string) => Effect.Effect<Option.Option<Credential>, HostedError>
-  readonly save: (origin: string, deviceId: string, credential: Credential) => Effect.Effect<void, HostedError>
+  readonly save: (origin: string, deviceId: string, credential: ActiveCredential) => Effect.Effect<void, HostedError>
   readonly remove: (origin: string, deviceId: string) => Effect.Effect<boolean, HostedError>
   readonly serialized: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | HostedError, R>
 }

@@ -73,7 +73,7 @@ export const Service = Context.Reference<Interface>("@rika/cli/command/HostedCom
       Effect.fail(
         ProductOperation.OperationUnavailable.make({
           operation: input._tag,
-          message: "Hosted commands are unavailable in this process",
+          message: "Account commands are unavailable in this process",
         }),
       ),
   }),

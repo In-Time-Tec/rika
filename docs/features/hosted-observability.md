@@ -8,6 +8,8 @@ Telemetry is best-effort operational evidence, not a transactional outbox. `even
 
 Structured logs and spans may contain only validated opaque Thread, Turn, Run, operation, Cell, binding, and model-attempt identifiers. An identifier is 1–128 ASCII letters, digits, dots, underscores, colons, or hyphens and starts with a letter or digit. Invalid values are omitted. Owner, command, assignment, sandbox, build, checkpoint, arbitrary annotations, prompts, cell source, output, credentials, and failure payloads are never recorded. The emitted correlation shape is `rika.thread.id`, `rika.turn.id`, `rika.run.id`, `rika.operation.id`, `rika.cell.id`, `rika.binding.id`, and `rika.model_attempt.id`. Identifiers never label metrics.
 
+Authentication and reconnect diagnostics may additionally record the bounded HTTP status, server retry delay, reconnect attempt, reconnect delay, and closed failure category. They never record response bodies, tokens, proof keys, account details, or raw failure messages. Refresh emits only success or failure operations; ordinary access-token reuse and successful Runner admission polling stay silent.
+
 Metric labels are closed stage, outcome, token-kind, and health-signal sets. Duration and lag summaries retain at most 1,024 samples per series for 15 minutes; exporters own longer retention. The bounded health signals are `stuck_queue_claim`, `stale_lease`, `setup_failure`, `unknown_outcome`, `replay_lag`, `orphan_sandbox`, and `restore_failure`.
 
 Worker readiness and admission depend only on current poll success and freshness because claim and discovery are atomic. Saturation, old active Turn and Run claims, old active projections, and retained failures remain diagnostic rather than readiness inputs.

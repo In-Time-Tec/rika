@@ -554,8 +554,11 @@ describe("Logging", () => {
                         "rika.follow.cursor": "cursor-42",
                         "rika.follow.reason": "thread-open",
                         "rika.follow.scope": "tree",
+                        "rika.http.status": 429,
                         "rika.reconnect.attempt": 3,
+                        "rika.reconnect.delay.ms": 42_000,
                         "rika.reconnect.message": "execution stream closed",
+                        "rika.retry_after.ms": 42_000,
                         "rika.unknown.annotation": "dropped-annotation-a41c",
                       }),
                     ),
@@ -575,7 +578,10 @@ describe("Logging", () => {
             "rika.follow.cursor": "cursor-42",
             "rika.follow.reason": "thread-open",
             "rika.follow.scope": "tree",
+            "rika.http.status": 429,
             "rika.reconnect.attempt": 3,
+            "rika.reconnect.delay.ms": 42_000,
+            "rika.retry_after.ms": 42_000,
           })
         }
         assert.notInclude(content, "dropped-annotation-a41c")

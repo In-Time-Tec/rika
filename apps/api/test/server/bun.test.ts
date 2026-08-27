@@ -198,6 +198,7 @@ it.effect("canonicalizes public HTTPS requests from the configured origin instea
       headers: {
         authorization: "DPoP proof",
         host: "internal.railway.test",
+        "x-rika-client-ip": "203.0.113.40",
         "x-forwarded-host": "attacker.example",
         "x-forwarded-proto": "http",
       },
@@ -211,6 +212,7 @@ it.effect("canonicalizes public HTTPS requests from the configured origin instea
     expect(canonical.method).toBe("POST")
     expect(canonical.headers.get("authorization")).toBe("DPoP proof")
     expect(canonical.headers.get("host")).toBe("api.example.test")
+    expect(canonical.headers.get("x-rika-client-ip")).toBe("203.0.113.40")
     expect(canonical.headers.get("x-forwarded-host")).toBeNull()
     expect(canonical.headers.get("x-forwarded-proto")).toBeNull()
     expect(yield* Effect.tryPromise(() => canonical.text())).toBe("request-body")

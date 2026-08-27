@@ -144,7 +144,9 @@ it.effect("defaults a first login with zero organizations to Personal", () =>
       clientId: "client-personal",
       owner: { kind: "personal" },
     })
-    expect(Option.isSome(yield* Ref.get(savedCredential))).toBe(true)
+    const credential = Option.getOrThrow(yield* Ref.get(savedCredential))
+    expect(credential.accessToken === undefined ? undefined : Redacted.value(credential.accessToken)).toBe("access")
+    expect(credential.accessTokenExpiresAt).toBe(600_000)
   }),
 )
 
@@ -176,7 +178,15 @@ it.effect("stores, reads, and revokes the OpenAI account for the selected hosted
         Layer.succeed(
           CredentialStore,
           CredentialStore.of({
-            load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+            load: () =>
+              Effect.succeed(
+                Option.some({
+                  refreshToken: Redacted.make("refresh"),
+                  privateJwk: key,
+                  accessToken: Redacted.make("access"),
+                  accessTokenExpiresAt: 600_000,
+                }),
+              ),
             save: () => Effect.void,
             remove: () => Effect.succeed(true),
             serialized: (effect) => effect,
@@ -367,7 +377,7 @@ it.effect("reports denial and expiry and remains interruptible", () =>
   }),
 )
 
-it.effect("rotates the refresh token while keeping access tokens in memory", () =>
+it.effect("migrates a legacy refresh credential to one persisted token snapshot", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const saved = yield* Ref.make<Option.Option<Credential>>(Option.none())
@@ -414,8 +424,110 @@ it.effect("rotates the refresh token while keeping access tokens in memory", () 
   ),
 )
 
+it.effect("reuses a valid access token without refreshing", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make<ReadonlyArray<string>>([])
+    const credential: Credential = {
+      refreshToken: Redacted.make("refresh"),
+      privateJwk: key,
+      accessToken: Redacted.make("persisted-access"),
+      accessTokenExpiresAt: 600_000,
+    }
+    const store = CredentialStore.of({
+      load: () => Effect.succeed(Option.some(credential)),
+      save: () => Effect.die("unused"),
+      remove: () => Effect.succeed(true),
+      serialized: () => Effect.die("unused"),
+    })
+    const http = Http.of({ ...unusedHttp, refresh: () => Effect.die("unused") })
+    const use = authenticated(profile, (session) =>
+      Ref.update(calls, (values) => [...values, Redacted.value(session.accessToken)]),
+    ).pipe(Effect.provideService(CredentialStore, store), Effect.provideService(Http, http))
+    yield* use
+    yield* use
+    expect(yield* Ref.get(calls)).toEqual(["persisted-access", "persisted-access"])
+  }),
+)
+
+it.effect("refreshes once and retries a protected request once after a 401", () =>
+  Effect.gen(function* () {
+    const current = yield* Ref.make<Credential>({
+      refreshToken: Redacted.make("refresh-0"),
+      privateJwk: key,
+      accessToken: Redacted.make("access-0"),
+      accessTokenExpiresAt: 600_000,
+    })
+    const refreshes = yield* Ref.make(0)
+    const requests = yield* Ref.make<ReadonlyArray<string>>([])
+    const store = CredentialStore.of({
+      load: () => Ref.get(current).pipe(Effect.map(Option.some)),
+      save: (_origin, _device, credential) => Ref.set(current, credential),
+      remove: () => Effect.succeed(true),
+      serialized: (effect) => effect,
+    })
+    const http = Http.of({
+      ...unusedHttp,
+      refresh: () =>
+        Ref.update(refreshes, (value) => value + 1).pipe(
+          Effect.as({ accessToken: "access-1", refreshToken: "refresh-1", expiresIn: 600 }),
+        ),
+    })
+    const result = yield* authenticated(profile, (session) => {
+      const accessToken = Redacted.value(session.accessToken)
+      return Ref.update(requests, (values) => [...values, accessToken]).pipe(
+        Effect.andThen(
+          accessToken === "access-0"
+            ? Effect.fail(HostedError.make({ kind: "login-required", message: "Identity login is required" }))
+            : Effect.succeed("ok"),
+        ),
+      )
+    }).pipe(Effect.provideService(CredentialStore, store), Effect.provideService(Http, http))
+
+    expect(result).toBe("ok")
+    expect(yield* Ref.get(refreshes)).toBe(1)
+    expect(yield* Ref.get(requests)).toEqual(["access-0", "access-1"])
+  }),
+)
+
+it.effect("stops after one protected-request retry when the replacement token also receives a 401", () =>
+  Effect.gen(function* () {
+    const current = yield* Ref.make<Credential>({
+      refreshToken: Redacted.make("refresh-0"),
+      privateJwk: key,
+      accessToken: Redacted.make("access-0"),
+      accessTokenExpiresAt: 600_000,
+    })
+    const refreshes = yield* Ref.make(0)
+    const requests = yield* Ref.make(0)
+    const store = CredentialStore.of({
+      load: () => Ref.get(current).pipe(Effect.map(Option.some)),
+      save: (_origin, _device, credential) => Ref.set(current, credential),
+      remove: () => Effect.succeed(true),
+      serialized: (effect) => effect,
+    })
+    const http = Http.of({
+      ...unusedHttp,
+      refresh: () =>
+        Ref.update(refreshes, (value) => value + 1).pipe(
+          Effect.as({ accessToken: "access-1", refreshToken: "refresh-1", expiresIn: 600 }),
+        ),
+    })
+    const error = yield* Effect.flip(
+      authenticated(profile, () =>
+        Ref.update(requests, (value) => value + 1).pipe(
+          Effect.andThen(HostedError.make({ kind: "login-required", message: "Identity login is required" })),
+        ),
+      ).pipe(Effect.provideService(CredentialStore, store), Effect.provideService(Http, http)),
+    )
+
+    expect(error.kind).toBe("login-required")
+    expect(yield* Ref.get(refreshes)).toBe(1)
+    expect(yield* Ref.get(requests)).toBe(2)
+  }),
+)
+
 it.layer(platform)((test) => {
-  test.effect("serializes rotating refresh tokens across independent credential stores", () =>
+  test.effect("shares one refreshed access token across independent credential stores", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
@@ -434,6 +546,8 @@ it.layer(platform)((test) => {
         yield* first.save(profile.origin, profile.deviceId, {
           refreshToken: Redacted.make("refresh-0"),
           privateJwk: key,
+          accessToken: Redacted.make("expired-access"),
+          accessTokenExpiresAt: 1,
         })
         let serverToken = "refresh-0"
         let revision = 0
@@ -467,13 +581,14 @@ it.layer(platform)((test) => {
         const secondFiber = yield* Effect.forkChild(authenticate(second))
         yield* Effect.yieldNow
         yield* Deferred.succeed(releaseFirstRefresh, undefined)
-        expect((yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])).toSorted()).toEqual([
+        expect(yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])).toEqual([
           "access-1",
-          "access-2",
+          "access-1",
         ])
         expect(
           Redacted.value(Option.getOrThrow(yield* first.load(profile.origin, profile.deviceId)).refreshToken),
-        ).toBe("refresh-2")
+        ).toBe("refresh-1")
+        expect(revision).toBe(1)
       }),
     ),
   )
@@ -560,7 +675,15 @@ it.effect("lists Personal, switches owners, clears projects, and returns to Pers
           Layer.succeed(
             CredentialStore,
             CredentialStore.of({
-              load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+              load: () =>
+                Effect.succeed(
+                  Option.some({
+                    refreshToken: Redacted.make("refresh"),
+                    privateJwk: key,
+                    accessToken: Redacted.make("access"),
+                    accessTokenExpiresAt: 600_000,
+                  }),
+                ),
               save: () => Effect.void,
               remove: () => Effect.succeed(true),
               serialized: (effect) => effect,
