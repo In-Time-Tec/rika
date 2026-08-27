@@ -127,14 +127,6 @@ const renderCellBodyImpl = (
       append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "  ")}`)))
   }
   for (const notice of block.notices) append(dim(fg(colors.amber)(`\n${wrapBodyText(notice.detail, width, "  ")}`)))
-  if (block.output.droppedBytes > 0 || block.output.droppedEvents > 0)
-    append(
-      dim(
-        fg(colors.amber)(
-          `\n  Dropped ${block.output.droppedBytes} bytes and ${block.output.droppedEvents} events at the output bound.`,
-        ),
-      ),
-    )
 }
 
 export const renderCellBody: {

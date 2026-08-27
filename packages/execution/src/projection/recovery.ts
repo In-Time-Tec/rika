@@ -43,17 +43,6 @@ export const eventNotice = (data: ToolProgressData): CellNotice | undefined => {
   }
 }
 
-const NestedOperationProgress = Schema.Struct({
-  nestedOperation: Schema.Struct({ kind: Schema.String, status: Schema.String }),
-})
-
-export const nestedOperationNotice = (data: ToolProgressData): CellNotice | undefined => {
-  const decoded = Schema.decodeUnknownOption(NestedOperationProgress)(data)
-  return Option.isSome(decoded)
-    ? { kind: "activity", detail: `${decoded.value.nestedOperation.kind} ${decoded.value.nestedOperation.status}` }
-    : undefined
-}
-
 export const restartNotification = (
   data: ToolProgressData,
 ): { readonly title: string; readonly detail: string } | undefined => {

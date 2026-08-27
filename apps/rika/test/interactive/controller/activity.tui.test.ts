@@ -1,3 +1,4 @@
+import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Schema } from "effect"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
@@ -12,6 +13,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           workspaceFiles: { "src/alpha.ts": "alpha", "src/beta.ts": "beta", "README.md": "readme" },
           script: [
             model.text("HARNESS_RESPONSE"),
@@ -38,6 +40,21 @@ test(
         expect(ordinary).not.toContain("Allow once")
         expect(ordinary).not.toContain("[pending]")
         yield* app.settled
+        const ordinaryTranscript = yield* app.transcript(Turn.TurnId.make("tui-turn-1"))
+        const ordinaryCell = ordinaryTranscript?.units.find(
+          (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell",
+        )
+        expect(
+          ordinaryCell?.content._tag === "Block" && ordinaryCell.content.block._tag === "Cell"
+            ? ordinaryCell.content.block.notices
+            : undefined,
+        ).toEqual([])
+        app.pressKey("\t")
+        app.pressEnter()
+        const expandedTool = yield* app.waitFrame("processId")
+        expect(expandedTool).not.toContain("rika.tool.context.current")
+        expect(expandedTool).not.toContain("rika.tool.processes.start running")
+        expect(expandedTool).not.toContain("rika.tool.processes.start succeeded")
 
         yield* Effect.tryPromise(() => app.type("check @"))
         const opened = yield* app.waitFrame("@README.md")
