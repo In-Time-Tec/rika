@@ -37,6 +37,22 @@ import type { TranscriptRenderableDescriptor, TranscriptRenderableRecord, Transc
 export type TranscriptRowsCache = Map<string, TranscriptUnitCacheEntry>
 export type TranscriptPathTarget = PathTarget
 
+export const tentativeTranscriptContainsMarkdown = ({
+  text,
+  sourceLength,
+}: {
+  readonly text: string
+  readonly sourceLength: number
+}) => {
+  const probe = text.slice(Math.max(0, sourceLength - 16))
+  return (
+    /[\\`*[\]<>#|~]/u.test(probe) ||
+    /(?:^|\n)[ \t]*(?:[-+>]|\d{1,9}[.)])[ \t]+/u.test(probe) ||
+    /(?:^|\n)[ \t]*(?:={2,}|-{3,})[ \t]*(?:\n|$)/u.test(probe) ||
+    /(?:^|[^\p{L}\p{N}])_(?=\S)|_(?:$|[^\p{L}\p{N}])/u.test(probe)
+  )
+}
+
 const buildTranscriptUnitBundles = (
   builder: ReturnType<typeof transcriptUnitBuilder>,
   unit: TranscriptUnit,
@@ -116,7 +132,10 @@ const buildTentativeTranscriptUnitBundles = (
         }
       : previous
   const sourceDelta = text.slice(layout.sourceLength)
-  if (tone === "answer" && (layout.markdown || /[\n\\`*{}[\]<>()#+\-.!|>~:/@_]/u.test(sourceDelta))) {
+  if (
+    tone === "answer" &&
+    (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength }))
+  ) {
     layout.markdown = true
     layout.sourceLength = text.length
     const bundles: Array<TranscriptRangeBundle> = []

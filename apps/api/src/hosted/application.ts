@@ -50,6 +50,7 @@ import { layer as hostedWorkspaceLayer } from "./environment/workspace"
 import { workspacePlacement } from "./environment/placement"
 import { layer as runnerExecutorLayer } from "../runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
+import { HostedPreviewBus, postgresHostedPreviewBusLayer } from "./thread/previews"
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
@@ -101,6 +102,9 @@ export const layer = (options: {
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
       )
       const retainedData = Layer.succeedContext(data)
+      const previewContext = yield* Layer.build(
+        postgresHostedPreviewBusLayer({ databaseUrl: options.databaseUrl }).pipe(Layer.provide(retainedData)),
+      )
       const openAiHttpContext = yield* Layer.build(OpenAiAuthHttp.layer.pipe(Layer.provide(httpLayer)))
       const credentialContext = yield* Layer.build(
         Layer.merge(
@@ -209,8 +213,11 @@ export const layer = (options: {
         }),
       )
       const hostedContext = Context.merge(
-        Context.merge(Context.merge(Context.merge(data, executionContext), environmentContext), toolPolicyContext),
-        Context.merge(Context.merge(credentialContext, modelContext), repositoryContext),
+        Context.merge(
+          Context.merge(Context.merge(Context.merge(data, executionContext), environmentContext), toolPolicyContext),
+          Context.merge(Context.merge(credentialContext, modelContext), repositoryContext),
+        ),
+        previewContext,
       )
       const recoveryContext = yield* Layer.build(
         hostedRecoveryLayer.pipe(
@@ -304,6 +311,7 @@ export const layer = (options: {
       const threadProtocolContext = yield* Layer.build(
         hostedThreadProtocolLayer({
           databaseUrl: options.databaseUrl,
+          previews: Context.get(previewContext, HostedPreviewBus),
           workspacePlacement: workspacePlacement(placementDatabase),
         }).pipe(
           Layer.provide(

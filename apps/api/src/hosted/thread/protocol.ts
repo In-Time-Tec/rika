@@ -34,6 +34,7 @@ import {
   type ThreadProtocolNotificationGeneration,
   type ThreadProtocolNotifications,
 } from "./notifications"
+import { HostedPreviewBus, type HostedPreviewBusService, type HostedPreviewSubscription } from "./previews"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
@@ -173,6 +174,7 @@ export const layerWithOptions = (
       threadId: ThreadId,
     ) => Effect.Effect<WorkspacePlacement, HostedThreadProtocolError>
     readonly notifications?: ThreadProtocolNotifications
+    readonly previews?: HostedPreviewBusService
   } = {},
 ) =>
   Layer.effect(
@@ -186,6 +188,8 @@ export const layerWithOptions = (
       const crypto = yield* Crypto.Crypto
       const contextualNotifications = yield* ThreadProtocolNotificationService
       const changes = options.notifications ?? contextualNotifications
+      const contextualPreviews = yield* HostedPreviewBus
+      const previews = options.previews ?? contextualPreviews
       if (options.databaseUrl !== undefined)
         yield* listenForThreadChanges({ databaseUrl: options.databaseUrl, changes }).pipe(Effect.forkScoped)
 
@@ -249,6 +253,7 @@ export const layerWithOptions = (
                 readonly knownHead: ThreadEventCursor
                 readonly snapshotFingerprint: string
                 readonly notificationGeneration: ThreadProtocolNotificationGeneration
+                readonly previewSubscription: HostedPreviewSubscription
               }
             | undefined
 
@@ -510,6 +515,8 @@ export const layerWithOptions = (
               const encodedAttachment = encodeUnknownJson(attachment)
               if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
                 return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
+              const previewSubscription = yield* previews.subscribe(authority.ownerId, command.threadId)
+              if (attached !== undefined) yield* attached.previewSubscription.close
               attached = {
                 threadId: command.threadId,
                 authority,
@@ -517,6 +524,7 @@ export const layerWithOptions = (
                 knownHead: representedCursor,
                 snapshotFingerprint: encodeThreadSnapshotJson(snapshot),
                 notificationGeneration,
+                previewSubscription,
               }
               return [attachment]
             }
@@ -534,6 +542,7 @@ export const layerWithOptions = (
                     expiresAt: now,
                   })
                   .pipe(Effect.ignore)
+                yield* attached.previewSubscription.close
               }
               attached = undefined
               return []
@@ -719,7 +728,7 @@ export const layerWithOptions = (
             ]
           })
 
-          const outbound: HostedThreadConnection["outbound"] = Effect.suspend(() => {
+          const durableReady = Effect.suspend(() => {
             const current = attached
             const waits = new Array<Effect.Effect<void>>()
             if (current !== undefined)
@@ -736,142 +745,117 @@ export const layerWithOptions = (
               waits.push(changes.wait(entry.command.threadId, entry.notificationGeneration).pipe(Effect.asVoid))
             }
             if (waits.length === 0) return Effect.never
-            const wait = waits.slice(1).reduce((left, right) => Effect.raceFirst(left, right), waits[0]!)
-            return wait.pipe(
-              Effect.flatMap(() =>
-                Effect.gen(function* () {
-                  const commandFrames = new Array<ServerFrame>()
-                  for (const entry of [...pendingCommands.values()]) {
-                    const notificationGeneration = changes.generation(entry.command.threadId)
-                    const refreshed = yield* store
-                      .admitCommand({
-                        ownerId: entry.command.ownerId,
-                        threadId: entry.command.threadId,
-                        commandId: entry.command.commandId,
-                        idempotencyKey: entry.command.idempotencyKey,
-                        expectedThreadVersion: entry.command.expectedThreadVersion,
-                        actor: entry.command.actor,
-                        command: entry.command.command,
-                        admittedAt: entry.command.admittedAt,
-                      })
-                      .pipe(Effect.mapError(storeFailure))
-                    if (refreshed.command.state === "completed") {
-                      pendingCommands.delete(String(entry.command.commandId))
-                      commandFrames.push(frame(commandResult(refreshed.command, entry.requestId)))
-                    } else {
-                      pendingCommands.set(String(entry.command.commandId), {
-                        ...entry,
-                        command: refreshed.command,
-                        notificationGeneration,
-                      })
-                    }
-                  }
-                  if (current === undefined || attached !== current) return commandFrames
-                  const notificationGeneration = changes.generation(current.threadId)
-                  yield* materializeSnapshot(current.authority, current.threadId, current.cursor)
-                  let replay = yield* store
-                    .replay({
-                      ownerId: current.authority.ownerId,
-                      threadId: current.threadId,
-                      actor: current.authority.actor,
-                      afterCursor: current.cursor,
-                      includeSnapshot: false,
-                      limit: 1_000,
-                    })
-                    .pipe(Effect.mapError(storeFailure))
-                  let expectedCursor = BigInt(current.cursor) + 1n
-                  let reset = replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor)
-                  for (const event of replay.events) {
-                    if (BigInt(event.cursor) !== expectedCursor) reset = true
-                    expectedCursor = BigInt(event.cursor) + 1n
-                  }
-                  if (reset) {
-                    replay = yield* store
-                      .replay({
-                        ownerId: current.authority.ownerId,
-                        threadId: current.threadId,
-                        actor: current.authority.actor,
-                        afterCursor: current.cursor,
-                        includeSnapshot: true,
-                        limit: 1_000,
-                      })
-                      .pipe(Effect.mapError(storeFailure))
-                    if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.cursor))
-                      return yield* unavailable("Hosted Thread replay gap has no newer durable snapshot")
-                    expectedCursor = BigInt(replay.snapshot.cursor) + 1n
-                    for (const event of replay.events) {
-                      if (BigInt(event.cursor) !== expectedCursor)
-                        return yield* unavailable(
-                          "Hosted Thread replay remains discontinuous after its durable snapshot",
-                        )
-                      expectedCursor += 1n
-                    }
-                  }
-                  const cursor = replay.events.at(-1)?.cursor ?? replay.snapshot?.cursor ?? current.cursor
-                  const representedHead = cursor === replay.cursor
-                  let durable: ThreadReplay | undefined
-                  if (reset) durable = replay
-                  else if (representedHead)
-                    durable = yield* store
-                      .replay({
-                        ownerId: current.authority.ownerId,
-                        threadId: current.threadId,
-                        actor: current.authority.actor,
-                        afterCursor: cursor,
-                        throughCursor: cursor,
-                        includeSnapshot: true,
-                        limit: 1,
-                      })
-                      .pipe(Effect.mapError(storeFailure))
-                  const snapshot = durable?.snapshot
-                  const projectedSnapshot =
-                    snapshot === undefined || options.workspacePlacement === undefined
-                      ? snapshot?.snapshot
-                      : {
-                          ...snapshot.snapshot,
-                          workspace: yield* options.workspacePlacement(current.authority.ownerId, current.threadId),
-                        }
-                  const snapshotFingerprint =
-                    projectedSnapshot === undefined
-                      ? current.snapshotFingerprint
-                      : encodeThreadSnapshotJson(projectedSnapshot)
-                  if (attached !== current) return commandFrames
-                  attached = {
-                    ...current,
-                    cursor,
-                    knownHead: replay.cursor,
-                    snapshotFingerprint,
+            return waits.slice(1).reduce((left, right) => Effect.raceFirst(left, right), waits[0]!)
+          })
+
+          const drainDurable: HostedThreadConnection["outbound"] = Effect.suspend(() => {
+            const current = attached
+            return Effect.gen(function* () {
+              const commandFrames = new Array<ServerFrame>()
+              for (const entry of [...pendingCommands.values()]) {
+                const notificationGeneration = changes.generation(entry.command.threadId)
+                const refreshed = yield* store
+                  .admitCommand({
+                    ownerId: entry.command.ownerId,
+                    threadId: entry.command.threadId,
+                    commandId: entry.command.commandId,
+                    idempotencyKey: entry.command.idempotencyKey,
+                    expectedThreadVersion: entry.command.expectedThreadVersion,
+                    actor: entry.command.actor,
+                    command: entry.command.command,
+                    admittedAt: entry.command.admittedAt,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+                if (refreshed.command.state === "completed") {
+                  pendingCommands.delete(String(entry.command.commandId))
+                  commandFrames.push(frame(commandResult(refreshed.command, entry.requestId)))
+                } else {
+                  pendingCommands.set(String(entry.command.commandId), {
+                    ...entry,
+                    command: refreshed.command,
                     notificationGeneration,
-                  }
-                  const frames =
-                    reset && projectedSnapshot !== undefined
-                      ? [
-                          frame({
-                            _tag: "ThreadSnapshot",
-                            threadId: current.threadId,
-                            threadVersion: snapshot!.threadVersion,
-                            cursor: snapshot!.cursor,
-                            snapshot: projectedSnapshot,
-                          }),
-                        ]
-                      : []
-                  frames.push(
-                    ...replay.events.map((event) =>
-                      frame({
-                        _tag: "ThreadEvent",
-                        event: {
-                          threadId: event.threadId,
-                          sequence: Sequence.make(event.sequence),
-                          cursor: event.cursor,
-                          threadVersion: event.threadVersion,
-                          event: event.event,
-                          createdAt: event.createdAt,
-                        },
-                      }),
-                    ),
-                  )
-                  if (!reset && projectedSnapshot !== undefined && snapshotFingerprint !== current.snapshotFingerprint)
-                    frames.push(
+                  })
+                }
+              }
+              if (current === undefined || attached !== current) return commandFrames
+              const notificationGeneration = changes.generation(current.threadId)
+              yield* materializeSnapshot(current.authority, current.threadId, current.cursor)
+              let replay = yield* store
+                .replay({
+                  ownerId: current.authority.ownerId,
+                  threadId: current.threadId,
+                  actor: current.authority.actor,
+                  afterCursor: current.cursor,
+                  includeSnapshot: false,
+                  limit: 1_000,
+                })
+                .pipe(Effect.mapError(storeFailure))
+              let expectedCursor = BigInt(current.cursor) + 1n
+              let reset = replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor)
+              for (const event of replay.events) {
+                if (BigInt(event.cursor) !== expectedCursor) reset = true
+                expectedCursor = BigInt(event.cursor) + 1n
+              }
+              if (reset) {
+                replay = yield* store
+                  .replay({
+                    ownerId: current.authority.ownerId,
+                    threadId: current.threadId,
+                    actor: current.authority.actor,
+                    afterCursor: current.cursor,
+                    includeSnapshot: true,
+                    limit: 1_000,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+                if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.cursor))
+                  return yield* unavailable("Hosted Thread replay gap has no newer durable snapshot")
+                expectedCursor = BigInt(replay.snapshot.cursor) + 1n
+                for (const event of replay.events) {
+                  if (BigInt(event.cursor) !== expectedCursor)
+                    return yield* unavailable("Hosted Thread replay remains discontinuous after its durable snapshot")
+                  expectedCursor += 1n
+                }
+              }
+              const cursor = replay.events.at(-1)?.cursor ?? replay.snapshot?.cursor ?? current.cursor
+              const representedHead = cursor === replay.cursor
+              let durable: ThreadReplay | undefined
+              if (reset) durable = replay
+              else if (representedHead)
+                durable = yield* store
+                  .replay({
+                    ownerId: current.authority.ownerId,
+                    threadId: current.threadId,
+                    actor: current.authority.actor,
+                    afterCursor: cursor,
+                    throughCursor: cursor,
+                    includeSnapshot: true,
+                    limit: 1,
+                  })
+                  .pipe(Effect.mapError(storeFailure))
+              const snapshot = durable?.snapshot
+              const projectedSnapshot =
+                snapshot === undefined || options.workspacePlacement === undefined
+                  ? snapshot?.snapshot
+                  : {
+                      ...snapshot.snapshot,
+                      workspace: yield* options.workspacePlacement(current.authority.ownerId, current.threadId),
+                    }
+              const snapshotFingerprint =
+                projectedSnapshot === undefined
+                  ? current.snapshotFingerprint
+                  : encodeThreadSnapshotJson(projectedSnapshot)
+              if (attached !== current) return commandFrames
+              attached = {
+                ...current,
+                cursor,
+                knownHead: replay.cursor,
+                snapshotFingerprint,
+                notificationGeneration,
+                previewSubscription: current.previewSubscription,
+              }
+              const frames =
+                reset && projectedSnapshot !== undefined
+                  ? [
                       frame({
                         _tag: "ThreadSnapshot",
                         threadId: current.threadId,
@@ -879,10 +863,59 @@ export const layerWithOptions = (
                         cursor: snapshot!.cursor,
                         snapshot: projectedSnapshot,
                       }),
-                    )
-                  return [...commandFrames, ...frames]
-                }),
-              ),
+                    ]
+                  : []
+              frames.push(
+                ...replay.events.map((event) =>
+                  frame({
+                    _tag: "ThreadEvent",
+                    event: {
+                      threadId: event.threadId,
+                      sequence: Sequence.make(event.sequence),
+                      cursor: event.cursor,
+                      threadVersion: event.threadVersion,
+                      event: event.event,
+                      createdAt: event.createdAt,
+                    },
+                  }),
+                ),
+              )
+              if (!reset && projectedSnapshot !== undefined && snapshotFingerprint !== current.snapshotFingerprint)
+                frames.push(
+                  frame({
+                    _tag: "ThreadSnapshot",
+                    threadId: current.threadId,
+                    threadVersion: snapshot!.threadVersion,
+                    cursor: snapshot!.cursor,
+                    snapshot: projectedSnapshot,
+                  }),
+                )
+              return [...commandFrames, ...frames]
+            })
+          })
+
+          const durableOutbound: HostedThreadConnection["outbound"] = durableReady.pipe(Effect.andThen(drainDurable))
+
+          const outbound: HostedThreadConnection["outbound"] = Effect.suspend(() => {
+            const current = attached
+            if (current === undefined) return durableOutbound
+            return Effect.raceFirst(durableReady.pipe(Effect.as(undefined)), current.previewSubscription.take).pipe(
+              Effect.flatMap((delivery) => {
+                if (delivery === undefined) return drainDurable
+                if (attached !== current) return Effect.succeed([])
+                return Effect.succeed([
+                  frame(
+                    delivery._tag === "Reset"
+                      ? { _tag: "ThreadPreviewReset", threadId: current.threadId }
+                      : {
+                          _tag: "ThreadPreview",
+                          threadId: delivery.value.threadId,
+                          turnId: delivery.value.turnId,
+                          preview: delivery.value.preview,
+                        },
+                  ),
+                ])
+              }),
             )
           })
 
@@ -893,13 +926,17 @@ export const layerWithOptions = (
                 Effect.orDie,
               ),
             outbound,
-            detach: Effect.sync(() => (attached = undefined)),
+            detach: Effect.suspend(() => {
+              const current = attached
+              attached = undefined
+              return current?.previewSubscription.close ?? Effect.void
+            }),
           }
         },
       )
 
       return HostedThreadProtocol.of({ issueTicket, connect })
     }),
-  ).pipe(Layer.provide(ThreadProtocolNotificationService.layer))
+  ).pipe(Layer.provide(ThreadProtocolNotificationService.layer), Layer.provide(HostedPreviewBus.memoryLayer))
 
 export const layer = layerWithOptions()

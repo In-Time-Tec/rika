@@ -24,6 +24,7 @@ import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { HostedModelRegistry } from "../environment/model-registry"
+import { HostedPreviewBus } from "./previews"
 
 export class HostedThreadApplicationError extends Schema.TaggedError<HostedThreadApplicationError>()(
   "HostedThreadApplicationError",
@@ -191,6 +192,7 @@ export const layer = Layer.effect(
     const hosted = yield* HostedStore
     const store = yield* ThreadProtocolStore
     const modelRegistry = yield* HostedModelRegistry
+    const previews = yield* HostedPreviewBus
     const ownerScope = yield* Effect.scope
     const invocations = new Map<OwnerId, InteractiveInvocation>()
     const interactiveAdmissions = new Map<OwnerId, Semaphore.Semaphore>()
@@ -359,6 +361,13 @@ export const layer = Layer.effect(
           yield* Effect.forkScoped(
             session
               .events((event) => {
+                if (event._tag === "ExecutionModelPreviewChanged")
+                  previews.publish({
+                    ownerId,
+                    threadId: hostedThreadId,
+                    turnId: event.turnId,
+                    preview: event.preview,
+                  })
                 const invocation = state.invocation
                 if (invocation === undefined) {
                   if (event._tag === "ThreadViewSnapshot" && event.snapshot.thread.id === threadId)

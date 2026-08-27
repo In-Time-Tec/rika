@@ -328,6 +328,55 @@ it.effect("does not poll AttachThread while an idle WebSocket remains connected"
   ),
 )
 
+it.effect("delivers hosted previews immediately and clears them after a best-effort gap", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const received: Array<InteractiveEvent> = []
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") socket.frame(attached(message, waitingSnapshot()))
+      })
+      const hosted = yield* runSession(harness, (previewEvent) => received.push(previewEvent))
+      harness.sockets[0]!.frame({
+        _tag: "ThreadPreview",
+        threadId: HostedThreadId.make("thread-1"),
+        turnId: Turn.TurnId.make("turn-1"),
+        preview: {
+          _tag: "ModelPreview",
+          runId: "run-1",
+          attemptFence: 1,
+          turn: 0,
+          modelCallId: "call-1",
+          modelAttemptId: "attempt-1",
+          attempt: 1,
+          sequence: 0,
+          changes: [{ channel: "text", offset: 0, delta: "Hello" }],
+        },
+      })
+      yield* eventually(
+        () => received.filter((previewEvent) => previewEvent._tag === "ExecutionModelPreviewChanged").length === 1,
+      )
+      expect(received.at(-1)).toMatchObject({
+        _tag: "ExecutionModelPreviewChanged",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        preview: { _tag: "ModelPreview", changes: [{ delta: "Hello" }] },
+      })
+      harness.sockets[0]!.frame({
+        _tag: "ThreadPreviewReset",
+        threadId: HostedThreadId.make("thread-1"),
+      })
+      yield* eventually(
+        () => received.filter((previewEvent) => previewEvent._tag === "ExecutionModelPreviewChanged").length === 2,
+      )
+      expect(received.at(-1)).toMatchObject({
+        _tag: "ExecutionModelPreviewChanged",
+        preview: { _tag: "ModelPreviewCleared", runId: "run-1", generation: 0 },
+      })
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
 it.effect("applies and acknowledges one unsolicited contiguous ThreadEvent exactly once", () =>
   Effect.scoped(
     Effect.gen(function* () {
