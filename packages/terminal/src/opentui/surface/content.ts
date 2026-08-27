@@ -5,7 +5,7 @@ import type { Model, Mode } from "../../state/model"
 import { isLoading } from "../../state/loadable"
 import { activeTimeIcon } from "../../state/activity/time"
 import { colors, modeColor, spacing } from "../../presentation/terminal/theme"
-import { formatActivity } from "../../state/activity/model"
+import { formatActivity, transcriptAnimationActive } from "../../state/activity/model"
 import { loaderFrame } from "../rendering/spinner"
 import { toOpenColor } from "../rendering/text-adapter"
 import { contentColumnWidth } from "../../state/layout/model"
@@ -93,6 +93,7 @@ export const animationActive = (model: Model): boolean =>
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
+  transcriptAnimationActive(model) ||
   connectivityActivity(model) !== undefined ||
   connectionActivity(model) !== undefined ||
   panelLoading(model) !== undefined ||
