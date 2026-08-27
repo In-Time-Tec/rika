@@ -432,7 +432,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       headerEnd: line,
       unit: id,
       expandable: true,
-      animated: unit.agentResponse?._tag !== "Streaming" && running,
+      animated: running,
     })
     if (expanded) renderSubagentContents(unit, `${visiblePrefix}${last ? "  " : "│ "}  `)
     nestedRanges[rangeIndex] = {
@@ -548,8 +548,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     } else if (unit.kind === "subagent") {
       const block = blockAt(unit.block)
       const status = block?._tag === "SubagentCard" ? block.status : undefined
-      const answerDelivered = unit.agentResponse?._tag === "Streaming"
-      animated = !answerDelivered && (status === "running" || status === "waiting" || status === "cancelling")
+      animated = status === "running" || status === "waiting" || status === "cancelling"
     } else if (unit.kind === "cell") {
       const block = blockAt(unit.block)
       animated = block?._tag === "Cell" && block.status === "running"

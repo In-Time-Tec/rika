@@ -4,7 +4,8 @@ import { Effect } from "effect"
 import { Surface } from "../../../src/opentui/surface/service"
 import { spinnerInterval } from "../../../src/opentui/rendering/spinner"
 import { initial, type Model } from "../../../src/state/model"
-import { openTui } from "./window.fixture"
+import type { TranscriptBlock } from "../../../src/state/transcript/model"
+import { openTui, styledTextValue } from "./window.fixture"
 
 const settled = (): Model => ({
   ...initial("/work", "high"),
@@ -14,6 +15,111 @@ const settled = (): Model => ({
 })
 
 const welcoming = (): Model => ({ ...settled(), entries: [], blocks: [], items: [] })
+
+const runningTool = (): Model => {
+  const block: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall",
+    id: "selected-tool",
+    name: "bash",
+    input: '{"command":"sleep 5"}',
+    status: "running",
+    presentation: {
+      family: "shell",
+      action: "command",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
+    detail: "sleep 5",
+    output: "working",
+    files: [],
+  }
+  return {
+    ...settled(),
+    entries: [],
+    blocks: [block],
+    items: [{ _tag: "Block", index: 0, id: "selected-tool", turnId: "turn-1" }],
+    detailSelection: "tool:selected-tool",
+    expandedRowKeys: ["tool:selected-tool"],
+  }
+}
+
+const runningCell = (): Model => {
+  const block: Extract<TranscriptBlock, { _tag: "Cell" }> = {
+    _tag: "Cell",
+    id: "selected-cell",
+    status: "running",
+    visual: "ts",
+    summary: "await work()",
+    source: { text: "await work()\nreturn 42", lines: 2, truncated: false },
+    output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+    epoch: 0,
+    notices: [],
+    files: [],
+  }
+  return {
+    ...settled(),
+    entries: [],
+    blocks: [block],
+    items: [{ _tag: "Block", index: 0, id: "selected-cell", turnId: "turn-1" }],
+    detailSelection: "cell:selected-cell",
+    expandedRowKeys: ["cell:selected-cell"],
+  }
+}
+
+const streamingSubagent = (status: "running" | "complete" | "failed" = "running"): Model => ({
+  ...settled(),
+  entries: [{ role: "assistant", text: "partial child answer", turnId: "turn-1" }],
+  blocks: [
+    {
+      _tag: "SubagentCard",
+      id: "streaming-subagent",
+      name: "Task",
+      prompt: "Inspect the spinner",
+      promptTruncated: false,
+      summary: "",
+      status,
+      activity: [],
+    },
+  ],
+  items: [
+    { _tag: "Block", index: 0, id: "streaming-subagent", turnId: "turn-1" },
+    { _tag: "Entry", index: 0, id: "partial-answer", turnId: "turn-1", parentId: "streaming-subagent" },
+  ],
+  expandedRowKeys: ["subagent:streaming-subagent"],
+})
+
+const nestedStreamingSubagent = (): Model => ({
+  ...settled(),
+  entries: [{ role: "assistant", text: "partial nested answer", turnId: "turn-1" }],
+  blocks: [
+    {
+      _tag: "SubagentCard",
+      id: "parent-subagent",
+      name: "Task",
+      prompt: "Delegate",
+      promptTruncated: false,
+      summary: "",
+      status: "running",
+      activity: [],
+    },
+    {
+      _tag: "SubagentCard",
+      id: "nested-subagent",
+      name: "Oracle",
+      prompt: "Inspect deeply",
+      promptTruncated: false,
+      summary: "",
+      status: "running",
+      activity: [],
+    },
+  ],
+  items: [
+    { _tag: "Block", index: 0, id: "parent-subagent", turnId: "turn-1" },
+    { _tag: "Block", index: 1, id: "nested-subagent", turnId: "turn-1", parentId: "parent-subagent" },
+    { _tag: "Entry", index: 0, id: "nested-answer", turnId: "turn-1", parentId: "nested-subagent" },
+  ],
+  expandedRowKeys: ["subagent:parent-subagent", "subagent:nested-subagent"],
+})
 
 interface AnimationProbe {
   readonly surface: Surface
@@ -49,6 +155,24 @@ const withSurface = <A>(model: Model, use: (probe: AnimationProbe) => A) =>
     }
   })
 
+const transcriptRow = (surface: Surface, key: string) => {
+  const diagnostics = surface.transcriptDiagnostics()
+  const index = diagnostics.keys.indexOf(key)
+  const row = diagnostics.rows[index]
+  if (row === undefined) throw new Error(`Missing transcript row ${key}`)
+  return row
+}
+
+const expectSpinnerAdvance = (surface: Surface, animationClock: ManualClock, key: string, stableKey?: string) => {
+  const row = transcriptRow(surface, key)
+  const before = styledTextValue(row.content)
+  const stableContent = stableKey === undefined ? undefined : transcriptRow(surface, stableKey).content
+  animationClock.advance(spinnerInterval)
+  expect(transcriptRow(surface, key)).toBe(row)
+  expect(styledTextValue(row.content)).not.toBe(before)
+  if (stableKey !== undefined) expect(transcriptRow(surface, stableKey).content).toBe(stableContent)
+}
+
 test("runs no animation timer and requests no frame while the surface is settled and idle", () =>
   Effect.runPromise(
     withSurface(settled(), ({ surface, animationClock, animationRenders }) => {
@@ -82,6 +206,41 @@ test("advances loader frames only while the model is animating and stops when it
       animationClock.advance(spinnerInterval * 1_000)
       expect(surface.animationDiagnostics().loaderPhase).toBe(busy.loaderPhase)
       expect(animationRenders()).toBe(settledRenders)
+    }),
+  ))
+
+test.each([
+  ["selected expanded tool", runningTool(), "tool:selected-tool:header", "tool:selected-tool:body"],
+  ["selected expanded cell", runningCell(), "cell:selected-cell:header", "cell:selected-cell:body"],
+])("updates the spinner inside a styled %s header without replacing the row or body", (_label, model, key, bodyKey) =>
+  Effect.runPromise(
+    withSurface(model, ({ surface, animationClock }) => {
+      expect(surface.animationDiagnostics().loaderRunning).toBe(true)
+      expectSpinnerAdvance(surface, animationClock, key, bodyKey)
+    }),
+  ),
+)
+
+test("keeps a streaming subagent spinner active after the root turn becomes idle until terminal status", () =>
+  Effect.runPromise(
+    withSurface(streamingSubagent(), ({ surface, animationClock }) => {
+      expect(surface.animationDiagnostics().loaderRunning).toBe(true)
+      expectSpinnerAdvance(surface, animationClock, "subagent:streaming-subagent:header")
+
+      surface.update(streamingSubagent("failed"))
+      expect(styledTextValue(transcriptRow(surface, "subagent:streaming-subagent:header").content)).toContain("✕")
+      expect(surface.animationDiagnostics().loaderRunning).toBe(false)
+
+      surface.update(streamingSubagent("complete"))
+      expect(styledTextValue(transcriptRow(surface, "subagent:streaming-subagent:header").content)).toContain("✓")
+      expect(surface.animationDiagnostics().loaderRunning).toBe(false)
+    }),
+  ))
+
+test("keeps a nested streaming subagent spinner active", () =>
+  Effect.runPromise(
+    withSurface(nestedStreamingSubagent(), ({ surface, animationClock }) => {
+      expectSpinnerAdvance(surface, animationClock, "subagent:nested-subagent:header")
     }),
   ))
 
