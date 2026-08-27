@@ -244,7 +244,7 @@ export class HostedExecutionOperations extends Context.Service<
 >()("@rika/product-store/hosted/execution/operations/HostedExecutionOperations") {}
 
 const failure = (cause: unknown) =>
-  HostedExecutionOperationsError.make({ message: `Hosted execution persistence failed: ${String(cause)}` })
+  HostedExecutionOperationsError.make({ message: `Execution persistence failed: ${String(cause)}` })
 const query = <A extends object, E, R>(effect: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   effect.pipe(Effect.mapError(failure))
 const timestamp = (value: Date) => value.toISOString()

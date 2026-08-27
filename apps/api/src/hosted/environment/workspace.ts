@@ -54,7 +54,7 @@ export const layer = Layer.effect(
       if (assignment === undefined || assignment.placement._tag !== "OrbPlacement")
         return yield* HostedWorkspaceError.make({
           kind: "unsupported",
-          message: "Hosted Workspace access requires an E2B executor",
+          message: "Workspace access requires an Orb executor",
         })
       if (
         assignment.lifecycle._tag !== "Active" ||

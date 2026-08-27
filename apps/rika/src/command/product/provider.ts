@@ -17,10 +17,10 @@ const status = Command.make("status", { provider: codex }, () => dispatch({ _tag
 )
 
 const logout = Command.make("logout", { provider: codex }, () => dispatch({ _tag: "Provider", action: "logout" })).pipe(
-  Command.withDescription("Remove hosted model-provider credentials"),
+  Command.withDescription("Remove model-provider credentials"),
 )
 
 export const providerCommand = Command.make("provider").pipe(
-  Command.withDescription("Manage hosted model-provider authentication"),
+  Command.withDescription("Manage model-provider authentication"),
   Command.withSubcommands([login, status, logout]),
 )

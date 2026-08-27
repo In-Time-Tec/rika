@@ -107,8 +107,7 @@ const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
   if (expectedCursor - 1n !== terminalCursor || representedVersion !== BigInt(attachment.threadVersion))
     return { _tag: "Invalid", error: failure("Thread attachment terminal metadata was not represented") }
   let view = ThreadView.fromSnapshot(attachment.snapshot.view)
-  if (view._tag === "Failure")
-    return { _tag: "Invalid", error: failure("Thread attachment snapshot was invalid") }
+  if (view._tag === "Failure") return { _tag: "Invalid", error: failure("Thread attachment snapshot was invalid") }
   for (const event of attachment.events) {
     if (event.event._tag === "ThreadViewSnapshot") {
       view = ThreadView.fromSnapshot(event.event.snapshot)
@@ -377,7 +376,10 @@ export interface HostedInteractiveSession {
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
   readonly profile: Profile
   readonly threadId: string
-  readonly createThread: (executorKind: "runner" | "orb") => Effect.Effect<string, HostedError>
+  readonly createThread: (
+    executorKind: "runner" | "orb",
+    archiveThreadId?: string,
+  ) => Effect.Effect<string, HostedError>
 }) {
   const profile = input.profile
   const http = yield* Http
@@ -1007,13 +1009,16 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                   "rika.reconnect.attempt": attempt + 1,
                   "rika.reconnect.delay.ms": delay,
                 }
-                const status = error.status === undefined ? reconnect : { ...reconnect, "rika.http.status": error.status }
+                const status =
+                  error.status === undefined ? reconnect : { ...reconnect, "rika.http.status": error.status }
                 const annotations =
                   error.retryAfterMillis === undefined
                     ? status
                     : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
                 return updateState((previousState) => ({ ...previousState, connectivity: "reconnecting" })).pipe(
-                  Effect.andThen(Effect.logInfo("connection.reconnect.scheduled").pipe(Effect.annotateLogs(annotations))),
+                  Effect.andThen(
+                    Effect.logInfo("connection.reconnect.scheduled").pipe(Effect.annotateLogs(annotations)),
+                  ),
                   Effect.andThen(Effect.sleep(delay)),
                   Effect.andThen(superviseConnection(connectedBefore || attached, attempt + 1)),
                 )
@@ -1110,13 +1115,24 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       yield* attempt(true)
     }).pipe(Effect.mapError((error) => unavailable(operation, error)))
 
-  const unsupported = (operation: string) =>
-    Effect.fail(OperationUnavailable.make({ operation, message: `${operation} is unavailable for hosted Threads` }))
+  const unsupported = (operation: string, message = "This action is unavailable in the current Thread") =>
+    Effect.fail(OperationUnavailable.make({ operation, message }))
   const nextCommandId = (prefix: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((id) => `${prefix}:${id}`),
       Effect.mapError((error) => unavailable(prefix, error)),
     )
+  const archiveCurrentThread = (operation: string) =>
+    Effect.gen(function* () {
+      const commandId = yield* nextCommandId("archive")
+      yield* mutate(operation, commandId, (threadId, version) => ({
+        _tag: "ArchiveThread",
+        threadId,
+        commandId: CommandId.make(commandId),
+        idempotencyKey: IdempotencyKey.make(commandId),
+        expectedThreadVersion: ThreadVersion.make(version),
+      }))
+    })
   const session: InteractiveSession = {
     events: (next) =>
       Effect.suspend(() => {
@@ -1206,9 +1222,32 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           ),
         )
       }),
-    shell: () => unsupported("InteractiveSession.shell"),
-    editQueued: () => unsupported("InteractiveSession.editQueued"),
-    dequeue: () => unsupported("InteractiveSession.dequeue"),
+    shell: () => unsupported("InteractiveSession.shell", "Shell commands are unavailable in this Thread"),
+    editQueued: (turnId, prompt) =>
+      Effect.gen(function* () {
+        const commandId = yield* nextCommandId("edit-queued")
+        yield* mutate("InteractiveSession.editQueued", commandId, (threadId, version) => ({
+          _tag: "EditQueued",
+          threadId,
+          commandId: CommandId.make(commandId),
+          idempotencyKey: IdempotencyKey.make(commandId),
+          expectedThreadVersion: ThreadVersion.make(version),
+          turnId: Turn.TurnId.make(turnId),
+          prompt,
+        }))
+      }),
+    dequeue: (turnId) =>
+      Effect.gen(function* () {
+        const commandId = yield* nextCommandId("dequeue")
+        yield* mutate("InteractiveSession.dequeue", commandId, (threadId, version) => ({
+          _tag: "Dequeue",
+          threadId,
+          commandId: CommandId.make(commandId),
+          idempotencyKey: IdempotencyKey.make(commandId),
+          expectedThreadVersion: ThreadVersion.make(version),
+          turnId: Turn.TurnId.make(turnId),
+        }))
+      }),
     steerQueued: (turnId, text, requestId) =>
       mutate("InteractiveSession.steerQueued", requestId, (threadId, version) => ({
         _tag: "Steer",
@@ -1347,8 +1386,15 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const threadId = yield* input.createThread("orb")
       yield* requestSelection(threadId)
     }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newOrbThread", error))),
-    archiveThread: unsupported("InteractiveSession.archiveThread"),
-    archiveAndNewThread: unsupported("InteractiveSession.archiveAndNewThread"),
+    archiveThread: archiveCurrentThread("InteractiveSession.archiveThread"),
+    archiveAndNewThread: Effect.gen(function* () {
+      const threadId = yield* input.createThread("runner", authority()?.threadId)
+      yield* requestSelection(threadId)
+    }).pipe(
+      Effect.mapError((error) =>
+        Schema.is(OperationUnavailable)(error) ? error : unavailable("InteractiveSession.archiveAndNewThread", error),
+      ),
+    ),
     selectThread: (threadId) =>
       requestSelection(threadId).pipe(
         Effect.mapError((error) => unavailable("InteractiveSession.selectThread", error)),
@@ -1359,7 +1405,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           ? requestSelection(threadId)
           : Effect.fail(failure("Queue refresh requires the selected Thread")),
       ).pipe(Effect.mapError((error) => unavailable("InteractiveSession.readQueue", error))),
-    previewThread: () => unsupported("InteractiveSession.previewThread"),
+    previewThread: () =>
+      unsupported("InteractiveSession.previewThread", "Thread previews are unavailable in this session"),
     reopenThread: Effect.suspend(() => requestSelection(authority()?.threadId ?? input.threadId)).pipe(
       Effect.mapError((error) => unavailable("InteractiveSession.reopenThread", error)),
     ),

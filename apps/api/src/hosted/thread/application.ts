@@ -234,7 +234,7 @@ export const layer = Layer.effect(
                 return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
               const hostedThread = yield* hosted.readThread({ ownerId, threadId: HostedThreadId.make(threadId) })
               if (hostedThread === undefined)
-                return yield* HostedThreadApplicationError.make({ message: "Hosted Thread is unavailable" })
+                return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
               const allTurns = yield* turns.list(threadId)
               const queue = yield* turns.readQueue(threadId)
               const usage = yield* transcripts.usage(threadId)
@@ -433,7 +433,7 @@ export const layer = Layer.effect(
         ownerId,
         () => {
           const invocation = invocations.get(ownerId)
-          if (invocation === undefined) throw new Error("Hosted interactive invocation is unavailable")
+          if (invocation === undefined) throw new Error("Interactive invocation is unavailable")
           return invocation
         },
         (mode) =>

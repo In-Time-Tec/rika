@@ -62,7 +62,7 @@ export const layer = (options: { readonly pollIntervalMillis: number }) =>
         Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          const message = "Hosted execution reconciliation failed"
+          const message = "Execution reconciliation failed"
           return Clock.currentTimeMillis.pipe(
             Effect.flatMap((at) =>
               SubscriptionRef.update(health, (state) => ({
@@ -91,15 +91,13 @@ export const layer = (options: { readonly pollIntervalMillis: number }) =>
             if (state.poll._tag === "Starting")
               return Effect.fail(
                 HostedExecutionReconcilerError.make({
-                  message: "Hosted execution reconciler has not completed its first poll",
+                  message: "Execution reconciler has not completed its first poll",
                 }),
               )
             if (state.poll._tag === "Failed")
               return Effect.fail(HostedExecutionReconcilerError.make({ message: state.poll.message }))
             if (state.pollAgeMillis !== undefined && state.pollAgeMillis > options.pollIntervalMillis * 4)
-              return Effect.fail(
-                HostedExecutionReconcilerError.make({ message: "Hosted execution reconciliation is stale" }),
-              )
+              return Effect.fail(HostedExecutionReconcilerError.make({ message: "Execution reconciliation is stale" }))
             return Effect.void
           }),
         ),

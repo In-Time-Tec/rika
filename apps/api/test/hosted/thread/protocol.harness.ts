@@ -1952,6 +1952,51 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       expect(yield* awaitCompletion(controllerA, duplicateControl)).toMatchObject([
         { payload: { _tag: "CommandAccepted", threadVersion: "8" } },
       ])
+
+      const durableInteractiveCommands = [
+        {
+          _tag: "EditQueued" as const,
+          commandId: CommandId.make("edit-queued-command"),
+          idempotencyKey: IdempotencyKey.make("edit-queued-key"),
+          expectedThreadVersion: ThreadVersion.make("8"),
+          turnId: TurnId.make("queued-turn"),
+          prompt: "rewritten prompt",
+        },
+        {
+          _tag: "Dequeue" as const,
+          commandId: CommandId.make("dequeue-command"),
+          idempotencyKey: IdempotencyKey.make("dequeue-key"),
+          expectedThreadVersion: ThreadVersion.make("9"),
+          turnId: TurnId.make("queued-turn"),
+        },
+        {
+          _tag: "ArchiveThread" as const,
+          commandId: CommandId.make("archive-command"),
+          idempotencyKey: IdempotencyKey.make("archive-key"),
+          expectedThreadVersion: ThreadVersion.make("10"),
+        },
+      ]
+      for (const durableCommand of durableInteractiveCommands)
+        expect(
+          yield* awaitCompletion(controllerA, {
+            protocolVersion,
+            requestId: RequestId.make(`${durableCommand._tag}-request`),
+            command: { ...durableCommand, threadId },
+          }),
+        ).toMatchObject([
+          {
+            payload: {
+              _tag: "CommandAccepted",
+              threadVersion: String(BigInt(durableCommand.expectedThreadVersion) + 1n),
+              result: { _tag: "Applied" },
+            },
+          },
+        ])
+      expect(effects.slice(-3)).toMatchObject([
+        { _tag: "EditQueued", turnId: "queued-turn", prompt: "rewritten prompt" },
+        { _tag: "Dequeue", turnId: "queued-turn" },
+        { _tag: "ArchiveThread" },
+      ])
     }),
   ),
 )

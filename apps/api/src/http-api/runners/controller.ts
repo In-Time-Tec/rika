@@ -24,7 +24,7 @@ export const runnersHandlers = (dependencies: HttpDependencies) =>
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.threads === undefined)
-            return yield* ServiceUnavailable.make({ message: "Hosted Thread service unavailable" })
+            return yield* ServiceUnavailable.make({ message: "Thread service unavailable" })
           const serverRequest = yield* HttpServerRequest.HttpServerRequest
           const request = yield* HttpServerRequest.toWeb(serverRequest).pipe(
             Effect.mapError(() => ServiceUnavailable.make({ message: "Request is unavailable" })),

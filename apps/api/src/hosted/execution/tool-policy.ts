@@ -244,7 +244,10 @@ export const policyFor = (request: Pick<BindingRequest, "module" | "operation" |
     if (request.operation === "get") return read(name)
     if (request.operation === "put") return effect(name, "hosted-state", "none", "provider-idempotent")
   }
-  throw HostedToolPolicyError.make({ kind: "unknown-tool", message: `Tool ${name} is not admitted by hosted policy` })
+  throw HostedToolPolicyError.make({
+    kind: "unknown-tool",
+    message: `Tool ${name} is not admitted by the active policy`,
+  })
 }
 
 const JsonRecord = Schema.Record(Schema.String, Schema.Json)
@@ -418,7 +421,7 @@ export const invokeAdmittedTool: (
     catch: (error) =>
       Schema.is(HostedToolPolicyError)(error)
         ? error
-        : HostedToolPolicyError.make({ kind: "unknown-tool", message: "Tool is not admitted by hosted policy" }),
+        : HostedToolPolicyError.make({ kind: "unknown-tool", message: "Tool is not admitted by the active policy" }),
   })
   const digest = yield* argumentsDigest(input.request.input)
   const context = yield* input.policyService.begin({

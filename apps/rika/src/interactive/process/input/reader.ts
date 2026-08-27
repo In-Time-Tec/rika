@@ -10,7 +10,10 @@ import { nextSubmissionId } from "../../controller/turn-submission"
 import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "../workspace/context"
 
 type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
-  readonly startSelection: (select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>) => void
+  readonly startSelection: (
+    select: () => Effect.Effect<void, ProductOperation.OperationUnavailable>,
+    acceptsCreatedThread?: boolean,
+  ) => void
   readonly rememberMode?: (mode: string) => Effect.Effect<void, never, BunServices.BunServices>
 }
 
@@ -160,12 +163,14 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
         }
         if (key.ctrl && key.name === "n") {
           showCtrlCMenu(false)
-          startSelection(() =>
-            session.archiveAndNewThread.pipe(
-              Effect.tapError((failure) =>
-                Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
+          startSelection(
+            () =>
+              session.archiveAndNewThread.pipe(
+                Effect.tapError((failure) =>
+                  Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
+                ),
               ),
-            ),
+            true,
           )
           return
         }

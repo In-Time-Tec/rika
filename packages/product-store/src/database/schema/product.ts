@@ -1615,6 +1615,7 @@ export const rikaHostedThreads = pgTable(
   "rika_hosted_threads",
   {
     id: text().primaryKey(),
+    archiveSourceThreadId: text("archive_source_thread_id"),
     ownerId: text("owner_id")
       .notNull()
       .references(() => rikaHostedOwners.id, { onDelete: "cascade" }),
@@ -1648,6 +1649,10 @@ export const rikaHostedThreads = pgTable(
     unique("rika_hosted_threads_id_owner_id_executor_kind_key").on(table.id, table.ownerId, table.executorKind),
     unique("rika_hosted_threads_id_owner_id_key").on(table.id, table.ownerId),
     unique("rika_hosted_threads_workspace_authority").on(table.id, table.ownerId, table.workspaceId),
+    check(
+      "rika_hosted_threads_archive_source_check",
+      sql`(archive_source_thread_id IS NULL OR archive_source_thread_id <> id)`,
+    ),
     check(
       "rika_hosted_threads_check",
       sql`((executor_kind = 'orb'::rika_hosted_executor_kind) OR (inherit_project_grants = false))`,

@@ -170,4 +170,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "36c17d4c225409f17a13e1ad97e37cea7070a58c08b5d6fbfaef69550b860e7e",
     url: new URL("../../migrations/postgres/0033-transcript-projection-notifications.sql", import.meta.url),
   },
+  {
+    id: "product/0034_atomic_thread_replacement",
+    checksum: "d2aa7fb7367e92bbb6ccd5b7fd57eed326935ce44cfc28933d8c24aa31eab001",
+    url: new URL("../../migrations/postgres/0034-atomic-thread-replacement.sql", import.meta.url),
+  },
 ]

@@ -25,7 +25,7 @@ export type AuthorityExecutor = Pick<PgDrizzle.EffectPgDatabase, "select">
 
 const failure = (message: string) => StoreError.make({ reason: "invalid-authority", message })
 const databaseError = (cause: unknown) =>
-  StoreError.make({ reason: "database", message: `Hosted PostgreSQL authority failed: ${String(cause)}` })
+  StoreError.make({ reason: "database", message: `PostgreSQL authority failed: ${String(cause)}` })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 

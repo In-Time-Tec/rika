@@ -139,7 +139,7 @@ class HostedPreviewTransportError extends Data.TaggedError("HostedPreviewTranspo
 
 const transportFailure = (cause: unknown) =>
   new HostedPreviewTransportError({
-    message: cause instanceof Error ? cause.message : "Hosted preview transport failed",
+    message: cause instanceof Error ? cause.message : "Thread preview transport failed",
     cause,
   })
 

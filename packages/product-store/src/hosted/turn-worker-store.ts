@@ -69,7 +69,7 @@ export class HostedTurnWorkerStore extends Context.Service<HostedTurnWorkerStore
 ) {}
 
 const failure = (cause: unknown) =>
-  HostedTurnWorkerStoreError.make({ message: `Hosted Turn worker store failed: ${String(cause)}` })
+  HostedTurnWorkerStoreError.make({ message: `Turn worker store failed: ${String(cause)}` })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(failure))
 const transaction = <A>(

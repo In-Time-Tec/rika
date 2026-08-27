@@ -177,6 +177,20 @@ export const MutatingThreadCommand = Schema.Union([
     }),
   ),
   strict(
+    Schema.TaggedStruct("EditQueued", {
+      ...mutating,
+      turnId: Turn.TurnId,
+      prompt: Schema.String,
+    }),
+  ),
+  strict(
+    Schema.TaggedStruct("Dequeue", {
+      ...mutating,
+      turnId: Turn.TurnId,
+    }),
+  ),
+  strict(Schema.TaggedStruct("ArchiveThread", mutating)),
+  strict(
     Schema.TaggedStruct("EnsureRepositoryService", {
       ...mutating,
       service: RepositoryService,
@@ -199,6 +213,7 @@ export const CreateThreadCommand = strict(
     executorKind: ExecutorKind,
     runnerTarget: Schema.optionalKey(RunnerTarget),
     repositoryRef: Schema.optionalKey(RepositoryRef),
+    archiveThreadId: Schema.optionalKey(ThreadId),
   }),
 ).check(
   Schema.makeFilter((command) =>

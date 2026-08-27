@@ -303,12 +303,14 @@ const reconnect = (harness: Harness) =>
 const runSession = Effect.fn("test.runSession")(function* (
   harness: Harness,
   onEvent: (event: InteractiveEvent) => void = () => undefined,
+  createThread: (executorKind: "runner" | "orb", archiveThreadId?: string) => Effect.Effect<string, HostedError> = () =>
+    Effect.die("unused"),
 ) {
   const context = yield* Layer.build(harness.layer)
   const hosted = yield* makeHostedInteractiveSession({
     profile,
     threadId: "thread-1",
-    createThread: () => Effect.die("unused"),
+    createThread,
   }).pipe(Effect.provide(context))
   const states: Array<{ target: string; activity?: string; connectivity: string }> = []
   const stateFiber = yield* Stream.runForEach(hosted.connection.stateChanges, (state) =>
@@ -331,13 +333,7 @@ const defaultReceive = (socket: FakeWebSocket, message: Message) => {
 
 it("backs transient connection failures off to five seconds", () => {
   expect([0, 1, 2, 3, 4, 5, 6].map((attempt) => reconnectDelay({ attempt }))).toEqual([
-    250,
-    500,
-    1_000,
-    2_000,
-    4_000,
-    5_000,
-    5_000,
+    250, 500, 1_000, 2_000, 4_000, 5_000, 5_000,
   ])
 })
 
@@ -527,6 +523,71 @@ it.effect("retains the newer Thread when a superseded selection receives late fr
       yield* Effect.yieldNow
       expect(String(hosted.session.currentView()?.thread.id)).toBe("thread-new")
       expect(hosted.session.currentView()?.thread.updatedAt).toBe(2)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("archives the current Thread and selects a new Runner Thread", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const created: Array<{ executorKind: "runner" | "orb"; archiveThreadId?: string }> = []
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          const threadId = String(message.command.threadId)
+          socket.frame(attached(message, snapshot(threadId, 0)))
+        }
+      })
+      const hosted = yield* runSession(harness, undefined, (executorKind, archiveThreadId) => {
+        created.push(archiveThreadId === undefined ? { executorKind } : { executorKind, archiveThreadId })
+        return Effect.succeed("thread-2")
+      })
+      yield* hosted.session.archiveAndNewThread
+      yield* eventually(() => String(hosted.session.currentView()?.thread.id) === "thread-2")
+      expect(created).toEqual([{ executorKind: "runner", archiveThreadId: "thread-1" }])
+      expect(harness.messages.map((message) => message.command._tag)).not.toContain("ArchiveThread")
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("edits and removes queued Turns through durable Thread commands", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let version = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(attached(message, snapshot("thread-1", version)))
+          return
+        }
+        if (message.command._tag !== "EditQueued" && message.command._tag !== "Dequeue") return
+        version += 1
+        socket.frame({
+          _tag: "CommandAccepted",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          threadVersion: ThreadVersion.make(String(version)),
+          cursor: ThreadEventCursor.make("0"),
+          result: { _tag: "Applied" },
+        })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.editQueued("turn-2", "rewritten prompt")
+      yield* hosted.session.dequeue("turn-3")
+      expect(
+        harness.messages
+          .map((message) => message.command)
+          .filter((command) => command._tag === "EditQueued" || command._tag === "Dequeue"),
+      ).toMatchObject([
+        {
+          _tag: "EditQueued",
+          turnId: "turn-2",
+          prompt: "rewritten prompt",
+          expectedThreadVersion: "0",
+        },
+        { _tag: "Dequeue", turnId: "turn-3", expectedThreadVersion: "1" },
+      ])
       yield* hosted.session.quit
     }),
   ),

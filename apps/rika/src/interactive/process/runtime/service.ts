@@ -14,7 +14,7 @@ import type { Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Deferred, Effect, Fiber, FileSystem, Option, Schema, SubscriptionRef } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, FileSystem, Option, Schema, SubscriptionRef } from "effect"
 import * as Logging from "../../../diagnostics/file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { InteractiveRuntimeContext } from "./context"
@@ -242,11 +242,23 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     let selectedFiber: Fiber.Fiber<void, never>
     selectedFiber = fork(
       (previous === undefined ? Effect.void : Fiber.interrupt(previous)).pipe(
-        Effect.andThen(recoverSession(loadSelected(select(), generation))),
+        Effect.andThen(
+          recoverSession(
+            loadSelected(select(), generation).pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit)
+                  ? Effect.sync(() => {
+                      if (loop.newThreadSelectionGeneration === generation)
+                        loop.newThreadSelectionGeneration = undefined
+                    })
+                  : Effect.void,
+              ),
+            ),
+          ),
+        ),
         Effect.ensuring(
           Effect.sync(() => {
             if (loop.selectionFiber === selectedFiber) loop.selectionFiber = undefined
-            if (loop.newThreadSelectionGeneration === generation) loop.newThreadSelectionGeneration = undefined
           }),
         ),
       ),

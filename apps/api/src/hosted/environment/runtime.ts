@@ -103,7 +103,7 @@ export class HostedEnvironment extends Context.Service<HostedEnvironment, Hosted
 
 const rejected = (kind: HostedEnvironmentError["kind"], message: string) =>
   HostedEnvironmentError.make({ kind, message })
-const unavailable = () => rejected("unavailable", "Hosted environment service is unavailable")
+const unavailable = () => rejected("unavailable", "Environment service is unavailable")
 const PhaseEnvironmentDigest = Schema.Array(
   Schema.Struct({
     id: EnvironmentReferenceId,

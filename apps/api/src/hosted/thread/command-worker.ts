@@ -186,6 +186,10 @@ const repositoryServiceFailureKind = (reason: "conflict" | "invalid" | "missing"
 const productCommand = (command: InteractiveMutatingCommand) => {
   const value = (() => {
     switch (command._tag) {
+      case "EditQueued":
+        return { _tag: "EditQueued", turnId: command.turnId, prompt: command.prompt }
+      case "Dequeue":
+        return { _tag: "Dequeue", turnId: command.turnId }
       case "Steer":
         return { _tag: "Steer", text: command.text, requestId: command.commandId, turnId: command.targetTurnId }
       case "InterruptAndSend":
@@ -206,6 +210,8 @@ const productCommand = (command: InteractiveMutatingCommand) => {
           authorizationId: command.authorizationId,
           checkpoint: command.checkpoint,
         }
+      case "ArchiveThread":
+        return { _tag: "ArchiveThread" }
     }
     return undefined
   })()
@@ -499,7 +505,7 @@ export const layer = (options: {
                   Effect.flatMap((at) =>
                     SubscriptionRef.update(health, (state) => ({
                       ...state,
-                      lastFailure: { at, message: "Hosted Thread command application failed" },
+                      lastFailure: { at, message: "Thread command application failed" },
                     })),
                   ),
                   Effect.andThen(Effect.logError("hosted-thread-command-worker.failed")),
@@ -521,8 +527,8 @@ export const layer = (options: {
             Effect.flatMap((at) =>
               SubscriptionRef.update(health, (state) => ({
                 ...state,
-                poll: { _tag: "Failed", at, message: "Hosted Thread command worker poll failed" } as const,
-                lastFailure: { at, message: "Hosted Thread command worker poll failed" },
+                poll: { _tag: "Failed", at, message: "Thread command worker poll failed" } as const,
+                lastFailure: { at, message: "Thread command worker poll failed" },
               })),
             ),
             Effect.andThen(Effect.logError("hosted-thread-command-worker.poll-failed")),

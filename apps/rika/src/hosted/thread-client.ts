@@ -63,9 +63,7 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
           Schema.is(HostedError)(error) ? error : failure("network", "Thread connection was interrupted"),
         ).pipe(Effect.asVoid),
       ),
-      Effect.ensuring(
-        Deferred.fail(disconnected, failure("network", "Thread connection closed")).pipe(Effect.ignore),
-      ),
+      Effect.ensuring(Deferred.fail(disconnected, failure("network", "Thread connection closed")).pipe(Effect.ignore)),
       Effect.forkScoped,
     )
 
@@ -181,6 +179,7 @@ export const layer = Layer.effect(
             }
             if (input.project !== undefined) command.projectId = ProjectId.make(input.project)
             if (input.runnerTarget !== undefined) command.runnerTarget = input.runnerTarget
+            if (input.archiveThreadId !== undefined) command.archiveThreadId = ThreadId.make(input.archiveThreadId)
             const accepted = yield* applyCommand(connection, envelope(requestId, command), input.commandId)
             if (accepted.result._tag !== "ThreadCreated")
               return yield* failure("protocol", "Thread creation returned the wrong result")

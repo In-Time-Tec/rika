@@ -49,6 +49,7 @@
     "./migrations/postgres/0031-transactional-thread-notifications.sql": "./migrations/postgres/0031-transactional-thread-notifications.sql",
     "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql": "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql",
     "./migrations/postgres/0033-transcript-projection-notifications.sql": "./migrations/postgres/0033-transcript-projection-notifications.sql",
+    "./migrations/postgres/0034-atomic-thread-replacement.sql": "./migrations/postgres/0034-atomic-thread-replacement.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
     "./goal-repository": "./src/goal/repository.ts",
     "./memory-thread-search-repository": "./src/search/memory-repository.ts",

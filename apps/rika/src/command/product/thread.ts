@@ -85,7 +85,7 @@ const syncCommand = Command.make(
 ).pipe(Command.withDescription("Publish an approved Thread commit to its repository"))
 
 export const threadCommand = Command.make("thread").pipe(
-  Command.withDescription("Create or continue hosted durable Threads"),
+  Command.withDescription("Create or continue durable Threads"),
   Command.withSubcommands([
     Command.make("new", {}, () => dispatchHosted({ _tag: "RemoteThread", action: "new" })),
     continueCommand,

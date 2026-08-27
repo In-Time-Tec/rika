@@ -70,8 +70,7 @@ export class HostedProductError extends Schema.TaggedError<HostedProductError>()
   message: Schema.String,
 }) {}
 
-const unavailable = () =>
-  HostedProductError.make({ kind: "unavailable", message: "Hosted product service is unavailable" })
+const unavailable = () => HostedProductError.make({ kind: "unavailable", message: "Rika service is unavailable" })
 
 const forbidden = (message = "Resource is unavailable") => HostedProductError.make({ kind: "forbidden", message })
 
@@ -84,7 +83,7 @@ const storeFailure = (error: ProductOperationError) => {
   if (error.reason === "conflict" || error.reason === "stale-fence") kind = "conflict"
   else if (error.reason === "not-found") kind = "not-found"
   else if (error.reason === "invalid-authority") kind = "forbidden"
-  return HostedProductError.make({ kind, message: "Hosted product operation was rejected" })
+  return HostedProductError.make({ kind, message: "Rika operation was rejected" })
 }
 
 const modelFailure = (error: HostedModelRegistryError) =>
@@ -115,6 +114,7 @@ export interface HostedProductService {
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: RunnerTarget
     readonly threadId?: string
+    readonly archiveThreadId?: string
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
   readonly registerRunner: (input: {
     readonly principal: AuthenticatedPrincipal
@@ -315,6 +315,8 @@ export const layer = (options: {
             threadId,
           }
           if (input.runnerTarget !== undefined) Object.assign(existingInput, { runnerTarget: input.runnerTarget })
+          if (input.archiveThreadId !== undefined)
+            Object.assign(existingInput, { archiveThreadId: input.archiveThreadId })
           const existing = yield* repository.existingConnection(existingInput).pipe(Effect.mapError(repositoryFailure))
           if (existing?._tag === "Incompatible")
             return yield* HostedProductError.make({
@@ -390,6 +392,8 @@ export const layer = (options: {
             nowMillis: currentTime,
           }
           if (input.runnerTarget !== undefined) Object.assign(connectionInput, { runnerTarget: input.runnerTarget })
+          if (input.archiveThreadId !== undefined)
+            Object.assign(connectionInput, { archiveThreadId: input.archiveThreadId })
           const result = yield* repository.createConnection(connectionInput).pipe(Effect.mapError(repositoryFailure))
           if (result._tag === "Incompatible")
             return yield* HostedProductError.make({
