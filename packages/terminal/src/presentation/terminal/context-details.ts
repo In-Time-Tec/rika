@@ -30,21 +30,23 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   }
   const compact = width < 40 || height < 16
   const context = model.contextUsage
-  const availableContext = context?._tag === "Available" ? context : undefined
-  const usable = availableContext === undefined ? undefined : ContextMeter.usableTokens(availableContext)
+  const selectedContext = ContextMeter.reading(context, model.modeRoutes[model.mode]?.main)
+  const usable = selectedContext === undefined ? undefined : ContextMeter.usableTokens(selectedContext)
   const placeholder = context?._tag === "Loading" ? "····" : "—"
+  const usageUnavailable = context?._tag === "Unavailable"
   let emptyReason: string | undefined
-  if (context?._tag === "NotStarted") emptyReason = "No usage yet — send a message to see context usage"
+  if (context?._tag === "NotStarted") emptyReason = "No usage recorded yet"
   else if (context?._tag === "Unavailable") emptyReason = "Context usage is not reported by this model"
-  const used = availableContext === undefined ? placeholder : formatContextTokens(availableContext.inputTokens)
+  const used =
+    selectedContext === undefined || usageUnavailable ? placeholder : formatContextTokens(selectedContext.inputTokens)
   const available =
-    availableContext === undefined
+    selectedContext === undefined || usageUnavailable
       ? placeholder
-      : formatContextTokens(Math.max(0, usable! - availableContext.inputTokens))
-  const full = availableContext === undefined ? placeholder : formatContextTokens(availableContext.contextWindow)
+      : formatContextTokens(Math.max(0, usable! - selectedContext.inputTokens))
+  const full = selectedContext === undefined ? placeholder : formatContextTokens(selectedContext.contextWindow)
   const usableText = usable === undefined ? placeholder : formatContextTokens(usable)
   const cells = Math.max(4, Math.min(width < 40 ? 12 : 20, width - 5))
-  const meter = availableContext === undefined ? undefined : ContextMeter.meter(availableContext, { cells })
+  const meter = selectedContext === undefined ? undefined : ContextMeter.meter(selectedContext, { cells })
 
   if (!compact) line("")
   if (meter === undefined)
@@ -55,7 +57,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
       ).join(""),
       (value) => fg(modeColor(model.mode))(value),
     )
-  else if (availableContext !== undefined) {
+  else if (selectedContext !== undefined) {
     const baseAnimation = {
       cells,
       tick: model.contextAnimation.compactTick ?? model.contextAnimation.munchTick,
@@ -66,7 +68,7 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
       model.contextAnimation.compactFromPercent === undefined
         ? baseAnimation
         : { ...baseAnimation, compactFromPercent: model.contextAnimation.compactFromPercent }
-    const glyphs = ContextMeter.animatedGlyphs(availableContext, animation)
+    const glyphs = ContextMeter.animatedGlyphs(selectedContext, animation)
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(modeColor(model.mode))(glyphs.join("")), bold(fg(modeColor(model.mode))(` ${meter.percent}%`)))
   }

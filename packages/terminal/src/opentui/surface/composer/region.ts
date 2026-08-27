@@ -6,7 +6,7 @@ import { colors, modeColor } from "../../../presentation/terminal/theme"
 import { displayInput } from "../../../state/composer/model"
 import { truncateToWidth } from "../../../presentation/terminal/format"
 import type { Command } from "../../../presentation/terminal/command-palette"
-import type { ModeRouteLabel } from "../../../state/mode/route"
+import type { ModeRoute } from "../../../state/mode/route"
 import { modeSelectorLabels, modeSelectorNotchAtPosition } from "../../../presentation/terminal/mode-selector-layout"
 const displayCursorOffset = (model: Model): number => {
   let offset = model.cursor
@@ -157,7 +157,7 @@ const paletteContentImpl = (
   return new StyledText(chunks)
 }
 
-const routeLabel = (route: ModeRouteLabel | undefined): string =>
+const routeLabel = (route: ModeRoute | undefined): string =>
   route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = new Map<string, string>(
   Object.entries({

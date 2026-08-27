@@ -86,7 +86,7 @@ it.effect("renders and targets every compact mode notch on a real 24x12 surface"
   }).pipe(Effect.scoped),
 )
 
-it.effect("renders responsive context tracks and per-cell mode commit wipe colors", () =>
+it.effect("renders responsive context meters and per-cell mode commit wipe colors", () =>
   Effect.gen(function* () {
     const setup = yield* Effect.acquireRelease(
       Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
@@ -108,7 +108,7 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
     setup.resize(32, 12)
     surface.update({ ...initial("/work", "high"), width: 32, height: 12, modePicker: { open: true, selected: 1 } })
     yield* Effect.tryPromise(() => setup.renderOnce())
-    expect(text(modeLabel())).toContain(`${meterGlyphs.track.repeat(4)} ─ high`)
+    expect(text(modeLabel())).toContain(`${muncherGlyphs.open}${meterGlyphs.pellet.repeat(3)} 0% ─ high`)
     const palette = surface.palette
     setup.mockMouse.click(
       palette.screenX + modeSelectorLabels(28, ["low", "medium", "high", "ultra"])[2]!.start,
@@ -118,7 +118,7 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
     expect(committed).toEqual([2])
     setup.resize(80, 24)
     surface.update({ ...initial("/work", "high"), width: 80, modePicker: { open: true, selected: 1 } })
-    expect(text(modeLabel())).toContain(`ctx ${meterGlyphs.track.repeat(8)} ─ high`)
+    expect(text(modeLabel())).toContain(`ctx ${muncherGlyphs.open}${meterGlyphs.pellet.repeat(7)} 0% ─ high`)
 
     surface.update({
       ...initial("/work", "high"),

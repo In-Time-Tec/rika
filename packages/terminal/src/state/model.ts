@@ -3,7 +3,7 @@ import { ModeId } from "@rika/configuration/behavior-mode"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import { idle as loadableIdle, loadableSchemas } from "./loadable"
 import { Activity } from "./activity/model"
-import { UsageDisplay, UsageTime } from "./usage"
+import { UsageTime } from "./usage"
 import { defaultModeRouteMap, modeRouteMapSchema, type ModeRouteMap } from "./mode/route"
 import { ChangedFile as ChangedFileSchema } from "./changed-file"
 import type { ChangedFile } from "./changed-file"
@@ -172,7 +172,6 @@ export const Model = Schema.Struct({
   retryCountdown: Schema.Finite,
   compactionShimmer: Schema.optional(CompactionShimmerSchema),
   contextDetailsOpen: Schema.Boolean,
-  usageDisplay: Schema.optional(UsageDisplay),
   usageTime: Schema.optional(UsageTime),
   usageTokens: Schema.optional(
     Schema.Union([
@@ -261,7 +260,6 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   retryCountdown: 0,
   compactionShimmer: undefined,
   contextDetailsOpen: false,
-  usageDisplay: "cost",
   paletteOpen: false,
   palette: { open: false, query: "", selected: 0 },
   modePicker: { open: false, selected: 0 },

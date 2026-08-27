@@ -65,22 +65,18 @@ import {
 it.effect("clears usage hover when a narrower selector moves away from the pointer", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())
-    surface.update(
-      model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
-    )
+    surface.update(model())
     yield* Effect.tryPromise(() => activeSetup.renderOnce())
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX))
 
-    surface.update(model({ usageCost: { _tag: "Available", usd: 0, unpricedAttempts: 0, includedAttempts: 0 } }))
+    surface.update(model({ width: 32 }))
     expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(0)
   }),
 )
 it.effect("clears usage hover after layout moves a right-anchored label under a stationary pointer", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())
-    surface.update(
-      model({ usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 123_456, uncountedAttempts: 0 } }),
-    )
+    surface.update(model())
     yield* Effect.tryPromise(() => activeSetup.renderOnce())
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX + 1))
 

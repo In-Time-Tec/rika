@@ -4,48 +4,23 @@ import type { Model } from "../../state/model"
 import { contentColumnWidth } from "../../state/layout/model"
 import { colors, modeColor } from "../../presentation/terminal/theme"
 import { toOpenColor } from "../rendering/text-adapter"
-import { activeTimeAt, activeTimeIcon, formatActiveTime } from "../../state/activity/time"
-import { formatTokens } from "../../presentation/terminal/format"
 import { meterGlyphs } from "../../state/context/glyph"
-import { formatCost, modeLabelWidth } from "./content"
+import { modeLabelWidth } from "./content"
 import { SurfaceChrome } from "./chrome"
 
 export abstract class SurfaceModeLabel extends SurfaceChrome {
   protected renderModeLabel(model: Model): void {
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     const availableWidth = contentColumnWidth(model)
-    const contextVisible = availableWidth >= 24 && (model.currentThreadId !== undefined || model.modePicker.open)
+    const contextVisible = availableWidth >= 18
     const contextCells = availableWidth < 40 ? 4 : 8
     const contextPrefix = availableWidth < 40 ? " " : " ctx "
     const border = toOpenColor(colors.text)
-    const compactUsageText = (): string => {
-      if (model.usageDisplay === "time") {
-        if (model.usageTime?._tag === "Available")
-          return formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
-        return model.usageTime?._tag === "Unavailable" ? `${activeTimeIcon} —` : `${activeTimeIcon} ····`
-      }
-      if (model.usageDisplay === "tokens") {
-        if (model.usageTokens?._tag === "Available")
-          return model.usageTokens.uncountedAttempts > 0
-            ? formatTokens(model.usageTokens.total).replace(/ tok$/, "+ tok")
-            : formatTokens(model.usageTokens.total)
-        return model.usageTokens?._tag === "Unavailable" ? "— tok" : "···· tok"
-      }
-      if (model.usageCost?._tag === "Included") return "Included"
-      if (model.usageCost?._tag === "Available") return formatCost(model.usageCost.usd)
-      if (model.usageCost?._tag === "Unavailable") return "$—"
-      return model.usageCost?._tag === "Loading" || model.busy ? "$····" : ""
-    }
     const buildUsageChunks = (): Array<TextChunk> => {
-      if (!contextVisible) {
-        const usageText = compactUsageText()
-        if (usageText.length === 0) return []
-        const usage = fg(model.currentThreadId === undefined ? border : modeColor(model.mode))(` ${usageText} `)
-        return [this.hoverController.usageHovered ? bold(usage) : usage]
-      }
+      if (!contextVisible) return []
       const chunks: Array<TextChunk> = [fg(modeColor(model.mode))(contextPrefix)]
-      const context = model.contextUsage
-      if (context?._tag === "Available") {
+      const context = ContextMeter.reading(model.contextUsage, model.modeRoutes[model.mode]?.main)
+      if (context !== undefined) {
         const value = ContextMeter.meter(context, { cells: contextCells })
         const baseAnimation = {
           cells: contextCells,
@@ -79,7 +54,7 @@ export abstract class SurfaceModeLabel extends SurfaceChrome {
       return chunks
     }
     const buildModeChunks = (): Array<TextChunk> => {
-      const usageChunks = buildUsageChunks()
+      const usageChunks = buildUsageChunks().map((chunk) => (this.hoverController.usageHovered ? bold(chunk) : chunk))
       const chunks = [...usageChunks]
       if (usageChunks.length > 0) chunks.push(fg(border)("─"))
       chunks.push(fg(border)(" "))

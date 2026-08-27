@@ -79,7 +79,7 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(surface.transcriptScroll.content).toBeInstanceOf(Object)
     expect(inputText()).toBe("abcd")
     expect(surface.inputBox.title).toBe("")
-    expect(modeLabelText()).toBe(" medium ")
+    expect(modeLabelText()).toBe(" ctx ᗧ······· 0% ─ medium ")
     expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
     expect(surface.inputBox.bottomTitle).toBe("")
     expect(surface.workspaceLabel.content).toEqual(
@@ -123,7 +123,7 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     for (const [mode] of modeColors) {
       surface.update(model({ mode, busy: true, activity: { _tag: "Sending" } }))
       expect(surface.inputBox.title).toBe("")
-      expect(modeLabelText()).toBe(` $···· ─ ${mode} `)
+      expect(modeLabelText()).toBe(` ctx ᗧ······· 0% ─ ${mode} `)
       expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
       expect(surface.statusLabel.content).toEqual(
         expect.objectContaining({
@@ -131,82 +131,6 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
         }),
       )
     }
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $0.007 ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $1.25 ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        usageCost: { _tag: "Available", usd: 0.0074, unpricedAttempts: 1, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $0.007 ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 2, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $1.25 ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        fastMode: true,
-        usageCost: { _tag: "Available", usd: 5.4449, unpricedAttempts: 0, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
-    const globalTotalUsd = 12.34
-    surface.update(
-      model({
-        mode: "medium",
-        busy: false,
-        usageCost: { _tag: "Available", usd: globalTotalUsd, unpricedAttempts: 0, includedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" $12.34 ─ medium ")
-    surface.update(model({ mode: "medium", usageCost: { _tag: "Included", includedAttempts: 3 } }))
-    expect(modeLabelText()).toBe(" Included ─ medium ")
-    surface.update(model({ mode: "medium", usageCost: { _tag: "Loading" } }))
-    expect(modeLabelText()).toBe(" $···· ─ medium ")
-    surface.update(model({ mode: "medium", usageCost: { _tag: "Unavailable" } }))
-    expect(modeLabelText()).toBe(" $— ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        usageDisplay: "tokens",
-        usageTokens: { _tag: "Available", total: 40_100_000, uncountedAttempts: 0 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" 40.1M tok ─ medium ")
-    surface.update(
-      model({
-        mode: "medium",
-        usageDisplay: "time",
-        usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
-      }),
-    )
-    expect(modeLabelText()).toBe(" ◷ 1m 43s ─ medium ")
-    surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Loading" } }))
-    expect(modeLabelText()).toBe(" ◷ ···· ─ medium ")
-    surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Unavailable" } }))
-    expect(modeLabelText()).toBe(" ◷ — ─ medium ")
 
     surface.update(
       model({
@@ -250,60 +174,54 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(opentui.renderer.getSchedulerState().hasScheduledRender).toBe(true)
   }),
 )
-it.effect("routes usage-label clicks to the local display toggle", () =>
+it.effect("routes context-meter clicks to the context overlay", () =>
   Effect.gen(function* () {
-    const usageToggle = vi.fn()
-    const { surface } = yield* createScoped({ ...handlers(), usageToggle })
-    surface.update(model({ usageCost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0, includedAttempts: 0 } }))
+    const contextToggle = vi.fn()
+    const { surface } = yield* createScoped({ ...handlers(), contextToggle })
+    surface.update(model())
     yield* Effect.tryPromise(() => activeSetup.renderOnce())
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX))
-    expect(usageToggle).toHaveBeenCalledOnce()
-    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + 7))
-    expect(usageToggle).toHaveBeenCalledOnce()
+    expect(contextToggle).toHaveBeenCalledOnce()
+    surface.modeLabel.processMouseEvent(
+      mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + surface.modeLabel.width - 1),
+    )
+    expect(contextToggle).toHaveBeenCalledOnce()
   }),
 )
-it.effect("uses native clock width and pointer hover for the usage label", () =>
+it.effect("uses pointer hover for the context meter", () =>
   Effect.gen(function* () {
     const { surface } = yield* createScoped(handlers())
-    surface.update(
-      model({
-        mode: "medium",
-        usageDisplay: "time",
-        usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
-      }),
-    )
+    surface.update(model({ mode: "medium" }))
     yield* Effect.tryPromise(() => activeSetup.renderOnce())
-    expect(surface.modeLabel.width).toBe(19)
+    expect(surface.modeLabel.width).toBe(26)
     expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(0)
 
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX))
     expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(1)
-    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "move", surface.modeLabel.screenX + 11))
-    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "over", surface.modeLabel.screenX))
+    surface.modeLabel.processMouseEvent(
+      mouseEvent(surface.modeLabel, "move", surface.modeLabel.screenX + surface.modeLabel.width - 1),
+    )
+    expect(styledText(surface.modeLabel.content).chunks[0]?.attributes).toBe(0)
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "out"))
   }),
 )
-it.effect("routes clicks on the usage and mode segments to their own handlers", () =>
+it.effect("routes clicks on the context and mode segments to their own handlers", () =>
   Effect.gen(function* () {
-    const usageToggle = vi.fn()
+    const contextToggle = vi.fn()
     const modeToggle = vi.fn()
-    const { surface } = yield* createScoped({ ...handlers(), usageToggle, modeToggle })
-    surface.update(
-      model({
-        mode: "medium",
-        usageDisplay: "time",
-        usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
-      }),
-    )
+    const { surface } = yield* createScoped({ ...handlers(), contextToggle, modeToggle })
+    surface.update(model({ mode: "medium" }))
     yield* Effect.tryPromise(() => activeSetup.renderOnce())
 
     surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX))
-    expect(usageToggle).toHaveBeenCalledTimes(1)
+    expect(contextToggle).toHaveBeenCalledTimes(1)
     expect(modeToggle).toHaveBeenCalledTimes(0)
 
-    surface.modeLabel.processMouseEvent(mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + 11))
+    surface.modeLabel.processMouseEvent(
+      mouseEvent(surface.modeLabel, "down", surface.modeLabel.screenX + surface.modeLabel.width - 1),
+    )
     expect(modeToggle).toHaveBeenCalledTimes(1)
-    expect(usageToggle).toHaveBeenCalledTimes(1)
+    expect(contextToggle).toHaveBeenCalledTimes(1)
   }),
 )
 

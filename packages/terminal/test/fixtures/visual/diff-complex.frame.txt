@@ -17,7 +17,7 @@
    20    -another removal
       21 +another addition with a deliberately long value that exercises cli…
    21 22  Binary files assets/old.png and assets/new.png differ
-╭─────────────────────────────────────────────────────────────────────── high ─╮
+╭───────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ─╮
 │                                                                              │
 │                                                                              │
 │                                                                              │

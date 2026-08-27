@@ -107,7 +107,7 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
       )
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
-      if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
+      if (current.contextDetailsOpen && current.usageTime?._tag === "Available") this.refreshContextDetails(current)
       this.transcriptPane.updateSpinner(glyph)
       if (current.threadSidebar.open)
         this.sidebar.content = renderSidebar(

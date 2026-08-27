@@ -108,7 +108,7 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
       }
     }),
   ))
-test("advances selected-thread active time with the injected clock and freezes closed intervals", () =>
+test("advances context-detail active time with the injected clock and freezes closed intervals", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const clock = new ManualClock()
@@ -123,21 +123,21 @@ test("advances selected-thread active time with the injected clock and freezes c
         ...initial("/work", "high"),
         width: 100,
         height: 30,
-        usageDisplay: "time",
+        contextDetailsOpen: true,
         usageTime: { _tag: "Available", accumulatedMillis: 0, activeSince: epoch },
       }
       try {
         surface.update(active)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 0s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 0s")
         clock.advance(1_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 1s")
 
         surface.update({
           ...active,
           usageTime: { _tag: "Available", accumulatedMillis: 1_000 },
         })
         clock.advance(2_000)
-        expect(styledTextValue(surface.modeLabel.content)).toContain("◷ 1s")
+        expect(styledTextValue(surface.palette.content)).toContain("◷ 1s")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
