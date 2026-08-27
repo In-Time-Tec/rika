@@ -5,7 +5,7 @@ import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, Sub
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { CredentialStore, HostedError, ThreadClient, Http, ProfileStore } from "./contract"
-import { authenticated, localLoginProfile } from "./account"
+import { authenticated, selectedProfile } from "./account"
 import * as HostedInteractiveSession from "./interactive-session"
 import { preferencePath, prepareRunnerCheckout, type PreparedRunnerCheckout } from "../runner/service"
 import { RunnerAdmission } from "../runner/contract"
@@ -98,7 +98,6 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     ) => Effect.Effect<never, E, R>
   },
 ) {
-  const profile = yield* localLoginProfile()
   const firstDraw = yield* Deferred.make<void>()
   const sessionReady = yield* Deferred.make<InteractiveSession.InteractiveSession, OperationUnavailable>()
   const deferred = makeDeferredSession(sessionReady)
@@ -114,6 +113,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
   }
   const initialize = Effect.gen(function* () {
     yield* Deferred.await(firstDraw)
+    const profile = yield* selectedProfile()
     const http = yield* Http
     yield* authenticated(profile, (session) => http.context(profile.origin, session))
     const checkout = prepareRunnerCheckout({

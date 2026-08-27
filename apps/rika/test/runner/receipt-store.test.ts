@@ -1,20 +1,11 @@
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import { expect, it } from "@effect/vitest"
-import { Effect, Option } from "effect"
+import { Effect, FileSystem, Layer, Option, Path } from "effect"
 import type { ForegroundRunnerSnapshot } from "@rika/remote-execution/foreground"
 import { makeRunnerReceiptStore } from "../../src/runner/receipt-store"
-import type { SecretVault } from "../../src/hosted/credential-store"
 
-const vault = (values: Map<string, string>): SecretVault => ({
-  get: ({ service, name }) => Effect.runPromise(Effect.succeed(values.get(`${service}:${name}`) ?? null)),
-  set: ({ service, name, value }) =>
-    Effect.runPromise(
-      Effect.sync(() => {
-        values.set(`${service}:${name}`, value)
-      }),
-    ),
-  delete: ({ service, name }) => Effect.runPromise(Effect.sync(() => values.delete(`${service}:${name}`))),
-})
-
+const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
 const snapshot: ForegroundRunnerSnapshot = {
   version: 1,
   workspaceIdentity: "workspace-1",
@@ -40,18 +31,29 @@ const snapshot: ForegroundRunnerSnapshot = {
   machines: [],
 }
 
-it.effect("stores Runner recovery state in the platform vault by assignment", () =>
-  Effect.gen(function* () {
-    const values = new Map<string, string>()
-    const store = makeRunnerReceiptStore({
-      origin: "https://hosted.example.test/path",
-      deviceId: "device-1",
-      vault: vault(values),
-    })
-    yield* store.save("assignment-1", snapshot)
-    expect(Option.getOrThrow(yield* store.load("assignment-1"))).toEqual(snapshot)
-    expect(yield* store.load("assignment-2")).toEqual(Option.none())
-    yield* store.remove("assignment-1")
-    expect(yield* store.load("assignment-1")).toEqual(Option.none())
-  }),
-)
+it.layer(platform)((test) => {
+  test.effect("stores owner-only Runner recovery files by assignment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runner-receipt-" })
+        const directory = path.join(root, "runner-receipts")
+        const store = yield* makeRunnerReceiptStore({
+          origin: "https://hosted.example.test/path",
+          deviceId: "device-1",
+          directory,
+        })
+        yield* store.save("assignment-1", snapshot)
+        expect(Option.getOrThrow(yield* store.load("assignment-1"))).toEqual(snapshot)
+        expect(yield* store.load("assignment-2")).toEqual(Option.none())
+        const files = yield* fileSystem.readDirectory(directory)
+        expect(files).toHaveLength(1)
+        expect((yield* fileSystem.stat(directory)).mode & 0o777).toBe(0o700)
+        expect((yield* fileSystem.stat(path.join(directory, files[0]!))).mode & 0o777).toBe(0o600)
+        yield* store.remove("assignment-1")
+        expect(yield* store.load("assignment-1")).toEqual(Option.none())
+      }),
+    ),
+  )
+})

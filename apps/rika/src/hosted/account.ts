@@ -96,14 +96,6 @@ export const selectedProfile = Effect.fn("HostedAccount.profile")(function* () {
   return loaded.value
 })
 
-export const localLoginProfile = Effect.fn("HostedAccount.localLoginProfile")(function* () {
-  const profile = yield* selectedProfile()
-  const credentials = yield* CredentialStore
-  const credential = yield* credentials.load(profile.origin, profile.deviceId)
-  if (Option.isNone(credential)) return yield* failure("login-required", "Run rika auth login first")
-  return profile
-})
-
 const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, current: Credential) {
   const http = yield* Http
   const store = yield* CredentialStore
@@ -223,8 +215,15 @@ export const login = Effect.fn("HostedAccount.login")(function* (input: {
     : { ...nextProfile, owner: { kind: "personal" as const }, project: undefined }
   yield* credentials.save(origin, started.deviceId, credentialFrom(tokens, started.privateJwk))
   yield* profiles.save(selected)
-  if (previous !== undefined && previous.origin === origin && previous.deviceId !== started.deviceId)
-    yield* credentials.remove(previous.origin, previous.deviceId).pipe(Effect.ignore)
+  if (previous !== undefined && previous.origin === origin && previous.deviceId !== started.deviceId) {
+    const revoked = yield* Effect.result(
+      http.revokeDevice(origin, previous.deviceId, sessionFrom(tokens, started.privateJwk)),
+    )
+    if (Result.isFailure(revoked))
+      yield* Console.log(
+        `Previous CLI device ${previous.deviceId} could not be revoked: ${revoked.failure.message}\nRun rika auth revoke-device ${previous.deviceId} to revoke it`,
+      )
+  }
   yield* Console.log(`Logged in as ${identity.account.email}`)
 })
 

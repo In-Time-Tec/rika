@@ -1,5 +1,5 @@
 import { ForegroundRunnerError, runForegroundRunner, foregroundRunnerLayer } from "@rika/remote-execution/foreground"
-import { Config, Console, Context, Crypto, Deferred, Effect, Function, Layer, Option, Ref, Schema } from "effect"
+import { Config, Console, Context, Crypto, Deferred, Effect, Function, Layer, Option, Path, Ref, Schema } from "effect"
 import type { Success } from "effect/Effect"
 import { ProjectId } from "@rika/product/hosted-model"
 import { inspectRunnerCheckout } from "./checkout"
@@ -214,15 +214,17 @@ export const runRunner = Effect.fn("Runner.run")(function* (
   const { profile, checkout } = prepared ?? (yield* prepareRunnerCheckout(input))
   const admission = yield* RunnerAdmission
   const crypto = yield* Crypto.Crypto
+  const path = yield* Path.Path
   const supervisorId = yield* crypto.randomUUIDv4
   const report = (status: RunnerStatus) =>
     (status._tag === "Ready" && firstConnection !== undefined
       ? Deferred.succeed(firstConnection, undefined)
       : Effect.void
     ).pipe(Effect.andThen(Console.log(statusLine(status))))
-  const receiptStore = RunnerReceiptStore.makeRunnerReceiptStore({
+  const receiptStore = yield* RunnerReceiptStore.makeRunnerReceiptStore({
     origin: profile.origin,
     deviceId: String(profile.deviceId),
+    directory: path.join(path.dirname(input.preferencePath), "runner-receipts"),
   })
   const running = yield* Ref.make(new Set<string>())
   yield* report({ _tag: "Registering", registration: checkout.registration })

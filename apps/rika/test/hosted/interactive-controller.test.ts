@@ -20,7 +20,6 @@ import * as Runner from "../../src/runner/service"
 
 const { raceStructured, runnerConnectionState, startRunnerWhenPlaced } = hostedInteractiveControllerInternals
 const neverRunner = (): Effect.Effect<never> => Effect.never
-const unavailableRenderer = (): Effect.Effect<never> => Effect.die("renderer must not be acquired")
 
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
@@ -336,116 +335,147 @@ const startupLayer = Layer.mergeAll(
 )
 
 it.layer(startupLayer)((test) => {
-  test.effect(
-    "checks local login before rendering and delays remote authentication until the first complete frame",
-    () =>
-      Effect.gen(function* () {
-        const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false }))
-        const rendererRequested = Deferred.makeUnsafe<void>()
-        const remoteCredentialLoad = Deferred.makeUnsafe<void>()
-        let profileLoads = 0
-        let credentialLoads = 0
-        const profileStore = ProfileStore.of({
-          load: Effect.sync(() => {
-            profileLoads += 1
-            return Option.some(profile)
+  test.effect("draws before loading the local profile or credential and authenticates once", () =>
+    Effect.gen(function* () {
+      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false }))
+      const rendererRequested = Deferred.makeUnsafe<void>()
+      const profileRequested = Deferred.makeUnsafe<void>()
+      const credentialRequested = Deferred.makeUnsafe<void>()
+      let profileLoads = 0
+      let credentialLoads = 0
+      const profileStore = ProfileStore.of({
+        load: Effect.sync(() => {
+          profileLoads += 1
+          Deferred.doneUnsafe(profileRequested, Effect.void)
+          return Option.some(profile)
+        }),
+        save: () => Effect.void,
+      })
+      const credentialStore = CredentialStore.of({
+        load: () =>
+          Effect.sync(() => {
+            credentialLoads += 1
+            Deferred.doneUnsafe(credentialRequested, Effect.void)
+            return Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })
           }),
-          save: () => Effect.void,
-        })
-        const credentialStore = CredentialStore.of({
-          load: () =>
-            Effect.sync(() => {
-              credentialLoads += 1
-              if (credentialLoads === 2) Deferred.doneUnsafe(remoteCredentialLoad, Effect.void)
-              return Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })
-            }),
-          save: () => Effect.void,
-          remove: () => Effect.succeed(true),
-          serialized: (effect) => effect,
-        })
-        const operation = runHostedInteractive(
-          { _tag: "Interactive", prompt: [], ephemeral: false },
-          {
-            makeRenderer: () => {
-              Deferred.doneUnsafe(rendererRequested, Effect.void)
-              return Effect.succeed(setup.renderer)
-            },
-            writeTerminalTitle: () => undefined,
-            startRunner: neverRunner,
+        save: () => Effect.void,
+        remove: () => Effect.succeed(true),
+        serialized: (effect) => effect,
+      })
+      const operation = runHostedInteractive(
+        { _tag: "Interactive", prompt: [], ephemeral: false },
+        {
+          makeRenderer: () => {
+            Deferred.doneUnsafe(rendererRequested, Effect.void)
+            return Effect.succeed(setup.renderer)
           },
-        ).pipe(
-          Effect.provideService(ProfileStore, profileStore),
-          Effect.provideService(CredentialStore, credentialStore),
-        )
-        const fiber = yield* operation.pipe(Effect.forkChild)
+          writeTerminalTitle: () => undefined,
+          startRunner: neverRunner,
+        },
+      ).pipe(Effect.provideService(ProfileStore, profileStore), Effect.provideService(CredentialStore, credentialStore))
+      const fiber = yield* operation.pipe(Effect.forkChild)
 
-        yield* Deferred.await(rendererRequested)
-        expect(profileLoads).toBe(1)
-        expect(credentialLoads).toBe(1)
-        expect(yield* Deferred.poll(remoteCredentialLoad)).toEqual(Option.none())
-        yield* Effect.tryPromise(() => setup.renderOnce())
-        yield* Deferred.await(remoteCredentialLoad)
-        expect(profileLoads).toBe(1)
-        expect(credentialLoads).toBe(2)
-        expect(setup.captureCharFrame()).toContain("Welcome to Rika")
-        yield* Fiber.interrupt(fiber)
-        setup.renderer.destroy()
-      }),
+      yield* Deferred.await(rendererRequested)
+      expect(profileLoads).toBe(0)
+      expect(credentialLoads).toBe(0)
+      yield* Effect.tryPromise(() => setup.renderOnce())
+      yield* Deferred.await(profileRequested)
+      yield* Deferred.await(credentialRequested)
+      expect(profileLoads).toBe(1)
+      expect(credentialLoads).toBe(1)
+      expect(setup.captureCharFrame()).toContain("Welcome to Rika")
+      yield* Fiber.interrupt(fiber)
+      setup.renderer.destroy()
+    }),
   )
 
-  test.effect("fails before renderer acquisition when the local profile is missing", () =>
+  test.effect("draws before reporting that the local profile is missing", () =>
     Effect.gen(function* () {
-      let rendererRequested = false
+      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false }))
+      const rendererRequested = Deferred.makeUnsafe<void>()
+      let firstFrame = ""
+      let profileLoads = 0
       const profileStore = ProfileStore.of({
-        load: Effect.succeed(Option.none()),
+        load: Effect.sync(() => {
+          profileLoads += 1
+          return Option.none()
+        }),
         save: () => Effect.void,
       })
       const operation = runHostedInteractive(
         { _tag: "Interactive", prompt: [], ephemeral: false },
         {
           makeRenderer: () => {
-            rendererRequested = true
-            return unavailableRenderer()
+            Deferred.doneUnsafe(rendererRequested, Effect.void)
+            return Effect.succeed(setup.renderer)
           },
           writeTerminalTitle: () => undefined,
+          onFirstDraw: () => {
+            firstFrame = setup.captureCharFrame()
+          },
           startRunner: neverRunner,
         },
       ).pipe(Effect.provideService(ProfileStore, profileStore))
-      const exit = yield* operation.pipe(Effect.exit)
+      const fiber = yield* operation.pipe(Effect.forkChild)
+      yield* Deferred.await(rendererRequested)
+      expect(profileLoads).toBe(0)
+      yield* Effect.tryPromise(() => setup.renderOnce())
+      const exit = yield* Fiber.await(fiber)
       expect(exit._tag).toBe("Failure")
       expect(String(exit)).toContain("Run rika auth login first")
-      expect(rendererRequested).toBe(false)
+      expect(firstFrame).toContain("Welcome to Rika")
+      setup.renderer.destroy()
     }),
   )
 
-  test.effect("fails before renderer acquisition when the local credential is missing", () =>
+  test.effect("draws before reporting that the local credential is missing", () =>
     Effect.gen(function* () {
-      let rendererRequested = false
-      const profileStore = ProfileStore.of({ load: Effect.succeed(Option.some(profile)), save: () => Effect.void })
+      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false }))
+      const rendererRequested = Deferred.makeUnsafe<void>()
+      let firstFrame = ""
+      let profileLoads = 0
+      let credentialLoads = 0
+      const profileStore = ProfileStore.of({
+        load: Effect.sync(() => {
+          profileLoads += 1
+          return Option.some(profile)
+        }),
+        save: () => Effect.void,
+      })
       const credentialStore = CredentialStore.of({
-        load: () => Effect.succeed(Option.none()),
+        load: () =>
+          Effect.sync(() => {
+            credentialLoads += 1
+            return Option.none()
+          }),
         save: () => Effect.void,
         remove: () => Effect.succeed(false),
         serialized: (effect) => effect,
       })
-      const exit = yield* runHostedInteractive(
+      const operation = runHostedInteractive(
         { _tag: "Interactive", prompt: [], ephemeral: false },
         {
           makeRenderer: () => {
-            rendererRequested = true
-            return unavailableRenderer()
+            Deferred.doneUnsafe(rendererRequested, Effect.void)
+            return Effect.succeed(setup.renderer)
           },
           writeTerminalTitle: () => undefined,
+          onFirstDraw: () => {
+            firstFrame = setup.captureCharFrame()
+          },
           startRunner: neverRunner,
         },
-      ).pipe(
-        Effect.provideService(ProfileStore, profileStore),
-        Effect.provideService(CredentialStore, credentialStore),
-        Effect.exit,
-      )
+      ).pipe(Effect.provideService(ProfileStore, profileStore), Effect.provideService(CredentialStore, credentialStore))
+      const fiber = yield* operation.pipe(Effect.forkChild)
+      yield* Deferred.await(rendererRequested)
+      expect(profileLoads).toBe(0)
+      expect(credentialLoads).toBe(0)
+      yield* Effect.tryPromise(() => setup.renderOnce())
+      const exit = yield* Fiber.await(fiber)
       expect(exit._tag).toBe("Failure")
       expect(String(exit)).toContain("Run rika auth login first")
-      expect(rendererRequested).toBe(false)
+      expect(firstFrame).toContain("Welcome to Rika")
+      setup.renderer.destroy()
     }),
   )
 })

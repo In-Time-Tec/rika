@@ -17,7 +17,10 @@ export const liveLayer = (home: string) =>
     HostedHttp.layer,
     HostedThreadClient.layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)),
     HostedProfileStore.layer({ home }),
-    HostedCredentialStore.layer({ lockPath: `${home}/.config/rika/hosted-refresh.lock` }),
+    HostedCredentialStore.layer({
+      filename: `${home}/.config/rika/hosted-credential.json`,
+      lockPath: `${home}/.config/rika/hosted-refresh.lock`,
+    }),
     HostedBrowser.layer(),
     OpenAiProviderAuth.layer,
   )

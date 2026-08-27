@@ -1,18 +1,15 @@
 import { Clock, Effect, FileSystem, Layer, Option, Path, PlatformError, Redacted, Schema, Semaphore } from "effect"
 import { CredentialStore, HostedError, PrivateJwk, type Credential } from "./contract"
 
-const service = "com.rika.cli"
 const CredentialDisk = Schema.Struct({
   formatVersion: Schema.Literal(1),
+  origin: Schema.String,
+  deviceId: Schema.String,
   refreshToken: Schema.String,
   privateJwk: PrivateJwk,
 })
 const RefreshLockDisk = Schema.Struct({ pid: Schema.Int })
 
-export type SecretVault = Pick<typeof Bun.secrets, "get" | "set" | "delete">
-
-const liveVault: SecretVault = Bun.secrets
-const name = (origin: string, deviceId: string) => `${new URL(origin).origin}/${deviceId}`
 const failure = (message: string) => HostedError.make({ kind: "storage", message })
 const ErrorCode = Schema.Struct({ code: Schema.String })
 const decodeErrorCode = Schema.decodeUnknownOption(ErrorCode)
@@ -20,18 +17,64 @@ const errorCode = (cause: unknown) => Option.getOrUndefined(decodeErrorCode(caus
 type RefreshLock = FileSystem.File.Info
 
 export const layer = (options: {
+  readonly filename: string
   readonly lockPath: string
-  readonly vault?: SecretVault
   readonly lockTimeout?: number
   readonly lockRetry?: number
 }) =>
   Layer.effect(
     CredentialStore,
     Effect.gen(function* () {
-      const vault = options.vault ?? liveVault
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const admission = yield* Semaphore.make(1)
+      const parent = path.dirname(options.filename)
+      const expectedUid = process.getuid?.()
+      let writeSequence = 0
+      const storageFailure = (operation: string) => failure(`Hosted credential file could not be ${operation}`)
+      const directoryReady = Effect.fn("HostedCredentialStore.directoryReady")(function* (create: boolean) {
+        const exists = yield* fileSystem.exists(parent).pipe(Effect.mapError(() => storageFailure("inspected")))
+        if (!exists) {
+          if (!create) return false
+          yield* fileSystem
+            .makeDirectory(parent, { recursive: true, mode: 0o700 })
+            .pipe(Effect.mapError(() => storageFailure("created")))
+        }
+        if ((yield* Effect.result(fileSystem.readLink(parent)))._tag === "Success")
+          return yield* failure("Hosted credential directory cannot be a symbolic link")
+        const info = yield* fileSystem.stat(parent).pipe(Effect.mapError(() => storageFailure("inspected")))
+        if (info.type !== "Directory" || (expectedUid !== undefined && Option.getOrUndefined(info.uid) !== expectedUid))
+          return yield* failure("Hosted credential directory is not owned by this user")
+        if (create && (info.mode & 0o077) !== 0)
+          yield* fileSystem.chmod(parent, 0o700).pipe(Effect.mapError(() => storageFailure("secured")))
+        else if ((info.mode & 0o077) !== 0)
+          return yield* failure("Hosted credential directory permissions must not allow group or other access")
+        return true
+      })
+      const filePresent = Effect.fn("HostedCredentialStore.filePresent")(function* () {
+        const exists = yield* fileSystem
+          .exists(options.filename)
+          .pipe(Effect.mapError(() => storageFailure("inspected")))
+        if (!exists) return false
+        if (!(yield* directoryReady(false))) return false
+        if ((yield* Effect.result(fileSystem.readLink(options.filename)))._tag === "Success")
+          return yield* failure("Hosted credential file cannot be a symbolic link")
+        const info = yield* fileSystem.stat(options.filename).pipe(Effect.mapError(() => storageFailure("inspected")))
+        if (info.type !== "File" || (expectedUid !== undefined && Option.getOrUndefined(info.uid) !== expectedUid))
+          return yield* failure("Hosted credential file is not owned by this user")
+        if ((info.mode & 0o777) !== 0o600) return yield* failure("Hosted credential file permissions must be 0600")
+        return true
+      })
+      const read = Effect.fn("HostedCredentialStore.read")(function* () {
+        if (!(yield* filePresent())) return Option.none<typeof CredentialDisk.Type>()
+        const text = yield* fileSystem
+          .readFileString(options.filename)
+          .pipe(Effect.mapError(() => storageFailure("read")))
+        const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(CredentialDisk))(text).pipe(
+          Effect.mapError(() => failure("Hosted credentials are corrupt")),
+        )
+        return Option.some(decoded)
+      })
       const sameFile = (left: RefreshLock, right: RefreshLock) =>
         left.dev === right.dev && Option.getOrUndefined(left.ino) === Option.getOrUndefined(right.ino)
       const removeAbandonedLock = Effect.gen(function* () {
@@ -58,9 +101,7 @@ export const layer = (options: {
         )
       })
       const acquireLock = Effect.gen(function* () {
-        yield* fileSystem
-          .makeDirectory(path.dirname(options.lockPath), { recursive: true, mode: 0o700 })
-          .pipe(Effect.mapError(() => failure("Hosted credential refresh lock is unavailable")))
+        yield* directoryReady(true)
         const lockText = yield* Schema.encodeEffect(Schema.fromJsonString(RefreshLockDisk))({
           pid: process.pid,
         }).pipe(Effect.mapError(() => failure("Hosted credential refresh lock is unavailable")))
@@ -92,18 +133,12 @@ export const layer = (options: {
             yield* fileSystem.remove(options.lockPath).pipe(Effect.ignore)
         })
       const load = Effect.fn("HostedCredentialStore.load")(function* (origin: string, deviceId: string) {
-        const identity = name(origin, deviceId)
-        const stored = yield* Effect.tryPromise({
-          try: () => vault.get({ service, name: identity }),
-          catch: () => failure("Platform credential storage is unavailable"),
-        })
-        if (stored === null) return Option.none<Credential>()
-        const decoded = yield* Schema.decodeEffect(Schema.fromJsonString(CredentialDisk))(stored).pipe(
-          Effect.mapError(() => failure("Hosted credentials are corrupt")),
-        )
+        const stored = yield* read()
+        if (Option.isNone(stored) || stored.value.origin !== origin || stored.value.deviceId !== deviceId)
+          return Option.none<Credential>()
         return Option.some({
-          refreshToken: Redacted.make(decoded.refreshToken),
-          privateJwk: decoded.privateJwk,
+          refreshToken: Redacted.make(stored.value.refreshToken),
+          privateJwk: stored.value.privateJwk,
         })
       })
       const save = Effect.fn("HostedCredentialStore.save")(function* (
@@ -111,23 +146,29 @@ export const layer = (options: {
         deviceId: string,
         credential: Credential,
       ) {
-        const identity = name(origin, deviceId)
+        yield* directoryReady(true)
+        yield* filePresent()
         const value = yield* Schema.encodeEffect(Schema.fromJsonString(CredentialDisk))({
           formatVersion: 1,
+          origin,
+          deviceId,
           refreshToken: Redacted.value(credential.refreshToken),
           privateJwk: credential.privateJwk,
         }).pipe(Effect.mapError(() => failure("Hosted credentials could not be encoded")))
-        yield* Effect.tryPromise({
-          try: () => vault.set({ service, name: identity, value }),
-          catch: () => failure("Platform credential storage is unavailable"),
-        })
+        writeSequence += 1
+        const temporary = `${options.filename}.tmp-${process.pid}-${writeSequence}`
+        yield* fileSystem.writeFileString(temporary, value, { flag: "wx", mode: 0o600 }).pipe(
+          Effect.andThen(fileSystem.chmod(temporary, 0o600)),
+          Effect.andThen(fileSystem.rename(temporary, options.filename)),
+          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+          Effect.mapError(() => storageFailure("saved")),
+        )
       })
       const remove = Effect.fn("HostedCredentialStore.remove")(function* (origin: string, deviceId: string) {
-        const identity = name(origin, deviceId)
-        return yield* Effect.tryPromise({
-          try: () => vault.delete({ service, name: identity }),
-          catch: () => failure("Platform credential storage is unavailable"),
-        })
+        const stored = yield* read()
+        if (Option.isNone(stored) || stored.value.origin !== origin || stored.value.deviceId !== deviceId) return false
+        yield* fileSystem.remove(options.filename).pipe(Effect.mapError(() => storageFailure("removed")))
+        return true
       })
       const serialized: CredentialStore["Service"]["serialized"] = (effect) =>
         admission.withPermits(1)(Effect.acquireUseRelease(acquireLock, () => effect, releaseLock))

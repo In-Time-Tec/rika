@@ -34,7 +34,7 @@ import {
   useOrganization,
   usePersonalOwner,
 } from "../../src/hosted/account"
-import { layer as credentialLayer, type SecretVault } from "../../src/hosted/credential-store"
+import { layer as credentialLayer } from "../../src/hosted/credential-store"
 import {
   Browser,
   CredentialStore,
@@ -52,21 +52,6 @@ import {
 import { ClientTicketResponse } from "@rika/product/client-protocol"
 
 const platform = Layer.mergeAll(BunFileSystem.layer, BunPath.layer)
-const memorySecretVault = (values: Map<string, string>): SecretVault => ({
-  get: ({ service, name }) => Effect.runPromise(Effect.succeed(values.get(`${service}:${name}`) ?? null)),
-  set: ({ service, name, value }) =>
-    Effect.runPromise(
-      Effect.sync(() => {
-        values.set(`${service}:${name}`, value)
-      }),
-    ),
-  delete: ({ service, name }) => Effect.runPromise(Effect.sync(() => values.delete(`${service}:${name}`))),
-})
-const unavailableSecretVault = (message: string): SecretVault => ({
-  get: () => Effect.runPromise(Effect.die(new Error(message))),
-  set: () => Effect.runPromise(Effect.die(new Error(message))),
-  delete: () => Effect.runPromise(Effect.die(new Error(message))),
-})
 const key: PrivateJwk = { kty: "EC", crv: "P-256", x: "x", y: "y", d: "d" }
 const profile: Profile = {
   origin: "https://hosted.example.test",
@@ -238,7 +223,7 @@ it.effect("re-registers when the saved OAuth client no longer exists", () =>
   Effect.gen(function* () {
     const savedProfile = yield* Ref.make<Option.Option<Profile>>(Option.none())
     const savedCredential = yield* Ref.make<Option.Option<Credential>>(Option.none())
-    const removed = yield* Ref.make<ReadonlyArray<string>>([])
+    const revoked = yield* Ref.make<ReadonlyArray<string>>([])
     const registrations = yield* Ref.make(0)
     const starts = yield* Ref.make<ReadonlyArray<string>>([])
     const context = yield* Layer.build(
@@ -256,8 +241,7 @@ it.effect("re-registers when the saved OAuth client no longer exists", () =>
           CredentialStore.of({
             load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("stale-refresh"), privateJwk: key })),
             save: (_origin, _device, value) => Ref.set(savedCredential, Option.some(value)),
-            remove: (_origin, deviceId) =>
-              Ref.update(removed, (current) => [...current, deviceId]).pipe(Effect.as(true)),
+            remove: () => Effect.succeed(false),
             serialized: (effect) => effect,
           }),
         ),
@@ -290,6 +274,12 @@ it.effect("re-registers when the saved OAuth client no longer exists", () =>
                 organizations: [{ id: "org-1", slug: "engineering", name: "Engineering", logo: null }],
                 projects: [],
               }),
+            revokeDevice: (_origin, deviceId) =>
+              Ref.update(revoked, (current) => [...current, deviceId]).pipe(
+                Effect.andThen(
+                  Effect.fail(HostedError.make({ kind: "network", message: "device revocation unavailable" })),
+                ),
+              ),
           }),
         ),
         Layer.succeed(Browser, Browser.of({ open: () => Effect.die("unused") })),
@@ -299,13 +289,16 @@ it.effect("re-registers when the saved OAuth client no longer exists", () =>
     yield* login({ server: profile.origin, noOpen: true }).pipe(Effect.provide(context))
     expect(yield* Ref.get(registrations)).toBe(1)
     expect(yield* Ref.get(starts)).toEqual(["client-1", "client-2"])
-    expect(yield* Ref.get(removed)).toEqual(["device-1"])
+    expect(yield* Ref.get(revoked)).toEqual(["device-1"])
     expect(Option.getOrThrow(yield* Ref.get(savedProfile))).toMatchObject({
       origin: profile.origin,
       clientId: "client-2",
       owner: profile.owner,
     })
     expect(Option.isSome(yield* Ref.get(savedCredential))).toBe(true)
+    expect(yield* TestConsole.logLines.pipe(Effect.provide(context))).toContain(
+      "Previous CLI device device-1 could not be revoked: device revocation unavailable\nRun rika auth revoke-device device-1 to revoke it",
+    )
   }),
 )
 
@@ -428,15 +421,14 @@ it.layer(platform)((test) => {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-refresh-" })
-        const values = new Map<string, string>()
-        const vault = memorySecretVault(values)
+        const filename = path.join(root, "hosted-credential.json")
         const lockPath = path.join(root, "refresh.lock")
         const first = Context.get(
-          yield* Layer.build(credentialLayer({ vault, lockPath, lockRetry: 0 })),
+          yield* Layer.build(credentialLayer({ filename, lockPath, lockRetry: 0 })),
           CredentialStore,
         )
         const second = Context.get(
-          yield* Layer.build(credentialLayer({ vault, lockPath, lockRetry: 0 })),
+          yield* Layer.build(credentialLayer({ filename, lockPath, lockRetry: 0 })),
           CredentialStore,
         )
         yield* first.save(profile.origin, profile.deviceId, {
@@ -482,35 +474,6 @@ it.layer(platform)((test) => {
         expect(
           Redacted.value(Option.getOrThrow(yield* first.load(profile.origin, profile.deviceId)).refreshToken),
         ).toBe("refresh-2")
-      }),
-    ),
-  )
-
-  test.effect("uses Bun secrets and fails closed when platform credential storage is unavailable", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-vault-" })
-        const values = new Map<string, string>()
-        const vault = memorySecretVault(values)
-        const context = yield* Layer.build(credentialLayer({ vault, lockPath: path.join(root, "refresh.lock") }))
-        const store = Context.get(context, CredentialStore)
-        const credential = { refreshToken: Redacted.make("refresh"), privateJwk: key }
-        yield* store.save(profile.origin, profile.deviceId, credential)
-        expect(
-          Redacted.value(Option.getOrThrow(yield* store.load(profile.origin, profile.deviceId)).refreshToken),
-        ).toBe("refresh")
-        const unavailable = unavailableSecretVault("no secret service")
-        const unavailableContext = yield* Layer.build(
-          credentialLayer({ vault: unavailable, lockPath: path.join(root, "unavailable-refresh.lock") }),
-        )
-        const unavailableStore = Context.get(unavailableContext, CredentialStore)
-        expect((yield* Effect.flip(unavailableStore.save(profile.origin, profile.deviceId, credential))).kind).toBe(
-          "storage",
-        )
-        expect((yield* Effect.flip(unavailableStore.load(profile.origin, profile.deviceId))).kind).toBe("storage")
-        expect((yield* Effect.flip(unavailableStore.remove(profile.origin, profile.deviceId))).kind).toBe("storage")
       }),
     ),
   )
