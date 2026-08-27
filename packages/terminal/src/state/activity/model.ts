@@ -65,6 +65,20 @@ export const formatActivity: {
 
 const runningCardStatuses: ReadonlySet<string> = new Set(["running", "waiting", "cancelling"])
 const decodeBlock = Schema.decodeUnknownSync(Block)
+const transcriptAnimationByBlocks = new WeakMap<Model["blocks"], boolean>()
+
+export const transcriptAnimationActive = (model: Model): boolean => {
+  const cached = transcriptAnimationByBlocks.get(model.blocks)
+  if (cached !== undefined) return cached
+  const active = model.blocks.some((candidate) => {
+    const block = decodeBlock(candidate)
+    if (block._tag === "SubagentCard") return runningCardStatuses.has(block.status)
+    if (block._tag === "Cell") return block.status === "running"
+    return block._tag === "ToolCall" && block.status === "running"
+  })
+  transcriptAnimationByBlocks.set(model.blocks, active)
+  return active
+}
 
 export const runningToolsActivity = (model: Model): Extract<Activity, { readonly _tag: "RunningTools" }> => {
   const items = orderedTranscriptItems(model)

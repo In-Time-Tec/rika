@@ -3,6 +3,7 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
+import { renderCellBody } from "../../../../src/opentui/rendering/unit/bodies"
 import {
   openTui,
   _insertText,
@@ -11,6 +12,35 @@ import {
   _giantSubagentModel,
   _collapsedSubagentModel,
 } from "./bodies.fixture"
+
+test("keeps output-bound details internal in expanded cells", () => {
+  const chunks: Array<string> = []
+  renderCellBody(
+    {
+      _tag: "Cell",
+      id: "bounded-cell",
+      status: "complete",
+      visual: "ts",
+      summary: "const value = 42",
+      source: { text: "const value = 42", lines: 1, truncated: false },
+      output: { stdout: "42", stderr: "", droppedBytes: 13_100, droppedEvents: 0 },
+      epoch: 1,
+      notices: [{ kind: "restored", detail: "Restored value." }],
+      files: [],
+    },
+    false,
+    true,
+    80,
+    "⠿",
+    (chunk) => chunks.push(chunk.text),
+  )
+  const rendered = chunks.join("")
+  expect(rendered).toContain("truncated")
+  expect(rendered).toContain("Restored value.")
+  expect(rendered).not.toContain("Dropped 13100 bytes")
+  expect(rendered).not.toContain("at the output bound")
+})
+
 test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>
   Effect.runPromise(
     Effect.gen(function* () {

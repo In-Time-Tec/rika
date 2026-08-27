@@ -118,7 +118,7 @@ const CellOutput = Schema.Struct({
   droppedEvents: Schema.Finite,
 })
 const CellNotice = Schema.Struct({
-  kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready", "activity"]),
+  kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready"]),
   detail: Schema.String,
 })
 const Cell = Schema.TaggedStruct("Cell", {

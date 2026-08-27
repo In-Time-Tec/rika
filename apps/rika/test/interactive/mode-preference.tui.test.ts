@@ -5,6 +5,15 @@ import * as TuiApp from "../support/tui-app.harness"
 import { model } from "../support/tui-model.fixture"
 
 const tuiTestTimeout = 60_000
+const spinnerFor = (frame: string, marker: string): string | undefined =>
+  frame
+    .split("\n")
+    .find((line) => line.includes(marker))
+    ?.match(/[⠀-⣿]/u)?.[0]
+const spinnerChanged = (frame: string, marker: string, previous: string | undefined): boolean => {
+  const current = spinnerFor(frame, marker)
+  return current !== undefined && current !== previous
+}
 
 test(
   "settles repeated process waits while the launching cell owns process liveness",
@@ -44,6 +53,22 @@ test(
 
         yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
+        const running = yield* app.waitFrame('"waitMillis":10000', 20_000)
+        const collapsedGlyph = spinnerFor(running, '"waitMillis":10000')
+        expect(collapsedGlyph).toBeDefined()
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', collapsedGlyph), 5_000)
+
+        yield* app.clickText('"waitMillis":10000')
+        const expanded = yield* app.waitFrame('"waitMillis":10000')
+        const expandedGlyph = spinnerFor(expanded, '"waitMillis":10000')
+        expect(expandedGlyph).toBeDefined()
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', expandedGlyph), 5_000)
+
+        yield* app.clickText('"waitMillis":10000')
+        const recollapsed = yield* app.waitFrame('"waitMillis":10000')
+        const recollapsedGlyph = spinnerFor(recollapsed, '"waitMillis":10000')
+        expect(recollapsedGlyph).toBeDefined()
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', recollapsedGlyph), 5_000)
         yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
         yield* app.settled
 

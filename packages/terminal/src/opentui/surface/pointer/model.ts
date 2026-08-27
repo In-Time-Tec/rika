@@ -28,6 +28,14 @@ export abstract class SurfacePointer extends SurfaceState {
   protected readonly onKey = (key: KeyEvent) => {
     const mapped = fromOpenTui(key)
     if (this.suppressMouseJunk(mapped)) return
+    if (
+      this.model?.contextDetailsOpen === true &&
+      !mapped.ctrl &&
+      !mapped.alt &&
+      !mapped.meta &&
+      (mapped.name === "pageup" || mapped.name === "pagedown" || mapped.name === "home" || mapped.name === "end")
+    )
+      return
     if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pageup") {
       if (this.model?.threadSwitcher.open === true) this.threadBrowser.pageUp()
       else this.transcriptPane.pageUp()

@@ -53,6 +53,24 @@ export const tentativeTranscriptContainsMarkdown = ({
   )
 }
 
+const isolateSpinnerChunk = (content: StyledText, spinnerGlyph: string) => {
+  const chunkIndex = content.chunks.findIndex((chunk) => chunk.text.includes(spinnerGlyph))
+  if (chunkIndex < 0) return { content, spinnerChunk: -1 }
+  const chunk = content.chunks[chunkIndex]!
+  if (chunk.text === spinnerGlyph) return { content, spinnerChunk: chunkIndex }
+  const offset = chunk.text.indexOf(spinnerGlyph)
+  const replacement: Array<TextChunk> = []
+  const before = chunk.text.slice(0, offset)
+  const after = chunk.text.slice(offset + spinnerGlyph.length)
+  if (before.length > 0) replacement.push({ ...chunk, text: before })
+  const spinnerChunk = chunkIndex + replacement.length
+  replacement.push({ ...chunk, text: spinnerGlyph })
+  if (after.length > 0) replacement.push({ ...chunk, text: after })
+  const chunks = [...content.chunks]
+  chunks.splice(chunkIndex, 1, ...replacement)
+  return { content: new StyledText(chunks), spinnerChunk }
+}
+
 const buildTranscriptUnitBundles = (
   builder: ReturnType<typeof transcriptUnitBuilder>,
   unit: TranscriptUnit,
@@ -80,10 +98,13 @@ const buildTranscriptUnitBundles = (
   ) => {
     for (let start = 0; start < lines.length; start += transcriptRenderableBandRows) {
       const band = lines.slice(start, start + transcriptRenderableBandRows)
-      const content = bandContent(band)
+      const bandStyled = bandContent(band)
+      const isolated =
+        range.animated === true && section === "header"
+          ? isolateSpinnerChunk(bandStyled, spinnerGlyph)
+          : { content: bandStyled, spinnerChunk: -1 }
+      const { content, spinnerChunk } = isolated
       const key = start === 0 ? `${range.unit}:${section}` : `${range.unit}:${section}:${lineOffset + start}`
-      const spinnerChunk =
-        range.animated === true ? content.chunks.findIndex((chunk) => chunk.text === spinnerGlyph) : -1
       const baseDescriptor = {
         key,
         revision: `${revision}#${rangeIndex}${section === "header" ? "h" : "b"}:${lineOffset + start}`,

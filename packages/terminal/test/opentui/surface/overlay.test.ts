@@ -306,3 +306,62 @@ it.effect("routes clicks on the usage and mode segments to their own handlers", 
     expect(usageToggle).toHaveBeenCalledTimes(1)
   }),
 )
+
+it.effect("keeps context details static under paging and mouse-wheel input", () =>
+  Effect.gen(function* () {
+    const { surface } = yield* createScoped(handlers())
+    const entries = Array.from({ length: 80 }, (_, index) => ({
+      role: "assistant" as const,
+      text: `answer ${index}`,
+      turnId: `turn-${index}`,
+    }))
+    const items = entries.map((_, index) => ({
+      _tag: "Entry" as const,
+      index,
+      id: `assistant:turn-${index}:0`,
+      turnId: `turn-${index}`,
+    }))
+    surface.update(
+      model({
+        entries,
+        items,
+        currentThreadId: "thread",
+        contextDetailsOpen: true,
+        contextUsage: {
+          _tag: "Available",
+          inputTokens: 20,
+          inputCacheRead: 5,
+          inputTotal: 20,
+          contextWindow: 100,
+          reserveTokens: 10,
+        },
+      }),
+    )
+    yield* Effect.tryPromise(() => activeSetup.flush())
+    surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
+    yield* Effect.tryPromise(() => activeSetup.flush())
+    const before = surface.transcriptScroll.scrollTop
+    expect(before).toBeGreaterThan(0)
+
+    for (const key of ["\u001b[5~", "\u001b[6~", "\u001b[H", "\u001b[F"]) {
+      activeSetup.mockInput.pressKey(key)
+      yield* Effect.tryPromise(() => activeSetup.flush())
+      expect(surface.transcriptScroll.scrollTop).toBe(before)
+      expect(surface.paletteBox.visible).toBe(true)
+    }
+
+    for (const direction of ["up", "down"] as const) {
+      yield* Effect.tryPromise(() =>
+        activeSetup.mockMouse.scroll(
+          surface.transcriptScroll.screenX + 1,
+          surface.transcriptScroll.screenY + 1,
+          direction,
+          { delayMs: 0 },
+        ),
+      )
+      yield* Effect.tryPromise(() => activeSetup.flush())
+      expect(surface.transcriptScroll.scrollTop).toBe(before)
+      expect(surface.paletteBox.visible).toBe(true)
+    }
+  }),
+)

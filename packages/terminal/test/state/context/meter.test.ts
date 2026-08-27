@@ -26,10 +26,10 @@ describe("ContextMeter", () => {
   })
 
   test("renders deterministic muncher, vacuum, flash, and fallback glyphs", () => {
-    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, streaming: true }).join("")).toBe(
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, muncher: true }).join("")).toBe(
       "━ᗧ······",
     )
-    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 1, streaming: true }).join("")).toBe(
+    expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 1, muncher: true }).join("")).toBe(
       "━ᗤ······",
     )
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, flashTicks: 2 }).join("")).toBe(

@@ -18,7 +18,7 @@ test(
             model.turn([
               model.binding({ module: "workspace", operation: "read", input: { path: "notes.txt" } }, "approved-read"),
             ]),
-            model.text("APPROVAL_COMPLETE"),
+            model.turn([model.part("APPROVAL_COMPLETE")], { inputTokens: 10_000, outputTokens: 100 }),
             model.turn([
               model.binding(
                 {
@@ -38,9 +38,13 @@ test(
         const completed = yield* app.waitFrame("APPROVAL_COMPLETE")
         expect(completed).not.toContain("[pending]")
         expect(completed).not.toContain("Allow once")
-        yield* app.waitFrame("ctx")
+        const idleContext = yield* app.waitFrame("ctx")
+        expect(idleContext).toMatch(/[ᗧᗤ]/u)
         yield* app.clickText("ctx")
-        yield* app.waitFrame("Active")
+        const details = yield* app.waitFrame("Active")
+        expect(details).toMatch(/[ᗧᗤ]/u)
+        yield* app.pressPageUp
+        expect(app.frame()).toBe(details)
         expect(yield* app.waitFrame("◷ ")).toMatch(/◷ [0-9]+s/u)
         yield* app.settled
         expect(app.frame()).toMatch(/◷ [0-9]+s/u)
@@ -49,7 +53,9 @@ test(
         yield* Effect.tryPromise(() => app.type("Run the shell tool."))
         expect(app.frame()).not.toContain("Context & Usage")
         app.pressEnter()
+        expect(yield* app.waitFrame("Waiting")).toMatch(/[ᗧᗤ]/u)
         const shellCompleted = yield* app.waitFrame("BASH_COMPLETE")
+        expect(shellCompleted).toMatch(/[ᗧᗤ]/u)
         expect(shellCompleted).not.toContain("[pending]")
         expect(shellCompleted).not.toContain("Allow once")
         expect(yield* fileSystem.exists(path.join(app.workspace, "cancel-proof.txt"))).toBe(true)

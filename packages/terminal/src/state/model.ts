@@ -37,6 +37,7 @@ const ModePickerStateSchema = Schema.Struct({
 })
 const ModeCommitAnimationSchema = Schema.Struct({ from: Mode, to: Mode, tick: Schema.Finite })
 const ContextAnimationSchema = Schema.Struct({
+  munchTick: Schema.Finite,
   compactFromPercent: Schema.optional(Schema.Finite),
   compactTick: Schema.optional(Schema.Finite),
   compactionPending: Schema.optional(Schema.Boolean),
@@ -255,7 +256,7 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   connection: undefined,
   contextUsage: { _tag: "Loading" },
   goal: undefined,
-  contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
+  contextAnimation: { munchTick: 0, flashTicks: 0, flashed75: false, flashed90: false },
   animationTick: 0,
   retryCountdown: 0,
   compactionShimmer: undefined,

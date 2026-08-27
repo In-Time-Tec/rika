@@ -8,7 +8,7 @@ import type { RunEvent } from "tenetkit/runtime"
 import { Option, Schema } from "effect"
 import { type CellState, type Node } from "../model"
 import { bounded, boundedHead, optionalString, record, string } from "../values"
-import { eventNotice, nestedOperationNotice, restartNotification } from "../recovery"
+import { eventNotice, restartNotification } from "../recovery"
 import { failureOutcome } from "./outcome"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
@@ -190,11 +190,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const block = cellBlock(node, rawId)
     if (block === undefined) return
     const raw = record(data)
-    const nested = nestedOperationNotice(raw)
-    if (nested !== undefined) {
-      write(node, rawId, appendNotice(block, nested))
-      return
-    }
     const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
     if (Option.isNone(decoded)) {
       if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return

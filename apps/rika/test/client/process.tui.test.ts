@@ -5,6 +5,16 @@ import * as TuiApp from "../support/tui-app.harness"
 import { model } from "../support/tui-model.fixture"
 
 const tuiTestTimeout = 60_000
+const spinnerFor = (frame: string, marker: string): string | undefined =>
+  frame
+    .split("\n")
+    .find((line) => line.includes(marker))
+    ?.match(/[⠀-⣿]/u)?.[0]
+const spinnerChanged = (frame: string, marker: string, previous: string | undefined): boolean => {
+  const current = spinnerFor(frame, marker)
+  return current !== undefined && current !== previous
+}
+
 test(
   "projects live semantic subagent cards while parallel child work runs",
   () =>
@@ -106,7 +116,7 @@ test(
               profile: "Task",
               steps: [
                 model.turn([model.part("CHILD_PREVIEW_FIRST"), model.part(" CHILD_PREVIEW_LAST")], {
-                  streamPartDelayMillis: 1_000,
+                  streamPartDelayMillis: 3_000,
                 }),
               ],
             },
@@ -122,6 +132,37 @@ test(
 
         const partial = yield* app.waitFrame("CHILD_PREVIEW_FIRST", 20_000)
         expect(partial).not.toContain("CHILD_PREVIEW_LAST")
+        const expandedGlyph = spinnerFor(partial, "Subagent working")
+        expect(expandedGlyph).toBeDefined()
+        yield* app.waitFrameMatch(
+          (frame) =>
+            frame.includes("CHILD_PREVIEW_FIRST") &&
+            !frame.includes("CHILD_PREVIEW_LAST") &&
+            spinnerChanged(frame, "Subagent working", expandedGlyph),
+          5_000,
+        )
+
+        app.pressEnter()
+        const collapsed = yield* app.waitGone("CHILD_PREVIEW_FIRST")
+        const collapsedGlyph = spinnerFor(collapsed, "Subagent working")
+        expect(collapsedGlyph).toBeDefined()
+        yield* app.waitFrameMatch(
+          (frame) =>
+            !frame.includes("CHILD_PREVIEW_FIRST") && spinnerChanged(frame, "Subagent working", collapsedGlyph),
+          5_000,
+        )
+
+        app.pressEnter()
+        const reexpanded = yield* app.waitFrame("CHILD_PREVIEW_FIRST")
+        const reexpandedGlyph = spinnerFor(reexpanded, "Subagent working")
+        expect(reexpandedGlyph).toBeDefined()
+        yield* app.waitFrameMatch(
+          (frame) =>
+            frame.includes("CHILD_PREVIEW_FIRST") &&
+            !frame.includes("CHILD_PREVIEW_LAST") &&
+            spinnerChanged(frame, "Subagent working", reexpandedGlyph),
+          5_000,
+        )
         const durable = yield* app.transcript(Turn.TurnId.make("tui-turn-0"))
         expect(durable?.units.some((unit) => JSON.stringify(unit.content).includes("CHILD_PREVIEW_FIRST"))).toBe(false)
 

@@ -387,20 +387,18 @@ describe("TenetKit cell projection", () => {
     ])
   })
 
-  it("records a nested host operation as a status-only activity notice", () => {
+  it("keeps nested host operation lifecycle progress out of the transcript", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-nested", "nested")
     projector.apply(started("cell-nested", "await rika.media.attach({ path: 'a.png' })"))
-    projector.apply(
+    const running = projector.apply(
       progress("cell-nested", { nestedOperation: { kind: "media.attach", ordinal: 0, status: "running" } }),
     )
-    const change = projector.apply(
+    const succeeded = projector.apply(
       progress("cell-nested", { nestedOperation: { kind: "media.attach", ordinal: 0, status: "succeeded" } }),
     )
-    expect(cellOf(change)?.notices).toEqual([
-      { kind: "activity", detail: "media.attach running" },
-      { kind: "activity", detail: "media.attach succeeded" },
-    ])
+    expect(cellOf(running)).toBeUndefined()
+    expect(cellOf(succeeded)).toBeUndefined()
   })
 
   it("does not invent an image or diff from a nested host operation, because no producer sends one", () => {
@@ -410,7 +408,7 @@ describe("TenetKit cell projection", () => {
     const change = projector.apply(
       progress("cell-nested-2", { nestedOperation: { kind: "workspace.replace", ordinal: 0, status: "succeeded" } }),
     )
-    expect(cellOf(change)?.files).toEqual([])
+    expect(cellOf(change)).toBeUndefined()
     expect(block(change, "ImageAttachment")).toBeUndefined()
   })
 
