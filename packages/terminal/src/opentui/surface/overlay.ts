@@ -62,6 +62,14 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     this.overlayEditor.focusable = editor === this.overlayEditor
     editor.showCursor = true
   }
+  protected refreshContextDetails(model: Model, width = this.paletteBox.width, height = this.paletteBox.height): void {
+    this.palette.content = contextDetails(
+      model,
+      Math.max(1, width - 4),
+      Math.max(1, height - 2),
+      this.currentTimeMillis(),
+    )
+  }
   protected updateOverlay(model: Model, contentLeft: number, contentWidth: number, renderedInputHeight: number): void {
     const composerTop = model.height - renderedInputHeight
     let overlay: "threads" | "files" | "modes" | "context" | "palette" | undefined
@@ -194,12 +202,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
         this.contextDividerOne.visible = true
         this.contextDividerTwo.visible = true
       }
-      this.palette.content = contextDetails(
-        model,
-        Math.max(1, boxWidth - 4),
-        Math.max(1, boxHeight - 2),
-        this.currentTimeMillis(),
-      )
+      this.refreshContextDetails(model, boxWidth, boxHeight)
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))

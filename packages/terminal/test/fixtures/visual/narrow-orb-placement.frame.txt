@@ -5,7 +5,7 @@
     ctrl+o commands   ? help
 
 
-╭─ Orb ───────────────── high ─╮
+╭─ Orb ─────── ᗧ··· 0% ─ high ─╮
 │                              │
 │                              │
 │                              │

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest"
 import * as ContextMeter from "../../../src/state/context/meter"
-import { glyphFallbacks } from "../../../src/state/context/glyph"
 
 const reading = (inputTokens: number): ContextMeter.Reading => ({
   inputTokens,
@@ -25,7 +24,13 @@ describe("ContextMeter", () => {
     expect(ContextMeter.loadingMeter(8).join("")).toBe("╌━╌╌╌╌╌╌")
   })
 
-  test("renders deterministic muncher, vacuum, flash, and fallback glyphs", () => {
+  test("renders deterministic Pac-Man, vacuum, and flash glyphs", () => {
+    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 0, muncher: true }).join("")).toBe(
+      "ᗧ·······",
+    )
+    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 1, muncher: true }).join("")).toBe(
+      "ᗤ·······",
+    )
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, muncher: true }).join("")).toBe(
       "━ᗧ······",
     )
@@ -36,7 +41,28 @@ describe("ContextMeter", () => {
       "━✦╌╌╌╌╌╌",
     )
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, compactFromPercent: 75 })).toContain("≪")
-    expect(glyphFallbacks).toEqual({ muncherOpen: "C", muncherClosed: "c" })
+  })
+
+  test("uses selected route capacity until the model reports a context reading", () => {
+    const capacity = { contextWindow: 100, reserveTokens: 10 }
+    expect(ContextMeter.reading({ _tag: "NotStarted" }, capacity)).toEqual({
+      inputTokens: 0,
+      contextWindow: 100,
+      reserveTokens: 10,
+    })
+    expect(
+      ContextMeter.reading(
+        {
+          _tag: "Available",
+          inputTokens: 20,
+          inputCacheRead: 0,
+          inputTotal: 20,
+          contextWindow: 200,
+          reserveTokens: 20,
+        },
+        capacity,
+      ),
+    ).toEqual({ inputTokens: 20, contextWindow: 200, reserveTokens: 20 })
   })
 
   test("caps the visual indicator while preserving over-budget pressure", () => {

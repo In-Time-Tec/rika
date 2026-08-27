@@ -58,6 +58,7 @@ const commitModeSelector = (model: Model, selected = model.modePicker.selected):
     ...model,
     mode: next,
     rememberedMode: next,
+    contextUsage: next === model.mode ? model.contextUsage : { _tag: "NotStarted" },
     modePicker: { open: false, selected },
     modeCommit: next === model.mode ? undefined : { from: model.mode, to: next, tick: 0 },
   }

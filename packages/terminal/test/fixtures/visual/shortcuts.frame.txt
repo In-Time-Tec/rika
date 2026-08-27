@@ -5,7 +5,7 @@
          ......···............
             ...............
                    .
-╭─────────────────────────────────────────────────────────────────────── high ─╮
+╭───────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ─╮
 │ Ctrl+O command palette          Ctrl+R prompt history                        │
 │ Ctrl+V paste images             Shift+Enter newline                          │
 │ Ctrl+S switch modes             Ctrl+Y context & usage                       │

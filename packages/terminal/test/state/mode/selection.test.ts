@@ -26,12 +26,12 @@ describe("mode cycling", () => {
   })
 
   it("keeps an explicit mode active while a valid remembered mode opens as the next picker selection", () => {
-    const label = { name: "model", effort: "medium", fast: false }
+    const route = { name: "model", effort: "medium", fast: false, contextWindow: 100, reserveTokens: 10 }
     const configured = withModeConfiguration(initial("/work", "ship"), {
       routes: {
-        quick: { main: label, oracle: label },
-        review: { main: label, oracle: label },
-        ship: { main: label, oracle: label },
+        quick: { main: route, oracle: route },
+        review: { main: route, oracle: route },
+        ship: { main: route, oracle: route },
       },
       defaultMode: "quick",
       rememberedMode: "review",
@@ -41,11 +41,11 @@ describe("mode cycling", () => {
   })
 
   it("ignores a stale remembered mode when the picker opens", () => {
-    const label = { name: "model", effort: "medium", fast: false }
+    const route = { name: "model", effort: "medium", fast: false, contextWindow: 100, reserveTokens: 10 }
     const configured = withModeConfiguration(initial("/work", "ship"), {
       routes: {
-        quick: { main: label, oracle: label },
-        ship: { main: label, oracle: label },
+        quick: { main: route, oracle: route },
+        ship: { main: route, oracle: route },
       },
       defaultMode: "quick",
       rememberedMode: "removed",

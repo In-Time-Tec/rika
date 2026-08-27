@@ -187,8 +187,7 @@ export class Surface extends SurfaceLifecycle {
     })
     this.modeLabel.onMouseDown = (event) => {
       const column = event.x - this.modeLabel.screenX
-      if (column >= 0 && column < this.hoverController.usageWidth)
-        (this.handlers.contextToggle ?? this.handlers.usageToggle)?.()
+      if (column >= 0 && column < this.hoverController.usageWidth) this.handlers.contextToggle?.()
       else if (column >= this.hoverController.modeSegmentStart && column < this.modeLabel.width)
         this.handlers.modeToggle?.()
     }

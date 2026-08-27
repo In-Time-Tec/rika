@@ -33,7 +33,6 @@ export interface Handlers {
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
   readonly contextToggle?: () => void
-  readonly usageToggle?: () => void
   readonly modeToggle?: () => void
   readonly modeCommit?: (selected: number) => void
   readonly modeHover?: (selected: number) => void

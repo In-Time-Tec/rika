@@ -8,7 +8,6 @@ import { classifyPrompt, promptParts } from "../../../src/state/composer/model"
 import { composerHeight, inputRows, wrappedRowCount } from "../../../src/state/layout/composer"
 import { isNarrow } from "../../../src/state/layout/model"
 import { ready } from "../../../src/state/loadable"
-import { nextUsageDisplay } from "../../../src/state/mode/selection"
 import { replaceTurnPrompt } from "../../../src/state/queue/prompt"
 import { applyQueueDelta, replaceQueue, resetQueue } from "../../../src/state/queue/model"
 import { initial, type Model } from "../../../src/state/model"
@@ -17,11 +16,6 @@ import { update } from "../../../src/state/reducer/model"
 
 import { formatTokens } from "../../../src/presentation/terminal/format"
 import { key, _thread, readCall, _editFile, _busyQueueModel } from "../../state/queue/model.fixture"
-test("cycles cost, tokens, and active time", () => {
-  expect(nextUsageDisplay("cost")).toBe("tokens")
-  expect(nextUsageDisplay("tokens")).toBe("time")
-  expect(nextUsageDisplay("time")).toBe("cost")
-})
 test("adds only an open active interval to accumulated time", () => {
   expect(activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 }, 53_000)).toEqual(
     Duration.seconds(48),

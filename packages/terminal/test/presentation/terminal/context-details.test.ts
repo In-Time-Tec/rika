@@ -57,20 +57,24 @@ test("renders honest empty states instead of Unknown when no usage exists yet", 
 
   const notStarted = text(contextDetails({ ...base, contextUsage: { _tag: "NotStarted" } }, 54, 16, 0).chunks)
   expect(notStarted).not.toContain("Unknown")
-  expect(notStarted).toContain("Used        —")
-  expect(notStarted).toContain("Available   —")
-  expect(notStarted).toContain("Usable     —")
-  expect(notStarted).toContain("Full       —")
-  expect(notStarted).toContain("No usage yet — send a message to see context usage")
+  expect(notStarted).toContain("Used        0")
+  expect(notStarted).toContain("Available   258.4K")
+  expect(notStarted).toContain("Usable     258.4K")
+  expect(notStarted).toContain("Full       272K")
+  expect(notStarted).toContain("No usage recorded yet")
 
   const notReported = text(contextDetails({ ...base, contextUsage: { _tag: "Unavailable" } }, 54, 16, 0).chunks)
   expect(notReported).not.toContain("Unknown")
   expect(notReported).toContain("Used        —")
+  expect(notReported).toContain("Available   —")
+  expect(notReported).toContain("Usable     258.4K")
+  expect(notReported).toContain("Full       272K")
   expect(notReported).toContain("Context usage is not reported by this model")
 
   const loading = text(contextDetails({ ...base, contextUsage: { _tag: "Loading" }, busy: true }, 54, 16, 0).chunks)
   expect(loading).not.toContain("Unknown")
-  expect(loading).toContain("Used        ····")
+  expect(loading).toContain("Used        0")
+  expect(loading).toContain("Full       272K")
   expect(loading).toContain("Cost       ····")
 
   const included = text(

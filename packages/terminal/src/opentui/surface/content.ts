@@ -97,7 +97,7 @@ export const animationActive = (model: Model): boolean =>
   connectivityActivity(model) !== undefined ||
   connectionActivity(model) !== undefined ||
   panelLoading(model) !== undefined ||
-  (model.usageDisplay === "time" &&
+  (model.contextDetailsOpen &&
     model.usageTime?._tag === "Available" &&
     model.usageTime.activeSince !== undefined) ||
   (model.modePicker.open && model.modePicker.turnTick !== undefined) ||
