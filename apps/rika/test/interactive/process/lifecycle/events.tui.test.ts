@@ -54,7 +54,7 @@ test(
         })
         const orb = yield* app.waitFrame("Preparing workspace")
         expect(orb).toContain("Orb")
-        expect(hasColor(app, "Orb", "174,119,255,255")).toBe(true)
+        expect(hasColor(app, "Orb", "61,255,166,255")).toBe(true)
         yield* app.quit
       }),
     ),

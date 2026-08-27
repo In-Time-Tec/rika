@@ -273,6 +273,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         currentThreadId: "context-thread",
         busy: true,
         animationTick: 1,
+        contextAnimation: { ...base().contextAnimation, munchTick: 1 },
         activity: { _tag: "Streaming", bytes: 20 },
         contextUsage: {
           _tag: "Available",
@@ -291,7 +292,14 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       {
         ...base(),
         currentThreadId: "context-thread",
-        contextAnimation: { compactFromPercent: 90, compactTick: 0, flashTicks: 0, flashed75: false, flashed90: false },
+        contextAnimation: {
+          munchTick: 0,
+          compactFromPercent: 90,
+          compactTick: 0,
+          flashTicks: 0,
+          flashed75: false,
+          flashed90: false,
+        },
         contextUsage: {
           _tag: "Available",
           inputCacheRead: 0,
@@ -309,7 +317,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       {
         ...base(),
         currentThreadId: "context-thread",
-        contextAnimation: { flashTicks: 2, flashed75: true, flashed90: false },
+        contextAnimation: { munchTick: 0, flashTicks: 2, flashed75: true, flashed90: false },
         contextUsage: {
           _tag: "Available",
           inputCacheRead: 0,

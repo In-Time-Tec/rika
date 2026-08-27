@@ -15,6 +15,7 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
   const previousUsage = contextPercent(before.contextUsage)
   const currentUsage = contextPercent(usage ?? after.contextUsage)
   const previousAnimation = after.contextAnimation
+  const munchTick = ticked && after.busy ? previousAnimation.munchTick + 1 : previousAnimation.munchTick
   let flashTicks = ticked ? Math.max(0, previousAnimation.flashTicks - 1) : previousAnimation.flashTicks
   let flashed75 = previousAnimation.flashed75
   let flashed90 = previousAnimation.flashed90
@@ -50,6 +51,7 @@ const advanceAnimationImpl = (before: Model, after: Model, usage?: ContextUsage)
     } else compactTick += 1
   }
   const baseAnimation = {
+    munchTick,
     flashTicks,
     flashed75,
     flashed90,

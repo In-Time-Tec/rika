@@ -211,7 +211,12 @@ const reduceExecutionImpl = (
         activeTurnId: message.turnId,
         busy: true,
         activity: { _tag: "Waiting" },
-        contextAnimation: { flashTicks: 0, flashed75: false, flashed90: false },
+        contextAnimation: {
+          munchTick: model.contextAnimation.munchTick,
+          flashTicks: 0,
+          flashed75: false,
+          flashed90: false,
+        },
       }
     }
     case "BlockAdded": {

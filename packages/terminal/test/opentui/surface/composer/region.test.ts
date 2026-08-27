@@ -3,15 +3,16 @@ import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
-import { initial } from "../../../../src/state/model"
+import { initial, type Model } from "../../../../src/state/model"
 import { canSubmit, update } from "../../../../src/state/reducer/model"
 import { modePickerContent } from "../../../../src/opentui/surface/composer/region"
 import { modeSelectorLabels } from "../../../../src/presentation/terminal/mode-selector-layout"
 import { animationActive, welcomeContent } from "../../../../src/opentui/surface/content"
 import { welcomeAnimationActive } from "../../../../src/opentui/surface/welcome/state"
 import { Surface } from "../../../../src/opentui/surface/service"
-import { colors } from "../../../../src/presentation/terminal/theme"
-import { meterGlyphs } from "../../../../src/state/context/glyph"
+import { colors, modeColor } from "../../../../src/presentation/terminal/theme"
+import { meterGlyphs, muncherGlyphs } from "../../../../src/state/context/glyph"
+import { toOpenColor } from "../../../../src/opentui/rendering/text-adapter"
 
 const key = (name: string) => ({
   name,
@@ -132,14 +133,87 @@ it.effect("renders responsive context tracks and per-cell mode commit wipe color
       },
       modeCommit: { from: "medium", to: "high", tick: 2 },
     })
-    const filled = modeLabel().filter((chunk) => chunk.text === meterGlyphs.fill)
-    expect(filled).toHaveLength(4)
-    expect(filled.map((chunk) => chunk.fg)).toEqual([
+    const utilized = modeLabel().filter(
+      (chunk) =>
+        chunk.text === meterGlyphs.fill || chunk.text === muncherGlyphs.open || chunk.text === muncherGlyphs.closed,
+    )
+    expect(utilized).toHaveLength(4)
+    expect(utilized.map((chunk) => chunk.fg)).toEqual([
       fg(colors.high)(meterGlyphs.fill).fg,
       fg(colors.high)(meterGlyphs.fill).fg,
       fg(colors.medium)(meterGlyphs.fill).fg,
       fg(colors.medium)(meterGlyphs.fill).fg,
     ])
+  }).pipe(Effect.scoped),
+)
+
+it.effect("keeps the Pac-Man context meter visible and freezes it when the agent becomes idle", () =>
+  Effect.gen(function* () {
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    const surface = yield* Effect.acquireRelease(
+      Effect.sync(
+        () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
+      ),
+      (value) => Effect.sync(() => value.destroy()),
+    )
+    const contextUsage = {
+      _tag: "Available" as const,
+      inputTokens: 50,
+      inputCacheRead: 25,
+      inputTotal: 50,
+      contextWindow: 100,
+      reserveTokens: 0,
+    }
+    let model: Model = {
+      ...initial("/work", "high"),
+      currentThreadId: "thread",
+      busy: true,
+      activity: { _tag: "Streaming" as const, bytes: 20 },
+      contextUsage,
+      contextDetailsOpen: true,
+    }
+    model = update(model, { _tag: "AnimationTicked" })
+    surface.update(model)
+    expect(text(surface.modeLabel.content.chunks)).toContain(muncherGlyphs.closed)
+    expect(text(surface.palette.content.chunks)).toContain(muncherGlyphs.closed)
+
+    model = update({ ...model, busy: false, activity: undefined }, { _tag: "AnimationTicked" })
+    surface.update(model)
+    expect(text(surface.modeLabel.content.chunks)).toContain(muncherGlyphs.closed)
+    expect(text(surface.palette.content.chunks)).toContain(muncherGlyphs.closed)
+    expect(text(surface.modeLabel.content.chunks)).toContain(meterGlyphs.pellet)
+    expect(text(surface.palette.content.chunks)).toContain(meterGlyphs.pellet)
+
+    model = update({ ...model, busy: true, activity: { _tag: "Waiting" } }, { _tag: "AnimationTicked" })
+    surface.update(model)
+    expect(text(surface.modeLabel.content.chunks)).toContain(muncherGlyphs.open)
+    expect(text(surface.palette.content.chunks)).toContain(muncherGlyphs.open)
+  }).pipe(Effect.scoped),
+)
+
+it.effect("colors the Orb composer cutout with every selected mode", () =>
+  Effect.gen(function* () {
+    const setup = yield* Effect.acquireRelease(
+      Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+      (value) => Effect.sync(() => value.renderer.destroy()),
+    )
+    const surface = yield* Effect.acquireRelease(
+      Effect.sync(
+        () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
+      ),
+      (value) => Effect.sync(() => value.destroy()),
+    )
+    for (const mode of ["low", "medium", "high", "ultra"] as const) {
+      surface.update({
+        ...initial("/work", mode),
+        connection: { connectivity: "connected", target: "orb", participants: 1 },
+      })
+      expect(surface.inputBox.title).toBe(" Orb ")
+      expect(surface.inputBox.titleColor).toEqual(toOpenColor(modeColor(mode)))
+    }
   }).pipe(Effect.scoped),
 )
 
