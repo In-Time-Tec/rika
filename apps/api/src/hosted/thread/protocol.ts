@@ -57,7 +57,7 @@ export class HostedThreadProtocolError extends Schema.TaggedError<HostedThreadPr
   },
 ) {}
 
-const unavailable = (message = "Hosted Thread protocol is unavailable") =>
+const unavailable = (message = "Thread protocol is unavailable") =>
   HostedThreadProtocolError.make({ kind: "unavailable", message })
 const productFailure = (error: HostedProductError) =>
   HostedThreadProtocolError.make({
@@ -96,6 +96,7 @@ interface MutableCreateConnectionInput {
   executorKind: CreateConnectionInput["executorKind"]
   runnerTarget?: NonNullable<CreateConnectionInput["runnerTarget"]>
   threadId: NonNullable<CreateConnectionInput["threadId"]>
+  archiveThreadId?: NonNullable<CreateConnectionInput["archiveThreadId"]>
 }
 
 const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): ServerFrame["payload"] => {
@@ -366,6 +367,12 @@ export const layerWithOptions = (
               }
               if (command.projectId !== undefined) createInput.projectId = command.projectId
               if (command.runnerTarget !== undefined) createInput.runnerTarget = command.runnerTarget
+              if (command.archiveThreadId !== undefined) {
+                yield* product
+                  .authorizeThread(principal, command.archiveThreadId, "thread:control")
+                  .pipe(Effect.mapError(productFailure))
+                createInput.archiveThreadId = command.archiveThreadId
+              }
               const created = yield* product.createConnection(createInput).pipe(Effect.mapError(productFailure))
               const threadId = ThreadId.make(created.threadId)
               const authority = yield* product
@@ -426,8 +433,7 @@ export const layerWithOptions = (
                   threshold: HostedObservability.replayLagAlertEvents,
                 })
               const replaySnapshot = replay.snapshot
-              if (replaySnapshot === undefined)
-                return yield* unavailable("Hosted Thread replay has no durable snapshot")
+              if (replaySnapshot === undefined) return yield* unavailable("Thread replay has no durable snapshot")
               const replayEvents = [...replay.events]
               const snapshotCursor = replaySnapshot?.cursor ?? zeroCursor
               const snapshotThreadVersion = replaySnapshot?.threadVersion ?? replay.threadVersion
@@ -445,22 +451,22 @@ export const layerWithOptions = (
                   })
                   .pipe(Effect.mapError(storeFailure))
                 if (page.events.length === 0)
-                  return yield* unavailable("Hosted Thread replay does not continuously represent its cursor")
+                  return yield* unavailable("Thread replay does not continuously represent its cursor")
                 replayEvents.push(...page.events)
                 if (replayEvents.length > maximumAttachmentEvents)
-                  return yield* unavailable("Hosted Thread replay exceeds the attachment event limit")
+                  return yield* unavailable("Thread replay exceeds the attachment event limit")
                 representedCursor = page.events.at(-1)!.cursor
               }
               let expectedCursor = BigInt(snapshotCursor) + 1n
               for (const event of replayEvents) {
                 if (BigInt(event.cursor) !== expectedCursor)
                   return yield* unavailable(
-                    `Hosted Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
+                    `Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
                   )
                 expectedCursor += 1n
               }
               if (representedCursor !== replay.cursor)
-                return yield* unavailable("Hosted Thread replay terminal cursor is not represented")
+                return yield* unavailable("Thread replay terminal cursor is not represented")
               const representedThreadVersion = replayEvents.at(-1)?.threadVersion ?? snapshotThreadVersion
               const snapshot =
                 options.workspacePlacement === undefined
@@ -514,7 +520,7 @@ export const layerWithOptions = (
               })
               const encodedAttachment = encodeUnknownJson(attachment)
               if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
-                return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
+                return yield* unavailable("Thread replay exceeds the attachment byte limit")
               const previewSubscription = yield* previews.subscribe(command.threadId)
               if (attached !== undefined) yield* attached.previewSubscription.close
               attached = {
@@ -808,11 +814,11 @@ export const layerWithOptions = (
                   })
                   .pipe(Effect.mapError(storeFailure))
                 if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.cursor))
-                  return yield* unavailable("Hosted Thread replay gap has no newer durable snapshot")
+                  return yield* unavailable("Thread replay gap has no newer durable snapshot")
                 expectedCursor = BigInt(replay.snapshot.cursor) + 1n
                 for (const event of replay.events) {
                   if (BigInt(event.cursor) !== expectedCursor)
-                    return yield* unavailable("Hosted Thread replay remains discontinuous after its durable snapshot")
+                    return yield* unavailable("Thread replay remains discontinuous after its durable snapshot")
                   expectedCursor += 1n
                 }
               }

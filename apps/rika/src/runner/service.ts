@@ -135,7 +135,7 @@ export const liveAdmissionLayer = Layer.effect(
                 message:
                   result.reason === "runner-owned"
                     ? "another Rika process owns this Runner checkout"
-                    : "the hosted Thread has no admitted Runner work yet",
+                    : "the Thread has no admitted Runner work yet",
               })
             }
             yield* Effect.sleep("1 second")

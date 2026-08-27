@@ -104,7 +104,7 @@ const dispatcherLayer = () =>
             if (input._tag !== "Interactive")
               return yield* ProductOperation.OperationUnavailable.make({
                 operation: input._tag,
-                message: `${input._tag} has no hosted command implementation`,
+                message: `${input._tag} is not implemented`,
               })
             return yield* Effect.scoped(
               Effect.gen(function* () {

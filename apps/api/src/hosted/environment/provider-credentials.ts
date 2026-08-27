@@ -335,8 +335,8 @@ export const storeLayer = (options: { readonly encryptionKey: Redacted.Redacted<
               })
             }),
           ),
-        save: () => Effect.fail(storeError("unsafe", "Hosted credentials require an authenticated write")),
-        remove: () => Effect.fail(storeError("unsafe", "Hosted credentials require an authenticated revoke")),
+        save: () => Effect.fail(storeError("unsafe", "Provider credentials require an authenticated write")),
+        remove: () => Effect.fail(storeError("unsafe", "Provider credentials require an authenticated revoke")),
       })
     }),
   ).pipe(Layer.provide(secretCipherLayer({ encodedKey: options.encryptionKey, domain: "provider-credential" })))

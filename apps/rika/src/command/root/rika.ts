@@ -122,7 +122,7 @@ export const command = Command.make(
     return interactiveCommand(values)
   },
 ).pipe(
-  Command.withDescription("Hosted durable coding agent"),
+  Command.withDescription("Rika coding agent"),
   Command.withSubcommands([
     runCommand,
     threadCommand,

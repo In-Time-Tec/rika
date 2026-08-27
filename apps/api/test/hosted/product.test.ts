@@ -14,6 +14,7 @@ import {
   rikaHostedThreadGrants,
   rikaHostedThreads,
   rikaHostedWorkspaces,
+  rikaThreads,
   rikaThreadQueueState,
   rikaTurnAdmissionOutbox,
   rikaTurns,
@@ -167,6 +168,82 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
         name: "Divergent retry",
       })
       expect(yield* failureKind(product.createConnection({ ...input, projectId: project.id }))).toBe("conflict")
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("atomically archives a Thread while creating its replacement", () =>
+  withDatabase("atomic-replacement", (database) =>
+    Effect.gen(function* () {
+      const authenticated = principal("atomic-replacement-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      const product = yield* HostedProduct
+      const base = {
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        executorKind: "orb" as const,
+      }
+      yield* product.createConnection({ ...base, threadId: "source-thread" })
+      yield* product.createConnection({ ...base, threadId: "other-source-thread" })
+      const replacement = {
+        ...base,
+        threadId: "replacement-thread",
+        archiveThreadId: "source-thread",
+      }
+      const created = yield* product.createConnection(replacement)
+      expect(yield* product.createConnection(replacement)).toEqual(created)
+      expect(
+        yield* failureKind(product.createConnection({ ...replacement, archiveThreadId: "other-source-thread" })),
+      ).toBe("conflict")
+      expect(
+        yield* failureKind(
+          product.createConnection({ ...base, threadId: "missing-replacement", archiveThreadId: "missing-thread" }),
+        ),
+      ).toBe("not-found")
+      expect(
+        yield* failureKind(
+          product.createConnection({ ...base, threadId: "self-replacement", archiveThreadId: "self-replacement" }),
+        ),
+      ).toBe("conflict")
+      expect(
+        yield* Effect.tryPromise(() =>
+          database
+            .select({ id: rikaThreads.id, archived: rikaThreads.archived })
+            .from(rikaThreads)
+            .where(inArray(rikaThreads.id, ["source-thread", "other-source-thread", "replacement-thread"]))
+            .orderBy(asc(rikaThreads.id)),
+        ),
+      ).toEqual([
+        { id: "other-source-thread", archived: 0 },
+        { id: "replacement-thread", archived: 0 },
+        { id: "source-thread", archived: 1 },
+      ])
+      expect(
+        yield* Effect.tryPromise(() =>
+          database
+            .select({ archiveSourceThreadId: rikaHostedThreads.archiveSourceThreadId })
+            .from(rikaHostedThreads)
+            .where(eq(rikaHostedThreads.id, "replacement-thread")),
+        ),
+      ).toEqual([{ archiveSourceThreadId: "source-thread" }])
+      expect(
+        yield* Effect.tryPromise(() =>
+          database.$count(
+            rikaHostedThreads,
+            inArray(rikaHostedThreads.id, ["missing-replacement", "self-replacement"]),
+          ),
+        ),
+      ).toBe(0)
     }),
   ),
 )

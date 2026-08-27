@@ -2,7 +2,7 @@ import { Argument, Command } from "effect/unstable/cli"
 import { dispatch } from "../root/hosted"
 
 export const organizationCommand = Command.make("org").pipe(
-  Command.withDescription("Manage hosted Rika organizations"),
+  Command.withDescription("Manage Rika organizations"),
   Command.withSubcommands([
     Command.make("list", {}, () => dispatch({ _tag: "Organization", action: "list" })),
     Command.make("personal", {}, () => dispatch({ _tag: "Organization", action: "personal" })),

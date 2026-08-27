@@ -12,6 +12,6 @@ const use = Command.make("use", { project: Argument.string("project") }, ({ proj
 )
 
 export const projectCommand = Command.make("project").pipe(
-  Command.withDescription("Create, list, and select hosted Projects"),
+  Command.withDescription("Create, list, and select Projects"),
   Command.withSubcommands([list, create, use]),
 )

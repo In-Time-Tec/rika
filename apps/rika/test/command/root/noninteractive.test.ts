@@ -146,7 +146,7 @@ it.effect("renders help without dispatching an operation", () =>
       }),
       layer,
     )
-    expect(output.join("\n")).toContain("Hosted durable coding agent")
+    expect(output.join("\n")).toContain("Rika coding agent")
     expect(output.join("\n")).toContain("diagnostics")
     yield* execute(run(["diagnostics", "--help"]), layer)
     expect((yield* TestConsole.logLines).join("\n")).toContain("performance")
@@ -408,7 +408,7 @@ it.effect("renders version and branch help without dispatching", () =>
       layer,
     )
     expect(output.join("\n")).toContain("0.0.0")
-    expect(output.join("\n")).toContain("Create or continue hosted durable Threads")
+    expect(output.join("\n")).toContain("Create or continue durable Threads")
     expect(yield* Ref.get(calls)).toEqual([])
   }),
 )

@@ -4,7 +4,7 @@ import * as InteractiveSession from "@rika/product/interactive-session"
 import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
-import { CredentialStore, HostedError, ThreadClient, Http, ProfileStore } from "./contract"
+import { CredentialStore, HostedError, HostedThreadId, ThreadClient, Http, ProfileStore } from "./contract"
 import { authenticated, selectedProfile } from "./account"
 import * as HostedInteractiveSession from "./interactive-session"
 import { preferencePath, prepareRunnerCheckout, type PreparedRunnerCheckout } from "../runner/service"
@@ -137,7 +137,10 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     const threads = yield* ThreadClient
     const crypto = yield* Crypto.Crypto
     const credentials = yield* CredentialStore
-    const createThread = (executorKind: "runner" | "orb"): Effect.Effect<string, HostedError> =>
+    const createThread = (
+      executorKind: "runner" | "orb",
+      archiveThreadId?: string,
+    ): Effect.Effect<string, HostedError> =>
       Effect.gen(function* () {
         const prepared = executorKind === "runner" ? yield* prepare : undefined
         const commandId = yield* crypto.randomUUIDv4
@@ -149,6 +152,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
           executorKind,
         }
         if (profile.project !== undefined) createInput.project = profile.project
+        if (archiveThreadId !== undefined) createInput.archiveThreadId = HostedThreadId.make(archiveThreadId)
         if (executorKind === "runner" && prepared !== undefined)
           createInput.runnerTarget = {
             deviceId: prepared.checkout.registration.deviceId,
@@ -168,7 +172,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     const hosted = yield* HostedInteractiveSession.makeHostedInteractiveSession({
       profile,
       threadId,
-      createThread: (executorKind) => createThread(executorKind).pipe(Effect.map(String)),
+      createThread,
     })
     const runnerReady = yield* Deferred.make<void>()
     let runnerConnected = false

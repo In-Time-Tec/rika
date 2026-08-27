@@ -109,7 +109,7 @@ const timestampText = (column: SQLWrapper) =>
 type DatabaseExecutor = Pick<PgDrizzle.EffectPgDatabase, "insert" | "select" | "update">
 
 const databaseError = (cause: unknown) =>
-  StoreError.make({ reason: "database", message: `Hosted PostgreSQL operation failed: ${String(cause)}` })
+  StoreError.make({ reason: "database", message: `PostgreSQL operation failed: ${String(cause)}` })
 const failure = (reason: StoreError["reason"], message: string) => StoreError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))

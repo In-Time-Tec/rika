@@ -283,6 +283,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
   const store = memoryStore()
   const notifications = makeThreadProtocolNotifications()
   let selectedOwner: OwnerSelection | undefined
+  let archiveThreadId: string | undefined
   const applied: Array<string> = []
   const admittedRuns: Array<Parameters<HostedProductService["admitRun"]>[0]> = []
   const authorizedActions: Array<AuthorizationAction> = []
@@ -318,6 +319,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
           )
         : Effect.sync(() => {
             selectedOwner = input.owner
+            archiveThreadId = input.archiveThreadId
             return { threadId }
           }),
     admitRun: (input) =>
@@ -424,6 +426,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
             deviceId,
             checkoutFingerprint: CheckoutFingerprint.make("checkout-1"),
           },
+          archiveThreadId: ThreadId.make("source-thread"),
         },
       })
       expect(created[0]?.payload).toMatchObject({
@@ -457,6 +460,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         _tag: "PersonalOwner",
         userId: "user-1",
       })
+      expect(archiveThreadId).toBe("source-thread")
       store.dropSnapshot()
       expect(
         yield* first.receive({

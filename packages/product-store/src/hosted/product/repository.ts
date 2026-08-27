@@ -108,6 +108,7 @@ export interface ProductRepositoryService {
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: { readonly deviceId: string; readonly checkoutFingerprint: string }
     readonly threadId: string
+    readonly archiveThreadId?: string
   }) => Effect.Effect<
     Extract<CreateConnectionResult, { readonly _tag: "Existing" | "Incompatible" }> | undefined,
     ProductRepositoryError
@@ -119,6 +120,7 @@ export interface ProductRepositoryService {
     readonly runnerTarget?: { readonly deviceId: string; readonly checkoutFingerprint: string }
     readonly requestingDeviceId: string
     readonly threadId: string
+    readonly archiveThreadId?: string
     readonly workspaceId: string
     readonly assignmentId: string
     readonly placement: JsonObject
@@ -356,6 +358,7 @@ const make = Effect.gen(function* () {
     query(
       db
         .select({
+          archiveSourceThreadId: rikaHostedThreads.archiveSourceThreadId,
           ownerId: rikaHostedThreads.ownerId,
           projectId: rikaHostedThreads.projectId,
           createdByUserId: rikaHostedThreads.createdByUserId,
@@ -377,6 +380,7 @@ const make = Effect.gen(function* () {
             placement.value.deviceId === input.runnerTarget.deviceId &&
             placement.value.checkoutFingerprint === input.runnerTarget.checkoutFingerprint)
         return existing.ownerId === input.authority.ownerId &&
+          existing.archiveSourceThreadId === (input.archiveThreadId ?? null) &&
           existing.projectId === input.projectId &&
           existing.createdByUserId === input.authority.userId &&
           existing.executorKind === input.executorKind &&
@@ -386,8 +390,15 @@ const make = Effect.gen(function* () {
       }),
     )
 
-  const createConnection: ProductRepositoryService["createConnection"] = (input) =>
-    db
+  const createConnection: ProductRepositoryService["createConnection"] = (input) => {
+    if (input.archiveThreadId === input.threadId)
+      return Effect.fail(
+        ProductRepositoryError.make({
+          kind: "conflict",
+          message: "A replacement Thread cannot archive itself",
+        }),
+      )
+    return db
       .transaction((tx) =>
         Effect.gen(function* () {
           yield* tx
@@ -397,6 +408,7 @@ const make = Effect.gen(function* () {
           const existing = (yield* query(
             tx
               .select({
+                archiveSourceThreadId: rikaHostedThreads.archiveSourceThreadId,
                 ownerId: rikaHostedThreads.ownerId,
                 projectId: rikaHostedThreads.projectId,
                 createdByUserId: rikaHostedThreads.createdByUserId,
@@ -419,12 +431,28 @@ const make = Effect.gen(function* () {
                 placement.value.deviceId === input.runnerTarget.deviceId &&
                 placement.value.checkoutFingerprint === input.runnerTarget.checkoutFingerprint)
             return existing.ownerId === input.authority.ownerId &&
+              existing.archiveSourceThreadId === (input.archiveThreadId ?? null) &&
               existing.projectId === input.projectId &&
               existing.createdByUserId === input.authority.userId &&
               existing.executorKind === input.executorKind &&
               runnerCompatible
               ? { _tag: "Existing" as const, threadId: input.threadId }
               : { _tag: "Incompatible" as const }
+          }
+          if (input.archiveThreadId !== undefined) {
+            const source = yield* query(
+              tx
+                .select({ id: rikaThreads.id })
+                .from(rikaThreads)
+                .where(and(eq(rikaThreads.id, input.archiveThreadId), eq(rikaThreads.ownerId, input.authority.ownerId)))
+                .for("update")
+                .limit(1),
+            )
+            if (source[0] === undefined)
+              return yield* ProductRepositoryError.make({
+                kind: "not-found",
+                message: "Thread is unavailable",
+              })
           }
           if (input.runnerTarget !== undefined) {
             const runner = (yield* query(
@@ -480,6 +508,7 @@ const make = Effect.gen(function* () {
               .insert(rikaHostedThreads)
               .values({
                 id: input.threadId,
+                archiveSourceThreadId: input.archiveThreadId ?? null,
                 ownerId: input.authority.ownerId,
                 projectId: input.projectId,
                 workspaceId,
@@ -540,10 +569,19 @@ const make = Effect.gen(function* () {
               })
               .returning({ id: rikaHostedExecutorAssignments.id }),
           )
+          if (input.archiveThreadId !== undefined)
+            yield* query(
+              tx
+                .update(rikaThreads)
+                .set({ archived: 1, updatedAt: input.nowMillis })
+                .where(and(eq(rikaThreads.id, input.archiveThreadId), eq(rikaThreads.ownerId, input.authority.ownerId)))
+                .returning({ id: rikaThreads.id }),
+            )
           return { _tag: "Created" as const, threadId: input.threadId }
         }),
       )
       .pipe(Effect.mapError((error) => (Schema.is(ProductRepositoryError)(error) ? error : databaseError(error))))
+  }
 
   const threadAuthority: ProductRepositoryService["threadAuthority"] = (userId, threadId) =>
     query(

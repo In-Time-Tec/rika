@@ -82,7 +82,7 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
         ).pipe(
           Effect.catchCause((cause) => {
             if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-            const message = "Hosted projection worker failed"
+            const message = "Projection worker failed"
             return Clock.currentTimeMillis.pipe(
               Effect.flatMap((at) =>
                 SubscriptionRef.update(health, (state) => ({ ...state, lastFailure: { at, message } })),
@@ -131,7 +131,7 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
       }).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          const message = "Hosted projection worker poll failed"
+          const message = "Projection worker poll failed"
           return Clock.currentTimeMillis.pipe(
             Effect.flatMap((at) =>
               SubscriptionRef.update(health, (state) => ({
@@ -174,15 +174,13 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
             if (state.poll._tag === "Starting")
               return Effect.fail(
                 HostedProjectionWorkerError.make({
-                  message: "Hosted projection worker has not completed its first poll",
+                  message: "Projection worker has not completed its first poll",
                 }),
               )
             if (state.poll._tag === "Failed")
               return Effect.fail(HostedProjectionWorkerError.make({ message: state.poll.message }))
             if (state.pollAgeMillis !== undefined && state.pollAgeMillis > options.pollIntervalMillis * 4)
-              return Effect.fail(
-                HostedProjectionWorkerError.make({ message: "Hosted projection worker poll is stale" }),
-              )
+              return Effect.fail(HostedProjectionWorkerError.make({ message: "Projection worker poll is stale" }))
             return Effect.void
           }),
         ),

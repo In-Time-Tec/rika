@@ -3,7 +3,7 @@ import { Argument, Command, Flag } from "effect/unstable/cli"
 import { dispatch } from "../root/hosted"
 
 export const authCommand = Command.make("auth").pipe(
-  Command.withDescription("Manage your hosted Rika identity"),
+  Command.withDescription("Manage your Rika identity"),
   Command.withSubcommands([
     Command.make(
       "login",

@@ -181,13 +181,17 @@ test(
 )
 
 test(
-  "archives the current thread and activates a new empty thread with Ctrl+N",
+  "archives the current thread and activates a new empty thread with Ctrl+N without a ThreadActivated event",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [model.text("CURRENT_THREAD_READY")],
           inspectTranscript: true,
+          mapInteractiveEvent: (event) =>
+            event._tag === "ThreadActivated" && event.threadId === "tui-thread-1"
+              ? { _tag: "AssistantCompleted", text: "" }
+              : event,
         })
 
         yield* createCurrentThread(app)

@@ -181,6 +181,7 @@ export interface ThreadClientInterface {
     readonly project?: string
     readonly executorKind: ExecutorKind
     readonly runnerTarget?: RunnerTarget
+    readonly archiveThreadId?: HostedThreadId
   }) => Effect.Effect<HostedThreadId, HostedError>
   readonly submit: (input: {
     readonly ticket: ClientTicketResponse

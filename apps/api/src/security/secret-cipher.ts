@@ -25,7 +25,7 @@ export const makeSecretCipher = (input: {
 }): SecretCipher => {
   const { encodedKey, domain } = input
   const key = Buffer.from(Redacted.value(encodedKey), "base64")
-  if (key.byteLength !== 32) throw new Error("Hosted secret encryption key must contain 32 bytes")
+  if (key.byteLength !== 32) throw new Error("Secret encryption key must contain 32 bytes")
   return {
     encrypt: (identity, value) => {
       const nonce = randomBytes(12)

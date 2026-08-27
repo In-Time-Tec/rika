@@ -28,6 +28,6 @@ const revoke = Command.make("revoke", { provider: providerArgument }, ({ provide
 )
 
 export const credentialCommand = Command.make("credential").pipe(
-  Command.withDescription("Manage hosted model-provider credentials for the selected owner"),
+  Command.withDescription("Manage model-provider credentials for the selected owner"),
   Command.withSubcommands([put("set"), list, put("rotate"), revoke]),
 )
