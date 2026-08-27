@@ -4,6 +4,7 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface } from "../../../../src/opentui/surface/service"
+import { tentativeTranscriptContainsMarkdown } from "../../../../src/opentui/surface/transcript/renderables"
 import {
   boundedTranscriptModel,
   maxBoundedTranscriptItems,
@@ -24,6 +25,15 @@ import {
   giantSubagentModel,
   collapsedSubagentModel,
 } from "../../../support/surface/transcript/pane-geometry.fixture"
+
+test("keeps streamed prose incremental until Markdown syntax appears", () => {
+  const prose = "Hello. How are you?\nThis stays incremental."
+  expect(tentativeTranscriptContainsMarkdown({ text: prose, sourceLength: "Hello".length })).toBe(false)
+  expect(
+    tentativeTranscriptContainsMarkdown({ text: `${prose}\n\n- This is Markdown`, sourceLength: prose.length }),
+  ).toBe(true)
+})
+
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

@@ -21,6 +21,7 @@ import type { InteractiveSession } from "@rika/product/interactive-session"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import type * as InteractiveConnection from "@rika/product/interactive-connection"
+import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
@@ -35,6 +36,7 @@ type Accepted = Extract<Payload, { readonly _tag: "CommandAccepted" }>
 type Rejected = Extract<Payload, { readonly _tag: "CommandRejected" }>
 type Snapshot = Extract<Payload, { readonly _tag: "ThreadSnapshot" }>
 type Attachment = Extract<Payload, { readonly _tag: "ThreadAttached" }>
+type Preview = Extract<Payload, { readonly _tag: "ThreadPreview" }>
 type SnapshotProjection = Pick<Snapshot, "threadId" | "threadVersion" | "cursor" | "snapshot">
 type CancellationTarget = Extract<MutatingThreadCommand, { readonly _tag: "Cancel" }>["target"]
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
@@ -407,6 +409,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const latestSubmitCommandIds = new Map<string, string>()
   const pendingSubmitCommandIds = new Map<string, Map<string, PendingSubmission>>()
   const threadCursors = new Map<string, string>()
+  const activePreviews = new Map<string, Preview>()
   let connectionChanged = Deferred.makeUnsafe<void>()
   const updateState = (update: (previousState: InteractiveConnection.State) => InteractiveConnection.State) =>
     SubscriptionRef.updateSome(state, (previousState) => {
@@ -507,6 +510,32 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const selectedFrame = (threadId: string) =>
     selection._tag === "Attached" ? selection.projection.threadId === threadId : selection.threadId === threadId
   const currentFrame = (connection: PhysicalConnection) => current === connection || connecting === connection
+  const resetPreviews = (threadId: string) => {
+    for (const [key, payload] of activePreviews) {
+      if (String(payload.threadId) !== threadId) continue
+      dispatch({
+        _tag: "ExecutionModelPreviewChanged",
+        threadId: ProductThreadId.make(payload.threadId),
+        turnId: payload.turnId,
+        preview:
+          payload.preview.parentId === undefined
+            ? {
+                _tag: "ModelPreviewCleared",
+                runId: payload.preview.runId,
+                attemptFence: payload.preview.attemptFence,
+                generation: 0,
+              }
+            : {
+                _tag: "ModelPreviewCleared",
+                runId: payload.preview.runId,
+                parentId: payload.preview.parentId,
+                attemptFence: payload.preview.attemptFence,
+                generation: 0,
+              },
+      })
+      activePreviews.delete(key)
+    }
+  }
   const projectionActivity = (
     view: ThreadView.ThreadViewSnapshot,
     pendingAuthorizations: ReadonlyArray<unknown>,
@@ -683,6 +712,24 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     })
   const receive = (payload: Payload, connection: PhysicalConnection) =>
     Effect.gen(function* () {
+      if (payload._tag === "ThreadPreview" || payload._tag === "ThreadPreviewReset") {
+        const threadId = String(payload.threadId)
+        if (!currentFrame(connection) || !selectedFrame(threadId)) return
+        if (payload._tag === "ThreadPreviewReset") {
+          resetPreviews(threadId)
+          return
+        }
+        const key = `${threadId}:${payload.turnId}:${payload.preview.runId}`
+        if (payload.preview._tag === "ModelPreview") activePreviews.set(key, payload)
+        else activePreviews.delete(key)
+        dispatch({
+          _tag: "ExecutionModelPreviewChanged",
+          threadId: ProductThreadId.make(payload.threadId),
+          turnId: payload.turnId,
+          preview: payload.preview,
+        })
+        return
+      }
       if (payload._tag === "PresenceSnapshot") {
         if (!currentFrame(connection) || !selectedFrame(String(payload.threadId))) return
         const projection = authority()!
@@ -868,6 +915,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           return Effect.void
         const previous = authority()
         const request = { threadId, token: {} }
+        if (previous !== undefined && previous.threadId !== threadId) resetPreviews(previous.threadId)
         selection = { _tag: "Loading", ...request, authority: previous }
         const attachment = attachSelection(request)
         const resolution =
@@ -937,6 +985,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               }).pipe(
                 Effect.ensuring(
                   Effect.sync(() => {
+                    const threadId = authority()?.threadId
+                    if (threadId !== undefined) resetPreviews(threadId)
                     publishConnection(undefined)
                   }),
                 ),

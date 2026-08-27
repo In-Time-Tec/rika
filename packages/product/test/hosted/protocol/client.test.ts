@@ -290,6 +290,26 @@ describe("hosted Thread client protocol", () => {
           snapshot,
         },
       },
+      {
+        protocolVersion,
+        payload: {
+          _tag: "ThreadPreview",
+          threadId,
+          turnId: "turn",
+          preview: {
+            _tag: "ModelPreview",
+            runId: "run",
+            attemptFence: 1,
+            turn: 0,
+            modelCallId: "call",
+            modelAttemptId: "attempt",
+            attempt: 1,
+            sequence: 0,
+            changes: [{ channel: "text", offset: 0, delta: "Hello" }],
+          },
+        },
+      },
+      { protocolVersion, payload: { _tag: "ThreadPreviewReset", threadId } },
       { protocolVersion, payload: { _tag: "Heartbeat", at: now } },
     ]
     expect(frames.map((frame) => roundTrip(ServerFrame, frame))).toEqual(frames)

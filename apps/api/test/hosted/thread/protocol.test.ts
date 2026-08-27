@@ -45,6 +45,7 @@ import {
   layerWithOptions as hostedThreadProtocolLayerWithOptions,
 } from "../../../src/hosted/thread/protocol"
 import { makeThreadProtocolNotifications } from "../../../src/hosted/thread/notifications"
+import { makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
 import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
 import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../../../src/hosted/environment/workspace"
@@ -399,8 +400,13 @@ it.effect("derives personal authority, admits a retried submission once, and res
   )
   return Effect.scoped(
     Effect.gen(function* () {
+      const previews = yield* makeHostedPreviewBus()
       const protocol = Context.get(
-        yield* Layer.build(hostedThreadProtocolLayerWithOptions({ notifications }).pipe(Layer.provide(dependencies))),
+        yield* Layer.build(
+          hostedThreadProtocolLayerWithOptions({ notifications, previews: previews.bus }).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
         HostedThreadProtocol,
       )
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
@@ -472,6 +478,37 @@ it.effect("derives personal authority, admits a retried submission once, and res
             snapshotCursor: "0",
             snapshot,
             events: [],
+          },
+        },
+      ])
+      previews.bus.publish({
+        ownerId,
+        threadId,
+        turnId: TurnId.make("turn-preview"),
+        preview: {
+          _tag: "ModelPreview",
+          runId: "run-preview",
+          attemptFence: 1,
+          turn: 0,
+          modelCallId: "call-preview",
+          modelAttemptId: "attempt-preview",
+          attempt: 1,
+          sequence: 0,
+          changes: [{ channel: "text", offset: 0, delta: "Hello" }],
+        },
+      })
+      expect(yield* first.outbound).toMatchObject([
+        {
+          protocolVersion,
+          payload: {
+            _tag: "ThreadPreview",
+            threadId,
+            turnId: "turn-preview",
+            preview: {
+              _tag: "ModelPreview",
+              sequence: 0,
+              changes: [{ channel: "text", offset: 0, delta: "Hello" }],
+            },
           },
         },
       ])
@@ -662,6 +699,22 @@ it.effect("derives personal authority, admits a retried submission once, and res
         completedAt: timestamp,
       })
       notifications.publish(threadId)
+      previews.bus.publish({
+        ownerId,
+        threadId: ThreadId.make("thread-2"),
+        turnId: TurnId.make("turn-ready-race"),
+        preview: {
+          _tag: "ModelPreview",
+          runId: "run-ready-race",
+          attemptFence: 1,
+          turn: 0,
+          modelCallId: "call-ready-race",
+          modelAttemptId: "attempt-ready-race",
+          attempt: 1,
+          sequence: 0,
+          changes: [{ channel: "text", offset: 0, delta: "preview" }],
+        },
+      })
       expect(yield* Fiber.join(submitCompletion)).toMatchObject([
         {
           payload: {
@@ -672,6 +725,9 @@ it.effect("derives personal authority, admits a retried submission once, and res
             result: { _tag: "PromptAdmitted", status: "queued" },
           },
         },
+      ])
+      expect(yield* second.outbound).toMatchObject([
+        { payload: { _tag: "ThreadPreview", threadId: "thread-2", turnId: "turn-ready-race" } },
       ])
       expect(
         (yield* second.receive({

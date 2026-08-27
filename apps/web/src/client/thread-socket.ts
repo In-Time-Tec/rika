@@ -83,6 +83,8 @@ const payloadThreadId = (payload: Payload): string | undefined => {
   if (
     payload._tag === "ThreadAttached" ||
     payload._tag === "ThreadSnapshot" ||
+    payload._tag === "ThreadPreview" ||
+    payload._tag === "ThreadPreviewReset" ||
     payload._tag === "WorkspaceFileInspected" ||
     payload._tag === "PortalOpened" ||
     payload._tag === "PresenceSnapshot" ||
@@ -220,7 +222,9 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
           payload._tag === "CommandAccepted" ||
           payload._tag === "CommandRejected" ||
           payload._tag === "ThreadSnapshot" ||
-          payload._tag === "ThreadEvent"
+          payload._tag === "ThreadEvent" ||
+          payload._tag === "ThreadPreview" ||
+          payload._tag === "ThreadPreviewReset"
         )
           quarantine(current, "foreign Thread frame")
         return

@@ -1,4 +1,5 @@
 import { Function, Option, Schema } from "effect"
+import * as ExecutionGateway from "../../execution/gateway/service"
 import * as ExecutionProjection from "../../execution/projection/contract"
 import { InteractiveEventSchema, type InteractiveEvent } from "../../operation/interactive/event"
 import * as Turn from "../../thread/turn/record"
@@ -21,7 +22,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 2 as const
+export const protocolVersion = 3 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 
@@ -381,6 +382,14 @@ const ServerPayload = Schema.Union([
     }),
   ),
   strict(Schema.TaggedStruct("ThreadEvent", { event: ThreadProtocolEvent })),
+  strict(
+    Schema.TaggedStruct("ThreadPreview", {
+      threadId: ThreadId,
+      turnId: Turn.TurnId,
+      preview: ExecutionGateway.ModelPreviewEvent,
+    }),
+  ),
+  strict(Schema.TaggedStruct("ThreadPreviewReset", { threadId: ThreadId })),
   strict(
     Schema.TaggedStruct("WorkspaceFileInspected", {
       requestId: RequestId,

@@ -30,6 +30,7 @@ import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
 import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "../../../src/hosted/thread/application"
+import { HostedPreviewBus } from "../../../src/hosted/thread/previews"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
@@ -101,6 +102,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           }),
           ExecutionSessionLifecycle.layerTest(),
           hostedModelRegistryTestLayer,
+          HostedPreviewBus.memoryLayer,
           Layer.succeed(ThreadProtocolStore, {
             initializeThread: () => Effect.die("unused"),
             admitCommand: () => Effect.die("unused"),
