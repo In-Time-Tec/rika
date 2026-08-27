@@ -622,8 +622,9 @@ export class TranscriptPane {
   private handleWheel(event: MouseEvent): void {
     const direction = event.scroll?.direction
     if (direction !== "up" && direction !== "down") return
-    const delta = Math.max(1, event.scroll?.delta ?? 1)
     event.stopPropagation()
+    if (this.model?.contextDetailsOpen === true) return
+    const delta = Math.max(1, event.scroll?.delta ?? 1)
     this.dispatchViewport({
       _tag: "WheelObserved",
       direction,

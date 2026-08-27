@@ -56,21 +56,17 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
       (value) => fg(modeColor(model.mode))(value),
     )
   else if (availableContext !== undefined) {
-    const streaming = model.busy && model.activity?._tag !== "Compacting"
     const baseAnimation = {
       cells,
-      tick: model.contextAnimation.compactTick ?? model.animationTick,
-      streaming,
+      tick: model.contextAnimation.compactTick ?? model.contextAnimation.munchTick,
+      muncher: true,
       flashTicks: model.contextAnimation.flashTicks,
     }
     const animation: ContextMeter.AnimatedMeterOptions =
       model.contextAnimation.compactFromPercent === undefined
         ? baseAnimation
         : { ...baseAnimation, compactFromPercent: model.contextAnimation.compactFromPercent }
-    const glyphs =
-      streaming || model.contextAnimation.compactFromPercent !== undefined || model.contextAnimation.flashTicks > 0
-        ? ContextMeter.animatedGlyphs(availableContext, animation)
-        : meter.glyphs
+    const glyphs = ContextMeter.animatedGlyphs(availableContext, animation)
     if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(modeColor(model.mode))(glyphs.join("")), bold(fg(modeColor(model.mode))(` ${meter.percent}%`)))
   }

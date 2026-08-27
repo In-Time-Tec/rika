@@ -62,7 +62,7 @@ export const loadingMeter: {
 export interface AnimatedMeterOptions {
   readonly cells: number
   readonly tick: number
-  readonly streaming?: boolean
+  readonly muncher?: boolean
   readonly compactFromPercent?: number
   readonly flashTicks?: number
 }
@@ -82,9 +82,9 @@ export const animatedGlyphs: {
   return Array.from({ length: options.cells }, (_, index) => {
     if (compactFrom > filled && index === visibleFill) return meterGlyphs.vacuum
     if (index === filled - 1 && options.flashTicks !== undefined && options.flashTicks > 0) return meterGlyphs.flash
-    if (index === filled - 1 && options.streaming === true)
+    if (index === filled - 1 && options.muncher === true)
       return options.tick % 2 === 0 ? muncherGlyphs.open : muncherGlyphs.closed
     if (index < visibleFill) return meterGlyphs.fill
-    return options.streaming === true ? meterGlyphs.pellet : meterGlyphs.track
+    return options.muncher === true ? meterGlyphs.pellet : meterGlyphs.track
   })
 })
