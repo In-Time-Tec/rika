@@ -21,18 +21,13 @@ describe("install contract", () => {
     expect(installer).toContain('bin_dir="${RIKA_BIN_DIR:-$HOME/.local/bin}"')
   })
 
-  test("install.sh validates the strict one-executable archive inventory", () => {
+  test("install.sh validates the kernel-capable archive inventory", () => {
     expect(installer).toContain("verify_archive_inventory")
     expect(installer).toContain('"${archive_root}/INSTALL"')
     expect(installer).toContain('"${archive_root}/bin/rika"')
-    for (const forbidden of [
-      ".rika-interactive",
-      ".rika-performance",
-      ".rika-kernel-runtime",
-      ".rika-kernel-worker.js",
-      "text-result.js",
-    ])
-      expect(installer).not.toContain(forbidden)
+    for (const required of [".rika-kernel-runtime", ".rika-kernel-worker.js", "text-result.js"])
+      expect(installer).toContain(required)
+    for (const forbidden of [".rika-interactive", ".rika-performance"]) expect(installer).not.toContain(forbidden)
   })
 
   test("install.sh verifies a checksum before publishing the install", () => {
@@ -91,8 +86,13 @@ describe("install contract", () => {
     expect(manifest.bin.rika).toBe("bin/rika.js")
   })
 
-  test("platform npm packages expose exactly bin/rika", () => {
-    expect(platformManifest("linux-x64", "1.2.3").files).toEqual(["bin/rika"])
+  test("platform npm packages carry the public executable and private kernel runtime", () => {
+    expect(platformManifest("linux-x64", "1.2.3").files).toEqual([
+      "bin/rika",
+      "bin/.rika-kernel-runtime",
+      "bin/.rika-kernel-worker.js",
+      "bin/text-result.js",
+    ])
   })
 
   test("platform packages constrain os and cpu", () => {

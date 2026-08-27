@@ -6,10 +6,9 @@ import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import * as SkillFileSystem from "@rika/extensions/skill-file-system"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
-import * as KernelComposition from "@rika/kernel/kernel-composition"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as GoalService from "@rika/product/goal-service"
-import { Effect, FileSystem, Function, Layer, Path, Scope } from "effect"
+import { Effect, Function, Layer, Scope } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 
 export { workspaceDigest, harnessStoreLayer, effectiveHarness } from "./kernel.harness"
@@ -57,25 +56,8 @@ export const layer = (
        * explicitly here so the mounted surface and the pinned profile can never disagree.
        */
       const trustMode = "trusted-local" as const
-      /**
-       * A compiled executable has no file for the module the worker was built from, so the packaged
-       * binaries ship one beside them. Reaching for it only when the resolved default is absent keeps
-       * an ordinary install on the path its own package resolves.
-       */
-      const workerFileSystem = yield* FileSystem.FileSystem
-      const workerPath = yield* Path.Path
-      const shippedDirectory = workerPath.dirname(process.execPath)
-      const packaged = !(yield* workerFileSystem
-        .exists(KernelComposition.defaultWorkerModules.worker)
-        .pipe(Effect.orDie))
-      const binaries = KernelComposition.kernelBinaries({
-        resolvedWorkerExists: !packaged,
-        executableDirectory: shippedDirectory,
-        join: (directory, name) => workerPath.join(directory, name),
-      })
       const kernelOptions = {
         trustMode,
-        ...binaries,
         workspace: options.workspace,
         workspaceDigest: digest,
         dataRoot: options.dataRoot,

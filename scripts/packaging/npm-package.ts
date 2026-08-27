@@ -3,7 +3,15 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { dual } from "effect/Function"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { archiveName, archiveRoot, targetNames, type PackageTarget } from "./package-contract"
+import {
+  archiveName,
+  archiveRoot,
+  kernelRuntime,
+  packageBinEntries,
+  packageExecutable,
+  targetNames,
+  type PackageTarget,
+} from "./package-contract"
 
 export class NpmPackageError extends Data.TaggedError("NpmPackageError")<{
   readonly step: string
@@ -86,7 +94,7 @@ export const platformManifest: {
   description: `Rika binaries for ${target}`,
   ...sharedManifest(version),
   ...platformConstraints(target),
-  files: ["bin/rika"],
+  files: packageBinEntries.map((entry) => `bin/${entry}`),
   preferUnplugged: true,
 }))
 
@@ -134,9 +142,19 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
     if (Number(exitCode) !== 0)
       return yield* npmPackageError("extract", `extract ${target}: tar exited with code ${exitCode}`)
     yield* fileSystem.makeDirectory(path.join(directory, "bin"), { recursive: true })
-    yield* fileSystem.copyFile(
-      path.join(staging, archiveRoot(version, target), "bin", "rika"),
-      path.join(directory, "bin", "rika"),
+    yield* Effect.forEach(
+      packageBinEntries,
+      (entry) =>
+        fileSystem.copyFile(
+          path.join(staging, archiveRoot(version, target), "bin", entry),
+          path.join(directory, "bin", entry),
+        ),
+      { concurrency: "unbounded", discard: true },
+    )
+    yield* Effect.forEach(
+      [packageExecutable, kernelRuntime],
+      (entry) => fileSystem.chmod(path.join(directory, "bin", entry), 0o755),
+      { concurrency: "unbounded", discard: true },
     )
     yield* writeJson(path.join(directory, "package.json"), platformManifest(target, version))
     yield* fileSystem.writeFileString(path.join(directory, "LICENSE"), license)

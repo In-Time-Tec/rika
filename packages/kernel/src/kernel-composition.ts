@@ -24,8 +24,7 @@ export const kernelBinaries = (input: {
         runtimeCommand: input.join(input.executableDirectory, ".rika-kernel-runtime"),
       }
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Duration, Layer } from "effect"
-import type { FileSystem, Path } from "effect"
+import { Duration, Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as KernelBootstrap from "./kernel-bootstrap"
 import { make as makeModules, type BindingRequirements, type Options as ModuleOptions } from "./binding/modules"
@@ -97,22 +96,31 @@ export const pool = (
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > =>
-  (() => {
-    const stateStore = state(options.dataRoot)
-    const basePoolOptions = {
-      profile: makeProfile(profileOptions(options)),
-      runtimeCommand: options.runtimeCommand ?? "bun",
-      workerModule: options.workerModule ?? workerModule,
-      startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
-      interruptGraceMillis: options.interruptGraceMillis ?? 250,
-      maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
-      idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
-      environment: options.environment ?? {},
-    }
-    const poolOptions: Parameters<typeof BunKernelPool.layer>[0] =
-      options.bootstrap === false ? basePoolOptions : { ...basePoolOptions, bootstrap: KernelBootstrap.source() }
-    return Layer.merge(BunKernelPool.layer(poolOptions).pipe(Layer.provide(stateStore)), stateStore)
-  })()
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const binaries = kernelBinaries({
+        resolvedWorkerExists: yield* fileSystem.exists(workerModule).pipe(Effect.orDie),
+        executableDirectory: path.dirname(process.execPath),
+        join: (directory, name) => path.join(directory, name),
+      })
+      const stateStore = state(options.dataRoot)
+      const basePoolOptions = {
+        profile: makeProfile(profileOptions(options)),
+        runtimeCommand: options.runtimeCommand ?? binaries.runtimeCommand ?? "bun",
+        workerModule: options.workerModule ?? binaries.workerModule ?? workerModule,
+        startTimeoutMillis: options.startTimeoutMillis ?? 20_000,
+        interruptGraceMillis: options.interruptGraceMillis ?? 250,
+        maxConcurrentBoots: options.maxConcurrentBoots ?? Number.POSITIVE_INFINITY,
+        idleTimeToLive: options.idleTimeToLive ?? defaultIdleTimeToLive,
+        environment: options.environment ?? {},
+      }
+      const poolOptions: Parameters<typeof BunKernelPool.layer>[0] =
+        options.bootstrap === false ? basePoolOptions : { ...basePoolOptions, bootstrap: KernelBootstrap.source() }
+      return Layer.merge(BunKernelPool.layer(poolOptions).pipe(Layer.provide(stateStore)), stateStore)
+    }),
+  )
 
 /**
  * The kernel a Rika Execution runs cells in, plus the surface those cells can call.

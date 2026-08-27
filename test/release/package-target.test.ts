@@ -7,6 +7,7 @@ import {
   expectedArchiveNames,
   isPackageTarget,
   ownedTargetEntries,
+  packageBinEntries,
   targets,
   validateArchiveSet,
 } from "../../scripts/packaging/package-contract"
@@ -36,6 +37,7 @@ it.layer(BunServices.layer)("release target construction", (test) => {
     expect(archiveRoot("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64")
     expect(archiveName("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64.tar.gz")
     expect(ownedTargetEntries("1.2.3", "linux-x64")).toEqual(["rika-1.2.3-linux-x64", "rika-1.2.3-linux-x64.tar.gz"])
+    expect(packageBinEntries).toEqual(["rika", ".rika-kernel-runtime", ".rika-kernel-worker.js", "text-result.js"])
   })
 
   test("accepts only the exact supported archive set", () => {
@@ -47,7 +49,7 @@ it.layer(BunServices.layer)("release target construction", (test) => {
     )
   })
 
-  test.effect("builds one public executable containing the interactive runtime", () =>
+  test.effect("builds one public executable with its private kernel runtime", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const packaging = yield* fileSystem.readFileString(
@@ -55,14 +57,10 @@ it.layer(BunServices.layer)("release target construction", (test) => {
       )
       expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, "rika")')
       expect(packaging).toContain("bytecode: false")
-      for (const forbidden of [
-        "interactive-main.ts",
-        ".rika-interactive",
-        "performance-main.ts",
-        ".rika-kernel-runtime",
-        ".rika-kernel-worker.js",
-        "text-result.js",
-      ])
+      expect(packaging).toContain("defaultWorkerModules.worker")
+      expect(packaging).toContain("path.join(bin, kernelWorker)")
+      expect(packaging).toContain("path.join(bin, kernelRuntime)")
+      for (const forbidden of ["interactive-main.ts", ".rika-interactive", "performance-main.ts"])
         expect(packaging).not.toContain(forbidden)
     }),
   )

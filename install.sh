@@ -77,8 +77,8 @@ verify_archive_inventory() {
   archive_path="$1"
   archive_root="$2"
   actual="$(tar -tzf "$archive_path" | LC_ALL=C sort)"
-  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" | LC_ALL=C sort)"
-  [ "$actual" = "$expected" ] || fail "release archive has unexpected contents (expected only INSTALL and bin/rika)"
+  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" "${archive_root}/bin/.rika-kernel-runtime" "${archive_root}/bin/.rika-kernel-worker.js" "${archive_root}/bin/text-result.js" | LC_ALL=C sort)"
+  [ "$actual" = "$expected" ] || fail "release archive has unexpected contents"
 }
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
@@ -149,6 +149,7 @@ verify_archive_inventory "${staging}/${archive_file}" "$archive_root"
 
 tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
+[ -x "${staging}/${archive_root}/bin/.rika-kernel-runtime" ] || fail "release archive is missing the kernel runtime"
 
 previous="${install_parent}/.rika-previous-$$"
 if [ -e "$install_root" ]; then

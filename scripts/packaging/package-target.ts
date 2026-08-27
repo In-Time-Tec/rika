@@ -1,3 +1,4 @@
+import { defaultWorkerModules } from "@rika/kernel/kernel-composition"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
@@ -6,6 +7,8 @@ import {
   archiveName,
   archiveRoot,
   isPackageTarget,
+  kernelRuntime,
+  kernelWorker,
   ownedTargetEntries,
   targetNames,
   targets,
@@ -162,7 +165,19 @@ const program = Effect.gen(function* () {
             yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
-            yield* fileSystem.writeFileString(path.join(stage, "INSTALL"), "Install bin/rika on PATH.\n")
+            yield* fileSystem.copyFile(defaultWorkerModules.worker, path.join(bin, kernelWorker))
+            yield* Effect.forEach(
+              defaultWorkerModules.support,
+              (module) => fileSystem.copyFile(module, path.join(bin, path.basename(module))),
+              { concurrency: "unbounded", discard: true },
+            )
+            const runtime = path.join(bin, kernelRuntime)
+            yield* fileSystem.copyFile(process.execPath, runtime)
+            yield* fileSystem.chmod(runtime, 0o755)
+            yield* fileSystem.writeFileString(
+              path.join(stage, "INSTALL"),
+              "Install bin/rika on PATH. Keep the private kernel runtime in bin beside it.\n",
+            )
             const exitCode = yield* spawner.exitCode(
               ChildProcess.make(
                 "tar",

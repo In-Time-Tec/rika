@@ -212,8 +212,8 @@ jobs:
         run: |
           directory="$(mktemp -d)"
           tar -xzf "$ARCHIVE" -C "$directory"
-          file "$directory"/rika-*/bin/rika
-          for executable in "$directory"/rika-*/bin/rika; do
+          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime
+          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime; do
             case "$EXPECTED_ARCHITECTURE" in
               x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
               arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
@@ -229,11 +229,12 @@ jobs:
           trap 'rm -rf "$directory" "$home"' EXIT
           root="$(basename "$ARCHIVE" .tar.gz)"
           entries="$(tar -tzf "$ARCHIVE" | LC_ALL=C sort)"
-          expected="$(printf '%s\n' "$root/" "$root/INSTALL" "$root/bin/" "$root/bin/rika" | LC_ALL=C sort)"
+          expected="$(printf '%s\n' "$root/" "$root/INSTALL" "$root/bin/" "$root/bin/rika" "$root/bin/.rika-kernel-runtime" "$root/bin/.rika-kernel-worker.js" "$root/bin/text-result.js" | LC_ALL=C sort)"
           test "$entries" = "$expected"
           tar -xzf "$ARCHIVE" -C "$directory"
           binary="$directory/$root/bin/rika"
           test -x "$binary"
+          test -x "$directory/$root/bin/.rika-kernel-runtime"
           version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
           env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version | grep -Fq "$version"
           help="$(env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --help)"
@@ -242,6 +243,7 @@ jobs:
             echo "obsolete relay command found in release help" >&2
             exit 1
           fi
+          HOME="$home" bun scripts/packaging/kernel-runtime-smoke.ts "$directory/$root/bin" | grep -Fq PACKAGE_KERNEL_OK
       - name: Attest archive
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
@@ -351,13 +353,15 @@ jobs:
             (cd "$directory" && npm pack)
           done
           test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 4
-      - name: Verify every platform package carries only the public binary
+      - name: Verify every platform package carries the kernel-capable runtime
         run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
             entries="$(tar -tzf "$archive")"
-            printf '%s\n' "$entries" | grep -qx 'package/bin/rika'
-            if printf '%s\n' "$entries" | grep -Eq 'package/bin/\.rika-|package/bin/(text-result\.js|rika-server)'; then
-              echo "private runtime artifact found in $archive" >&2
+            for required in package/bin/rika package/bin/.rika-kernel-runtime package/bin/.rika-kernel-worker.js package/bin/text-result.js; do
+              printf '%s\n' "$entries" | grep -qx "$required"
+            done
+            if printf '%s\n' "$entries" | grep -Eq 'package/bin/(\.rika-interactive|\.rika-performance|rika-server)'; then
+              echo "obsolete runtime artifact found in $archive" >&2
               exit 1
             fi
           done
