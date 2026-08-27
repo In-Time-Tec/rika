@@ -515,7 +515,7 @@ export const layerWithOptions = (
               const encodedAttachment = encodeUnknownJson(attachment)
               if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
                 return yield* unavailable("Hosted Thread replay exceeds the attachment byte limit")
-              const previewSubscription = yield* previews.subscribe(authority.ownerId, command.threadId)
+              const previewSubscription = yield* previews.subscribe(command.threadId)
               if (attached !== undefined) yield* attached.previewSubscription.close
               attached = {
                 threadId: command.threadId,

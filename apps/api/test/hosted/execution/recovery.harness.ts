@@ -20,6 +20,7 @@ import { Clock, Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "ef
 import { TestClock } from "effect/testing"
 import { layer as executionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as projectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
+import { HostedPreviewBus } from "../../../src/hosted/thread/previews"
 import { layer as turnWorkerLayer } from "../../../src/hosted/thread/turn-worker"
 
 const threadId = Thread.ThreadId.make("restart-thread")
@@ -343,7 +344,9 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
     const buildWorkers = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
       Layer.buildWithScope(
         Layer.merge(
-          projectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }),
+          projectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+            Layer.provide(HostedPreviewBus.memoryLayer),
+          ),
           executionReconcilerLayer({ pollIntervalMillis: 10 }),
         ).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),

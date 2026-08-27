@@ -36,6 +36,7 @@ import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
+import { HostedPreviewBus } from "../../../src/hosted/thread/previews"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
@@ -178,7 +179,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
             hostedProjectionWorkerLayer({
               concurrency: 2,
               pollIntervalMillis: 10,
-            }),
+            }).pipe(Layer.provide(HostedPreviewBus.memoryLayer)),
             hostedExecutionReconcilerLayer({ pollIntervalMillis: 10 }),
           ).pipe(
             Layer.provide(ProductRepositories.projectionLayer),

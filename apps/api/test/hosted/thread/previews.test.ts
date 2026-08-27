@@ -1,6 +1,6 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { OwnerId, ThreadId } from "@rika/product/hosted-model"
+import { ThreadId } from "@rika/product/hosted-model"
 import { TurnId } from "@rika/product/turn-record"
 import { Config, Context, Effect, Fiber, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
@@ -11,11 +11,9 @@ import {
   type HostedPreview,
 } from "../../../src/hosted/thread/previews"
 
-const ownerId = OwnerId.make("owner-1")
 const threadId = ThreadId.make("thread-1")
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const preview = (sequence: number): HostedPreview => ({
-  ownerId,
   threadId,
   turnId: TurnId.make("turn-1"),
   preview: {
@@ -31,12 +29,12 @@ const preview = (sequence: number): HostedPreview => ({
   },
 })
 
-it.effect("fans previews out only to the subscribed owner and Thread", () =>
+it.effect("fans previews out only to the subscribed Thread", () =>
   Effect.gen(function* () {
     const { bus } = yield* makeHostedPreviewBus()
-    const selected = yield* bus.subscribe(ownerId, threadId)
+    const selected = yield* bus.subscribe(threadId)
     const foreignThreadId = ThreadId.make("thread-2")
-    const foreign = yield* bus.subscribe(ownerId, foreignThreadId)
+    const foreign = yield* bus.subscribe(foreignThreadId)
     bus.publish(preview(0))
     expect(yield* selected.take).toEqual({ _tag: "Preview", value: preview(0) })
     const foreignPreview = { ...preview(1), threadId: foreignThreadId }
@@ -49,7 +47,7 @@ it.effect("resets a slow subscriber instead of backpressuring publication", () =
   Effect.gen(function* () {
     const forwarded: Array<HostedPreview> = []
     const { bus } = yield* makeHostedPreviewBus((value) => void forwarded.push(value))
-    const subscription = yield* bus.subscribe(ownerId, threadId)
+    const subscription = yield* bus.subscribe(threadId)
     for (let sequence = 0; sequence < 65; sequence += 1) bus.publish(preview(sequence))
     expect(yield* subscription.take).toEqual({ _tag: "Reset" })
     expect(forwarded).toHaveLength(65)
@@ -65,7 +63,7 @@ it.effect.skipIf(databaseUrl === "")("fans a maximum UTF-8 preview between API r
         )
         const first = Context.get(yield* Layer.build(layer), HostedPreviewBus)
         const second = Context.get(yield* Layer.build(layer), HostedPreviewBus)
-        const subscription = yield* second.subscribe(ownerId, threadId)
+        const subscription = yield* second.subscribe(threadId)
         const large = {
           ...preview(0),
           preview: {

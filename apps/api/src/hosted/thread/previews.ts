@@ -1,5 +1,5 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { OwnerId, ThreadId } from "@rika/product/hosted-model"
+import { ThreadId } from "@rika/product/hosted-model"
 import * as Turn from "@rika/product/turn-record"
 import { Context, Crypto, Data, Effect, Encoding, Layer, Queue, Redacted, Result, Schema } from "effect"
 import { Client, type Notification } from "pg"
@@ -11,7 +11,6 @@ const fragmentCharacters = 5_000
 const reassemblyCapacity = 256
 
 export interface HostedPreview {
-  readonly ownerId: OwnerId
   readonly threadId: ThreadId
   readonly turnId: Turn.TurnId
   readonly preview: ExecutionGateway.ModelPreviewEvent
@@ -28,7 +27,7 @@ export interface HostedPreviewSubscription {
 
 export interface HostedPreviewBusService {
   readonly publish: (preview: HostedPreview) => void
-  readonly subscribe: (ownerId: OwnerId, threadId: ThreadId) => Effect.Effect<HostedPreviewSubscription>
+  readonly subscribe: (threadId: ThreadId) => Effect.Effect<HostedPreviewSubscription>
 }
 
 interface Subscriber {
@@ -36,20 +35,20 @@ interface Subscriber {
   overflowed: boolean
 }
 
-const subscriptionKey = (ownerId: OwnerId, threadId: ThreadId) => `${ownerId}:${threadId}`
+const subscriptionKey = (threadId: ThreadId) => String(threadId)
 
 export const makeHostedPreviewBus = Effect.fn("HostedPreviewBus.make")(
   (forward: (preview: HostedPreview) => void = () => undefined) =>
     Effect.sync(() => {
       const subscribers = new Map<string, Set<Subscriber>>()
       const publishLocal = (preview: HostedPreview) => {
-        const current = subscribers.get(subscriptionKey(preview.ownerId, preview.threadId))
+        const current = subscribers.get(subscriptionKey(preview.threadId))
         if (current === undefined) return
         for (const subscriber of current)
           if (!Queue.offerUnsafe(subscriber.queue, { _tag: "Preview", value: preview })) subscriber.overflowed = true
       }
-      const resetLocal = (ownerId: OwnerId, threadId: ThreadId) => {
-        const current = subscribers.get(subscriptionKey(ownerId, threadId))
+      const resetLocal = (threadId: ThreadId) => {
+        const current = subscribers.get(subscriptionKey(threadId))
         if (current === undefined) return
         for (const subscriber of current)
           if (!Queue.offerUnsafe(subscriber.queue, { _tag: "Reset" })) subscriber.overflowed = true
@@ -59,9 +58,9 @@ export const makeHostedPreviewBus = Effect.fn("HostedPreviewBus.make")(
           publishLocal(preview)
           forward(preview)
         },
-        subscribe: (ownerId, threadId) =>
+        subscribe: (threadId) =>
           Effect.gen(function* () {
-            const key = subscriptionKey(ownerId, threadId)
+            const key = subscriptionKey(threadId)
             const subscriber: Subscriber = {
               queue: yield* Queue.dropping<HostedPreviewDelivery>(subscriberCapacity),
               overflowed: false,
@@ -86,7 +85,7 @@ export const makeHostedPreviewBus = Effect.fn("HostedPreviewBus.make")(
         bus,
         publishLocal,
         resetLocal,
-        hasSubscribers: (ownerId: OwnerId, threadId: ThreadId) => subscribers.has(subscriptionKey(ownerId, threadId)),
+        hasSubscribers: (threadId: ThreadId) => subscribers.has(subscriptionKey(threadId)),
       }
     }),
 )
@@ -98,7 +97,6 @@ export class HostedPreviewBus extends Context.Service<HostedPreviewBus, HostedPr
 }
 
 const HostedPreviewSchema = Schema.Struct({
-  ownerId: OwnerId,
   threadId: ThreadId,
   turnId: Turn.TurnId,
   preview: ExecutionGateway.ModelPreviewEvent,
@@ -107,7 +105,6 @@ const HostedPreviewSchema = Schema.Struct({
 const PreviewFragment = Schema.Struct({
   source: Schema.String,
   id: Schema.String,
-  ownerId: OwnerId,
   threadId: ThreadId,
   index: Schema.Int,
   count: Schema.Int,
@@ -127,7 +124,6 @@ const fragments = (source: string, sequence: number, preview: HostedPreview): Re
     encodeFragment({
       source,
       id,
-      ownerId: preview.ownerId,
       threadId: preview.threadId,
       index,
       count,
@@ -249,7 +245,7 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
       const reassembly = new Map<string, Reassembly>()
       const latest = new Map<string, string>()
       let sequence = 0
-      const streamFor = (fragment: PreviewFragment) => `${fragment.source}:${fragment.ownerId}:${fragment.threadId}`
+      const streamFor = (fragment: PreviewFragment) => `${fragment.source}:${fragment.threadId}`
       const discard = (id: string, fragment: PreviewFragment) => {
         reassembly.delete(id)
         const stream = streamFor(fragment)
@@ -258,7 +254,7 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
       const receive = (fragment: PreviewFragment) => {
         if (fragment.count < 1 || fragment.count > 16 || fragment.index < 0 || fragment.index >= fragment.count) return
         const stream = streamFor(fragment)
-        if (!local.hasSubscribers(fragment.ownerId, fragment.threadId)) {
+        if (!local.hasSubscribers(fragment.threadId)) {
           const stale = latest.get(stream)
           if (stale !== undefined) discard(stale, fragment)
           return
@@ -266,7 +262,7 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
         const previous = latest.get(stream)
         if (fragment.index === 0 && previous !== undefined && previous !== fragment.id) {
           reassembly.delete(previous)
-          local.resetLocal(fragment.ownerId, fragment.threadId)
+          local.resetLocal(fragment.threadId)
         }
         latest.set(stream, fragment.id)
         let current = reassembly.get(fragment.id)
@@ -275,20 +271,16 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
             const evictedKey = reassembly.keys().next().value!
             const evicted = reassembly.get(evictedKey)
             if (evicted !== undefined) {
-              local.resetLocal(evicted.fragment.ownerId, evicted.fragment.threadId)
+              local.resetLocal(evicted.fragment.threadId)
               discard(evictedKey, evicted.fragment)
             }
           }
           current = { fragment, parts: Array.from({ length: fragment.count }) }
           reassembly.set(fragment.id, current)
         }
-        if (
-          current.fragment.count !== fragment.count ||
-          current.fragment.ownerId !== fragment.ownerId ||
-          current.fragment.threadId !== fragment.threadId
-        ) {
+        if (current.fragment.count !== fragment.count || current.fragment.threadId !== fragment.threadId) {
           discard(fragment.id, fragment)
-          local.resetLocal(fragment.ownerId, fragment.threadId)
+          local.resetLocal(fragment.threadId)
           return
         }
         current.parts[fragment.index] = fragment.data
@@ -296,17 +288,12 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
         discard(fragment.id, fragment)
         const decoded = Result.getOrUndefined(Encoding.decodeBase64String(current.parts.join("")))
         if (decoded === undefined) {
-          local.resetLocal(fragment.ownerId, fragment.threadId)
+          local.resetLocal(fragment.threadId)
           return
         }
         const preview = decodePreview(decoded)
-        if (
-          preview._tag === "Some" &&
-          preview.value.ownerId === fragment.ownerId &&
-          preview.value.threadId === fragment.threadId
-        )
-          local.publishLocal(preview.value)
-        else local.resetLocal(fragment.ownerId, fragment.threadId)
+        if (preview._tag === "Some" && preview.value.threadId === fragment.threadId) local.publishLocal(preview.value)
+        else local.resetLocal(fragment.threadId)
       }
       yield* reconnect(
         "hosted-preview-publisher.disconnected",

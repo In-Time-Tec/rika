@@ -1,11 +1,13 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionProjectionWatch from "@rika/product/execution-projection-watch"
+import { ThreadId as HostedThreadId } from "@rika/product/hosted-model"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import type { ProjectionRecoveryCandidate } from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Cause, Clock, Context, Effect, FiberMap, Layer, Ref, Schema, SubscriptionRef } from "effect"
+import { HostedPreviewBus } from "../thread/previews"
 
 export class HostedProjectionWorkerError extends Schema.TaggedError<HostedProjectionWorkerError>()(
   "HostedProjectionWorkerError",
@@ -51,6 +53,7 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
       const turns = yield* TurnRepository.Service
       const transcripts = yield* TranscriptRepository.Service
       const backend = yield* ExecutionGateway.Service
+      const previews = yield* HostedPreviewBus
       const health = yield* SubscriptionRef.make<WorkerState>({
         poll: { _tag: "Starting" },
         lastSuccessfulPollAt: undefined,
@@ -69,6 +72,12 @@ export const layer = (options: { readonly concurrency: number; readonly pollInte
             turns,
             transcripts,
             backend,
+            onPreview: (preview) =>
+              previews.publish({
+                threadId: HostedThreadId.make(candidate.threadId),
+                turnId: candidate.turnId,
+                preview,
+              }),
           }).pipe(Effect.asVoid),
         ).pipe(
           Effect.catchCause((cause) => {

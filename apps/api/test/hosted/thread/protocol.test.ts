@@ -482,7 +482,6 @@ it.effect("derives personal authority, admits a retried submission once, and res
         },
       ])
       previews.bus.publish({
-        ownerId,
         threadId,
         turnId: TurnId.make("turn-preview"),
         preview: {
@@ -700,7 +699,6 @@ it.effect("derives personal authority, admits a retried submission once, and res
       })
       notifications.publish(threadId)
       previews.bus.publish({
-        ownerId,
         threadId: ThreadId.make("thread-2"),
         turnId: TurnId.make("turn-ready-race"),
         preview: {

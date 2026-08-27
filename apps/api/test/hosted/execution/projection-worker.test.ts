@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import { ThreadId as HostedThreadId } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
 import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -16,6 +17,7 @@ import {
   HostedProjectionWorker,
   layer as hostedProjectionWorkerLayer,
 } from "../../../src/hosted/execution/projection-worker"
+import { HostedPreviewBus, makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
 
 const threadId = Thread.ThreadId.make("thread-test")
 const turnId = Turn.TurnId.make("turn-test")
@@ -39,10 +41,15 @@ const state = (status: "running" | "completed") => ({
   steering: { steeringMessages: 0, followUpMessages: 0 },
 })
 
-it.effect("projects a recovered Turn through its terminal cursor without owning Turn settlement", () =>
+const testProjectionWorkerLayer = (options: Parameters<typeof hostedProjectionWorkerLayer>[0]) =>
+  hostedProjectionWorkerLayer(options).pipe(Layer.provide(HostedPreviewBus.memoryLayer))
+
+it.effect("projects durable changes and publishes transient previews for a recovered Turn", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const projected = yield* Deferred.make<void>()
+      const previews = yield* makeHostedPreviewBus()
+      const subscription = yield* previews.bus.subscribe(HostedThreadId.make(threadId))
       let projection: Projection | undefined
       const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
       const turns = TurnRepository.Service.of({
@@ -96,9 +103,20 @@ it.effect("projects a recovered Turn through its terminal cursor without owning 
         remove: [],
         state: state("completed"),
       }
+      const preview: ExecutionGateway.ModelPreviewEvent = {
+        _tag: "ModelPreview",
+        runId: "run-test",
+        attemptFence: 1,
+        turn: 0,
+        modelCallId: "call-test",
+        modelAttemptId: "attempt-test",
+        attempt: 1,
+        sequence: 0,
+        changes: [{ channel: "text", offset: 0, delta: "streamed" }],
+      }
       const gateway = ExecutionGateway.Service.of({
         ...Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service),
-        watchTurn: () => Stream.fromIterable([running, completed]),
+        watchTurn: () => Stream.fromIterable([preview, running, completed]),
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "completed" }),
       })
       const context = yield* Layer.build(
@@ -109,9 +127,14 @@ it.effect("projects a recovered Turn through its terminal cursor without owning 
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+          Layer.provide(Layer.succeed(HostedPreviewBus, previews.bus)),
         ),
       )
       yield* Deferred.await(projected)
+      expect(yield* subscription.take).toEqual({
+        _tag: "Preview",
+        value: { threadId: HostedThreadId.make(threadId), turnId, preview },
+      })
       yield* HostedProjectionWorker.pipe(
         Effect.provide(context),
         Effect.flatMap((worker) => worker.ready),
@@ -143,7 +166,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
         watchTurn: () => Stream.never,
       })
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({
+        testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
@@ -245,7 +268,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
         cancelTurn: (link) => Ref.update(events, (current) => [...current, `cancelled:${link.turnId}`]),
       })
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({
+        testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 60_000,
         }).pipe(
@@ -284,7 +307,7 @@ it.effect("rejects a stale projection worker when listing blocks after a success
       })
       const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({
+        testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
@@ -311,7 +334,7 @@ it.effect("rejects the current projection list failure immediately", () =>
       })
       const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
-        hostedProjectionWorkerLayer({
+        testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
