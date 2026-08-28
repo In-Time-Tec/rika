@@ -2728,7 +2728,7 @@ describe("executor gateway", () => {
     }),
   )
 
-  it.effect("moves pending cells to a replacement connection for the same executor", () =>
+  it.effect("redispatches pending cells to a replacement connection for the same executor", () =>
     Effect.gen(function* () {
       const firstSocket = socket()
       const replacementSocket = socket()
@@ -2780,15 +2780,31 @@ describe("executor gateway", () => {
       expect(firstSocket.closed).toEqual([[1008, "fenced"]])
       const replacementAccess = { ...access, leaseEpoch: 2 }
       yield* workspaceReady(gateway, replacementSocket, replacementAccess)
+      const replacementMessages = replacementSocket.sent.map((message) => decode(message))
       expect(
-        replacementSocket.sent.map((message) => decode(message)).find((message) => message._tag === "CellReplay"),
-      ).toEqual({
-        _tag: "CellReplay",
-        access: replacementAccess,
+        replacementMessages.find(
+          (message) =>
+            message._tag === "PhaseEnvironmentGranted" && message.operationKey === "replacement-operation",
+        ),
+      ).toMatchObject({
+        _tag: "PhaseEnvironmentGranted",
+        phase: "runtime",
         operationKey: "replacement-operation",
-        attempt: 0,
-        afterCursor: 0,
       })
+      expect(replacementMessages.find((message) => message._tag === "CellExecute")).toMatchObject({
+        _tag: "CellExecute",
+        request: {
+          access: replacementAccess,
+          operationKey: "replacement-operation",
+          attempt: 0,
+          code: "echo hosted-mvp",
+        },
+      })
+      expect(
+        replacementMessages.some(
+          (message) => message._tag === "CellReplay" && message.operationKey === "replacement-operation",
+        ),
+      ).toBe(false)
       yield* gateway.receive(
         firstSocket,
         encode({

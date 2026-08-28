@@ -561,6 +561,34 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }),
     )
 
+  const sendCellExecute = (operation: Pending) =>
+    Effect.try({
+      try: () =>
+        operation.socket.send(
+          encode({
+            _tag: "CellExecute",
+            request: {
+              access: operation.access,
+              operationKey: operation.request.operationKey,
+              workspaceId: operation.request.workspaceId,
+              sessionId: operation.request.sessionId,
+              threadId: operation.request.threadId,
+              turnId: operation.request.turnId,
+              runId: operation.request.runId,
+              toolCallId: operation.request.toolCallId,
+              code: operation.request.code,
+              rootRunId: operation.request.rootRunId,
+              attempt: operation.request.attempt,
+              replayPolicy: operation.request.replayPolicy,
+              admittedAt: operation.request.admittedAt,
+              deadlineAt: operation.request.deadlineAt,
+              bindings: operation.bindings.manifest,
+            },
+          }),
+        ),
+      catch: () => undefined,
+    }).pipe(Effect.ignore)
+
   const hydrate = Effect.fn("ExecutorGateway.hydrate")(function* (input: ExecuteInput) {
     const retained = yield* lifecycle.load(input.assignmentId, input.operationKey, input.attempt)
     let outputCount = 0
@@ -735,13 +763,13 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   })
 
   const replayPending = Effect.fn("ExecutorGateway.replayPending")(function* (session: Session) {
-    const terminalReceipts = new Set<string>()
+    const delivered = new Set<string>()
     for (const operation of (yield* Ref.get(pending)).values()) {
       if (operation.assignmentId !== session.access.fence.assignmentId) continue
       const operationKey = key(operation.assignmentId, operation.operationKey, operation.attempt)
       const terminal = (yield* Ref.get(terminals)).get(operationKey)
       if (terminal !== undefined) {
-        terminalReceipts.add(operationKey)
+        delivered.add(operationKey)
         session.socket.send(
           encode({
             _tag: "CellTerminalReceipt",
@@ -751,10 +779,14 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             cursor: terminal.cursor,
           }),
         )
+        continue
       }
+      delivered.add(operationKey)
+      yield* grant(session, "runtime", operation.operationKey)
+      yield* sendCellExecute(operation)
     }
     for (const operation of yield* lifecycle.replay(session.access.fence.assignmentId)) {
-      if (terminalReceipts.has(key(session.access.fence.assignmentId, operation.operationKey, operation.attempt)))
+      if (delivered.has(key(session.access.fence.assignmentId, operation.operationKey, operation.attempt)))
         continue
       session.socket.send(
         encode({
@@ -2108,32 +2140,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (current) => new Map(current).set(pendingKey, created))
-        yield* Effect.try({
-          try: () =>
-            session.socket.send(
-              encode({
-                _tag: "CellExecute",
-                request: {
-                  access: session.access,
-                  operationKey: request.operationKey,
-                  workspaceId: request.workspaceId,
-                  sessionId: request.sessionId,
-                  threadId: request.threadId,
-                  turnId: request.turnId,
-                  runId: request.runId,
-                  toolCallId: request.toolCallId,
-                  code: request.code,
-                  rootRunId: request.rootRunId,
-                  attempt: request.attempt,
-                  replayPolicy: request.replayPolicy,
-                  admittedAt: request.admittedAt,
-                  deadlineAt: request.deadlineAt,
-                  bindings: created.bindings.manifest,
-                },
-              }),
-            ),
-          catch: () => undefined,
-        }).pipe(Effect.ignore)
+        yield* sendCellExecute(created)
         return created
       }),
     )
