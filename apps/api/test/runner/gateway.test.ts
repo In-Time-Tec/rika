@@ -38,6 +38,7 @@ import {
   type AccessWire,
   type CellResponse,
 } from "@rika/remote-execution/protocol"
+import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { and, count, eq, sql } from "drizzle-orm"
@@ -850,15 +851,29 @@ it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the call
           failure: { kind: "cancelled", message: "Cell operation was cancelled" },
         }
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-deadline-first", deadlineAt)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find(
+              (message) =>
+                message._tag === "CellExecute" && message.request.operationKey === "operation-deadline-first",
+            ),
+        )
         yield* TestClock.adjust("1 second")
-        const deadline = yield* gateway.execute(cellRequest("operation-deadline-first", deadlineAt))
-        expect(deadline).toMatchObject({ outcome: "unknown", eventPersisted: false })
+        expect(running.pollUnsafe()).toBeUndefined()
         expect(
           target.sent
             .map((value) => decode(value))
             .some((message) => message._tag === "CellCancel" && message.operationKey === "operation-deadline-first"),
-        ).toBe(true)
+        ).toBe(false)
+        yield* TestClock.adjust("100 millis")
         yield* persistTerminal(gateway, target, access, "operation-deadline-first", cancelled, "cancelled")
+        expect(yield* Fiber.join(running)).toMatchObject({
+          response: cancelled,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
         yield* gateway.receive(
           target,
           encode({
@@ -1212,7 +1227,7 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
           _tag: "Unknown",
           message: "Machine outcome is unknown at the operation deadline",
         })
-        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: false })
+        expect(running.pollUnsafe()).toBeUndefined()
         expect(binding.pollUnsafe()).toBeUndefined()
         expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
           [],
@@ -1221,6 +1236,8 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
         yield* Deferred.await(cleanupCompleted)
         yield* Fiber.join(binding)
         yield* Fiber.join(advancing)
+        yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: false })
         expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
           [
             expect.objectContaining({
@@ -1558,13 +1575,17 @@ it.effect.skipIf(!live)("reports an overdue dispatch without replacing the Runne
         const left = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const right = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         yield* TestClock.adjust("1 second")
-        const results = yield* Effect.all(
-          [
-            left.execute(cellRequest("operation-overdue", deadlineAt)),
-            right.execute(cellRequest("operation-overdue", deadlineAt)),
-          ],
-          { concurrency: 2 },
+        const waiting = yield* Effect.forkChild(
+          Effect.all(
+            [
+              left.execute(cellRequest("operation-overdue", deadlineAt)),
+              right.execute(cellRequest("operation-overdue", deadlineAt)),
+            ],
+            { concurrency: 2 },
+          ),
         )
+        yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+        const results = yield* Fiber.join(waiting)
         expect(results.map((result) => result.response)).toEqual([
           {
             _tag: "DomainFailure",

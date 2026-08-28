@@ -46,6 +46,9 @@ export interface Interface {
 
 export class Cells extends Context.Service<Cells, Interface>()("@rika/remote-execution/protocol/cells") {}
 
+export const CellTerminalPersistenceTimeoutMillis = 5_000
+export const CellTerminalSettlementGraceMillis = CellTerminalPersistenceTimeoutMillis + 1_000
+
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const State = Schema.Union([
@@ -200,7 +203,7 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
                     })
                     .pipe(
                       Effect.timeoutOrElse({
-                        duration: "5 seconds",
+                        duration: CellTerminalPersistenceTimeoutMillis,
                         orElse: () =>
                           CellError.make({ kind: "execution", message: "Cell terminal persistence deadline exceeded" }),
                       }),

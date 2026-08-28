@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { ControllerError, type Interface as Controller } from "@rika/e2b-executor/controller"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
+import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import {
   ApiMessage,
   BindingRequest,
@@ -1163,7 +1164,7 @@ describe("executor gateway", () => {
     }),
   )
 
-  it.effect("keeps the late executor terminal authoritative after the caller deadline", () =>
+  it.effect("returns the executor terminal that settles after the execution deadline", () =>
     Effect.gen(function* () {
       const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
       const observed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -1215,23 +1216,18 @@ describe("executor gateway", () => {
       ])
         yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
       yield* TestClock.adjust("1 second")
-      expect(yield* Fiber.join(running)).toEqual({
-        response: {
-          _tag: "DomainFailure",
-          failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
-        },
-        outcome: "unknown",
-      })
+      expect(running.pollUnsafe()).toBeUndefined()
       expect(
         target.sent
           .map((message) => decode(message))
           .some((message) => message._tag === "CellCancel" && message.operationKey === "operation-deadline"),
-      ).toBe(true)
+      ).toBe(false)
 
       const cancelled = {
         _tag: "DomainFailure" as const,
         failure: { kind: "cancelled", message: "Cell operation was cancelled" },
       }
+      yield* TestClock.adjust("100 millis")
       yield* observed(
         gateway.receive(
           target,
@@ -1248,6 +1244,8 @@ describe("executor gateway", () => {
           }),
         ),
       )
+      yield* TestClock.adjust("100 millis")
+      expect(yield* Fiber.join(running)).toEqual({ response: cancelled, outcome: "cancelled" })
       yield* gateway.receive(
         target,
         encode({
@@ -1260,7 +1258,7 @@ describe("executor gateway", () => {
       )
       expect(target.closed).toEqual([])
       const renderedObservability = encodeUnknown(observability)
-      expect(renderedObservability.match(/hosted\.terminal\.unknown/g)).toHaveLength(1)
+      expect(renderedObservability.match(/hosted\.terminal\.unknown/g)).toBeNull()
       expect(renderedObservability.match(/hosted\.terminal\.interrupted/g)).toHaveLength(1)
       const deadlineAcknowledgements = target.sent
         .map((message) => decode(message))
@@ -1314,6 +1312,85 @@ describe("executor gateway", () => {
         }),
       )
       expect(yield* Fiber.join(next)).toEqual({ access, response, outcome: "completed" })
+      expect(target.closed).toEqual([])
+    }),
+  )
+
+  it.effect("returns unknown after settlement grace and preserves a later executor terminal", () =>
+    Effect.gen(function* () {
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: false, pty: false },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* workspaceReady(gateway, target)
+      const input = {
+        assignmentId: "assignment-1",
+        operationKey: "operation-after-settlement-grace",
+        workspaceId: "workspace-1",
+        sessionId: "thread-1",
+        ...cellIdentity,
+        deadlineAt: "1970-01-01T00:00:01.000Z",
+        code: "wait beyond settlement grace",
+      }
+      const running = yield* Effect.forkChild(gateway.execute(input))
+      yield* Effect.yieldNow
+      for (const frame of [
+        { _tag: "Accepted" as const, attribution: attribution(input.operationKey), cursor: 1 },
+        { _tag: "Started" as const, attribution: attribution(input.operationKey), cursor: 2 },
+      ])
+        yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access, frame }))
+      yield* TestClock.adjust("1 second")
+      expect(running.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+      expect(yield* Fiber.join(running)).toEqual({
+        response: {
+          _tag: "DomainFailure",
+          failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
+        },
+        outcome: "unknown",
+      })
+      expect(
+        target.sent
+          .map((message) => decode(message))
+          .filter((message) => message._tag === "CellCancel" && message.operationKey === input.operationKey),
+      ).toHaveLength(1)
+
+      const cancelled = {
+        _tag: "DomainFailure" as const,
+        failure: { kind: "cancelled", message: "Cell operation was cancelled" },
+      }
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "CellLifecycle",
+          access,
+          frame: {
+            _tag: "Terminal",
+            attribution: attribution(input.operationKey),
+            cursor: 3,
+            outcome: "cancelled",
+            response: cancelled,
+          },
+        }),
+      )
+      expect(yield* gateway.execute(input)).toEqual({ response: cancelled, outcome: "cancelled" })
       expect(target.closed).toEqual([])
     }),
   )
@@ -1622,7 +1699,7 @@ describe("executor gateway", () => {
         _tag: "Unknown",
         message: "Machine outcome is unknown at the operation deadline",
       })
-      expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown" })
+      expect(running.pollUnsafe()).toBeUndefined()
       expect(binding.pollUnsafe()).toBeUndefined()
       expect(
         firstResumed.sent.map((message) => decode(message)).filter((message) => message._tag === "BindingResult"),
@@ -1645,6 +1722,8 @@ describe("executor gateway", () => {
       yield* Deferred.await(cleanupCompleted)
       yield* Fiber.join(binding)
       yield* Fiber.join(advancing)
+      yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+      expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown" })
       expect(
         firstResumed.sent.map((message) => decode(message)).filter((message) => message._tag === "BindingResult"),
       ).toEqual([

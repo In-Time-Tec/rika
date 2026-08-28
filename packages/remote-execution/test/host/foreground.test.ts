@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
-import { Clock, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
+import { Clock, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Queue, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../../src/host/foreground"
 import {
@@ -815,6 +815,159 @@ describe.sequential("foreground Runner", () => {
             ).toHaveLength(2)
             yield* Fiber.interrupt(runner)
           }),
+        ),
+      (original) =>
+        Effect.sync(() => {
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
+          FakeWebSocket.current = undefined
+          FakeWebSocket.instances.length = 0
+          FakeWebSocket.onSend = undefined
+        }),
+    ),
+  )
+
+  it.live("completes concurrent workspace bindings", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const original = globalThis.WebSocket
+        Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
+        return original
+      }),
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
+            const fileSystem = yield* FileSystem.FileSystem
+            const workspacePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runner-bindings-" })
+            const ready = yield* Deferred.make<void, import("../../src/host/foreground").ForegroundRunnerError>()
+            const runner = yield* Effect.forkScoped(
+              runForegroundRunner({
+                admission: {
+                  assignmentId: "assignment-concurrent-bindings",
+                  admissionId: "admission-concurrent-bindings",
+                  ticket: "one-use-ticket",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
+                  workspaceIdentity: "workspace-concurrent-bindings",
+                  expiresAt: 9_999_999_999_999,
+                },
+                workspacePath,
+                ready,
+              }).pipe(Effect.provide(foregroundContext)),
+            )
+            const socket = yield* eventuallyLive(() => FakeWebSocket.current)
+            const hello = yield* eventuallyLive(() => socket.messages("RunnerHello")[0])
+            const access: AccessWire = {
+              version: 1,
+              fence: {
+                target: "runner",
+                assignmentId: "assignment-concurrent-bindings",
+                assignmentGeneration: 1,
+                instanceId: "device-1",
+                executorId: "executor-1",
+                processIncarnation: hello.hello.processIncarnation,
+              },
+              leaseEpoch: 1,
+              sessionToken: "session-1",
+            }
+            socket.message({
+              _tag: "ExecutorWelcome",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: access.leaseEpoch,
+                sessionToken: access.sessionToken,
+                leaseExpiresAt: 9_999_999_999_999,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 0, value: "" },
+              },
+            })
+            yield* Deferred.await(ready)
+            const manifest = yield* bindingManifest([
+              { module: "context", operations: ["current"] },
+              { module: "workspace", operations: ["read"] },
+            ]).pipe(Effect.provide(foregroundContext))
+            const bindingCalls: Array<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>> = []
+            const bindingQueue =
+              yield* Queue.unbounded<Extract<RunnerMessageValue, { readonly _tag: "BindingInvoke" }>>()
+            FakeWebSocket.onSend = (_target, message) => {
+              if (message._tag !== "BindingInvoke" || message.operationKey !== "operation-concurrent-bindings") return
+              bindingCalls.push(message)
+              Queue.offerUnsafe(bindingQueue, message)
+            }
+            yield* Effect.forkScoped(
+              Effect.forEach(
+                Array.from({ length: 9 }),
+                () =>
+                  Effect.gen(function* () {
+                    const message = yield* Queue.take(bindingQueue)
+                    const output =
+                      message.request.module === "context"
+                        ? { threadId: "thread-concurrent-bindings" }
+                        : {
+                            text: `${(yield* Schema.decodeUnknownEffect(Schema.Struct({ path: Schema.String }))(message.request.input)).path}:content`,
+                          }
+                    yield* Effect.sleep("1 millis")
+                    socket.message({
+                      _tag: "BindingResult",
+                      access,
+                      operationKey: message.operationKey,
+                      attempt: message.attempt,
+                      callId: message.callId,
+                      requestDigest: message.requestDigest,
+                      outcome: { _tag: "Returned", response: { _tag: "Success", output } },
+                    })
+                  }),
+                { discard: true },
+              ),
+            )
+            const paths = Array.from({ length: 8 }, (_, index) => `docs/spec/${index}.md`)
+            const encodedPaths = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.String)))(paths)
+            socket.message({
+              _tag: "CellExecute",
+              request: {
+                access,
+                operationKey: "operation-concurrent-bindings",
+                workspaceId: "workspace-concurrent-bindings",
+                sessionId: "session-concurrent-bindings",
+                threadId: "thread-concurrent-bindings",
+                turnId: "turn-concurrent-bindings",
+                runId: "run-concurrent-bindings",
+                rootRunId: "run-concurrent-bindings",
+                toolCallId: "call-concurrent-bindings",
+                code: `const paths = ${encodedPaths}; Object.fromEntries(await Promise.all(paths.map(async (path) => [path, (await rika.workspace.read({ path })).text])))`,
+                attempt: 0,
+                replayPolicy: "never",
+                admittedAt: null,
+                deadlineAt: "2999-01-01T00:00:00.000Z",
+                bindings: manifest,
+              },
+            })
+            const completed = yield* eventuallyLive(() =>
+              socket
+                .frames("Terminal")
+                .find((message) => message.frame.attribution.operationKey === "operation-concurrent-bindings"),
+            )
+            socket.message({
+              _tag: "CellTerminalReceipt",
+              access,
+              operationKey: "operation-concurrent-bindings",
+              attempt: completed.frame.attribution.attempt,
+              cursor: completed.frame.cursor,
+            })
+            expect(completed.frame.response).toMatchObject({ _tag: "Success" })
+            if (completed.frame.response._tag !== "Success") return
+            const result = yield* Schema.decodeUnknownEffect(Schema.Struct({ value: Schema.String }))(
+              completed.frame.response.result,
+            )
+            expect(
+              yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(
+                result.value,
+              ),
+            ).toEqual(Object.fromEntries(paths.map((path) => [path, `${path}:content`])))
+            expect(bindingCalls).toHaveLength(9)
+            expect(new Set(bindingCalls.map((call) => call.callId))).toHaveLength(9)
+            yield* Fiber.interrupt(runner)
+          }).pipe(provideLayer(BunFileSystem.layer)),
         ),
       (original) =>
         Effect.sync(() => {

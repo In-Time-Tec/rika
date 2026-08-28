@@ -7,6 +7,7 @@ import type {
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import type * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as HostedObservability from "@rika/product/hosted-observability"
+import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { HostBindingRegistry } from "tenetkit/repl"
 import {
   ApiMessage,
@@ -2016,14 +2017,61 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       return resolution.result
     })
     const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(request.deadlineAt))
+    const settlementDeadlineAtMillis = deadlineAtMillis + CellTerminalSettlementGraceMillis
+    const sendDeadlineCancel = Effect.gen(function* () {
+      const session = (yield* Ref.get(sessions)).get(request.assignmentId)
+      if (session === undefined || !session.ready) return
+      yield* Effect.try({
+        try: () =>
+          session.socket.send(
+            encode({
+              _tag: "CellCancel",
+              access: session.access,
+              operationKey: request.operationKey,
+              attempt: request.attempt,
+            }),
+          ),
+        catch: () => undefined,
+      }).pipe(Effect.ignore)
+    })
+    const awaitSettlement = (
+      result?: Deferred.Deferred<ExecutionResult, GatewayError>,
+    ): Effect.Effect<ExecutionResult, GatewayError> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        if (now < deadlineAtMillis) {
+          const remaining = deadlineAtMillis - now
+          if (result !== undefined) {
+            const completed = yield* Deferred.await(result).pipe(Effect.timeoutOption(remaining))
+            if (Option.isSome(completed)) return completed.value
+          } else yield* Effect.sleep(remaining)
+          return yield* awaitSettlement(result)
+        }
+        const durable = yield* lifecycle.inspect(request)
+        const terminal = yield* durableResult(durable)
+        if (terminal !== undefined) return terminal
+        if (durable.state !== "dispatched") return yield* resolveDeadline()
+        const settlementNow = yield* Clock.currentTimeMillis
+        if (settlementNow >= settlementDeadlineAtMillis) {
+          const settled = yield* resolveDeadline()
+          if (settled.outcome === "unknown") yield* sendDeadlineCancel
+          return settled
+        }
+        const remaining = Math.min(100, settlementDeadlineAtMillis - settlementNow)
+        if (result !== undefined) {
+          const completed = yield* Deferred.await(result).pipe(Effect.timeoutOption(remaining))
+          if (Option.isSome(completed)) return completed.value
+        } else yield* Effect.sleep(remaining)
+        return yield* awaitSettlement(result)
+      })
     const prepared = yield* lifecycle.inspect(request)
     const replay = yield* durableResult(prepared)
     if (replay !== undefined) return replay
-    if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) return yield* resolveDeadline()
+    if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) return yield* awaitSettlement()
     const connected = yield* awaitSession(request.assignmentId).pipe(
       Effect.timeoutOption(Math.max(0, deadlineAtMillis - (yield* Clock.currentTimeMillis))),
     )
-    if (Option.isNone(connected)) return yield* resolveDeadline()
+    if (Option.isNone(connected)) return yield* awaitSettlement()
     const pendingKey = key(request.assignmentId, request.operationKey, request.attempt)
     const operation = yield* admission.withPermits(1)(
       Effect.gen(function* () {
@@ -2056,7 +2104,8 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             waiters: 1,
           }
         if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) {
-          const deadlineResult = yield* resolveDeadline()
+          const result = yield* Deferred.make<ExecutionResult, GatewayError>()
+          if (durable.state !== "dispatched") yield* Deferred.succeed(result, yield* resolveDeadline())
           return {
             assignmentId: request.assignmentId,
             operationKey: request.operationKey,
@@ -2064,10 +2113,12 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
             request,
             socket: session.socket,
             access: session.access,
-            result: yield* Deferred.make<ExecutionResult, GatewayError>().pipe(
-              Effect.tap((result) => Deferred.succeed(result, deadlineResult)),
-            ),
+            result,
             waiters: 1,
+            bindings: request.bindings,
+            bindingCalls: yield* Ref.make(new Map()),
+            bindingAccess: yield* Semaphore.make(1),
+            nextMachineOrdinal: yield* Ref.make(0),
           }
         }
         const terminal = (yield* Ref.get(terminals)).get(pendingKey)
@@ -2169,24 +2220,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         if (retire) yield* retireOperation(pendingKey, operation)
       }),
     )
-    const sendCancel = Effect.try({
-      try: () =>
-        operation.socket.send(
-          encode({
-            _tag: "CellCancel",
-            access: operation.access,
-            operationKey: operation.operationKey,
-            attempt: operation.attempt,
-          }),
-        ),
-      catch: () => undefined,
-    }).pipe(Effect.ignore)
-    return yield* Deferred.await(operation.result).pipe(
-      Effect.timeoutOption(Math.max(0, deadlineAtMillis - (yield* Clock.currentTimeMillis))),
-      Effect.flatMap((completed) => {
-        if (Option.isSome(completed)) return Effect.succeed(completed.value)
-        return resolveDeadline().pipe(Effect.tap((result) => (result.outcome === "unknown" ? sendCancel : Effect.void)))
-      }),
+    return yield* awaitSettlement(operation.result).pipe(
       Effect.onExit((exit) =>
         Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : releaseWaiter,
       ),
