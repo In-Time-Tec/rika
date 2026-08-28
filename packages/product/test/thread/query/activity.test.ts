@@ -3,10 +3,12 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
+import { Schema } from "effect"
 import * as ThreadActivity from "../../../src/thread/query/activity"
 
 const turnId = Turn.TurnId.make("turn-a")
 const threadId = Thread.ThreadId.make("thread-a")
+const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json))
 
 const toolUnit = (key: string, output: string | undefined): Unit => {
   const block = {
@@ -24,7 +26,10 @@ const toolUnit = (key: string, output: string | undefined): Unit => {
     turnId,
     order: unitOrder(key, 0),
     revision: 0,
-    content: { _tag: "Block", block: output === undefined ? block : { ...block, output } },
+    content: {
+      _tag: "Block",
+      block: output === undefined ? block : { ...block, result: decodeJson(output) },
+    },
   }
 }
 

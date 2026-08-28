@@ -38,6 +38,7 @@ import {
 import { toolUnitsFor, shellCommandText, shellExitCode, type ToolUnit } from "../tool/detail"
 import { transcriptWrapWidth, type TranscriptUnitBuild, type UnitLineRange } from "../transcript/window"
 import { createToolBodyRenderer } from "../tool/bodies"
+import { toolResultText } from "../../../presentation/transcript/tool/body"
 
 const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
   state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
@@ -202,7 +203,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const agent = unit.block.presentation.family === "agent"
     const shellFailure =
       failed && unit.block.presentation.family === "shell" ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
-    const output = agent || !toolOutputDisplayed(unit.block) ? undefined : unit.block.output
+    const output = agent || !toolOutputDisplayed(unit.block) ? undefined : toolResultText(unit.block.result)
     const expandable =
       hasChildren ||
       hasTerminal ||
@@ -249,7 +250,11 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       append(
         chunk.text.includes("\n") ? { ...chunk, text: chunk.text.replaceAll("\n", `\n${continuationPrefix}`) } : chunk,
       )
-    renderCellBody(block, false, expanded, rowWidth - stringWidth(continuationPrefix), spinnerFrame, appendIndented)
+    renderCellBody(block, false, expanded, rowWidth - stringWidth(continuationPrefix), spinnerFrame, appendIndented, {
+      nestedRanges,
+      rowExpanded,
+      line: () => line,
+    })
     nestedRanges.push({
       start,
       end: line,
@@ -276,7 +281,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const detail = toolDetail(index, block)
     const children = unit.children ?? []
     const agent = block.presentation.family === "agent"
-    const output = agent || !toolOutputDisplayed(block) ? undefined : block.output
+    const output = agent || !toolOutputDisplayed(block) ? undefined : toolResultText(block.result)
     const expandable =
       children.length > 0 ||
       unit.agentResponse !== undefined ||
@@ -447,7 +452,11 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   const renderCellUnitBody = (index: number, selected: boolean, expanded: boolean) => {
     const block = blockAt(index)
     if (block?._tag !== "Cell") return
-    renderCellBody(block, selected, expanded, transcriptWrapWidth(model.width), spinnerFrame, append)
+    renderCellBody(block, selected, expanded, transcriptWrapWidth(model.width), spinnerFrame, append, {
+      nestedRanges,
+      rowExpanded,
+      line: () => line,
+    })
   }
   const renderDiffUnitBody = (index: number, selected: boolean, expanded: boolean) => {
     const block = blockAt(index)

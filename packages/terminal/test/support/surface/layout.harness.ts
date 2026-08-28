@@ -50,7 +50,7 @@ const tool = (
     files: [],
   }
   if (output === undefined) return value
-  return { ...value, output }
+  return { ...value, result: { text: output } }
 }
 const base = (): Model => initial("/workspace", "high")
 const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({

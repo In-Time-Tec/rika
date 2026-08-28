@@ -5,6 +5,7 @@ import { TranscriptBlock, type TranscriptItem } from "../../../state/transcript/
 import { Schema } from "effect"
 import { spacing } from "../../terminal/theme"
 import { orderedTranscriptItems } from "../row"
+import { toolResultText } from "../tool/body"
 
 export const transcriptWrapWidth = (width: number): number => Math.max(8, width - spacing.transcript * 2 - 2)
 
@@ -20,7 +21,7 @@ const textRows = (text: string, wrapWidth: number): number =>
 const blockText = (block: TranscriptBlock | undefined): string => {
   switch (block?._tag) {
     case "ToolCall":
-      return [block.detail, block.output ?? "", ...block.files.map((file) => file.path)].join("\n")
+      return [block.detail, toolResultText(block.result) ?? "", ...block.files.map((file) => file.path)].join("\n")
     case "ToolResult":
       return block.output
     case "Diff":

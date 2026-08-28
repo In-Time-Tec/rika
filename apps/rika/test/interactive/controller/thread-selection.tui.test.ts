@@ -52,7 +52,7 @@ test(
         app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
-        const nestedCell = 'await rika.workspace.read({"path":"nested.txt"})'
+        const nestedCell = 'await rika.workspace.read({ path: "nested.txt" })'
         yield* app.waitFrame(nestedCell)
         yield* app.settled
         const completed = app.frame()
@@ -65,8 +65,8 @@ test(
         expect(completed).not.toContain("Collected subagents")
         expect(completed).not.toContain("Waiting for subagents")
         expect(completed).not.toContain("1 line")
-        expect(completed).not.toContain(" · ")
-        expect(spanHasColor(app, "ts", "128,128,128,255"), "nested cell language span").toBe(true)
+        expect(completed).toMatch(/\d+ms · 1 call · ▸/)
+        expect(completed).not.toContain(" ts ")
         expect(spanHasColor(app, "\u251c ", "128,128,128,255"), "nested cell branch span").toBe(true)
         yield* app.quit
       }),

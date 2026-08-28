@@ -14,6 +14,7 @@ const cell = (overrides: Partial<Cell> = {}): Cell => ({
   output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   epoch: 0,
   notices: [],
+  calls: [],
   files: [],
   ...overrides,
 })
@@ -68,6 +69,6 @@ test("the body text joins every non-empty channel", () => {
         notices: [{ kind: "restored", detail: "Restored a." }],
       }),
     ),
-  ).toBe("const a = 1\nout\nerr\n1\nError: boom\nat cell\nRestored a.")
+  ).toBe('const a = 1\nout\nerr\n"1"\nError: boom\nat cell\nRestored a.')
   expect(cellBodyText(cell())).toBe("")
 })

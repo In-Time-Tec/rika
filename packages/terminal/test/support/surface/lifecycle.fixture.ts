@@ -11,7 +11,7 @@ const shell = (id: string, command: string, output: string) => ({
   id,
   name: "bash",
   input: JSON.stringify({ command }),
-  output,
+  result: { text: output },
   status: "complete" as const,
   presentation: { family: "shell" as const, action: "command", activeLabel: "Running", completeLabel: "Ran" },
   detail: command,
@@ -70,7 +70,7 @@ const subagentToolBlock = {
     completeLabel: "Subagent finished",
   },
   detail: "Inspect the repository",
-  output: "Inspect complete",
+  result: { text: "Inspect complete" },
   files: [],
 }
 
@@ -87,7 +87,7 @@ const editToolBlock = {
     completeLabel: "Edited",
   },
   detail: "src/a.ts",
-  output: "@@\n-old\n+new",
+  result: { text: "@@\n-old\n+new" },
   patch: "@@\n-old\n+new",
   files: [
     {

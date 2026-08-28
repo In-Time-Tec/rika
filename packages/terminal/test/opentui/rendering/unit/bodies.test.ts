@@ -25,6 +25,7 @@ test("keeps output-bound details internal in expanded cells", () => {
       output: { stdout: "42", stderr: "", droppedBytes: 13_100, droppedEvents: 0 },
       epoch: 1,
       notices: [{ kind: "restored", detail: "Restored value." }],
+      calls: [],
       files: [],
     },
     false,
@@ -53,6 +54,7 @@ test("shows all authored source when collapsed and caps long cells at fifteen li
       output: { stdout: "hidden while collapsed", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,
       notices: [],
+      calls: [],
       files: [],
     },
     false,
@@ -68,6 +70,46 @@ test("shows all authored source when collapsed and caps long cells at fifteen li
   expect(rendered).toContain("… 3 more lines · ▸")
   expect(rendered).not.toContain("hidden while collapsed")
   expect(rendered).not.toContain("ts")
+})
+
+test("renders typed cell result zones and the host-call ledger", () => {
+  const chunks: Array<string> = []
+  renderCellBody(
+    {
+      _tag: "Cell",
+      id: "typed-cell",
+      status: "complete",
+      visual: "ts",
+      source: { text: "await rika.workspace.read({ path: 'a.ts' })", lines: 1, truncated: false },
+      output: { stdout: "printed", stderr: "warned", droppedBytes: 0, droppedEvents: 0 },
+      result: { content: "first\nsecond" },
+      epoch: 1,
+      notices: [],
+      calls: [
+        {
+          id: "read-1",
+          module: "workspace",
+          operation: "read",
+          inputSummary: '{"path":"a.ts"}',
+          status: "returned",
+          durationMillis: 4,
+          message: "two lines",
+        },
+      ],
+      files: [],
+    },
+    false,
+    true,
+    80,
+    "⠿",
+    (chunk) => chunks.push(chunk.text),
+  )
+  const rendered = chunks.join("")
+  expect(rendered).toContain("stdout\n    printed")
+  expect(rendered).toContain("stderr\n    warned")
+  expect(rendered).toContain('result\n    {\n      "content": first\n      second')
+  expect(rendered).toContain("1 call")
+  expect(rendered).toContain("✓ Read a.ts · 4ms ▸")
 })
 
 test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>
@@ -88,7 +130,7 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
           completeLabel: "Ran",
         },
         detail: "sleep 5",
-        output: "still running",
+        result: { text: "still running" },
         files: [],
       }
       const model: Model = {

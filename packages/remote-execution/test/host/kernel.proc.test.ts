@@ -304,7 +304,7 @@ describe("hosted TypeScript kernel", () => {
         )
 
         expect(resultValue(first)).toContain("operation-1")
-        expect(resultValue(second)).toContain("count: 2")
+        expect(resultValue(second)).toContain('"count":2')
         expect(resultValue(second)).toContain("operation-2")
         expect(suspended).toEqual({ _tag: "Suspend", token: "approval-token" })
         expect(nestedRequests).toEqual([

@@ -478,9 +478,9 @@ it.effect.skipIf(databaseUrl === "")(
               turnId: "personal-turn",
               threadId: "personal-thread",
               revision: 0,
-              projectionVersion: 4,
+              projectionVersion: 5,
               stateJson: "{}",
-              projectorVersion: 4,
+              projectorVersion: 5,
               projectorCursor: "current-cursor",
               projectorState: authorizationState,
               updatedAt: 1,
@@ -494,7 +494,7 @@ it.effect.skipIf(databaseUrl === "")(
                 turnId: "personal-turn",
                 actor: personalActor,
                 authorizationId: "wrong-authorization",
-                checkpoint: { version: 4, cursor: "wrong", state: "wrong" },
+                checkpoint: { version: 5, cursor: "wrong", state: "wrong" },
                 decision: "approved",
               }),
             ),
@@ -510,7 +510,7 @@ it.effect.skipIf(databaseUrl === "")(
             actor: personalActor,
             authorizationId: "internal-approval",
             checkpoint: {
-              version: 4,
+              version: 5,
               cursor: "checkpoint-cursor",
               state: checkpointState,
             },
@@ -582,7 +582,7 @@ it.effect.skipIf(databaseUrl === "")(
           expect(records.find(({ phase }) => phase === "decision")).toMatchObject({
             authorizationId: "internal-approval",
             authorizationCheckpoint: {
-              version: 4,
+              version: 5,
               cursor: "checkpoint-cursor",
             },
           })

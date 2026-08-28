@@ -84,7 +84,7 @@ const childUnits = (child: number): ReadonlyArray<Unit> => {
             status: "complete",
             presentation: toolPresentation,
             detail: `src/${child}/${tool}.ts`,
-            output: `contents ${child} ${tool}`,
+            result: { text: `contents ${child} ${tool}` },
             files: [],
           },
         },

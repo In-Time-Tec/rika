@@ -54,7 +54,7 @@ const editSnapshot: ExecutionProjection.Snapshot = {
           status: "complete",
           presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
           detail: "src/a.ts",
-          output: JSON.stringify({ text: "edited src/a.ts", truncated: false, diff: patch }),
+          result: { text: "edited src/a.ts", truncated: false, diff: patch },
           files: [],
         },
       },

@@ -13,7 +13,7 @@ test("renders a completed subagent's tool-result fallback as markdown", () => {
     blocks: [
       {
         ...agentToolBlock("complete", undefined),
-        output: JSON.stringify({ output: [{ type: "text", text: "## Review complete\n\n**No defects found.**" }] }),
+        result: { output: [{ type: "text", text: "## Review complete\n\n**No defects found.**" }] },
       },
     ],
     items: [{ _tag: "Block", index: 0, id: "tool:agent" }],

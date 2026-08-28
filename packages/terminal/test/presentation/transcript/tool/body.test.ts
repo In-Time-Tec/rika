@@ -29,15 +29,15 @@ describe("tool body contract", () => {
     expect(isExpandableBody(body)).toBe(false)
   })
 
-  test("a numbered read window decodes to a FileWindow with its starting line", () => {
+  test("a typed read result renders its text directly", () => {
     const body = toolBody(
-      call({ action: "read", input: '{"path":"src/a.ts"}', output: "100: const a = 1\n101: const b = 2" }),
+      call({ action: "read", input: '{"path":"src/a.ts"}', result: { text: "100: const a = 1\n101: const b = 2" } }),
     )
-    expect(body).toMatchObject({ _tag: "FileWindow", path: "src/a.ts", start: 100 })
+    expect(body).toEqual({ _tag: "Text", text: "100: const a = 1\n101: const b = 2" })
   })
 
   test("a web page decodes to Markdown", () => {
-    const body = toolBody(call({ action: "read-web-page", output: "# Title" }))
+    const body = toolBody(call({ action: "read-web-page", result: { text: "# Title" } }))
     expect(body).toMatchObject({ _tag: "Markdown", source: "# Title" })
   })
 
@@ -63,7 +63,7 @@ describe("tool body contract", () => {
   })
 
   test("anything else with output decodes to Text and is expandable", () => {
-    const body = toolBody(call({ action: "shell", output: "hello" }))
+    const body = toolBody(call({ action: "shell", result: { text: "hello" } }))
     expect(body).toMatchObject({ _tag: "Text", text: "hello" })
     expect(isExpandableBody(body)).toBe(true)
   })

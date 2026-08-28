@@ -37,14 +37,14 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
   if (block?._tag !== "ToolCall") return model
   const base = outcomeBase.get(block) ?? block
   if (base._tag !== "ToolCall") return model
-  if (outcome.status === "complete" && isFailedDelegationOutput(base.output)) return model
-  if (outcome.status === "failed" && isDeliveredDelegationOutput(base.output)) return model
-  const { output: _, ...withoutOutput } = base
-  const keepsOutput = outcome.reason === undefined && isSucceededDelegationOutput(base.output)
+  if (outcome.status === "complete" && isFailedDelegationOutput(base.result)) return model
+  if (outcome.status === "failed" && isDeliveredDelegationOutput(base.result)) return model
+  const { result: _, ...withoutResult } = base
+  const keepsResult = outcome.reason === undefined && isSucceededDelegationOutput(base.result)
   const applied =
     outcome.reason === undefined
-      ? { ...(keepsOutput ? base : withoutOutput), status: outcome.status }
-      : { ...withoutOutput, status: outcome.status, output: outcome.reason }
+      ? { ...(keepsResult ? base : withoutResult), status: outcome.status }
+      : { ...withoutResult, status: outcome.status, result: outcome.reason }
   blocks[index] = applied
   outcomeBase.set(applied, base)
   outcomeShadow.set(base, { outcome, applied })

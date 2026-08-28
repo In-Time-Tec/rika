@@ -23,7 +23,8 @@ import { projectorNames, textLimit, toolTextLimit } from "../values"
 
 import { scopedId } from "../decoding"
 import { encoded, providerCostNanoUsd, token } from "../decoding"
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
+import { format } from "prettier"
 
 export type { Projector }
 
@@ -175,6 +176,7 @@ const make = (
     notice,
     error,
   })
+  const formattedCellSources = new Map<string, string>()
 
   const { cardFor, updateCard, groupCards, bindChild } = SubagentCard.makeSubagentCardProjection({
     core,
@@ -336,12 +338,22 @@ const make = (
           if (event.message === undefined) return tool
           return {
             ...tool,
-            output: bounded(`${tool.output === undefined ? "" : `${tool.output}\n`}${event.message}`, toolTextLimit),
+            result: bounded(
+              `${Schema.is(Schema.String)(tool.result) ? `${tool.result}\n` : ""}${event.message}`,
+              toolTextLimit,
+            ),
           }
         })
       case "ToolExecutionCompleted": {
-        if (event.call.name === Cell.cellToolName)
+        if (event.call.name === Cell.cellToolName) {
+          const key = `${treeEvent.runId}\u0000${event.call.id}`
+          const formatted = formattedCellSources.get(key)
+          if (formatted !== undefined) {
+            formattedCellSources.delete(key)
+            openCell(node, event.call.id, formatted)
+          }
           return completeCell(node, event.call.id, event.result.result, event.result.isFailure)
+        }
         if (event.call.name === projectorNames.runChild) {
           const card = cardsByInvocation.get(`${node.rawRunId}\u0000${event.call.id}`)
           const result = record(event.result.result)
@@ -764,6 +776,18 @@ const make = (
     },
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
+    formatCellSource: Effect.fn("TreeProjector.formatCellSource")(function* (
+      runId: string,
+      id: string,
+      source: string,
+    ) {
+      const key = `${runId}\u0000${id}`
+      const formatted = yield* Effect.tryPromise(() =>
+        format(source, { parser: "typescript", printWidth: 120, semi: false }),
+      ).pipe(Effect.option)
+      if (Option.isSome(formatted)) formattedCellSources.set(key, formatted.value)
+      else formattedCellSources.delete(key)
+    }),
     previewRunIds: () =>
       [...cardsByChild].flatMap(([runId, card]) => {
         const candidate = units.get(card.unitKey)

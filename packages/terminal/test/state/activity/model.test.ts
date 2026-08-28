@@ -12,6 +12,7 @@ const cell = (id: string, status: string) => ({
   output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   epoch: 0,
   notices: [],
+  calls: [],
   files: [],
 })
 

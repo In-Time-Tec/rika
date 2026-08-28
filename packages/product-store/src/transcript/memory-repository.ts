@@ -66,7 +66,11 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
     Ref.get(state).pipe(
       Effect.map((entries) => {
         const projection = entries.get(turnId)
-        return projection === undefined ? undefined : clone(projection)
+        if (projection === undefined) return undefined
+        const current = clone(projection)
+        if (current.projectorCheckpoint?.version === ExecutionProjection.projectionVersion) return current
+        const { projectorCheckpoint: _, ...withoutStaleCheckpoint } = current
+        return withoutStaleCheckpoint
       }),
     )
   const usage = (threadId: import("@rika/product/thread-record").ThreadId): Effect.Effect<UsageSummary> =>
@@ -122,7 +126,8 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
           const terminalProjectionMissing =
             (turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled") &&
             projection.state.status !== turn.status
-          if (active || terminalProjectionMissing) candidates.push({ threadId: turn.threadId, turnId: turn.id })
+          if (projection.projectionVersion < projectionVersion || active || terminalProjectionMissing)
+            candidates.push({ threadId: turn.threadId, turnId: turn.id })
         }
         return candidates
       }),

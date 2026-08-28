@@ -1,6 +1,7 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Function, Option, Schema } from "effect"
 import type { Block } from "@rika/product/execution-transcript-contract"
+import { toolTextLimit } from "../values"
 
 type Tool = Extract<Block, { readonly _tag: "ToolCall" }>
 type ToolFile = Tool["files"][number]
@@ -133,7 +134,7 @@ const makeToolImpl = (id: string, name: string, input: string, previous?: Tool):
     detail: detail(name, input),
     files: files(id, name, input),
   }
-  if (previous?.output !== undefined) tool = { ...tool, output: previous.output }
+  if (previous?.result !== undefined) tool = { ...tool, result: previous.result }
   if (previous?.process !== undefined) tool = { ...tool, process: previous.process }
   if (previous?.parentId !== undefined) tool = { ...tool, parentId: previous.parentId }
   return tool
@@ -161,10 +162,13 @@ const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean
   if (running) fileStatus = "running"
   if (failed) fileStatus = "failed"
   const resolved = value.diff ?? ""
+  const json = Schema.decodeUnknownOption(Schema.Json)(output)
+  let result: Schema.Json = encodedOutput.slice(0, toolTextLimit)
+  if (Option.isSome(json) && JSON.stringify(json.value).length <= toolTextLimit) result = json.value
   let completed: Tool = {
     ...tool,
     status: completionStatus,
-    output: encodedOutput,
+    result,
     files: tool.files.map((file, index) => {
       const applied = index === 0 && resolved.length > 0 ? { patch: resolved, ...lineCounts(resolved) } : {}
       return { ...file, ...applied, preview: false, status: fileStatus }

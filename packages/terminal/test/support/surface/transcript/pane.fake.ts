@@ -47,7 +47,7 @@ const _streamingShellImpl = (
     detail: `printf ${id}`,
     files: [],
   }
-  return output === undefined ? block : { ...block, output }
+  return output === undefined ? block : { ...block, result: { text: output } }
 }
 
 export const _streamingShell: {

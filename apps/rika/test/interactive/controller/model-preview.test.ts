@@ -474,6 +474,7 @@ describe("tentative model preview overlay", () => {
           visual: "ts",
           source: { text: "1 + 1", lines: 1, truncated: false },
           output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+          calls: [],
           epoch: 1,
           notices: [],
           files: [],

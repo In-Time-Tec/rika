@@ -1,6 +1,6 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import { cellOutputTruncated, formatCellDuration } from "@rika/transcript/cell-presentation"
+import { cellOutputTruncated, formatCellDuration, formatCellResult } from "@rika/transcript/cell-presentation"
 import { highlightLines } from "../../../presentation/markdown/syntax-highlighter"
 import { wrapBodyText } from "../window"
 import type { TranscriptBlock } from "../../../state/transcript/model"
@@ -12,9 +12,15 @@ import { diffCounts } from "../tool/detail"
 import { completedCompactionIcon, renderBlock } from "../block"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
 import { toOpenChunk, wrapStyledLine } from "../text-adapter"
+import type { UnitLineRange } from "../transcript/window"
 
 type Append = (chunk: TextChunk | TerminalTextChunk) => void
 type AppendAll = (styled: StyledText) => void
+interface CellRenderContext {
+  readonly nestedRanges: Array<UnitLineRange>
+  readonly rowExpanded: (id: string) => boolean
+  readonly line: () => number
+}
 
 export const toolOutputDisplayed = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): boolean =>
   isToolOutputDisplayed(block)
@@ -70,6 +76,13 @@ const cellStatusColor = (status: Extract<TranscriptBlock, { _tag: "Cell" }>["sta
 }
 
 const collapsedCellLines = 15
+const HostCallPath = Schema.fromJsonString(Schema.Struct({ path: Schema.String }))
+
+const hostCallLabel = (operation: string, inputSummary: string): string => {
+  const action = operation.length === 0 ? "Call" : `${operation[0]!.toUpperCase()}${operation.slice(1)}`
+  const input = Schema.decodeOption(HostCallPath)(inputSummary)
+  return input._tag === "Some" ? `${action} ${input.value.path}` : action
+}
 
 const renderCellBodyImpl = (
   block: Extract<TranscriptBlock, { _tag: "Cell" }>,
@@ -78,6 +91,7 @@ const renderCellBodyImpl = (
   width: number,
   spinnerFrame: string,
   append: Append,
+  context?: CellRenderContext,
 ): void => {
   const running = block.status === "running"
   let icon = "✕"
@@ -102,19 +116,48 @@ const renderCellBodyImpl = (
   const duration = block.durationMillis === undefined ? "" : formatCellDuration(block.durationMillis)
   if (duration.length > 0) footer.push(duration)
   if (cellOutputTruncated(block)) footer.push("truncated")
+  if (block.calls.length > 0) footer.push(`${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)
   footer.push(expanded ? "▾" : "▸")
   append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
   if (!expanded) return
   if (block.source.truncated) append(dim(fg(colors.amber)("\n  Source truncated.")))
   if (block.output.stdout.length > 0)
-    append(dim(fg(colors.text)(`\n${wrapBodyText(block.output.stdout, width, "  ")}`)))
-  if (block.output.stderr.length > 0) append(dim(fg(colors.red)(`\n${wrapBodyText(block.output.stderr, width, "  ")}`)))
-  if (block.result !== undefined && block.result.length > 0)
-    append(fg(colors.text)(`\n${wrapBodyText(block.result, width, "  ")}`))
+    append(dim(fg(colors.text)(`\n  stdout\n${wrapBodyText(block.output.stdout, width, "    ")}`)))
+  if (block.output.stderr.length > 0)
+    append(dim(fg(colors.red)(`\n  stderr\n${wrapBodyText(block.output.stderr, width, "    ")}`)))
+  if (block.result !== undefined)
+    append(fg(colors.text)(`\n  result\n${wrapBodyText(formatCellResult(block.result), width, "    ")}`))
   if (block.error !== undefined) {
-    append(fg(colors.red)(`\n${wrapBodyText(`${block.error.name}: ${block.error.message}`, width, "  ")}`))
-    if (block.error.stack !== undefined && block.error.stack.length > 0)
-      append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "  ")}`)))
+    append(fg(colors.red)(`\n  error\n${wrapBodyText(`${block.error.name}: ${block.error.message}`, width, "    ")}`))
+    if (block.error.stack !== undefined && block.error.stack.length > 0) {
+      const id = `cell-stack:${block.id}`
+      const start = context?.line() ?? 0
+      const shown = context?.rowExpanded(id) ?? false
+      append(dim(fg(colors.subtle)(`\n    stack ${shown ? "▾" : "▸"}`)))
+      const headerEnd = context?.line() ?? start
+      if (shown) append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "      ")}`)))
+      context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
+    }
+  }
+  for (const call of block.calls) {
+    const id = `cell-call:${block.id}:${call.id}`
+    const start = context?.line() ?? 0
+    const shown = context?.rowExpanded(id) ?? false
+    let callIcon = "✓"
+    if (call.status === "started") callIcon = spinnerFrame
+    else if (call.status === "failed") callIcon = "✕"
+    const callDuration = call.durationMillis === undefined ? "" : ` · ${formatCellDuration(call.durationMillis)}`
+    append(
+      fg(call.status === "failed" ? colors.red : colors.text)(
+        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)}${callDuration} ${shown ? "▾" : "▸"}`,
+      ),
+    )
+    const headerEnd = context?.line() ?? start
+    if (shown) {
+      append(dim(fg(colors.text)(`\n${wrapBodyText(call.inputSummary, width, "    ")}`)))
+      if (call.message !== undefined) append(dim(fg(colors.text)(`\n${wrapBodyText(call.message, width, "    ")}`)))
+    }
+    context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
   }
   for (const notice of block.notices) append(dim(fg(colors.amber)(`\n${wrapBodyText(notice.detail, width, "  ")}`)))
 }
@@ -126,6 +169,7 @@ export const renderCellBody: {
     arg3: Parameters<typeof renderCellBodyImpl>[3],
     arg4: Parameters<typeof renderCellBodyImpl>[4],
     arg5: Parameters<typeof renderCellBodyImpl>[5],
+    arg6?: Parameters<typeof renderCellBodyImpl>[6],
   ): (arg0: Parameters<typeof renderCellBodyImpl>[0]) => ReturnType<typeof renderCellBodyImpl>
   (
     arg0: Parameters<typeof renderCellBodyImpl>[0],
@@ -134,8 +178,9 @@ export const renderCellBody: {
     arg3: Parameters<typeof renderCellBodyImpl>[3],
     arg4: Parameters<typeof renderCellBodyImpl>[4],
     arg5: Parameters<typeof renderCellBodyImpl>[5],
+    arg6?: Parameters<typeof renderCellBodyImpl>[6],
   ): ReturnType<typeof renderCellBodyImpl>
-} = Function.dual(6, renderCellBodyImpl)
+} = Function.dual((args) => args.length >= 6, renderCellBodyImpl)
 
 const compactionRainbow = ["#ff5f6d", "#ff9f43", "#ffd166", "#7bd389", "#5bc0eb", "#8c7ae6", "#d980fa"] as const
 

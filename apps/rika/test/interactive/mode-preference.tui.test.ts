@@ -76,16 +76,17 @@ test(
           unit.content._tag === "Block" && unit.content.block._tag === "Cell" ? [unit.content.block] : [],
         )
         expect(cells?.map(({ source }) => source.text)).toEqual([
-          `await rika.processes.start({"command":"${command}","timeoutMillis":0})`,
-          'await rika.processes.status({"processId":"1","waitMillis":0})',
-          'await rika.processes.status({"processId":"1","waitMillis":10000})',
+          `await rika.processes.start({ command: "${command}", timeoutMillis: 0 })\n`,
+          'await rika.processes.status({ processId: "1", waitMillis: 0 })\n',
+          'await rika.processes.status({ processId: "1", waitMillis: 10000 })\n',
         ])
-        expect(cells?.at(0)?.result, "the launching cell reports the registered process").toContain("processId: '1'")
-        expect(cells?.at(0)?.result, "the launching cell leaves the process running").toContain("running: true")
-        expect(cells?.at(1)?.result, "the immediate wait observes a live process").toContain("running: true")
-        expect(cells?.at(2)?.result).toContain("FINAL_OUTPUT")
-        expect(cells?.at(2)?.result, "the final wait observes a settled process").toContain("running: false")
-        expect(cells?.at(2)?.result, "the settled process reports its exit code").toContain("exitCode: 0")
+        expect(cells?.at(0)?.result).toMatchObject({ processId: "1", running: true })
+        expect(cells?.at(1)?.result).toMatchObject({ running: true })
+        expect(cells?.at(2)?.result).toMatchObject({
+          text: expect.stringContaining("FINAL_OUTPUT"),
+          running: false,
+          exitCode: 0,
+        })
         expect(cells?.every(({ status }) => status === "complete")).toBe(true)
 
         app.pressKey("\t")

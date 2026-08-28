@@ -3,6 +3,7 @@ import type { Block } from "@rika/product/execution-transcript-contract"
 import { Response } from "tenetkit"
 import { Cell as TenetCell } from "tenetkit/repl"
 import type { RunEvent } from "tenetkit/runtime"
+import { Schema } from "effect"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
@@ -47,6 +48,8 @@ const progress = (id: string, data: ToolProgressData) => {
   }
   return treeEvent("raw-root-run", event)
 }
+
+const decodeCellEvent = Schema.decodeUnknownSync(TenetCell.CellEvent)
 
 const completed = (id: string, code: string, result: ToolResult, isFailure: boolean) => {
   const event: RunEventInput<"ToolExecutionCompleted"> = {
@@ -103,6 +106,57 @@ describe("TenetKit cell projection", () => {
     expect(streamed).toMatchObject({ status: "running", output: { stdout: "first second", stderr: "warn" } })
   })
 
+  it("projects one host-call row per request and updates it through settlement", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-cell-host-calls", "read files")
+    projector.apply(started("cell-host", "await rika.workspace.read({ path: 'a.ts' })"))
+    projector.apply(
+      progress(
+        "cell-host",
+        decodeCellEvent({
+          _tag: "HostCall",
+          cellId: "cell-host",
+          sequence: 0,
+          requestId: "request-1",
+          module: "workspace",
+          operation: "Read",
+          inputSummary: '{"path":"a.ts"}',
+          status: "started",
+        }),
+      ),
+    )
+    const returned = cellOf(
+      projector.apply(
+        progress(
+          "cell-host",
+          decodeCellEvent({
+            _tag: "HostCall",
+            cellId: "cell-host",
+            sequence: 1,
+            requestId: "request-1",
+            module: "workspace",
+            operation: "Read",
+            inputSummary: '{"path":"a.ts"}',
+            status: "returned",
+            durationMillis: 12,
+            message: "read a.ts",
+          }),
+        ),
+      ),
+    )
+    expect(returned?.calls).toEqual([
+      {
+        id: "request-1",
+        module: "workspace",
+        operation: "Read",
+        inputSummary: '{"path":"a.ts"}',
+        status: "returned",
+        durationMillis: 12,
+        message: "read a.ts",
+      },
+    ])
+  })
+
   it("settles a completed cell with result, output, duration, epoch, and truncation counts", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-complete", "complete")
@@ -131,7 +185,7 @@ describe("TenetKit cell projection", () => {
     )
     expect(settled).toMatchObject({
       status: "complete",
-      result: "42",
+      result: 42,
       durationMillis: 1_240,
       epoch: 2,
       output: { stdout: "printed\n", stderr: "", droppedBytes: 136, droppedEvents: 3 },
@@ -155,7 +209,8 @@ describe("TenetKit cell projection", () => {
             sequence: 3,
             name: "TypeError",
             message: "boom",
-            stack: "at cell:1:1",
+            stack:
+              "TypeError: boom\n    at /$bunfs/root/cell.ts:1:1\n    at node_modules/effect/src/internal.ts:2:1\n    at user.ts:3:1",
             stdout: "before throw",
             stderr: "trace",
             durationMillis: 12,
@@ -167,7 +222,7 @@ describe("TenetKit cell projection", () => {
     )
     expect(failed).toMatchObject({
       status: "failed",
-      error: { name: "TypeError", message: "boom", stack: "at cell:1:1" },
+      error: { name: "TypeError", message: "boom", stack: "TypeError: boom\n    at user.ts:3:1" },
       output: { stdout: "before throw", stderr: "trace" },
       durationMillis: 12,
       epoch: 1,

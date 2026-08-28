@@ -264,7 +264,7 @@ describe("recorded shell session", () => {
               block: {
                 _tag: "ToolCall",
                 status: "cancelled",
-                output: "Shell command cancelled",
+                result: "Shell command cancelled",
                 process: { truncated: false },
               },
             },
@@ -349,7 +349,7 @@ describe("recorded shell session", () => {
               block: {
                 _tag: "ToolCall",
                 status: "failed",
-                output: expect.stringContaining("process launch failed"),
+                result: expect.stringContaining("process launch failed"),
                 process: { truncated: false },
               },
             },
@@ -390,7 +390,7 @@ describe("recorded shell session", () => {
               _tag: "Block",
               block: {
                 _tag: "ToolCall",
-                output: "failed output\n",
+                result: "failed output\n",
                 process: { truncated: false, exitCode: 7 },
               },
             },

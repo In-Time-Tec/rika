@@ -584,45 +584,55 @@ const make = (
         let pendingTitle: Run.RunSnapshot | null | undefined
         let rootProjected = input?.checkpoint !== undefined
         const projected = Stream.merge(rootEvents, titleEvents).pipe(
-          Stream.map((event) => {
-            if (event._tag === "title") {
-              if (!rootProjected && pendingTitle === undefined) {
-                pendingTitle = event.snapshot ?? null
-                return []
-              }
-              if (event.snapshot === undefined) {
-                const change = projector.applyTitle(undefined, [])
+          Stream.mapEffect((event) =>
+            Effect.gen(function* () {
+              if (event._tag === "title") {
+                if (!rootProjected && pendingTitle === undefined) {
+                  pendingTitle = event.snapshot ?? null
+                  return []
+                }
+                if (event.snapshot === undefined) {
+                  const change = projector.applyTitle(undefined, [])
+                  return change === undefined ? [] : [{ change }]
+                }
+                const outcome = event.snapshot.outcome
+                const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+                const change = projector.applyTitle(text, event.snapshot.usage)
                 return change === undefined ? [] : [{ change }]
               }
-              const outcome = event.snapshot.outcome
-              const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
-              const change = projector.applyTitle(text, event.snapshot.usage)
-              return change === undefined ? [] : [{ change }]
-            }
-            rootProjected = true
-            const change = projector.apply(event.event)
-            const changes: Array<{
-              readonly change: ReturnType<typeof projector.apply>
-              readonly childRunId?: string
-            }> = []
-            if (event.event.event._tag === "ChildLinked")
-              changes.push({ change, childRunId: event.event.event.childRunId })
-            else changes.push({ change })
-            if (pendingTitle !== undefined) {
-              const snapshot = pendingTitle
-              pendingTitle = undefined
-              if (snapshot === null) {
-                const titleChange = projector.applyTitle(undefined, [])
-                if (titleChange !== undefined) changes.push({ change: titleChange })
-              } else {
-                const outcome = snapshot.outcome
-                const text = outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
-                const titleChange = projector.applyTitle(text, snapshot.usage)
-                if (titleChange !== undefined) changes.push({ change: titleChange })
+              rootProjected = true
+              if (event.event.event._tag === "ToolExecutionCompleted" && event.event.event.call.name === "typescript") {
+                const decoded = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }))(
+                  event.event.event.call.params,
+                )
+                if (Option.isSome(decoded))
+                  yield* projector.formatCellSource(event.event.runId, event.event.event.call.id, decoded.value.code)
               }
-            }
-            return changes
-          }),
+              const change = projector.apply(event.event)
+              const changes: Array<{
+                readonly change: ReturnType<typeof projector.apply>
+                readonly childRunId?: string
+              }> = []
+              if (event.event.event._tag === "ChildLinked")
+                changes.push({ change, childRunId: event.event.event.childRunId })
+              else changes.push({ change })
+              if (pendingTitle !== undefined) {
+                const snapshot = pendingTitle
+                pendingTitle = undefined
+                if (snapshot === null) {
+                  const titleChange = projector.applyTitle(undefined, [])
+                  if (titleChange !== undefined) changes.push({ change: titleChange })
+                } else {
+                  const outcome = snapshot.outcome
+                  const text =
+                    outcome?._tag === "Succeeded" && "text" in outcome.result ? outcome.result.text : undefined
+                  const titleChange = projector.applyTitle(text, snapshot.usage)
+                  if (titleChange !== undefined) changes.push({ change: titleChange })
+                }
+              }
+              return changes
+            }),
+          ),
           Stream.flatMap(Stream.fromIterable),
           Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
         )

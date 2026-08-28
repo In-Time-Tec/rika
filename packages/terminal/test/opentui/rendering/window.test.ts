@@ -28,7 +28,7 @@ test("toggles expandable transcript headers without selecting them and keeps bod
               completeLabel: "Ran",
             },
             detail: "printf transcript-output",
-            output: "transcript-output",
+            result: { text: "transcript-output" },
             files: [],
           },
         ],

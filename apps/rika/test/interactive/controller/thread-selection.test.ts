@@ -422,6 +422,7 @@ describe("interactive ThreadView controller", () => {
                     output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
                     epoch: 0,
                     notices: [],
+                    calls: [],
                     files: [],
                   },
                 },

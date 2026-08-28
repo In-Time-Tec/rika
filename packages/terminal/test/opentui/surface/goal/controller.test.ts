@@ -22,6 +22,7 @@ const cell = {
   durationMillis: 1_240,
   epoch: 0,
   notices: [],
+  calls: [],
   files: [],
 }
 
@@ -83,7 +84,7 @@ describe("a subagent's own cell", () => {
     const expandedCell = rendered(cellOpen)
     expect(expandedCell).toContain("NESTED_CELL_STDOUT")
     expect(expandedCell.match(new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))).toHaveLength(1)
-    expect(expandedCell).toContain("\u2502   NESTED_CELL_STDOUT")
+    expect(expandedCell).toContain("\u2502     NESTED_CELL_STDOUT")
   })
 
   test("wraps highlighted source inside the card timeline", () => {

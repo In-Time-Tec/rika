@@ -177,7 +177,7 @@ const reduceDataImpl = (
             if (requested?._tag !== "ToolCall") return model
             blocks[index] = {
               ...requested,
-              output: incoming.output,
+              result: incoming.output,
               status: incoming.failed ? "failed" : "complete",
             }
           } else {

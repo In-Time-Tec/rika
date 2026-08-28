@@ -54,7 +54,7 @@ const ToolCall = Schema.TaggedStruct("ToolCall", {
   status: Schema.Literals(["running", "complete", "failed", "cancelled", "rejected"]),
   presentation: Presentation,
   detail: Schema.String,
-  output: Schema.optionalKey(Schema.String),
+  result: Schema.optionalKey(Schema.Json),
   process: Schema.optionalKey(ToolProcess),
   files: Schema.Array(ToolFile),
   parentId: Schema.optionalKey(Schema.String),
@@ -121,13 +121,22 @@ const CellNotice = Schema.Struct({
   kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready"]),
   detail: Schema.String,
 })
+const CellHostCall = Schema.Struct({
+  id: Schema.String,
+  module: Schema.String,
+  operation: Schema.String,
+  inputSummary: Schema.String,
+  status: Schema.Literals(["started", "returned", "failed"]),
+  durationMillis: Schema.optionalKey(Schema.Finite),
+  message: Schema.optionalKey(Schema.String),
+})
 const Cell = Schema.TaggedStruct("Cell", {
   id: Schema.String,
   status: Schema.Literals(["running", "complete", "failed", "cancelled", "unknown"]),
   visual: Schema.Literals(["ts", "shell"]),
   source: CellSource,
   output: CellOutput,
-  result: Schema.optionalKey(Schema.String),
+  result: Schema.optionalKey(Schema.Json),
   error: Schema.optionalKey(
     Schema.Struct({
       name: Schema.String,
@@ -138,6 +147,7 @@ const Cell = Schema.TaggedStruct("Cell", {
   durationMillis: Schema.optionalKey(Schema.Finite),
   epoch: Schema.Finite,
   notices: Schema.Array(CellNotice),
+  calls: Schema.Array(CellHostCall),
   files: Schema.Array(ToolFile),
   process: Schema.optionalKey(ToolProcess),
   parentId: Schema.optionalKey(Schema.String),

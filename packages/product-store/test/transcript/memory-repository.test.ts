@@ -302,7 +302,7 @@ describe("Operation thread actions", () => {
             revision: 1,
             content: {
               _tag: "Block",
-              block: { _tag: "ToolCall", detail: "printf copied", output: "copied", status: "complete" },
+              block: { _tag: "ToolCall", detail: "printf copied", result: "copied", status: "complete" },
             },
           },
         ],

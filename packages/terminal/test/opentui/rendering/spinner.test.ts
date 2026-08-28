@@ -30,7 +30,7 @@ const runningTool = (): Model => {
       completeLabel: "Ran",
     },
     detail: "sleep 5",
-    output: "working",
+    result: { text: "working" },
     files: [],
   }
   return {
@@ -53,6 +53,7 @@ const runningCell = (): Model => {
     output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
     epoch: 0,
     notices: [],
+    calls: [],
     files: [],
   }
   return {

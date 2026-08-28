@@ -62,7 +62,7 @@ it.effect("derives a terminal recorded shell from its authoritative Turn instead
       fail: (message) => Effect.die(message),
     })
     expect(window.entries).toHaveLength(1)
-    expect(window.entries[0]?.unit.content).toMatchObject({ block: { status: "complete", output: "done" } })
+    expect(window.entries[0]?.unit.content).toMatchObject({ block: { status: "complete", result: "done" } })
   }),
 )
 

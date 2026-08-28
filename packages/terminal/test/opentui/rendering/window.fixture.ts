@@ -41,7 +41,7 @@ const streamingShellImpl = (id: string, output: string | undefined) => {
     detail: `printf ${id}`,
     files: [],
   }
-  return output === undefined ? block : { ...block, output }
+  return output === undefined ? block : { ...block, result: { text: output } }
 }
 export const streamingShell: {
   (output: string | undefined): (id: string) => ReturnType<typeof streamingShellImpl>

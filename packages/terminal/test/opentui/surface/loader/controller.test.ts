@@ -107,7 +107,7 @@ test("keeps hidden nested web output inline", () => {
           outputDisplay: "hidden",
         },
         detail: "Find current documentation",
-        output: "NESTED SEARCH RESULT BODY",
+        result: { text: "NESTED SEARCH RESULT BODY" },
         files: [],
       },
     ],

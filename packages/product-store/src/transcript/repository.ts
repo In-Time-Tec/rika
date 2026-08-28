@@ -2,7 +2,7 @@ import { Service, RepositoryError } from "@rika/product/transcript-repository"
 import type { Interface } from "@rika/product/transcript-repository"
 export { Service, RepositoryError } from "@rika/product/transcript-repository"
 export type { Interface } from "@rika/product/transcript-repository"
-import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, notExists, or, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, notExists, or, sql } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Layer, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
@@ -45,6 +45,7 @@ export const layer = Layer.effect(
                 isNotNull(rikaTurns.executionLinkJson),
                 notExists(newerCheckpoint),
                 or(
+                  lt(rikaTranscriptCheckpoints.projectionVersion, projectionVersion),
                   inArray(rikaTurns.status, ["running", "cancelling"]),
                   isNull(rikaTranscriptCheckpoints.turnId),
                   ne(sql`${rikaTranscriptCheckpoints.stateJson}::jsonb ->> 'status'`, rikaTurns.status),

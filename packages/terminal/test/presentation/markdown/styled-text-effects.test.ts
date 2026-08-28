@@ -32,7 +32,7 @@ test("expanding a block below the reading position does not move the viewport", 
           },
           detail: "echo hi",
           files: [],
-          output: Array.from({ length: 40 }, (_, index) => `output line ${index}`).join("\n"),
+          result: { text: Array.from({ length: 40 }, (_, index) => `output line ${index}`).join("\n") },
         }
         const base: Model = {
           ...initial("/work", "medium"),

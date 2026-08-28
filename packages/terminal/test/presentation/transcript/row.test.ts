@@ -17,7 +17,7 @@ const readBlock = {
   },
   detail: "src/main.ts",
   files: [],
-  output: Array.from({ length: 40 }, (_, index) => `${index + 100}: line ${index + 100}`).join("\n"),
+  result: { text: Array.from({ length: 40 }, (_, index) => `${index + 100}: line ${index + 100}`).join("\n") },
 }
 
 const model = (expanded: ReadonlyArray<string>): Model => ({
@@ -60,9 +60,8 @@ describe("read tool detail is inspectable", () => {
     expect(output).toContain("line 139")
   })
 
-  test("a read window renders through the Pierre gutter rather than raw numbered text", () => {
+  test("a typed read result renders its numbered text directly", () => {
     const output = rendered(model(["tool:read-1", "tool-child:read-1"]))
-    expect(output).not.toContain("100: line 100")
-    expect(output).toMatch(/100\s+line 100/)
+    expect(output).toContain("100: line 100")
   })
 })

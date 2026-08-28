@@ -15,6 +15,7 @@ type Cell = Extract<Block, { readonly _tag: "Cell" }>
 type CellNotice = Cell["notices"][number]
 type ImageAttachment = Extract<Block, { readonly _tag: "ImageAttachment" }>
 type CellFile = Cell["files"][number]
+type CellHostCall = Cell["calls"][number]
 type ToolProgressData = Extract<RunEvent.RunEvent, { readonly _tag: "ToolProgress" }>["data"]
 type ToolResult = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionCompleted" }>["result"]["result"]
 
@@ -26,6 +27,21 @@ const commentOnly = /^(?:\/\/|\/\*|\*)/u
 const shellStatement = /Bun\.(?:\$`|spawn(?:Sync)?\s*\()/u
 
 const sourceLines = (text: string): number => (text.length === 0 ? 0 : text.split("\n").length)
+const JsonFromString = Schema.fromJsonString(Schema.Json)
+const resultValue = (value: string): Schema.Json => {
+  const decoded = Schema.decodeOption(JsonFromString)(value)
+  return Option.isSome(decoded) ? decoded.value : bounded(value, cellTextLimit)
+}
+
+const HostCallEvent = Schema.TaggedStruct("HostCall", {
+  requestId: Schema.String,
+  module: Schema.String,
+  operation: Schema.String,
+  inputSummary: Schema.String,
+  status: Schema.Literals(["started", "returned", "failed"]),
+  durationMillis: Schema.optionalKey(Schema.Finite),
+  message: Schema.optionalKey(Schema.String),
+})
 
 const meaningfulLines = (source: string): ReadonlyArray<string> =>
   source
@@ -143,6 +159,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,
       notices: [],
+      calls: [],
       files: [],
     }
     write(node, rawId, source.length === 0 && previous !== undefined ? base : withSource(base, source))
@@ -185,6 +202,26 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const block = cellBlock(node, rawId)
     if (block === undefined) return
     const raw = record(data)
+    if (raw._tag === "HostCall") {
+      const decoded = Schema.decodeUnknownOption(HostCallEvent)(raw)
+      if (Option.isNone(decoded) || decoded.value.requestId.length === 0) return
+      const event = decoded.value
+      let call: CellHostCall = {
+        id: event.requestId,
+        module: event.module,
+        operation: event.operation,
+        inputSummary: bounded(event.inputSummary, 2_048),
+        status: event.status,
+      }
+      if (event.durationMillis !== undefined) call = { ...call, durationMillis: event.durationMillis }
+      if (event.message !== undefined) call = { ...call, message: bounded(event.message, 2_048) }
+      const index = block.calls.findIndex((current) => current.id === call.id)
+      write(node, rawId, {
+        ...block,
+        calls: index < 0 ? [...block.calls, call] : block.calls.map((current, at) => (at === index ? call : current)),
+      })
+      return
+    }
     const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
     if (Option.isNone(decoded)) {
       if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return
@@ -216,7 +253,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
         }
         break
       case "Result":
-        next = { ...next, result: bounded(optionalString(event.value), cellTextLimit) }
+        next = { ...next, result: resultValue(optionalString(event.value)) }
         break
       case "OutputTruncated":
         next = {
@@ -262,7 +299,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       write(node, rawId, {
         ...block,
         status: "complete",
-        result: bounded(success.value, cellTextLimit),
+        result: resultValue(success.value),
         output: {
           stdout: bounded(success.stdout, cellTextLimit),
           stderr: bounded(success.stderr, cellTextLimit),

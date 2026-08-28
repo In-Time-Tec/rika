@@ -11,6 +11,14 @@ import {
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 
+const filteredStack = (stack: string): string | undefined => {
+  const lines = stack
+    .split("\n")
+    .filter((line) => !line.includes("$bunfs") && !line.includes("/effect/") && !line.includes("effect@"))
+  const value = lines.join("\n").trim()
+  return value.length === 0 ? undefined : bounded(value, cellTextLimit)
+}
+
 export interface CellOutcome {
   readonly status: Cell["status"]
   readonly error?: NonNullable<Cell["error"]>
@@ -21,13 +29,15 @@ export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
   const message = optionalString(failure.message)
   switch (failure._tag) {
     case cellExecutionFailedTag:
+      const stack = filteredStack(optionalString(failure.stack))
+      let cellError: NonNullable<Cell["error"]> = {
+        name: failure.name,
+        message: bounded(message, cellTextLimit),
+      }
+      if (stack !== undefined) cellError = { ...cellError, stack }
       return {
         status: "failed",
-        error: {
-          name: failure.name,
-          message: bounded(message, cellTextLimit),
-          stack: bounded(optionalString(failure.stack), cellTextLimit),
-        },
+        error: cellError,
       }
     case kernelUnavailableTag:
       return {

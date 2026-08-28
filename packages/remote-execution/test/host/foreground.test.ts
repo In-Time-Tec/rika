@@ -798,7 +798,7 @@ describe.sequential("foreground Runner", () => {
             })
             expect(completed.frame.response).toMatchObject({
               _tag: "Success",
-              result: { value: "{ threadId: 'thread-1' }" },
+              result: { value: '{"threadId":"thread-1"}' },
             })
             expect(
               [...firstSocket.sent, ...secondSocket.sent].filter(

@@ -2,7 +2,7 @@ import { KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { buildTranscript } from "../../../src/opentui/rendering/renderer"
 import { Surface } from "../../../src/opentui/surface/service"
 import { adapterFixtures4 } from "../../state/loadable.fixture"
@@ -58,7 +58,7 @@ test("expands a failed subagent to its prompt and stored error text", () => {
           ...subagentToolBlock,
           status: "failed",
           detail: "Inspect the projection",
-          output: "AgentToolError: Model gpt-5.6-luna is not available",
+          result: "AgentToolError: Model gpt-5.6-luna is not available",
         },
       ],
       expandedRowKeys: ["tool:agent"],
@@ -115,7 +115,7 @@ test("never renders a serialized child result as subagent output", () => {
         id: "task",
         name: "task",
         input: "{}",
-        output: serialized,
+        result: Schema.decodeSync(Schema.fromJsonString(Schema.Json))(serialized),
         status: "complete",
         presentation: {
           family: "agent",
@@ -148,7 +148,7 @@ test("presents successful and failed shell commands with expandable output", () 
             id: "git-status",
             name: "bash",
             input: '{"command":"git --no-optional-locks status --short --branch"}',
-            output,
+            result: { text: output },
             status,
             presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
             detail: "git --no-optional-locks status --short --branch",

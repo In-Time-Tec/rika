@@ -38,7 +38,7 @@ const streamingShellImpl = (id: string, output: string | undefined) => ({
     completeLabel: "Ran",
   },
   detail: `printf ${id}`,
-  output,
+  result: output === undefined ? undefined : { text: output },
   files: [],
 })
 export const _streamingShell: {

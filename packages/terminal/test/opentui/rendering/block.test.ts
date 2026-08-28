@@ -80,6 +80,7 @@ test("renders every transcript block variant and sidebar state", () => {
       output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,
       notices: [],
+      calls: [],
       files: [],
     },
     {
@@ -93,6 +94,7 @@ test("renders every transcript block variant and sidebar state", () => {
       durationMillis: 1_240,
       epoch: 1,
       notices: [{ kind: "restored", detail: "Restored total." }],
+      calls: [],
       files: [],
     },
     {
@@ -105,6 +107,7 @@ test("renders every transcript block variant and sidebar state", () => {
       error: { name: "Error", message: "boom" },
       epoch: 1,
       notices: [],
+      calls: [],
       files: [],
     },
   ] as const
@@ -136,7 +139,7 @@ test("renders hidden tool output as inline presentation status in plain transcri
     id: "web",
     name: "web_search",
     input: JSON.stringify({ objective: "Find current documentation" }),
-    output: "HIDDEN SEARCH RESULT",
+    result: { text: "HIDDEN SEARCH RESULT" },
     status: "complete" as const,
     presentation: {
       family: "direct" as const,

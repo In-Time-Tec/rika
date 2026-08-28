@@ -4,7 +4,7 @@ import { RunEvent } from "tenetkit/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import type { CheckpointInstrumentation } from "../../../src/projection/tree/projector-recovery"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Prompt, Response } from "effect/unstable/ai"
 import {
   assistantOf,
@@ -189,88 +189,101 @@ describe("TenetKit tree projector", () => {
       block: expect.objectContaining({
         detail: "bun test",
         status: "complete",
+        result: { running: false, processId: "p1", exitCode: 0, stdout: "ok" },
         process: expect.objectContaining({ processId: "p1", exitCode: 0, stdout: "ok" }),
       }),
     })
   })
 
-  it("produces identical cell units live and after a checkpoint reload", () => {
-    resetEventPosition()
-    const source = "// warm up\nconst answer = 6 * 7\nanswer"
-    const call = {
-      type: "tool-call" as const,
-      id: "cell-resume",
-      name: "typescript",
-      params: { code: source },
-      providerExecuted: false,
-      metadata: {},
-    }
-    const live = TreeProjector.make("turn-cell-resume", "run a cell")
-    live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    live.apply(
-      treeEvent(
-        "raw-root-run",
-        runEvent({ _tag: "ToolExecutionStarted", turn: 0, call: Response.makePart("tool-call", call) }),
-      ),
-    )
-    const patch = live.apply(
-      treeEvent(
-        "raw-root-run",
-        runEvent({
-          _tag: "ToolProgress",
-          turn: 0,
-          toolCallId: "cell-resume",
-          message: "Stdout",
-          data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
-        }),
-      ),
-    )
-    const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
-    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
-    const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
-      projector.apply(
+  it.effect("formats completed cell source identically live and after a checkpoint reload", () =>
+    Effect.gen(function* () {
+      resetEventPosition()
+      const source = "const answer={value:6*7};answer"
+      const call = {
+        type: "tool-call" as const,
+        id: "cell-resume",
+        name: "typescript",
+        params: { code: source },
+        providerExecuted: false,
+        metadata: {},
+      }
+      const live = TreeProjector.make("turn-cell-resume", "run a cell")
+      live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+      live.apply(
+        treeEvent(
+          "raw-root-run",
+          runEvent({ _tag: "ToolExecutionStarted", turn: 0, call: Response.makePart("tool-call", call) }),
+        ),
+      )
+      const patch = live.apply(
         treeEvent(
           "raw-root-run",
           runEvent({
-            _tag: "ToolExecutionCompleted",
+            _tag: "ToolProgress",
             turn: 0,
-            call: Response.makePart("tool-call", call),
-            result: Response.makePart("tool-result", {
-              id: "cell-resume",
-              name: "typescript",
-              result: {
-                cellId: "cell-resume",
-                epoch: 1,
-                sequence: 2,
-                value: "42",
-                stdout: "partial output",
-                stderr: "",
-                durationMillis: 8,
-                truncation: [],
-              },
-              encodedResult: {},
-              isFailure: false,
-              providerExecuted: false,
-              preliminary: false,
-              metadata: {},
-            }),
+            toolCallId: "cell-resume",
+            message: "Stdout",
+            data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
           }),
         ),
       )
-    resetEventPosition()
-    const livePosition = completion(live)
-    resetEventPosition()
-    const reloadedPosition = completion(reloaded)
-    expect(reloadedPosition.upsert).toEqual(livePosition.upsert)
-    expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
-    expect(
-      reloaded.snapshot().units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")
-        ?.content,
-    ).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ status: "complete", result: "42", durationMillis: 8, epoch: 1 }),
-    })
-  })
+      const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
+      expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+      const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
+        projector.apply(
+          treeEvent(
+            "raw-root-run",
+            runEvent({
+              _tag: "ToolExecutionCompleted",
+              turn: 0,
+              call: Response.makePart("tool-call", call),
+              result: Response.makePart("tool-result", {
+                id: "cell-resume",
+                name: "typescript",
+                result: {
+                  cellId: "cell-resume",
+                  epoch: 1,
+                  sequence: 2,
+                  value: "42",
+                  stdout: "partial output",
+                  stderr: "",
+                  durationMillis: 8,
+                  truncation: [],
+                },
+                encodedResult: {},
+                isFailure: false,
+                providerExecuted: false,
+                preliminary: false,
+                metadata: {},
+              }),
+            }),
+          ),
+        )
+      yield* Effect.all([
+        live.formatCellSource("raw-root-run", "cell-resume", source),
+        reloaded.formatCellSource("raw-root-run", "cell-resume", source),
+      ])
+      resetEventPosition()
+      const livePosition = completion(live)
+      resetEventPosition()
+      const reloadedPosition = completion(reloaded)
+      expect(reloadedPosition.upsert).toEqual(livePosition.upsert)
+      expect(reloaded.snapshot().units).toEqual(live.snapshot().units)
+      expect(
+        reloaded.snapshot().units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")
+          ?.content,
+      ).toEqual({
+        _tag: "Block",
+        block: expect.objectContaining({
+          status: "complete",
+          source: { text: "const answer = { value: 6 * 7 }\nanswer\n", lines: 3, truncated: false },
+          result: 42,
+          durationMillis: 8,
+          epoch: 1,
+        }),
+      })
+    }),
+  )
 
   it("keeps a running cell across a Server restart and drops a settled one from the checkpoint", () => {
     resetEventPosition()

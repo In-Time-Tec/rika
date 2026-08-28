@@ -1,5 +1,6 @@
 import type { Run } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
+import type { Effect } from "effect"
 import type { SemanticTreeEvent } from "./semantic/event"
 
 export interface ToolState {
@@ -49,6 +50,7 @@ export interface Projector {
   readonly snapshot: () => Projection.Snapshot
   readonly apply: (input: SemanticTreeEvent) => Projection.Patch
   readonly applyAll: (inputs: ReadonlyArray<SemanticTreeEvent>) => Projection.Patch
+  readonly formatCellSource: (runId: string, id: string, source: string) => Effect.Effect<void>
   readonly previewRunIds: () => ReadonlyArray<string>
   readonly previewParentId: (runId: string) => string | undefined
   readonly applyTitle: (

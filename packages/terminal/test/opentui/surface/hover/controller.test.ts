@@ -67,7 +67,7 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     input: JSON.stringify({
       command: `echo ${"a".repeat(90)} && rg --hidden --glob '!node_modules' ${"b".repeat(60)}`,
     }),
-    output: `${longText}\n${longText}`,
+    result: { text: `${longText}\n${longText}` },
   }),
   toolCall("shell-2", {
     presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
@@ -102,7 +102,7 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
       outputDisplay: "hidden",
     },
     status: "failed",
-    output: longText,
+    result: { text: longText },
   }),
   toolCall("nested-agent", {
     status: "running",

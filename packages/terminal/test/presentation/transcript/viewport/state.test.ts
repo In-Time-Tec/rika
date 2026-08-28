@@ -123,6 +123,7 @@ const detailCases = [
           durationMillis: 1,
           epoch: 1,
           notices: [],
+          calls: [],
           files: [],
         },
         "cell:cell-detail",

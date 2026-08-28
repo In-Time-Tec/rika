@@ -10,7 +10,7 @@ const shellImpl = (id: string, command: string, output: string) => ({
   id,
   name: "bash",
   input: JSON.stringify({ command }),
-  output,
+  result: { text: output },
   status: "complete" as const,
   presentation: { family: "shell" as const, action: "command", activeLabel: "Running", completeLabel: "Ran" },
   detail: command,

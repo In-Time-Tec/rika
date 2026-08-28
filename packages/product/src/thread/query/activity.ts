@@ -5,11 +5,11 @@ import type * as Turn from "../turn/record"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Function, Option, Schema } from "effect"
 
-const DiffOutput = Schema.fromJsonString(Schema.Struct({ diff: Schema.optionalKey(Schema.String) }))
+const DiffOutput = Schema.Struct({ diff: Schema.optionalKey(Schema.String) })
 
-const resultDiff = (output: string | undefined): string | undefined => {
-  if (output === undefined) return undefined
-  const decoded = Schema.decodeOption(DiffOutput)(output)
+const resultDiff = (result: Schema.Json | undefined): string | undefined => {
+  if (result === undefined) return undefined
+  const decoded = Schema.decodeUnknownOption(DiffOutput)(result)
   if (Option.isNone(decoded)) return undefined
   const diff = decoded.value.diff
   return diff !== undefined && diff.length > 0 ? diff : undefined
@@ -18,7 +18,7 @@ const resultDiff = (output: string | undefined): string | undefined => {
 export const toolResultDiffs = (units: ReadonlyArray<Unit>): ReadonlyArray<string> =>
   units.flatMap((unit) => {
     if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall") return []
-    const diff = resultDiff(unit.content.block.output)
+    const diff = resultDiff(unit.content.block.result)
     return diff === undefined ? [] : [diff]
   })
 

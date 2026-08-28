@@ -17,7 +17,7 @@ const webBlock = {
   },
   detail: "https://example.com",
   files: [],
-  output: "# Heading\n\nSome **bold** text.",
+  result: { text: "# Heading\n\nSome **bold** text." },
 }
 
 const model = (expanded: ReadonlyArray<string>): Model => ({

@@ -2,6 +2,7 @@ import * as TranscriptPresentationModel from "@rika/transcript/transcript-presen
 import * as TranscriptUnitModel from "@rika/transcript/transcript-unit"
 import { Function, Schema } from "effect"
 import { agentResponseState, isToolOutputDisplayed } from "./agent-response"
+import { toolResultText } from "./tool/body"
 import type { Model } from "../../state/model"
 import type { TranscriptBlock, TranscriptItem } from "../../state/transcript/model"
 import { toolKind } from "./tool/detail"
@@ -248,6 +249,7 @@ export const isExpandableUnit: {
         block.output.stderr.length > 0 ||
         block.result !== undefined ||
         block.error !== undefined ||
+        block.calls.length > 0 ||
         block.notices.length > 0
       )
     }
@@ -263,8 +265,7 @@ export const isExpandableUnit: {
       (block.presentation.family === "agent" && (block.status === "running" || block.detail.length > 0)) ||
       (block.presentation.outputDisplay !== "inline" &&
         isToolOutputDisplayed(block) &&
-        block.output !== undefined &&
-        block.output.length > 0)
+        (toolResultText(block.result)?.length ?? 0) > 0)
     )
   })
 })
@@ -279,7 +280,15 @@ export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> 
     if (!isExpandableUnit(model, unit)) return
     const id = transcriptUnitId(model, unit)
     ids.push(id)
-    if (unit.kind === "cell" || !expanded.has(id)) return
+    if (!expanded.has(id)) return
+    if (unit.kind === "cell") {
+      const block = decodeTranscriptBlock(model.blocks[unit.block])
+      if (block._tag === "Cell") {
+        if (block.error?.stack !== undefined) ids.push(`cell-stack:${block.id}`)
+        for (const call of block.calls) ids.push(`cell-call:${block.id}:${call.id}`)
+      }
+      return
+    }
     for (const child of unit.children ?? []) appendNested(child)
     if (unit.kind === "subagent") return
     if (unit.group === "edit") {
@@ -294,7 +303,7 @@ export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> 
       for (const index of unit.blocks) {
         const block = decodeTranscriptBlock(model.blocks[index])
         if (block._tag !== "ToolCall") continue
-        if (isToolOutputDisplayed(block) && block.output !== undefined && block.output.length > 0)
+        if (isToolOutputDisplayed(block) && (toolResultText(block.result)?.length ?? 0) > 0)
           ids.push(`tool-child:${block.id}`)
       }
   }

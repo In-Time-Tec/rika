@@ -20,7 +20,8 @@
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "prettier": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

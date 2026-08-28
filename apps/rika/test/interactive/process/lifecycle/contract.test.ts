@@ -211,7 +211,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       expect.objectContaining({
         _tag: "ToolCall",
         detail: "printf recorded-output",
-        output: "recorded-output",
+        result: "recorded-output",
         status: "complete",
       }),
     )
@@ -235,7 +235,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     expect(persisted.turns[0]?.prompt).not.toContain("incognito-output")
     expect(persisted.projection).toMatchObject({
       turn: { _tag: "RecordedShell", status: "completed" },
-      units: [{ content: { _tag: "Block", block: { _tag: "ToolCall", output: "recorded-output" } } }],
+      units: [{ content: { _tag: "Block", block: { _tag: "ToolCall", result: "recorded-output" } } }],
     })
 
     yield* Effect.gen(function* () {
@@ -273,7 +273,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       expect.objectContaining({
         _tag: "ToolCall",
         detail: "printf alongside-output",
-        output: "alongside-output",
+        result: "alongside-output",
         status: "complete",
       }),
     )

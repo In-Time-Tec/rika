@@ -96,7 +96,7 @@ export const settleRecordedShellProjection: {
             status: terminalStatus(turn.status),
             presentation,
             detail: turn.command,
-            output: turn.result.text,
+            result: turn.result.text,
             process: Object.assign(
               { truncated: turn.result.truncated },
               turn.result.exitCode === undefined ? undefined : { exitCode: turn.result.exitCode },

@@ -148,6 +148,72 @@ it.effect("projects durable changes and publishes transient previews for a recov
   ),
 )
 
+it.effect("replays an existing transcript when its projection version is stale", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const completedTurn: Turn.AgentExecutionTurn = { ...turn, status: "completed" }
+      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer([completedTurn])), TurnRepository.Service)
+      const stale: Projection = {
+        turn: completedTurn,
+        units: [],
+        checkpointGeneration: 1,
+        revision: 0,
+        state: state("completed"),
+        projectionVersion: ExecutionProjection.projectionVersion - 1,
+      }
+      const memory = yield* TranscriptStore.makeMemory({ initial: [stale], turns })
+      const projected = yield* Deferred.make<void>()
+      const transcripts = TranscriptRepository.Service.of({
+        ...memory,
+        commitProjection: (projectedTurn, change) =>
+          memory
+            .commitProjection(projectedTurn, change)
+            .pipe(
+              Effect.tap((result) => (result === "committed" ? Deferred.succeed(projected, undefined) : Effect.void)),
+            ),
+      })
+      const watchInputs = new Array<Parameters<ExecutionGateway.Interface["watchTurn"]>[1]>()
+      const replay: ExecutionProjection.Change = {
+        _tag: "ProjectionSnapshot",
+        revision: 1,
+        checkpoint: {
+          version: ExecutionProjection.projectionVersion,
+          cursor: "replayed",
+          state: "{}",
+        },
+        units: [],
+        hasOlder: false,
+        state: state("completed"),
+      }
+      const gateway = ExecutionGateway.makeTest({
+        watchTurn: (_link, input) =>
+          Stream.fromEffect(
+            Effect.sync(() => {
+              watchInputs.push(input)
+            }),
+          ).pipe(Stream.flatMap(() => Stream.succeed(replay))),
+        inspectTurn: () => Effect.succeed({ status: "completed", cursor: "replayed" }),
+      })
+      yield* Layer.build(
+        testProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
+          Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
+        ),
+      )
+      yield* Deferred.await(projected)
+
+      expect(watchInputs).toHaveLength(1)
+      expect(watchInputs[0]).not.toHaveProperty("checkpoint")
+      expect(yield* memory.get(completedTurn.id)).toMatchObject({
+        revision: 1,
+        projectionVersion: ExecutionProjection.projectionVersion,
+        projectorCheckpoint: { cursor: "replayed" },
+      })
+    }),
+  ),
+)
+
 it.effect("does not reset active projection age when a duplicate candidate is rejected", () =>
   Effect.scoped(
     Effect.gen(function* () {

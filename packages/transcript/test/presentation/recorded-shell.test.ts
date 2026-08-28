@@ -79,7 +79,7 @@ describe("recorded shell transcript projection", () => {
                 outputDisplay: "inline",
               },
               detail: "exit 23",
-              output: "terminal output",
+              result: "terminal output",
               process: { truncated: true, exitCode: 23 },
               files: [],
             },

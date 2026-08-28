@@ -1,7 +1,7 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
-import { decodeTranscriptBlocks, type TranscriptBlock } from "../../../state/transcript/model"
+import { decodeTranscriptBlocks } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
@@ -19,19 +19,8 @@ import {
 } from "./detail"
 import { toolDetails } from "../../../presentation/transcript/tool/detail"
 import { isToolOutputDisplayed } from "../../../presentation/transcript/agent-response"
-import { isExpandableBody, toolBody } from "../../../presentation/transcript/tool/body"
+import { isExpandableBody, toolBody, toolResultText } from "../../../presentation/transcript/tool/body"
 import type { UnitLineRange } from "../transcript/window"
-
-const numberedLine = /^(\d+):\s?(.*)$/
-const readWindowPatch = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): string | undefined => {
-  const body = toolBody(block)
-  if (body._tag !== "FileWindow") return undefined
-  const lines = body.lines.split("\n")
-  const parsed = lines.map((line) => numberedLine.exec(line))
-  if (parsed.some((match) => match === null)) return undefined
-  const content = parsed.map((match) => ` ${match![2]}`).join("\n")
-  return `--- a/${body.path}\n+++ b/${body.path}\n@@ -${body.start},${lines.length} +${body.start},${lines.length} @@\n${content}`
-}
 
 export interface ToolBodyContext {
   readonly model: Model
@@ -92,23 +81,18 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         for (const chunk of renderToolSummary(summary, { leading: " " })[0]!) append(chunk)
         const output =
           unit.block.status === "failed" && isToolOutputDisplayed(unit.block)
-            ? unit.block.output?.split("\n").find((value) => value.length > 0)
+            ? toolResultText(unit.block.result)
+                ?.split("\n")
+                .find((value) => value.length > 0)
             : undefined
         if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
-        const childOutput = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
+        const childOutput = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
         const childExpandable = isExpandableBody(toolBody(unit.block))
         if (childExpandable) append(marker(rowExpanded(childId)))
         const headerEnd = context.line()
         if (childExpandable && rowExpanded(childId)) {
           append(fg(colors.text)("\n"))
-          const window = readWindowPatch(unit.block)
-          const styled =
-            window === undefined
-              ? undefined
-              : renderPierreDiff(window, { width: Math.max(8, transcriptWrapWidth(model.width) - 4), indent: 4 })
-          if (styled === undefined)
-            append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "    "))))
-          else appendAll(styled)
+          append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "    "))))
         }
         const nestedRange = {
           start,
@@ -250,7 +234,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const running = unit.block.status === "running"
     const cancelled = unit.block.status === "cancelled"
     const lines = command.split("\n")
-    const output = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
+    const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const inlineOutput = unit.block.presentation.outputDisplay === "inline"
     const expandable = !inlineOutput && output !== undefined && output.length > 0
     const exitCode = shellExitCode(unit.block)
@@ -322,7 +306,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         const start = context.line()
         const childId = `tool-child:${unit.block.id}`
         const childExpanded = rowExpanded(childId)
-        const output = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
+        const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
         const expandable = output !== undefined && output.length > 0
         const cancelled = unit.block.status === "cancelled"
         const failed = unit.block.status === "failed"

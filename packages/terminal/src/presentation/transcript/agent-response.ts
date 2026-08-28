@@ -26,25 +26,23 @@ type DelegationOutput = typeof DelegationOutput.Type
 const nonEmpty = (value: string | undefined): string | undefined =>
   value !== undefined && value.trim().length > 0 ? value : undefined
 
-const decodedOutput = (output: string | undefined): DelegationOutput | undefined => {
+const decodedOutput = (output: Schema.Json | undefined): DelegationOutput | undefined => {
   if (output === undefined) return undefined
-  const value = output.trim()
-  if (!(value.startsWith("{") || value.startsWith("["))) return undefined
-  const decoded = Schema.decodeExit(Schema.fromJsonString(DelegationOutput))(value)
+  const decoded = Schema.decodeUnknownExit(DelegationOutput)(output)
   if (Exit.isFailure(decoded)) return undefined
   return decoded.value
 }
 
 const failedDelegationTags = new Set(["NoReport", "Failed"])
 
-export const isFailedDelegationOutput = (output: string | undefined): boolean => {
+export const isFailedDelegationOutput = (output: Schema.Json | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
   const tag = nonEmpty(decoded._tag)
   return tag !== undefined && failedDelegationTags.has(tag) && nonEmpty(decoded.status) === "failed"
 }
 
-export const isDeliveredDelegationOutput = (output: string | undefined): boolean => {
+export const isDeliveredDelegationOutput = (output: Schema.Json | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
   return nonEmpty(decoded._tag) === "Report" && nonEmpty(decoded.status) === "completed"
@@ -52,7 +50,7 @@ export const isDeliveredDelegationOutput = (output: string | undefined): boolean
 
 const succeededDelegationTags = new Set(["Report", "NoReport"])
 
-export const isSucceededDelegationOutput = (output: string | undefined): boolean => {
+export const isSucceededDelegationOutput = (output: Schema.Json | undefined): boolean => {
   const decoded = decodedOutput(output)
   if (decoded === undefined) return false
   const tag = nonEmpty(decoded._tag)
@@ -66,12 +64,11 @@ const noReportText = (decoded: DelegationOutput): string | undefined => {
   return recovery === undefined ? reason : `${reason}\n\n${recovery}`
 }
 
-export const agentOutputText = (output: string | undefined): string | undefined => {
+export const agentOutputText = (output: Schema.Json | undefined): string | undefined => {
   if (output === undefined) return undefined
-  const value = output.trim()
-  if (value.length === 0) return undefined
+  if (Schema.is(Schema.String)(output) && output.trim().length === 0) return undefined
   const decoded = decodedOutput(output)
-  if (decoded === undefined) return output
+  if (decoded === undefined) return Schema.is(Schema.String)(output) ? output : JSON.stringify(output, null, 2)
   const noReport = noReportText(decoded)
   if (noReport !== undefined) return noReport
   if (decoded.output !== undefined) {
@@ -122,12 +119,12 @@ const settledText = (
   children: ReadonlyArray<TranscriptItem>,
   fallback: string,
 ): string =>
-  (block.status === "complete" && isDeliveredDelegationOutput(block.output)
-    ? agentOutputText(block.output)
+  (block.status === "complete" && isDeliveredDelegationOutput(block.result)
+    ? agentOutputText(block.result)
     : undefined) ??
   childErrorDetail(model, children) ??
   outcomeReason(model, block) ??
-  (isToolOutputDisplayed(block) ? agentOutputText(block.output) : undefined) ??
+  (isToolOutputDisplayed(block) ? agentOutputText(block.result) : undefined) ??
   fallback
 
 export const agentResponseState: {
