@@ -64,7 +64,7 @@ const PersistedProjectorSchema = Schema.Struct({
   turnId: Schema.String,
   revision: Schema.Finite,
   hasOlder: Schema.Boolean,
-  rootStatus: Schema.Literals(["running", "completed", "failed", "cancelled"]),
+  rootStatus: Projection.ProjectionState.fields.status,
   title: Schema.optionalKey(Projection.GeneratedTitle),
   steeringMessages: Schema.Finite,
   followUpMessages: Schema.Finite,

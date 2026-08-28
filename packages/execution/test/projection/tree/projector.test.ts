@@ -410,7 +410,7 @@ describe("TenetKit tree projector", () => {
         status: "pending",
       },
     })
-    const resumed = projector.apply(
+    const resumed = TreeProjector.make("turn-auth", "approve", waiting.checkpoint, projector.snapshot().units).apply(
       treeEvent("raw-root-run", {
         _tag: "RunResumed",
         waitId: "raw-wait",
@@ -739,6 +739,14 @@ describe("TenetKit tree projector", () => {
     expect(cancellation.upsert).toEqual([])
     expect(cancellation.remove).toEqual([])
     expect(projector.snapshot().units).toEqual(before)
+    expect(
+      TreeProjector.make(
+        "turn-silent-cancellation",
+        "cancel me",
+        cancellation.checkpoint,
+        projector.snapshot().units,
+      ).snapshot().state.status,
+    ).toBe("cancelling")
   })
 
   it("parks the root as waiting when an interrupted operation needs resolution", () => {
