@@ -28,6 +28,10 @@ const WorkspaceCatalogJson = Schema.fromJsonString(
   Schema.Struct({ workspaces: Schema.Struct({ catalog: Schema.Record(Schema.String, Schema.String) }) }),
 )
 
+const WorkspacePackageJson = Schema.fromJsonString(
+  Schema.Struct({ dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)) }),
+)
+
 class PackageError extends Data.TaggedError("PackageError")<{
   readonly operation: string
   readonly message: string
@@ -62,20 +66,51 @@ const program = Effect.gen(function* () {
       const pinned = Object.entries(catalog.workspaces.catalog).filter(
         ([name]) => name === "tenetkit" || name.startsWith("@tenetkit/"),
       )
-      const drift = yield* Effect.forEach(pinned, ([name, expected]) =>
-        Effect.try({
-          try: () => Bun.resolveSync(`${name}/package.json`, path.join(root, "apps/rika")),
-          catch: () => packageError("install", `${name} is not installed`),
-        }).pipe(
-          Effect.flatMap((manifestPath) => fileSystem.readFileString(manifestPath)),
-          Effect.flatMap(Schema.decodeUnknownEffect(PackageManifestJson)),
-          Effect.map(({ version }) =>
-            version === expected ? [] : [`${name} installed ${version}, catalog pins ${expected}`],
+      const workspaceManifestPaths = [path.join(root, "package.json")]
+      for (const directory of ["apps", "packages"]) {
+        const entries = yield* fileSystem.readDirectory(path.join(root, directory))
+        workspaceManifestPaths.push(...entries.map((entry) => path.join(root, directory, entry, "package.json")))
+      }
+      const existingWorkspaceManifestPaths = yield* Effect.filter(workspaceManifestPaths, (manifestPath) =>
+        fileSystem.exists(manifestPath),
+      )
+      const importers = yield* Effect.forEach(
+        existingWorkspaceManifestPaths,
+        (manifestPath) =>
+          fileSystem.readFileString(manifestPath).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(WorkspacePackageJson)),
+            Effect.map(({ dependencies }) => ({
+              directory: path.dirname(manifestPath),
+              dependencies: dependencies ?? {},
+            })),
           ),
-          Effect.orElseSucceed(() => [`${name} could not be resolved from the workspace root`]),
+        { concurrency: "unbounded" },
+      )
+      const drift = yield* Effect.forEach(pinned, ([name, expected]) =>
+        Effect.forEach(
+          importers.filter(({ dependencies }) => Object.hasOwn(dependencies, name)),
+          ({ directory }) =>
+            Effect.try({
+              try: () => Bun.resolveSync(`${name}/package.json`, directory),
+              catch: () =>
+                packageError("install", `${name} is not installed from ${path.relative(root, directory) || "."}`),
+            }).pipe(
+              Effect.flatMap((manifestPath) => fileSystem.readFileString(manifestPath)),
+              Effect.flatMap(Schema.decodeUnknownEffect(PackageManifestJson)),
+              Effect.map(({ version }) =>
+                version === expected
+                  ? []
+                  : [
+                      `${name} from ${path.relative(root, directory) || "."} installed ${version}, catalog pins ${expected}`,
+                    ],
+              ),
+              Effect.orElseSucceed(() => [
+                `${name} could not be resolved from ${path.relative(root, directory) || "."}`,
+              ]),
+            ),
         ),
       )
-      const mismatches = drift.flat()
+      const mismatches = drift.flat(2)
       if (mismatches.length === 0) return
       return yield* packageError(
         "install",
