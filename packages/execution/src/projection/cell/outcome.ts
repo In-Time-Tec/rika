@@ -1,7 +1,6 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
 import { Cell as TenetCell } from "tenetkit/repl"
-import { bounded, optionalString } from "../values"
-import { cellTextLimit } from "./state"
+import { optionalString } from "../values"
 import {
   cellExecutionFailedTag,
   cellOutcomeUnknownTag,
@@ -16,7 +15,7 @@ const filteredStack = (stack: string): string | undefined => {
     .split("\n")
     .filter((line) => !line.includes("$bunfs") && !line.includes("/effect/") && !line.includes("effect@"))
   const value = lines.join("\n").trim()
-  return value.length === 0 ? undefined : bounded(value, cellTextLimit)
+  return value.length === 0 ? undefined : value
 }
 
 export interface CellOutcome {
@@ -32,7 +31,7 @@ export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
       const stack = filteredStack(optionalString(failure.stack))
       let cellError: NonNullable<Cell["error"]> = {
         name: failure.name,
-        message: bounded(message, cellTextLimit),
+        message,
       }
       if (stack !== undefined) cellError = { ...cellError, stack }
       return {
@@ -70,7 +69,7 @@ export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
     default:
       return {
         status: "failed",
-        error: { name: "Error", message: bounded(message.length === 0 ? "The cell failed." : message, cellTextLimit) },
+        error: { name: "Error", message: message.length === 0 ? "The cell failed." : message },
       }
   }
 }

@@ -7,7 +7,7 @@ import { plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
 import { renderDiffStyled, renderPartialDiffStyled, renderPierreDiff, renderToolSummary } from "../diff-text-adapter"
 import { transcriptWrapWidth } from "../transcript/window"
-import { wrapTextToWidth, wrapBodyText, iconChar, markerText } from "../window"
+import { wrapTextToWidth, wrapBodyText, iconChar } from "../window"
 import {
   inputString,
   toolInputValue,
@@ -32,11 +32,10 @@ export interface ToolBodyContext {
   readonly rowExpanded: (id: string) => boolean
   readonly highlight: (text: string) => void
   readonly statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk
-  readonly marker: (expanded: boolean) => TextChunk
 }
 
 export const createToolBodyRenderer = (context: ToolBodyContext) => {
-  const { model, spinnerFrame, append, appendAll, rowExpanded, highlight, statusIcon, marker } = context
+  const { model, spinnerFrame, append, appendAll, rowExpanded, highlight, statusIcon } = context
   const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
     const running = units.some((unit) => unit.block.status === "running")
     const complete = units.some((unit) => unit.block.status === "complete")
@@ -50,7 +49,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const counts = [...counters].map(([counter, count]) => plural(count, counter)).join(", ")
     if (selected)
       highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+        `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}`,
       )
     else {
       append(statusIcon(failed, running, cancelled))
@@ -59,7 +58,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         { leading: " " },
       )[0]!)
         append(chunk)
-      append(marker(expanded))
     }
     if (expanded)
       for (const unit of units) {
@@ -88,7 +86,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
         const childOutput = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
         const childExpandable = isExpandableBody(toolBody(unit.block))
-        if (childExpandable) append(marker(rowExpanded(childId)))
         const headerEnd = context.line()
         if (childExpandable && rowExpanded(childId)) {
           append(fg(colors.text)("\n"))
@@ -147,17 +144,13 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       verb = running ? units[0]!.block.presentation.activeLabel : units[0]!.block.presentation.completeLabel
     }
     const counts = `${added > 0 ? ` +${added}` : ""}${removed > 0 ? ` -${removed}` : ""}`
-    if (selected)
-      highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${verb} ${label}${counts}${markerText(expanded)}`,
-      )
+    if (selected) highlight(`${iconChar(failed, running, spinnerFrame, cancelled)} ${verb} ${label}${counts}`)
     else {
       append(statusIcon(failed, running, cancelled))
       for (const chunk of renderToolSummary({ primary: verb, secondary: ` ${label}` }, { leading: " " })[0]!)
         append(chunk)
       if (added > 0) append(fg(colors.green)(` +${added}`))
       if (removed > 0) append(fg(colors.red)(` -${removed}`))
-      append(marker(expanded))
     }
     if (expanded) {
       const files = allFiles
@@ -188,7 +181,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
             append(chunk)
           if (file.additions > 0) append(fg(colors.green)(` +${file.additions}`))
           if (file.deletions > 0) append(fg(colors.red)(` -${file.deletions}`))
-          append(marker(childExpanded))
           if (childExpanded && file.patch.length > 0) {
             append(fg(colors.text)("\n"))
             appendAll(
@@ -236,14 +228,11 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const lines = command.split("\n")
     const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const inlineOutput = unit.block.presentation.outputDisplay === "inline"
-    const expandable = !inlineOutput && output !== undefined && output.length > 0
     const exitCode = shellExitCode(unit.block)
     if (selected) {
       const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
       const cancellation = cancelled ? " (cancelled)" : ""
-      highlight(
-        `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}${expandable ? markerText(expanded) : ""}`,
-      )
+      highlight(`${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}`)
     } else {
       const highlighted = cancelled ? undefined : highlightShellCommand(command)
       const commandWidth = Math.max(8, transcriptWrapWidth(model.width) - 4)
@@ -270,7 +259,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       })
       if (failed) append(fg(colors.red)(` (exit code: ${exitCode ?? 1})`))
       if (cancelled) append(italic(fg(colors.amber)(" (cancelled)")))
-      if (expandable) append(marker(expanded))
     }
     if ((expanded || inlineOutput) && output !== undefined && output.length > 0) {
       append(fg(colors.text)("\n"))
@@ -287,7 +275,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const running = units.some((unit) => unit.block.status === "running")
     if (selected)
       highlight(
-        `${iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}${markerText(expanded)}`,
+        `${iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}`,
       )
     else {
       append(statusIcon(failedCount > 0, running, cancelledCount > 0))
@@ -298,7 +286,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         append(chunk)
       if (failedCount > 0) append(fg(colors.muted)(`, ${failedCount} failed`))
       if (cancelledCount > 0) append(fg(colors.muted)(`, ${cancelledCount} cancelled`))
-      append(marker(expanded))
     }
     if (expanded)
       for (const unit of units) {
@@ -314,11 +301,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         const cancellation = cancelled ? " (cancelled)" : ""
         const commandWidth = Math.max(
           1,
-          transcriptWrapWidth(model.width) -
-            5 -
-            stringWidth(failure) -
-            stringWidth(cancellation) -
-            (expandable ? 2 : 0),
+          transcriptWrapWidth(model.width) - 5 - stringWidth(failure) - stringWidth(cancellation),
         )
         if (cancelled) {
           append(bold(fg(colors.amber)("$ ")))
@@ -337,7 +320,6 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
           }
         }
         if (failure.length > 0) append(fg(colors.red)(failure))
-        if (expandable) append(marker(childExpanded))
         if (expandable && childExpanded) {
           append(fg(colors.text)("\n"))
           append(dim(fg(colors.text)(wrapBodyText(output!, transcriptWrapWidth(model.width), "     "))))

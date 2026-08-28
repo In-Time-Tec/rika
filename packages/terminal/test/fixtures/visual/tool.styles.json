@@ -522,7 +522,7 @@
           "width": 10
         },
         {
-          "text": " 1 file ▸",
+          "text": " 1 file",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -540,10 +540,10 @@
             }
           },
           "attributes": 0,
-          "width": 9
+          "width": 7
         },
         {
-          "text": "                                                           ",
+          "text": "                                                             ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -561,7 +561,7 @@
             }
           },
           "attributes": 0,
-          "width": 59
+          "width": 61
         }
       ]
     },

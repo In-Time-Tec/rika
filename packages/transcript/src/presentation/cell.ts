@@ -3,18 +3,6 @@ import { Schema } from "effect"
 
 export type Cell = Extract<Block, { readonly _tag: "Cell" }>
 
-export const formatCellDuration = (millis: number): string => {
-  if (!Number.isFinite(millis) || millis < 0) return ""
-  if (millis < 1_000) return `${Math.round(millis)}ms`
-  const seconds = millis / 1_000
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`
-}
-
-export const cellOutputTruncated = (cell: Cell): boolean =>
-  cell.source.truncated || cell.output.droppedBytes > 0 || cell.output.droppedEvents > 0
-
 const indent = (value: string, depth: number): string => value.replaceAll("\n", `\n${"  ".repeat(depth)}`)
 
 const formatResult = (value: Schema.Json, depth: number): string => {

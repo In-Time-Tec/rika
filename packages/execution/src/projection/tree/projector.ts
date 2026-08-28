@@ -18,8 +18,8 @@ import { type AuthorizationState, type ModelCallState, type ProjectorCore } from
 import { boundedInsert, subagentCardStatus } from "./nodes"
 import * as ProjectorRecovery from "./projector-recovery"
 import type { CheckpointInstrumentation } from "./projector-recovery"
-import { bounded, boundedHead, optionalString, record, string } from "../values"
-import { projectorNames, textLimit, toolTextLimit } from "../values"
+import { optionalString, record, string } from "../values"
+import { projectorNames, textLimit } from "../values"
 
 import { scopedId } from "../decoding"
 import { encoded, providerCostNanoUsd, token } from "../decoding"
@@ -338,10 +338,7 @@ const make = (
           if (event.message === undefined) return tool
           return {
             ...tool,
-            result: bounded(
-              `${Schema.is(Schema.String)(tool.result) ? `${tool.result}\n` : ""}${event.message}`,
-              toolTextLimit,
-            ),
+            result: `${Schema.is(Schema.String)(tool.result) ? `${tool.result}\n` : ""}${event.message}`,
           }
         })
       case "ToolExecutionCompleted": {
@@ -377,12 +374,7 @@ const make = (
           return
         }
         return updateTool(node, event.call.id, (tool) =>
-          completeTool(
-            tool,
-            event.result.result,
-            event.result.isFailure,
-            boundedHead(encoded(event.result.result), toolTextLimit),
-          ),
+          completeTool(tool, event.result.result, event.result.isFailure),
         )
       }
       case "ApprovalRequested":

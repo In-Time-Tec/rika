@@ -113,12 +113,10 @@ const detailCases = [
           id: "cell-detail",
           status: "complete",
           visual: "shell",
-          source: { text: "echo cell-output", lines: 1, truncated: false },
+          source: { text: "echo cell-output", lines: 1 },
           output: {
             stdout: "cell-output\n".repeat(50),
             stderr: "",
-            droppedBytes: 0,
-            droppedEvents: 0,
           },
           durationMillis: 1,
           epoch: 1,

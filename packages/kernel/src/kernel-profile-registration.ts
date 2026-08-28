@@ -6,7 +6,6 @@ const runtimeName = "bun"
 
 export const defaultLimits: KernelProfile.Limits = {
   sourceBytes: 65_536,
-  channelBytes: 262_144,
   cellDeadlineMillis: 120_000,
 }
 

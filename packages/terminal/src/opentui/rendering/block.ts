@@ -106,7 +106,7 @@ export const renderBlock: {
         else if (block.status === "complete") icon = "✓"
         else if (block.status === "cancelled") icon = "⊘"
         const detail = block.summary.length === 0 ? block.prompt : block.summary
-        return `${icon} ${subagentPhrase(block.name, block.status)} ▸${detail.length === 0 ? "" : `\n${body(detail)}`}`
+        return `${icon} ${subagentPhrase(block.name, block.status)}${detail.length === 0 ? "" : `\n${body(detail)}`}`
       }
       case "AuthorizationCard": {
         let icon = "✕"

@@ -397,7 +397,7 @@
           "width": 9
         },
         {
-          "text": " cancelled ▾",
+          "text": " cancelled",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -415,10 +415,10 @@
             }
           },
           "attributes": 0,
-          "width": 12
+          "width": 10
         },
         {
-          "text": "                                                         ",
+          "text": "                                                           ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -436,7 +436,7 @@
             }
           },
           "attributes": 0,
-          "width": 57
+          "width": 59
         }
       ]
     },

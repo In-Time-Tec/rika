@@ -314,7 +314,6 @@ it.effect.skipIf(databaseUrl === "")(
                     stdout: "",
                     stderr: "",
                     durationMillis: 1,
-                    truncation: [],
                   },
                 },
                 workspaceId: "recovery-workspace",

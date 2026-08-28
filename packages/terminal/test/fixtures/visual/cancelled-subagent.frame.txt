@@ -11,7 +11,7 @@
 
 
 
- ⊘ Subagent cancelled ▾
+ ⊘ Subagent cancelled
  │   Wait then run the checks
  │   ├ $ sleep 60 (cancelled)
  │   │

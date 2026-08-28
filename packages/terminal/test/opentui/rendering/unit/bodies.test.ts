@@ -1,7 +1,6 @@
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
-import stringWidth from "string-width"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
 import type { TranscriptBlock } from "../../../../src/state/transcript/model"
@@ -16,7 +15,7 @@ import {
   _collapsedSubagentModel,
 } from "./bodies.fixture"
 
-test("keeps output-bound details internal in expanded cells", () => {
+test("renders complete output without a truncation marker", () => {
   const chunks: Array<string> = []
   renderCellBody(
     {
@@ -24,8 +23,8 @@ test("keeps output-bound details internal in expanded cells", () => {
       id: "bounded-cell",
       status: "complete",
       visual: "ts",
-      source: { text: "const value = 42", lines: 1, truncated: false },
-      output: { stdout: "42", stderr: "", droppedBytes: 13_100, droppedEvents: 0 },
+      source: { text: "const value = 42", lines: 1 },
+      output: { stdout: "42", stderr: "" },
       epoch: 1,
       notices: [{ kind: "restored", detail: "Restored value." }],
       calls: [],
@@ -38,13 +37,11 @@ test("keeps output-bound details internal in expanded cells", () => {
     (chunk) => chunks.push(chunk.text),
   )
   const rendered = chunks.join("")
-  expect(rendered).toContain("truncated")
+  expect(rendered).not.toContain("truncated")
   expect(rendered).toContain("Restored value.")
-  expect(rendered).not.toContain("Dropped 13100 bytes")
-  expect(rendered).not.toContain("at the output bound")
 })
 
-test("shows all authored source when collapsed and caps long cells at fifteen lines", () => {
+test("shows all authored source while collapsed without an expansion indicator", () => {
   const chunks: Array<string> = []
   const source = Array.from({ length: 18 }, (_, index) => `const value${index + 1} = ${index + 1}`).join("\n")
   renderCellBody(
@@ -53,8 +50,8 @@ test("shows all authored source when collapsed and caps long cells at fifteen li
       id: "long-cell",
       status: "running",
       visual: "ts",
-      source: { text: source, lines: 18, truncated: false },
-      output: { stdout: "hidden while collapsed", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+      source: { text: source, lines: 18 },
+      output: { stdout: "hidden while collapsed", stderr: "" },
       epoch: 0,
       notices: [],
       calls: [],
@@ -67,14 +64,12 @@ test("shows all authored source when collapsed and caps long cells at fifteen li
     (chunk) => chunks.push(chunk.text),
   )
   const rendered = chunks.join("")
-  const firstLine = rendered.split("\n")[0]!
   expect(rendered).toContain("⠿ const value1 = 1")
   expect(rendered).not.toContain("⠿\n  const value1 = 1")
-  expect(firstLine.endsWith("▸")).toBe(true)
-  expect(stringWidth(firstLine)).toBe(80)
   expect(rendered).toContain("const value15 = 15")
-  expect(rendered).not.toContain("const value16 = 16")
-  expect(rendered).toContain("… 3 more lines")
+  expect(rendered).toContain("const value18 = 18")
+  expect(rendered).not.toContain("more lines")
+  expect(rendered).not.toMatch(/[▸▾]/u)
   expect(rendered).not.toContain("hidden while collapsed")
   expect(rendered).not.toContain("ts")
 })
@@ -87,8 +82,8 @@ test("renders typed cell result zones and the host-call ledger", () => {
       id: "typed-cell",
       status: "complete",
       visual: "ts",
-      source: { text: "await rika.workspace.read({ path: 'a.ts' })", lines: 1, truncated: false },
-      output: { stdout: "printed", stderr: "warned", droppedBytes: 0, droppedEvents: 0 },
+      source: { text: "await rika.workspace.read({ path: 'a.ts' })", lines: 1 },
+      output: { stdout: "printed", stderr: "warned" },
       result: { content: "first\nsecond" },
       durationMillis: 1_240,
       epoch: 1,
@@ -117,7 +112,8 @@ test("renders typed cell result zones and the host-call ledger", () => {
   expect(rendered).toContain("stderr\n    warned")
   expect(rendered).toContain('result\n    {\n      "content": first\n      second')
   expect(rendered).toContain("1 call")
-  expect(rendered).toContain("✓ Read a.ts ▸")
+  expect(rendered).toContain("✓ Read a.ts")
+  expect(rendered).not.toMatch(/[▸▾]/u)
   expect(rendered).not.toContain("4ms")
   expect(rendered).not.toContain("1.2s")
 })
@@ -128,8 +124,8 @@ test("makes every collapsed source row part of the expandable cell header", () =
     id: "clickable-cell",
     status: "complete",
     visual: "ts",
-    source: { text: "const first = 1\nconst second = 2", lines: 2, truncated: false },
-    output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+    source: { text: "const first = 1\nconst second = 2", lines: 2 },
+    output: { stdout: "", stderr: "" },
     result: 2,
     epoch: 1,
     notices: [],

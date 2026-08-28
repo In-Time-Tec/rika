@@ -61,7 +61,8 @@ test("matches Amp cancelled subagent and shell treatment", () => {
   const text = built.styled.chunks.map((chunk) => chunk.text).join("")
   const marker = built.styled.chunks.find((chunk) => chunk.text === "⊘")
 
-  expect(text).toContain("⊘ Subagent cancelled ▾")
+  expect(text).toContain("⊘ Subagent cancelled")
+  expect(text).not.toMatch(/[▸▾]/u)
   expect(text).toContain("$ sleep 60 (cancelled)")
   expect(
     text

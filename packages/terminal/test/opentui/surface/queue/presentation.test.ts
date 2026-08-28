@@ -131,11 +131,12 @@ test("renders a subagent tool tree and expands each child independently", () =>
         surface.update(model)
         yield* openTui(() => setup.flush())
         const collapsed = setup.captureCharFrame()
-        expect(collapsed).toContain("Oracle has spoken ▾")
+        expect(collapsed).toContain("Oracle has spoken")
         expect(collapsed).toContain("Review the code")
-        expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4 ▸")
-        expect(collapsed).toContain("├ ✓ Subagent finished ▸")
-        expect(collapsed).toContain("├ ✓ $ bun test ▸")
+        expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4")
+        expect(collapsed).toContain("├ ✓ Subagent finished")
+        expect(collapsed).toContain("├ ✓ $ bun test")
+        expect(collapsed).not.toMatch(/[▸▾]/u)
         expect(collapsed).toContain("Review complete")
         expect(collapsed).toContain("No defects found.")
         expect(collapsed).not.toContain("##")
@@ -161,10 +162,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         const agent = transcriptRow("Subagent finished")
         const agentLines = styledTextValue(agent.content).split("\n")
         expect(agentLines).toHaveLength(1)
-        const markerLine = agentLines[0]!
-        yield* openTui(() =>
-          setup.mockMouse.click(agent.screenX + markerLine.indexOf("▸"), agent.screenY + agentLines.length - 1),
-        )
+        yield* openTui(() => setup.mockMouse.click(agent.screenX + 4, agent.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:child-agent")
 

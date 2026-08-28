@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import type { Block } from "../../src/schema/presentation"
-import { cellBodyText, cellOutputTruncated, formatCellDuration } from "../../src/presentation/cell"
+import { cellBodyText } from "../../src/presentation/cell"
 import { cellSourceLineCount, cellVisual, meaningfulSourceLines } from "../../src/presentation/cell-source"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
@@ -10,8 +10,8 @@ const cell = (overrides: Partial<Cell> = {}): Cell => ({
   id: "cell-1",
   status: "complete",
   visual: "ts",
-  source: { text: "", lines: 0, truncated: false },
-  output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+  source: { text: "", lines: 0 },
+  output: { stdout: "", stderr: "" },
   epoch: 0,
   notices: [],
   calls: [],
@@ -38,32 +38,12 @@ test("source line counts are exact", () => {
   expect(cellSourceLineCount("a\nb\n")).toBe(3)
 })
 
-test("durations format by magnitude", () => {
-  expect(formatCellDuration(0)).toBe("0ms")
-  expect(formatCellDuration(940)).toBe("940ms")
-  expect(formatCellDuration(1_240)).toBe("1.2s")
-  expect(formatCellDuration(95_000)).toBe("1m 35s")
-  expect(formatCellDuration(-1)).toBe("")
-  expect(formatCellDuration(Number.NaN)).toBe("")
-})
-
-test("truncation is either source or output loss", () => {
-  expect(cellOutputTruncated(cell())).toBe(false)
-  expect(cellOutputTruncated(cell({ source: { text: "a", lines: 1, truncated: true } }))).toBe(true)
-  expect(cellOutputTruncated(cell({ output: { stdout: "", stderr: "", droppedBytes: 12, droppedEvents: 0 } }))).toBe(
-    true,
-  )
-  expect(cellOutputTruncated(cell({ output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 3 } }))).toBe(
-    true,
-  )
-})
-
 test("the body text joins every non-empty channel", () => {
   expect(
     cellBodyText(
       cell({
-        source: { text: "const a = 1", lines: 1, truncated: false },
-        output: { stdout: "out", stderr: "err", droppedBytes: 0, droppedEvents: 0 },
+        source: { text: "const a = 1", lines: 1 },
+        output: { stdout: "out", stderr: "err" },
         result: "1",
         error: { name: "Error", message: "boom", stack: "at cell" },
         notices: [{ kind: "restored", detail: "Restored a." }],

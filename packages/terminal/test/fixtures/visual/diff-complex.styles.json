@@ -205,7 +205,7 @@
           "width": 1
         },
         {
-          "text": "Δ src/renamed.ts ▾",
+          "text": "Δ src/renamed.ts",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -223,10 +223,10 @@
             }
           },
           "attributes": 1,
-          "width": 18
+          "width": 16
         },
         {
-          "text": "                                                             ",
+          "text": "                                                               ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -244,7 +244,7 @@
             }
           },
           "attributes": 0,
-          "width": 61
+          "width": 63
         }
       ]
     },

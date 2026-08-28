@@ -1,6 +1,6 @@
 import { Function, Schema } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import { cellOutputTruncated, formatCellResult } from "@rika/transcript/cell-presentation"
+import { formatCellResult } from "@rika/transcript/cell-presentation"
 import stringWidth from "string-width"
 import { highlightLines } from "../../../presentation/markdown/syntax-highlighter"
 import { wrapBodyText } from "../window"
@@ -36,19 +36,18 @@ const renderDiffBodyImpl = (
   appendAll: AppendAll,
 ): void => {
   if (expanded) {
-    append(bold(fg(selected ? colors.blue : colors.muted)(`Δ ${block.path} ▾\n`)))
+    append(bold(fg(selected ? colors.blue : colors.muted)(`Δ ${block.path}\n`)))
     appendAll(renderPierreDiff(block.patch, { width }) ?? renderDiffStyled(block.patch, { width }))
     return
   }
   const [added, removed] = diffCounts(block.patch)
   const verb = /^--- \/dev\/null$/m.test(block.patch) || /^new file mode /m.test(block.patch) ? "Created" : "Edited"
-  if (selected) append(bold(fg(colors.blue)(`✓ ${verb} ${block.path} +${added} -${removed} ▸`)))
+  if (selected) append(bold(fg(colors.blue)(`✓ ${verb} ${block.path} +${added} -${removed}`)))
   else {
     append(fg(colors.green)("✓"))
     append(fg(colors.text)(` ${verb} ${block.path}`))
     append(fg(colors.green)(` +${added}`))
     append(fg(colors.red)(` -${removed}`))
-    append(fg(colors.subtle)(" ▸"))
   }
 }
 
@@ -77,7 +76,6 @@ const cellStatusColor = (status: Extract<TranscriptBlock, { _tag: "Cell" }>["sta
   return colors.red
 }
 
-const collapsedCellLines = 15
 const HostCallPath = Schema.fromJsonString(Schema.Struct({ path: Schema.String }))
 
 const hostCallLabel = (operation: string, inputSummary: string): string => {
@@ -105,32 +103,20 @@ const renderCellBodyImpl = (
   if (block.visual === "shell") header.push(fg(colors.subtle)(" $"))
   for (const chunk of header) append(selected ? bold(chunk) : chunk)
   const headerWidth = header.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-  const marker = expanded ? "▾" : "▸"
   const source = highlightLines(block.source.text, "typescript")
-  const visibleSource = expanded ? source : source.slice(0, collapsedCellLines)
   let firstRow = true
-  for (const line of visibleSource) {
-    const rowWidth = firstRow ? Math.max(1, width - headerWidth - 2) : Math.max(1, width - 2)
+  for (const line of source) {
+    const rowWidth = firstRow ? Math.max(1, width - headerWidth - 1) : Math.max(1, width - 2)
     for (const row of wrapStyledLine(line.map(toOpenChunk), rowWidth)) {
       append(fg(colors.text)(firstRow ? " " : "\n  "))
       for (const chunk of row) append(chunk)
-      if (firstRow) {
-        const used = headerWidth + 1 + row.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-        append(dim(fg(colors.subtle)(`${" ".repeat(Math.max(0, width - used - 1))}${marker}`)))
-      }
       firstRow = false
     }
   }
-  if (firstRow) append(dim(fg(colors.subtle)(`${" ".repeat(Math.max(0, width - headerWidth - 1))}${marker}`)))
-  const hiddenLines = Math.max(0, source.length - visibleSource.length)
-  const footer: Array<string> = []
-  if (hiddenLines > 0) footer.push(`… ${hiddenLines} more ${hiddenLines === 1 ? "line" : "lines"}`)
-  if (cellOutputTruncated(block)) footer.push("truncated")
-  if (block.calls.length > 0) footer.push(`${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)
-  if (footer.length > 0) append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
+  if (block.calls.length > 0)
+    append(dim(fg(colors.subtle)(`\n  ${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)))
   context?.finishHeader?.()
   if (!expanded) return
-  if (block.source.truncated) append(dim(fg(colors.amber)("\n  Source truncated.")))
   if (block.output.stdout.length > 0)
     append(dim(fg(colors.text)(`\n  stdout\n${wrapBodyText(block.output.stdout, width, "    ")}`)))
   if (block.output.stderr.length > 0)
@@ -143,7 +129,7 @@ const renderCellBodyImpl = (
       const id = `cell-stack:${block.id}`
       const start = context?.line() ?? 0
       const shown = context?.rowExpanded(id) ?? false
-      append(dim(fg(colors.subtle)(`\n    stack ${shown ? "▾" : "▸"}`)))
+      append(dim(fg(colors.subtle)("\n    stack")))
       const headerEnd = context?.line() ?? start
       if (shown) append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "      ")}`)))
       context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
@@ -158,7 +144,7 @@ const renderCellBodyImpl = (
     else if (call.status === "failed") callIcon = "✕"
     append(
       fg(call.status === "failed" ? colors.red : colors.text)(
-        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)} ${shown ? "▾" : "▸"}`,
+        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)}`,
       ),
     )
     const headerEnd = context?.line() ?? start
