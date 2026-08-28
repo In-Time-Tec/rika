@@ -209,6 +209,8 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           yield* sql`UPDATE rika_transcript_checkpoints
               SET projection_version = ${ExecutionProjection.projectionVersion - 1},
                   projector_version = ${ExecutionProjection.projectionVersion - 1},
+                  projector_cursor = 'obsolete',
+                  projector_state = '{}',
                   revision = 99
               WHERE turn_id = ${active.id}`
           const obsoleteKey = "assistant:obsolete"
