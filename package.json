@@ -13,7 +13,7 @@
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
-      "tenetkit": "0.40.0",
+      "tenetkit": "0.40.1",
       "@aws-sdk/client-bedrock-runtime": "3.859.0",
       "@aws-sdk/credential-provider-node": "3.859.0",
       "@effect/platform-bun": "4.0.0-rc.111",
