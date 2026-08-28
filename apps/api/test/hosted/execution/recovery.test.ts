@@ -371,7 +371,7 @@ it.effect.skipIf(databaseUrl === "")(
             status: "succeeded",
             resolution_idempotency_key: "tenet-auto:executor-terminal",
             resolution_json:
-              '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]}}}',
+              '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1}}}',
           })
           const operations = yield* recovery.inspect({
             principal,

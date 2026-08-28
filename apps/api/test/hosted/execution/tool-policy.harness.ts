@@ -480,7 +480,7 @@ it.effect.skipIf(databaseUrl === "")(
               revision: 0,
               projectionVersion: 6,
               stateJson: "{}",
-              projectorVersion: 5,
+              projectorVersion: 6,
               projectorCursor: "current-cursor",
               projectorState: authorizationState,
               updatedAt: 1,
