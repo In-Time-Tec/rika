@@ -327,6 +327,7 @@ it.layer(BunServices.layer)((test) => {
             Layer.provideMerge(runnerExecutorLayer.pipe(Layer.provide(shared))),
             Layer.provide(shared),
           )
+          yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
           const context = yield* Layer.build(
             Layer.mergeAll(productLayer, executorLayer, toolPolicyLayer).pipe(Layer.provideMerge(shared)),
           )
@@ -334,7 +335,6 @@ it.layer(BunServices.layer)((test) => {
           const toolPolicy = Context.get(context, HostedToolPolicy)
           const executor = Context.get(context, Executor)
           gateway = executor.gateway
-          yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
           const connection = yield* product.createConnection({
             principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
             owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
