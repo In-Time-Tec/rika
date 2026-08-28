@@ -195,7 +195,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
     if (Option.isNone(decoded)) {
       if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return
-      const cellNotice = eventNotice(raw)
+      const cellNotice = eventNotice(data)
       const epoch = Schema.decodeUnknownOption(Schema.Int)(raw.epoch)
       const next = appendNotice({ ...block, epoch: Option.isSome(epoch) ? epoch.value : block.epoch }, cellNotice)
       write(node, rawId, next)

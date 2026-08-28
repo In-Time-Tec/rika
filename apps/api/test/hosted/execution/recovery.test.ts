@@ -18,7 +18,7 @@ import { and, asc, eq, ne } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import { Address, ExecutableManifest, ExecutableResolver, Message } from "tenetkit/runtime"
-import { encodeExecutableManifest, encodeExecutableRef, encodeMessage } from "tenetkit/runtime/driver/sql/codecs"
+import { SqlCodecs } from "tenetkit/runtime/driver/sql"
 import { HostedRecovery, layer as hostedRecoveryLayer } from "../../../src/hosted/execution/recovery"
 import {
   runOperations as tenetkitRunOperations,
@@ -29,10 +29,10 @@ import { live as livePlatform } from "../../support/live-platform"
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }
 const executable = ExecutableManifest.makeTest("recovery", "test")
-const executableRef = encodeExecutableRef(executable.ref)
-const executableManifest = encodeExecutableManifest(executable.manifest)
+const executableRef = SqlCodecs.encodeExecutableRef(executable.ref)
+const executableManifest = SqlCodecs.encodeExecutableManifest(executable.manifest)
 const storedMessage = (suffix: string) =>
-  encodeMessage(
+  SqlCodecs.encodeMessage(
     Message.make({
       id: `message-${suffix}`,
       to: Address.make("agent:recovery"),

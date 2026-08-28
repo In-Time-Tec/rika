@@ -78,9 +78,9 @@ export const nested: {
 )
 
 export const operation = <
-  Input extends Schema.Constraint,
-  Output extends Schema.Constraint,
-  Failure extends Schema.Constraint,
+  Input extends Schema.Codec<unknown, unknown, never, never>,
+  Output extends Schema.Codec<unknown, unknown, never, never>,
+  Failure extends Schema.Codec<unknown, unknown, never, never>,
   R,
 >(definition: {
   readonly name: string

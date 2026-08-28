@@ -42,8 +42,10 @@ it.layer(BunServices.layer)("release target construction", (test) => {
       "rika",
       ".rika-kernel-runtime",
       ".rika-kernel-worker.js",
+      "command-lines.js",
+      "worker-error.js",
       "text-result.js",
-      "bun-value.js",
+      "value.js",
     ])
   })
 

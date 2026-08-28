@@ -25,7 +25,7 @@ export const pin = (state: HarnessState.HarnessState): Pinned => {
   return {
     id: registration.id,
     capability: registration.capability,
-    payload: Schema.decodeUnknownSync(Schema.Json)(registration.payload),
+    payload: Schema.decodeSync(Schema.Json)(registration.payload),
     overview: HarnessOverview.formatOverview(state),
   }
 }
@@ -41,4 +41,9 @@ export const reconstruct: {
     id: string,
     payload: Schema.Json,
   ): Effect.Effect<HarnessState.HarnessState, HarnessSnapshot.SnapshotInvalid | HarnessSnapshot.SnapshotMismatch>
-} = Function.dual(2, (id: string, payload: Schema.Json) => HarnessSnapshot.decode(id, payload))
+} = Function.dual(2, (id: string, payload: Schema.Json) =>
+  Schema.decodeUnknownEffect(HarnessSnapshot.SnapshotPayload)(payload).pipe(
+    Effect.mapError((issue) => HarnessSnapshot.SnapshotInvalid.make({ message: String(issue) })),
+    Effect.flatMap((decoded) => HarnessSnapshot.decode(id, decoded)),
+  ),
+)

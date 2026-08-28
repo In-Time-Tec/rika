@@ -15,7 +15,7 @@ export const targetNames = Object.keys(targets).filter(isPackageTarget)
 export const packageExecutable = "rika"
 export const kernelRuntime = ".rika-kernel-runtime"
 export const kernelWorker = ".rika-kernel-worker.js"
-export const kernelSupport = ["text-result.js", "bun-value.js"] as const
+export const kernelSupport = ["command-lines.js", "worker-error.js", "text-result.js", "value.js"] as const
 export const packageBinEntries = [packageExecutable, kernelRuntime, kernelWorker, ...kernelSupport] as const
 
 export const archiveName: {

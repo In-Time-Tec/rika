@@ -77,7 +77,7 @@ export const harnessCapabilityName = "rika-harness-snapshot"
  * `SnapshotMismatch` rather than drifting.
  */
 export const harness = (state: HarnessState.HarnessState): Pinned => {
-  const payload = Schema.decodeUnknownSync(Schema.Json)(HarnessSnapshot.encode(state))
+  const payload = Schema.decodeSync(Schema.Json)(HarnessSnapshot.encode(state))
   const capability = {
     name: harnessCapabilityName,
     pin: Pins.makeCapability({ codec: HarnessSnapshot.CODEC, version: HarnessSnapshot.VERSION, payload }),

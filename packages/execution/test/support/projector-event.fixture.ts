@@ -18,10 +18,23 @@ type RunEventInput = {
   }
 }[RunEvent.RunEvent["_tag"]]
 
-type ModelResponsePart = Parameters<typeof RunEvent.CompletedModelResponse.make>[0]["content"][number]
+type EncodedModelResponsePart = (typeof RunEvent.CompletedModelResponse.Encoded)["content"][number]
+type EncodedFilePart = Extract<EncodedModelResponsePart, { readonly type: "file" }>
+type ModelResponsePart =
+  | Exclude<EncodedModelResponsePart, EncodedFilePart>
+  | (Omit<EncodedFilePart, "data"> & { readonly data: string | Uint8Array })
+  | string
 
 const completedModelResponse = (content: ReadonlyArray<ModelResponsePart>): RunEvent.CompletedModelResponse =>
-  RunEvent.CompletedModelResponse.make({ content })
+  Schema.decodeSync(RunEvent.CompletedModelResponse)({
+    content: content.map((part) => {
+      if (Schema.is(Schema.String)(part)) return { type: "text", text: part }
+      if (part.type !== "file") return part
+      if (Schema.is(Schema.String)(part.data)) return { ...part, data: part.data }
+      const data = Schema.decodeSync(Schema.Uint8Array)(part.data)
+      return { ...part, data: Schema.encodeSync(Schema.Uint8ArrayFromBase64)(data) }
+    }),
+  })
 
 export const resetEventPosition = () => {
   position = 0
