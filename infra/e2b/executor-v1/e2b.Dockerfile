@@ -40,7 +40,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     libcairo2=1.16.0-7 libcups2=2.4.2-3+deb12u9 libdbus-1-3=1.14.10-1~deb12u1 \
     libexpat1=2.5.0-1+deb12u2 libgbm1=22.3.6-1+deb12u2 libglib2.0-0=2.74.6-2+deb12u9 \
     libgtk-3-0=3.24.38-2~deb12u3 libnspr4=2:4.35-1 libnss3=2:3.87.1-1+deb12u4 \
-    libpango-1.0-0=1.50.12+ds-1 libudev1=252.39-1~deb12u2 libvulkan1=1.3.239.0-1 \
+    libpango-1.0-0=1.50.12+ds-1 libsecret-1-0=0.20.5-3 libudev1=252.39-1~deb12u2 libvulkan1=1.3.239.0-1 \
     libx11-6=2:1.8.4-2+deb12u2 libxcb1=1.15-1 libxcomposite1=1:0.4.5-1 \
     libxdamage1=1:1.1.6-1 libxext6=2:1.3.4-1+b1 libxfixes3=1:6.0.0-2 \
     libxkbcommon0=1.5.0-1 libxrandr2=2:1.5.2-2+b1 \

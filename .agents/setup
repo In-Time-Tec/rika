@@ -8,49 +8,63 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 echo "Preparing the Rika orb"
 
-system_packages=(ca-certificates caddy curl dbus-x11 gnome-keyring libsecret-1-0 unzip)
-missing_system_packages=()
-for package in "${system_packages[@]}"; do
-  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fqx 'install ok installed'; then
-    missing_system_packages+=("$package")
+root_command=()
+if (( EUID == 0 )); then
+  install_system_tools=true
+elif command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+  root_command=(sudo -n)
+  install_system_tools=true
+else
+  install_system_tools=false
+fi
+
+if [[ "$install_system_tools" == true ]]; then
+  system_packages=(ca-certificates caddy curl dbus-x11 gnome-keyring libsecret-1-0 unzip)
+  missing_system_packages=()
+  for package in "${system_packages[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fqx 'install ok installed'; then
+      missing_system_packages+=("$package")
+    fi
+  done
+  if (( ${#missing_system_packages[@]} > 0 )); then
+    "${root_command[@]}" apt-get update
+    "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_system_packages[@]}"
   fi
-done
-if (( ${#missing_system_packages[@]} > 0 )); then
-  sudo apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_system_packages[@]}"
-fi
 
-if ! command -v docker >/dev/null; then
-  sudo install -m 0755 -d /etc/apt/keyrings
-  sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-  sudo chmod a+r /etc/apt/keyrings/docker.asc
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
-    sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-  sudo apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-fi
+  if ! command -v docker >/dev/null; then
+    "${root_command[@]}" install -m 0755 -d /etc/apt/keyrings
+    "${root_command[@]}" curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    "${root_command[@]}" chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
+      "${root_command[@]}" tee /etc/apt/sources.list.d/docker.list >/dev/null
+    "${root_command[@]}" apt-get update
+    "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  fi
 
-if ! command -v cloudflared >/dev/null || [[ "$(cloudflared --version 2>&1)" != *"$cloudflared_version"* ]]; then
-  case "$(dpkg --print-architecture)" in
-    amd64)
-      readonly cloudflared_asset="cloudflared-linux-amd64"
-      readonly cloudflared_sha256="fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2"
-      ;;
-    arm64)
-      readonly cloudflared_asset="cloudflared-linux-arm64"
-      readonly cloudflared_sha256="7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790"
-      ;;
-    *)
-      echo "Unsupported cloudflared architecture: $(dpkg --print-architecture)" >&2
-      exit 1
-      ;;
-  esac
-  curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
-    "https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version/$cloudflared_asset" \
-    -o /tmp/cloudflared
-  echo "$cloudflared_sha256  /tmp/cloudflared" | sha256sum -c -
-  sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
-  rm -f /tmp/cloudflared
+  if ! command -v cloudflared >/dev/null || [[ "$(cloudflared --version 2>&1)" != *"$cloudflared_version"* ]]; then
+    case "$(dpkg --print-architecture)" in
+      amd64)
+        readonly cloudflared_asset="cloudflared-linux-amd64"
+        readonly cloudflared_sha256="fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2"
+        ;;
+      arm64)
+        readonly cloudflared_asset="cloudflared-linux-arm64"
+        readonly cloudflared_sha256="7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790"
+        ;;
+      *)
+        echo "Unsupported cloudflared architecture: $(dpkg --print-architecture)" >&2
+        exit 1
+        ;;
+    esac
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+      "https://github.com/cloudflare/cloudflared/releases/download/$cloudflared_version/$cloudflared_asset" \
+      -o /tmp/cloudflared
+    echo "$cloudflared_sha256  /tmp/cloudflared" | sha256sum -c -
+    "${root_command[@]}" install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared
+    rm -f /tmp/cloudflared
+  fi
+else
+  echo "Using executor-provided system tools"
 fi
 
 if ! command -v bun >/dev/null || [[ "$(bun --version)" != "$bun_version" ]]; then

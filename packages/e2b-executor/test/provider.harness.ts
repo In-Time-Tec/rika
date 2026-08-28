@@ -20,6 +20,7 @@ describe("E2B template", () => {
         )
         expect(dockerfile).toContain("usermod --append --groups rika-workspace rika-executor")
         expect(dockerfile).toContain("sudo -n -u rika-workspace -- test -w /home/rika-workspace/workspace")
+        expect(dockerfile).toContain("libsecret-1-0=0.20.5-3")
         expect(dockerfile).toContain("zstd=1.5.4+dfsg2-5")
         expect(dockerfile).toContain("RIKA_EXECUTOR_ASSIGNMENT_ID=template-readiness")
         expect(dockerfile).not.toMatch(/DATABASE_URL|E2B_API_KEY|BETTER_AUTH_SECRET/)
