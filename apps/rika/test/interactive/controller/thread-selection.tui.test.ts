@@ -52,7 +52,7 @@ test(
         app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
-        const nestedCell = 'ts await rika.workspace.read({"path":"nested.txt"})'
+        const nestedCell = 'await rika.workspace.read({"path":"nested.txt"})'
         yield* app.waitFrame(nestedCell)
         yield* app.settled
         const completed = app.frame()

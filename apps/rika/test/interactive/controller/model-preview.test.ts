@@ -472,7 +472,6 @@ describe("tentative model preview overlay", () => {
           id: "cell",
           status: "running",
           visual: "ts",
-          summary: "Running cell",
           source: { text: "1 + 1", lines: 1, truncated: false },
           output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
           epoch: 1,

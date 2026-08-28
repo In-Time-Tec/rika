@@ -5,11 +5,11 @@ import * as TuiApp from "../support/tui-app.harness"
 import { model } from "../support/tui-model.fixture"
 
 const tuiTestTimeout = 60_000
-const spinnerFor = (frame: string, marker: string): string | undefined =>
-  frame
-    .split("\n")
-    .find((line) => line.includes(marker))
-    ?.match(/[⠀-⣿]/u)?.[0]
+const spinnerFor = (frame: string, marker: string): string | undefined => {
+  const lines = frame.split("\n")
+  const sourceLine = lines.findIndex((line) => line.includes(marker))
+  return sourceLine < 1 ? undefined : lines[sourceLine - 1]?.match(/[⠀-⣿]/u)?.[0]
+}
 const spinnerChanged = (frame: string, marker: string, previous: string | undefined): boolean => {
   const current = spinnerFor(frame, marker)
   return current !== undefined && current !== previous

@@ -8,7 +8,6 @@ const cell = (id: string, status: string) => ({
   id,
   status,
   visual: "ts",
-  summary: "await work()",
   source: { text: "await work()", lines: 1, truncated: false },
   output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   epoch: 0,

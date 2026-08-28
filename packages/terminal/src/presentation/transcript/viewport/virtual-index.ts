@@ -1,5 +1,5 @@
 import { Function } from "effect"
-import { cellBodyText, cellCollapsedLine } from "@rika/transcript/cell-presentation"
+import { cellBodyText } from "@rika/transcript/cell-presentation"
 import type { Model } from "../../../state/model"
 import { TranscriptBlock, type TranscriptItem } from "../../../state/transcript/model"
 import { Schema } from "effect"
@@ -40,7 +40,7 @@ const blockText = (block: TranscriptBlock | undefined): string => {
     case "ContextUsage":
       return block.text
     case "Cell":
-      return [cellCollapsedLine(block), cellBodyText(block), ...block.files.map((file) => file.path)].join("\n")
+      return [cellBodyText(block), ...block.files.map((file) => file.path)].join("\n")
     default:
       return ""
   }

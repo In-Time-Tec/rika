@@ -17,7 +17,6 @@ const cell = {
   id: "oracle-cell",
   status: "complete" as const,
   visual: "ts",
-  summary: source,
   source: { text: source, lines: 1, truncated: false },
   output: { stdout: "NESTED_CELL_STDOUT", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   durationMillis: 1_240,
@@ -69,14 +68,14 @@ describe("a subagent's own cell", () => {
   test("renders its authored source on the card's timeline, never a tool label", () => {
     const cardOpen = { ...model(), expandedRowKeys: ["subagent:oracle-card"] }
     const collapsedCell = rendered(cardOpen)
-    expect(collapsedCell).toContain(`ts ${source} 1.2s`)
+    expect(collapsedCell).toContain(source)
+    expect(collapsedCell).toContain("1.2s · ▸")
+    expect(collapsedCell).not.toContain("ts ")
     expect(collapsedCell).not.toContain("1 line")
-    expect(collapsedCell).not.toContain(" · ")
     expect(collapsedCell).not.toContain("Read nested.txt")
     expect(collapsedCell).not.toContain("NESTED_CELL_STDOUT")
 
     const chunks = buildTranscript(cardOpen).styled.chunks
-    expect(chunks.find((chunk) => chunk.text === "ts")?.fg).toBe(colors.subtle)
     expect(chunks.find((chunk) => chunk.text.includes("1.2s"))?.fg).toBe(colors.subtle)
     expect(chunks.find((chunk) => chunk.text === "const")?.fg).not.toBe(colors.text)
 
@@ -97,7 +96,6 @@ describe("a subagent's own cell", () => {
         base.blocks[0]!,
         {
           ...cell,
-          summary: longSource,
           source: { text: `${longSource}\nresult.text`, lines: 2, truncated: false },
         },
       ],

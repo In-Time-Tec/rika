@@ -21,7 +21,6 @@ test("keeps output-bound details internal in expanded cells", () => {
       id: "bounded-cell",
       status: "complete",
       visual: "ts",
-      summary: "const value = 42",
       source: { text: "const value = 42", lines: 1, truncated: false },
       output: { stdout: "42", stderr: "", droppedBytes: 13_100, droppedEvents: 0 },
       epoch: 1,
@@ -39,6 +38,36 @@ test("keeps output-bound details internal in expanded cells", () => {
   expect(rendered).toContain("Restored value.")
   expect(rendered).not.toContain("Dropped 13100 bytes")
   expect(rendered).not.toContain("at the output bound")
+})
+
+test("shows all authored source when collapsed and caps long cells at fifteen lines", () => {
+  const chunks: Array<string> = []
+  const source = Array.from({ length: 18 }, (_, index) => `const value${index + 1} = ${index + 1}`).join("\n")
+  renderCellBody(
+    {
+      _tag: "Cell",
+      id: "long-cell",
+      status: "running",
+      visual: "ts",
+      source: { text: source, lines: 18, truncated: false },
+      output: { stdout: "hidden while collapsed", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+      epoch: 0,
+      notices: [],
+      files: [],
+    },
+    false,
+    false,
+    80,
+    "⠿",
+    (chunk) => chunks.push(chunk.text),
+  )
+  const rendered = chunks.join("")
+  expect(rendered).toContain("const value1 = 1")
+  expect(rendered).toContain("const value15 = 15")
+  expect(rendered).not.toContain("const value16 = 16")
+  expect(rendered).toContain("… 3 more lines · ▸")
+  expect(rendered).not.toContain("hidden while collapsed")
+  expect(rendered).not.toContain("ts")
 })
 
 test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>

@@ -113,7 +113,6 @@ const detailCases = [
           id: "cell-detail",
           status: "complete",
           visual: "shell",
-          summary: "Ran cell",
           source: { text: "echo cell-output", lines: 1, truncated: false },
           output: {
             stdout: "cell-output\n".repeat(50),

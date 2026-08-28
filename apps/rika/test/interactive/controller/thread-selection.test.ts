@@ -418,7 +418,6 @@ describe("interactive ThreadView controller", () => {
                     id: "cell",
                     status: "running",
                     visual: "ts",
-                    summary: source,
                     source: { text: source, lines: 1, truncated: false },
                     output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
                     epoch: 0,

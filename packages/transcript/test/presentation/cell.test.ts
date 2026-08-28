@@ -1,13 +1,7 @@
 import { expect, test } from "vitest"
 import type { Block } from "../../src/schema/presentation"
-import {
-  cellBodyText,
-  cellCollapsedLine,
-  cellGlyph,
-  cellOutputTruncated,
-  formatCellDuration,
-} from "../../src/presentation/cell"
-import { cellSourceLineCount, cellSummary, cellVisual, meaningfulSourceLines } from "../../src/presentation/cell-source"
+import { cellBodyText, cellOutputTruncated, formatCellDuration } from "../../src/presentation/cell"
+import { cellSourceLineCount, cellVisual, meaningfulSourceLines } from "../../src/presentation/cell-source"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 
@@ -16,7 +10,6 @@ const cell = (overrides: Partial<Cell> = {}): Cell => ({
   id: "cell-1",
   status: "complete",
   visual: "ts",
-  summary: "",
   source: { text: "", lines: 0, truncated: false },
   output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
   epoch: 0,
@@ -29,11 +22,6 @@ test("meaningful source lines drop blank lines and comments", () => {
   expect(meaningfulSourceLines("\n// a comment\n/* block */\n* continued\nconst a = 1\n")).toEqual(["const a = 1"])
 })
 
-test("the summary is the first meaningful line", () => {
-  expect(cellSummary("// setup\n\nconst answer = 42\nconst other = 1")).toBe("const answer = 42")
-  expect(cellSummary("   \n\n")).toBe("")
-})
-
 test("a single Bun shell statement reads as the shell visual", () => {
   expect(cellVisual("await Bun.$`bun test`")).toBe("shell")
   expect(cellVisual("// run it\nBun.spawn(['bun', 'test'])")).toBe("shell")
@@ -41,11 +29,6 @@ test("a single Bun shell statement reads as the shell visual", () => {
   expect(cellVisual("await Bun.$`bun test`\nconst extra = 1")).toBe("ts")
   expect(cellVisual("const a = 1")).toBe("ts")
   expect(cellVisual("")).toBe("ts")
-})
-
-test("the glyph is the visual language", () => {
-  expect(cellGlyph("shell")).toBe("$")
-  expect(cellGlyph("ts")).toBe("ts")
 })
 
 test("source line counts are exact", () => {
@@ -72,26 +55,6 @@ test("truncation is either source or output loss", () => {
   expect(cellOutputTruncated(cell({ output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 3 } }))).toBe(
     true,
   )
-})
-
-test("the collapsed line carries only the glyph, source summary, duration, and truncation", () => {
-  expect(
-    cellCollapsedLine(
-      cell({
-        visual: "shell",
-        summary: "await Bun.$`bun test`",
-        source: { text: "await Bun.$`bun test`", lines: 1, truncated: false },
-        output: { stdout: "ok", stderr: "", droppedBytes: 4, droppedEvents: 0 },
-        durationMillis: 1_240,
-      }),
-    ),
-  ).toBe("$ await Bun.$`bun test` 1.2s truncated")
-  expect(
-    cellCollapsedLine(
-      cell({ summary: "const a = 1", source: { text: "const a = 1\nconst b = 2", lines: 2, truncated: false } }),
-    ),
-  ).toBe("ts const a = 1")
-  expect(cellCollapsedLine(cell())).toBe("ts")
 })
 
 test("the body text joins every non-empty channel", () => {

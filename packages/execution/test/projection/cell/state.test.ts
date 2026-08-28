@@ -68,14 +68,13 @@ const completed = (id: string, code: string, result: ToolResult, isFailure: bool
 }
 
 describe("TenetKit cell projection", () => {
-  it("opens a running cell with summary, visual, and line counts from the call source", () => {
+  it("opens a running cell with visual and the complete call source", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-open", "run a cell")
     const opened = cellOf(projector.apply(started("cell-1", "// warm up\nconst answer = 6 * 7\nanswer")))
     expect(opened).toMatchObject({
       status: "running",
       visual: "ts",
-      summary: "const answer = 6 * 7",
       source: { lines: 3, truncated: false },
       output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,
@@ -427,7 +426,7 @@ describe("TenetKit cell projection", () => {
         }),
       ),
     )
-    expect(projected).toMatchObject({ status: "running", summary: "const a = 1" })
+    expect(projected).toMatchObject({ status: "running" })
     expect(projected?.source.text).toBe("const a = 1")
   })
 

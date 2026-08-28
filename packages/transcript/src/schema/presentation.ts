@@ -125,7 +125,6 @@ const Cell = Schema.TaggedStruct("Cell", {
   id: Schema.String,
   status: Schema.Literals(["running", "complete", "failed", "cancelled", "unknown"]),
   visual: Schema.Literals(["ts", "shell"]),
-  summary: Schema.String,
   source: CellSource,
   output: CellOutput,
   result: Schema.optionalKey(Schema.String),

@@ -2,7 +2,6 @@ import type { Block } from "../schema/presentation"
 
 export type Cell = Extract<Block, { readonly _tag: "Cell" }>
 
-export const cellGlyph = (visual: Cell["visual"]): string => (visual === "shell" ? "$" : "ts")
 export const formatCellDuration = (millis: number): string => {
   if (!Number.isFinite(millis) || millis < 0) return ""
   if (millis < 1_000) return `${Math.round(millis)}ms`
@@ -14,15 +13,6 @@ export const formatCellDuration = (millis: number): string => {
 
 export const cellOutputTruncated = (cell: Cell): boolean =>
   cell.source.truncated || cell.output.droppedBytes > 0 || cell.output.droppedEvents > 0
-
-export const cellCollapsedLine = (cell: Cell): string => {
-  const parts = [cellGlyph(cell.visual)]
-  if (cell.summary.length > 0) parts.push(cell.summary)
-  const duration = cell.durationMillis === undefined ? "" : formatCellDuration(cell.durationMillis)
-  if (duration.length > 0) parts.push(duration)
-  if (cellOutputTruncated(cell)) parts.push("truncated")
-  return parts.join(" ")
-}
 
 export const cellBodyText = (cell: Cell): string =>
   [

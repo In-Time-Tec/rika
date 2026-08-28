@@ -49,7 +49,6 @@ const runningCell = (): Model => {
     id: "selected-cell",
     status: "running",
     visual: "ts",
-    summary: "await work()",
     source: { text: "await work()\nreturn 42", lines: 2, truncated: false },
     output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
     epoch: 0,

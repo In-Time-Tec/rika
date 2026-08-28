@@ -7,7 +7,7 @@ import { Cell as TenetCell } from "tenetkit/repl"
 import type { RunEvent } from "tenetkit/runtime"
 import { Option, Schema } from "effect"
 import { type CellState, type Node } from "../model"
-import { bounded, boundedHead, optionalString, record, string } from "../values"
+import { bounded, optionalString, record, string } from "../values"
 import { eventNotice, restartNotification } from "../recovery"
 import { failureOutcome } from "./outcome"
 
@@ -20,7 +20,6 @@ type ToolResult = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionComp
 
 export const cellToolName = "typescript"
 export const maxCellNotices = 32
-export const maxCellSummary = 240
 
 const diffMediaTypes = new Set(["text/x-diff", "application/x-patch"])
 const commentOnly = /^(?:\/\/|\/\*|\*)/u
@@ -33,8 +32,6 @@ const meaningfulLines = (source: string): ReadonlyArray<string> =>
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !commentOnly.test(line))
-
-const summaryOf = (source: string): string => boundedHead(meaningfulLines(source)[0] ?? "", maxCellSummary)
 
 const visualOf = (source: string): Cell["visual"] => {
   const lines = meaningfulLines(source)
@@ -128,7 +125,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const text = bounded(source, cellSourceLimit)
     return {
       ...block,
-      summary: summaryOf(text),
       visual: visualOf(text),
       source: { text, lines: sourceLines(text), truncated: source.length > cellSourceLimit },
     }
@@ -143,7 +139,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       id: identity.blockId,
       status: "running",
       visual: "ts",
-      summary: "",
       source: { text: "", lines: 0, truncated: false },
       output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,

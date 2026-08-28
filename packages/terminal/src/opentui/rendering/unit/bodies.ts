@@ -1,6 +1,6 @@
 import { Function } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import { cellGlyph, cellOutputTruncated, formatCellDuration } from "@rika/transcript/cell-presentation"
+import { cellOutputTruncated, formatCellDuration } from "@rika/transcript/cell-presentation"
 import { highlightLines } from "../../../presentation/markdown/syntax-highlighter"
 import { wrapBodyText } from "../window"
 import type { TranscriptBlock } from "../../../state/transcript/model"
@@ -69,6 +69,8 @@ const cellStatusColor = (status: Extract<TranscriptBlock, { _tag: "Cell" }>["sta
   return colors.red
 }
 
+const collapsedCellLines = 15
+
 const renderCellBodyImpl = (
   block: Extract<TranscriptBlock, { _tag: "Cell" }>,
   selected: boolean,
@@ -83,38 +85,26 @@ const renderCellBodyImpl = (
   else if (block.status === "complete") icon = "✓"
   else if (block.status === "cancelled") icon = "⊘"
   else if (block.status === "unknown") icon = "?"
-  const header: Array<TextChunk> = [
-    fg(cellStatusColor(block.status))(`${icon} `),
-    fg(colors.subtle)(cellGlyph(block.visual)),
-  ]
-  if (block.summary.length > 0) {
-    header.push(fg(colors.text)(" "))
-    header.push(...highlightLines(block.summary, "typescript")[0]!.map(toOpenChunk))
-  }
-  const duration = block.durationMillis === undefined ? "" : formatCellDuration(block.durationMillis)
-  if (duration.length > 0) header.push(fg(colors.subtle)(" "), fg(colors.subtle)(duration))
-  if (cellOutputTruncated(block)) header.push(fg(colors.subtle)(" "), fg(colors.amber)("truncated"))
-  header.push(fg(colors.subtle)(expanded ? " ▾" : " ▸"))
-  for (const [rowIndex, row] of wrapStyledLine(header, Math.max(1, width - 2)).entries()) {
-    if (rowIndex > 0) append(fg(colors.text)("\n  "))
-    for (const chunk of row) append(selected ? bold(chunk) : chunk)
-  }
-  if (!expanded) return
+  const header: Array<TextChunk> = [fg(cellStatusColor(block.status))(icon)]
+  if (block.visual === "shell") header.push(fg(colors.subtle)(" $"))
+  for (const chunk of header) append(selected ? bold(chunk) : chunk)
   const source = highlightLines(block.source.text, "typescript")
-  const summaryLine = source.findIndex(
-    (line) =>
-      line
-        .map((chunk) => chunk.text)
-        .join("")
-        .trim() === block.summary.trim(),
-  )
-  for (const [lineIndex, line] of source.entries()) {
-    if (lineIndex === summaryLine) continue
+  const visibleSource = expanded ? source : source.slice(0, collapsedCellLines)
+  for (const line of visibleSource) {
     for (const row of wrapStyledLine(line.map(toOpenChunk), Math.max(1, width - 2))) {
       append(fg(colors.text)("\n  "))
       for (const chunk of row) append(chunk)
     }
   }
+  const hiddenLines = Math.max(0, source.length - visibleSource.length)
+  const footer: Array<string> = []
+  if (hiddenLines > 0) footer.push(`… ${hiddenLines} more ${hiddenLines === 1 ? "line" : "lines"}`)
+  const duration = block.durationMillis === undefined ? "" : formatCellDuration(block.durationMillis)
+  if (duration.length > 0) footer.push(duration)
+  if (cellOutputTruncated(block)) footer.push("truncated")
+  footer.push(expanded ? "▾" : "▸")
+  append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
+  if (!expanded) return
   if (block.source.truncated) append(dim(fg(colors.amber)("\n  Source truncated.")))
   if (block.output.stdout.length > 0)
     append(dim(fg(colors.text)(`\n${wrapBodyText(block.output.stdout, width, "  ")}`)))

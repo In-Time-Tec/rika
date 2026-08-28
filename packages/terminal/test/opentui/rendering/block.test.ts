@@ -76,7 +76,6 @@ test("renders every transcript block variant and sidebar state", () => {
       id: "cell-running",
       status: "running",
       visual: "ts",
-      summary: 'await rika.workspace.read({ path: "a.ts" })',
       source: { text: 'await rika.workspace.read({ path: "a.ts" })', lines: 1, truncated: false },
       output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
       epoch: 0,
@@ -88,7 +87,6 @@ test("renders every transcript block variant and sidebar state", () => {
       id: "cell-complete",
       status: "complete",
       visual: "shell",
-      summary: "await Bun.$`bun test`",
       source: { text: "await Bun.$`bun test`", lines: 1, truncated: false },
       output: { stdout: "pass\n", stderr: "", droppedBytes: 12, droppedEvents: 1 },
       result: "0",
@@ -102,7 +100,6 @@ test("renders every transcript block variant and sidebar state", () => {
       id: "cell-failed",
       status: "failed",
       visual: "ts",
-      summary: 'throw new Error("boom")',
       source: { text: 'throw new Error("boom")', lines: 1, truncated: false },
       output: { stdout: "", stderr: "trace\n", droppedBytes: 0, droppedEvents: 0 },
       error: { name: "Error", message: "boom" },
@@ -119,9 +116,9 @@ test("renders every transcript block variant and sidebar state", () => {
   expect(renderedBlocks).not.toContain(" at 42")
   expect(renderedBlocks).toContain("ERROR\n  Execution failed: Model unavailable")
   expect(renderedBlocks).toContain("2×3 · 4 B")
-  expect(renderedBlocks).toContain('⠿ ts await rika.workspace.read({ path: "a.ts" })')
-  expect(renderedBlocks).toContain("✓ $ await Bun.$`bun test` 1.2s truncated")
-  expect(renderedBlocks).toContain('✕ ts throw new Error("boom")')
+  expect(renderedBlocks).toContain('⠿\n  await rika.workspace.read({ path: "a.ts" })')
+  expect(renderedBlocks).toContain("✓ $\n  await Bun.$`bun test`")
+  expect(renderedBlocks).toContain('✕\n  throw new Error("boom")')
   const state = model({
     blocks: [...blocks],
     currentThreadId: "a",
