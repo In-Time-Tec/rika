@@ -1,7 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Path } from "effect"
-import { defaultWorkerModules } from "@rika/kernel/kernel-composition"
+import { Effect, FileSystem } from "effect"
 import {
   archiveName,
   archiveRoot,
@@ -42,19 +41,8 @@ it.layer(BunServices.layer)("release target construction", (test) => {
       "rika",
       ".rika-kernel-runtime",
       ".rika-kernel-worker.js",
-      "command-lines.js",
-      "worker-error.js",
-      "text-result.js",
-      "value.js",
     ])
   })
-
-  test.effect("packages every TenetKit worker support module", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      expect(packageBinEntries.slice(3)).toEqual(defaultWorkerModules.support.map((module) => path.basename(module)))
-    }),
-  )
 
   test("accepts only the exact supported archive set", () => {
     const exact = expectedArchiveNames("1.2.3")
@@ -74,6 +62,7 @@ it.layer(BunServices.layer)("release target construction", (test) => {
       expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, "rika")')
       expect(packaging).toContain("bytecode: false")
       expect(packaging).toContain("defaultWorkerModules.worker")
+      expect(packaging).toContain("bundleWorker(path.join(bin, kernelWorker))")
       expect(packaging).toContain("path.join(bin, kernelWorker)")
       expect(packaging).toContain("path.join(bin, kernelRuntime)")
       for (const forbidden of ["interactive-main.ts", ".rika-interactive", "performance-main.ts"])

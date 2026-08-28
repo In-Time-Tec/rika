@@ -181,6 +181,31 @@ const program = Effect.gen(function* () {
       ),
   )
 
+  const bundleWorker = Effect.fn("Package.bundleWorker")((outfile: string) =>
+    Effect.tryPromise({
+      try: () =>
+        Bun.build({
+          entrypoints: [defaultWorkerModules.worker],
+          outdir: path.dirname(outfile),
+          naming: path.basename(outfile),
+          target: "bun",
+          format: "esm",
+          minify: true,
+        }),
+      catch: (cause) => packageError("build", `bundle kernel worker failed: ${buildFailure(cause)}`, cause),
+    }).pipe(
+      Effect.flatMap((result) => {
+        if (!result.success)
+          return Effect.fail(
+            packageError("build", `bundle kernel worker failed:\n${result.logs.map(String).join("\n")}`),
+          )
+        if (result.outputs.length !== 1)
+          return Effect.fail(packageError("build", "bundle kernel worker emitted unexpected assets"))
+        return Effect.void
+      }),
+    ),
+  )
+
   const buildTarget = Effect.fn("Package.buildTarget")((target: PackageTarget) =>
     Effect.gen(function* () {
       yield* fileSystem.makeDirectory(artifacts, { recursive: true })
@@ -200,12 +225,7 @@ const program = Effect.gen(function* () {
             yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
-            yield* fileSystem.copyFile(defaultWorkerModules.worker, path.join(bin, kernelWorker))
-            yield* Effect.forEach(
-              defaultWorkerModules.support,
-              (module) => fileSystem.copyFile(module, path.join(bin, path.basename(module))),
-              { concurrency: "unbounded", discard: true },
-            )
+            yield* bundleWorker(path.join(bin, kernelWorker))
             const runtime = path.join(bin, kernelRuntime)
             yield* fileSystem.copyFile(process.execPath, runtime)
             yield* fileSystem.chmod(runtime, 0o755)
