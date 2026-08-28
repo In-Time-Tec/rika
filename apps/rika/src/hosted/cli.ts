@@ -1,7 +1,8 @@
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Crypto, Effect, Layer } from "effect"
+import { Crypto, Effect, FileSystem, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import type { Input } from "../command/root/hosted"
 import * as HostedAccount from "./account"
 import * as HostedBrowser from "./browser"
@@ -40,7 +41,15 @@ const operation = (
 ): Effect.Effect<
   void,
   HostedError,
-  Browser | CredentialStore | Crypto.Crypto | Http | OpenAiAuth.Service | ProfileStore | ThreadClient
+  | Browser
+  | ChildProcessSpawner.ChildProcessSpawner
+  | CredentialStore
+  | Crypto.Crypto
+  | FileSystem.FileSystem
+  | Http
+  | OpenAiAuth.Service
+  | ProfileStore
+  | ThreadClient
 > => {
   if (input._tag === "Auth") {
     if (input.action === "login") return HostedAccount.login(input)

@@ -65,6 +65,7 @@ const valid = (credential) => ({
       environmentDigest: "sha256:${"a".repeat(64)}",
       setupCache: false,
     },
+    seed: null,
     restore: null,
   }),
 })
@@ -115,6 +116,7 @@ const body = JSON.stringify({
     environmentDigest: "sha256:${"a".repeat(64)}",
     setupCache: false,
   },
+  seed: null,
   restore: null,
 })
 await new Promise((resolve, reject) => {
@@ -230,6 +232,7 @@ try {
         environmentDigest: "sha256:${"b".repeat(64)}",
         setupCache: false,
       },
+      seed: null,
       restore: null,
     }),
   })

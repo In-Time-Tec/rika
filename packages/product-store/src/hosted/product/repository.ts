@@ -5,6 +5,11 @@ import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Context, Effect, Layer, Schema } from "effect"
 import {
+  RepositoryCheckout,
+  WorkspaceSeed,
+  type WorkspaceSeed as WorkspaceSeedValue,
+} from "@rika/product/executor-assignment"
+import {
   rikaHostedExecutorAssignments,
   rikaHostedOwnerCounters,
   rikaHostedOwners,
@@ -13,6 +18,7 @@ import {
   rikaHostedRunnerRegistrations,
   rikaHostedThreadGrants,
   rikaHostedThreads,
+  rikaHostedWorkspaceSeeds,
   rikaHostedWorkspaces,
   rikaThreads,
   rikaWorkspaces,
@@ -81,6 +87,15 @@ const RunnerPlacement = Schema.TaggedStruct("RunnerPlacement", {
 })
 
 export interface ProductRepositoryService {
+  readonly stageWorkspaceSeed: (input: {
+    readonly id: string
+    readonly userId: string
+    readonly deviceId: string
+    readonly clientId: string
+    readonly manifest: WorkspaceSeedValue
+    readonly expiresAt: Date
+    readonly now: Date
+  }) => Effect.Effect<void, ProductRepositoryError>
   readonly resolveOwner: (input: {
     readonly userId: string
     readonly selection: HostedOwner
@@ -107,6 +122,7 @@ export interface ProductRepositoryService {
     readonly projectId: string | null
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: { readonly deviceId: string; readonly checkoutFingerprint: string }
+    readonly workspaceSeedId?: string
     readonly threadId: string
     readonly archiveThreadId?: string
   }) => Effect.Effect<
@@ -119,6 +135,8 @@ export interface ProductRepositoryService {
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: { readonly deviceId: string; readonly checkoutFingerprint: string }
     readonly requestingDeviceId: string
+    readonly requestingClientId: string
+    readonly workspaceSeedId?: string
     readonly threadId: string
     readonly archiveThreadId?: string
     readonly workspaceId: string
@@ -150,6 +168,26 @@ const query = <A extends object, E, R>(effect: Effect.Effect<ReadonlyArray<A>, E
 const make = Effect.gen(function* () {
   yield* PgClient.PgClient
   const db = yield* PgDrizzle.makeWithDefaults()
+
+  const stageWorkspaceSeed: ProductRepositoryService["stageWorkspaceSeed"] = (input) =>
+    query(
+      db
+        .insert(rikaHostedWorkspaceSeeds)
+        .values({
+          id: input.id,
+          createdByUserId: input.userId,
+          createdByDeviceId: input.deviceId,
+          createdByClientId: input.clientId,
+          manifest: input.manifest,
+          expiresAt: input.expiresAt,
+          createdAt: input.now,
+        })
+        .returning({ id: rikaHostedWorkspaceSeeds.id }),
+    ).pipe(
+      Effect.flatMap((rows) =>
+        rows[0] === undefined ? Effect.fail(databaseError("Workspace seed was not staged")) : Effect.void,
+      ),
+    )
 
   const resolveOwner: ProductRepositoryService["resolveOwner"] = (input) =>
     db
@@ -364,6 +402,7 @@ const make = Effect.gen(function* () {
           createdByUserId: rikaHostedThreads.createdByUserId,
           executorKind: rikaHostedThreads.executorKind,
           placement: rikaHostedExecutorAssignments.placement,
+          workspaceSeed: rikaHostedExecutorAssignments.workspaceSeed,
         })
         .from(rikaHostedThreads)
         .innerJoin(rikaHostedExecutorAssignments, eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id))
@@ -379,12 +418,18 @@ const make = Effect.gen(function* () {
           (placement._tag === "Some" &&
             placement.value.deviceId === input.runnerTarget.deviceId &&
             placement.value.checkoutFingerprint === input.runnerTarget.checkoutFingerprint)
+        const seed = Schema.decodeUnknownOption(WorkspaceSeed)(existing.workspaceSeed)
+        const seedCompatible =
+          input.workspaceSeedId === undefined
+            ? existing.workspaceSeed === null
+            : seed._tag === "Some" && seed.value.id === input.workspaceSeedId
         return existing.ownerId === input.authority.ownerId &&
           existing.archiveSourceThreadId === (input.archiveThreadId ?? null) &&
           existing.projectId === input.projectId &&
           existing.createdByUserId === input.authority.userId &&
           existing.executorKind === input.executorKind &&
-          runnerCompatible
+          runnerCompatible &&
+          seedCompatible
           ? { _tag: "Existing" as const, threadId: input.threadId }
           : { _tag: "Incompatible" as const }
       }),
@@ -414,6 +459,7 @@ const make = Effect.gen(function* () {
                 createdByUserId: rikaHostedThreads.createdByUserId,
                 executorKind: rikaHostedThreads.executorKind,
                 placement: rikaHostedExecutorAssignments.placement,
+                workspaceSeed: rikaHostedExecutorAssignments.workspaceSeed,
               })
               .from(rikaHostedThreads)
               .innerJoin(
@@ -430,12 +476,18 @@ const make = Effect.gen(function* () {
               (placement._tag === "Some" &&
                 placement.value.deviceId === input.runnerTarget.deviceId &&
                 placement.value.checkoutFingerprint === input.runnerTarget.checkoutFingerprint)
+            const seed = Schema.decodeUnknownOption(WorkspaceSeed)(existing.workspaceSeed)
+            const seedCompatible =
+              input.workspaceSeedId === undefined
+                ? existing.workspaceSeed === null
+                : seed._tag === "Some" && seed.value.id === input.workspaceSeedId
             return existing.ownerId === input.authority.ownerId &&
               existing.archiveSourceThreadId === (input.archiveThreadId ?? null) &&
               existing.projectId === input.projectId &&
               existing.createdByUserId === input.authority.userId &&
               existing.executorKind === input.executorKind &&
-              runnerCompatible
+              runnerCompatible &&
+              seedCompatible
               ? { _tag: "Existing" as const, threadId: input.threadId }
               : { _tag: "Incompatible" as const }
           }
@@ -479,6 +531,59 @@ const make = Effect.gen(function* () {
             if (input.requestingDeviceId !== input.runnerTarget.deviceId && !runner.allowed)
               return { _tag: "RunnerRemoteDenied" as const }
             workspaceId = runner.workspaceId
+          }
+          let workspaceSeed: WorkspaceSeedValue | null = null
+          if (input.workspaceSeedId !== undefined) {
+            if (input.executorKind !== "orb")
+              return yield* ProductRepositoryError.make({
+                kind: "conflict",
+                message: "Workspace seed requires Orb execution",
+              })
+            const staged = (yield* query(
+              tx
+                .select({
+                  userId: rikaHostedWorkspaceSeeds.createdByUserId,
+                  deviceId: rikaHostedWorkspaceSeeds.createdByDeviceId,
+                  clientId: rikaHostedWorkspaceSeeds.createdByClientId,
+                  manifest: rikaHostedWorkspaceSeeds.manifest,
+                  claimedAssignmentId: rikaHostedWorkspaceSeeds.claimedAssignmentId,
+                  expiresAt: rikaHostedWorkspaceSeeds.expiresAt,
+                })
+                .from(rikaHostedWorkspaceSeeds)
+                .where(eq(rikaHostedWorkspaceSeeds.id, input.workspaceSeedId))
+                .for("update")
+                .limit(1),
+            ))[0]
+            if (staged === undefined || staged.expiresAt <= input.now)
+              return yield* ProductRepositoryError.make({ kind: "not-found", message: "Workspace seed is unavailable" })
+            if (
+              staged.userId !== input.authority.userId ||
+              staged.deviceId !== input.requestingDeviceId ||
+              staged.clientId !== input.requestingClientId
+            )
+              return yield* ProductRepositoryError.make({ kind: "forbidden", message: "Workspace seed is unavailable" })
+            if (staged.claimedAssignmentId !== null && staged.claimedAssignmentId !== input.assignmentId)
+              return yield* ProductRepositoryError.make({
+                kind: "conflict",
+                message: "Workspace seed was already claimed",
+              })
+            workspaceSeed = yield* Schema.decodeUnknownEffect(WorkspaceSeed)(staged.manifest).pipe(
+              Effect.mapError(() => databaseError("Workspace seed manifest is invalid")),
+            )
+            if (input.checkout !== null) {
+              const checkout = yield* Schema.decodeUnknownEffect(RepositoryCheckout)(input.checkout).pipe(
+                Effect.mapError(() => databaseError("Repository checkout is invalid")),
+              )
+              if (
+                workspaceSeed.sourceRepository === null ||
+                workspaceSeed.sourceRepository.owner.toLowerCase() !== checkout.owner.toLowerCase() ||
+                workspaceSeed.sourceRepository.name.toLowerCase() !== checkout.name.toLowerCase()
+              )
+                return yield* ProductRepositoryError.make({
+                  kind: "conflict",
+                  message: "Local Workspace repository does not match the selected Project repository",
+                })
+            }
           }
           const inheritProjectGrants = input.executorKind === "orb" && input.projectId !== null
           yield* query(
@@ -562,6 +667,7 @@ const make = Effect.gen(function* () {
                 executorKind: input.executorKind,
                 placement: input.placement,
                 checkout: input.checkout,
+                workspaceSeed,
                 generation: 1,
                 revision: 0,
                 lastLeaseEpoch: 0,
@@ -576,6 +682,14 @@ const make = Effect.gen(function* () {
                 .set({ archived: 1, updatedAt: input.nowMillis })
                 .where(and(eq(rikaThreads.id, input.archiveThreadId), eq(rikaThreads.ownerId, input.authority.ownerId)))
                 .returning({ id: rikaThreads.id }),
+            )
+          if (input.workspaceSeedId !== undefined)
+            yield* query(
+              tx
+                .update(rikaHostedWorkspaceSeeds)
+                .set({ claimedAssignmentId: input.assignmentId })
+                .where(eq(rikaHostedWorkspaceSeeds.id, input.workspaceSeedId))
+                .returning({ id: rikaHostedWorkspaceSeeds.id }),
             )
           return { _tag: "Created" as const, threadId: input.threadId }
         }),
@@ -678,6 +792,7 @@ const make = Effect.gen(function* () {
     })
 
   return ProductRepository.of({
+    stageWorkspaceSeed,
     resolveOwner,
     organizationIds,
     projects,

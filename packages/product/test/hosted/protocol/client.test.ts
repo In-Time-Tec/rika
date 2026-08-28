@@ -95,6 +95,7 @@ describe("hosted Thread client protocol", () => {
         projectId,
         executorKind: "orb",
         repositoryRef: { repositoryId: "repository", ref: "refs/heads/main" },
+        workspaceSeedId: "seed-1",
       }),
       envelope({ _tag: "AttachThread", threadId, afterCursor: cursor }),
       envelope({
@@ -166,6 +167,18 @@ describe("hosted Thread client protocol", () => {
           owner: { kind: "personal" },
           executorKind: "orb",
           runnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+        }),
+      ),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeSync(ClientMessage)(
+        envelope({
+          _tag: "CreateThread",
+          ...admitted,
+          owner: { kind: "personal" },
+          executorKind: "runner",
+          runnerTarget: { deviceId: "device-1", checkoutFingerprint: "checkout-1" },
+          workspaceSeedId: "seed-1",
         }),
       ),
     ).toThrow()

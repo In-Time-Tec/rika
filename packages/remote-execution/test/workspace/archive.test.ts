@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { createArchive, restoreArchive } from "../../src/workspace/archive"
 
 const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -66,6 +67,60 @@ describe("Workspace archive", () => {
               .kind,
           ).toBe("archive")
         }).pipe(Effect.ensuring(fileSystem.remove(source, { recursive: true, force: true }).pipe(Effect.ignore)))
+      }),
+    ),
+  )
+
+  it.effect("captures tracked changes and untracked files while preserving local deletions and Git ignores", () =>
+    withPlatform(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const source = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-git-source-" })
+        const target = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-git-target-" })
+        const git = (arguments_: ReadonlyArray<string>) =>
+          spawner
+            .exitCode(ChildProcess.make("git", ["-C", source, ...arguments_]))
+            .pipe(Effect.flatMap((code) => (Number(code) === 0 ? Effect.void : Effect.die(`git exited ${code}`))))
+        yield* Effect.gen(function* () {
+          yield* git(["init", "--quiet"])
+          yield* fileSystem.writeFileString(`${source}/.gitignore`, "ignored/\n")
+          yield* fileSystem.writeFileString(`${source}/modified.txt`, "original")
+          yield* fileSystem.writeFileString(`${source}/deleted.txt`, "delete me")
+          yield* git(["add", ".gitignore", "modified.txt", "deleted.txt"])
+          yield* fileSystem.writeFileString(`${source}/modified.txt`, "local change")
+          yield* fileSystem.remove(`${source}/deleted.txt`)
+          yield* fileSystem.writeFileString(`${source}/untracked.txt`, "local only")
+          yield* fileSystem.makeDirectory(`${source}/ignored`, { recursive: true })
+          yield* fileSystem.writeFileString(`${source}/ignored/dependency.txt`, "ignored")
+          yield* fileSystem.makeDirectory(`${source}/nested/.agents/state/run`, { recursive: true })
+          yield* fileSystem.writeFileString(`${source}/nested/.agents/state/run/transient`, "ignored")
+          const archive = yield* createArchive(source)
+
+          yield* fileSystem.makeDirectory(`${target}/.git`, { recursive: true })
+          yield* fileSystem.writeFileString(`${target}/.git/config`, "clone identity")
+          yield* fileSystem.writeFileString(`${target}/deleted.txt`, "cloned content")
+          yield* fileSystem.makeDirectory(`${target}/ignored`, { recursive: true })
+          yield* fileSystem.writeFileString(`${target}/ignored/dependency.txt`, "cloned ignored content")
+          yield* restoreArchive(target, archive)
+
+          expect(yield* fileSystem.readFileString(`${target}/modified.txt`)).toBe("local change")
+          expect(yield* fileSystem.readFileString(`${target}/untracked.txt`)).toBe("local only")
+          expect(yield* fileSystem.exists(`${target}/deleted.txt`)).toBe(false)
+          expect(yield* fileSystem.exists(`${target}/ignored`)).toBe(false)
+          expect(yield* fileSystem.exists(`${target}/nested/.agents/state`)).toBe(false)
+          expect(yield* fileSystem.readFileString(`${target}/.git/config`)).toBe("clone identity")
+        }).pipe(
+          Effect.ensuring(
+            Effect.all(
+              [
+                fileSystem.remove(source, { recursive: true, force: true }),
+                fileSystem.remove(target, { recursive: true, force: true }),
+              ],
+              { discard: true },
+            ).pipe(Effect.ignore),
+          ),
+        )
       }),
     ),
   )

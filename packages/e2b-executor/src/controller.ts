@@ -26,6 +26,7 @@ import {
   type Hello,
   type QuiescedOperation,
   type WorkspaceProof,
+  type WorkspaceSeedRestore,
 } from "@rika/remote-execution/protocol"
 import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/workspace-archive"
 import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Result, Schema } from "effect"
@@ -477,6 +478,22 @@ export const layer = (
         return { checkpointId: manifest.id, archive: encodeArchive(archive) } satisfies CheckpointRestore
       })
 
+      const restoreWorkspaceSeed = Effect.fn("Controller.restoreWorkspaceSeed")(function* (
+        assignment: ExecutorAssignment,
+      ) {
+        if (assignment.workspaceSeed === null) return null
+        const stored = yield* Schema.decodeEffect(StoredArchive)(assignment.workspaceSeed).pipe(
+          Effect.mapError(() => failure("checkpoint", "Workspace seed manifest is invalid")),
+        )
+        const archive = yield* vault
+          .loadWorkspaceSeed(assignment.workspaceSeed.id, stored)
+          .pipe(Effect.mapError((error) => failure("checkpoint", error.message)))
+        return {
+          seedId: assignment.workspaceSeed.id,
+          archive: encodeArchive(archive),
+        } satisfies WorkspaceSeedRestore
+      })
+
       const matchesGeneration = (
         assignment: ExecutorAssignment,
         templateId: string,
@@ -568,7 +585,8 @@ export const layer = (
             return yield* assignmentFailure(binding.failure)
           }
         }
-        if (bound.lifecycle._tag === "AwaitingBootstrap")
+        if (bound.lifecycle._tag === "AwaitingBootstrap") {
+          const seed = lifecycle === "resume" || restore !== null ? null : yield* restoreWorkspaceSeed(provisioning)
           yield* provider
             .bootstrap({
               sandboxId: sandbox.sandboxId,
@@ -579,9 +597,11 @@ export const layer = (
                 lifecycle,
                 authorization.environmentDigest,
               ),
+              seed,
               restore,
             })
             .pipe(Effect.mapError(providerFailure))
+        }
         return publicAssignment(bound)
       })
 

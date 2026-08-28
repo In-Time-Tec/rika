@@ -8,6 +8,7 @@ const base = {
   threadId: "thread-1",
   workspaceId: "workspace-1",
   checkout: null,
+  workspaceSeed: null,
   generation: "1",
   revision: "0",
   lastLeaseEpoch: "0",

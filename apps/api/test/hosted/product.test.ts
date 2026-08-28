@@ -13,6 +13,7 @@ import {
   rikaHostedThreadCommands,
   rikaHostedThreadGrants,
   rikaHostedThreads,
+  rikaHostedWorkspaceSeeds,
   rikaHostedWorkspaces,
   rikaThreads,
   rikaThreadQueueState,
@@ -244,6 +245,79 @@ it.effect.skipIf(!live)("atomically archives a Thread while creating its replace
           ),
         ),
       ).toBe(0)
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("claims one staged Workspace seed atomically with its Orb assignment", () =>
+  withDatabase("workspace-seed", (database) =>
+    Effect.gen(function* () {
+      const authenticated = principal("workspace-seed-user")
+      const now = DateTime.nowUnsafe()
+      const createdAt = DateTime.toDate(now)
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      const manifest = {
+        id: "seed-1",
+        sourceRepository: null,
+        objectKey: "workspace-seeds/seed-1/source.tar.zst.aes",
+        contentDigest: `sha256:${"a".repeat(64)}`,
+        sizeBytes: 128,
+        archiveDigest: `sha256:${"b".repeat(64)}`,
+        archiveSizeBytes: 96,
+        encryption: "aes-256-gcm",
+      }
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaHostedWorkspaceSeeds).values({
+          id: manifest.id,
+          createdByUserId: authenticated.userId,
+          createdByDeviceId: authenticated.deviceId,
+          createdByClientId: authenticated.clientId,
+          manifest,
+          expiresAt: DateTime.toDate(DateTime.add(now, { minutes: 10 })),
+          createdAt,
+        }),
+      )
+      const product = yield* HostedProduct
+      const input = {
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        executorKind: "orb" as const,
+        workspaceSeedId: manifest.id,
+        threadId: "seeded-thread",
+      }
+      const created = yield* product.createConnection(input)
+      expect(yield* product.createConnection(input)).toEqual(created)
+      const [assignment] = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedExecutorAssignments.id, workspaceSeed: rikaHostedExecutorAssignments.workspaceSeed })
+          .from(rikaHostedExecutorAssignments)
+          .where(eq(rikaHostedExecutorAssignments.threadId, created.threadId)),
+      )
+      const [seed] = yield* Effect.tryPromise(() =>
+        database
+          .select({ claimedAssignmentId: rikaHostedWorkspaceSeeds.claimedAssignmentId })
+          .from(rikaHostedWorkspaceSeeds)
+          .where(eq(rikaHostedWorkspaceSeeds.id, manifest.id)),
+      )
+      expect(assignment?.workspaceSeed).toEqual(manifest)
+      expect(seed?.claimedAssignmentId).toBe(assignment?.id)
+      expect(
+        yield* failureKind(
+          product.createConnection({
+            ...input,
+            threadId: "another-seeded-thread",
+          }),
+        ),
+      ).toBe("conflict")
     }),
   ),
 )

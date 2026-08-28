@@ -5,6 +5,7 @@ import type {
   ExecutorCursor,
   ExecutorPlacement,
   RepositoryCheckout,
+  WorkspaceSeed,
   WorkspaceCapabilitySnapshot,
   WorkspaceCheckpointManifest,
 } from "./assignment"
@@ -43,6 +44,7 @@ export interface CreateInput {
   readonly workspaceId: WorkspaceId
   readonly placement: ExecutorPlacement
   readonly checkout: RepositoryCheckout | null
+  readonly workspaceSeed?: WorkspaceSeed | null
 }
 
 export interface Version {

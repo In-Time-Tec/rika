@@ -113,6 +113,7 @@ export interface HostedProductService {
     readonly projectId?: string
     readonly executorKind: "runner" | "orb"
     readonly runnerTarget?: RunnerTarget
+    readonly workspaceSeedId?: string
     readonly threadId?: string
     readonly archiveThreadId?: string
   }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
@@ -317,6 +318,8 @@ export const layer = (options: {
           if (input.runnerTarget !== undefined) Object.assign(existingInput, { runnerTarget: input.runnerTarget })
           if (input.archiveThreadId !== undefined)
             Object.assign(existingInput, { archiveThreadId: input.archiveThreadId })
+          if (input.workspaceSeedId !== undefined)
+            Object.assign(existingInput, { workspaceSeedId: input.workspaceSeedId })
           const existing = yield* repository.existingConnection(existingInput).pipe(Effect.mapError(repositoryFailure))
           if (existing?._tag === "Incompatible")
             return yield* HostedProductError.make({
@@ -383,6 +386,7 @@ export const layer = (options: {
             projectId: input.projectId ?? null,
             executorKind: input.executorKind,
             requestingDeviceId: input.principal.deviceId,
+            requestingClientId: input.principal.clientId,
             threadId,
             workspaceId: fallbackWorkspaceId,
             assignmentId: yield* crypto.randomUUIDv4,
@@ -394,6 +398,8 @@ export const layer = (options: {
           if (input.runnerTarget !== undefined) Object.assign(connectionInput, { runnerTarget: input.runnerTarget })
           if (input.archiveThreadId !== undefined)
             Object.assign(connectionInput, { archiveThreadId: input.archiveThreadId })
+          if (input.workspaceSeedId !== undefined)
+            Object.assign(connectionInput, { workspaceSeedId: input.workspaceSeedId })
           const result = yield* repository.createConnection(connectionInput).pipe(Effect.mapError(repositoryFailure))
           if (result._tag === "Incompatible")
             return yield* HostedProductError.make({

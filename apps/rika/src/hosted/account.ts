@@ -24,6 +24,7 @@ import {
 } from "./contract"
 import type { RunRequest } from "./contract"
 import * as Dpop from "./dpop"
+import { prepareWorkspaceSeed } from "./workspace/seed"
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 const emailSchema = Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
@@ -125,9 +126,7 @@ const refresh = Effect.fn("HostedAccount.refresh")(function* (profile: Profile, 
         }
         const status = error.status === undefined ? category : { ...category, "rika.http.status": error.status }
         const annotations =
-          error.retryAfterMillis === undefined
-            ? status
-            : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
+          error.retryAfterMillis === undefined ? status : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
         return Effect.logWarning("auth.refresh.failure").pipe(Effect.annotateLogs(annotations))
       }),
       Effect.flatMap((tokens) =>
@@ -611,7 +610,7 @@ export const syncRepository = Effect.fn("HostedAccount.syncRepository")(function
   )
 })
 
-export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(function* () {
+export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(function* (workspace = process.cwd()) {
   const profile = yield* selectedProfile()
   const http = yield* Http
   const threads = yield* ThreadClient
@@ -619,16 +618,28 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
   const commandId = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("host", "Could not create a Thread identifier")),
   )
+  const workspaceSeed = yield* Effect.scoped(prepareWorkspaceSeed(workspace))
   const threadId = yield* authenticated(profile, (session) =>
     http.context(profile.origin, session).pipe(
       Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner),
-      Effect.andThen(http.issueThreadTicket(profile.origin, session)),
-      Effect.flatMap((ticket) => {
+      Effect.andThen(
+        Effect.all({
+          seed: http.uploadWorkspaceSeed(
+            profile.origin,
+            workspaceSeed.archive,
+            workspaceSeed.sourceRepository,
+            session,
+          ),
+          ticket: http.issueThreadTicket(profile.origin, session),
+        }),
+      ),
+      Effect.flatMap(({ seed, ticket }) => {
         const request = {
           ticket,
           commandId,
           owner: profile.owner,
           executorKind: "orb",
+          workspaceSeedId: seed.id,
         } satisfies Parameters<typeof threads.create>[0]
         return threads.create(
           Object.assign(request, profile.project === undefined ? undefined : { project: profile.project }),

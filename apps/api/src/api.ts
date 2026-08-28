@@ -12,6 +12,7 @@ import { publicationHandlers } from "./http-api/publication/controller"
 import { modelsHandlers } from "./http-api/models/controller"
 import { environmentHandlers } from "./http-api/environment/controller"
 import { auditHandlers } from "./http-api/audit/controller"
+import { workspaceSeedsHandlers } from "./http-api/workspace-seeds/controller"
 
 export { RikaApi } from "./http-api/contract"
 
@@ -22,6 +23,7 @@ export const makeRikaApiHandler = (dependencies: HttpDependencies) => {
   const authenticated = Layer.mergeAll(
     identityHandlers(dependencies),
     runnersHandlers(dependencies),
+    workspaceSeedsHandlers(dependencies),
     recoveryHandlers(dependencies),
     publicationHandlers(dependencies),
     modelsHandlers(dependencies),

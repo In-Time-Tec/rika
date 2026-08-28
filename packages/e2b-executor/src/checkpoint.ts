@@ -69,6 +69,12 @@ export const StoredArchive = Schema.Struct({
 export type StoredArchive = typeof StoredArchive.Type
 
 export interface VaultInterface {
+  readonly storeWorkspaceSeed: (
+    seedId: string,
+    archive: EncodedArchive,
+  ) => Effect.Effect<StoredArchive, CheckpointError>
+  readonly loadWorkspaceSeed: (seedId: string, stored: StoredArchive) => Effect.Effect<Archive, CheckpointError>
+  readonly removeWorkspaceSeed: (seedId: string, stored: StoredArchive) => Effect.Effect<void, CheckpointError>
   readonly storeCheckpoint: (
     scope: CheckpointScope,
     archive: EncodedArchive,
@@ -103,6 +109,8 @@ const checkpointPrefix = (scope: CheckpointScope) =>
   `owners/${keyPart(scope.ownerId)}/threads/${keyPart(scope.threadId)}/assignments/${keyPart(scope.assignmentId)}/g${scope.generation}/`
 
 const checkpointKey = (scope: CheckpointScope) => `${checkpointPrefix(scope)}${keyPart(scope.checkpointId)}.tar.zst.aes`
+const workspaceSeedPrefix = (seedId: string) => `workspace-seeds/${keyPart(seedId)}/`
+const workspaceSeedKey = (seedId: string) => `${workspaceSeedPrefix(seedId)}source.tar.zst.aes`
 
 const cacheScope = (key: SetupCacheKey) => ({
   kind: "setup-cache" as const,
@@ -110,6 +118,7 @@ const cacheScope = (key: SetupCacheKey) => ({
   repositoryId: key.repository.repositoryId,
   commitSha: key.repository.commitSha,
   setupHookDigest: key.setupHookDigest,
+  workspaceSeedDigest: key.workspaceSeedDigest,
   templateBuildId: key.templateBuildId,
   environmentDigest: key.environmentDigest,
 })
@@ -130,6 +139,8 @@ const checkpointAad = (scope: CheckpointScope) =>
       checkpointId: scope.checkpointId,
     }),
   )
+
+const workspaceSeedAad = (seedId: string) => encoder.encode(JSON.stringify({ kind: "workspace-seed", seedId }))
 
 const cacheAad = (key: SetupCacheKey) => encoder.encode(JSON.stringify(cacheScope(key)))
 
@@ -282,7 +293,24 @@ export const vaultLayer = (
         )
       }
 
-      return Vault.of({ storeCheckpoint, loadCheckpoint, storeSetupCache, loadSetupCache })
+      const storeWorkspaceSeed: VaultInterface["storeWorkspaceSeed"] = (seedId, archive) =>
+        store(workspaceSeedKey(seedId), workspaceSeedAad(seedId), archive)
+      const loadWorkspaceSeed: VaultInterface["loadWorkspaceSeed"] = (seedId, stored) =>
+        load(stored.objectKey, workspaceSeedPrefix(seedId), workspaceSeedAad(seedId), stored)
+      const removeWorkspaceSeed: VaultInterface["removeWorkspaceSeed"] = (seedId, stored) =>
+        stored.objectKey === workspaceSeedKey(seedId) && validObjectKey(stored.objectKey)
+          ? objects.remove(stored.objectKey)
+          : Effect.fail(failure("scope", "Workspace archive does not belong to this scope"))
+
+      return Vault.of({
+        storeWorkspaceSeed,
+        loadWorkspaceSeed,
+        removeWorkspaceSeed,
+        storeCheckpoint,
+        loadCheckpoint,
+        storeSetupCache,
+        loadSetupCache,
+      })
     }),
   ).pipe(Layer.provide(BunServices.layer))
 

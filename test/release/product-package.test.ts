@@ -188,6 +188,7 @@ const expected = {
     "migrations/postgres/0032-terminalize-unrecoverable-turns.sql",
     "migrations/postgres/0033-transcript-projection-notifications.sql",
     "migrations/postgres/0034-atomic-thread-replacement.sql",
+    "migrations/postgres/0035-workspace-seeds.sql",
     "product-repositories",
     "product-repository",
     "provider-credentials",

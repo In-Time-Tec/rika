@@ -55,6 +55,7 @@ const unusedHttp: HttpInterface = {
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
+  uploadWorkspaceSeed: () => Effect.die("unused"),
   registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
   pollRunner: () => Effect.die("unused"),

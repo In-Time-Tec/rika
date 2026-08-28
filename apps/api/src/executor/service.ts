@@ -134,25 +134,26 @@ export const loadConfig = Effect.fn("ExecutorConfig.load")(function* (environmen
 
 export type ExecutorConfig = Effect.Success<ReturnType<typeof loadConfig>>
 
+export const workspaceArchiveVaultLayer = (options: ExecutorConfig) =>
+  vaultLayer(options.checkpointKey).pipe(
+    Layer.provide(
+      s3ObjectStoreLayer(
+        Object.assign(
+          {
+            bucket: options.checkpointBucket,
+            region: options.checkpointRegion,
+          },
+          options.checkpointEndpoint === undefined ? undefined : { endpoint: options.checkpointEndpoint },
+        ),
+      ),
+    ),
+    Layer.provide(BunFileSystem.layer),
+  )
+
 export const layer = (options: ExecutorConfig) =>
   controllerLayer(options).pipe(
     Layer.provide(providerLayer({ apiKey: options.apiKey })),
-    Layer.provide(
-      vaultLayer(options.checkpointKey).pipe(
-        Layer.provide(
-          s3ObjectStoreLayer(
-            Object.assign(
-              {
-                bucket: options.checkpointBucket,
-                region: options.checkpointRegion,
-              },
-              options.checkpointEndpoint === undefined ? undefined : { endpoint: options.checkpointEndpoint },
-            ),
-          ),
-        ),
-        Layer.provide(BunFileSystem.layer),
-      ),
-    ),
+    Layer.provide(workspaceArchiveVaultLayer(options)),
     Layer.provide(
       Layer.effect(
         Credentials,

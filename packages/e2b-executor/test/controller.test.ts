@@ -4,7 +4,7 @@ import { ExecutorInstanceId } from "@rika/product/hosted-model"
 import type { Access } from "@rika/remote-execution/protocol"
 import { Deferred, Effect, Fiber, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { CheckpointError } from "../src/checkpoint"
+import { CheckpointError, Vault } from "../src/checkpoint"
 import * as Controller from "../src/controller"
 import { assignmentInput, controller, createAssignment, makeHarness, readAssignment } from "./support/fakes"
 import { provideLayer } from "./support/layer"
@@ -157,11 +157,51 @@ describe("Controller", () => {
         setupCache: false,
       })
       expect(bootstrapRequest.restore).toBeNull()
+      expect(bootstrapRequest.seed).toBeNull()
       const bootstrap = bootstrapRequest.credential
       expect(String(bootstrap)).toBe("<redacted:executor-bootstrap>")
       expect(json(first)).not.toContain(Redacted.value(bootstrap))
       expect((yield* readAssignment()).lifecycle).toMatchObject({ _tag: "AwaitingBootstrap" })
       expect(json(yield* readAssignment())).not.toContain(Redacted.value(bootstrap))
+    }).pipe(provideLayer(harness.layer))
+  })
+
+  it.effect("loads the local seed for a fresh Orb and prefers its checkpoint on replacement", () => {
+    const harness = makeHarness()
+    return Effect.gen(function* () {
+      const service = yield* controller
+      const vault = yield* Vault
+      const assignments = yield* ExecutorAssignments
+      const stored = yield* vault.storeWorkspaceSeed("seed-1", archive)
+      yield* assignments.create({
+        ...assignmentInput,
+        workspaceSeed: {
+          id: "seed-1",
+          sourceRepository: { owner: "In-Time-Tec", name: "rika" },
+          ...stored,
+        },
+      })
+
+      yield* service.provision(assignmentInput.id, setupAuthorization)
+
+      expect(harness.provider.bootstraps[0]).toMatchObject({
+        identity: { lifecycle: "fresh" },
+        seed: { seedId: "seed-1", archive },
+        restore: null,
+      })
+      const first = yield* authenticate(harness, 1)
+      yield* service.checkpoint(first.access, {
+        version: 1,
+        checkpointId: "checkpoint-seeded",
+        archive,
+        cursor: { sequence: 0, value: "" },
+      })
+      yield* service.replace({ assignmentId: "assignment-1", generation: 1 }, runtimeAuthorization)
+      expect(harness.provider.bootstraps[1]).toMatchObject({
+        identity: { lifecycle: "replacement" },
+        seed: null,
+        restore: { checkpointId: "checkpoint-seeded", archive },
+      })
     }).pipe(provideLayer(harness.layer))
   })
 

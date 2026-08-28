@@ -1,6 +1,7 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import {
   Cause,
   Clock,
@@ -77,6 +78,7 @@ const unusedHttp: HttpInterface = {
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
+  uploadWorkspaceSeed: () => Effect.die("unused"),
   registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
   pollRunner: () => Effect.die("unused"),
@@ -581,10 +583,7 @@ it.layer(platform)((test) => {
         const secondFiber = yield* Effect.forkChild(authenticate(second))
         yield* Effect.yieldNow
         yield* Deferred.succeed(releaseFirstRefresh, undefined)
-        expect(yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])).toEqual([
-          "access-1",
-          "access-1",
-        ])
+        expect(yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])).toEqual(["access-1", "access-1"])
         expect(
           Redacted.value(Option.getOrThrow(yield* first.load(profile.origin, profile.deviceId)).refreshToken),
         ).toBe("refresh-1")
@@ -718,71 +717,91 @@ it.effect("lists Personal, switches owners, clears projects, and returns to Pers
   ),
 )
 
-it.effect("creates for Personal with zero organizations and fails closed for a stale organization", () =>
-  Effect.gen(function* () {
-    const current = yield* Ref.make<Profile>({ ...profile, owner: { kind: "personal" } })
-    const created = yield* Ref.make(0)
-    const context = yield* Layer.build(
-      Layer.mergeAll(
-        Layer.succeed(
-          ProfileStore,
-          ProfileStore.of({
-            load: Ref.get(current).pipe(Effect.map(Option.some)),
-            save: (value) => Ref.set(current, value),
-          }),
-        ),
-        Layer.succeed(
-          CredentialStore,
-          CredentialStore.of({
-            load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
-            save: () => Effect.void,
-            remove: () => Effect.succeed(true),
-            serialized: (effect) => effect,
-          }),
-        ),
-        Layer.succeed(
-          Http,
-          Http.of({
-            ...unusedHttp,
-            refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
-            context: () =>
-              Effect.succeed({
-                account: { id: "user-1", email: "dev@example.test", name: "Dev" },
-                organizations: [],
-                projects: [],
+it.layer(BunServices.layer)((test) => {
+  test.effect("creates for Personal with zero organizations and fails closed for a stale organization", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-remote-thread-" })
+        yield* fileSystem.writeFileString(`${workspace}/local.txt`, "local workspace state")
+        const current = yield* Ref.make<Profile>({ ...profile, owner: { kind: "personal" } })
+        const created = yield* Ref.make(0)
+        const uploaded = yield* Ref.make(0)
+        const context = yield* Layer.build(
+          Layer.mergeAll(
+            Layer.succeed(
+              ProfileStore,
+              ProfileStore.of({
+                load: Ref.get(current).pipe(Effect.map(Option.some)),
+                save: (value) => Ref.set(current, value),
               }),
-            issueThreadTicket: () =>
-              Effect.succeed(
-                Schema.decodeSync(ClientTicketResponse)({
-                  ticket: "ticket-1",
-                  expiresAt: "2026-08-21T06:00:00.000Z",
-                  websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
-                  protocol: "rika.thread.v1",
-                }),
-              ),
-          }),
-        ),
-        Layer.succeed(
-          ThreadClient,
-          ThreadClient.of({
-            create: ({ owner }) => {
-              expect(owner).toEqual({ kind: "personal" })
-              return Ref.update(created, (value) => value + 1).pipe(Effect.as(HostedThreadId.make("thread-1")))
-            },
-            submit: () => Effect.die("unused"),
-            ensureService: () => Effect.die("unused"),
-            stopService: () => Effect.die("unused"),
-            openPortal: () => Effect.die("unused"),
-          }),
-        ),
-        BunCrypto.layer,
-        TestConsole.layer,
-      ),
-    )
-    yield* createRemoteThread().pipe(Effect.provide(context))
-    yield* Ref.set(current, { ...profile, owner: { kind: "organization", organizationId: "revoked" } })
-    const error = yield* Effect.flip(createRemoteThread().pipe(Effect.provide(context)))
-    expect(error.message).toContain("rika org personal")
-    expect(yield* Ref.get(created)).toBe(1)
-  }),
-)
+            ),
+            Layer.succeed(
+              CredentialStore,
+              CredentialStore.of({
+                load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
+                save: () => Effect.void,
+                remove: () => Effect.succeed(true),
+                serialized: (effect) => effect,
+              }),
+            ),
+            Layer.succeed(
+              Http,
+              Http.of({
+                ...unusedHttp,
+                refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
+                context: () =>
+                  Effect.succeed({
+                    account: { id: "user-1", email: "dev@example.test", name: "Dev" },
+                    organizations: [],
+                    projects: [],
+                  }),
+                issueThreadTicket: () =>
+                  Effect.succeed(
+                    Schema.decodeSync(ClientTicketResponse)({
+                      ticket: "ticket-1",
+                      expiresAt: "2026-08-21T06:00:00.000Z",
+                      websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
+                      protocol: "rika.thread.v1",
+                    }),
+                  ),
+                uploadWorkspaceSeed: (_origin, archive) =>
+                  Ref.update(uploaded, (value) => value + 1).pipe(
+                    Effect.as({
+                      id: "seed-1",
+                      contentDigest: archive.contentDigest,
+                      sizeBytes: archive.sizeBytes,
+                      expiresAt: "2026-08-21T06:10:00.000Z",
+                    }),
+                  ),
+              }),
+            ),
+            Layer.succeed(
+              ThreadClient,
+              ThreadClient.of({
+                create: ({ owner, executorKind, workspaceSeedId }) => {
+                  expect(owner).toEqual({ kind: "personal" })
+                  expect(executorKind).toBe("orb")
+                  expect(workspaceSeedId).toBe("seed-1")
+                  return Ref.update(created, (value) => value + 1).pipe(Effect.as(HostedThreadId.make("thread-1")))
+                },
+                submit: () => Effect.die("unused"),
+                ensureService: () => Effect.die("unused"),
+                stopService: () => Effect.die("unused"),
+                openPortal: () => Effect.die("unused"),
+              }),
+            ),
+            BunCrypto.layer,
+            TestConsole.layer,
+          ),
+        )
+        yield* createRemoteThread(workspace).pipe(Effect.provide(context))
+        yield* Ref.set(current, { ...profile, owner: { kind: "organization", organizationId: "revoked" } })
+        const error = yield* Effect.flip(createRemoteThread(workspace).pipe(Effect.provide(context)))
+        expect(error.message).toContain("rika org personal")
+        expect(yield* Ref.get(uploaded)).toBe(1)
+        expect(yield* Ref.get(created)).toBe(1)
+      }),
+    ),
+  )
+})

@@ -11,6 +11,7 @@ import { preferencePath, prepareRunnerCheckout, type PreparedRunnerCheckout } fr
 import { RunnerAdmission } from "../runner/contract"
 import type { InteractiveTuiOptions } from "../interactive/process/lifecycle/loop"
 import { interactiveTui } from "../interactive/process/lifecycle/loop"
+import { prepareWorkspaceSeed } from "./workspace/seed"
 
 const FailureMessage = Schema.Struct({ message: Schema.String })
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
@@ -137,16 +138,39 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     const threads = yield* ThreadClient
     const crypto = yield* Crypto.Crypto
     const credentials = yield* CredentialStore
+    const workspace = input.workspace ?? process.cwd()
     const createThread = (
       executorKind: "runner" | "orb",
       archiveThreadId?: string,
     ): Effect.Effect<string, HostedError> =>
       Effect.gen(function* () {
         const prepared = executorKind === "runner" ? yield* prepare : undefined
+        const workspaceSeed =
+          executorKind === "orb"
+            ? yield* prepareWorkspaceSeed(workspace).pipe(
+                Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcesses),
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Scope.Scope, scope),
+              )
+            : undefined
         const commandId = yield* crypto.randomUUIDv4
-        const ticket = yield* authenticated(profile, (session) => http.issueThreadTicket(profile.origin, session))
+        const created = yield* authenticated(profile, (session) =>
+          Effect.gen(function* () {
+            const seed =
+              workspaceSeed === undefined
+                ? undefined
+                : yield* http.uploadWorkspaceSeed(
+                    profile.origin,
+                    workspaceSeed.archive,
+                    workspaceSeed.sourceRepository,
+                    session,
+                  )
+            const ticket = yield* http.issueThreadTicket(profile.origin, session)
+            return { seed, ticket }
+          }),
+        )
         const createInput: ThreadCreateInput = {
-          ticket,
+          ticket: created.ticket,
           commandId,
           owner: profile.owner,
           executorKind,
@@ -158,6 +182,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
             deviceId: prepared.checkout.registration.deviceId,
             checkoutFingerprint: prepared.checkout.registration.checkoutFingerprint,
           }
+        if (created.seed !== undefined) createInput.workspaceSeedId = created.seed.id
         return yield* threads.create(createInput)
       }).pipe(
         Effect.provideService(Http, http),

@@ -89,24 +89,27 @@ const program = Effect.scoped(
         openRouterApiKey: Redacted.make(openRouterApiKey),
       })
     }
+    const dependencies = {
+      identity,
+      directory: makePostgresIdentityDirectory(identityDatabase),
+      devices: makePostgresCliDeviceDirectory(identityDatabase),
+      product: application.product,
+      toolPolicy: application.toolPolicy,
+      threads: application.threadProtocol,
+      credentials: application.credentials,
+      environment: application.environment,
+      models: application.models,
+      recovery: application.recovery,
+      publication: application.publication,
+      executor: application.executor,
+      execution: application.execution.readiness,
+      production: config.production,
+    }
+    if (application.workspaceSeeds !== undefined)
+      Object.assign(dependencies, { workspaceSeeds: application.workspaceSeeds })
     yield* serveApi({
       config,
-      dependencies: {
-        identity,
-        directory: makePostgresIdentityDirectory(identityDatabase),
-        devices: makePostgresCliDeviceDirectory(identityDatabase),
-        product: application.product,
-        toolPolicy: application.toolPolicy,
-        threads: application.threadProtocol,
-        credentials: application.credentials,
-        environment: application.environment,
-        models: application.models,
-        recovery: application.recovery,
-        publication: application.publication,
-        executor: application.executor,
-        execution: application.execution.readiness,
-        production: config.production,
-      },
+      dependencies,
     })
     yield* Console.log(`Rika API listening on port ${config.port}`)
     return yield* Effect.never

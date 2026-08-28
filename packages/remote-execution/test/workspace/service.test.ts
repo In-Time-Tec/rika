@@ -180,7 +180,7 @@ it.effect("forces gh API reads to GET and rejects every write-capable surface", 
   ).pipe(provideLayer(platform)),
 )
 
-it.effect("atomically installs an exact private checkout without exposing its credential", () =>
+it.effect("clones a private repository, overlays the local seed, and preserves Git identity", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -197,6 +197,7 @@ it.effect("atomically installs an exact private checkout without exposing its cr
         command,
         `#!/bin/sh
 set -eu
+if [ "\${1:-}" = bash ]; then exec "$@"; fi
 while [ "\${1:-}" != git ] && [ "\${1:-}" != gh ]; do shift; done
 tool="$1"
 shift
@@ -208,6 +209,7 @@ if [ "\${1:-}" = clone ]; then
   mkdir -p "$target/.git"
   printf '%s' '${repositoryUrl}' > "$target/.remote"
   printf '[remote "origin"]\\n  url = ${repositoryUrl}\\n' > "$target/.git/config"
+  printf '%s' 'cloned content' > "$target/deleted-locally.txt"
   exit 0
 fi
 if [ "\${1:-}" = -C ]; then
@@ -227,6 +229,12 @@ fi
       )
       yield* fileSystem.chmod(command, 0o700)
       yield* fileSystem.writeFileString(fail, "")
+      const seedSource = `${parent}/seed`
+      yield* fileSystem.makeDirectory(seedSource)
+      yield* fileSystem.writeFileString(`${seedSource}/.head`, commitSha)
+      yield* fileSystem.writeFileString(`${seedSource}/.remote`, repositoryUrl)
+      yield* fileSystem.writeFileString(`${seedSource}/local.txt`, "local workspace state")
+      const seed = { seedId: "seed-private", archive: encodeArchive(yield* createArchive(seedSource)) }
       const purposes: Array<string> = []
       const revoked: Array<string> = []
       const output: Array<string> = []
@@ -258,6 +266,7 @@ fi
         stateDirectory,
         kernel,
         assignment,
+        seed,
         reporter: {
           started: () => Effect.void,
           output: (_phase: string, _stream: string, text: string) =>
@@ -292,6 +301,8 @@ fi
           })
           expect(yield* fileSystem.readFileString(`${root}/.head`)).toBe(commitSha)
           expect(yield* fileSystem.readFileString(`${root}/.remote`)).toBe(repositoryUrl)
+          expect(yield* fileSystem.readFileString(`${root}/local.txt`)).toBe("local workspace state")
+          expect(yield* fileSystem.exists(`${root}/deleted-locally.txt`)).toBe(false)
           expect(yield* fileSystem.readFileString(`${root}/.git/config`)).not.toContain("private-checkout-secret")
           expect(yield* fileSystem.exists(`${root}/.agents`)).toBe(false)
           expect(
@@ -463,6 +474,51 @@ exec "$@"
       )
       expect(output.join("\n")).not.toContain("fixture-secret-opaque")
       expect(phases).toContain("checkout")
+    }),
+  ).pipe(provideLayer(platform)),
+)
+
+it.effect("restores a local seed into a fresh projectless Orb before running its setup hook", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workspace-seed-" })
+      const source = `${parent}/source`
+      const root = `${parent}/workspace/repo`
+      yield* fileSystem.makeDirectory(`${source}/.agents`, { recursive: true })
+      yield* fileSystem.writeFileString(`${source}/local.txt`, "local workspace state")
+      yield* fileSystem.writeFileString(
+        `${source}/.agents/setup`,
+        `#!/bin/sh\nprintf seeded > "${root}/setup-result"\n`,
+      )
+      yield* fileSystem.chmod(`${source}/.agents/setup`, 0o700)
+      const archive = encodeArchive(yield* createArchive(source))
+
+      const evidence = yield* prepare({
+        root,
+        workspaceCommandPrefix: [],
+        stateDirectory: `${parent}/state`,
+        kernel,
+        reporter: { started: () => Effect.void, output: () => Effect.void },
+        credential: () =>
+          Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),
+        revoke: () => Effect.void,
+        assignment: {
+          access,
+          workspaceId: "workspace-1",
+          wakeId: "wake-seeded",
+          cold: false,
+          attempt: 1,
+          retry: false,
+          templateBuildId: "build-1",
+          checkout: null,
+        },
+        seed: { seedId: "seed-1", archive },
+      })
+
+      expect(evidence.setup.outcome).toBe("completed")
+      expect(yield* fileSystem.readFileString(`${root}/local.txt`)).toBe("local workspace state")
+      expect(yield* fileSystem.readFileString(`${root}/setup-result`)).toBe("seeded")
     }),
   ).pipe(provideLayer(platform)),
 )

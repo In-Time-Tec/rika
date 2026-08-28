@@ -17,6 +17,7 @@ import type { HostedPublicationService } from "../hosted/publication"
 import type { Runtime as Executor } from "../executor/service"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
 import type { HostedToolPolicyService } from "../hosted/execution/tool-policy"
+import type { HostedWorkspaceSeedsService } from "../hosted/workspace-seeds"
 
 export interface HttpDependencies {
   readonly identity: IdentityRuntime
@@ -31,6 +32,7 @@ export interface HttpDependencies {
   readonly recovery: HostedRecoveryService
   readonly publication?: HostedPublicationService
   readonly executor: Executor
+  readonly workspaceSeeds?: HostedWorkspaceSeedsService
   readonly execution: ExecutionReadiness
   readonly production: boolean
 }

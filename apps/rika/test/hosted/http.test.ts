@@ -118,6 +118,19 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
               protocol: "rika.thread.v1",
             }),
           )
+        if (path === "/api/v1/workspace-seeds")
+          return Effect.succeed(
+            response(
+              request,
+              {
+                id: "seed-1",
+                contentDigest: `sha256:${"d".repeat(64)}`,
+                sizeBytes: 3,
+                expiresAt: "2026-08-21T06:10:00.000Z",
+              },
+              201,
+            ),
+          )
         if (path.endsWith("/admissions"))
           return Effect.succeed(response(request, { _tag: "Waiting", reason: "no-work" }))
         return Effect.succeed(response(request, {}))
@@ -162,6 +175,14 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
       yield* http.revokeDevice(origin, "device-1", session)
       yield* http.revokeAllDevices(origin, session)
       expect((yield* http.issueThreadTicket(origin, session)).ticket).toBe("ticket-1")
+      expect(
+        yield* http.uploadWorkspaceSeed(
+          origin,
+          { bytes: Uint8Array.from([1, 2, 3]), contentDigest: `sha256:${"d".repeat(64)}`, sizeBytes: 3 },
+          { owner: "In-Time-Tec", name: "rika" },
+          session,
+        ),
+      ).toMatchObject({ id: "seed-1", sizeBytes: 3 })
       yield* http.registerRunner(
         origin,
         "checkout-1",
@@ -225,6 +246,7 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
         "/api/v1/auth/cli/devices/device-1/revoke",
         "/api/v1/auth/cli/devices/revoke-all",
         "/api/v1/thread-sessions",
+        "/api/v1/workspace-seeds",
         "/api/v1/runners/checkout-1",
         "/api/v1/runners/checkout-1/remote-thread-creation",
         "/api/v1/runners/checkout-1/admissions",
@@ -237,15 +259,21 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
       expect(requests[4]?.headers.authorization).toBe("DPoP access")
       expect(bodyText(requests[0]!)).toContain('"reference_id":"cli-device:device-1"')
       expect(bodyText(requests[8]!)).toBe("")
-      expect(bodyText(requests[10]!)).toContain('"workspaceIdentity":"workspace-1"')
-      expect(bodyText(requests[11]!)).toBe('{"preference":"allowed"}')
-      expect(bodyText(requests[12]!)).toBe(
+      expect(requests[10]?.headers["content-type"]).toBe("application/vnd.rika.workspace-seed+zstd")
+      expect(requests[10]?.headers["x-rika-content-digest"]).toBe(`sha256:${"d".repeat(64)}`)
+      expect(requests[10]?.headers["x-rika-source-repository"]).toBe("In-Time-Tec/rika")
+      const seedBody = requests[10]?.body
+      if (seedBody?._tag !== "Uint8Array") return yield* Effect.die("Workspace seed request body is not binary")
+      expect(Array.from(seedBody.body)).toEqual([1, 2, 3])
+      expect(bodyText(requests[11]!)).toContain('"workspaceIdentity":"workspace-1"')
+      expect(bodyText(requests[12]!)).toBe('{"preference":"allowed"}')
+      expect(bodyText(requests[13]!)).toBe(
         '{"supervisorId":"10000000-0000-4000-8000-000000000001","activeAssignmentIds":[]}',
       )
-      expect(bodyText(requests[13]!)).toContain('"name":"Remote"')
-      expect(bodyText(requests[14]!)).toContain('"value":"secret-value"')
-      expect(bodyText(requests[15]!)).not.toContain("secret-value")
-      expect(requests[16]?.headers["idempotency-key"]).toBe("019d1a56-286d-7000-8000-000000000001")
+      expect(bodyText(requests[14]!)).toContain('"name":"Remote"')
+      expect(bodyText(requests[15]!)).toContain('"value":"secret-value"')
+      expect(bodyText(requests[16]!)).not.toContain("secret-value")
+      expect(requests[17]?.headers["idempotency-key"]).toBe("019d1a56-286d-7000-8000-000000000001")
     }),
   ),
 )

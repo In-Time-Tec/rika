@@ -405,6 +405,7 @@ export const rikaHostedExecutorAssignments = pgTable(
     executorKind: rikaHostedExecutorKind("executor_kind").notNull(),
     placement: jsonb().notNull(),
     checkout: jsonb(),
+    workspaceSeed: jsonb("workspace_seed"),
     generation: bigint({ mode: "number" }).notNull(),
     revision: bigint({ mode: "number" }).default(0).notNull(),
     lastLeaseEpoch: bigint("last_lease_epoch", { mode: "number" }).default(0).notNull(),
@@ -489,6 +490,33 @@ export const rikaHostedExecutorAssignments = pgTable(
     check(
       "rika_hosted_executor_credentials_short_lived",
       sql`(((bootstrap_expires_at IS NULL) OR (bootstrap_expires_at <= (updated_at + '00:05:00'::interval))) AND ((lease_expires_at IS NULL) OR (lease_expires_at <= (updated_at + '00:05:00'::interval))))`,
+    ),
+  ],
+)
+
+export const rikaHostedWorkspaceSeeds = pgTable(
+  "rika_hosted_workspace_seeds",
+  {
+    id: text().primaryKey(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdByDeviceId: text("created_by_device_id").notNull(),
+    createdByClientId: text("created_by_client_id").notNull(),
+    manifest: jsonb().notNull(),
+    claimedAssignmentId: text("claimed_assignment_id").references(() => rikaHostedExecutorAssignments.id, {
+      onDelete: "cascade",
+    }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .default(sql`transaction_timestamp()`)
+      .notNull(),
+  },
+  (table) => [
+    unique("rika_hosted_workspace_seeds_claimed_assignment_id_key").on(table.claimedAssignmentId),
+    index("rika_hosted_workspace_seeds_expiry").using("btree", table.expiresAt.asc().nullsLast()),
+    check("rika_hosted_workspace_seeds_expiry_check", sql`(expires_at > created_at)`),
+    check(
+      "rika_hosted_workspace_seeds_manifest_check",
+      sql`((jsonb_typeof(manifest) = 'object'::text) AND ((manifest ->> 'id'::text) = id))`,
     ),
   ],
 )

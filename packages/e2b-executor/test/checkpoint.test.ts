@@ -56,6 +56,32 @@ const workspaceArchive = Effect.gen(function* () {
 })
 
 describe("Workspace checkpoint vault", () => {
+  it.effect("encrypts Workspace seeds in their own scope and removes only the matching seed", () => {
+    const durable = new Map<string, Uint8Array>()
+    const objects = ObjectStore.of({
+      put: (objectKey, value) => Effect.sync(() => void durable.set(objectKey, value.slice())),
+      get: (objectKey) => Effect.sync(() => Option.fromNullishOr(durable.get(objectKey)?.slice())),
+      remove: (objectKey) => Effect.sync(() => void durable.delete(objectKey)),
+    })
+    return withVault(
+      Effect.gen(function* () {
+        const vault = yield* Vault
+        const archive = yield* workspaceArchive
+        const stored = yield* vault.storeWorkspaceSeed("seed-1", archive)
+        expect(stored.objectKey).toMatch(/^workspace-seeds\/[a-f0-9]{32}\/source\.tar\.zst\.aes$/)
+        expect(new TextDecoder().decode(durable.get(stored.objectKey)!)).not.toContain("durable workspace state")
+        expect((yield* vault.loadWorkspaceSeed("seed-1", stored)).bytes).toEqual(
+          (yield* createArchiveFromEncoded(archive)).bytes,
+        )
+        expect((yield* Effect.flip(vault.loadWorkspaceSeed("seed-2", stored))).kind).toBe("scope")
+        expect((yield* Effect.flip(vault.removeWorkspaceSeed("seed-2", stored))).kind).toBe("scope")
+        yield* vault.removeWorkspaceSeed("seed-1", stored)
+        expect(durable.size).toBe(0)
+      }),
+      objects,
+    )
+  })
+
   it.effect("encrypts owner and Thread-bound archives and verifies their durable metadata", () => {
     const durable = new Map<string, Uint8Array>()
     const objects = ObjectStore.of({

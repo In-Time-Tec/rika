@@ -22,7 +22,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 3 as const
+export const protocolVersion = 4 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 
@@ -214,13 +214,17 @@ export const CreateThreadCommand = strict(
     runnerTarget: Schema.optionalKey(RunnerTarget),
     repositoryRef: Schema.optionalKey(RepositoryRef),
     archiveThreadId: Schema.optionalKey(ThreadId),
+    workspaceSeedId: Schema.optionalKey(Schema.NonEmptyString),
   }),
 ).check(
-  Schema.makeFilter((command) =>
-    (command.executorKind === "runner") === (command.runnerTarget !== undefined)
-      ? []
-      : [{ path: ["runnerTarget"], issue: "runner requires exactly one Runner target" }],
-  ),
+  Schema.makeFilter((command) => {
+    const issues: Array<{ readonly path: ReadonlyArray<PropertyKey>; readonly issue: string }> = []
+    if ((command.executorKind === "runner") !== (command.runnerTarget !== undefined))
+      issues.push({ path: ["runnerTarget"], issue: "runner requires exactly one Runner target" })
+    if (command.executorKind === "runner" && command.workspaceSeedId !== undefined)
+      issues.push({ path: ["workspaceSeedId"], issue: "Workspace seed requires Orb execution" })
+    return issues
+  }),
 )
 export type CreateThreadCommand = typeof CreateThreadCommand.Type
 

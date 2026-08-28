@@ -89,6 +89,7 @@ export interface Options {
   readonly revoke: (purpose: "git-read" | "github-read") => Effect.Effect<void, WorkspaceError, never>
   readonly environment?: Readonly<Record<string, string>>
   readonly environmentDigest?: string
+  readonly seed?: { readonly seedId: string; readonly archive: EncodedArchive }
   readonly restore?: { readonly checkpointId: string; readonly archive: EncodedArchive }
   readonly setupCache?: {
     readonly ownerId: string
@@ -1049,6 +1050,9 @@ const make = (options: Options) =>
       }
     }
 
+    if (!assignment.cold && options.seed !== undefined && options.restore === undefined)
+      yield* restore(options.seed.archive)
+
     if (assignment.checkout !== null) {
       if (assignment.checkout.private) {
         const credential = yield* acquireCredential("git-read")
@@ -1064,18 +1068,21 @@ const make = (options: Options) =>
     const cacheKey: SetupCacheKey | undefined =
       options.setupCache === undefined || assignment.checkout === null
         ? undefined
-        : {
-            ownerId: options.setupCache.ownerId,
-            repository: {
-              repositoryId: assignment.checkout.repositoryId,
-              owner: assignment.checkout.owner,
-              name: assignment.checkout.name,
-              commitSha: assignment.checkout.commitSha,
+        : Object.assign(
+            {
+              ownerId: options.setupCache.ownerId,
+              repository: {
+                repositoryId: assignment.checkout.repositoryId,
+                owner: assignment.checkout.owner,
+                name: assignment.checkout.name,
+                commitSha: assignment.checkout.commitSha,
+              },
+              setupHookDigest,
+              templateBuildId: assignment.templateBuildId,
+              environmentDigest: authorizedEnvironmentDigest,
             },
-            setupHookDigest,
-            templateBuildId: assignment.templateBuildId,
-            environmentDigest: authorizedEnvironmentDigest,
-          }
+            options.seed === undefined ? undefined : { workspaceSeedDigest: options.seed.archive.contentDigest },
+          )
     let restoredCheckpointId: string | null = null
     let restoredCache = false
     if (options.restore !== undefined) {

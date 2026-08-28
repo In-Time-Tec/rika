@@ -191,6 +191,7 @@ const make = Effect.gen(function* () {
           executorKind,
           placement: input.placement,
           checkout: input.checkout,
+          workspaceSeed: input.workspaceSeed ?? null,
           generation: FencingGeneration.make("1"),
           revision: AssignmentRevision.make("0"),
           lastLeaseEpoch: Sequence.make("0"),

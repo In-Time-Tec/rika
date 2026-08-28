@@ -70,6 +70,7 @@ import {
   ExecutorBootstrapWire,
   type ExecutorBootstrapIdentity,
   type CheckpointRestore,
+  type WorkspaceSeedRestore,
   type Fence,
   ExecutorMessage,
   type RepositoryCheckoutWire,
@@ -99,6 +100,7 @@ interface Identity extends ExecutorBootstrapIdentity {
 interface Bootstrap {
   readonly credential: Redacted.Redacted<string>
   readonly identity: Identity
+  readonly seed: WorkspaceSeedRestore | null
   readonly restore: CheckpointRestore | null
 }
 
@@ -411,6 +413,7 @@ const prepare = (
   kernelProfileDigest: string,
   bindingContractDigest: Ref.Ref<string | undefined>,
   identity: Identity,
+  seed: WorkspaceSeedRestore | null,
   restore: CheckpointRestore | null,
   incoming: Queue.Queue<IncomingMessage>,
   credentials: Queue.Queue<Extract<IncomingMessage, { readonly _tag: "RepositoryCredential" }>>,
@@ -647,7 +650,8 @@ const prepare = (
           environmentDigest: identity.environmentDigest,
           secretValues: redactedValues,
         }
-        const restoredOptions = restore === null ? workspaceOptions : { ...workspaceOptions, restore }
+        const seededOptions = seed === null ? workspaceOptions : { ...workspaceOptions, seed }
+        const restoredOptions = restore === null ? seededOptions : { ...seededOptions, restore }
         const preparedOptions = setupCache === undefined ? restoredOptions : { ...restoredOptions, setupCache }
         const outcome = yield* Effect.result(prepareWorkspace(preparedOptions))
         if (outcome._tag === "Success") {
@@ -1500,6 +1504,7 @@ const connect = Effect.fn("Host.connect")(function* (
   kernelProfileDigest: string,
   bindingContractDigest: Ref.Ref<string | undefined>,
   identity: Identity,
+  seed: WorkspaceSeedRestore | null,
   restore: CheckpointRestore | null,
   store: SessionStore,
   receipts: OperationReceiptStore,
@@ -1571,6 +1576,7 @@ const connect = Effect.fn("Host.connect")(function* (
       kernelProfileDigest,
       bindingContractDigest,
       identity,
+      seed,
       restore,
       incoming,
       credentials,
@@ -1677,6 +1683,7 @@ const receiveBootstrap = Effect.scoped(
             setupCache: body.identity.setupCache,
             stateDirectory,
           },
+          seed: body.seed,
           restore: body.restore,
         }
         yield* Deferred.succeed(completed, bootstrap)
@@ -1797,6 +1804,7 @@ const host = Effect.scoped(
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
+      seed: WorkspaceSeedRestore | null,
       restore: CheckpointRestore | null,
       connected: Effect.Effect<void> = Effect.void,
     ) =>
@@ -1940,6 +1948,7 @@ const host = Effect.scoped(
             kernelProfileDigest,
             bindingContractDigest,
             identity,
+            seed,
             restore,
             store,
             receipts,
@@ -2001,6 +2010,7 @@ const host = Effect.scoped(
             replacement.identity,
             replacement.credential,
             undefined,
+            replacement.seed,
             replacement.restore,
             Deferred.succeed(admitted, undefined).pipe(Effect.asVoid),
           ),
@@ -2017,6 +2027,7 @@ const host = Effect.scoped(
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
       restoredSession: SessionWire | undefined,
+      seed: WorkspaceSeedRestore | null,
       restore: CheckpointRestore | null,
     ): Effect.Effect<
       never,
@@ -2029,12 +2040,12 @@ const host = Effect.scoped(
       | import("effect").Scope.Scope
     > =>
       Effect.gen(function* () {
-        const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession, restore))
+        const running = yield* Effect.forkScoped(run(identity, bootstrapToken, restoredSession, seed, restore))
         return yield* monitor(running)
       })
     if (matchingSession === undefined) {
       const bootstrap = yield* Effect.scoped(receiveBootstrap)
-      return yield* supervise(bootstrap.identity, bootstrap.credential, undefined, bootstrap.restore)
+      return yield* supervise(bootstrap.identity, bootstrap.credential, undefined, bootstrap.seed, bootstrap.restore)
     }
     const selected = yield* Deferred.make<"bootstrap" | "reconnect">()
     const fresh = yield* Effect.forkScoped(
@@ -2044,6 +2055,7 @@ const host = Effect.scoped(
             bootstrap.identity,
             bootstrap.credential,
             undefined,
+            bootstrap.seed,
             bootstrap.restore,
             Deferred.succeed(selected, "bootstrap").pipe(Effect.asVoid),
           ),
@@ -2055,6 +2067,7 @@ const host = Effect.scoped(
         environmentIdentity,
         Redacted.make("", { label: "executor-bootstrap-not-required" }),
         matchingSession,
+        null,
         null,
         Deferred.succeed(selected, "reconnect").pipe(Effect.asVoid),
       ),

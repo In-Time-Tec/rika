@@ -15,6 +15,7 @@ import {
   Project,
   Registration,
   RepositoryPublicationStatus,
+  WorkspaceSeedUpload,
   scopes,
   type DevicePoll,
   type OwnerSelection,
@@ -179,9 +180,7 @@ export const layer = Layer.effect(
       withDpop(request, method, url, session.privateJwk, session.accessToken).pipe(
         Effect.flatMap(execute),
         Effect.flatMap((response) =>
-          response.status >= 200 && response.status < 300
-            ? Effect.void
-            : Effect.fail(responseError(response, action)),
+          response.status >= 200 && response.status < 300 ? Effect.void : Effect.fail(responseError(response, action)),
         ),
       )
     return Http.of({
@@ -351,6 +350,22 @@ export const layer = Layer.effect(
           ClientTicketResponse,
           "Thread session",
         )
+      },
+      uploadWorkspaceSeed: (origin, archive, sourceRepository, session) => {
+        const url = `${origin}/api/v1/workspace-seeds`
+        const request = HttpClientRequest.post(url).pipe(
+          HttpClientRequest.setHeader("x-rika-content-digest", archive.contentDigest),
+          HttpClientRequest.bodyUint8Array(archive.bytes, "application/vnd.rika.workspace-seed+zstd"),
+        )
+        const withRepository =
+          sourceRepository === undefined
+            ? request
+            : HttpClientRequest.setHeader(
+                request,
+                "x-rika-source-repository",
+                `${sourceRepository.owner}/${sourceRepository.name}`,
+              )
+        return authenticatedJson("POST", url, withRepository, session, WorkspaceSeedUpload, "Workspace seed upload")
       },
       registerRunner: (origin, checkoutFingerprint, registration, session) => {
         const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}`

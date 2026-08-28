@@ -175,4 +175,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "d2aa7fb7367e92bbb6ccd5b7fd57eed326935ce44cfc28933d8c24aa31eab001",
     url: new URL("../../migrations/postgres/0034-atomic-thread-replacement.sql", import.meta.url),
   },
+  {
+    id: "product/0035_workspace_seeds",
+    checksum: "89afe9f0dfe8c832a0de50f4608ff2b303329716808df0710d1cd770eae30598",
+    url: new URL("../../migrations/postgres/0035-workspace-seeds.sql", import.meta.url),
+  },
 ]

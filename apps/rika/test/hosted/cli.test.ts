@@ -543,8 +543,10 @@ it.layer(BunServices.layer)((test) => {
             HostedCommand.Service,
             Effect.context<
               | Browser
+              | import("effect/unstable/process").ChildProcessSpawner.ChildProcessSpawner
               | CredentialStore
               | import("effect").Crypto.Crypto
+              | import("effect").FileSystem.FileSystem
               | Http
               | OpenAiAuth.Service
               | ProfileStore
@@ -554,7 +556,7 @@ it.layer(BunServices.layer)((test) => {
                 HostedCommand.Service.of({ run: (input) => HostedCli.run(input).pipe(Effect.provide(services)) }),
               ),
             ),
-          ).pipe(Layer.provide(hostedDependencies))
+          ).pipe(Layer.provide(hostedDependencies), Layer.provide(BunServices.layer))
           const cli = yield* Layer.build(
             Layer.mergeAll(
               BunServices.layer,

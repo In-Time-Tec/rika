@@ -70,9 +70,16 @@ export const CheckpointRestore = Schema.Struct({
 })
 export type CheckpointRestore = typeof CheckpointRestore.Type
 
+export const WorkspaceSeedRestore = Schema.Struct({
+  seedId: Identifier,
+  archive: EncodedArchive,
+})
+export type WorkspaceSeedRestore = typeof WorkspaceSeedRestore.Type
+
 export const ExecutorBootstrapWire = Schema.Struct({
   credential: Identifier,
   identity: ExecutorBootstrapIdentity,
+  seed: Schema.NullOr(WorkspaceSeedRestore),
   restore: Schema.NullOr(CheckpointRestore),
 })
 export type ExecutorBootstrapWire = typeof ExecutorBootstrapWire.Type

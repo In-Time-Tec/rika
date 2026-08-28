@@ -58,7 +58,7 @@ export interface Harness {
     readonly repositoryId: string
     readonly purpose: "git-read" | "github-read" | "branch-push"
   }>
-  layer: Layer.Layer<Controller | ExecutorAssignments, ControllerError>
+  layer: Layer.Layer<Controller | ExecutorAssignments | Vault, ControllerError>
 }
 
 const providerLayer = (state: FakeProviderState) =>
@@ -195,6 +195,10 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     string,
     { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }
   >()
+  const seeds = new Map<
+    string,
+    { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }
+  >()
   const archive = (encoded: { readonly content: string; readonly contentDigest: string; readonly sizeBytes: number }) =>
     Effect.try({
       try: () => ({
@@ -207,6 +211,23 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
   const vault = Layer.succeed(
     Vault,
     Vault.of({
+      storeWorkspaceSeed: (seedId, encoded) => {
+        seeds.set(seedId, encoded)
+        return Effect.succeed({
+          objectKey: `workspace-seeds/${seedId}/source.tar.zst.aes`,
+          contentDigest: encoded.contentDigest,
+          sizeBytes: encoded.sizeBytes,
+          archiveDigest: encoded.contentDigest,
+          archiveSizeBytes: encoded.sizeBytes,
+          encryption: "aes-256-gcm" as const,
+        })
+      },
+      loadWorkspaceSeed: (seedId) =>
+        Option.match(Option.fromNullishOr(seeds.get(seedId)), {
+          onNone: () => Effect.fail(CheckpointError.make({ kind: "missing", message: "Workspace seed missing" })),
+          onSome: archive,
+        }),
+      removeWorkspaceSeed: (seedId) => Effect.sync(() => void seeds.delete(seedId)),
       storeCheckpoint: (scope, encoded) => {
         checkpointInspections.push(scope.checkpointId)
         if (
@@ -295,7 +316,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     controlEgress: ["api.example.test"],
     ...overrides,
   }).pipe(Layer.provide(dependencies), Layer.provide(assignments))
-  layer = Layer.merge(controller, assignments)
+  layer = Layer.mergeAll(controller, assignments, vault)
   return harness
 }
 

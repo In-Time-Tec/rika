@@ -65,6 +65,24 @@ export const RepositoryCheckout = Schema.Struct({
 })
 export type RepositoryCheckout = typeof RepositoryCheckout.Type
 
+export const WorkspaceSeedRepository = Schema.Struct({
+  owner: OpaqueId,
+  name: OpaqueId,
+})
+export type WorkspaceSeedRepository = typeof WorkspaceSeedRepository.Type
+
+export const WorkspaceSeed = Schema.Struct({
+  id: OpaqueId,
+  sourceRepository: Schema.NullOr(WorkspaceSeedRepository),
+  objectKey: Schema.NonEmptyString,
+  contentDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+  sizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+  archiveDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+  archiveSizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+  encryption: Schema.Literal("aes-256-gcm"),
+})
+export type WorkspaceSeed = typeof WorkspaceSeed.Type
+
 export const RunnerPlacement = Schema.TaggedStruct("RunnerPlacement", {
   deviceId: DeviceId,
   checkoutFingerprint: CheckoutFingerprint,
@@ -131,6 +149,7 @@ const ExecutorAssignmentStruct = Schema.Struct({
   executorKind: ExecutorKind,
   placement: ExecutorPlacement,
   checkout: Schema.NullOr(RepositoryCheckout),
+  workspaceSeed: Schema.NullOr(WorkspaceSeed),
   generation: FencingGeneration,
   revision: AssignmentRevision,
   lastLeaseEpoch: Sequence,
@@ -158,6 +177,8 @@ export const ExecutorAssignment = ExecutorAssignmentStruct.check(
       (assignment.executorKind !== "orb" || assignment.checkout.ownerId !== assignment.ownerId)
     )
       issues.push({ path: ["checkout"], issue: "repository checkout must match its remote assignment owner" })
+    if (assignment.workspaceSeed !== null && assignment.executorKind !== "orb")
+      issues.push({ path: ["workspaceSeed"], issue: "Workspace seed requires an Orb assignment" })
     if (
       !(
         (assignment.capabilityGeneration === null && assignment.capabilities === null) ||

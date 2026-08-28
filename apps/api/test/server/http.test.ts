@@ -836,6 +836,60 @@ describe("api HTTP", () => {
     }),
   )
 
+  it.effect("accepts a verified binary Workspace seed only from authenticated CLI device authority", () =>
+    Effect.gen(function* () {
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ userId: "user-1", account })
+      let received: unknown
+      const deps: HttpDependencies = {
+        ...base,
+        identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        workspaceSeeds: {
+          stage: (value) => {
+            received = value
+            return Effect.succeed({
+              id: "seed-1",
+              contentDigest: `sha256:${"d".repeat(64)}`,
+              sizeBytes: 3,
+              expiresAt: "2026-08-19T00:10:00.000Z",
+            })
+          },
+        },
+      }
+      const result = yield* response("/api/v1/workspace-seeds", deps, {
+        method: "POST",
+        headers: {
+          "content-type": "application/vnd.rika.workspace-seed+zstd",
+          "x-rika-content-digest": `sha256:${"d".repeat(64)}`,
+          "x-rika-source-repository": "In-Time-Tec/rika",
+        },
+        body: Uint8Array.from([1, 2, 3]),
+      })
+      expect(result.status).toBe(201)
+      expect(received).toMatchObject({
+        principal: { userId: "user-1", deviceId: "device-1", clientId: "client-1" },
+        sourceRepository: { owner: "In-Time-Tec", name: "rika" },
+        archive: { content: "AQID", contentDigest: `sha256:${"d".repeat(64)}`, sizeBytes: 3 },
+      })
+      expect(yield* Effect.tryPromise(() => result.json())).toMatchObject({ id: "seed-1", sizeBytes: 3 })
+
+      const rejected = yield* response(
+        "/api/v1/workspace-seeds",
+        { ...deps, devices },
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/vnd.rika.workspace-seed+zstd",
+            "x-rika-content-digest": `sha256:${"d".repeat(64)}`,
+          },
+          body: Uint8Array.from([1, 2, 3]),
+        },
+      )
+      expect(rejected.status).toBe(401)
+    }),
+  )
+
   it.effect("does not expose the replaced connection and operation endpoints", () =>
     Effect.gen(function* () {
       const deps = dependencies({ userId: "user-1", account })

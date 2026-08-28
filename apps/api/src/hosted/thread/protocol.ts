@@ -95,6 +95,7 @@ interface MutableCreateConnectionInput {
   projectId?: NonNullable<CreateConnectionInput["projectId"]>
   executorKind: CreateConnectionInput["executorKind"]
   runnerTarget?: NonNullable<CreateConnectionInput["runnerTarget"]>
+  workspaceSeedId?: NonNullable<CreateConnectionInput["workspaceSeedId"]>
   threadId: NonNullable<CreateConnectionInput["threadId"]>
   archiveThreadId?: NonNullable<CreateConnectionInput["archiveThreadId"]>
 }
@@ -373,6 +374,7 @@ export const layerWithOptions = (
                   .pipe(Effect.mapError(productFailure))
                 createInput.archiveThreadId = command.archiveThreadId
               }
+              if (command.workspaceSeedId !== undefined) createInput.workspaceSeedId = command.workspaceSeedId
               const created = yield* product.createConnection(createInput).pipe(Effect.mapError(productFailure))
               const threadId = ThreadId.make(created.threadId)
               const authority = yield* product

@@ -191,6 +191,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
           owner: { kind: "personal" },
           executorKind: "orb",
           archiveThreadId: "thread-before-create-1",
+          workspaceSeedId: "seed-1",
         }),
       ).toBe("thread-1")
       expect(
@@ -242,7 +243,11 @@ it.effect("creates, attaches, submits, and replays admission through the authent
         "AttachThread",
         "OpenPortal",
       ])
-      expect(commands[0]).toMatchObject({ archiveThreadId: "thread-before-create-1" })
+      expect(commands[0]).toMatchObject({
+        executorKind: "orb",
+        archiveThreadId: "thread-before-create-1",
+        workspaceSeedId: "seed-1",
+      })
       expect(commands[2]).toMatchObject({
         threadId: "thread-1",
         expectedThreadVersion: "1",

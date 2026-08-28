@@ -134,6 +134,14 @@ export type CliDevice = typeof CliDevice.Type
 export const HostedThreadId = Schema.NonEmptyString
 export type HostedThreadId = typeof HostedThreadId.Type
 
+export const WorkspaceSeedUpload = Schema.Struct({
+  id: Schema.NonEmptyString,
+  contentDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+  sizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+  expiresAt: Schema.String,
+})
+export type WorkspaceSeedUpload = typeof WorkspaceSeedUpload.Type
+
 export const isHostedThreadId = Schema.is(HostedThreadId)
 
 export const RunRequest = Schema.Struct({
@@ -182,6 +190,7 @@ export interface ThreadClientInterface {
     readonly executorKind: ExecutorKind
     readonly runnerTarget?: RunnerTarget
     readonly archiveThreadId?: HostedThreadId
+    readonly workspaceSeedId?: string
   }) => Effect.Effect<HostedThreadId, HostedError>
   readonly submit: (input: {
     readonly ticket: ClientTicketResponse
@@ -268,6 +277,12 @@ export interface HttpInterface {
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
   readonly issueThreadTicket: (origin: string, session: Session) => Effect.Effect<ClientTicketResponse, HostedError>
+  readonly uploadWorkspaceSeed: (
+    origin: string,
+    archive: { readonly bytes: Uint8Array; readonly contentDigest: string; readonly sizeBytes: number },
+    sourceRepository: { readonly owner: string; readonly name: string } | undefined,
+    session: Session,
+  ) => Effect.Effect<WorkspaceSeedUpload, HostedError>
   readonly registerRunner: (
     origin: string,
     checkoutFingerprint: string,

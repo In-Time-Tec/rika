@@ -294,6 +294,7 @@ describe("Provider", () => {
         sandboxId: "sandbox",
         credential: Redacted.make("bootstrap-secret"),
         identity: bootstrapIdentity("sandbox"),
+        seed: null,
         restore: null,
       })
       expect(bootstrapUrl).toBe("https://7070-sandbox.e2b.app/.rika/bootstrap")
@@ -301,6 +302,7 @@ describe("Provider", () => {
       expect(decodeJson(bootstrapBody)).toEqual({
         credential: "bootstrap-secret",
         identity: bootstrapIdentity("sandbox"),
+        seed: null,
         restore: null,
       })
       expect(testing.bootstrapHeaders("sandbox-traffic-secret")).toEqual({

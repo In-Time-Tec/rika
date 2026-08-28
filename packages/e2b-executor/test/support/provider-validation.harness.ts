@@ -70,6 +70,7 @@ const program = Effect.gen(function* () {
             environmentDigest: `sha256:${"a".repeat(64)}`,
             setupCache: false,
           },
+          seed: null,
           restore: null,
         })
         yield* provider.touch(sandbox.sandboxId, 900_000)

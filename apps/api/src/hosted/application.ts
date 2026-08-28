@@ -24,6 +24,7 @@ import {
   layer as executorLayer,
   runnerOnlyControllerLayer,
   service as executorService,
+  workspaceArchiveVaultLayer,
 } from "../executor/service"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "./environment/runtime"
 import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "./thread/application"
@@ -51,6 +52,7 @@ import { workspacePlacement } from "./environment/placement"
 import { layer as runnerExecutorLayer } from "../runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
 import { HostedPreviewBus, postgresHostedPreviewBusLayer } from "./thread/previews"
+import { HostedWorkspaceSeeds, layer as hostedWorkspaceSeedsLayer } from "./workspace-seeds"
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
@@ -64,6 +66,7 @@ export interface HostedApplicationService {
   readonly recovery: HostedRecoveryService
   readonly repositories: HostedRepositories["Service"]
   readonly publication: HostedPublication["Service"]
+  readonly workspaceSeeds?: HostedWorkspaceSeeds["Service"]
   readonly executionReconciler: HostedExecutionReconciler["Service"]
   readonly projectionWorker: HostedProjectionWorker["Service"]
   readonly turnWorker: HostedTurnWorker["Service"]
@@ -140,6 +143,15 @@ export const layer = (options: {
             ),
       )
       const toolPolicyContext = yield* Layer.build(hostedToolPolicyLayer.pipe(Layer.provide(retainedData)))
+      const workspaceSeedsContext =
+        options.executor === undefined
+          ? undefined
+          : yield* Layer.build(
+              hostedWorkspaceSeedsLayer.pipe(
+                Layer.provide(workspaceArchiveVaultLayer(options.executor)),
+                Layer.provide(retainedData),
+              ),
+            )
       const executorContext = yield* Layer.build(
         executorService.pipe(
           Layer.provide(
@@ -324,7 +336,7 @@ export const layer = (options: {
           ),
         ),
       )
-      return HostedApplication.of({
+      const application = {
         product: Context.get(productContext, HostedProduct),
         threadApplication: Context.get(threadApplicationContext, HostedThreadApplication),
         threadProtocol: Context.get(threadProtocolContext, HostedThreadProtocol),
@@ -354,6 +366,11 @@ export const layer = (options: {
             status: readiness.status,
           },
         },
-      })
+      }
+      return HostedApplication.of(
+        workspaceSeedsContext === undefined
+          ? application
+          : { ...application, workspaceSeeds: Context.get(workspaceSeedsContext, HostedWorkspaceSeeds) },
+      )
     }),
   )
