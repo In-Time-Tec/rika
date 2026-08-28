@@ -1,7 +1,7 @@
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import * as os from "node:os"
-import { Config, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { defineConfig } from "vitest/config"
 import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
@@ -17,37 +17,13 @@ const runPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer
   )
 const configured = Effect.gen(function* () {
   const path = yield* Path.Path
-  const tenetkit = yield* Config.option(Config.string("RIKA_TENETKIT_WORKTREE"))
-  return { path, tenetkit }
+  return { path }
 }).pipe((effect) => runPlatform(effect, platform))
-const tenetkit = configured.tenetkit._tag === "Some" ? configured.tenetkit.value : undefined
 const resolve = configured.path.resolve
 const dirname = configured.path.dirname
-const tenetkitPackage = tenetkit === undefined ? undefined : resolve(tenetkit, "packages/tenetkit/dist")
-const tenetkitAliases =
-  tenetkitPackage === undefined
-    ? []
-    : [
-        { find: /^tenetkit$/, replacement: resolve(tenetkitPackage, "index.js") },
-        { find: /^tenetkit\/ai$/, replacement: resolve(tenetkitPackage, "ai/index.js") },
-        { find: /^tenetkit\/harness$/, replacement: resolve(tenetkitPackage, "harness/index.js") },
-        { find: /^tenetkit\/mcp$/, replacement: resolve(tenetkitPackage, "mcp/index.js") },
-        { find: /^tenetkit\/repl$/, replacement: resolve(tenetkitPackage, "repl/index.js") },
-        { find: /^tenetkit\/repl\/bun$/, replacement: resolve(tenetkitPackage, "repl/repl/bun.js") },
-        { find: /^tenetkit\/runtime$/, replacement: resolve(tenetkitPackage, "runtime/index.js") },
-        { find: /^tenetkit\/runtime\/driver$/, replacement: resolve(tenetkitPackage, "runtime/driver/index.js") },
-        {
-          find: /^tenetkit\/runtime\/driver\/sql\/codecs$/,
-          replacement: resolve(tenetkitPackage, "runtime/sql/codecs.js"),
-        },
-        { find: /^tenetkit\/skills$/, replacement: resolve(tenetkitPackage, "skills/index.js") },
-        { find: /^tenetkit\/test$/, replacement: resolve(tenetkitPackage, "test/index.js") },
-        { find: /^@tenetkit\/pg$/, replacement: resolve(tenetkit, "packages/pg/dist/postgres/index.js") },
-      ]
 export default defineConfig({
   resolve: {
     dedupe: ["effect"],
-    alias: tenetkitAliases,
   },
   plugins: [
     {

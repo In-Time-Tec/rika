@@ -33,16 +33,6 @@ const resultValue = (value: string): Schema.Json => {
   return Option.isSome(decoded) ? decoded.value : bounded(value, cellTextLimit)
 }
 
-const HostCallEvent = Schema.TaggedStruct("HostCall", {
-  requestId: Schema.String,
-  module: Schema.String,
-  operation: Schema.String,
-  inputSummary: Schema.String,
-  status: Schema.Literals(["started", "returned", "failed"]),
-  durationMillis: Schema.optionalKey(Schema.Finite),
-  message: Schema.optionalKey(Schema.String),
-})
-
 const meaningfulLines = (source: string): ReadonlyArray<string> =>
   source
     .split("\n")
@@ -202,26 +192,6 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const block = cellBlock(node, rawId)
     if (block === undefined) return
     const raw = record(data)
-    if (raw._tag === "HostCall") {
-      const decoded = Schema.decodeUnknownOption(HostCallEvent)(raw)
-      if (Option.isNone(decoded) || decoded.value.requestId.length === 0) return
-      const event = decoded.value
-      let call: CellHostCall = {
-        id: event.requestId,
-        module: event.module,
-        operation: event.operation,
-        inputSummary: bounded(event.inputSummary, 2_048),
-        status: event.status,
-      }
-      if (event.durationMillis !== undefined) call = { ...call, durationMillis: event.durationMillis }
-      if (event.message !== undefined) call = { ...call, message: bounded(event.message, 2_048) }
-      const index = block.calls.findIndex((current) => current.id === call.id)
-      write(node, rawId, {
-        ...block,
-        calls: index < 0 ? [...block.calls, call] : block.calls.map((current, at) => (at === index ? call : current)),
-      })
-      return
-    }
     const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
     if (Option.isNone(decoded)) {
       if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return
@@ -234,6 +204,24 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const event = decoded.value
     let next = appendNotice({ ...block, epoch: "epoch" in event ? event.epoch : block.epoch }, eventNotice(event))
     switch (event._tag) {
+      case "HostCall": {
+        if (event.requestId.length === 0) return
+        let call: CellHostCall = {
+          id: event.requestId,
+          module: event.module,
+          operation: event.operation,
+          inputSummary: bounded(event.inputSummary, 2_048),
+          status: event.status,
+        }
+        if (event.durationMillis !== undefined) call = { ...call, durationMillis: event.durationMillis }
+        if (event.message !== undefined) call = { ...call, message: bounded(event.message, 2_048) }
+        const index = block.calls.findIndex((current) => current.id === call.id)
+        next = {
+          ...next,
+          calls: index < 0 ? [...block.calls, call] : block.calls.map((current, at) => (at === index ? call : current)),
+        }
+        break
+      }
       case "Stdout":
         next = {
           ...next,

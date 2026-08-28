@@ -15,7 +15,7 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "catalog:",
     "@aws-sdk/credential-provider-node": "catalog:",
-    "@tenetkit/pg": "0.39.1",
+    "@tenetkit/pg": "0.40.0",
     "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
