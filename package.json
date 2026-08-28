@@ -13,7 +13,7 @@
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
-      "tenetkit": "0.41.3",
+      "tenetkit": "0.41.4",
       "@aws-sdk/client-bedrock-runtime": "3.859.0",
       "@aws-sdk/client-kms": "3.1094.0",
       "@aws-sdk/client-s3": "3.1094.0",
@@ -46,7 +46,7 @@
       "@oxlint/plugins": "1.78.0",
       "@pierre/diffs": "1.2.11",
       "@rikalabs/repo-lint": "2.3.0",
-      "@tenetkit/pg": "0.41.3",
+      "@tenetkit/pg": "0.41.4",
       "@tsconfig/bun": "1.0.9",
       "@types/bun": "1.4.0",
       "@types/node": "24.12.2",

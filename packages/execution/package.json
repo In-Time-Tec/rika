@@ -27,6 +27,7 @@
     "@effect/vitest": "catalog:",
     "@rika/configuration": "workspace:*",
     "@types/bun": "catalog:",
+    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

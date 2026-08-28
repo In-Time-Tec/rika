@@ -134,7 +134,7 @@ export const observeClaim = (claim: ObservedClaim) => {
 
 export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
   const applied: Effect.Effect<undefined, SchemaError> = Effect.scoped(
-    Layer.build(RunSchema.layerClient(input.url)).pipe(
+    Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
       Effect.flatMap((context) => RunSchema.apply(input.source).pipe(Effect.provide(context))),
     ),
   )
@@ -143,7 +143,7 @@ export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: P
 
 export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: Pick<Options, "url" | "source">) {
   const checked: Effect.Effect<undefined, SchemaError> = Effect.scoped(
-    Layer.build(RunSchema.layerClient(input.url)).pipe(
+    Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
       Effect.flatMap((context) => RunSchema.check(input.source).pipe(Effect.provide(context))),
     ),
   )
