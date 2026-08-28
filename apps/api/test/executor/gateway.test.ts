@@ -417,6 +417,58 @@ describe("executor gateway", () => {
     }),
   )
 
+  it.effect("logs a bounded executor-side connection failure", () =>
+    Effect.gen(function* () {
+      const observability: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+      const target = socket()
+      const gateway = yield* makeGateway(controller())
+      yield* gateway.receive(
+        target,
+        encode({
+          _tag: "ExecutorHello",
+          lifecycle: "fresh",
+          environmentDigest,
+          hello: {
+            minimumVersion: 1,
+            maximumVersion: 1,
+            fence,
+            templateBuildId: "build-1",
+            capabilities: { cells: true, checkpoints: true, pty: true },
+            workspaceCapabilities,
+            cursors: { command: 0, event: 0, pty: 0 },
+            latestCheckpointId: null,
+            bootstrapToken: "bootstrap-token",
+          },
+        }),
+      )
+      yield* gateway
+        .receive(
+          target,
+          encode({
+            _tag: "ExecutorConnectionFailed",
+            access,
+            stage: "api",
+            message: "Cell request has no runtime authorization",
+          }),
+        )
+        .pipe(
+          Effect.provideService(
+            Logger.CurrentLoggers,
+            new Set([Logger.map(Logger.formatStructured, (record) => observability.push(record))]),
+          ),
+        )
+      expect(target.closed).toEqual([])
+      expect(milestone(observability, "executor-host.connection-failed").map((record) => record.annotations)).toEqual([
+        {
+          "rika.assignment.id": "assignment-1",
+          "rika.executor.id": "executor-1",
+          "rika.executor.failure.stage": "api",
+          "rika.error.message": "Cell request has no runtime authorization",
+        },
+      ])
+    }),
+  )
+
   it.effect("routes one publication-fenced branch push and its purpose-scoped credential", () =>
     Effect.gen(function* () {
       const target = socket()

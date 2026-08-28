@@ -189,7 +189,7 @@ const ownedSession = (handler: {
 
 const ReverseMessage = Schema.fromJsonString(
   Schema.Struct({
-    _tag: Schema.Literals(["BindingInvoke", "MachineResult"]),
+    _tag: Schema.Literals(["BindingInvoke", "MachineResult", "ExecutorConnectionFailed"]),
     payload: Schema.optional(Schema.Unknown),
   }),
 )
@@ -200,7 +200,7 @@ const reverse = (message: WebSocketMessage) =>
 
 const DurableMessage = Schema.fromJsonString(
   Schema.Struct({
-    _tag: Schema.Literals(["CellLifecycle", "CellResult"]),
+    _tag: Schema.Literals(["CellLifecycle", "CellResult", "ExecutorConnectionFailed"]),
     payload: Schema.optional(Schema.Unknown),
   }),
 )

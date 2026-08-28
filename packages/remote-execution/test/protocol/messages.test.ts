@@ -188,6 +188,22 @@ describe("executor protocol v1", () => {
     }),
   )
 
+  it.effect("bounds sanitized executor connection failure reports", () =>
+    Effect.gen(function* () {
+      const access = { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" }
+      const report = {
+        _tag: "ExecutorConnectionFailed" as const,
+        access,
+        stage: "api" as const,
+        message: "Cell request has no runtime authorization",
+      }
+      expect(yield* Schema.decodeEffect(ExecutorMessage)(report)).toEqual(report)
+      expect(
+        (yield* Effect.flip(Schema.decodeEffect(ExecutorMessage)({ ...report, message: "x".repeat(513) }))).issue,
+      ).toBeDefined()
+    }),
+  )
+
   it.effect("keeps local admission frames out of the E2B executor decoder", () =>
     Effect.gen(function* () {
       const local = RunnerMessage.make({

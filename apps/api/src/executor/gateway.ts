@@ -422,6 +422,7 @@ const fenceOf = (message: ExecutorMessageValue): Fence | undefined => {
       return message.access.fence
     case "ExecutorHeartbeat":
       return message.heartbeat.access.fence
+    case "ExecutorConnectionFailed":
     case "CredentialRequested":
     case "CredentialRevocationRequested":
     case "WorkspacePreparationRequested":
@@ -1425,6 +1426,18 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           environmentDigest,
         })
         if (registered) socket.send(encode({ _tag: "LeaseReceipt", receipt }))
+        return
+      }
+      case "ExecutorConnectionFailed": {
+        yield* controller.validateAccess(redactAccess(message.access)).pipe(Effect.mapError(accessFailure))
+        yield* Effect.logWarning("executor-host.connection-failed").pipe(
+          Effect.annotateLogs({
+            "rika.assignment.id": message.access.fence.assignmentId,
+            "rika.executor.id": message.access.fence.executorId,
+            "rika.executor.failure.stage": message.stage,
+            "rika.error.message": message.message,
+          }),
+        )
         return
       }
       case "ExecutorWorkspaceReady": {

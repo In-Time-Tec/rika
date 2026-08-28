@@ -633,6 +633,11 @@ export const ExecutorMessage = Schema.Union([
   }),
   Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
+  Schema.TaggedStruct("ExecutorConnectionFailed", {
+    access: AccessWire,
+    stage: Schema.Literals(["controller", "api", "pty"]),
+    message: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+  }),
   Schema.TaggedStruct("CredentialRequested", {
     requestId: Identifier,
     access: AccessWire,

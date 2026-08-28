@@ -1601,10 +1601,29 @@ const connect = Effect.fn("Host.connect")(function* (
     Effect.mapError((error) => HostError.make({ message: error.message })),
   )
   yield* connected
+  const reportConnectionFailure = (stage: "controller" | "api" | "pty", error: { readonly message: string }) => {
+    const message = error.message.slice(0, 512) || "Executor connection failed"
+    return runtime.access.pipe(
+      Effect.flatMap((access) =>
+        writer(
+          encodeExecutorMessage({
+            _tag: "ExecutorConnectionFailed",
+            access,
+            stage,
+            message,
+          }),
+        ),
+      ),
+      Effect.timeout("250 millis"),
+      Effect.ignore,
+    )
+  }
   const connectedSession = Effect.raceFirst(
     Effect.raceFirst(
       Fiber.join(reader).pipe(
         Effect.mapError(() => HostError.make({ message: "Executor controller connection closed" })),
+        Effect.flatMap(() => HostError.make({ message: "Executor controller connection ended" })),
+        Effect.tapError((error) => reportConnectionFailure("controller", error)),
       ),
       consumeApi(
         config,
@@ -1627,9 +1646,12 @@ const connect = Effect.fn("Host.connect")(function* (
         environmentAccess,
         redactedValues,
         runWorker,
-      ),
+      ).pipe(Effect.tapError((error) => reportConnectionFailure("api", error))),
     ),
-    consumePtyEvents(writer, ptyDelivery),
+    consumePtyEvents(writer, ptyDelivery).pipe(
+      Effect.flatMap(() => HostError.make({ message: "Executor PTY event stream ended" })),
+      Effect.tapError((error) => reportConnectionFailure("pty", error)),
+    ),
   )
   const pty = yield* PtyManager
   return yield* connectedSession.pipe(
