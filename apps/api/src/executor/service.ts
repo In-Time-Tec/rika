@@ -258,20 +258,12 @@ export interface Runtime {
 
 export class Executor extends Context.Service<Executor, Runtime>()("@rika/api/executor/service/Executor") {}
 
-interface OrphanReaper<R> {
-  readonly check: Effect.Effect<void, never, R>
-  readonly run: Effect.Effect<never, never, R>
-}
-
-export const makeOrphanReaper: {
-  (interval: Duration.Input): <A, R>(cleanup: Effect.Effect<A, never, R>) => OrphanReaper<R>
-  <A, R>(cleanup: Effect.Effect<A, never, R>, interval: Duration.Input): OrphanReaper<R>
+export const orphanReaper: {
+  (interval: Duration.Input): <A, R>(cleanup: Effect.Effect<A, never, R>) => Effect.Effect<never, never, R>
+  <A, R>(cleanup: Effect.Effect<A, never, R>, interval: Duration.Input): Effect.Effect<never, never, R>
 } = Function.dual(2, <A, R>(cleanup: Effect.Effect<A, never, R>, interval: Duration.Input) => {
-  const check = cleanup.pipe(Effect.asVoid)
-  return {
-    check,
-    run: Effect.sleep(interval).pipe(Effect.andThen(check), Effect.forever),
-  }
+  const cycle = cleanup.pipe(Effect.asVoid, Effect.andThen(Effect.sleep(interval)))
+  return cycle.pipe(Effect.forever)
 })
 
 class HostedRunnerGateway extends Context.Service<HostedRunnerGateway, RunnerGateway>()(
@@ -378,8 +370,7 @@ export const service = Layer.effect(
         ),
       ),
     )
-    const orphanReaper = makeOrphanReaper(reapOrphans, DefaultOrphanGraceMillis)
-    yield* orphanReaper.run.pipe(Effect.forkIn(scope))
+    yield* orphanReaper(reapOrphans, DefaultOrphanGraceMillis).pipe(Effect.forkIn(scope))
     const preparationAccess = Effect.fn("Executor.preparationAccess")(function* (
       input: import("@rika/remote-execution/protocol").AccessWire,
     ) {
@@ -1029,7 +1020,7 @@ export const service = Layer.effect(
                 : ControllerError.make({ kind: "repository", message: "Executor phase authorization was rejected" }),
             ),
           ),
-      ready: orphanReaper.check,
+      ready: Effect.void,
     }
   }),
 )
