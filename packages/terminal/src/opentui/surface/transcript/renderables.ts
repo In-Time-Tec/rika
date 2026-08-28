@@ -296,9 +296,12 @@ const reconcileTranscriptRenderables = ({
       else existing.spinnerChunk = descriptor.spinnerChunk
       existing.renderable.selectable = descriptor.selectable ?? true
       existing.renderable.onMouseDown = (event) => handleMouseDown(existing.renderable, event)
-      existing.renderable.onMouseOver = descriptor.pointer ? () => renderer.setMousePointer("pointer") : undefined
-      existing.renderable.onMouseMove = descriptor.pointer ? () => renderer.setMousePointer("pointer") : undefined
-      existing.renderable.onMouseOut = descriptor.pointer ? () => renderer.setMousePointer("default") : undefined
+      existing.renderable.onMouseOver =
+        descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
+      existing.renderable.onMouseMove =
+        descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
+      existing.renderable.onMouseOut =
+        descriptor.pointer === true ? () => renderer.setMousePointer("default") : undefined
       return existing
     }
     const renderable = new TextRenderable(renderer, {
@@ -307,9 +310,9 @@ const reconcileTranscriptRenderables = ({
       selectable: descriptor.selectable ?? true,
     })
     renderable.onMouseDown = (event) => handleMouseDown(renderable, event)
-    renderable.onMouseOver = descriptor.pointer ? () => renderer.setMousePointer("pointer") : undefined
-    renderable.onMouseMove = descriptor.pointer ? () => renderer.setMousePointer("pointer") : undefined
-    renderable.onMouseOut = descriptor.pointer ? () => renderer.setMousePointer("default") : undefined
+    renderable.onMouseOver = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
+    renderable.onMouseMove = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
+    renderable.onMouseOut = descriptor.pointer === true ? () => renderer.setMousePointer("default") : undefined
     const record =
       descriptor.spinnerChunk === undefined
         ? { key: descriptor.key, revision: descriptor.revision, renderable }
