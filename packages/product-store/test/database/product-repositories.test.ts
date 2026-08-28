@@ -1,4 +1,5 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
+import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as GoalRepository from "@rika/product/goal-repository"
 import { OwnerId } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
@@ -204,6 +205,54 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             hasOlder: false,
             hasNewer: false,
           })
+
+          yield* sql`UPDATE rika_transcript_checkpoints
+              SET projection_version = ${ExecutionProjection.projectionVersion - 1},
+                  projector_version = ${ExecutionProjection.projectionVersion - 1},
+                  revision = 99
+              WHERE turn_id = ${active.id}`
+          const obsoleteKey = "assistant:obsolete"
+          yield* sql`UPDATE rika_transcript_units
+              SET unit_key = ${obsoleteKey},
+                  unit_order_key = ${UnitOrder.encodeUnitOrder(UnitOrder.unitOrder(obsoleteKey, 0))},
+                  unit_json = '{}'
+              WHERE turn_id = ${active.id}`
+          expect(yield* transcripts.get(active.id)).toBeUndefined()
+          const completedActive = yield* turns.get(active.id)
+          if (completedActive?._tag !== "AgentExecution")
+            return yield* Effect.die("Expected the completed PostgreSQL Turn")
+          expect(
+            yield* transcripts.commitProjection(completedActive, {
+              _tag: "ProjectionSnapshot",
+              revision: 1,
+              checkpoint: {
+                version: ExecutionProjection.projectionVersion,
+                cursor: "reprojected",
+                state: "{}",
+              },
+              units: [
+                {
+                  key,
+                  turnId: active.id,
+                  order: UnitOrder.unitOrder(key, 0),
+                  revision: 1,
+                  content: { _tag: "Entry", role: "assistant", text: "reprojected" },
+                },
+              ],
+              hasOlder: true,
+              state: {
+                status: "completed",
+                usage: ExecutionProjection.emptyUsageState(),
+                steering: { steeringMessages: 0, followUpMessages: 0 },
+              },
+            }),
+          ).toBe("committed")
+          expect(yield* transcripts.get(active.id)).toMatchObject({
+            revision: 1,
+            projectionVersion: ExecutionProjection.projectionVersion,
+            units: [{ key, content: { text: "reprojected" } }],
+          })
+          expect((yield* transcripts.get(active.id))?.units.map((unit) => unit.key)).toEqual([key])
 
           const goal = {
             threadId,

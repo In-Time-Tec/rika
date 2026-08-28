@@ -68,6 +68,7 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
         const projection = entries.get(turnId)
         if (projection === undefined) return undefined
         const current = clone(projection)
+        if (current.projectionVersion !== ExecutionProjection.projectionVersion) return undefined
         if (current.projectorCheckpoint?.version === ExecutionProjection.projectionVersion) return current
         const { projectorCheckpoint: _, ...withoutStaleCheckpoint } = current
         return withoutStaleCheckpoint
@@ -136,12 +137,25 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
       yield* validateUnits(turn.id, upsert)
       return yield* Ref.modify(state, (entries) => {
         const current = entries.get(turn.id)
-        if (change._tag === "ProjectionPatch" && current?.revision !== change.baseRevision)
+        if (
+          change._tag === "ProjectionPatch" &&
+          (current?.projectionVersion !== ExecutionProjection.projectionVersion ||
+            current.revision !== change.baseRevision)
+        )
           return ["stale" as const, entries]
-        if (change._tag === "ProjectionSnapshot" && current !== undefined && current.revision > change.revision)
+        if (
+          change._tag === "ProjectionSnapshot" &&
+          current !== undefined &&
+          (current.projectionVersion > ExecutionProjection.projectionVersion ||
+            (current.projectionVersion === ExecutionProjection.projectionVersion && current.revision > change.revision))
+        )
           return ["stale" as const, entries]
-        const units = new Map((current?.units ?? []).map((unit) => [unit.key, unit]))
-        if (change._tag === "ProjectionSnapshot" && !change.hasOlder) units.clear()
+        const replacingOlderProjection =
+          change._tag === "ProjectionSnapshot" &&
+          current !== undefined &&
+          current.projectionVersion < ExecutionProjection.projectionVersion
+        const units = new Map((replacingOlderProjection ? [] : (current?.units ?? [])).map((unit) => [unit.key, unit]))
+        if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection)) units.clear()
         for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
         for (const unit of upsert) units.set(unit.key, clone(unit))
         const candidateBase = {

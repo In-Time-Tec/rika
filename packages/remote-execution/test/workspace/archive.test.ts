@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { fileURLToPath } from "node:url"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
@@ -57,36 +58,19 @@ describe("Workspace archive", () => {
     withPlatform(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const source = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-source-" })
         const target = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-target-" })
-        const staged = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-wire-" })
         yield* Effect.gen(function* () {
-          yield* fileSystem.writeFileString(`${source}/workspace.txt`, "Apple Workspace state")
-          const archivePath = `${staged}/workspace.tar.gz`
-          const exitCode = yield* spawner.exitCode(
-            ChildProcess.make("tar", ["--gzip", "--create", "--file", archivePath, "--directory", source, "workspace.txt"]),
+          const bytes = yield* fileSystem.readFile(
+            fileURLToPath(new URL("./fixtures/apple-workspace.tar.gz", import.meta.url)),
           )
-          expect(Number(exitCode)).toBe(0)
-          const bytes = yield* fileSystem.readFile(archivePath)
           yield* restoreArchive(target, {
             bytes,
             contentDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
             sizeBytes: bytes.byteLength,
           })
-          expect(yield* fileSystem.readFileString(`${target}/workspace.txt`)).toBe("Apple Workspace state")
-        }).pipe(
-          Effect.ensuring(
-            Effect.all(
-              [
-                fileSystem.remove(source, { recursive: true, force: true }),
-                fileSystem.remove(target, { recursive: true, force: true }),
-                fileSystem.remove(staged, { recursive: true, force: true }),
-              ],
-              { discard: true },
-            ).pipe(Effect.ignore),
-          ),
-        )
+          expect(yield* fileSystem.readFileString(`${target}/workspace.txt`)).toBe("Apple Workspace state\n")
+          expect(yield* fileSystem.exists(`${target}/._workspace.txt`)).toBe(false)
+        }).pipe(Effect.ensuring(fileSystem.remove(target, { recursive: true, force: true }).pipe(Effect.ignore)))
       }),
     ),
   )

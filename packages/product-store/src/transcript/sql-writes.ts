@@ -5,7 +5,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { and, eq, lte, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Clock, Effect, Schema } from "effect"
 import { rikaTranscriptCheckpoints, rikaTranscriptUnits } from "../database/schema/product"
@@ -46,6 +46,18 @@ export const transcriptSqlWrites = {
           Effect.gen(function* () {
             const checkpoint = change.checkpoint
             const now = clock.currentTimeMillisUnsafe()
+            const storedCheckpoint =
+              change._tag === "ProjectionSnapshot" && change.hasOlder
+                ? (yield* tx
+                    .select({ projectionVersion: rikaTranscriptCheckpoints.projectionVersion })
+                    .from(rikaTranscriptCheckpoints)
+                    .where(eq(rikaTranscriptCheckpoints.turnId, turn.id))
+                    .for("update")
+                    .limit(1))[0]
+                : undefined
+            const replacingOlderProjection =
+              storedCheckpoint !== undefined &&
+              storedCheckpoint.projectionVersion < ExecutionProjection.projectionVersion
             const rows =
               change._tag === "ProjectionSnapshot"
                 ? yield* tx
@@ -74,7 +86,7 @@ export const transcriptSqlWrites = {
                         projectorState: sql`excluded.projector_state`,
                         updatedAt: sql`excluded.updated_at`,
                       },
-                      setWhere: lte(rikaTranscriptCheckpoints.revision, sql`excluded.revision`),
+                      setWhere: sql`${rikaTranscriptCheckpoints.projectionVersion} < excluded.projection_version OR (${rikaTranscriptCheckpoints.projectionVersion} = excluded.projection_version AND ${rikaTranscriptCheckpoints.revision} <= excluded.revision)`,
                     })
                     .returning({ turnId: rikaTranscriptCheckpoints.turnId })
                 : yield* tx
@@ -93,11 +105,12 @@ export const transcriptSqlWrites = {
                       and(
                         eq(rikaTranscriptCheckpoints.turnId, turn.id),
                         eq(rikaTranscriptCheckpoints.revision, change.baseRevision),
+                        eq(rikaTranscriptCheckpoints.projectionVersion, ExecutionProjection.projectionVersion),
                       ),
                     )
                     .returning({ turnId: rikaTranscriptCheckpoints.turnId })
             if (rows.length === 0) return "stale" as const
-            if (change._tag === "ProjectionSnapshot" && !change.hasOlder)
+            if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection))
               yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const key of change._tag === "ProjectionPatch" ? change.remove : [])
               yield* tx

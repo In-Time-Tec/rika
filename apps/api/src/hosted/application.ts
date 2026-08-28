@@ -245,7 +245,7 @@ export const layer = (options: {
       const executionReconciler = Context.get(executionReconcilerContext, HostedExecutionReconciler)
       const projectionWorkerContext = yield* Layer.build(
         hostedProjectionWorkerLayer({
-          concurrency: 32,
+          concurrency: 4,
           pollIntervalMillis: 250,
         }).pipe(Layer.provide(ProductRepositories.projectionLayer), Layer.provide(Layer.succeedContext(hostedContext))),
       )

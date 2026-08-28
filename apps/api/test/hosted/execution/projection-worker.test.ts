@@ -157,7 +157,7 @@ it.effect("replays an existing transcript when its projection version is stale",
         turn: completedTurn,
         units: [],
         checkpointGeneration: 1,
-        revision: 0,
+        revision: 99,
         state: state("completed"),
         projectionVersion: ExecutionProjection.projectionVersion - 1,
       }
@@ -205,6 +205,7 @@ it.effect("replays an existing transcript when its projection version is stale",
 
       expect(watchInputs).toHaveLength(1)
       expect(watchInputs[0]).not.toHaveProperty("checkpoint")
+      expect(watchInputs[0]).not.toHaveProperty("units")
       expect(yield* memory.get(completedTurn.id)).toMatchObject({
         revision: 1,
         projectionVersion: ExecutionProjection.projectionVersion,

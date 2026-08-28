@@ -372,6 +372,8 @@ export const createArchive = Effect.fn("WorkspaceArchive.create")(function* (
       : [
           "--gzip",
           "--create",
+          "--no-mac-metadata",
+          "--no-xattrs",
           "--uid",
           "0",
           "--gid",
