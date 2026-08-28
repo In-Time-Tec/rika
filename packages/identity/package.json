@@ -14,19 +14,19 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@better-auth/oauth-provider": "1.7.1",
-    "better-auth": "1.7.1",
+    "@better-auth/oauth-provider": "catalog:",
+    "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
-    "effect": "4.0.0-rc.111",
-    "pg": "8.21.0"
+    "effect": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.0-rc.111",
-    "@effect/vitest": "4.0.0-rc.111",
-    "@types/bun": "1.4.0",
-    "@types/pg": "8.15.5",
-    "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "package",

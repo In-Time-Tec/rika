@@ -15,13 +15,13 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "catalog:",
     "@aws-sdk/credential-provider-node": "catalog:",
-    "@tenetkit/pg": "0.40.1",
-    "tenetkit": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
+    "@tenetkit/pg": "catalog:",
     "effect": "catalog:",
-    "prettier": "catalog:"
+    "prettier": "catalog:",
+    "tenetkit": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

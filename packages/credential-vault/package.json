@@ -15,8 +15,8 @@
     "./secret-bytes": "./src/secret-bytes.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-kms": "3.1094.0",
-    "@noble/ciphers": "2.3.0",
+    "@aws-sdk/client-kms": "catalog:",
+    "@noble/ciphers": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

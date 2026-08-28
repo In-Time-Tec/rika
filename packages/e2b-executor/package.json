@@ -11,10 +11,10 @@
     "./provider": "./src/provider.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1094.0",
+    "@aws-sdk/client-s3": "catalog:",
     "@rika/product": "workspace:*",
     "@rika/remote-execution": "workspace:*",
-    "e2b": "2.41.0",
+    "e2b": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

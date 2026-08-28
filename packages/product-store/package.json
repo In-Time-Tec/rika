@@ -71,14 +71,14 @@
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
-    "@types/bun": "catalog:",
-    "@rika/configuration": "workspace:*",
     "@rika/coding-tools": "workspace:*",
+    "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "@types/pg": "8.15.5",
-    "pg": "8.21.0"
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "adapter",

@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "effect": "catalog:",
-    "jose": "6.2.9"
+    "jose": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

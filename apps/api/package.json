@@ -13,27 +13,27 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-rc.111",
-    "@effect/sql-pg": "4.0.0-rc.111",
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-pg": "catalog:",
     "@rika/configuration": "workspace:*",
     "@rika/e2b-executor": "workspace:*",
+    "@rika/execution": "workspace:*",
     "@rika/github-app": "workspace:*",
     "@rika/identity": "workspace:*",
     "@rika/product": "workspace:*",
-    "@rika/execution": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/remote-execution": "workspace:*",
     "drizzle-orm": "catalog:",
-    "effect": "4.0.0-rc.111",
-    "pg": "8.21.0",
+    "effect": "catalog:",
+    "pg": "catalog:",
     "tenetkit": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.111",
-    "@types/bun": "1.4.0",
-    "@types/pg": "8.15.5",
-    "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "application",

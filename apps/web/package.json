@@ -12,20 +12,20 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-rc.111",
+    "@effect/platform-bun": "catalog:",
     "@foldkit/ui": "catalog:",
     "@rika/product": "workspace:*",
-    "effect": "4.0.0-rc.111",
+    "effect": "catalog:",
     "foldkit": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.111",
+    "@effect/vitest": "catalog:",
     "@foldkit/vite-plugin": "catalog:",
-    "@types/bun": "1.4.0",
+    "@types/bun": "catalog:",
     "happy-dom": "catalog:",
-    "typescript": "7.0.2",
+    "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "4.1.11"
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "application",
