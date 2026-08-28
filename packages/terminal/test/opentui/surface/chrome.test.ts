@@ -4,6 +4,8 @@ import { expandableRowIds, transcriptUnitId, transcriptUnits } from "../../../sr
 import { initial, type Model } from "../../../src/state/model"
 import { update } from "../../../src/state/reducer/model"
 import type { Key } from "../../../src/presentation/terminal/keymap"
+import { transcriptWrapWidth } from "../../../src/opentui/rendering/transcript/window"
+import stringWidth from "string-width"
 
 const rendered = (model: Model) =>
   buildTranscript(model)
@@ -68,6 +70,11 @@ describe("semantic subagent and authorization transcript rows", () => {
     const subagent = transcriptUnits(collapsed).find((unit) => unit.kind === "subagent")
     expect(subagent).toMatchObject({ kind: "subagent", children: [{ blocks: [1] }] })
     expect(expandableRowIds(collapsed)).toContain("subagent:subagent-local")
+    const header = rendered(collapsed)
+      .split("\n")
+      .find((line) => line.includes("Review working"))!
+    expect(header.endsWith("▸")).toBe(true)
+    expect(stringWidth(header)).toBe(transcriptWrapWidth(collapsed.width))
     const expanded = { ...collapsed, expandedRowKeys: [transcriptUnitId(collapsed, subagent!)] }
     const output = rendered(expanded)
     expect(output).toContain("Review correctness")

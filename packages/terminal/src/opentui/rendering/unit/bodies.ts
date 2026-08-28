@@ -1,6 +1,7 @@
 import { Function, Schema } from "effect"
 import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import { cellOutputTruncated, formatCellDuration, formatCellResult } from "@rika/transcript/cell-presentation"
+import { cellOutputTruncated, formatCellResult } from "@rika/transcript/cell-presentation"
+import stringWidth from "string-width"
 import { highlightLines } from "../../../presentation/markdown/syntax-highlighter"
 import { wrapBodyText } from "../window"
 import type { TranscriptBlock } from "../../../state/transcript/model"
@@ -103,25 +104,30 @@ const renderCellBodyImpl = (
   const header: Array<TextChunk> = [fg(cellStatusColor(block.status))(icon)]
   if (block.visual === "shell") header.push(fg(colors.subtle)(" $"))
   for (const chunk of header) append(selected ? bold(chunk) : chunk)
+  const headerWidth = header.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+  const marker = expanded ? "▾" : "▸"
   const source = highlightLines(block.source.text, "typescript")
   const visibleSource = expanded ? source : source.slice(0, collapsedCellLines)
   let firstRow = true
   for (const line of visibleSource) {
-    for (const row of wrapStyledLine(line.map(toOpenChunk), Math.max(1, width - 2))) {
+    const rowWidth = firstRow ? Math.max(1, width - headerWidth - 2) : Math.max(1, width - 2)
+    for (const row of wrapStyledLine(line.map(toOpenChunk), rowWidth)) {
       append(fg(colors.text)(firstRow ? " " : "\n  "))
       for (const chunk of row) append(chunk)
+      if (firstRow) {
+        const used = headerWidth + 1 + row.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+        append(dim(fg(colors.subtle)(`${" ".repeat(Math.max(0, width - used - 1))}${marker}`)))
+      }
       firstRow = false
     }
   }
+  if (firstRow) append(dim(fg(colors.subtle)(`${" ".repeat(Math.max(0, width - headerWidth - 1))}${marker}`)))
   const hiddenLines = Math.max(0, source.length - visibleSource.length)
   const footer: Array<string> = []
   if (hiddenLines > 0) footer.push(`… ${hiddenLines} more ${hiddenLines === 1 ? "line" : "lines"}`)
-  const duration = block.durationMillis === undefined ? "" : formatCellDuration(block.durationMillis)
-  if (duration.length > 0) footer.push(duration)
   if (cellOutputTruncated(block)) footer.push("truncated")
   if (block.calls.length > 0) footer.push(`${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)
-  footer.push(expanded ? "▾" : "▸")
-  append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
+  if (footer.length > 0) append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
   context?.finishHeader?.()
   if (!expanded) return
   if (block.source.truncated) append(dim(fg(colors.amber)("\n  Source truncated.")))
@@ -150,10 +156,9 @@ const renderCellBodyImpl = (
     let callIcon = "✓"
     if (call.status === "started") callIcon = spinnerFrame
     else if (call.status === "failed") callIcon = "✕"
-    const callDuration = call.durationMillis === undefined ? "" : ` · ${formatCellDuration(call.durationMillis)}`
     append(
       fg(call.status === "failed" ? colors.red : colors.text)(
-        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)}${callDuration} ${shown ? "▾" : "▸"}`,
+        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)} ${shown ? "▾" : "▸"}`,
       ),
     )
     const headerEnd = context?.line() ?? start

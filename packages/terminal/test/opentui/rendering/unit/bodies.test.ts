@@ -1,6 +1,7 @@
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
+import stringWidth from "string-width"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
 import type { TranscriptBlock } from "../../../../src/state/transcript/model"
@@ -66,11 +67,14 @@ test("shows all authored source when collapsed and caps long cells at fifteen li
     (chunk) => chunks.push(chunk.text),
   )
   const rendered = chunks.join("")
+  const firstLine = rendered.split("\n")[0]!
   expect(rendered).toContain("⠿ const value1 = 1")
   expect(rendered).not.toContain("⠿\n  const value1 = 1")
+  expect(firstLine.endsWith("▸")).toBe(true)
+  expect(stringWidth(firstLine)).toBe(80)
   expect(rendered).toContain("const value15 = 15")
   expect(rendered).not.toContain("const value16 = 16")
-  expect(rendered).toContain("… 3 more lines · ▸")
+  expect(rendered).toContain("… 3 more lines")
   expect(rendered).not.toContain("hidden while collapsed")
   expect(rendered).not.toContain("ts")
 })
@@ -86,6 +90,7 @@ test("renders typed cell result zones and the host-call ledger", () => {
       source: { text: "await rika.workspace.read({ path: 'a.ts' })", lines: 1, truncated: false },
       output: { stdout: "printed", stderr: "warned", droppedBytes: 0, droppedEvents: 0 },
       result: { content: "first\nsecond" },
+      durationMillis: 1_240,
       epoch: 1,
       notices: [],
       calls: [
@@ -112,7 +117,9 @@ test("renders typed cell result zones and the host-call ledger", () => {
   expect(rendered).toContain("stderr\n    warned")
   expect(rendered).toContain('result\n    {\n      "content": first\n      second')
   expect(rendered).toContain("1 call")
-  expect(rendered).toContain("✓ Read a.ts · 4ms ▸")
+  expect(rendered).toContain("✓ Read a.ts ▸")
+  expect(rendered).not.toContain("4ms")
+  expect(rendered).not.toContain("1.2s")
 })
 
 test("makes every collapsed source row part of the expandable cell header", () => {

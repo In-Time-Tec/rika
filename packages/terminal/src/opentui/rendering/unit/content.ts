@@ -247,10 +247,16 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
     const start = line
-    const appendIndented = (chunk: TextChunk | TerminalTextChunk) =>
-      append(
-        chunk.text.includes("\n") ? { ...chunk, text: chunk.text.replaceAll("\n", `\n${continuationPrefix}`) } : chunk,
-      )
+    const appendIndented = (chunk: TextChunk | TerminalTextChunk) => {
+      const parts = chunk.text.split("\n")
+      for (const [index, part] of parts.entries()) {
+        if (index > 0) {
+          append(fg(colors.text)("\n"))
+          append(dim(fg(colors.subtle)(continuationPrefix)))
+        }
+        if (part.length > 0) append({ ...chunk, text: part })
+      }
+    }
     renderCellBody(block, false, expanded, rowWidth - stringWidth(continuationPrefix), spinnerFrame, appendIndented, {
       nestedRanges,
       rowExpanded,
@@ -390,7 +396,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       end: children.length === 0 ? line : (nestedRanges[rangeIndex + 1]?.start ?? start + 1) - 1,
     }
   }
-  const renderSubagentHeader = (unit: SubagentTranscriptUnit, expanded: boolean) => {
+  const renderSubagentHeader = (unit: SubagentTranscriptUnit, expanded: boolean, width: number) => {
     const block = blockAt(unit.block)
     if (block?._tag !== "SubagentCard") return
     const running = block.status === "running" || block.status === "waiting" || block.status === "cancelling"
@@ -398,8 +404,11 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const cancelled = block.status === "cancelled"
     const label = subagentPhrase(block.name, block.status)
     append(block.status === "queued" ? fg(colors.subtle)("◷") : statusIcon(failed, running, cancelled))
-    append(fg(colors.text)(` ${label}`))
-    append(marker(expanded))
+    const visibleLabel = truncateToWidth(` ${label}`, Math.max(0, width - 2))
+    append(fg(colors.text)(visibleLabel))
+    append(
+      fg(colors.subtle)(`${" ".repeat(Math.max(0, width - stringWidth(visibleLabel) - 2))}${expanded ? "▾" : "▸"}`),
+    )
   }
   const renderSubagentContents = (unit: SubagentTranscriptUnit, bodyIndent: string) => {
     const block = blockAt(unit.block)
@@ -430,7 +439,11 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
     const start = line
-    renderSubagentHeader(unit, expanded)
+    renderSubagentHeader(
+      unit,
+      expanded,
+      Math.max(2, transcriptWrapWidth(model.width) - stringWidth(`${visiblePrefix}${last ? "└" : "├"} `)),
+    )
     const rangeIndex = nestedRanges.length
     nestedRanges.push({
       start,
@@ -447,7 +460,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
   }
   const renderSubagentUnitBody = (unit: SubagentTranscriptUnit, expanded: boolean) => {
-    renderSubagentHeader(unit, expanded)
+    renderSubagentHeader(unit, expanded, transcriptWrapWidth(model.width))
     if (expanded) renderSubagentContents(unit, "  ")
   }
   const renderCellUnitBody = (index: number, selected: boolean, expanded: boolean) => {

@@ -65,9 +65,17 @@ test(
         expect(completed).not.toContain("Collected subagents")
         expect(completed).not.toContain("Waiting for subagents")
         expect(completed).not.toContain("1 line")
-        expect(completed).toMatch(/\d+ms · 1 call · ▸/)
+        expect(completed).not.toMatch(/\d+(?:ms|\.\d+s)\b/)
+        expect(completed).toMatch(/await rika\.workspace\.read\([^\n]+▸/)
+        expect(completed).toContain("1 call")
         expect(completed).not.toContain(" ts ")
         expect(spanHasColor(app, "\u251c ", "128,128,128,255"), "nested cell branch span").toBe(true)
+        const connectors = app
+          .spans()
+          .lines.flatMap((line) => line.spans)
+          .filter((span) => /^ +[│├└]/u.test(span.text))
+        expect(connectors.length).toBeGreaterThan(0)
+        expect([...new Set(connectors.map((span) => span.fg.toInts().join(",")))]).toEqual(["128,128,128,255"])
         yield* app.quit
       }),
     ),
