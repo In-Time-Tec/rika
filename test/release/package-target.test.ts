@@ -37,7 +37,13 @@ it.layer(BunServices.layer)("release target construction", (test) => {
     expect(archiveRoot("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64")
     expect(archiveName("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64.tar.gz")
     expect(ownedTargetEntries("1.2.3", "linux-x64")).toEqual(["rika-1.2.3-linux-x64", "rika-1.2.3-linux-x64.tar.gz"])
-    expect(packageBinEntries).toEqual(["rika", ".rika-kernel-runtime", ".rika-kernel-worker.js", "text-result.js"])
+    expect(packageBinEntries).toEqual([
+      "rika",
+      ".rika-kernel-runtime",
+      ".rika-kernel-worker.js",
+      "text-result.js",
+      "bun-value.js",
+    ])
   })
 
   test("accepts only the exact supported archive set", () => {
