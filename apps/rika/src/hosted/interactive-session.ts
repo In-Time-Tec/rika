@@ -22,8 +22,10 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
+import type { ThreadSummary } from "@rika/product/thread-summary"
 import * as ThreadView from "@rika/product/thread-view"
 import * as Turn from "@rika/product/turn-record"
+import type { Unit } from "@rika/transcript/transcript-unit"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
 import { authenticated } from "./account"
 import { reconnectDelay, retryableConnectionFailure } from "./reconnect-policy"
@@ -380,6 +382,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     executorKind: "runner" | "orb",
     archiveThreadId?: string,
   ) => Effect.Effect<string, HostedError>
+  readonly listThreads: Effect.Effect<ReadonlyArray<ThreadSummary>, HostedError>
+  readonly previewThread: (threadId: string) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
 }) {
   const profile = input.profile
   const http = yield* Http
@@ -427,6 +431,12 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     updateState((previousState) =>
       previousState.participants === participants ? previousState : { ...previousState, participants },
     )
+  const refreshThreads = input.listThreads.pipe(
+    Effect.tap((threads) => Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads }))),
+    Effect.catch((error) =>
+      Effect.logWarning("thread-list.refresh.failed").pipe(Effect.annotateLogs("message", error.message)),
+    ),
+  )
 
   const publishConnection = (value: PhysicalConnection | undefined) => {
     current = value
@@ -712,6 +722,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       }
       replaceAuthority(plan.candidate, delivered)
       threadCursors.set(threadId, delivered.deliveredCursor)
+      yield* refreshThreads
     })
   const receive = (payload: Payload, connection: PhysicalConnection) =>
     Effect.gen(function* () {
@@ -997,7 +1008,11 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
             Effect.matchEffect({
               onFailure: (error) => {
                 if (stopped) return Effect.void
-                if (!retryableConnectionFailure(error)) return Effect.fail(error)
+                if (!retryableConnectionFailure(error))
+                  return updateState((previousState) => ({
+                    ...previousState,
+                    connectivity: "disconnected",
+                  })).pipe(Effect.andThen(Effect.fail(error)))
                 const attempt = attached ? 0 : failedAttempts
                 const delay = reconnectDelay(
                   error.retryAfterMillis === undefined
@@ -1132,6 +1147,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         idempotencyKey: IdempotencyKey.make(commandId),
         expectedThreadVersion: ThreadVersion.make(version),
       }))
+      yield* refreshThreads
     })
   const session: InteractiveSession = {
     events: (next) =>
@@ -1405,8 +1421,13 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
           ? requestSelection(threadId)
           : Effect.fail(failure("Queue refresh requires the selected Thread")),
       ).pipe(Effect.mapError((error) => unavailable("InteractiveSession.readQueue", error))),
-    previewThread: () =>
-      unsupported("InteractiveSession.previewThread", "Thread previews are unavailable in this session"),
+    previewThread: (threadId, requestId) =>
+      input.previewThread(threadId).pipe(
+        Effect.tap((units) => Effect.sync(() => dispatch({ _tag: "ThreadPreviewLoaded", threadId, requestId, units }))),
+        Effect.catch((error) =>
+          Effect.sync(() => dispatch({ _tag: "ThreadPreviewFailed", threadId, requestId, message: error.message })),
+        ),
+      ),
     reopenThread: Effect.suspend(() => requestSelection(authority()?.threadId ?? input.threadId)).pipe(
       Effect.mapError((error) => unavailable("InteractiveSession.reopenThread", error)),
     ),

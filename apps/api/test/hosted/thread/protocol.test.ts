@@ -295,6 +295,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
     projects: () => Effect.succeed([]),
     createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
+    authorizeOwner: () => Effect.die("unused"),
     authorizeThread: (_principal, _threadId, action) =>
       Effect.sync(() => {
         authorizedActions.push(action)
@@ -343,6 +344,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
     cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const operations: HostedThreadApplicationService = {
+    threads: () => Effect.die("unused"),
+    preview: () => Effect.die("unused"),
     thread: () => Effect.succeed(snapshot.view.thread),
     snapshot: () => Effect.succeed(snapshot),
     interactive: (input, persist) => {
@@ -890,6 +893,7 @@ it.effect("admits authorization decisions without applying them in the socket se
     createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
     createConnection: () => Effect.die("unused"),
+    authorizeOwner: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () =>
       Effect.succeed({
@@ -909,6 +913,8 @@ it.effect("admits authorization decisions without applying them in the socket se
     cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const operations: HostedThreadApplicationService = {
+    threads: () => Effect.die("unused"),
+    preview: () => Effect.die("unused"),
     thread: () => Effect.succeed(currentSnapshot.view.thread),
     interactive: (input, persist) =>
       Effect.suspend(() => {
@@ -1082,6 +1088,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
     createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
     createConnection: () => Effect.die("unused"),
+    authorizeOwner: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () => Effect.die("unused"),
     registerRunner: () => Effect.die("unused"),
@@ -1093,6 +1100,8 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
     cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   }
   const operations: HostedThreadApplicationService = {
+    threads: () => Effect.die("unused"),
+    preview: () => Effect.die("unused"),
     thread: () => Effect.succeed(currentSnapshot.view.thread),
     interactive: () => Effect.die("unused"),
     snapshot: () => Effect.succeed(currentSnapshot),

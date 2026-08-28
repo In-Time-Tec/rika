@@ -13,6 +13,8 @@ import * as ProductOperationService from "@rika/product/product-operation-servic
 import { ThreadId, type Thread } from "@rika/product/thread-record"
 import * as ThreadView from "@rika/product/thread-view"
 import * as ThreadRepository from "@rika/product/thread-repository"
+import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
+import type { ThreadSummary } from "@rika/product/thread-summary"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -31,6 +33,14 @@ export class HostedThreadApplicationError extends Schema.TaggedError<HostedThrea
 ) {}
 
 export interface HostedThreadApplicationService {
+  readonly threads: (
+    ownerId: OwnerId,
+    projectId?: string,
+  ) => Effect.Effect<ReadonlyArray<ThreadSummary>, HostedThreadApplicationError>
+  readonly preview: (
+    ownerId: OwnerId,
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<Unit>, HostedThreadApplicationError>
   readonly thread: (
     ownerId: OwnerId,
     threadId: ThreadId,
@@ -442,6 +452,50 @@ export const layer = Layer.effect(
       ),
     )
     return HostedThreadApplication.of({
+      threads: (ownerId, projectId) =>
+        Effect.scoped(
+          ownerRepositories.contextEffect(ownerId).pipe(
+            Effect.flatMap((context) => Context.get(context, ThreadSummaryRepository.Service).list()),
+            Effect.flatMap((summaries) =>
+              projectId === undefined
+                ? Effect.succeed(summaries)
+                : Effect.filter(summaries, (summary) =>
+                    hosted
+                      .readThread({ ownerId, threadId: HostedThreadId.make(summary.id) })
+                      .pipe(Effect.map((thread) => String(thread?.projectId) === projectId)),
+                  ),
+            ),
+            Effect.mapError((error) => HostedThreadApplicationError.make({ message: String(error) })),
+          ),
+        ),
+      preview: (ownerId, threadId) =>
+        Effect.scoped(
+          ownerRepositories.contextEffect(ownerId).pipe(
+            Effect.flatMap((context) =>
+              Effect.gen(function* () {
+                const threads = Context.get(context, ThreadRepository.Service)
+                const turns = Context.get(context, TurnRepository.Service)
+                const transcripts = Context.get(context, TranscriptRepository.Service)
+                const thread = yield* threads.get(threadId)
+                if (thread === undefined)
+                  return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
+                const recent = yield* turns.listRecentNonqueued(thread.id, 4)
+                const units = yield* Effect.forEach(recent, (turn) =>
+                  transcripts.get(turn.id).pipe(
+                    Effect.map((projection) => projection?.units ?? [promptUnit(turn)]),
+                    Effect.orElseSucceed(() => [promptUnit(turn)]),
+                  ),
+                )
+                return units.flat()
+              }),
+            ),
+            Effect.mapError((error) =>
+              Schema.is(HostedThreadApplicationError)(error)
+                ? error
+                : HostedThreadApplicationError.make({ message: String(error) }),
+            ),
+          ),
+        ),
       thread: (ownerId, threadId) =>
         Effect.scoped(
           ownerRepositories.contextEffect(ownerId).pipe(

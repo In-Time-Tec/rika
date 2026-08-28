@@ -2,8 +2,10 @@ import { Context, Effect, Option, Redacted, Schema } from "effect"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import type { Credential as OpenAiAccountCredential } from "@rika/product/openai-auth-contract"
 import type { ExecutorKind } from "@rika/product/hosted-model"
+import { ThreadSummary } from "@rika/product/thread-summary"
 import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
 import type { RepositoryService } from "@rika/product/workspace-capability"
+import { Unit } from "@rika/transcript/transcript-unit"
 import * as HostedIdentity from "@rika/product/hosted-identity-context"
 import type {
   RunnerTarget,
@@ -144,6 +146,29 @@ export type WorkspaceSeedUpload = typeof WorkspaceSeedUpload.Type
 
 export const isHostedThreadId = Schema.is(HostedThreadId)
 
+export const HostedThreadList = Schema.Struct({ threads: Schema.Array(ThreadSummary) })
+export type HostedThreadList = typeof HostedThreadList.Type
+export const HostedThreadPreview = Schema.Struct({ units: Schema.Array(Unit) })
+export type HostedThreadPreview = typeof HostedThreadPreview.Type
+
+export const RecoveryOperation = Schema.Struct({
+  operationId: Schema.NonEmptyString,
+  operationKey: Schema.NonEmptyString,
+  runId: Schema.NonEmptyString,
+  attempt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
+  started: Schema.Boolean,
+  state: Schema.Literals(["needs-resolution", "retrying", "accepted", "aborted"]),
+  actions: Schema.Array(Schema.Literals(["inspect", "retry", "accept", "abort"])),
+  resolution: Schema.NullOr(Schema.Unknown),
+})
+export type RecoveryOperation = typeof RecoveryOperation.Type
+
+export type RecoveryResolution =
+  | { readonly action: "retry" }
+  | { readonly action: "accept"; readonly value: unknown }
+  | { readonly action: "abort"; readonly reason: string }
+
 export const RunRequest = Schema.Struct({
   prompt: Schema.Array(Schema.String),
   mode: Schema.optionalKey(Schema.String),
@@ -277,6 +302,32 @@ export interface HttpInterface {
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
   readonly issueThreadTicket: (origin: string, session: Session) => Effect.Effect<ClientTicketResponse, HostedError>
+  readonly listThreads: (
+    origin: string,
+    owner: OwnerSelection,
+    project: string | undefined,
+    session: Session,
+  ) => Effect.Effect<ReadonlyArray<ThreadSummary>, HostedError>
+  readonly previewThread: (
+    origin: string,
+    threadId: string,
+    session: Session,
+  ) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
+  readonly inspectRecovery: (
+    origin: string,
+    threadId: string,
+    runId: string,
+    session: Session,
+  ) => Effect.Effect<ReadonlyArray<RecoveryOperation>, HostedError>
+  readonly resolveRecovery: (
+    origin: string,
+    threadId: string,
+    runId: string,
+    operationId: string,
+    resolution: RecoveryResolution,
+    operationKey: string,
+    session: Session,
+  ) => Effect.Effect<RecoveryOperation, HostedError>
   readonly uploadWorkspaceSeed: (
     origin: string,
     archive: { readonly bytes: Uint8Array; readonly contentDigest: string; readonly sizeBytes: number },

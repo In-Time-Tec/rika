@@ -580,6 +580,36 @@ export const openThreadPortal = Effect.fn("HostedAccount.openThreadPortal")(func
   yield* Console.log(url)
 })
 
+export const inspectRecovery = Effect.fn("HostedAccount.inspectRecovery")(function* (threadId: string, runId: string) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const operations = yield* authenticated(profile, (session) =>
+    http.inspectRecovery(profile.origin, threadId, runId, session),
+  )
+  yield* Console.log(yield* json(operations))
+})
+
+export const resolveRecovery = Effect.fn("HostedAccount.resolveRecovery")(function* (
+  threadId: string,
+  runId: string,
+  operationId: string,
+  resolution:
+    | { readonly action: "retry" }
+    | { readonly action: "accept"; readonly value: unknown }
+    | { readonly action: "abort"; readonly reason: string },
+) {
+  const profile = yield* selectedProfile()
+  const http = yield* Http
+  const crypto = yield* Crypto.Crypto
+  const operationKey = yield* crypto.randomUUIDv4.pipe(
+    Effect.mapError(() => failure("host", "Could not create a recovery resolution identifier")),
+  )
+  const operation = yield* authenticated(profile, (session) =>
+    http.resolveRecovery(profile.origin, threadId, runId, operationId, resolution, operationKey, session),
+  )
+  yield* Console.log(yield* json(operation))
+})
+
 export const syncRepository = Effect.fn("HostedAccount.syncRepository")(function* (input: {
   readonly threadId: string
   readonly commitSha: string

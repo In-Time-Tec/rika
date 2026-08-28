@@ -53,6 +53,35 @@ export type Input =
   | { readonly _tag: "ThreadService"; readonly action: "stop"; readonly threadId: string; readonly serviceId: string }
   | { readonly _tag: "ThreadPortal"; readonly threadId: string; readonly port: number }
   | {
+      readonly _tag: "ThreadRecovery"
+      readonly action: "inspect"
+      readonly threadId: string
+      readonly runId: string
+    }
+  | {
+      readonly _tag: "ThreadRecovery"
+      readonly action: "retry"
+      readonly threadId: string
+      readonly runId: string
+      readonly operationId: string
+    }
+  | {
+      readonly _tag: "ThreadRecovery"
+      readonly action: "accept"
+      readonly threadId: string
+      readonly runId: string
+      readonly operationId: string
+      readonly value: unknown
+    }
+  | {
+      readonly _tag: "ThreadRecovery"
+      readonly action: "abort"
+      readonly threadId: string
+      readonly runId: string
+      readonly operationId: string
+      readonly reason: string
+    }
+  | {
       readonly _tag: "ThreadSync"
       readonly threadId: string
       readonly commitSha: string

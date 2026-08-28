@@ -1,5 +1,5 @@
 import * as ProductOperation from "@rika/product/product-operation"
-import { Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import { dispatch as dispatchHosted } from "../root/hosted"
 import { dispatch } from "../root/cli-operation"
@@ -61,6 +61,50 @@ const portalCommand = Command.make(
   ({ threadId, port }) => dispatchHosted({ _tag: "ThreadPortal", threadId, port }),
 ).pipe(Command.withDescription("Open an authenticated portal to an Orb service"))
 
+const recoveryArguments = {
+  threadId: Argument.string("thread-id"),
+  runId: Argument.string("run-id"),
+}
+const recoveryOperationArguments = {
+  ...recoveryArguments,
+  operationId: Argument.string("operation-id"),
+}
+const recoveryCommand = Command.make("recovery").pipe(
+  Command.withDescription("Inspect and resolve interrupted hosted Thread operations"),
+  Command.withSubcommands([
+    Command.make("inspect", recoveryArguments, ({ threadId, runId }) =>
+      dispatchHosted({ _tag: "ThreadRecovery", action: "inspect", threadId, runId }),
+    ),
+    Command.make("retry", recoveryOperationArguments, ({ threadId, runId, operationId }) =>
+      dispatchHosted({ _tag: "ThreadRecovery", action: "retry", threadId, runId, operationId }),
+    ),
+    Command.make(
+      "accept",
+      { ...recoveryOperationArguments, value: Argument.string("json-value") },
+      ({ threadId, runId, operationId, value }) =>
+        Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
+          Effect.mapError(() => invalid("thread recovery accept requires a valid JSON value")),
+          Effect.flatMap((decoded) =>
+            dispatchHosted({
+              _tag: "ThreadRecovery",
+              action: "accept",
+              threadId,
+              runId,
+              operationId,
+              value: decoded,
+            }),
+          ),
+        ),
+    ),
+    Command.make(
+      "abort",
+      { ...recoveryOperationArguments, reason: Argument.string("reason") },
+      ({ threadId, runId, operationId, reason }) =>
+        dispatchHosted({ _tag: "ThreadRecovery", action: "abort", threadId, runId, operationId, reason }),
+    ),
+  ]),
+)
+
 const syncCommand = Command.make(
   "sync",
   {
@@ -91,6 +135,7 @@ export const threadCommand = Command.make("thread").pipe(
     continueCommand,
     serviceCommand,
     portalCommand,
+    recoveryCommand,
     syncCommand,
   ]),
 )

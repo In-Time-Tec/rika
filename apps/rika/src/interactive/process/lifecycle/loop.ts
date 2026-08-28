@@ -156,7 +156,11 @@ export const interactiveTui =
         ): Effect.Effect<void, never, R> =>
           effect.pipe(
             Effect.catchTag("OperationUnavailable", (error) =>
-              loop.closed ? Effect.void : Effect.logError(error.message),
+              loop.closed
+                ? Effect.void
+                : Effect.logError(error.message).pipe(
+                    Effect.andThen(Effect.sync(() => loop.renderer?.surface.showToast(error.message, "#e06c75"))),
+                  ),
             ),
           )
         const render = (immediate = false) => {

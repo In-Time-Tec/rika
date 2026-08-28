@@ -95,6 +95,20 @@ const operation = (
     return HostedAccount.stopRepositoryService(input.threadId, input.serviceId)
   }
   if (input._tag === "ThreadPortal") return HostedAccount.openThreadPortal(input.threadId, input.port)
+  if (input._tag === "ThreadRecovery") {
+    if (input.action === "inspect") return HostedAccount.inspectRecovery(input.threadId, input.runId)
+    if (input.action === "retry")
+      return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, { action: "retry" })
+    if (input.action === "accept")
+      return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
+        action: "accept",
+        value: input.value,
+      })
+    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
+      action: "abort",
+      reason: input.reason,
+    })
+  }
   if (input._tag === "ThreadSync") return HostedAccount.syncRepository(input)
   return HostedAccount.createRemoteThread()
 }

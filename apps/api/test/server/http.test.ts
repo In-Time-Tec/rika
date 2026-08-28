@@ -23,7 +23,16 @@ import type { HostedProviderCredentialsService } from "../../src/hosted/environm
 import type { HostedEnvironmentService } from "../../src/hosted/environment/runtime"
 import type { HostedPublicationService } from "../../src/hosted/publication"
 import { EnvironmentReferenceId } from "@rika/product/environment-policy"
-import { AssignmentLeaseEpoch, FencingGeneration, OrganizationId } from "@rika/product/hosted-model"
+import {
+  AssignmentLeaseEpoch,
+  BetterAuthUserId,
+  ClientId,
+  DeviceId,
+  FencingGeneration,
+  OrganizationId,
+  OwnerId,
+} from "@rika/product/hosted-model"
+import { ThreadId } from "@rika/product/thread-record"
 
 const account: Account = {
   user: {
@@ -69,6 +78,7 @@ const devices: CliDeviceDirectory = {
 const product: HostedProductService = {
   ready: Effect.void,
   activatePrincipal: () => Effect.void,
+  authorizeOwner: () => Effect.die("unused"),
   authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
   threadExecutionContext: () => Effect.die("unused"),
   projects: () => Effect.succeed([]),
@@ -398,6 +408,74 @@ describe("api HTTP", () => {
       const rejected = yield* response("/api/v1/me/context", withDevice(false))
       expect(accepted.status).toBe(200)
       expect(rejected.status).toBe(401)
+    }),
+  )
+
+  it.effect("lists and previews only Threads authorized for the authenticated device", () =>
+    Effect.gen(function* () {
+      const principal: IdentityPrincipal = { userId: "user-1", clientId: "client-1", dpopJkt: "thumbprint-1" }
+      const base = dependencies({ account: { ...account, memberships: [] } })
+      const visible = {
+        id: ThreadId.make("thread-visible"),
+        workspace: "workspace-1",
+        title: "Visible Thread",
+        pinned: false,
+        archived: false,
+        status: "idle" as const,
+        unread: false,
+        lastActivityAt: 1,
+      }
+      const hidden = { ...visible, id: ThreadId.make("thread-hidden"), title: "Hidden Thread" }
+      const deps: HttpDependencies = {
+        ...base,
+        identity: { ...base.identity, identify: () => Effect.succeed(principal) },
+        devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
+        product: {
+          ...product,
+          authorizeOwner: (receivedPrincipal, owner) => {
+            expect(receivedPrincipal).toMatchObject({ ...principal, deviceId: "device-1" })
+            expect(owner).toMatchObject({ _tag: "PersonalOwner", userId: "user-1" })
+            return Effect.succeed({ ownerId: OwnerId.make("owner-1") })
+          },
+          authorizeThread: (_receivedPrincipal, threadId) =>
+            threadId === "thread-hidden"
+              ? Effect.fail(HostedProductError.make({ kind: "forbidden", message: "hidden" }))
+              : Effect.succeed({
+                  ownerId: OwnerId.make("owner-1"),
+                  actor: {
+                    _tag: "PersonalActor",
+                    owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make("user-1") },
+                    userId: BetterAuthUserId.make("user-1"),
+                    clientId: ClientId.make("client-1"),
+                    deviceId: DeviceId.make("device-1"),
+                  },
+                }),
+        },
+        threadApplication: {
+          threads: (ownerId, projectId) => {
+            expect(ownerId).toBe("owner-1")
+            expect(projectId).toBeUndefined()
+            return Effect.succeed([visible, hidden])
+          },
+          preview: (ownerId, threadId) => {
+            expect(ownerId).toBe("owner-1")
+            expect(threadId).toBe("thread-visible")
+            return Effect.succeed([])
+          },
+          thread: () => Effect.die("unused"),
+          interactive: () => Effect.die("unused"),
+          snapshot: () => Effect.die("unused"),
+        },
+      }
+      const listed = yield* response("/api/v1/threads/list", deps, {
+        method: "POST",
+        body: encodeJson({ owner: { kind: "personal" } }),
+      })
+      const preview = yield* response("/api/v1/threads/thread-visible/preview", deps)
+      expect(listed.status).toBe(200)
+      expect(yield* Effect.tryPromise(() => listed.json())).toEqual({ threads: [visible] })
+      expect(preview.status).toBe(200)
+      expect(yield* Effect.tryPromise(() => preview.json())).toEqual({ units: [] })
     }),
   )
 

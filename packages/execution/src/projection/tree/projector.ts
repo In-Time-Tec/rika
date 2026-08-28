@@ -545,7 +545,7 @@ const make = (
           node,
           "operation",
           "Execution needs resolution",
-          `Unknown operation ${event.operationId}.`,
+          `Unknown operation ${event.operationId} in Run ${node.rawRunId}. Inspect it with rika thread recovery inspect <thread-id> ${node.rawRunId}.`,
           event.operationId,
         )
       case "ChildLinked":

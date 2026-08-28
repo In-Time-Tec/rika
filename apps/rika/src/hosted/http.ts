@@ -6,6 +6,8 @@ import {
   CliDevice,
   DeviceAuthorization,
   HostedError,
+  HostedThreadList,
+  HostedThreadPreview,
   EnvironmentReferenceStatus,
   Http,
   IdentityContext,
@@ -13,6 +15,7 @@ import {
   OpenAiAccountStatus,
   ProviderCredentialStatus,
   Project,
+  RecoveryOperation,
   Registration,
   RepositoryPublicationStatus,
   WorkspaceSeedUpload,
@@ -46,6 +49,7 @@ const OAuthErrorWire = Schema.Struct({
 })
 const DevicesWire = Schema.Union([Schema.Array(CliDevice), Schema.Struct({ devices: Schema.Array(CliDevice) })])
 const ProviderCredentialsWire = Schema.Struct({ credentials: Schema.Array(ProviderCredentialStatus) })
+const RecoveryOperationsWire = Schema.Struct({ operations: Schema.Array(RecoveryOperation) })
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 const resource = (origin: string) => `${origin}/api/v1`
@@ -349,6 +353,55 @@ export const layer = Layer.effect(
           session,
           ClientTicketResponse,
           "Thread session",
+        )
+      },
+      listThreads: (origin, owner, project, session) => {
+        const url = `${origin}/api/v1/threads/list`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner), project_id: project }),
+          ),
+          session,
+          HostedThreadList,
+          "Thread list",
+        ).pipe(Effect.map((response) => response.threads))
+      },
+      previewThread: (origin, threadId, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/preview`
+        return authenticatedJson(
+          "GET",
+          url,
+          HttpClientRequest.get(url),
+          session,
+          HostedThreadPreview,
+          "Thread preview",
+        ).pipe(Effect.map((response) => response.units))
+      },
+      inspectRecovery: (origin, threadId, runId, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/recovery`
+        return authenticatedJson(
+          "GET",
+          url,
+          HttpClientRequest.get(url),
+          session,
+          RecoveryOperationsWire,
+          "Thread recovery inspection",
+        ).pipe(Effect.map((response) => response.operations))
+      },
+      resolveRecovery: (origin, threadId, runId, operationId, resolution, operationKey, session) => {
+        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/recovery/${encodeURIComponent(operationId)}`
+        return authenticatedJson(
+          "POST",
+          url,
+          HttpClientRequest.post(url).pipe(
+            HttpClientRequest.setHeader("idempotency-key", operationKey),
+            HttpClientRequest.bodyJsonUnsafe(resolution),
+          ),
+          session,
+          RecoveryOperation,
+          "Thread recovery resolution",
         )
       },
       uploadWorkspaceSeed: (origin, archive, sourceRepository, session) => {

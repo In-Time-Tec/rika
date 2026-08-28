@@ -749,9 +749,15 @@ describe("TenetKit tree projector", () => {
 
     const parked = projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
     expect(projector.snapshot().state.status).toBe("waiting")
-    expect(parked.upsert.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")).toBe(
-      true,
-    )
+    const failure = parked.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")
+    expect(failure?.content).toMatchObject({
+      _tag: "Block",
+      block: {
+        _tag: "Error",
+        detail:
+          "Unknown operation op-1 in Run raw-root-run. Inspect it with rika thread recovery inspect <thread-id> raw-root-run.",
+      },
+    })
   })
 
   it("keeps cancellation authoritative when a never-replay nested operation becomes unknown", () => {

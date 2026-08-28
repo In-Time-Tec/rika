@@ -216,6 +216,10 @@ const unusedHttp: HttpInterface = {
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
   issueThreadTicket: () => Effect.die("unused"),
+  listThreads: () => Effect.die("unused"),
+  previewThread: () => Effect.die("unused"),
+  inspectRecovery: () => Effect.die("unused"),
+  resolveRecovery: () => Effect.die("unused"),
   uploadWorkspaceSeed: () => Effect.die("unused"),
   registerRunner: () => Effect.die("unused"),
   setRemoteThreadCreation: () => Effect.die("unused"),
@@ -306,12 +310,16 @@ const runSession = Effect.fn("test.runSession")(function* (
   onEvent: (event: InteractiveEvent) => void = () => undefined,
   createThread: (executorKind: "runner" | "orb", archiveThreadId?: string) => Effect.Effect<string, HostedError> = () =>
     Effect.die("unused"),
+  listThreads: Parameters<typeof makeHostedInteractiveSession>[0]["listThreads"] = Effect.succeed([]),
+  previewThread: Parameters<typeof makeHostedInteractiveSession>[0]["previewThread"] = () => Effect.die("unused"),
 ) {
   const context = yield* Layer.build(harness.layer)
   const hosted = yield* makeHostedInteractiveSession({
     profile,
     threadId: "thread-1",
     createThread,
+    listThreads,
+    previewThread,
   }).pipe(Effect.provide(context))
   const states: Array<{ target: string; activity?: string; connectivity: string }> = []
   const stateFiber = yield* Stream.runForEach(hosted.connection.stateChanges, (state) =>
@@ -359,6 +367,7 @@ it.effect("stops instead of reconnecting after a terminal protocol failure", () 
       expect(yield* Effect.flip(Fiber.join(hosted.eventFiber))).toMatchObject({
         operation: "InteractiveSession.events",
       })
+      expect(hosted.states.at(-1)?.connectivity).toBe("disconnected")
       yield* TestClock.adjust("1 minute")
       expect(harness.sockets).toHaveLength(1)
     }),
@@ -373,6 +382,45 @@ it.effect("does not poll AttachThread while an idle WebSocket remains connected"
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
       for (let advance = 0; advance < 4; advance += 1) yield* TestClock.adjust("500 millis")
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("publishes hosted Thread summaries and previews", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const received: Array<InteractiveEvent> = []
+      const harness = makeHarness(defaultReceive)
+      const summary = {
+        id: Thread.ThreadId.make("thread-1"),
+        workspace: "workspace-1",
+        title: "Hosted Thread",
+        pinned: false,
+        archived: false,
+        status: "idle" as const,
+        unread: false,
+        lastActivityAt: 1,
+      }
+      const hosted = yield* runSession(
+        harness,
+        (receivedEvent) => received.push(receivedEvent),
+        () => Effect.die("unused"),
+        Effect.succeed([summary]),
+        () => Effect.succeed([]),
+      )
+      yield* eventually(() => received.some((receivedEvent) => receivedEvent._tag === "ThreadsListed"))
+      expect(received.find((receivedEvent) => receivedEvent._tag === "ThreadsListed")).toEqual({
+        _tag: "ThreadsListed",
+        threads: [summary],
+      })
+      yield* hosted.session.previewThread("thread-1", 7)
+      expect(received.at(-1)).toEqual({
+        _tag: "ThreadPreviewLoaded",
+        threadId: "thread-1",
+        requestId: 7,
+        units: [],
+      })
       yield* hosted.session.quit
     }),
   ),

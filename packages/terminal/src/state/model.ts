@@ -90,7 +90,7 @@ const ThreadPreviewSchema = Schema.Union([
   Schema.TaggedStruct("Failed", { threadId: Schema.String, requestId: Schema.Int, message: Schema.String }),
 ])
 export const ConnectionState = Schema.Struct({
-  connectivity: Schema.Literals(["connecting", "connected", "reconnecting"]),
+  connectivity: Schema.Literals(["connecting", "connected", "reconnecting", "disconnected"]),
   target: Schema.Literals(["resolving", "runner", "orb"]),
   activity: Schema.optional(
     Schema.Literals([

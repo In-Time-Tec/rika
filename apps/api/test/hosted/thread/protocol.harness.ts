@@ -798,11 +798,14 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           }),
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         activatePrincipal: () => Effect.die("unused"),
       }
       const operations: HostedThreadApplicationService = {
+        threads: () => Effect.die("unused"),
+        preview: () => Effect.die("unused"),
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
@@ -950,11 +953,14 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
             cancelledPrompts.add(input.targetCommandId)
             return {}
           }),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         activatePrincipal: () => Effect.die("unused"),
       }
       const operations: HostedThreadApplicationService = {
+        threads: () => Effect.die("unused"),
+        preview: () => Effect.die("unused"),
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
@@ -1079,6 +1085,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
         createProject: () => Effect.die("unused"),
         activatePrincipal: () => Effect.void,
         createConnection: () => Effect.die("unused"),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.succeed({ ownerId, actor }),
         threadExecutionContext: () => Effect.die("unused"),
         registerRunner: () => Effect.die("unused"),
@@ -1090,6 +1097,8 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       }
       const operations: HostedThreadApplicationService = {
+        threads: () => Effect.die("unused"),
+        preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () =>
           Effect.gen(function* () {
@@ -1363,6 +1372,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         createProject: () => Effect.die("unused"),
         activatePrincipal: () => Effect.void,
         createConnection: () => Effect.die("unused"),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.succeed({ ownerId, actor }),
         threadExecutionContext: () =>
           Effect.succeed({
@@ -1409,6 +1419,8 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       }
       const operations: HostedThreadApplicationService = {
+        threads: () => Effect.die("unused"),
+        preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
         interactive: (input, persist) =>

@@ -1,8 +1,13 @@
 import { Deferred, Effect, Exit, FiberSet, Function, Queue, Schema, Scope } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import {
+  CompatibleClientMessage,
+  CompatibleServerFrame,
   ClientMessage,
+  type ClientProtocolVersion,
   inspectClientProtocolVersion,
+  isSupportedClientProtocolVersion,
+  normalizeClientMessage,
   protocolMismatchCloseCode,
   protocolMismatchFrame,
   protocolMismatchMessage,
@@ -219,8 +224,9 @@ const session = (
     runConcurrent,
   })
 
-const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMessage))
+const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(CompatibleClientMessage))
 const encodeThreadFrame = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
+const encodeCompatibleThreadFrame = Schema.encodeSync(Schema.fromJsonString(CompatibleServerFrame))
 const maximumThreadSocketBytes = 32 * 1024 * 1024
 
 interface EncodedThreadFrames {
@@ -228,8 +234,15 @@ interface EncodedThreadFrames {
   readonly bytes: number
 }
 
-const encodeThreadFrames = (frames: ReadonlyArray<ServerFrame>): EncodedThreadFrames => {
-  const values = frames.map((frame) => encodeThreadFrame(frame))
+const encodeThreadFrames = (
+  frames: ReadonlyArray<ServerFrame>,
+  negotiatedVersion: ClientProtocolVersion = protocolVersion,
+): EncodedThreadFrames => {
+  const values = frames.map((frame) =>
+    negotiatedVersion === protocolVersion
+      ? encodeThreadFrame(frame)
+      : encodeCompatibleThreadFrame({ ...frame, protocolVersion: negotiatedVersion }),
+  )
   return { values, bytes: values.reduce((total, value) => total + Buffer.byteLength(value), 0) }
 }
 
@@ -254,6 +267,7 @@ const threadSession = (
   runCommand: (effect: Effect.Effect<void>) => void,
 ): Session => {
   const outbound = Effect.runSync(Queue.bounded<EncodedThreadFrames>(maximumSessionMessages))
+  const protocolNegotiated = Deferred.makeUnsafe<ClientProtocolVersion>()
   const inbound = Effect.runSync(
     Queue.unbounded<{
       readonly message: ClientMessage
@@ -262,10 +276,12 @@ const threadSession = (
   )
   let outboundBytes = 0
   let acceptingOutput = true
+  let negotiatedVersion: ClientProtocolVersion | undefined
   const enqueue = (socket: Socket, frames: ReadonlyArray<ServerFrame>) =>
     Effect.sync(() => {
       if (!acceptingOutput || frames.length === 0) return
-      const encoded = encodeThreadFrames(frames)
+      if (negotiatedVersion === undefined) return
+      const encoded = encodeThreadFrames(frames, negotiatedVersion)
       if (outboundBytes + encoded.bytes > maximumThreadSocketBytes || !Queue.offerUnsafe(outbound, encoded)) {
         acceptingOutput = false
         socket.close(1013, "Thread output limit exceeded")
@@ -285,7 +301,8 @@ const threadSession = (
   const process = (socket: Socket) =>
     Effect.raceFirst(
       Queue.take(inbound).pipe(Effect.map((value) => ({ _tag: "Inbound" as const, value }))),
-      connection.outbound.pipe(
+      Deferred.await(protocolNegotiated).pipe(
+        Effect.andThen(connection.outbound),
         Effect.map((frames) => ({ _tag: "Outbound" as const, frames })),
         Effect.catch(() =>
           Effect.sync(() => socket.close(1011, "Thread replay failed")).pipe(Effect.andThen(Effect.never)),
@@ -312,17 +329,26 @@ const threadSession = (
     receive: (socket, message) => {
       const body = Buffer.from(message).toString("utf8")
       const inspected = inspectClientProtocolVersion(body)
-      if (inspected.protocolVersion !== protocolVersion)
+      if (!isSupportedClientProtocolVersion(inspected.protocolVersion))
         return Effect.sync(() => {
           socket.send(protocolMismatchFrame(inspected))
           socket.close(protocolMismatchCloseCode, protocolMismatchMessage)
         })
       return decodeThreadMessage(body).pipe(
         Effect.flatMap((decoded) =>
-          Effect.gen(function* () {
-            const processed = yield* Deferred.make<void>()
-            yield* Queue.offer(inbound, { message: decoded, processed })
-            yield* Deferred.await(processed)
+          Effect.suspend(() => {
+            if (negotiatedVersion !== undefined && negotiatedVersion !== decoded.protocolVersion)
+              return Effect.sync(() => socket.close(1003, "Thread protocol version changed"))
+            negotiatedVersion = decoded.protocolVersion
+            return Deferred.succeed(protocolNegotiated, negotiatedVersion).pipe(
+              Effect.andThen(
+                Effect.gen(function* () {
+                  const processed = yield* Deferred.make<void>()
+                  yield* Queue.offer(inbound, { message: normalizeClientMessage(decoded), processed })
+                  yield* Deferred.await(processed)
+                }),
+              ),
+            )
           }),
         ),
         Effect.catch(() => Effect.sync(() => socket.close(1003, "invalid Thread protocol frame"))),

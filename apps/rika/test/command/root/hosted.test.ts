@@ -42,6 +42,10 @@ it.effect("routes hosted execution without calling the local server operation", 
       yield* invoke(["org", "use", "engineering"])
       yield* invoke(["org", "invite", "dev@example.test"])
       yield* invoke(["thread", "new"])
+      yield* invoke(["thread", "recovery", "inspect", "thread-1", "run-1"])
+      yield* invoke(["thread", "recovery", "retry", "thread-1", "run-1", "operation-1"])
+      yield* invoke(["thread", "recovery", "accept", "thread-1", "run-1", "operation-1", '{"remoteId":"1"}'])
+      yield* invoke(["thread", "recovery", "abort", "thread-1", "run-1", "operation-1", "Not completed"])
       yield* invoke(["--execute", "hello", "--thread", "thread-1", "--mode", "low"])
       yield* invoke(["credential", "list", "openrouter"])
       yield* invoke(["credential", "revoke", "openrouter"])
@@ -60,12 +64,42 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Organization", action: "use", organization: "engineering" },
         { _tag: "Organization", action: "invite", email: "dev@example.test" },
         { _tag: "RemoteThread", action: "new" },
+        { _tag: "ThreadRecovery", action: "inspect", threadId: "thread-1", runId: "run-1" },
+        {
+          _tag: "ThreadRecovery",
+          action: "retry",
+          threadId: "thread-1",
+          runId: "run-1",
+          operationId: "operation-1",
+        },
+        {
+          _tag: "ThreadRecovery",
+          action: "accept",
+          threadId: "thread-1",
+          runId: "run-1",
+          operationId: "operation-1",
+          value: { remoteId: "1" },
+        },
+        {
+          _tag: "ThreadRecovery",
+          action: "abort",
+          threadId: "thread-1",
+          runId: "run-1",
+          operationId: "operation-1",
+          reason: "Not completed",
+        },
         { _tag: "RemoteRun", threadId: "thread-1", request: { prompt: ["hello"], mode: "low" } },
         { _tag: "Credential", action: "list", provider: "openrouter" },
         { _tag: "Credential", action: "revoke", provider: "openrouter" },
       ])
+      expect(
+        (yield* Effect.exit(
+          invoke(["thread", "recovery", "accept", "thread-1", "run-1", "operation-1", "not-json"]),
+        ))._tag,
+      ).toBe("Failure")
       expect((yield* Effect.exit(invoke(["credential", "list", "--scope", "user"])))._tag).toBe("Failure")
       expect(yield* Ref.get(productCalls)).toEqual([])
+      expect(yield* Ref.get(hostedCalls)).toHaveLength(20)
     }),
   ),
 )

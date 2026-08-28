@@ -41,7 +41,9 @@ const startRunnerWhenPlaced = <Prepared, E, R, E2, R2>(
   )
 
 const runnerConnectionState = (state: InteractiveConnection.State, ready: boolean): InteractiveConnection.State =>
-  state.target === "runner" && !ready ? { ...state, connectivity: "connecting" } : state
+  state.target === "runner" && !ready && state.connectivity !== "disconnected"
+    ? { ...state, connectivity: "connecting" }
+    : state
 
 const raceStructured = <A, E, R, A2, E2, R2>(left: Effect.Effect<A, E, R>, right: Effect.Effect<A2, E2, R2>) =>
   Effect.scoped(
@@ -194,10 +196,20 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
         ),
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))
+    const listThreads = authenticated(profile, (session) =>
+      http.listThreads(profile.origin, profile.owner, profile.project, session),
+    ).pipe(Effect.provideService(Http, http), Effect.provideService(CredentialStore, credentials))
+    const previewThread = (selectedThreadId: string) =>
+      authenticated(profile, (session) => http.previewThread(profile.origin, selectedThreadId, session)).pipe(
+        Effect.provideService(Http, http),
+        Effect.provideService(CredentialStore, credentials),
+      )
     const hosted = yield* HostedInteractiveSession.makeHostedInteractiveSession({
       profile,
       threadId,
       createThread,
+      listThreads,
+      previewThread,
     })
     const runnerReady = yield* Deferred.make<void>()
     let runnerConnected = false

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { goalFrames, spinnerFrames, statusSpinnerFrames } from "../../../src/opentui/rendering/spinner"
-import { goalAnimationActive, goalIndicatorVisible } from "../../../src/opentui/surface/content"
+import { animationActive, goalAnimationActive, goalIndicatorVisible } from "../../../src/opentui/surface/content"
 import { formatGoalElapsed } from "../../../src/state/goal"
 import { initial, type Model } from "../../../src/state/model"
 import { update } from "../../../src/state/reducer/model"
@@ -50,6 +50,14 @@ describe("goalAnimationActive", () => {
     [{ ...active, status: "errored" as const }, false],
   ])("is %o -> %s", (goal, expected) => {
     expect(goalAnimationActive(model(goal))).toBe(expected)
+  })
+})
+
+describe("connection animation", () => {
+  it("stops after a terminal disconnect", () => {
+    const connection = { target: "runner" as const, participants: 1 }
+    expect(animationActive({ ...model(), connection: { ...connection, connectivity: "reconnecting" } })).toBe(true)
+    expect(animationActive({ ...model(), connection: { ...connection, connectivity: "disconnected" } })).toBe(false)
   })
 })
 

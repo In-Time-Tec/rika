@@ -21,7 +21,10 @@ import {
 } from "../../../src/hosted/model"
 import {
   ClientMessage,
+  CompatibleClientMessage,
   inspectClientProtocolVersion,
+  normalizeClientMessage,
+  previousProtocolVersion,
   protocolMismatchFrame,
   protocolMismatchMessage,
   protocolVersion,
@@ -184,9 +187,19 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
   })
 
-  it("rejects a previous protocol version and encodes a mismatch frame the caller can still read", () => {
-    const body = JSON.stringify({ protocolVersion: 1, requestId: "request-1", command: { _tag: "Detach" } })
-    expect(inspectClientProtocolVersion(body)).toEqual({ protocolVersion: 1, requestId: "request-1" })
+  it("normalizes the compatible previous protocol and encodes older mismatches for the caller", () => {
+    const compatible = Schema.decodeSync(CompatibleClientMessage)({
+      protocolVersion: previousProtocolVersion,
+      requestId: "request-1",
+      command: { _tag: "Detach" },
+    })
+    expect(normalizeClientMessage(compatible)).toEqual({
+      protocolVersion,
+      requestId: "request-1",
+      command: { _tag: "Detach" },
+    })
+    const body = JSON.stringify({ protocolVersion: 2, requestId: "request-2", command: { _tag: "Detach" } })
+    expect(inspectClientProtocolVersion(body)).toEqual({ protocolVersion: 2, requestId: "request-2" })
     const frame = Schema.decodeSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -194,9 +207,9 @@ describe("hosted Thread client protocol", () => {
           payload: Schema.Struct({ message: Schema.String, requestId: Schema.String }),
         }),
       ),
-    )(protocolMismatchFrame({ protocolVersion: 1, requestId: "request-1" }))
-    expect(frame.protocolVersion).toBe(1)
-    expect(frame.payload.requestId).toBe("request-1")
+    )(protocolMismatchFrame({ protocolVersion: 2, requestId: "request-2" }))
+    expect(frame.protocolVersion).toBe(2)
+    expect(frame.payload.requestId).toBe("request-2")
     expect(frame.payload.message).toBe(protocolMismatchMessage)
   })
 

@@ -69,6 +69,7 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
   const product: HostedProductService = {
     ready,
     activatePrincipal: () => Effect.die("unused"),
+    authorizeOwner: () => Effect.die("unused"),
     authorizeThread: () => Effect.die("unused"),
     threadExecutionContext: () => Effect.die("unused"),
     projects: () => Effect.die("unused"),

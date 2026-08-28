@@ -24,6 +24,7 @@ const connectivityActivity = (model: Model): string | undefined => {
   const connection = model.connection
   if (connection?.connectivity === "connecting") return "Connecting"
   if (connection?.connectivity === "reconnecting") return "Reconnecting"
+  if (connection?.connectivity === "disconnected") return "Disconnected"
   return undefined
 }
 
@@ -94,7 +95,8 @@ export const animationActive = (model: Model): boolean =>
   model.busy ||
   model.activity !== undefined ||
   transcriptAnimationActive(model) ||
-  connectivityActivity(model) !== undefined ||
+  model.connection?.connectivity === "connecting" ||
+  model.connection?.connectivity === "reconnecting" ||
   connectionActivity(model) !== undefined ||
   panelLoading(model) !== undefined ||
   (model.contextDetailsOpen &&

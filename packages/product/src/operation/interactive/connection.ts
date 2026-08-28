@@ -1,6 +1,6 @@
 import type { Stream } from "effect"
 
-export type Connectivity = "connecting" | "connected" | "reconnecting"
+export type Connectivity = "connecting" | "connected" | "reconnecting" | "disconnected"
 export type ExecutionTarget = "resolving" | "runner" | "orb"
 export type Activity =
   | "authenticating"

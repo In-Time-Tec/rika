@@ -23,8 +23,15 @@ import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
 export const protocolVersion = 4 as const
+export const previousProtocolVersion = 3 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
+export const ClientProtocolVersion = Schema.Union([
+  Schema.Literal(previousProtocolVersion),
+  Schema.Literal(protocolVersion),
+])
+export type ClientProtocolVersion = typeof ClientProtocolVersion.Type
+export const isSupportedClientProtocolVersion = Schema.is(ClientProtocolVersion)
 
 const ProtocolInspection = Schema.Struct({
   protocolVersion: Schema.optionalKey(Schema.Unknown),
@@ -270,6 +277,20 @@ export const ClientMessage = strict(
 )
 export type ClientMessage = typeof ClientMessage.Type
 
+export const CompatibleClientMessage = strict(
+  Schema.Struct({
+    protocolVersion: ClientProtocolVersion,
+    requestId: RequestId,
+    command: ClientCommand,
+  }),
+)
+export type CompatibleClientMessage = typeof CompatibleClientMessage.Type
+
+export const normalizeClientMessage = (message: CompatibleClientMessage): ClientMessage => ({
+  ...message,
+  protocolVersion,
+})
+
 export const PendingAuthorization = strict(
   Schema.Struct({
     threadId: ThreadId,
@@ -347,7 +368,7 @@ export type CommandResult = typeof CommandResult.Type
 
 const PresenceParticipant = Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })
 
-const ServerPayload = Schema.Union([
+export const ServerPayload = Schema.Union([
   strict(
     Schema.TaggedStruct("CommandAdmitted", {
       requestId: RequestId,
@@ -440,6 +461,14 @@ export const ServerFrame = strict(
   }),
 )
 export type ServerFrame = typeof ServerFrame.Type
+
+export const CompatibleServerFrame = strict(
+  Schema.Struct({
+    protocolVersion: ClientProtocolVersion,
+    payload: ServerPayload,
+  }),
+)
+export type CompatibleServerFrame = typeof CompatibleServerFrame.Type
 
 export const ClientTicketResponse = strict(
   Schema.Struct({

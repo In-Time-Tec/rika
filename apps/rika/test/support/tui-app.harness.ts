@@ -70,6 +70,7 @@ export interface TuiAppOptions {
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly duplicateInteractiveEvent?: (event: SessionEvent) => boolean
   readonly submissionFailure?: (attempt: number) => string | undefined
+  readonly newOrbThreadFailure?: string
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
   readonly prepareRuntimeState?: RuntimeStatePreparation
   readonly modeConfiguration?: ModeConfiguration
@@ -303,6 +304,15 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             ? Effect.void
             : current.selectThread(threadId),
       }
+      if (options.newOrbThreadFailure !== undefined)
+        Object.assign(tuiSession, {
+          newOrbThread: Effect.fail(
+            ProductOperation.OperationUnavailable.make({
+              operation: "New Orb Thread",
+              message: options.newOrbThreadFailure,
+            }),
+          ),
+        })
       const open = runInteractive(settings, tuiSession, interactiveConnection)
       return options.initialThreadSelected === true && settings.threadId !== undefined
         ? current.selectThread(settings.threadId).pipe(Effect.andThen(open))

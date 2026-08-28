@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer } from "effect"
@@ -43,6 +44,44 @@ describe("Workspace archive", () => {
               [
                 fileSystem.remove(source, { recursive: true, force: true }),
                 fileSystem.remove(target, { recursive: true, force: true }),
+              ],
+              { discard: true },
+            ).pipe(Effect.ignore),
+          ),
+        )
+      }),
+    ),
+  )
+
+  it.effect("restores gzip Workspace seeds produced by Apple clients", () =>
+    withPlatform(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const source = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-source-" })
+        const target = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-target-" })
+        const staged = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-gzip-wire-" })
+        yield* Effect.gen(function* () {
+          yield* fileSystem.writeFileString(`${source}/workspace.txt`, "Apple Workspace state")
+          const archivePath = `${staged}/workspace.tar.gz`
+          const exitCode = yield* spawner.exitCode(
+            ChildProcess.make("tar", ["--gzip", "--create", "--file", archivePath, "--directory", source, "workspace.txt"]),
+          )
+          expect(Number(exitCode)).toBe(0)
+          const bytes = yield* fileSystem.readFile(archivePath)
+          yield* restoreArchive(target, {
+            bytes,
+            contentDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+            sizeBytes: bytes.byteLength,
+          })
+          expect(yield* fileSystem.readFileString(`${target}/workspace.txt`)).toBe("Apple Workspace state")
+        }).pipe(
+          Effect.ensuring(
+            Effect.all(
+              [
+                fileSystem.remove(source, { recursive: true, force: true }),
+                fileSystem.remove(target, { recursive: true, force: true }),
+                fileSystem.remove(staged, { recursive: true, force: true }),
               ],
               { discard: true },
             ).pipe(Effect.ignore),
@@ -121,6 +160,48 @@ describe("Workspace archive", () => {
             ).pipe(Effect.ignore),
           ),
         )
+      }),
+    ),
+  )
+
+  it.effect("allows committed credential fixtures but rejects credential material in local changes", () =>
+    withPlatform(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const source = yield* fileSystem.makeTempDirectory({ prefix: "rika-archive-credentials-" })
+        const git = (arguments_: ReadonlyArray<string>) =>
+          spawner
+            .exitCode(ChildProcess.make("git", ["-C", source, ...arguments_]))
+            .pipe(Effect.flatMap((code) => (Number(code) === 0 ? Effect.void : Effect.die(`git exited ${code}`))))
+        yield* Effect.gen(function* () {
+          yield* git(["init", "--quiet"])
+          const fixture = ["const api_", 'key = "', ["committed", "fixture", "value"].join("-"), '"\n'].join("")
+          yield* fileSystem.writeFileString(`${source}/fixture.ts`, fixture)
+          yield* git(["add", "fixture.ts"])
+          yield* git([
+            "-c",
+            "user.name=Rika Test",
+            "-c",
+            "user.email=rika@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "fixture",
+          ])
+          yield* createArchive(source)
+
+          yield* fileSystem.writeFileString(`${source}/fixture.ts`, `${fixture}const safe = true\n`)
+          yield* createArchive(source)
+          yield* fileSystem.writeFileString(
+            `${source}/fixture.ts`,
+            `${fixture}const session = { accessToken: Redacted.make("access") }\n`,
+          )
+          yield* createArchive(source)
+          const credential = ["pass", "word=", ["local", "credential", "value"].join("-")].join("")
+          yield* fileSystem.writeFileString(`${source}/local.txt`, credential)
+          expect((yield* Effect.flip(createArchive(source))).kind).toBe("secret")
+        }).pipe(Effect.ensuring(fileSystem.remove(source, { recursive: true, force: true }).pipe(Effect.ignore)))
       }),
     ),
   )

@@ -96,6 +96,7 @@ const program = Effect.scoped(
       product: application.product,
       toolPolicy: application.toolPolicy,
       threads: application.threadProtocol,
+      threadApplication: application.threadApplication,
       credentials: application.credentials,
       environment: application.environment,
       models: application.models,

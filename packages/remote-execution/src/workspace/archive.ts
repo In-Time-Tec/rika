@@ -38,7 +38,10 @@ export class WorkspaceArchiveError extends Schema.TaggedError<WorkspaceArchiveEr
 
 const failure = (kind: WorkspaceArchiveError["kind"], message: string) => WorkspaceArchiveError.make({ kind, message })
 
-const secretPattern = String.raw`(?i)(authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{12,}|(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|private[_-]?key)\s*[:=]\s*["']?[a-z0-9._~+/=-]{12,}|\b(sk|ghp|github_pat)_[a-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)`
+const secretPattern = new RegExp(
+  String.raw`(authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{12,}|(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|private[_-]?key)\s*[:=]\s*["']?[a-z0-9._~+/=-]{12,}["']?(?![a-z0-9._~+/=-]|\s*\()|\b(sk|ghp|github_pat)_[a-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)`,
+  "iu",
+)
 
 const excluded = [
   ".git",
@@ -57,23 +60,46 @@ const exclusionArguments = excluded.flatMap((path) => {
   return ["--exclude", path, "--exclude", `${path}/**`, "--exclude", `*/${path}`, "--exclude", `*/${path}/**`]
 })
 
+const isForbiddenArchivePath = (path: string) => {
+  const normalized = path.replace(/^\.\//, "")
+  const parts = normalized.split("/")
+  return (
+    normalized.startsWith("/") ||
+    parts.includes("..") ||
+    parts.some((part) => part === ".git" || part === ".env" || part.startsWith(".env.")) ||
+    parts.some(
+      (part, index) =>
+        (part === ".agents" && parts[index + 1] === "state") || (part === ".rika" && parts[index + 1] === "secrets"),
+    ) ||
+    [".git-credentials", ".netrc", ".npmrc", ".pypirc"].includes(parts.at(-1) ?? "")
+  )
+}
+
 interface CommandResult {
   readonly stdout: Uint8Array
   readonly exitCode: number
 }
 
-const tarArguments = (arguments_: ReadonlyArray<string>) =>
+interface TarExecutable {
+  readonly command: "gtar" | "tar"
+  readonly kind: "gnu" | "bsd"
+}
+
+const tarExecutable = Effect.fn("WorkspaceArchive.tarExecutable")(function* () {
+  for (const candidate of ["gtar", "tar"] as const) {
+    const version = yield* run({ command: [candidate, "--version"] }).pipe(Effect.option)
+    if (version._tag === "None" || version.value.exitCode !== 0) continue
+    const output = new TextDecoder().decode(version.value.stdout)
+    if (output.includes("GNU tar")) return { command: candidate, kind: "gnu" } satisfies TarExecutable
+    if (/bsdtar|libarchive/iu.test(output)) return { command: candidate, kind: "bsd" } satisfies TarExecutable
+  }
+  return yield* failure("archive", "Workspace archiving requires GNU tar or bsdtar")
+})
+
+const tarArguments = (arguments_: { readonly gnu: ReadonlyArray<string>; readonly bsd: ReadonlyArray<string> }) =>
   Effect.gen(function* () {
-    for (const candidate of ["gtar", "tar"] as const) {
-      const version = yield* run({ command: [candidate, "--version"] }).pipe(Effect.option)
-      if (
-        version._tag === "Some" &&
-        version.value.exitCode === 0 &&
-        new TextDecoder().decode(version.value.stdout).includes("GNU tar")
-      )
-        return [candidate, ...arguments_]
-    }
-    return yield* failure("archive", "Workspace archiving requires GNU tar (install gnu-tar on macOS)")
+    const executable = yield* tarExecutable()
+    return [executable.command, ...(executable.kind === "gnu" ? arguments_.gnu : arguments_.bsd)]
   })
 
 const run = (input: { readonly command: ReadonlyArray<string>; readonly cwd?: string; readonly stdin?: Uint8Array }) =>
@@ -129,17 +155,31 @@ const command = Effect.fn("WorkspaceArchive.command")(function* (
 
 const digest = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`
 
+const archiveCompression = (bytes: Uint8Array): "gzip" | "zstd" | "none" => {
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) return "gzip"
+  if (bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) return "zstd"
+  return "none"
+}
+
+const gnuCompressionArguments = (bytes: Uint8Array): ReadonlyArray<string> => {
+  const compression = archiveCompression(bytes)
+  if (compression === "gzip") return ["--gzip"]
+  if (compression === "zstd") return ["--zstd"]
+  return []
+}
+
 const existingFiles = Effect.fn("WorkspaceArchive.existingFiles")(function* (workspace: string, listed: Uint8Array) {
   const fileSystem = yield* FileSystem.FileSystem
   const encoder = new TextEncoder()
-  const selected: Array<Uint8Array> = []
+  const paths: Array<string> = []
   for (const path of new TextDecoder().decode(listed).split("\0")) {
     if (path.length === 0) continue
     const exists = yield* fileSystem
       .exists(`${workspace}/${path}`)
       .pipe(Effect.mapError(() => failure("archive", "Workspace files could not be inspected")))
-    if (exists) selected.push(encoder.encode(`${path}\0`))
+    if (exists) paths.push(path)
   }
+  const selected = paths.toSorted().map((path) => encoder.encode(`${path}\0`))
   const files = new Uint8Array(selected.reduce((total, value) => total + value.byteLength, 0))
   let offset = 0
   for (const value of selected) {
@@ -149,22 +189,57 @@ const existingFiles = Effect.fn("WorkspaceArchive.existingFiles")(function* (wor
   return files
 })
 
-const inspectSecrets = Effect.fn("WorkspaceArchive.inspectSecrets")(function* (directory: string) {
-  const result = yield* run({
+const inspectSecretFiles = Effect.fn("WorkspaceArchive.inspectSecretFiles")(function* (
+  directory: string,
+  listed: Uint8Array,
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  for (const path of new TextDecoder().decode(listed).split("\0")) {
+    if (path.length === 0 || isForbiddenArchivePath(path)) continue
+    const file = `${directory}/${path}`
+    const info = yield* fileSystem
+      .stat(file)
+      .pipe(Effect.mapError(() => failure("archive", "Workspace files could not be inspected")))
+    if (info.type !== "File") continue
+    const bytes = yield* fileSystem
+      .readFile(file)
+      .pipe(Effect.mapError(() => failure("archive", "Workspace files could not be inspected")))
+    if (secretPattern.test(new TextDecoder().decode(bytes)))
+      return yield* failure("secret", "Workspace changes contain credential material")
+  }
+})
+
+const inspectGitSecretChanges = Effect.fn("WorkspaceArchive.inspectGitSecretChanges")(function* (
+  workspace: string,
+  files: Uint8Array,
+) {
+  const changed = yield* run({
     command: [
-      "rg",
-      "--hidden",
-      "--no-ignore",
-      "--pcre2",
-      "--files-with-matches",
-      ...excluded.flatMap((path) => ["--glob", `!${path}/**`, "--glob", `!${path}`]),
-      secretPattern,
+      "git",
+      "-C",
+      workspace,
+      "diff",
+      "--text",
+      "--unified=0",
+      "--no-ext-diff",
+      "--no-color",
+      "HEAD",
+      "--",
       ".",
     ],
-    cwd: directory,
   })
-  if (result.exitCode === 0) return yield* failure("secret", "Workspace contains credential material")
-  if (result.exitCode > 1) return yield* failure("archive", "Workspace secret inspection failed")
+  const untracked = yield* run({
+    command: ["git", "-C", workspace, "ls-files", "--others", "--exclude-standard", "-z", "--", "."],
+  })
+  if (changed.exitCode !== 0 || untracked.exitCode !== 0) return yield* inspectSecretFiles(workspace, files)
+  const additions = new TextDecoder()
+    .decode(changed.stdout)
+    .split("\n")
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1))
+    .join("\n")
+  if (secretPattern.test(additions)) return yield* failure("secret", "Workspace changes contain credential material")
+  yield* inspectSecretFiles(workspace, yield* existingFiles(workspace, untracked.stdout))
 })
 
 const inspectSecretValues = Effect.fn("WorkspaceArchive.inspectSecretValues")(function* (
@@ -194,27 +269,16 @@ const inspectSecretValues = Effect.fn("WorkspaceArchive.inspectSecretValues")(fu
 })
 
 const safeArchiveEntries = Effect.fn("WorkspaceArchive.safeEntries")(function* (bytes: Uint8Array) {
-  const tar = yield* tarArguments(["--zstd", "--list", "--file", "-"])
+  const tar = yield* tarArguments({
+    gnu: [...gnuCompressionArguments(bytes), "--list", "--file", "-"],
+    bsd: ["--list", "--file", "-"],
+  })
   const output = yield* command({ command: tar, stdin: bytes }, "archive", "Workspace archive is invalid")
   const entries = new TextDecoder()
     .decode(output)
     .split("\n")
     .filter((entry) => entry.length > 0)
-  if (
-    entries.some((entry) => {
-      const normalized = entry.replace(/^\.\//, "")
-      return (
-        normalized.startsWith("/") ||
-        normalized.split("/").includes("..") ||
-        normalized.split("/").some((part) => part === ".git" || part === ".env" || part.startsWith(".env.")) ||
-        normalized === ".agents/state" ||
-        normalized.startsWith(".agents/state/") ||
-        normalized === ".rika/secrets" ||
-        normalized.startsWith(".rika/secrets/") ||
-        [".git-credentials", ".netrc", ".npmrc", ".pypirc"].includes(normalized.split("/").at(-1) ?? "")
-      )
-    })
-  )
+  if (entries.some(isForbiddenArchivePath))
     return yield* failure("archive", "Workspace archive contains a forbidden path")
 })
 
@@ -283,31 +347,85 @@ export const createArchive = Effect.fn("WorkspaceArchive.create")(function* (
     if (listed.exitCode > 1) return yield* failure("archive", "Workspace files could not be selected")
     files = listed.stdout
   }
-  const tar = yield* tarArguments([
-    "--zstd",
-    "--create",
-    "--file",
-    "-",
-    "--sort=name",
-    "--mtime=@0",
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "--directory",
-    workspace,
-    ...exclusionArguments,
-    "--null",
-    "--verbatim-files-from",
-    "--files-from=-",
-  ])
-  const bytes = yield* command(
-    {
-      command: tar,
-      stdin: files,
-    },
-    "archive",
-    "Could not create Workspace archive",
-  )
+  if (gitFiles.exitCode === 0) yield* inspectGitSecretChanges(workspace, files)
+  else yield* inspectSecretFiles(workspace, files)
+  const executable = yield* tarExecutable()
+  const createArguments =
+    executable.kind === "gnu"
+      ? [
+          "--zstd",
+          "--create",
+          "--file",
+          "-",
+          "--sort=name",
+          "--mtime=@0",
+          "--owner=0",
+          "--group=0",
+          "--numeric-owner",
+          "--directory",
+          workspace,
+          ...exclusionArguments,
+          "--null",
+          "--verbatim-files-from",
+          "--files-from=-",
+        ]
+      : [
+          "--gzip",
+          "--create",
+          "--uid",
+          "0",
+          "--gid",
+          "0",
+          "--uname",
+          "root",
+          "--gname",
+          "root",
+          "--directory",
+          workspace,
+          ...exclusionArguments,
+          "--null",
+          "--files-from=-",
+        ]
+  const bytes =
+    executable.kind === "gnu"
+      ? yield* command(
+          {
+            command: [executable.command, ...createArguments],
+            stdin: files,
+          },
+          "archive",
+          "Could not create Workspace archive",
+        )
+      : yield* Effect.scoped(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem
+            const directory = yield* fileSystem
+              .makeTempDirectoryScoped({ prefix: "rika-workspace-archive-" })
+              .pipe(Effect.mapError(() => failure("archive", "Could not stage Workspace archive")))
+            const archive = `${directory}/workspace.tar.gz`
+            yield* command(
+              {
+                command: [
+                  executable.command,
+                  ...createArguments.slice(0, 2),
+                  "--file",
+                  archive,
+                  ...createArguments.slice(2),
+                ],
+                stdin: files,
+              },
+              "archive",
+              "Could not create Workspace archive",
+            )
+            const stagedBytes = yield* fileSystem
+              .readFile(archive)
+              .pipe(Effect.mapError(() => failure("archive", "Could not read Workspace archive")))
+            if (archiveCompression(stagedBytes) !== "gzip")
+              return yield* failure("archive", "Workspace archive compression is invalid")
+            stagedBytes.fill(0, 4, 8)
+            return stagedBytes
+          }),
+        )
   if (bytes.byteLength === 0 || bytes.byteLength > MaximumArchiveBytes)
     return yield* failure("size", "Workspace archive exceeds the allowed size")
   return yield* inspectArchive(
@@ -333,23 +451,25 @@ export const inspectArchive = Effect.fn("WorkspaceArchive.inspect")(function* (
     Effect.gen(function* () {
       yield* command(
         {
-          command: yield* tarArguments([
-            "--zstd",
-            "--extract",
-            "--file",
-            "-",
-            "--directory",
-            directory,
-            "--no-same-owner",
-            "--no-same-permissions",
-          ]),
+          command: yield* tarArguments({
+            gnu: [
+              ...gnuCompressionArguments(archive.bytes),
+              "--extract",
+              "--file",
+              "-",
+              "--directory",
+              directory,
+              "--no-same-owner",
+              "--no-same-permissions",
+            ],
+            bsd: ["--extract", "--file", "-", "--directory", directory, "--no-same-owner", "--no-same-permissions"],
+          }),
           stdin: archive.bytes,
         },
         "archive",
         "Workspace archive could not be extracted safely",
       )
       yield* inspectLinks(directory)
-      yield* inspectSecrets(directory)
       yield* inspectSecretValues(directory, secretValues)
     }),
   )
@@ -367,16 +487,19 @@ export const restoreArchive = Effect.fn("WorkspaceArchive.restore")(function* (
     Effect.gen(function* () {
       yield* command(
         {
-          command: yield* tarArguments([
-            "--zstd",
-            "--extract",
-            "--file",
-            "-",
-            "--directory",
-            directory,
-            "--no-same-owner",
-            "--no-same-permissions",
-          ]),
+          command: yield* tarArguments({
+            gnu: [
+              ...gnuCompressionArguments(archive.bytes),
+              "--extract",
+              "--file",
+              "-",
+              "--directory",
+              directory,
+              "--no-same-owner",
+              "--no-same-permissions",
+            ],
+            bsd: ["--extract", "--file", "-", "--directory", directory, "--no-same-owner", "--no-same-permissions"],
+          }),
           stdin: archive.bytes,
         },
         "archive",

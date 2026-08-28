@@ -43,6 +43,10 @@ it("keeps local submission disconnected until the concrete Runner reports ready"
   })
   expect(runnerConnectionState(placement("runner"), true)).toEqual(placement("runner"))
   expect(runnerConnectionState(placement("orb"), false)).toEqual(placement("orb"))
+  expect(runnerConnectionState({ ...placement("runner"), connectivity: "disconnected" }, false)).toEqual({
+    ...placement("runner"),
+    connectivity: "disconnected",
+  })
 })
 
 it.effect("prepares no Runner for Orb placement, then starts one Runner once despite repeated states", () =>

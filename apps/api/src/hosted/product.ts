@@ -59,6 +59,10 @@ export interface ThreadAuthority {
   readonly actor: ActorAttribution
 }
 
+export interface OwnerAuthority {
+  readonly ownerId: OwnerId
+}
+
 export interface ThreadExecutionContext {
   readonly repository: JsonObject | null
   readonly branch: string | null
@@ -173,6 +177,10 @@ export interface HostedProductService {
     readonly cancelCommandId: string
     readonly targetCommandId: string
   }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
+  readonly authorizeOwner: (
+    principal: AuthenticatedPrincipal,
+    owner: OwnerSelection,
+  ) => Effect.Effect<OwnerAuthority, HostedProductError>
   readonly authorizeThread: (
     principal: AuthenticatedPrincipal,
     threadId: string,
@@ -456,6 +464,15 @@ export const layer = (options: {
           .pipe(Effect.mapError(repositoryFailure))
       }, Effect.mapError(storeFailure))
 
+      const authorizeOwner: HostedProductService["authorizeOwner"] = Effect.fn("HostedProduct.authorizeOwner")(
+        function* (principal, owner) {
+          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
+          const authority = yield* resolveOwner(principal, owner)
+          return { ownerId: OwnerId.make(authority.ownerId) }
+        },
+        Effect.mapError(storeFailure),
+      )
+
       const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
         function* (principal, threadId, action) {
           yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
@@ -630,6 +647,7 @@ export const layer = (options: {
         admitAuthorizedRun,
         cancelRunAdmission,
         cancelAuthorizedRunAdmission,
+        authorizeOwner,
         authorizeThread,
         threadExecutionContext,
         activatePrincipal,

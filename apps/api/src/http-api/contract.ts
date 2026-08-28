@@ -7,6 +7,7 @@ import { PublicGroup } from "./public/routes"
 import { PublicationGroup } from "./publication/routes"
 import { RecoveryGroup } from "./recovery/routes"
 import { RunnersGroup } from "./runners/routes"
+import { ThreadsGroup } from "./threads/routes"
 import { WorkspaceSeedsGroup } from "./workspace-seeds/routes"
 
 export class RikaApi extends HttpApi.make("rika-api")
@@ -14,6 +15,7 @@ export class RikaApi extends HttpApi.make("rika-api")
   .add(PublicIdentityGroup)
   .add(IdentityGroup)
   .add(RunnersGroup)
+  .add(ThreadsGroup)
   .add(WorkspaceSeedsGroup)
   .add(RecoveryGroup)
   .add(PublicationGroup)

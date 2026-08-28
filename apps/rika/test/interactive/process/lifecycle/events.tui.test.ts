@@ -44,6 +44,8 @@ test(
         yield* app.setConnectionState({ connectivity: "connected", target: "runner", participants: 1 })
         yield* app.waitGone("Reconnecting")
         yield* app.waitFrame("WORK_CONTINUED")
+        yield* app.setConnectionState({ connectivity: "disconnected", target: "runner", participants: 1 })
+        yield* app.waitFrame("Disconnected")
 
         yield* app.setConnectionState({
           connectivity: "connected",
@@ -57,6 +59,37 @@ test(
         expect(hasColor(app, "Orb", "61,255,166,255")).toBe(true)
         yield* app.quit
       }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "shows Orb creation failures and keeps the current Thread usable",
+  () =>
+    TuiApp.run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const app = yield* TuiApp.tuiApp({
+            historicalTranscriptFixture: {
+              threadId: "tui-thread-0",
+              entryCount: 3,
+              marker: "CURRENT_THREAD_RETAINED",
+            },
+            initialThreadId: "tui-thread-0",
+            initialThreadSelected: true,
+            newOrbThreadFailure: "Workspace archive upload failed",
+          })
+          yield* app.waitFrame("CURRENT_THREAD_RETAINED")
+          app.pressKey("o", { ctrl: true })
+          yield* app.waitFrame("Command Palette")
+          yield* Effect.tryPromise(() => app.type("new in Orb"))
+          app.pressEnter()
+          const failed = yield* app.waitFrame("Workspace archive upload failed")
+          expect(failed).toContain("CURRENT_THREAD_RETAINED")
+          expect(failed).not.toContain("Loading Thread")
+          yield* app.quit
+        }),
+      ),
     ),
   tuiTestTimeout,
 )

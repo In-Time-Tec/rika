@@ -3,7 +3,12 @@ import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope, Stream }
 import { TestClock } from "effect/testing"
 import * as Socket from "effect/unstable/socket/Socket"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
-import { protocolVersion, ServerFrame } from "@rika/product/client-protocol"
+import {
+  CompatibleServerFrame,
+  previousProtocolVersion,
+  protocolVersion,
+  ServerFrame,
+} from "@rika/product/client-protocol"
 import { Timestamp } from "@rika/product/hosted-model"
 import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { HostedProductService } from "../../src/hosted/product"
@@ -60,6 +65,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
     const product: HostedProductService = {
       ready: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
       activatePrincipal: () => Effect.die("unused"),
+      authorizeOwner: () => Effect.die("unused"),
       authorizeThread: () => Effect.die("unused"),
       threadExecutionContext: () => Effect.die("unused"),
       projects: () => Effect.die("unused"),
@@ -245,6 +251,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
       product: {
         ready: Effect.void,
         activatePrincipal: () => Effect.die("unused"),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         projects: () => Effect.die("unused"),
@@ -372,7 +379,7 @@ it.effect("closes a slow Thread consumer before buffering another frame", () =>
 it.effect("exchanges canonical Thread frames and finishes accepted commands after socket disconnect", () =>
   Effect.gen(function* () {
     let connected: ReadonlyArray<string> | undefined
-    let received: unknown
+    const received: Array<unknown> = []
     let receiveStartedAfterOutboundStopped = false
     const outboundStarted = yield* Deferred.make<void>()
     const outboundStopped = yield* Deferred.make<void>()
@@ -398,6 +405,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
       product: {
         ready: Effect.void,
         activatePrincipal: () => Effect.die("unused"),
+        authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         projects: () => Effect.die("unused"),
@@ -434,7 +442,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
               Deferred.isDone(outboundStopped).pipe(
                 Effect.tap((stopped) =>
                   Effect.sync(() => {
-                    received = message
+                    received.push(message)
                     receiveStartedAfterOutboundStopped = stopped
                   }),
                 ),
@@ -524,10 +532,10 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
                 })
                 .pipe(Effect.forkScoped)
               yield* Deferred.await(opened)
-              yield* Deferred.await(outboundStarted)
               yield* writer(
                 `{"protocolVersion":${protocolVersion},"requestId":"request-1","command":{"_tag":"Detach"}}`,
               )
+              yield* Deferred.await(outboundStarted)
               return yield* Deferred.await(response)
             }),
             context,
@@ -558,17 +566,55 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
     yield* Scope.close(detachedScope, Exit.void)
     yield* Deferred.succeed(releaseDetachedReceive, undefined)
     yield* Deferred.await(detachedReceiveCompleted)
+    const legacyReply = yield* Effect.scoped(
+      Layer.build(Socket.layerWebSocketConstructorGlobal).pipe(
+        Effect.flatMap((context) =>
+          Effect.provide(
+            Effect.gen(function* () {
+              const socket = yield* Socket.makeWebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, {
+                protocols: ["rika.thread.v1", "rika.ticket.secret"],
+              })
+              const writer = yield* socket.writer
+              const opened = yield* Deferred.make<void>()
+              const response = yield* Deferred.make<string>()
+              yield* socket
+                .runString((message) => Deferred.succeed(response, message), {
+                  onOpen: Deferred.succeed(opened, undefined),
+                })
+                .pipe(Effect.forkScoped)
+              yield* Deferred.await(opened)
+              yield* writer(
+                `{"protocolVersion":${previousProtocolVersion},"requestId":"request-legacy","command":{"_tag":"AttachThread","threadId":"thread-legacy","afterCursor":"0"}}`,
+              )
+              return yield* Deferred.await(response)
+            }),
+            context,
+          ),
+        ),
+      ),
+    )
     yield* Effect.tryPromise(() => running.server.stop(true))
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
-    expect(received).toEqual({
-      protocolVersion,
-      requestId: "request-1",
-      command: { _tag: "Detach" },
-    })
+    expect(received).toEqual([
+      {
+        protocolVersion,
+        requestId: "request-1",
+        command: { _tag: "Detach" },
+      },
+      {
+        protocolVersion,
+        requestId: "request-legacy",
+        command: { _tag: "AttachThread", threadId: "thread-legacy", afterCursor: "0" },
+      },
+    ])
     expect(receiveStartedAfterOutboundStopped).toBe(true)
     expect(yield* Schema.decodeEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
       protocolVersion,
+      payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
+    })
+    expect(yield* Schema.decodeEffect(Schema.fromJsonString(CompatibleServerFrame))(legacyReply)).toEqual({
+      protocolVersion: previousProtocolVersion,
       payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
     })
   }),
