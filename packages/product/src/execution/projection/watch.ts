@@ -116,7 +116,7 @@ export const watch = (input: {
               message: `Turn ${turnId} projection cursor does not match terminal TenetKit inspection at ${inspection.cursor}`,
             })
           return { stored, inspection, hasUncommittedTerminal: pendingTerminal.length > 0 }
-        }),
+        }).pipe(Effect.scoped),
       )
       if (progressed || previewed) lastProgressAt = yield* clock.currentTimeMillis
       if (attempt._tag === "Failure") {
