@@ -105,8 +105,8 @@ test("publishes npm packages built from the same attested archives", () => {
   expect(commands("npm")).toContain("sha256sum --check SHA256SUMS")
   expect(commands("npm")).toContain("bun run npm-package")
 
-  for (const artifact of ["rika", ".rika-kernel-runtime", ".rika-kernel-worker.js", "text-result.js"])
-    expect(commands("npm")).toContain(`package/bin/${artifact}`)
+  expect(commands("npm")).toContain('import { packageBinEntries } from "./scripts/packaging/package-contract"')
+  expect(commands("npm")).toContain("package/bin/${entry}")
   for (const privateArtifact of [".rika-interactive", ".rika-performance", ".rika-server"])
     expect(commands("npm")).not.toContain(`package/bin/${privateArtifact}`)
 
