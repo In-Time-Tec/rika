@@ -92,6 +92,7 @@ describe("install contract", () => {
       "bin/.rika-kernel-runtime",
       "bin/.rika-kernel-worker.js",
       "bin/text-result.js",
+      "bin/bun-value.js",
     ])
   })
 
