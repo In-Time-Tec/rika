@@ -229,7 +229,7 @@ jobs:
           trap 'rm -rf "$directory" "$home"' EXIT
           root="$(basename "$ARCHIVE" .tar.gz)"
           entries="$(tar -tzf "$ARCHIVE" | LC_ALL=C sort)"
-          expected="$(printf '%s\n' "$root/" "$root/INSTALL" "$root/bin/" "$root/bin/rika" "$root/bin/.rika-kernel-runtime" "$root/bin/.rika-kernel-worker.js" "$root/bin/text-result.js" "$root/bin/bun-value.js" | LC_ALL=C sort)"
+          expected="$(ROOT="$root" bun -e 'import { packageBinEntries } from "./scripts/packaging/package-contract"; const root = process.env.ROOT; console.log([`${root}/`, `${root}/INSTALL`, `${root}/bin/`, ...packageBinEntries.map((entry) => `${root}/bin/${entry}`)].sort().join("\n"))')"
           test "$entries" = "$expected"
           tar -xzf "$ARCHIVE" -C "$directory"
           binary="$directory/$root/bin/rika"
@@ -357,9 +357,9 @@ jobs:
         run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
             entries="$(tar -tzf "$archive")"
-            for required in package/bin/rika package/bin/.rika-kernel-runtime package/bin/.rika-kernel-worker.js package/bin/text-result.js package/bin/bun-value.js; do
+            while IFS= read -r required; do
               printf '%s\n' "$entries" | grep -qx "$required"
-            done
+            done < <(bun -e 'import { packageBinEntries } from "./scripts/packaging/package-contract"; for (const entry of packageBinEntries) console.log(`package/bin/${entry}`)')
             if printf '%s\n' "$entries" | grep -Eq 'package/bin/(\.rika-interactive|\.rika-performance|rika-server)'; then
               echo "obsolete runtime artifact found in $archive" >&2
               exit 1

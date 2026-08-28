@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Path } from "effect"
+import { defaultWorkerModules } from "@rika/kernel/kernel-composition"
 import {
   archiveName,
   archiveRoot,
@@ -45,6 +46,13 @@ it.layer(BunServices.layer)("release target construction", (test) => {
       "bun-value.js",
     ])
   })
+
+  test.effect("packages every TenetKit worker support module", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      expect(packageBinEntries.slice(3)).toEqual(defaultWorkerModules.support.map((module) => path.basename(module)))
+    }),
+  )
 
   test("accepts only the exact supported archive set", () => {
     const exact = expectedArchiveNames("1.2.3")
