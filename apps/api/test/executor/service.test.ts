@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Redacted, Schema } from "effect"
-import { ExecutorConfigError, loadConfig } from "../../src/executor/service"
+import { Effect, Fiber, Redacted, Ref, Schema } from "effect"
+import { TestClock } from "effect/testing"
+import { ExecutorConfigError, loadConfig, makeOrphanReaper } from "../../src/executor/service"
 
 const environment = {
   E2B_API_KEY: "e2b-api-key",
@@ -32,6 +33,27 @@ describe("executor configuration", () => {
       expect(templateError.message).toBe("E2B_TEMPLATE_ID is required")
       expect(Schema.is(ExecutorConfigError)(apiError)).toBe(true)
       expect(apiError.message).toBe("RIKA_EXECUTOR_API_URL is required")
+    }),
+  )
+})
+
+describe("executor orphan reaper", () => {
+  it.effect("keeps readiness checks separate from one recurring cleanup", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0)
+      const reaper = makeOrphanReaper(Ref.update(calls, (count) => count + 1), "5 minutes")
+      const running = yield* reaper.run.pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* reaper.check
+      yield* reaper.check
+      expect(yield* Ref.get(calls)).toBe(2)
+
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* Ref.get(calls)).toBe(3)
+      yield* TestClock.adjust("5 minutes")
+      expect(yield* Ref.get(calls)).toBe(4)
+
+      yield* Fiber.interrupt(running)
     }),
   )
 })
