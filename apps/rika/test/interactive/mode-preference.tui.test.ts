@@ -8,7 +8,8 @@ const tuiTestTimeout = 60_000
 const spinnerFor = (frame: string, marker: string): string | undefined => {
   const lines = frame.split("\n")
   const sourceLine = lines.findIndex((line) => line.includes(marker))
-  return sourceLine < 1 ? undefined : lines[sourceLine - 1]?.match(/[⠀-⣿]/u)?.[0]
+  if (sourceLine < 0) return undefined
+  return lines[sourceLine]?.match(/[⠀-⣿]/u)?.[0] ?? lines[sourceLine - 1]?.match(/[⠀-⣿]/u)?.[0]
 }
 const spinnerChanged = (frame: string, marker: string, previous: string | undefined): boolean => {
   const current = spinnerFor(frame, marker)

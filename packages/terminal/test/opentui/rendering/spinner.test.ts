@@ -211,8 +211,8 @@ test("advances loader frames only while the model is animating and stops when it
 
 test.each([
   ["selected expanded tool", runningTool(), "tool:selected-tool:header", "tool:selected-tool:body"],
-  ["selected expanded cell", runningCell(), "cell:selected-cell:header", "cell:selected-cell:body"],
-])("updates the spinner inside a styled %s header without replacing the row or body", (_label, model, key, bodyKey) =>
+  ["selected expanded cell", runningCell(), "cell:selected-cell:header", undefined],
+])("updates the spinner inside a styled %s header without replacing its rows", (_label, model, key, bodyKey) =>
   Effect.runPromise(
     withSurface(model, ({ surface, animationClock }) => {
       expect(surface.animationDiagnostics().loaderRunning).toBe(true)

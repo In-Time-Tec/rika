@@ -20,6 +20,7 @@ interface CellRenderContext {
   readonly nestedRanges: Array<UnitLineRange>
   readonly rowExpanded: (id: string) => boolean
   readonly line: () => number
+  readonly finishHeader?: () => void
 }
 
 export const toolOutputDisplayed = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): boolean =>
@@ -104,10 +105,12 @@ const renderCellBodyImpl = (
   for (const chunk of header) append(selected ? bold(chunk) : chunk)
   const source = highlightLines(block.source.text, "typescript")
   const visibleSource = expanded ? source : source.slice(0, collapsedCellLines)
+  let firstRow = true
   for (const line of visibleSource) {
     for (const row of wrapStyledLine(line.map(toOpenChunk), Math.max(1, width - 2))) {
-      append(fg(colors.text)("\n  "))
+      append(fg(colors.text)(firstRow ? " " : "\n  "))
       for (const chunk of row) append(chunk)
+      firstRow = false
     }
   }
   const hiddenLines = Math.max(0, source.length - visibleSource.length)
@@ -119,6 +122,7 @@ const renderCellBodyImpl = (
   if (block.calls.length > 0) footer.push(`${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)
   footer.push(expanded ? "▾" : "▸")
   append(dim(fg(colors.subtle)(`\n  ${footer.join(" · ")}`)))
+  context?.finishHeader?.()
   if (!expanded) return
   if (block.source.truncated) append(dim(fg(colors.amber)("\n  Source truncated.")))
   if (block.output.stdout.length > 0)

@@ -78,6 +78,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   const rowExpanded = (id: string): boolean => model.expandedRowKeys.includes(id)
   const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
   let nestedRanges: Array<UnitLineRange> = []
+  let rootHeaderEnd: number | undefined
   const renderEntryBody = (index: number) => {
     const entry = model.entries[index]!
     if (entry.role === "assistant") {
@@ -456,6 +457,9 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       nestedRanges,
       rowExpanded,
       line: () => line,
+      finishHeader: () => {
+        rootHeaderEnd = line
+      },
     })
   }
   const renderDiffUnitBody = (index: number, selected: boolean, expanded: boolean) => {
@@ -499,6 +503,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     chunks = []
     line = 0
     nestedRanges.length = 0
+    rootHeaderEnd = undefined
     const expandable = isExpandableUnit(model, unit)
     const id = transcriptUnitId(model, unit)
     const expanded =
@@ -569,7 +574,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       const block = blockAt(unit.block)
       if (block?._tag === "Diff") targets = [{ path: block.path }]
     }
-    const rootBase: UnitLineRange = {
+    const rootWithoutHeader: UnitLineRange = {
       start,
       end: nestedRanges.length === 0 ? line : nestedRanges[0]!.start - 1,
       unit: id,
@@ -577,6 +582,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       animated,
       gapBefore: false,
     }
+    const rootBase =
+      rootHeaderEnd === undefined ? rootWithoutHeader : { ...rootWithoutHeader, headerEnd: rootHeaderEnd }
     const root: UnitLineRange = targets === undefined ? rootBase : { ...rootBase, targets }
     return { chunks, lines: line, root, nested: nestedRanges }
   }
