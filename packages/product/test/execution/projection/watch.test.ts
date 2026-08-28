@@ -72,6 +72,7 @@ it.effect("retries deterministic projection defects without cancelling or settli
     let replacements = 0
     let cancellations = 0
     let attempts = 0
+    let releases = 0
     const memoryTranscripts = Context.get(
       yield* Layer.build(TranscriptRepository.productMemoryLayerWithTurns),
       TranscriptRepository.Service,
@@ -90,9 +91,15 @@ it.effect("retries deterministic projection defects without cancelling or settli
         backend: ExecutionGateway.makeTest({
           watchTurn: () =>
             Stream.fromEffect(
-              Effect.sync(() => {
-                attempts += 1
-              }).pipe(Effect.andThen(Effect.die("projection defect"))),
+              Effect.acquireRelease(
+                Effect.sync(() => {
+                  attempts += 1
+                }),
+                () =>
+                  Effect.sync(() => {
+                    releases += 1
+                  }),
+              ).pipe(Effect.andThen(Effect.die("projection defect"))),
             ),
           cancelTurn: () =>
             Effect.sync(() => {
@@ -109,6 +116,7 @@ it.effect("retries deterministic projection defects without cancelling or settli
     yield* Effect.yieldNow
 
     expect(attempts).toBeGreaterThanOrEqual(3)
+    expect(releases).toBe(attempts)
     expect(cancellations).toBe(0)
     expect(replacements).toBe(0)
     expect(fiber.pollUnsafe()).toBeUndefined()
