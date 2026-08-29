@@ -1,6 +1,7 @@
-import { RunSchema, layerPostgres as upstreamLayer } from "@tenetkit/pg"
+import { RunSchema, layer as upstreamLayer } from "@tenetkit/pg"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   Errors,
@@ -27,7 +28,7 @@ export const WorkerOptions = Schema.Struct({
   workerId: NonEmptyString,
   concurrency: PositiveInt,
   leaseMillis: PositiveInt,
-  pollIntervalMillis: PositiveInt,
+  fallbackIntervalMillis: PositiveInt,
   cancellationIntervalMillis: PositiveInt,
 })
 
@@ -65,8 +66,9 @@ export const ReadinessProof = Schema.Struct({
 export type ReadinessProof = typeof ReadinessProof.Type
 
 export interface WorkerDiagnostics extends RuntimeWorker.WorkerStatus {
-  readonly pollAgeMillis: number | undefined
-  readonly lastSuccessfulPollAgeMillis: number | undefined
+  readonly scanAgeMillis: number | undefined
+  readonly wakeupAgeMillis: number | undefined
+  readonly lastFallbackAgeMillis: number | undefined
   readonly oldestClaimAgeMillis: number | undefined
   readonly lastFailureAgeMillis: number | undefined
   readonly availableCapacity: number
@@ -97,7 +99,7 @@ export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.WorkerOpt
   workerId: options.workerId,
   concurrency: options.concurrency,
   lease: options.leaseMillis,
-  pollInterval: options.pollIntervalMillis,
+  fallbackInterval: options.fallbackIntervalMillis,
   cancellationInterval: options.cancellationIntervalMillis,
   onClaim: observeClaim,
 })
@@ -195,8 +197,9 @@ export const workerDiagnostics: {
   2,
   (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
     ...status,
-    pollAgeMillis: status.poll._tag === "Starting" ? undefined : age(now, status.poll.at),
-    lastSuccessfulPollAgeMillis: age(now, status.lastSuccessfulPollAt),
+    scanAgeMillis: status.scan._tag === "Starting" ? undefined : age(now, status.scan.at),
+    wakeupAgeMillis: status.wakeup._tag === "Starting" ? undefined : age(now, status.wakeup.at),
+    lastFallbackAgeMillis: age(now, status.lastFallbackAt),
     oldestClaimAgeMillis: age(now, status.oldestClaimAt),
     lastFailureAgeMillis: age(now, status.lastFailure?.at),
     availableCapacity: Math.max(0, status.capacity - status.active),
@@ -206,31 +209,35 @@ export const workerDiagnostics: {
 export const checkWorkerReadiness: {
   (
     now: number,
-    pollIntervalMillis: number,
+    fallbackIntervalMillis: number,
   ): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
-  (status: RuntimeWorker.WorkerStatus, now: number, pollIntervalMillis: number): Effect.Effect<void, WorkerUnavailable>
+  (
+    status: RuntimeWorker.WorkerStatus,
+    now: number,
+    fallbackIntervalMillis: number,
+  ): Effect.Effect<void, WorkerUnavailable>
 } = Function.dual(
   3,
   (
     status: RuntimeWorker.WorkerStatus,
     now: number,
-    pollIntervalMillis: number,
+    fallbackIntervalMillis: number,
   ): Effect.Effect<void, WorkerUnavailable> => {
-    if (status.poll._tag === "Starting")
+    if (status.scan._tag === "Starting")
       return Effect.fail(
-        WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first poll" }),
+        WorkerUnavailable.make({ message: "Hosted execution worker has not completed its first scan" }),
       )
-    if (status.poll._tag === "Failed")
-      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll failed" }))
-    if (now - status.poll.at > pollIntervalMillis * 4)
-      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker poll is stale" }))
+    if (status.scan._tag === "Failed")
+      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker scan failed" }))
+    if (now - status.scan.at > fallbackIntervalMillis * 4)
+      return Effect.fail(WorkerUnavailable.make({ message: "Hosted execution worker scan is stale" }))
     return Effect.void
   },
 )
 
 export const makeReadiness = (input: {
   readonly source: string
-  readonly pollIntervalMillis: number
+  readonly fallbackIntervalMillis: number
   readonly worker: Pick<RuntimeWorker.Interface, "workerId" | "status">
   readonly schema: Effect.Effect<void, SchemaError>
 }): ReadinessInterface => {
@@ -239,7 +246,7 @@ export const makeReadiness = (input: {
     yield* input.schema
     const workerStatus = yield* status
     const now = yield* Clock.currentTimeMillis
-    yield* checkWorkerReadiness(workerStatus, now, input.pollIntervalMillis)
+    yield* checkWorkerReadiness(workerStatus, now, input.fallbackIntervalMillis)
     return ReadinessProof.make({ backend: "postgres", source: input.source, workerId: input.worker.workerId })
   })
   const diagnostics: Effect.Effect<WorkerDiagnostics> = Effect.all([status, Clock.currentTimeMillis]).pipe(
@@ -266,9 +273,7 @@ export const layer = (
     validateOptions(options.postgres).pipe(
       Effect.map((postgres) => {
         const postgresLayerOptionsBase = {
-          url: postgres.url,
           source: postgres.source,
-          maxConnections: postgres.maxConnections,
           resolver: options.resolver,
           addresses: [],
         }
@@ -278,7 +283,11 @@ export const layer = (
             : { ...postgresLayerOptionsBase, subscriberQueueCapacity: options.subscriberQueueCapacity }
         const postgresLayerOptions =
           options.scheduler === undefined ? withQueue : { ...withQueue, scheduler: options.scheduler }
+        const client = RunSchema.layerClient({ url: postgres.url, maxConnections: postgres.maxConnections }).pipe(
+          Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
+        )
         const runtime = upstreamLayer(postgresLayerOptions).pipe(
+          Layer.provide(client),
           Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
         )
         const worker = workerLayer(postgres.worker).pipe(Layer.provideMerge(runtime))
@@ -286,16 +295,17 @@ export const layer = (
           Readiness,
           Effect.gen(function* () {
             const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
+            const sql = yield* SqlClient
             return Readiness.of(
               makeReadiness({
                 source: postgres.source,
-                pollIntervalMillis: postgres.worker.pollIntervalMillis,
+                fallbackIntervalMillis: postgres.worker.fallbackIntervalMillis,
                 worker: runtimeWorker,
-                schema: checkSchema(postgres),
+                schema: RunSchema.check(postgres.source).pipe(Effect.provideService(SqlClient, sql)),
               }),
             )
           }),
-        )
+        ).pipe(Layer.provide(client))
         return readiness.pipe(Layer.provideMerge(worker))
       }),
     ),

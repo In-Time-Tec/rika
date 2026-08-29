@@ -218,7 +218,7 @@ export const layer = (options: {
               workerId: options.workerId,
               concurrency: 8,
               leaseMillis: 30_000,
-              pollIntervalMillis: 250,
+              fallbackIntervalMillis: 250,
               cancellationIntervalMillis: 1_000,
             },
           },

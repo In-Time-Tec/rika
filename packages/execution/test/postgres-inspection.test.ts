@@ -53,7 +53,7 @@ it.live.skipIf(databaseUrl === "")(
                 workerId: `postgres-inspection-${suffix}`,
                 concurrency: 1,
                 leaseMillis: 30_000,
-                pollIntervalMillis: 20,
+                fallbackIntervalMillis: 20,
                 cancellationIntervalMillis: 20,
               },
             },

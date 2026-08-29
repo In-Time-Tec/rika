@@ -361,7 +361,7 @@ it.effect.skipIf(databaseUrl === "")(
                         workerId: "hosted-recovery-live",
                         concurrency: 1,
                         leaseMillis: 30_000,
-                        pollIntervalMillis: 60_000,
+                        fallbackIntervalMillis: 60_000,
                         cancellationIntervalMillis: 60_000,
                       },
                     },

@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { ModelRegistry, Response as AiResponse } from "tenetkit"
 import { TestModel } from "tenetkit/test"
-import { Runtime } from "tenetkit/runtime"
+import { RunTree, Runtime } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
@@ -33,7 +33,10 @@ const routeWithIdentity = (rootIdentity: string, titleIdentity: string) => {
 }
 
 const readTreeEvents = (runtime: Runtime.Interface, rootRunId: string) =>
-  runtime.treeHistory({ rootRunId, limit: 1_000 }).pipe(Effect.map(({ events }) => events))
+  RunTree.replay({ rootRunId, limit: 1_000 }).pipe(
+    Effect.provideService(Runtime.Runtime, runtime),
+    Effect.map(({ events }) => events),
+  )
 
 const promptText = (prompt: TestModel.Request["prompt"] | undefined): string => JSON.stringify(prompt)
 

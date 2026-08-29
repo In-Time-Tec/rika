@@ -336,7 +336,8 @@ const make = (
             kind: "stale",
             message: "Authorization is no longer pending",
           })
-        const inspection = yield* RunTree.inspect(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const checkpoint = yield* RunTree.checkpoint(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const inspection = checkpoint.inspection
         if (!inspection.runs.some(({ run }) => run.runId === target.runId))
           return yield* ExecutionGateway.ApprovalResponseFailure.make({
             kind: "mismatch",
@@ -669,13 +670,14 @@ const make = (
         )
       },
       inspectTurn: (link) =>
-        RunTree.inspect(link.runId).pipe(
+        RunTree.checkpoint(link.runId).pipe(
           Effect.provideService(Runtime.Runtime, runtime),
-          Effect.map((inspection) => {
+          Effect.map((checkpoint) => {
+            const inspection = checkpoint.inspection
             const root = inspection.runs.find(({ run }) => run.runId === link.runId)
             return root === undefined
               ? { status: "unavailable" as const }
-              : { status: status(root.run.status), cursor: inspection.cursor }
+              : { status: status(root.run.status), cursor: checkpoint.cursor }
           }),
           Effect.catchTag("tenetkit/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
