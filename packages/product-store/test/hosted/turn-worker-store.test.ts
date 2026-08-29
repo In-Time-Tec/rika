@@ -17,6 +17,7 @@ import { HostedTurnWorkerStore, layer as workerStoreLayer } from "../../src/host
 import { layer as workspacePreparationLayer } from "../../src/hosted/workspace-preparations"
 import { Config, Context, Effect, FileSystem, Inspectable, Layer, Logger, Random, Redacted, Schema } from "effect"
 import { eq, sql as drizzleSql } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
@@ -80,38 +81,42 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
         yield* Effect.tryPromise(() =>
           db.insert(schema.rikaHostedOwners).values({ id: "worker-owner", kind: "personal", userId: "worker-user" }),
         )
-        yield* Effect.tryPromise(() =>
-          db.insert(schema.rikaHostedWorkspaces).values({
-            id: "workspace-1",
-            ownerId: "worker-owner",
-            createdByUserId: "worker-user",
-            executorKind: "orb",
-            inheritProjectGrants: false,
-            createdAt: now,
-          }),
+        const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
+        const context = yield* Layer.build(
+          Layer.merge(workerStoreLayer, workspacePreparationLayer).pipe(Layer.provide(postgres)),
         )
-        yield* Effect.tryPromise(() =>
-          db.insert(schema.rikaHostedThreads).values({
-            id: "thread-1",
-            ownerId: "worker-owner",
-            workspaceId: "workspace-1",
-            createdByUserId: "worker-user",
-            executorKind: "orb",
-            inheritProjectGrants: false,
-            createdAt: now,
-          }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(schema.rikaWorkspaces).values({ ownerId: "worker-owner", path: "workspace-1", createdAt: 1 }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(schema.rikaThreads).values({
-            id: "thread-1",
-            ownerId: "worker-owner",
-            workspace: "workspace-1",
-            title: "Worker",
-            createdAt: 1,
-            updatedAt: 1,
+        const postgresContext = yield* Layer.build(postgres)
+        const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(postgresContext))
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(schema.rikaHostedWorkspaces).values({
+              id: "workspace-1",
+              ownerId: "worker-owner",
+              createdByUserId: "worker-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt: now,
+            })
+            yield* tx
+              .insert(schema.rikaWorkspaces)
+              .values({ ownerId: "worker-owner", path: "workspace-1", createdAt: 1 })
+            yield* tx.insert(schema.rikaHostedThreads).values({
+              id: "thread-1",
+              ownerId: "worker-owner",
+              workspaceId: "workspace-1",
+              createdByUserId: "worker-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt: now,
+            })
+            yield* tx.insert(schema.rikaThreads).values({
+              id: "thread-1",
+              ownerId: "worker-owner",
+              workspace: "workspace-1",
+              title: "Worker",
+              createdAt: 1,
+              updatedAt: 1,
+            })
           }),
         )
         yield* Effect.tryPromise(() =>
@@ -158,10 +163,6 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
             leaseEpoch: 1,
             leaseExpiresAt: drizzleSql`clock_timestamp() + interval '4 minutes'`,
           }),
-        )
-        const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
-        const context = yield* Layer.build(
-          Layer.merge(workerStoreLayer, workspacePreparationLayer).pipe(Layer.provide(postgres)),
         )
         const store = Context.get(context, HostedTurnWorkerStore)
         const preparations = Context.get(context, WorkspacePreparations)

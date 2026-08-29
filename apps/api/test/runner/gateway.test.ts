@@ -1,4 +1,5 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
 import {
@@ -42,6 +43,7 @@ import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { and, count, eq, sql } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { type PgInsertValue } from "drizzle-orm/pg-core"
 import { FileSystem, Config, Context, Deferred, Effect, Fiber, Layer, Random, Redacted, Schema } from "effect"
@@ -262,6 +264,7 @@ const seed = (
     const ownerId = `${ownerKind}-owner-local-gateway`
     const now = sql`transaction_timestamp()`
     const future = sql`transaction_timestamp() + interval '5 minutes'`
+    const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
     yield* Effect.tryPromise(() =>
       databaseClient.insert(identityUser).values({
         id: "user-local-gateway",
@@ -332,42 +335,38 @@ const seed = (
         updatedAt: now,
       }),
     )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedWorkspaces).values({
-        id: "workspace-local-gateway",
-        ownerId,
-        projectId: "project-local-gateway",
-        createdByUserId: "user-local-gateway",
-        executorKind: "runner",
-        inheritProjectGrants: false,
-        createdAt: now,
-      }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedThreads).values({
-        id: "thread-local-gateway",
-        ownerId,
-        projectId: "project-local-gateway",
-        workspaceId: "workspace-local-gateway",
-        createdByUserId: "user-local-gateway",
-        executorKind: "runner",
-        inheritProjectGrants: false,
-        nextCommandSequence: 2,
-        nextEventSequence: 1,
-        createdAt: now,
-      }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaWorkspaces).values({ ownerId, path: "workspace-local-gateway", createdAt: 1 }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaThreads).values({
-        id: "thread-local-gateway",
-        ownerId,
-        workspace: "workspace-local-gateway",
-        title: "Local",
-        createdAt: 1,
-        updatedAt: 1,
+    yield* aggregateDatabase.transaction((tx) =>
+      Effect.gen(function* () {
+        yield* tx.insert(rikaHostedWorkspaces).values({
+          id: "workspace-local-gateway",
+          ownerId,
+          projectId: "project-local-gateway",
+          createdByUserId: "user-local-gateway",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt: now,
+        })
+        yield* tx.insert(rikaWorkspaces).values({ ownerId, path: "workspace-local-gateway", createdAt: 1 })
+        yield* tx.insert(rikaHostedThreads).values({
+          id: "thread-local-gateway",
+          ownerId,
+          projectId: "project-local-gateway",
+          workspaceId: "workspace-local-gateway",
+          createdByUserId: "user-local-gateway",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          nextCommandSequence: 2,
+          nextEventSequence: 1,
+          createdAt: now,
+        })
+        yield* tx.insert(rikaThreads).values({
+          id: "thread-local-gateway",
+          ownerId,
+          workspace: "workspace-local-gateway",
+          title: "Local",
+          createdAt: 1,
+          updatedAt: 1,
+        })
       }),
     )
     yield* Effect.tryPromise(() =>
@@ -581,7 +580,12 @@ const isolated = <A, E, R>(
     try {
       const activePool = yield* migrate(url)
       pool = activePool
-      return yield* run({ url, databaseClient: drizzle({ client: activePool }) })
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+          return yield* run({ url, databaseClient: drizzle({ client: activePool }) }).pipe(Effect.provide(context))
+        }),
+      )
     } finally {
       const cleanupPool = pool
       yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())

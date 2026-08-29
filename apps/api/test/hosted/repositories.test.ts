@@ -16,10 +16,13 @@ import {
   rikaHostedThreads,
   rikaHostedWorkspacePreparations,
   rikaHostedWorkspaces,
+  rikaThreads,
+  rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
 import { eq } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { FileSystem, Config, Clock, Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
@@ -158,9 +161,10 @@ it.effect.skipIf(databaseUrl === "")(
             }),
           ),
         )
+        const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })
         const dependencies = Layer.mergeAll(
           BunCrypto.layer,
-          PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }),
+          postgres,
           assignmentLayer,
           installationLayer,
           tokenLayer,
@@ -170,6 +174,8 @@ it.effect.skipIf(databaseUrl === "")(
           repositoryLayer({ baseUrl: "https://github.test" }).pipe(Layer.provide(dependencies)),
         )
         const service = Context.get(context, HostedRepositories)
+        const postgresContext = yield* Layer.build(postgres)
+        const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(postgresContext))
         const setup = {
           authoritySubject: "owner-1",
           githubIdentity: { userId: 8, login: "maintainer" },
@@ -257,27 +263,38 @@ it.effect.skipIf(databaseUrl === "")(
           private: true,
           gitIdentity: { name: "Personal Committer", email: "personal@example.test" },
         }
-        yield* Effect.tryPromise(() =>
-          databaseClient.insert(rikaHostedWorkspaces).values({
-            id: "workspace-personal",
-            ownerId: "owner-personal",
-            projectId: "project-personal",
-            createdByUserId: "user-1",
-            executorKind: "orb",
-            inheritProjectGrants: true,
-            createdAt,
-          }),
-        )
-        yield* Effect.tryPromise(() =>
-          databaseClient.insert(rikaHostedThreads).values({
-            id: "thread-personal",
-            ownerId: "owner-personal",
-            projectId: "project-personal",
-            workspaceId: "workspace-personal",
-            createdByUserId: "user-1",
-            executorKind: "orb",
-            inheritProjectGrants: true,
-            createdAt,
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(rikaHostedWorkspaces).values({
+              id: "workspace-personal",
+              ownerId: "owner-personal",
+              projectId: "project-personal",
+              createdByUserId: "user-1",
+              executorKind: "orb",
+              inheritProjectGrants: true,
+              createdAt,
+            })
+            yield* tx
+              .insert(rikaWorkspaces)
+              .values({ ownerId: "owner-personal", path: "workspace-personal", createdAt: 1 })
+            yield* tx.insert(rikaHostedThreads).values({
+              id: "thread-personal",
+              ownerId: "owner-personal",
+              projectId: "project-personal",
+              workspaceId: "workspace-personal",
+              createdByUserId: "user-1",
+              executorKind: "orb",
+              inheritProjectGrants: true,
+              createdAt,
+            })
+            yield* tx.insert(rikaThreads).values({
+              id: "thread-personal",
+              ownerId: "owner-personal",
+              workspace: "workspace-personal",
+              title: "Personal",
+              createdAt: 1,
+              updatedAt: 1,
+            })
           }),
         )
         yield* Effect.tryPromise(() =>

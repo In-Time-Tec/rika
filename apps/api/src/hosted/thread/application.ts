@@ -32,7 +32,7 @@ import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { isDurableThreadEvent, type HostedThreadSnapshot } from "@rika/product/client-protocol"
-import { HostedStore } from "@rika/product/hosted-store"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
@@ -206,7 +206,7 @@ const ownerLayer = (
 export const layer = Layer.effect(
   HostedThreadApplication,
   Effect.gen(function* () {
-    const hosted = yield* HostedStore
+    const hosted = yield* HostedClientAuthority
     const store = yield* ThreadProtocolStore
     const modelRegistry = yield* HostedModelRegistry
     const ownerScope = yield* Effect.scope

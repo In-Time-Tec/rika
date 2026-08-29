@@ -2103,6 +2103,7 @@ export const rikaThreads = pgTable(
       table.updatedAt.desc().nullsFirst(),
       table.id.asc().nullsLast(),
     ),
+    unique("rika_threads_hosted_authority").on(table.id, table.ownerId, table.workspace),
     check("rika_threads_archived_check", sql`(archived = ANY (ARRAY[0, 1]))`),
     check("rika_threads_pinned_check", sql`(pinned = ANY (ARRAY[0, 1]))`),
   ],

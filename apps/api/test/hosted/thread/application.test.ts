@@ -14,7 +14,7 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
-import { layer as hostedStoreLayer } from "@rika/product-store/store"
+import { layer as hostedClientAuthorityLayer } from "@rika/product-store/client-authority"
 import {
   rikaHostedOwners,
   rikaHostedThreads,
@@ -24,6 +24,7 @@ import {
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { eq } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Config, Context, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
@@ -89,7 +90,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         const databaseLayer = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const dependencies = Layer.mergeAll(
           databaseLayer,
-          hostedStoreLayer.pipe(Layer.provide(databaseLayer)),
+          hostedClientAuthorityLayer.pipe(Layer.provide(databaseLayer)),
           BunCrypto.layer,
           Layer.succeed(ExecutionGateway.Service, {
             ...gateway,
@@ -123,57 +124,75 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         )
         const context = yield* Layer.build(hostedThreadApplicationLayer.pipe(Layer.provideMerge(dependencies)))
         const application = Context.get(context, HostedThreadApplication)
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaWorkspaces).values({ ownerId: "personal-owner", path: "workspace-1", createdAt: 1 }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaThreads).values({
-            id: "owner-thread",
-            ownerId: "personal-owner",
-            workspace: "workspace-1",
-            title: "New thread",
-            createdAt: 1,
-            updatedAt: 1,
+        const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(rikaHostedWorkspaces).values({
+              id: "workspace-1",
+              ownerId: "personal-owner",
+              projectId: null,
+              createdByUserId: "owner-user",
+              executorKind: "runner",
+              inheritProjectGrants: false,
+              createdAt,
+            })
+            yield* tx.insert(rikaWorkspaces).values({ ownerId: "personal-owner", path: "workspace-1", createdAt: 1 })
+            yield* tx.insert(rikaHostedThreads).values({
+              id: "owner-thread",
+              ownerId: "personal-owner",
+              projectId: null,
+              workspaceId: "workspace-1",
+              createdByUserId: "owner-user",
+              executorKind: "runner",
+              inheritProjectGrants: false,
+              createdAt,
+            })
+            yield* tx.insert(rikaThreads).values({
+              id: "owner-thread",
+              ownerId: "personal-owner",
+              workspace: "workspace-1",
+              title: "New thread",
+              createdAt: 1,
+              updatedAt: 1,
+            })
           }),
         )
         const threadId = ThreadId.make("owner-thread")
         const thread = yield* application.thread(OwnerId.make("personal-owner"), threadId)
         expect(thread).toMatchObject({ workspace: "workspace-1", title: "New thread" })
         expect(yield* application.thread(OwnerId.make("other-owner"), threadId)).toBeUndefined()
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaWorkspaces).values({ ownerId: "other-owner", path: "read-only-workspace", createdAt: 1 }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaThreads).values({
-            id: "read-only-thread",
-            ownerId: "other-owner",
-            workspace: "read-only-workspace",
-            title: "Read only",
-            createdAt: 1,
-            updatedAt: 1,
-          }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaHostedWorkspaces).values({
-            id: "hosted-read-only-workspace",
-            ownerId: "other-owner",
-            projectId: null,
-            createdByUserId: "other-user",
-            executorKind: "orb",
-            inheritProjectGrants: false,
-            createdAt,
-          }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaHostedThreads).values({
-            id: "read-only-thread",
-            ownerId: "other-owner",
-            projectId: null,
-            workspaceId: "hosted-read-only-workspace",
-            createdByUserId: "other-user",
-            executorKind: "orb",
-            inheritProjectGrants: false,
-            createdAt,
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(rikaHostedWorkspaces).values({
+              id: "read-only-workspace",
+              ownerId: "other-owner",
+              projectId: null,
+              createdByUserId: "other-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt,
+            })
+            yield* tx
+              .insert(rikaWorkspaces)
+              .values({ ownerId: "other-owner", path: "read-only-workspace", createdAt: 1 })
+            yield* tx.insert(rikaHostedThreads).values({
+              id: "read-only-thread",
+              ownerId: "other-owner",
+              projectId: null,
+              workspaceId: "read-only-workspace",
+              createdByUserId: "other-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt,
+            })
+            yield* tx.insert(rikaThreads).values({
+              id: "read-only-thread",
+              ownerId: "other-owner",
+              workspace: "read-only-workspace",
+              title: "Read only",
+              createdAt: 1,
+              updatedAt: 1,
+            })
           }),
         )
         const sql = Context.get(context, PgClient.PgClient)
@@ -323,26 +342,26 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         yield* Effect.tryPromise(() =>
           db.update(rikaTurns).set({ executionLinkJson: executionLink }).where(eq(rikaTurns.id, turn.id)),
         )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaThreads).values({
-            id: "parallel-thread",
-            ownerId: "other-owner",
-            workspace: "read-only-workspace",
-            title: "Parallel",
-            createdAt: 1,
-            updatedAt: 1,
-          }),
-        )
-        yield* Effect.tryPromise(() =>
-          db.insert(rikaHostedThreads).values({
-            id: "parallel-thread",
-            ownerId: "other-owner",
-            projectId: null,
-            workspaceId: "hosted-read-only-workspace",
-            createdByUserId: "other-user",
-            executorKind: "orb",
-            inheritProjectGrants: false,
-            createdAt,
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(rikaHostedThreads).values({
+              id: "parallel-thread",
+              ownerId: "other-owner",
+              projectId: null,
+              workspaceId: "read-only-workspace",
+              createdByUserId: "other-user",
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt,
+            })
+            yield* tx.insert(rikaThreads).values({
+              id: "parallel-thread",
+              ownerId: "other-owner",
+              workspace: "read-only-workspace",
+              title: "Parallel",
+              createdAt: 1,
+              updatedAt: 1,
+            })
           }),
         )
         const parallelTurn: Turn.AgentExecutionTurn = {

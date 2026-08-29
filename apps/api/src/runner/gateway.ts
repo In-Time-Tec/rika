@@ -28,7 +28,7 @@ import {
   IdempotencyKey,
   Sequence,
 } from "@rika/product/hosted-model"
-import { HostedStore } from "@rika/product/hosted-store"
+import { HostedCommandLedger } from "@rika/product/hosted-command-ledger"
 import {
   Cause,
   Clock,
@@ -168,7 +168,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   toolPolicy: HostedToolPolicyService,
 ) {
   const operations = yield* HostedExecutionOperations
-  const store = yield* HostedStore
+  const store = yield* HostedCommandLedger
   const crypto = yield* Crypto.Crypto
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())

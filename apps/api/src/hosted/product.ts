@@ -1,5 +1,7 @@
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect"
 import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedCommandLedger } from "@rika/product/hosted-command-ledger"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
@@ -14,7 +16,7 @@ import {
   OwnerId,
   ThreadId,
 } from "@rika/product/hosted-model"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import type { PromptPart } from "@rika/product/execution-request"
 import { TurnId } from "@rika/product/turn-record"
 import type { RunnerProfile, RunnerTarget, RemoteThreadCreationPreference } from "@rika/product/runner-registration"
@@ -78,11 +80,11 @@ const unavailable = () => HostedProductError.make({ kind: "unavailable", message
 
 const forbidden = (message = "Resource is unavailable") => HostedProductError.make({ kind: "forbidden", message })
 
-type ProductOperationError = HostedProductError | StoreError | { readonly _tag: string }
+type ProductOperationError = HostedProductError | HostedPersistenceError | { readonly _tag: string }
 
 const storeFailure = (error: ProductOperationError) => {
   if (Schema.is(HostedProductError)(error)) return error
-  if (!Schema.is(StoreError)(error)) return unavailable()
+  if (!Schema.is(HostedPersistenceError)(error)) return unavailable()
   let kind: NonNullable<HostedProductError["kind"]> = "unavailable"
   if (error.reason === "conflict" || error.reason === "stale-fence") kind = "conflict"
   else if (error.reason === "not-found") kind = "not-found"
@@ -208,7 +210,8 @@ export const layer = (options: {
   Layer.effect(
     HostedProduct,
     Effect.gen(function* () {
-      const store = yield* HostedStore
+      const clientAuthority = yield* HostedClientAuthority
+      const commands = yield* HostedCommandLedger
       const repository = yield* ProductRepository
       const runners = yield* RunnerRegistrations
       const policy = yield* AuthorizationPolicy
@@ -223,14 +226,14 @@ export const layer = (options: {
         const currentTime = yield* Clock.currentTimeMillis
         const now = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
         const deviceId = DeviceId.make(principal.deviceId)
-        yield* store.registerDevice({
+        yield* clientAuthority.registerDevice({
           id: deviceId,
           userId,
           displayName: "Rika CLI",
           publicKeyFingerprint: principal.dpopJkt ?? principal.clientId,
           now,
         })
-        yield* store.authenticateClient({
+        yield* clientAuthority.authenticateClient({
           id: ClientId.make(principal.clientId),
           userId,
           deviceId,
@@ -366,7 +369,7 @@ export const layer = (options: {
             }
           }
           if (actor === undefined) return yield* forbidden()
-          yield* store.grantClientAuthority({
+          yield* clientAuthority.grantClientAuthority({
             ownerId: OwnerId.make(authority.ownerId),
             actor,
             now: timestamp,
@@ -520,13 +523,13 @@ export const layer = (options: {
                   deviceId: DeviceId.make(principal.deviceId),
                 } as const)
           const nowMillis = yield* Clock.currentTimeMillis
-          yield* store.grantClientAuthority({
+          yield* clientAuthority.grantClientAuthority({
             ownerId: OwnerId.make(resolved.ownerId),
             actor,
             now: DateTime.formatIso(DateTime.makeUnsafe(nowMillis)),
             expiresAt: DateTime.formatIso(DateTime.makeUnsafe(nowMillis + 5 * 60 * 1000)),
           })
-          yield* store.authorizeThread({
+          yield* clientAuthority.authorizeThread({
             ownerId: OwnerId.make(resolved.ownerId),
             threadId: ThreadId.make(threadId),
             actor,
@@ -599,7 +602,7 @@ export const layer = (options: {
           readinessProof,
         }
         if (input.promptParts !== undefined) Object.assign(promptInput, { promptParts: input.promptParts })
-        const admitted = yield* store.admitPrompt(promptInput)
+        const admitted = yield* commands.admitPrompt(promptInput)
         if (admitted._tag === "Cancelled") return { _tag: "Cancelled" as const, commandId: input.operationKey }
         return {
           _tag: "Admitted" as const,
@@ -619,7 +622,7 @@ export const layer = (options: {
         "HostedProduct.cancelAuthorizedRunAdmission",
       )(function* (input) {
         const cancelledAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-        const cancellation = yield* store.cancelPrompt({
+        const cancellation = yield* commands.cancelPrompt({
           ownerId: input.authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           cancelCommandId: CommandId.make(input.cancelCommandId),

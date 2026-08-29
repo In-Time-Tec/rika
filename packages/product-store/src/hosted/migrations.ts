@@ -185,4 +185,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "4136448fb7cb12fdf36ceef33b11e697cf958e2ceff2e574f421e52ec915f7bf",
     url: new URL("../../migrations/postgres/0036-explicit-command-turn-identity.sql", import.meta.url),
   },
+  {
+    id: "product/0037_hosted_product_thread_invariant",
+    checksum: "547bd9d542f3fc5414862652c825d0ac53bbdfbecc56ed35b4aeccefdd9128f9",
+    url: new URL("../../migrations/postgres/0037-hosted-product-thread-invariant.sql", import.meta.url),
+  },
 ]

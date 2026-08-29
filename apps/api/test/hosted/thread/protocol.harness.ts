@@ -18,7 +18,9 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { HostedPresence } from "@rika/product/hosted-presence"
 import { protocolVersion, type HostedThreadSnapshot, type ServerFrame } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
@@ -26,9 +28,13 @@ import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import {
   rikaHostedClientAuthorities,
+  rikaHostedOwnerCounters,
+  rikaHostedOwners,
+  rikaHostedThreads,
   rikaHostedThreadProtocolCommands,
   rikaHostedThreadProtocolEvents,
   rikaHostedThreadProtocolSnapshots,
+  rikaHostedWorkspaces,
   rikaThreads,
   rikaTranscriptCheckpoints,
   rikaTurns,
@@ -37,6 +43,7 @@ import {
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/layer"
 import { and, count, eq, gt } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { FileSystem, Config, Context, DateTime, Deferred, Effect, Fiber, Layer, Random, Redacted } from "effect"
 import { TestClock } from "effect/testing"
@@ -104,7 +111,10 @@ const snapshot = {
 }
 
 const withDatabase = <A, E, R>(
-  use: (pool: Pool, url: string) => Effect.Effect<A, E, R | HostedStore | ThreadProtocolStore>,
+  use: (
+    pool: Pool,
+    url: string,
+  ) => Effect.Effect<A, E, R | HostedClientAuthority | HostedPresence | ThreadProtocolStore>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -146,8 +156,9 @@ const withDatabase = <A, E, R>(
 const setup = (pool: Pool) =>
   Effect.gen(function* () {
     const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+    const db = drizzle({ client: pool })
     yield* Effect.tryPromise(() =>
-      drizzle({ client: pool }).insert(identityUser).values({
+      db.insert(identityUser).values({
         id: userId,
         name: userId,
         email: "protocol@example.test",
@@ -156,42 +167,61 @@ const setup = (pool: Pool) =>
         updatedAt: createdAt,
       }),
     )
-    const hosted = yield* HostedStore
-    yield* hosted.putOwner({ id: ownerId, identity: actor.owner, now })
-    yield* hosted.registerDevice({
+    const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
+    yield* aggregateDatabase.transaction((tx) =>
+      Effect.gen(function* () {
+        yield* tx.insert(rikaHostedOwners).values({ id: ownerId, kind: "personal", userId })
+        yield* tx.insert(rikaHostedOwnerCounters).values({ ownerId })
+        yield* tx.insert(rikaHostedWorkspaces).values({
+          id: workspaceId,
+          ownerId,
+          projectId: null,
+          createdByUserId: userId,
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt,
+        })
+        yield* tx.insert(rikaWorkspaces).values({ ownerId, path: workspaceId, createdAt: 1 })
+        yield* tx.insert(rikaHostedThreads).values({
+          id: threadId,
+          ownerId,
+          projectId: null,
+          workspaceId,
+          createdByUserId: userId,
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt,
+        })
+        yield* tx.insert(rikaThreads).values({
+          id: threadId,
+          ownerId,
+          workspace: workspaceId,
+          title: "Protocol Thread",
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      }),
+    )
+    const authority = yield* HostedClientAuthority
+    yield* authority.registerDevice({
       id: deviceId,
       userId,
       displayName: "Protocol device",
       publicKeyFingerprint: "protocol-key",
       now,
     })
-    yield* hosted.authenticateClient({
+    yield* authority.authenticateClient({
       id: clientId,
       userId,
       deviceId,
       now,
       expiresAt: authorityExpiresAt,
     })
-    yield* hosted.grantClientAuthority({
+    yield* authority.grantClientAuthority({
       ownerId,
       actor,
       now,
       expiresAt: authorityExpiresAt,
-    })
-    yield* hosted.createWorkspace({
-      id: workspaceId,
-      ownerId,
-      createdByUserId: userId,
-      executorKind: "runner",
-      now,
-    })
-    yield* hosted.createThread({
-      id: threadId,
-      ownerId,
-      workspaceId,
-      createdByUserId: userId,
-      executorKind: "runner",
-      now,
     })
     const protocol = yield* ThreadProtocolStore
     yield* protocol.initializeThread({ ownerId, threadId, actor })
@@ -616,16 +646,30 @@ it.effect.skipIf(!live)("claims another Thread while one Thread command lane is 
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
       const otherThreadId = ThreadId.make("protocol-thread-other")
-      yield* hosted.createThread({
-        id: otherThreadId,
-        ownerId,
-        workspaceId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
-      })
+      yield* aggregateDatabase.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(rikaHostedThreads).values({
+            id: otherThreadId,
+            ownerId,
+            projectId: null,
+            workspaceId,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt: DateTime.toDate(DateTime.nowUnsafe()),
+          })
+          yield* tx.insert(rikaThreads).values({
+            id: otherThreadId,
+            ownerId,
+            workspace: workspaceId,
+            title: "Other protocol thread",
+            createdAt: 2,
+            updatedAt: 2,
+          })
+        }),
+      )
       yield* protocol.initializeThread({
         ownerId,
         threadId: otherThreadId,
@@ -804,7 +848,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const authority = yield* HostedClientAuthority
       let completionAttempts = 0
       let admissionAttempts = 0
       const admittedEffects = new Set<string>()
@@ -816,7 +860,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           completionAttempts += 1
           return completionAttempts === 1
             ? Effect.fail(
-                StoreError.make({
+                HostedPersistenceError.make({
                   reason: "database",
                   message: "simulated API interruption",
                 }),
@@ -867,7 +911,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, workerProtocol),
-              Layer.succeed(HostedStore, hosted),
+              Layer.succeed(HostedClientAuthority, authority),
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(
@@ -967,7 +1011,7 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const authority = yield* HostedClientAuthority
       const releasePrompt = yield* Deferred.make<void>()
       const cancelledPrompts = new Set<string>()
       const admittedPrompts = new Set<string>()
@@ -1024,7 +1068,7 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, protocol),
-              Layer.succeed(HostedStore, hosted),
+              Layer.succeed(HostedClientAuthority, authority),
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(
@@ -1302,17 +1346,6 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
           revision: 4,
         },
       }
-      yield* Effect.tryPromise(() => db.insert(rikaWorkspaces).values({ ownerId, path: workspaceId, createdAt: 4 }))
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaThreads).values({
-          id: threadId,
-          ownerId,
-          workspace: workspaceId,
-          title: "Checkpoint notification",
-          createdAt: 4,
-          updatedAt: 4,
-        }),
-      )
       yield* Effect.tryPromise(() =>
         db.insert(rikaTurns).values({
           id: "checkpoint-notify-turn",
@@ -2069,7 +2102,9 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
       const db = drizzle({ client: pool })
-      const hosted = yield* HostedStore
+      const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
+      const authority = yield* HostedClientAuthority
+      const presence = yield* HostedPresence
       const organizationId = OrganizationId.make("protocol-organization")
       const membershipId = BetterAuthMemberId.make("protocol-membership")
       const organizationOwnerId = OwnerId.make("protocol-organization-owner")
@@ -2101,31 +2136,47 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
           createdAt,
         }),
       )
-      yield* hosted.putOwner({
-        id: organizationOwnerId,
-        identity: organizationActor.owner,
-        now,
-      })
-      yield* hosted.grantClientAuthority({
+      yield* aggregateDatabase.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(rikaHostedOwners).values({ id: organizationOwnerId, kind: "organization", organizationId })
+          yield* tx.insert(rikaHostedOwnerCounters).values({ ownerId: organizationOwnerId })
+          yield* tx.insert(rikaHostedWorkspaces).values({
+            id: organizationWorkspaceId,
+            ownerId: organizationOwnerId,
+            projectId: null,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt,
+          })
+          yield* tx
+            .insert(rikaWorkspaces)
+            .values({ ownerId: organizationOwnerId, path: organizationWorkspaceId, createdAt: 1 })
+          yield* tx.insert(rikaHostedThreads).values({
+            id: organizationThreadId,
+            ownerId: organizationOwnerId,
+            projectId: null,
+            workspaceId: organizationWorkspaceId,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt,
+          })
+          yield* tx.insert(rikaThreads).values({
+            id: organizationThreadId,
+            ownerId: organizationOwnerId,
+            workspace: organizationWorkspaceId,
+            title: "Organization protocol thread",
+            createdAt: 1,
+            updatedAt: 1,
+          })
+        }),
+      )
+      yield* authority.grantClientAuthority({
         ownerId: organizationOwnerId,
         actor: organizationActor,
         now,
         expiresAt: authorityExpiresAt,
-      })
-      yield* hosted.createWorkspace({
-        id: organizationWorkspaceId,
-        ownerId: organizationOwnerId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
-      })
-      yield* hosted.createThread({
-        id: organizationThreadId,
-        ownerId: organizationOwnerId,
-        workspaceId: organizationWorkspaceId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
       })
       yield* protocol.initializeThread({
         ownerId: organizationOwnerId,
@@ -2172,7 +2223,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         },
         completedAt: later,
       })
-      yield* hosted.upsertPresence({
+      yield* presence.upsert({
         ownerId: organizationOwnerId,
         threadId: organizationThreadId,
         actor: organizationActor,
@@ -2235,8 +2286,8 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         failure: { reason: "invalid-authority" },
       })
       expect(
-        yield* hosted
-          .listPresence({
+        yield* presence
+          .list({
             ownerId: organizationOwnerId,
             threadId: organizationThreadId,
             actor: organizationActor,
@@ -2259,7 +2310,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         threadVersion: "0",
         cursor: "0",
       })
-      yield* hosted.upsertPresence({
+      yield* presence.upsert({
         ownerId,
         threadId,
         actor,
@@ -2267,7 +2318,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         now: later,
         expiresAt: presenceExpiresAt,
       })
-      expect(yield* hosted.listPresence({ ownerId, threadId, actor, now: later })).toHaveLength(1)
+      expect(yield* presence.list({ ownerId, threadId, actor, now: later })).toHaveLength(1)
     }),
   ),
 )

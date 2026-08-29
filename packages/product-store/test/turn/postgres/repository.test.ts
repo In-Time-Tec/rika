@@ -15,7 +15,14 @@ import { Pool } from "pg"
 import { identityUser } from "../../../../identity/src/database/account-schema"
 import { identityMigrations } from "../../../../identity/src/database/migrations"
 import { runMigration } from "../../../../identity/src/database/postgres"
-import { rikaHostedOwners, rikaThreads, rikaTurns, rikaWorkspaces } from "../../../src/database/schema/product"
+import {
+  rikaHostedOwners,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
+  rikaThreads,
+  rikaTurns,
+  rikaWorkspaces,
+} from "../../../src/database/schema/product"
 import { migrations } from "../../../src/hosted/migrations"
 import * as TurnRepository from "../../../src/turn/postgres/repository"
 
@@ -181,16 +188,39 @@ it.effect.skipIf(databaseUrl === "")("runs the turn repository contract against 
             updatedAt: now,
           })
           yield* db.insert(rikaHostedOwners).values({ id: ownerId, kind: "personal", userId: "turn-contract-user" })
-          yield* db.insert(rikaWorkspaces).values({ ownerId, path: workspace, createdAt: 1 })
-          yield* db.insert(rikaThreads).values(
-            [threadId, pageThreadId, malformedThreadId].map((id) => ({
-              id,
-              ownerId,
-              workspace,
-              title: id,
-              createdAt: 1,
-              updatedAt: 1,
-            })),
+          yield* db.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.insert(rikaHostedWorkspaces).values({
+                id: workspace,
+                ownerId,
+                createdByUserId: "turn-contract-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              })
+              yield* tx.insert(rikaWorkspaces).values({ ownerId, path: workspace, createdAt: 1 })
+              yield* tx.insert(rikaHostedThreads).values(
+                [threadId, pageThreadId, malformedThreadId].map((id) => ({
+                  id,
+                  ownerId,
+                  workspaceId: workspace,
+                  createdByUserId: "turn-contract-user",
+                  executorKind: "orb" as const,
+                  inheritProjectGrants: false,
+                  createdAt: now,
+                })),
+              )
+              yield* tx.insert(rikaThreads).values(
+                [threadId, pageThreadId, malformedThreadId].map((id) => ({
+                  id,
+                  ownerId,
+                  workspace,
+                  title: id,
+                  createdAt: 1,
+                  updatedAt: 1,
+                })),
+              )
+            }),
           )
 
           const promptParts: ReadonlyArray<ExecutionRequest.PromptPart> = [

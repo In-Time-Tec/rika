@@ -13,7 +13,8 @@ import {
   ThreadVersion,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { HostedPresence } from "@rika/product/hosted-presence"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import {
@@ -68,7 +69,7 @@ const productFailure = (error: HostedProductError) =>
         : "unavailable",
     message: error.message,
   })
-const storeFailure = (error: StoreError) => {
+const storeFailure = (error: HostedPersistenceError) => {
   let kind: HostedThreadProtocolError["kind"] = "unavailable"
   if (error.reason === "invalid-authority") kind = "forbidden"
   else if (error.reason === "not-found" || error.reason === "conflict" || error.reason === "stale-version")
@@ -187,7 +188,7 @@ export const layerWithOptions = (
       const operations = yield* HostedThreadApplication
       const workspace = yield* HostedWorkspace
       const store = yield* ThreadProtocolStore
-      const hosted = yield* HostedStore
+      const presence = yield* HostedPresence
       const crypto = yield* Crypto.Crypto
       const contextualNotifications = yield* ThreadProtocolNotificationService
       const changes = options.notifications ?? contextualNotifications
@@ -487,8 +488,8 @@ export const layerWithOptions = (
               const presenceExpiresAt = Timestamp.make(
                 DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
               )
-              const participants = yield* hosted
-                .upsertPresence({
+              const participants = yield* presence
+                .upsert({
                   ownerId: authority.ownerId,
                   threadId: command.threadId,
                   actor: authority.actor,
@@ -498,7 +499,7 @@ export const layerWithOptions = (
                 })
                 .pipe(
                   Effect.andThen(
-                    hosted.listPresence({
+                    presence.list({
                       ownerId: authority.ownerId,
                       threadId: command.threadId,
                       actor: authority.actor,
@@ -546,8 +547,8 @@ export const layerWithOptions = (
             if (command._tag === "Detach") {
               if (attached !== undefined) {
                 const now = Timestamp.make(receivedAt)
-                yield* hosted
-                  .upsertPresence({
+                yield* presence
+                  .upsert({
                     ownerId: attached.authority.ownerId,
                     threadId: attached.threadId,
                     actor: attached.authority.actor,
@@ -578,8 +579,8 @@ export const layerWithOptions = (
 
             if (command._tag === "UpdatePresence") {
               const now = Timestamp.make(receivedAt)
-              yield* hosted
-                .upsertPresence({
+              yield* presence
+                .upsert({
                   ownerId: authority.ownerId,
                   threadId,
                   actor: authority.actor,
@@ -590,8 +591,8 @@ export const layerWithOptions = (
                   ),
                 })
                 .pipe(Effect.mapError(storeFailure))
-              const participants = yield* hosted
-                .listPresence({ ownerId: authority.ownerId, threadId, actor: authority.actor, now })
+              const participants = yield* presence
+                .list({ ownerId: authority.ownerId, threadId, actor: authority.actor, now })
                 .pipe(Effect.mapError(storeFailure))
               return [
                 frame({

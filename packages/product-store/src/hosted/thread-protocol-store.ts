@@ -33,7 +33,7 @@ import {
   ThreadVersion,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { InteractiveEventSchema } from "@rika/product/interactive-event"
 import { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { TurnId } from "@rika/product/turn-record"
@@ -57,8 +57,12 @@ import {
 import { requireThreadAccess } from "./authority"
 
 const databaseError = (cause: unknown) =>
-  StoreError.make({ reason: "database", message: `Thread protocol PostgreSQL operation failed: ${String(cause)}` })
-const failure = (reason: StoreError["reason"], message: string) => StoreError.make({ reason, message })
+  HostedPersistenceError.make({
+    reason: "database",
+    message: `Thread protocol PostgreSQL operation failed: ${String(cause)}`,
+  })
+const failure = (reason: HostedPersistenceError["reason"], message: string) =>
+  HostedPersistenceError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 const decode =

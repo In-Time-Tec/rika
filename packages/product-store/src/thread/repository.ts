@@ -4,7 +4,7 @@ import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { and, asc, desc, eq, ilike, notExists, or } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
-import { rikaThreadDeletionOutbox, rikaThreads, rikaWorkspaces } from "../database/schema/product"
+import { rikaHostedThreads, rikaThreadDeletionOutbox, rikaThreads, rikaWorkspaces } from "../database/schema/product"
 
 export class RepositoryError extends Schema.TaggedError<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
@@ -173,6 +173,31 @@ export const layerForOwner = (ownerId: string) =>
           .pipe(Effect.mapError(repositoryError))
         return yield* requireThread(input.id)
       })
+      const deleteAggregate = Effect.fn("ThreadRepository.deleteAggregate")(function* (
+        id: ThreadId,
+        requireExisting: boolean,
+      ) {
+        yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              const rows = yield* tx
+                .select({ id: rikaThreads.id })
+                .from(rikaThreads)
+                .where(and(eq(rikaThreads.id, id), eq(rikaThreads.ownerId, ownerId)))
+                .for("update")
+                .pipe(Effect.mapError(repositoryError))
+              if (rows[0] === undefined) {
+                if (requireExisting) return yield* missing(id)
+                return
+              }
+              yield* tx
+                .delete(rikaHostedThreads)
+                .where(and(eq(rikaHostedThreads.id, id), eq(rikaHostedThreads.ownerId, ownerId)))
+                .pipe(Effect.mapError(repositoryError))
+            }),
+          )
+          .pipe(Effect.mapError(repositoryError))
+      })
       return Service.of({
         create: Effect.fn("ThreadRepository.create")(function* (input) {
           return yield* db.transaction(() => insert(input)).pipe(Effect.mapError(repositoryError))
@@ -294,25 +319,8 @@ export const layerForOwner = (ownerId: string) =>
             ),
           )
         }),
-        completeDeletion: Effect.fn("ThreadRepository.completeDeletion")(function* (id) {
-          yield* db
-            .transaction((tx) =>
-              tx.delete(rikaThreads).where(and(eq(rikaThreads.id, id), eq(rikaThreads.ownerId, ownerId))),
-            )
-            .pipe(Effect.mapError(repositoryError))
-        }),
-        discard: Effect.fn("ThreadRepository.discard")(function* (id) {
-          const rows = yield* db
-            .select({ id: rikaThreads.id })
-            .from(rikaThreads)
-            .where(and(eq(rikaThreads.id, id), eq(rikaThreads.ownerId, ownerId)))
-            .pipe(Effect.mapError(repositoryError))
-          if (rows[0] === undefined) return yield* missing(id)
-          yield* db
-            .delete(rikaThreads)
-            .where(and(eq(rikaThreads.id, id), eq(rikaThreads.ownerId, ownerId)))
-            .pipe(Effect.mapError(repositoryError))
-        }),
+        completeDeletion: (id) => deleteAggregate(id, false),
+        discard: (id) => deleteAggregate(id, true),
       })
     }),
   )

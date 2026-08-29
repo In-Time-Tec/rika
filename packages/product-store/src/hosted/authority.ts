@@ -1,6 +1,6 @@
 import type { ActorAttribution } from "@rika/product/hosted-model"
 import { isAuthorized, type AuthorizationAction } from "@rika/product/hosted-authorization"
-import { StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { pgTable, text } from "drizzle-orm/pg-core"
@@ -23,9 +23,9 @@ const identityMembers = pgTable("member", {
 
 export type AuthorityExecutor = Pick<PgDrizzle.EffectPgDatabase, "select">
 
-const failure = (message: string) => StoreError.make({ reason: "invalid-authority", message })
+const failure = (message: string) => HostedPersistenceError.make({ reason: "invalid-authority", message })
 const databaseError = (cause: unknown) =>
-  StoreError.make({ reason: "database", message: `PostgreSQL authority failed: ${String(cause)}` })
+  HostedPersistenceError.make({ reason: "database", message: `PostgreSQL authority failed: ${String(cause)}` })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 

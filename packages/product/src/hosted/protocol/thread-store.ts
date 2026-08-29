@@ -16,7 +16,7 @@ import type {
   ThreadVersion,
   Timestamp,
 } from "../model"
-import type { StoreError } from "../store"
+import type { HostedPersistenceError } from "../persistence-error"
 
 export interface ThreadProtocolCommand {
   readonly ownerId: OwnerId
@@ -83,7 +83,7 @@ export interface ThreadProtocolStoreService {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly actor: ActorAttribution
-  }) => Effect.Effect<void, StoreError>
+  }) => Effect.Effect<void, HostedPersistenceError>
   readonly admitCommand: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
@@ -94,24 +94,24 @@ export interface ThreadProtocolStoreService {
     readonly actor: ActorAttribution
     readonly command: JsonObject
     readonly admittedAt: Timestamp
-  }) => Effect.Effect<CommandAdmission, StoreError>
+  }) => Effect.Effect<CommandAdmission, HostedPersistenceError>
   readonly claimNextCommand: (input: {
     readonly claimToken: string
     readonly claimMillis: number
-  }) => Effect.Effect<ThreadProtocolCommand | undefined, StoreError>
+  }) => Effect.Effect<ThreadProtocolCommand | undefined, HostedPersistenceError>
   readonly renewCommandClaim: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly commandId: CommandId
     readonly claimToken: string
     readonly claimMillis: number
-  }) => Effect.Effect<boolean, StoreError>
+  }) => Effect.Effect<boolean, HostedPersistenceError>
   readonly releaseCommandClaim: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly commandId: CommandId
     readonly claimToken: string
-  }) => Effect.Effect<void, StoreError>
+  }) => Effect.Effect<void, HostedPersistenceError>
   readonly completeCommand: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
@@ -121,14 +121,14 @@ export interface ThreadProtocolStoreService {
     readonly events: ReadonlyArray<InteractiveEvent>
     readonly snapshot?: HostedThreadSnapshot
     readonly completedAt: Timestamp
-  }) => Effect.Effect<CommandCompletion, StoreError>
+  }) => Effect.Effect<CommandCompletion, HostedPersistenceError>
   readonly appendEvents: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly events: ReadonlyArray<InteractiveEvent>
     readonly snapshot: HostedThreadSnapshot
     readonly createdAt: Timestamp
-  }) => Effect.Effect<ReadonlyArray<ThreadProtocolEvent>, StoreError>
+  }) => Effect.Effect<ReadonlyArray<ThreadProtocolEvent>, HostedPersistenceError>
   readonly saveSnapshot: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
@@ -136,7 +136,7 @@ export interface ThreadProtocolStoreService {
     readonly cursor: ThreadEventCursor
     readonly snapshot: HostedThreadSnapshot
     readonly createdAt: Timestamp
-  }) => Effect.Effect<void, StoreError>
+  }) => Effect.Effect<void, HostedPersistenceError>
   readonly replay: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
@@ -145,26 +145,26 @@ export interface ThreadProtocolStoreService {
     readonly throughCursor?: ThreadEventCursor
     readonly includeSnapshot?: boolean
     readonly limit: number
-  }) => Effect.Effect<ThreadReplay, StoreError>
+  }) => Effect.Effect<ThreadReplay, HostedPersistenceError>
   readonly acknowledgeCursor: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly actor: ActorAttribution
     readonly cursor: ThreadEventCursor
     readonly acknowledgedAt: Timestamp
-  }) => Effect.Effect<ThreadEventCursor, StoreError>
+  }) => Effect.Effect<ThreadEventCursor, HostedPersistenceError>
   readonly issueTicket: (
     input: ThreadSocketTicketBinding & {
       readonly ticketDigest: string
       readonly issuedAt: Timestamp
     },
-  ) => Effect.Effect<void, StoreError>
+  ) => Effect.Effect<void, HostedPersistenceError>
   readonly redeemTicket: (input: {
     readonly ticketDigest: string
     readonly audience: string
     readonly redeemedAt: Timestamp
-  }) => Effect.Effect<ThreadSocketTicketBinding, StoreError>
-  readonly revokeTicket: (ticketId: string) => Effect.Effect<void, StoreError>
+  }) => Effect.Effect<ThreadSocketTicketBinding, HostedPersistenceError>
+  readonly revokeTicket: (ticketId: string) => Effect.Effect<void, HostedPersistenceError>
 }
 
 export class ThreadProtocolStore extends Context.Service<ThreadProtocolStore, ThreadProtocolStoreService>()(

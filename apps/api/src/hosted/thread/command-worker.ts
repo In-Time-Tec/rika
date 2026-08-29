@@ -13,7 +13,8 @@ import {
 } from "effect"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { CreateThreadCommand, MutatingThreadCommand, isDurableThreadEvent } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
@@ -74,7 +75,7 @@ type InteractiveMutatingCommand = Exclude<
 >
 type CommandFailure =
   | CommandApplicationError
-  | StoreError
+  | HostedPersistenceError
   | HostedProductError
   | HostedWorkspaceError
   | HostedToolPolicyError
@@ -109,7 +110,7 @@ export const commandControlFailure: {
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 const commandFailure = (error: CommandFailure) => {
   if (Schema.is(CommandApplicationError)(error)) return error
-  if (Schema.is(StoreError)(error)) {
+  if (Schema.is(HostedPersistenceError)(error)) {
     let kind: CommandApplicationError["kind"] = "unavailable"
     if (error.reason === "invalid-authority") kind = "forbidden"
     else if (error.reason === "not-found") kind = "not-found"
@@ -228,7 +229,7 @@ export const layer = (options: {
   Layer.unwrap(
     Effect.gen(function* () {
       const protocol = yield* ThreadProtocolStore
-      const hosted = yield* HostedStore
+      const hosted = yield* HostedClientAuthority
       const product = yield* HostedProduct
       const operations = yield* HostedThreadApplication
       const workspace = yield* HostedWorkspace

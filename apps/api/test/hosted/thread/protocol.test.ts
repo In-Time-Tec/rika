@@ -17,7 +17,8 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { HostedPresence } from "@rika/product/hosted-presence"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import { protocolVersion, type HostedThreadSnapshot } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
@@ -46,7 +47,6 @@ import {
 } from "../../../src/hosted/thread/protocol"
 import { makeThreadProtocolNotifications } from "../../../src/hosted/thread/notifications"
 import { makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
-import { layer as hostedStoreLayer } from "@rika/product-store/memory-store"
 import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../../../src/hosted/environment/workspace"
 import { testToolPolicy } from "../execution/tool-policy.fixture"
@@ -90,6 +90,19 @@ const snapshot = {
   pendingAuthorizations: [],
 }
 
+const presenceLayer = Layer.succeed(HostedPresence, {
+  upsert: (input) =>
+    Effect.succeed({
+      ownerId: input.ownerId,
+      threadId: input.threadId,
+      actor: input.actor,
+      status: input.status,
+      lastSeenAt: input.now,
+      expiresAt: input.expiresAt,
+    }),
+  list: () => Effect.succeed([]),
+})
+
 const memoryStore = () => {
   let version = 0n
   let cursor = 0n
@@ -116,7 +129,7 @@ const memoryStore = () => {
   const service: ThreadProtocolStoreService = {
     initializeThread: () => Effect.void,
     admitCommand: (input) =>
-      Effect.suspend((): Effect.Effect<CommandAdmission, StoreError> => {
+      Effect.suspend((): Effect.Effect<CommandAdmission, HostedPersistenceError> => {
         admissions.push({
           threadId: input.threadId,
           commandId: input.commandId,
@@ -128,7 +141,7 @@ const memoryStore = () => {
             command: found,
           })
         if (input.expectedThreadVersion !== String(version))
-          return Effect.fail(StoreError.make({ reason: "stale-version", message: "stale" }))
+          return Effect.fail(HostedPersistenceError.make({ reason: "stale-version", message: "stale" }))
         version += 1n
         const admitted: ThreadProtocolCommand = {
           ...input,
@@ -399,7 +412,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       }),
     ),
     Layer.succeed(ThreadProtocolStore, store),
-    hostedStoreLayer,
+    presenceLayer,
     Layer.succeed(HostedToolPolicy, testToolPolicy),
     BunCrypto.layer,
   )
@@ -938,7 +951,7 @@ it.effect("admits authorization decisions without applying them in the socket se
       }),
     ),
     Layer.succeed(ThreadProtocolStore, store),
-    hostedStoreLayer,
+    presenceLayer,
     Layer.succeed(HostedToolPolicy, {
       ...testToolPolicy,
       recordDecision: (input) => Effect.sync(() => void decisions.push(input)),
@@ -1119,7 +1132,7 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
       }),
     ),
     Layer.succeed(ThreadProtocolStore, store),
-    hostedStoreLayer,
+    presenceLayer,
     Layer.succeed(HostedToolPolicy, testToolPolicy),
     BunCrypto.layer,
   )

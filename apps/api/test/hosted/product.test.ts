@@ -19,9 +19,10 @@ import {
   rikaThreadQueueState,
   rikaTurnAdmissionOutbox,
   rikaTurns,
+  rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { asc, count as rowCount, eq, inArray } from "drizzle-orm"
+import { asc, count as rowCount, eq, inArray, sql } from "drizzle-orm"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted, Ref, Schema } from "effect"
 import { Pool } from "pg"
@@ -87,14 +88,14 @@ const withDatabase = <A, E, R>(
         const activePool = new Pool({ connectionString: url })
         pool = activePool
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          const migrationSql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.readFileString(migration.url.pathname),
           )
           yield* runMigration({
             pool: activePool,
             id: migration.id,
             checksum: migration.checksum,
-            sql,
+            sql: migrationSql,
           })
         }
         const context = yield* Layer.build(
@@ -169,6 +170,124 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
         name: "Divergent retry",
       })
       expect(yield* failureKind(product.createConnection({ ...input, projectId: project.id }))).toBe("conflict")
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("rolls back failed aggregate creation and rejects one-sided Thread state", () =>
+  withDatabase("aggregate-invariant", (database) =>
+    Effect.gen(function* () {
+      const authenticated = principal("aggregate-invariant-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`CREATE FUNCTION reject_aggregate_product_thread() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected aggregate failure'; END $$;
+            CREATE TRIGGER reject_aggregate_product_thread BEFORE INSERT ON rika_threads
+            FOR EACH ROW EXECUTE FUNCTION reject_aggregate_product_thread();`),
+        ),
+      )
+      const product = yield* HostedProduct
+      const threadId = "aggregate-rollback-thread"
+      expect(
+        yield* product
+          .createConnection({
+            principal: authenticated,
+            owner: personal(authenticated.userId),
+            executorKind: "orb",
+            threadId,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`DROP TRIGGER reject_aggregate_product_thread ON rika_threads;
+          DROP FUNCTION reject_aggregate_product_thread();`),
+        ),
+      )
+      const rolledBack = {
+        hostedThreads: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedThreads, eq(rikaHostedThreads.id, threadId)),
+        ),
+        hostedWorkspaces: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedWorkspaces, eq(rikaHostedWorkspaces.id, `${threadId}-workspace`)),
+        ),
+        threads: yield* Effect.tryPromise(() => database.$count(rikaThreads, eq(rikaThreads.id, threadId))),
+        workspaces: yield* Effect.tryPromise(() =>
+          database.$count(rikaWorkspaces, eq(rikaWorkspaces.path, `${threadId}-workspace`)),
+        ),
+      }
+      expect(rolledBack).toEqual({ hostedThreads: 0, hostedWorkspaces: 0, threads: 0, workspaces: 0 })
+
+      const owners = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedOwners.id })
+          .from(rikaHostedOwners)
+          .where(eq(rikaHostedOwners.userId, authenticated.userId)),
+      )
+      const ownerId = owners[0]?.id
+      if (ownerId === undefined) return yield* Effect.die("Aggregate rollback owner was not created")
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaHostedWorkspaces).values({
+          id: "hosted-orphan-workspace",
+          ownerId,
+          createdByUserId: authenticated.userId,
+          executorKind: "orb",
+          inheritProjectGrants: false,
+          createdAt,
+        }),
+      )
+      expect(
+        yield* Effect.tryPromise(() =>
+          database.transaction((tx) =>
+            tx.insert(rikaHostedThreads).values({
+              id: "hosted-orphan-thread",
+              ownerId,
+              workspaceId: "hosted-orphan-workspace",
+              createdByUserId: authenticated.userId,
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt,
+            }),
+          ),
+        ).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaWorkspaces).values({ ownerId, path: "product-orphan-workspace", createdAt: 1 }),
+      )
+      expect(
+        yield* Effect.tryPromise(() =>
+          database.transaction((tx) =>
+            tx.insert(rikaThreads).values({
+              id: "product-orphan-thread",
+              ownerId,
+              workspace: "product-orphan-workspace",
+              title: "Orphan",
+              createdAt: 1,
+              updatedAt: 1,
+            }),
+          ),
+        ).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      const orphans = {
+        hosted: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedThreads, eq(rikaHostedThreads.id, "hosted-orphan-thread")),
+        ),
+        product: yield* Effect.tryPromise(() =>
+          database.$count(rikaThreads, eq(rikaThreads.id, "product-orphan-thread")),
+        ),
+      }
+      expect(orphans).toEqual({ hosted: 0, product: 0 })
     }),
   ),
 )

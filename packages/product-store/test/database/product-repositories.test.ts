@@ -12,8 +12,9 @@ import * as UnitOrder from "@rika/transcript/transcript-unit-order"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
-import { and, eq, sql as drizzleSql } from "drizzle-orm"
+import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { eq, sql as drizzleSql } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -119,6 +120,40 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           ]),
         )
         const personal = yield* Layer.build(repositoryLayer(url, personalOwner))
+        const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(personal))
+        const seedAggregate = (id: Thread.ThreadId, workspace: string, title: string, createdAt: number) =>
+          aggregateDatabase.transaction((tx) =>
+            Effect.gen(function* () {
+              const date = DateTime.toDate(DateTime.makeUnsafe(createdAt))
+              yield* tx.insert(schema.rikaHostedWorkspaces).values({
+                id: workspace,
+                ownerId: personalOwner,
+                createdByUserId: "product-personal-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: date,
+              })
+              yield* tx.insert(schema.rikaWorkspaces).values({ ownerId: personalOwner, path: workspace, createdAt })
+              yield* tx.insert(schema.rikaHostedThreads).values({
+                id,
+                ownerId: personalOwner,
+                workspaceId: workspace,
+                createdByUserId: "product-personal-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: date,
+              })
+              yield* tx.insert(schema.rikaThreads).values({
+                id,
+                ownerId: personalOwner,
+                workspace,
+                title,
+                createdAt,
+                updatedAt: createdAt,
+              })
+            }),
+          )
+        yield* seedAggregate(threadId, "/work/product", "Product", 1)
         const organization = yield* Layer.build(repositoryLayer(url, organizationOwner))
 
         yield* Effect.gen(function* () {
@@ -129,7 +164,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           const goals = yield* GoalRepository.Service
           const sql = yield* SqlClient
 
-          yield* threads.create({ id: threadId, workspace: "/work/product", title: "Product", now: 1 })
           const active = yield* createTurn(turns, {
             id: "product-active",
             threadId,
@@ -268,32 +302,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           expect(yield* goals.claim(goal)).toEqual(goal)
           expect(yield* goals.claim({ ...goal, objective: "conflict" })).toBeUndefined()
 
-          yield* sql`CREATE FUNCTION reject_product_thread() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-              BEGIN RAISE EXCEPTION 'injected product thread failure'; END $$`
-          yield* sql`CREATE TRIGGER reject_product_thread BEFORE INSERT ON rika_threads
-              FOR EACH ROW EXECUTE FUNCTION reject_product_thread()`
-          const rollbackThread = Thread.ThreadId.make("product-rollback")
-          expect(
-            yield* Effect.result(
-              threads.create({ id: rollbackThread, workspace: "/work/rollback", title: "Rejected", now: 30 }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { _tag: "ThreadRepositoryError" } })
-          expect(
-            yield* Effect.tryPromise(() =>
-              db
-                .select({ path: schema.rikaWorkspaces.path })
-                .from(schema.rikaWorkspaces)
-                .where(
-                  and(
-                    eq(schema.rikaWorkspaces.ownerId, personalOwner),
-                    eq(schema.rikaWorkspaces.path, "/work/rollback"),
-                  ),
-                ),
-            ),
-          ).toEqual([])
-          yield* sql`DROP TRIGGER reject_product_thread ON rika_threads`
-          yield* sql`DROP FUNCTION reject_product_thread()`
-
           expect(yield* ThreadRepository.Service.pipe(Effect.provide(organization))).toEqual(
             expect.objectContaining({}),
           )
@@ -305,12 +313,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           ).toBeUndefined()
 
           const cancellationThreadId = Thread.ThreadId.make("product-cancellation-thread")
-          yield* threads.create({
-            id: cancellationThreadId,
-            workspace: "/work/product-cancellation",
-            title: "Cancellation",
-            now: 30,
-          })
+          yield* seedAggregate(cancellationThreadId, "/work/product-cancellation", "Cancellation", 30)
           const cancelledBeforeLink = yield* createTurn(turns, {
             id: "product-cancel-before-link",
             threadId: cancellationThreadId,
@@ -325,6 +328,22 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           expect(yield* threads.get(threadId)).toBeUndefined()
           expect(yield* threads.pendingDeletions).toEqual([{ threadId, requestedAt: 34 }])
           yield* threads.completeDeletion(threadId)
+          expect(
+            yield* Effect.tryPromise(() =>
+              db
+                .select({ id: schema.rikaHostedThreads.id })
+                .from(schema.rikaHostedThreads)
+                .where(eq(schema.rikaHostedThreads.id, threadId)),
+            ),
+          ).toEqual([])
+          expect(
+            yield* Effect.tryPromise(() =>
+              db
+                .select({ id: schema.rikaThreads.id })
+                .from(schema.rikaThreads)
+                .where(eq(schema.rikaThreads.id, threadId)),
+            ),
+          ).toEqual([])
           expect(
             yield* Effect.tryPromise(() =>
               db

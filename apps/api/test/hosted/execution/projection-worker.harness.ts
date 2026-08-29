@@ -6,6 +6,8 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import {
   rikaHostedOwners,
+  rikaHostedThreads,
+  rikaHostedWorkspaces,
   rikaThreads,
   rikaTranscriptCheckpoints,
   rikaTranscriptUnits,
@@ -31,6 +33,7 @@ import {
   Stream,
 } from "effect"
 import { eq } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -84,6 +87,8 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           sql,
         })
       }
+      const aggregateContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+      const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(aggregateContext))
       const route = yield* Schema.encodeEffect(JsonRoute)(ExecutionRoute.testExecutionRoute())
       const link = yield* Schema.encodeEffect(JsonLink)({
         runId: "projection-run",
@@ -104,17 +109,36 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       yield* Effect.tryPromise(() =>
         db.insert(rikaHostedOwners).values({ id: "projection-owner", kind: "personal", userId: "projection-user" }),
       )
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaWorkspaces).values({ ownerId: "projection-owner", path: "projection-workspace", createdAt: 1 }),
-      )
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaThreads).values({
-          id: "projection-thread",
-          ownerId: "projection-owner",
-          workspace: "projection-workspace",
-          title: "Projection",
-          createdAt: 1,
-          updatedAt: 1,
+      yield* aggregateDatabase.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(rikaHostedWorkspaces).values({
+            id: "projection-workspace",
+            ownerId: "projection-owner",
+            createdByUserId: "projection-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt: now,
+          })
+          yield* tx
+            .insert(rikaWorkspaces)
+            .values({ ownerId: "projection-owner", path: "projection-workspace", createdAt: 1 })
+          yield* tx.insert(rikaHostedThreads).values({
+            id: "projection-thread",
+            ownerId: "projection-owner",
+            workspaceId: "projection-workspace",
+            createdByUserId: "projection-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt: now,
+          })
+          yield* tx.insert(rikaThreads).values({
+            id: "projection-thread",
+            ownerId: "projection-owner",
+            workspace: "projection-workspace",
+            title: "Projection",
+            createdAt: 1,
+            updatedAt: 1,
+          })
         }),
       )
       yield* Effect.tryPromise(() =>
