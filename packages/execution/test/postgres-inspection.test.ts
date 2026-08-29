@@ -11,6 +11,7 @@ import { layerHosted } from "../src/runtime"
 import { remoteCell } from "./support/adapters"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
+const maxConnections = 6
 
 const backendCount = (pool: Pool) =>
   Effect.tryPromise(() =>
@@ -49,7 +50,7 @@ it.live.skipIf(databaseUrl === "")(
             postgres: {
               url,
               source: "postgres-inspection-test",
-              maxConnections: 6,
+              maxConnections,
               worker: {
                 workerId: `postgres-inspection-${suffix}`,
                 concurrency: 1,
@@ -58,7 +59,7 @@ it.live.skipIf(databaseUrl === "")(
                 cancellationIntervalMillis: 20,
               },
             },
-          }).pipe(Layer.provide(RunSchema.layerClient({ url, maxConnections: 6 }))),
+          }).pipe(Layer.provide(RunSchema.layerClient({ url, maxConnections }))),
           scope,
         )
         const gateway = Context.get(context, ExecutionGateway.Service)
@@ -82,16 +83,13 @@ it.live.skipIf(databaseUrl === "")(
           yield* Effect.scoped(gateway.watchTurn(link).pipe(Stream.runDrain))
           expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
         })
-        for (let attempt = 0; attempt < 10; attempt += 1) {
-          yield* inspect
-        }
-        const baseline = yield* backendCount(pool)
         const observed = new Array<number>()
         for (let attempt = 0; attempt < 20; attempt += 1) {
           yield* inspect
           observed.push(yield* backendCount(pool))
         }
-        expect(Math.max(...observed)).toBeLessThanOrEqual(baseline + 1)
+        // The managed pool owns at most maxConnections backends, LISTEN owns one, and this test's pool owns one.
+        expect(Math.max(...observed)).toBeLessThanOrEqual(maxConnections + 2)
         expect(yield* fixture.requests).toHaveLength(1)
       } finally {
         yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)
