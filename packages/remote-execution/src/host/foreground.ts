@@ -3,7 +3,6 @@ import { BunFileSystem } from "@effect/platform-bun"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import {
-  Cause,
   Clock,
   Config,
   Context,
@@ -11,7 +10,6 @@ import {
   Deferred,
   Effect,
   Fiber,
-  FiberSet,
   FileSystem,
   Layer,
   Queue,
@@ -21,17 +19,14 @@ import {
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError, type Transport as BindingTransport } from "../protocol/binding-proxy"
-import { CellError, State as CellStateSchema, terminalOutcome, type State as CellState } from "../protocol/cells"
+import { CellError, State as CellStateSchema, type State as CellState } from "../protocol/cells"
+import * as Operations from "../protocol/operations"
 import * as HostedKernel from "./kernel"
 import { Machine, MachineError, State as MachineState, workspaceLayer as machineLayer } from "./machine"
 import {
   AccessWire,
   ApiMessage,
-  CellAttribution,
-  CellLifecycleFrame,
-  CellResponse,
   type ApiMessage as IncomingMessage,
-  type CellRequest,
   emptyCursor,
   type Fence,
   RunnerAdmissionWire,
@@ -60,15 +55,7 @@ export class ForegroundRunnerError extends Schema.TaggedError<ForegroundRunnerEr
   message: Schema.String,
 }) {}
 
-const ReceiptState = Schema.Literals(["running", "completed"])
-const ForegroundReceipt = Schema.Struct({
-  operationKey: Schema.String.check(Schema.isMinLength(1)),
-  attempt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  attribution: CellAttribution,
-  frames: Schema.Array(CellLifecycleFrame),
-  state: ReceiptState,
-  response: Schema.optionalKey(CellResponse),
-})
+const ForegroundReceipt = Operations.OperationReceipt
 export type ForegroundReceipt = typeof ForegroundReceipt.Type
 
 export const ForegroundRunnerSnapshot = Schema.Struct({
@@ -110,33 +97,6 @@ const sameAccess = (left: AccessWire, right: AccessWire) =>
   left.sessionToken === right.sessionToken &&
   sameFence(left.fence, right.fence)
 
-const attribution = (request: CellRequest): CellAttribution => ({
-  operationKey: request.operationKey,
-  workspaceId: request.workspaceId,
-  sessionId: request.sessionId,
-  threadId: request.threadId,
-  turnId: request.turnId,
-  runId: request.runId,
-  rootRunId: request.rootRunId,
-  toolCallId: request.toolCallId,
-  attempt: request.attempt,
-})
-
-const executionKey = (operationKey: string, attempt: number) => `${operationKey}\u0000${attempt}`
-const machineExecutionKey = (operationKey: string, attempt: number, machineId: string) =>
-  `${executionKey(operationKey, attempt)}\u0000${machineId}`
-const machineParentActive = (receipts: Map<string, PendingResult>, operationKey: string, attempt: number) => {
-  const retained = receipts.get(executionKey(operationKey, attempt))
-  return retained !== undefined && !retained.frames.some((frame) => frame._tag === "Terminal")
-}
-
-const redactOutput = (text: string) => {
-  const redacted = text
-    .replace(/(token|password|secret|authorization)["']?\s*[:=]\s*["'][^"']+/gi, "$1=REDACTED")
-    .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]+\b/g, "REDACTED")
-  return { text: redacted.slice(0, 16_384), truncated: redacted.length > 16_384 }
-}
-
 const runnerUrl = (
   value: string,
   expiresAt: number | undefined,
@@ -175,15 +135,6 @@ interface LocalSession {
   readonly leaseExpiresAt: number
   readonly heartbeatIntervalMillis: number
   readonly cursor: typeof emptyCursor
-}
-
-interface PendingResult {
-  readonly operationKey: string
-  readonly attempt: number
-  readonly attribution: CellAttribution
-  readonly frames: ReadonlyArray<CellLifecycleFrame>
-  readonly state: "running" | "completed"
-  readonly response?: CellResponse
 }
 
 const access = (session: LocalSession): AccessWire => ({
@@ -278,47 +229,12 @@ const inMemoryCells = (
     })
   })
 
-const resolveCellResponse = Effect.fn("ForegroundRunner.resolveCellResponse")(function* (input: {
-  readonly current: LocalSession
-  readonly request: CellRequest
-  readonly cells: HostedKernel.Interface
-  readonly output: (chunk: { readonly stream: "stdout" | "stderr"; readonly text: string }) => Effect.Effect<void>
-}) {
-  return sameAccess(access(input.current), input.request.access)
-    ? yield* input.cells.execute(input.request, input.output).pipe(
-        Effect.catch((error) =>
-          Effect.succeed<CellResponse>({
-            _tag: "DomainFailure",
-            failure: { kind: error._tag === "CellError" ? error.kind : "execution", message: error.message },
-          }),
-        ),
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
-            : Effect.succeed<CellResponse>({
-                _tag: "DomainFailure",
-                failure: { kind: "execution", message: String(cause) },
-              }),
-        ),
-      )
-    : ({
-        _tag: "DomainFailure",
-        failure: { kind: "fenced", message: "Cell request has a stale executor fence" },
-      } as const)
-})
-
 const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
-  writer: (chunk: string) => Effect.Effect<void, Socket.SocketError>,
   session: Ref.Ref<LocalSession | undefined>,
-  receipts: Ref.Ref<Map<string, PendingResult>>,
-  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundRunnerError>>>,
-  activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   cells: HostedKernel.Interface,
-  machine: Machine["Service"],
+  operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
-  lifecycle: Semaphore.Semaphore,
-  runWorker: (effect: Effect.Effect<void, ForegroundRunnerError>) => Fiber.Fiber<void, ForegroundRunnerError>,
 ) =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
@@ -342,308 +258,22 @@ const consumeApi = (
       })
       yield* persist()
     }
-    const writeLifecycle = (frame: CellLifecycleFrame) =>
-      Effect.gen(function* () {
-        const current = yield* Ref.get(session)
-        if (current === undefined) return yield* failure("Runner session is unavailable")
-        const currentWriter = (yield* Ref.get(activeWriter)) ?? writer
-        yield* currentWriter(encodeRunnerMessage({ _tag: "CellLifecycle", access: access(current), frame })).pipe(
-          Effect.mapError(() => failure("Could not write local cell lifecycle")),
-        )
-      })
-    const append = (operationKey: string, frame: CellLifecycleFrame, terminal?: { readonly response: CellResponse }) =>
-      lifecycle.withPermits(1)(
-        Effect.gen(function* () {
-          const receipt = (yield* Ref.get(receipts)).get(operationKey)
-          if (receipt === undefined || receipt.frames.some((known) => known._tag === "Terminal")) return false
-          if (frame.cursor !== receipt.frames.length + 1) return false
-          yield* Ref.update(receipts, (values) => {
-            const next = new Map(values)
-            const nextReceipt = {
-              ...receipt,
-              frames: [...receipt.frames, frame],
-            }
-            next.set(
-              operationKey,
-              terminal === undefined
-                ? nextReceipt
-                : { ...nextReceipt, state: "completed", response: terminal.response },
-            )
-            return next
-          })
-          yield* persist()
-          yield* writeLifecycle(frame)
-          return true
-        }),
-      )
-    if (message._tag === "LocalCellReceipt") {
-      const current = yield* Ref.get(session)
-      if (current === undefined) return yield* failure("Runner session is unavailable")
-      if (!sameAccess(access(current), message.access)) return yield* failure("Runner result receipt is stale")
-      const key = executionKey(message.operationKey, message.attempt)
-      yield* Ref.update(receipts, (values) => {
-        const pending = values.get(key)
-        if (pending === undefined || pending.attempt !== message.attempt) return values
-        const next = new Map(values)
-        next.delete(key)
-        return next
-      })
-      yield* persist()
-    }
-    if (message._tag === "CellTerminalReceipt") {
-      const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
-      const terminal = receipt?.frames.find(
-        (frame): frame is Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }> =>
-          frame._tag === "Terminal" && frame.cursor === message.cursor && frame.attribution.attempt === message.attempt,
-      )
-      const current = yield* Ref.get(session)
-      if (terminal !== undefined && current !== undefined && sameAccess(access(current), message.access)) {
-        const currentWriter = (yield* Ref.get(activeWriter)) ?? writer
-        yield* currentWriter(
-          encodeRunnerMessage({
-            _tag: "LocalCellResult",
-            access: access(current),
-            operationKey: message.operationKey,
-            attempt: message.attempt,
-            response: terminal.response,
-          }),
-        ).pipe(Effect.mapError(() => failure("Could not write local cell result")))
-      }
-    }
-    if (message._tag === "CellTerminalSuperseded") {
-      const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access))
-        return yield* failure("Runner terminal supersession is stale")
-    }
-    if (message._tag === "CellReplay") {
-      const receipt = (yield* Ref.get(receipts)).get(executionKey(message.operationKey, message.attempt))
-      const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access))
-        return yield* failure("Runner replay has a stale session")
-      if (receipt !== undefined)
-        yield* Effect.forEach(
-          receipt.frames.filter((frame) => frame.cursor > message.afterCursor),
-          writeLifecycle,
-          { discard: true },
-        )
-      yield* cells.replayBindings(access(current)).pipe(Effect.mapError((error) => failure(error.message)))
-    }
-    if (message._tag === "CellCancel") {
-      const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access))
-        return yield* failure("Runner cancellation has a stale session")
-      const key = executionKey(message.operationKey, message.attempt)
-      const receipt = (yield* Ref.get(receipts)).get(key)
-      if (receipt === undefined || receipt.attempt !== message.attempt)
-        return yield* failure("Runner cancellation has a stale attempt")
-      const response = yield* cells
-        .cancel(message.operationKey, message.attempt)
-        .pipe(Effect.mapError((error) => failure(error.message)))
-      const machinePrefix = `${key}\u0000`
-      const machines = [...(yield* Ref.get(liveOperations))]
-        .filter(([operationKey]) => operationKey.startsWith(machinePrefix))
-        .map(([, fiber]) => fiber)
-      yield* Effect.forEach(machines, Fiber.interrupt, { discard: true })
-      const interrupted = (yield* Ref.get(receipts)).get(key)
-      if (interrupted !== undefined && !interrupted.frames.some((frame) => frame._tag === "Terminal")) {
-        yield* append(
-          key,
-          {
-            _tag: "Terminal",
-            attribution: interrupted.attribution,
-            cursor: interrupted.frames.length + 1,
-            outcome: terminalOutcome(response),
-            response,
-          },
-          { response },
-        )
-      }
-    }
     if (message._tag === "BindingResult") {
       const current = yield* Ref.get(session)
       if (current === undefined || !sameAccess(access(current), message.access))
         return yield* failure("Local binding result has a stale session")
       yield* cells.completeBinding(message).pipe(Effect.mapError((error) => failure(error.message)))
     }
-    if (message._tag === "MachineExecute") {
-      const currentSession = yield* Ref.get(session)
-      if (currentSession === undefined || !sameAccess(access(currentSession), message.access))
-        return yield* failure("Local machine request has a stale session")
-      if (!machineParentActive(yield* Ref.get(receipts), message.operationKey, message.attempt)) {
-        const currentWriter = yield* Ref.get(activeWriter)
-        if (currentWriter !== undefined)
-          yield* currentWriter(
-            encodeRunnerMessage({
-              _tag: "MachineResult",
-              access: message.access,
-              operationKey: message.operationKey,
-              attempt: message.attempt,
-              machineId: message.machineId,
-              requestDigest: message.requestDigest,
-              outcome: { _tag: "Fenced", message: "Parent Cell is no longer running" },
-            }),
-          ).pipe(Effect.mapError(() => failure("Could not write fenced local machine result")))
-        return
-      }
-      const key = machineExecutionKey(message.operationKey, message.attempt, message.machineId)
-      if (!(yield* Ref.get(liveOperations)).has(key)) {
-        const gate = yield* Deferred.make<void>()
-        const operation = machine
-          .execute({
-            machineId: message.machineId,
-            requestDigest: message.requestDigest,
-            request: message.request,
-          })
-          .pipe(
-            Effect.flatMap((outcome) =>
-              Effect.gen(function* () {
-                const latest = yield* Ref.get(session)
-                const currentWriter = yield* Ref.get(activeWriter)
-                if (latest === undefined || currentWriter === undefined) return
-                yield* currentWriter(
-                  encodeRunnerMessage({
-                    _tag: "MachineResult",
-                    access: access(latest),
-                    operationKey: message.operationKey,
-                    attempt: message.attempt,
-                    machineId: message.machineId,
-                    requestDigest: message.requestDigest,
-                    outcome,
-                  }),
-                ).pipe(Effect.mapError(() => failure("Could not write local machine result")))
-              }),
-            ),
-            Effect.mapError((error) => failure(error.message)),
-            Effect.ensuring(
-              Ref.update(liveOperations, (current) => {
-                const next = new Map(current)
-                next.delete(key)
-                return next
-              }),
-            ),
-          )
-        const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
-        yield* Ref.update(liveOperations, (current) => new Map(current).set(key, fiber))
-        yield* Deferred.succeed(gate, undefined)
-      }
-    }
-    if (message._tag === "CellExecute") {
-      const current = yield* Ref.get(session)
-      if (current === undefined) return yield* failure("Runner session is unavailable")
-      const operationKey = message.request.operationKey
-      const attempt = message.request.attempt
-      const key = executionKey(operationKey, attempt)
-      const known = (yield* Ref.get(receipts)).get(key)
-      if (known !== undefined && attempt < known.attempt) return
-      if (known !== undefined && (known.state !== "running" || (yield* Ref.get(liveOperations)).has(key))) {
-        yield* Effect.forEach(known.frames, writeLifecycle, { discard: true })
-        yield* cells.replayBindings(access(current)).pipe(Effect.mapError((error) => failure(error.message)))
-        return
-      }
-      const identity = known?.attribution ?? attribution(message.request)
-      if (known === undefined) {
-        const accepted: CellLifecycleFrame = { _tag: "Accepted", attribution: identity, cursor: 1 }
-        yield* Ref.update(receipts, (values) =>
-          new Map(values).set(key, {
-            operationKey,
-            attempt,
-            attribution: identity,
-            frames: [accepted],
-            state: "running",
-          }),
-        )
-        yield* persist()
-        yield* writeLifecycle(accepted)
-      }
-      const admission = yield* cells.admit(message.request).pipe(
-        Effect.match({
-          onFailure: (error) =>
-            ({
-              _tag: "Failure" as const,
-              response: {
-                _tag: "DomainFailure" as const,
-                failure: { kind: error._tag === "CellError" ? error.kind : "execution", message: error.message },
-              },
-            }) satisfies { readonly _tag: "Failure"; readonly response: CellResponse },
-          onSuccess: () => ({ _tag: "Success" as const }),
-        }),
-      )
-      if (admission._tag === "Failure") {
-        const receipt = (yield* Ref.get(receipts)).get(key)
-        if (receipt !== undefined)
-          yield* append(
-            key,
-            {
-              _tag: "Terminal",
-              attribution: identity,
-              cursor: receipt.frames.length + 1,
-              outcome: terminalOutcome(admission.response),
-              response: admission.response,
-            },
-            { response: admission.response },
-          )
-        return
-      }
-      const admittedReceipt = (yield* Ref.get(receipts)).get(key)
-      if (admittedReceipt !== undefined && !admittedReceipt.frames.some((frame) => frame._tag === "Started"))
-        yield* append(key, {
-          _tag: "Started",
-          attribution: identity,
-          cursor: admittedReceipt.frames.length + 1,
-        })
-      const operation = Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const response = yield* restore(
-            resolveCellResponse({
-              current,
-              request: message.request,
-              cells,
-              output: (chunk) =>
-                Effect.gen(function* () {
-                  const receipt = (yield* Ref.get(receipts)).get(key)
-                  if (receipt === undefined || receipt.frames.filter((frame) => frame._tag === "Output").length >= 16)
-                    return
-                  const output = redactOutput(chunk.text)
-                  yield* append(key, {
-                    _tag: "Output",
-                    attribution: identity,
-                    cursor: receipt.frames.length + 1,
-                    stream: chunk.stream,
-                    text: output.text,
-                    redacted: true,
-                    truncated: output.truncated,
-                  }).pipe(Effect.ignore)
-                }),
-            }),
-          )
-          const receipt = (yield* Ref.get(receipts)).get(key)
-          if (receipt === undefined) return
-          yield* append(
-            key,
-            {
-              _tag: "Terminal",
-              attribution: identity,
-              cursor: receipt.frames.length + 1,
-              outcome: terminalOutcome(response),
-              response,
-            },
-            { response },
-          )
-        }),
-      ).pipe(
-        Effect.ensuring(
-          Ref.update(liveOperations, (values) => {
-            const next = new Map(values)
-            next.delete(key)
-            return next
-          }),
-        ),
-      )
-      const gate = yield* Deferred.make<void>()
-      const fiber = yield* Effect.sync(() => runWorker(Deferred.await(gate).pipe(Effect.andThen(operation))))
-      yield* Ref.update(liveOperations, (values) => new Map(values).set(key, fiber))
-      yield* Deferred.succeed(gate, undefined)
-    }
+    if (
+      message._tag === "CellCancel" ||
+      message._tag === "CellExecute" ||
+      message._tag === "CellReplay" ||
+      message._tag === "CellTerminalReceipt" ||
+      message._tag === "CellTerminalSuperseded" ||
+      message._tag === "LocalCellReceipt" ||
+      message._tag === "MachineExecute"
+    )
+      yield* operations.dispatch(message).pipe(Effect.mapError((error) => failure(error.message)))
   }).pipe(Effect.forever)
 
 const connected = (
@@ -652,14 +282,10 @@ const connected = (
   processIncarnation: string,
   workspaceCapabilities: WorkspaceCapabilitySnapshot,
   sessions: Ref.Ref<LocalSession | undefined>,
-  receipts: Ref.Ref<Map<string, PendingResult>>,
-  liveOperations: Ref.Ref<Map<string, Fiber.Fiber<void, ForegroundRunnerError>>>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   cells: HostedKernel.Interface,
-  machine: Machine["Service"],
+  operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
-  lifecycle: Semaphore.Semaphore,
-  runWorker: (effect: Effect.Effect<void, ForegroundRunnerError>) => Fiber.Fiber<void, ForegroundRunnerError>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -766,19 +392,7 @@ const connected = (
       return yield* Effect.raceFirst(
         Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
         Effect.raceFirst(
-          consumeApi(
-            incoming,
-            writer,
-            sessions,
-            receipts,
-            liveOperations,
-            activeWriter,
-            cells,
-            machine,
-            persist,
-            lifecycle,
-            runWorker,
-          ),
+          consumeApi(incoming, sessions, cells, operations, persist),
           Effect.raceFirst(heartbeat, leaseWatchdog),
         ),
       )
@@ -826,10 +440,10 @@ export const runForegroundRunner = (
               cursor: options.resume.cursor,
             }
       const sessions = yield* Ref.make<LocalSession | undefined>(initialSession)
-      const initialReceipts = new Map<string, PendingResult>(
+      const initialReceipts = new Map<string, ReadonlyArray<import("../protocol/messages").CellLifecycleFrame>>(
         (options.resume?.receipts ?? []).map((receipt) => [
-          executionKey(receipt.operationKey, receipt.attempt),
-          receipt,
+          Operations.executionKey(receipt.operationKey, receipt.frames[0].attribution.attempt),
+          receipt.frames,
         ]),
       )
       const receipts = yield* Ref.make(initialReceipts)
@@ -843,7 +457,6 @@ export const runForegroundRunner = (
       const machineStates = yield* Ref.make(
         new Map((options.resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const)),
       )
-      const liveOperations = yield* Ref.make(new Map<string, Fiber.Fiber<void, ForegroundRunnerError>>())
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
       )
@@ -852,30 +465,39 @@ export const runForegroundRunner = (
       const receiptStore = options.receiptStore
       const receiptScope = options.receiptScope
       const persistLock = yield* Semaphore.make(1)
-      const lifecycle = yield* Semaphore.make(1)
-      const persist = () =>
-        persistLock.withPermits(1)(
-          receiptStore === undefined || receiptScope === undefined
-            ? Effect.void
-            : Effect.gen(function* () {
-                const session = yield* Ref.get(sessions)
-                if (session === undefined) return
-                const values = yield* Ref.get(receipts)
-                const storedReceipts = [...values.values()]
-                yield* receiptStore.save(receiptScope, {
-                  version: 1,
-                  workspaceIdentity,
-                  executorUrl: url,
-                  access: access(session),
-                  leaseExpiresAt: session.leaseExpiresAt,
-                  heartbeatIntervalMillis: session.heartbeatIntervalMillis,
-                  cursor: session.cursor,
-                  receipts: storedReceipts,
-                  cells: Array.from(yield* Ref.get(cellStates), ([key, state]) => ({ executionKey: key, state })),
-                  machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
-                })
-              }),
-        )
+      const saveSnapshot = (operationReceipts: Operations.ReceiptMap) =>
+        receiptStore === undefined || receiptScope === undefined
+          ? Effect.void
+          : Effect.gen(function* () {
+              const session = yield* Ref.get(sessions)
+              if (session === undefined) return
+              const storedReceipts = [...operationReceipts.values()].flatMap((frames) => {
+                const first = frames[0]
+                return first === undefined
+                  ? []
+                  : [
+                      Operations.OperationReceipt.make({
+                        operationKey: first.attribution.operationKey,
+                        frames: [first, ...frames.slice(1)],
+                      }),
+                    ]
+              })
+              yield* receiptStore.save(receiptScope, {
+                version: 1,
+                workspaceIdentity,
+                executorUrl: url,
+                access: access(session),
+                leaseExpiresAt: session.leaseExpiresAt,
+                heartbeatIntervalMillis: session.heartbeatIntervalMillis,
+                cursor: session.cursor,
+                receipts: storedReceipts,
+                cells: Array.from(yield* Ref.get(cellStates), ([key, state]) => ({ executionKey: key, state })),
+                machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
+              })
+            })
+      const persist = () => persistLock.withPermits(1)(Effect.flatMap(Ref.get(receipts), saveSnapshot))
+      const commitReceipts = (next: Operations.ReceiptMap) =>
+        persistLock.withPermits(1)(saveSnapshot(next).pipe(Effect.andThen(Ref.set(receipts, next))))
       const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath, cellStates, persist, (message) =>
         Effect.gen(function* () {
           const session = yield* Ref.get(sessions)
@@ -901,28 +523,96 @@ export const runForegroundRunner = (
         }),
       )
       const machine = Context.get(machineContext, Machine)
+      const cellOperationFailure = (error: CellError | BindingProxyError) =>
+        Operations.OperationError.make({
+          kind: error._tag === "CellError" ? error.kind : "execution",
+          message: error.message,
+        })
+      const currentAccess = Ref.get(sessions).pipe(
+        Effect.flatMap((session) =>
+          session === undefined
+            ? Effect.fail(
+                Operations.OperationError.make({ kind: "execution", message: "Runner session is unavailable" }),
+              )
+            : Effect.succeed(access(session)),
+        ),
+      )
+      const operations = yield* Operations.make({
+        access: currentAccess,
+        receipts: {
+          current: Ref.get(receipts),
+          commit: (next) =>
+            commitReceipts(next).pipe(
+              Effect.mapError((error) =>
+                Operations.OperationError.make({ kind: "persistence", message: error.message }),
+              ),
+            ),
+        },
+        emit: (event) =>
+          Ref.get(activeWriter).pipe(
+            Effect.flatMap((writer) =>
+              writer === undefined
+                ? Effect.fail(
+                    Operations.OperationError.make({ kind: "transport", message: "Runner transport is unavailable" }),
+                  )
+                : writer(
+                    encodeRunnerMessage(
+                      event._tag === "CellResult" ? { ...event, _tag: "LocalCellResult" as const } : event,
+                    ),
+                  ).pipe(
+                    Effect.mapError(() =>
+                      Operations.OperationError.make({
+                        kind: "transport",
+                        message: "Could not write Runner operation",
+                      }),
+                    ),
+                  ),
+            ),
+          ),
+        cell: {
+          prepare: (request) =>
+            Effect.succeed({
+              secrets: [],
+              execute: (output) => cells.execute(request, output).pipe(Effect.mapError(cellOperationFailure)),
+            }),
+          admit: (request) => cells.admit(request).pipe(Effect.mapError(cellOperationFailure)),
+          cancel: (operationKey, attempt) =>
+            cells
+              .cancel(operationKey, attempt)
+              .pipe(
+                Effect.mapError((error) =>
+                  Operations.OperationError.make({ kind: error.kind, message: error.message }),
+                ),
+              ),
+          replayBindings: (current) => cells.replayBindings(current).pipe(Effect.mapError(cellOperationFailure)),
+        },
+        machine: {
+          execute: (input) =>
+            machine
+              .execute(input)
+              .pipe(
+                Effect.mapError((error) =>
+                  Operations.OperationError.make({ kind: "execution", message: error.message }),
+                ),
+              ),
+        },
+      })
       const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
         target: "runner",
         workspacePath: options.workspacePath,
         typescriptKernel: true,
         pty: false,
       })
-      const workers = yield* FiberSet.make<void, ForegroundRunnerError>()
-      const runWorker = yield* FiberSet.runtime(workers)<never>()
       const connection = connected(
         options,
         url,
         processIncarnation,
         workspaceCapabilities,
         sessions,
-        receipts,
-        liveOperations,
         activeWriter,
         cells,
-        machine,
+        operations,
         persist,
-        lifecycle,
-        runWorker,
       ).pipe(
         Effect.catch((error: ForegroundRunnerError) =>
           Effect.gen(function* () {

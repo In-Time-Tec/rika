@@ -174,6 +174,7 @@ describe.sequential("foreground Runner", () => {
             const ready = yield* Deferred.make<void, import("../../src/host/foreground").ForegroundRunnerError>()
             const terminalPersistenceStarted = yield* Deferred.make<void>()
             const releaseTerminalPersistence = yield* Deferred.make<void>()
+            let latestSnapshot: import("../../src/host/foreground").ForegroundRunnerSnapshot | undefined
             const runner = yield* Effect.forkScoped(
               runForegroundRunner({
                 admission: {
@@ -189,11 +190,19 @@ describe.sequential("foreground Runner", () => {
                 receiptStore: {
                   save: (_scope, snapshot) => {
                     const deadline = snapshot.receipts.find((receipt) => receipt.operationKey === "operation-deadline")
-                    return deadline?.frames.some((frame) => frame._tag === "Terminal") === true
-                      ? Deferred.succeed(terminalPersistenceStarted, undefined).pipe(
-                          Effect.andThen(Deferred.await(releaseTerminalPersistence)),
-                        )
-                      : Effect.void
+                    const save =
+                      deadline?.frames.some((frame) => frame._tag === "Terminal") === true
+                        ? Deferred.succeed(terminalPersistenceStarted, undefined).pipe(
+                            Effect.andThen(Deferred.await(releaseTerminalPersistence)),
+                          )
+                        : Effect.void
+                    return save.pipe(
+                      Effect.andThen(
+                        Effect.sync(() => {
+                          latestSnapshot = snapshot
+                        }),
+                      ),
+                    )
                   },
                 },
                 ready,
@@ -435,6 +444,10 @@ describe.sequential("foreground Runner", () => {
                 .frames("Terminal")
                 .filter((message) => message.frame.attribution.operationKey === "operation-deadline"),
             ).toHaveLength(1)
+            expect(
+              latestSnapshot?.receipts.find((receipt) => receipt.operationKey === "operation-deadline")?.frames.at(-1)
+                ?._tag,
+            ).toBe("Terminal")
             socket.message({ _tag: "CellExecute", request: deadlineRequest })
             const replayedTimeout = yield* acknowledgeTerminal(socket, access, "operation-deadline", 1)
             expect(replayedTimeout.frame.response).toEqual(timedOut.frame.response)
@@ -1172,20 +1185,23 @@ describe.sequential("foreground Runner", () => {
                   receipts: [
                     {
                       operationKey: "operation-resume",
-                      attempt: 0,
-                      attribution: {
-                        operationKey: "operation-resume",
-                        workspaceId: "workspace-binding-1",
-                        sessionId: "cell-session-resume",
-                        threadId: "thread-resume",
-                        turnId: "turn-resume",
-                        runId: "run-resume",
-                        rootRunId: "run-resume",
-                        toolCallId: "tool-call-resume",
-                        attempt: 0,
-                      },
-                      frames: [],
-                      state: "running",
+                      frames: [
+                        {
+                          _tag: "Accepted",
+                          attribution: {
+                            operationKey: "operation-resume",
+                            workspaceId: "workspace-binding-1",
+                            sessionId: "cell-session-resume",
+                            threadId: "thread-resume",
+                            turnId: "turn-resume",
+                            runId: "run-resume",
+                            rootRunId: "run-resume",
+                            toolCallId: "tool-call-resume",
+                            attempt: 0,
+                          },
+                          cursor: 1,
+                        },
+                      ],
                     },
                   ],
                 },
@@ -1360,15 +1376,10 @@ describe.sequential("foreground Runner", () => {
                 ? latestSnapshot
                 : undefined,
             )
-            expect(pending.receipts).toEqual([
-              expect.objectContaining({
-                operationKey: "operation-goodbye",
-                attempt: 0,
-                state: "completed",
-                response: completed.response,
-                attribution: firstTerminal.frame.attribution,
-              }),
-            ])
+            expect(pending.receipts).toHaveLength(1)
+            expect(pending.receipts[0]?.operationKey).toBe("operation-goodbye")
+            expect(pending.receipts[0]?.frames.at(-1)).toEqual(firstTerminal.frame)
+            expect(firstTerminal.frame.response).toEqual(completed.response)
             firstSocket.close()
             for (let index = 0; index < 10; index += 1) {
               yield* Effect.yieldNow
@@ -1400,15 +1411,9 @@ describe.sequential("foreground Runner", () => {
                 .messages("LocalCellResult")
                 .find((message) => message.operationKey === "operation-goodbye"),
             )
-            expect(latestSnapshot?.receipts).toEqual([
-              expect.objectContaining({
-                operationKey: "operation-goodbye",
-                attempt: 0,
-                state: "completed",
-                response: completed.response,
-                attribution: firstTerminal.frame.attribution,
-              }),
-            ])
+            expect(latestSnapshot?.receipts).toHaveLength(1)
+            expect(latestSnapshot?.receipts[0]?.operationKey).toBe("operation-goodbye")
+            expect(latestSnapshot?.receipts[0]?.frames.at(-1)).toEqual(firstTerminal.frame)
             reconnectedSocket.message({
               _tag: "LocalCellReceipt",
               access,
