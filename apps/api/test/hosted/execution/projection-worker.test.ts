@@ -9,8 +9,7 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product-store/transcript-repository"
-import * as TurnStore from "@rika/product-store/turn-repository"
+import * as TranscriptStore from "@rika/product/transcript-repository"
 import { Context, Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
@@ -51,9 +50,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
       const previews = yield* makeHostedPreviewBus()
       const subscription = yield* previews.bus.subscribe(HostedThreadId.make(threadId))
       let projection: Projection | undefined
-      const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
-      const turns = TurnRepository.Service.of({
-        ...turnRepository,
+      const turns = Layer.mock(TurnRepository.Service, {
         get: () => Effect.succeed(turn),
         setStatus: () => Effect.die("projection worker settled the Turn"),
       })
@@ -124,7 +121,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
           concurrency: 2,
           pollIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
           Layer.provide(Layer.succeed(HostedPreviewBus, previews.bus)),
@@ -152,7 +149,14 @@ it.effect("replays an existing transcript when its projection version is stale",
   Effect.scoped(
     Effect.gen(function* () {
       const completedTurn: Turn.AgentExecutionTurn = { ...turn, status: "completed" }
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer([completedTurn])), TurnRepository.Service)
+      const turns = Context.get(
+        yield* Layer.build(
+          Layer.mock(TurnRepository.Service, {
+            get: () => Effect.succeed(completedTurn),
+          }),
+        ),
+        TurnRepository.Service,
+      )
       const stale: Projection = {
         turn: completedTurn,
         units: [],
@@ -219,8 +223,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
   Effect.scoped(
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
-      const turns = TurnRepository.Service.of({
-        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
+      const turns = Layer.mock(TurnRepository.Service, {
         get: () => Deferred.succeed(started, undefined).pipe(Effect.as(turn)),
       })
       const transcripts = TranscriptRepository.Service.of({
@@ -237,7 +240,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
@@ -272,8 +275,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
         id,
         executionLink: { runId: `run-${id}`, threadId, turnId: id },
       })
-      const turns = TurnRepository.Service.of({
-        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
+      const turns = Layer.mock(TurnRepository.Service, {
         get: (id: Turn.TurnId) => Effect.succeed(turnFor(id)),
         setStatus: (id: Turn.TurnId) =>
           Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(Effect.as(turnFor(id))),
@@ -339,7 +341,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
           concurrency: 1,
           pollIntervalMillis: 60_000,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
@@ -372,13 +374,12 @@ it.effect("rejects a stale projection worker when listing blocks after a success
             Effect.flatMap((count) => (count === 0 ? Effect.succeed([]) : Deferred.await(blocked))),
           ),
       })
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),
@@ -399,13 +400,12 @@ it.effect("rejects the current projection list failure immediately", () =>
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.die("list unavailable"),
       })
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
           pollIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),

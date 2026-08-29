@@ -394,6 +394,55 @@ it.effect.skipIf(databaseUrl === "")("fences Turn claims and recovers prepared e
             ))[0]?.count,
           ),
         ).toBe(0)
+        yield* aggregateDatabase.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.insert(schema.rikaHostedThreads).values(
+              ["parallel-1", "parallel-2"].map((id) => ({
+                id,
+                ownerId: "worker-owner",
+                workspaceId: "workspace-1",
+                createdByUserId: "worker-user",
+                executorKind: "orb" as const,
+                inheritProjectGrants: false,
+                createdAt: now,
+              })),
+            )
+            yield* tx.insert(schema.rikaThreads).values(
+              ["parallel-1", "parallel-2"].map((id, index) => ({
+                id,
+                ownerId: "worker-owner",
+                workspace: "workspace-1",
+                title: id,
+                createdAt: 400 + index,
+                updatedAt: 400 + index,
+              })),
+            )
+            yield* tx.insert(schema.rikaTurns).values(
+              ["parallel-1", "parallel-2"].map((threadId, index) => ({
+                id: `turn-${threadId}`,
+                threadId,
+                prompt: threadId,
+                status: "queued" as const,
+                createdAt: 400 + index,
+                updatedAt: 400 + index,
+                executionRouteJson: route,
+              })),
+            )
+            yield* tx
+              .insert(schema.rikaThreadQueueState)
+              .values(["parallel-1", "parallel-2"].map((threadId) => ({ threadId, revision: 1, queuedCount: 1 })))
+          }),
+        )
+        const parallelClaims = yield* Effect.forEach(
+          Array.from({ length: 8 }, (_, index) => request(`parallel-worker-${index}`, `parallel-claim-${index}`)),
+          store.claimNext,
+          { concurrency: "unbounded" },
+        )
+        const claimedThreads = parallelClaims
+          .filter((claim) => claim !== undefined)
+          .map((claim) => claim.input.threadId)
+          .toSorted()
+        expect(claimedThreads).toEqual(["parallel-1", "parallel-2"])
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

@@ -67,4 +67,3 @@ export const layer = Layer.effect(
     })
   }),
 )
-export { makeMemory, memoryLayer, memoryLayerWithTurns } from "./memory-repository"

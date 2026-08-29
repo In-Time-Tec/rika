@@ -8,14 +8,13 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product-store/transcript-repository"
+import * as TranscriptStore from "@rika/product/transcript-repository"
 import {
   HostedTurnWorkerStore,
   type ClaimRequest,
   type HostedTurnWorkerStoreService,
   type TurnClaim,
 } from "@rika/product-store/turn-worker-store"
-import * as TurnStore from "@rika/product-store/turn-repository"
 import { Clock, Context, Deferred, Effect, Exit, Layer, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { layer as executionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
@@ -284,9 +283,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
         steering: { steeringMessages: 0, followUpMessages: 0 },
       },
     }
-    const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
-    const turns = TurnRepository.Service.of({
-      ...turnRepository,
+    const turns = Layer.mock(TurnRepository.Service, {
       get: () => Effect.succeed(durable.turns.get(turnId)),
       listNonterminal: Effect.sync(() => {
         const current = durable.turns.get(turnId)
@@ -349,7 +346,7 @@ it.effect("converges across API, Turn worker, runtime, projection, and terminal-
           ),
           executionReconcilerLayer({ pollIntervalMillis: 10 }),
         ).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),

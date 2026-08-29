@@ -20,7 +20,7 @@ import {
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
+import { layer as assignmentLayer } from "@rika/product-store/assignments"
 import { eq } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
@@ -165,7 +165,7 @@ it.effect.skipIf(databaseUrl === "")(
         const dependencies = Layer.mergeAll(
           BunCrypto.layer,
           postgres,
-          assignmentLayer,
+          assignmentLayer.pipe(Layer.provide(postgres)),
           installationLayer,
           tokenLayer,
           httpLayer,

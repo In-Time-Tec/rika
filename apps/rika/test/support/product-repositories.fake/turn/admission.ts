@@ -1,6 +1,5 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { RepositoryError } from "@rika/product/turn-repository"
-import type { Interface } from "@rika/product/turn-repository"
+import { RepositoryError, type Interface } from "@rika/product/turn-repository"
 import { TurnResult } from "@rika/product/thread-result"
 import { TurnId } from "@rika/product/turn-record"
 import { Effect, Schema } from "effect"

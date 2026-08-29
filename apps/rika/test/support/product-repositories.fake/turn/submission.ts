@@ -1,13 +1,12 @@
 import { TurnResult } from "@rika/product/thread-result"
 import { Effect } from "effect"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { QueueFull, RepositoryError } from "@rika/product/turn-repository"
+import { QueueFull, RepositoryError, type Interface } from "@rika/product/turn-repository"
 import { clone } from "./state"
 import { queueState, withQueueState } from "./queue-state"
 import type { MemoryState, MemorySubmissionResult } from "./state"
 import type { TurnMemoryContext } from "./state-operations"
 import type { AgentExecutionTurn } from "@rika/product/turn-record"
-import type { Interface } from "@rika/product/turn-repository"
 
 type QueueItemChange = Effect.Success<ReturnType<Interface["dequeue"]>>
 

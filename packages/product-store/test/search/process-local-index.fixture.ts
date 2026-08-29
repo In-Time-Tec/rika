@@ -1,4 +1,4 @@
-import { Fixtures } from "./memory-repository.support"
+import { Fixtures } from "./process-local-index.support"
 
 export const workspace = "/work/acme"
 export const storedThread: Fixtures.Thread.Thread = {

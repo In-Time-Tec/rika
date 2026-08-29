@@ -66,3 +66,5 @@ export const productMemoryLayerWithTurns = Layer.succeed(
     usage: () => Effect.succeed({ usage: ExecutionProjection.emptyUsageState() }),
   }),
 )
+
+export { makeMemory, memoryLayer } from "./transcript-memory/memory"

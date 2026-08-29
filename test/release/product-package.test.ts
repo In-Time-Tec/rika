@@ -152,7 +152,6 @@ const expected = {
   ],
   "@rika/product-store": [
     "database-schema",
-    "memory-assignments",
     "assignments",
     "client-authority",
     "command-ledger",
@@ -200,7 +199,7 @@ const expected = {
     "repositories",
     "runner-registrations",
     "workspace-preparations",
-    "memory-thread-search-repository",
+    "thread-search-index",
     "goal-repository",
     "thread-summary-repository",
     "thread-repository",

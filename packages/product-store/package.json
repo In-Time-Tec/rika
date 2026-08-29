@@ -6,7 +6,6 @@
   "type": "module",
   "exports": {
     "./database-schema": "./src/database/schema/product.ts",
-    "./memory-assignments": "./src/hosted/memory-assignments.ts",
     "./assignments": "./src/hosted/assignments.ts",
     "./client-authority": "./src/hosted/client-authority.ts",
     "./command-ledger": "./src/hosted/command-ledger.ts",
@@ -55,7 +54,7 @@
     "./migrations/postgres/0037-hosted-product-thread-invariant.sql": "./migrations/postgres/0037-hosted-product-thread-invariant.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
     "./goal-repository": "./src/goal/repository.ts",
-    "./memory-thread-search-repository": "./src/search/memory-repository.ts",
+    "./thread-search-index": "./src/search/process-local-index.ts",
     "./thread-summary-repository": "./src/summary/repository.ts",
     "./thread-repository": "./src/thread/repository.ts",
     "./transcript-repository": "./src/transcript/repository.ts",

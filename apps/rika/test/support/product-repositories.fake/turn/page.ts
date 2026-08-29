@@ -1,8 +1,7 @@
 import { Turn } from "@rika/product/turn-record"
 
 import { Schema } from "effect"
-import { defaultPageSize, maximumPageSize } from "@rika/product/turn-repository"
-import { PageCursor as PageCursorSchema } from "@rika/product/turn-repository"
+import { PageCursor as PageCursorSchema, defaultPageSize, maximumPageSize } from "@rika/product/turn-repository"
 type PageCursor = typeof PageCursorSchema.Type
 
 export const clone = <T extends Turn>(turn: T): T => structuredClone(turn)

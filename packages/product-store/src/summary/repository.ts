@@ -242,5 +242,3 @@ export const layerForOwner = (ownerId: string) =>
   )
 
 export const layer = layerForOwner("local")
-
-export { makeMemory, memoryLayer } from "./memory-repository"

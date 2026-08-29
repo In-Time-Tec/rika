@@ -533,4 +533,4 @@ const make = Effect.gen(function* () {
   } satisfies AssignmentsService)
 })
 
-export const layer = Layer.effect(ExecutorAssignments, make)
+export const assignmentLayer = Layer.effect(ExecutorAssignments, make)

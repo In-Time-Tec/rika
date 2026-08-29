@@ -1,16 +1,12 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
-
 import type { Projection, PageCursor, UsageSummary } from "@rika/product/transcript-page"
-import { Service, RepositoryError, type Interface } from "@rika/product/transcript-repository"
+import { Service, RepositoryError, type Interface } from "../transcript"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Effect, Layer, Ref, Schema } from "effect"
 import type { TurnId } from "@rika/product/turn-record"
-import {
-  Service as TurnRepositoryService,
-  type Interface as TurnRepositoryInterface,
-} from "@rika/product/turn-repository"
+import type { Interface as TurnRepositoryInterface } from "../turn"
 
 const clone = <A>(value: A): A => structuredClone(value)
 const cursorFor = (projection: Projection, unit: Unit): PageCursor => ({
@@ -247,10 +243,3 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
 
 export const memoryLayer = (initial?: ReadonlyArray<Projection>) =>
   Layer.effect(Service, makeMemory(initial === undefined ? {} : { initial }))
-export const memoryLayerWithTurns = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const turns = yield* TurnRepositoryService
-    return yield* makeMemory({ turns })
-  }),
-)

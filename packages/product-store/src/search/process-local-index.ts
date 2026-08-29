@@ -169,7 +169,7 @@ const selected = (documents: ReadonlyArray<Document>, input: SearchInput, parsed
       results.length > limit && last !== undefined ? { updatedAt: last.updatedAt, threadId: last.threadId } : undefined,
   }
 }
-export const makeMemory = Effect.gen(function* () {
+export const make = Effect.gen(function* () {
   const state = yield* Ref.make(new Map<ThreadId, Document>())
   return Service.of({
     search: Effect.fn("ThreadSearchRepository.search")(function* (input) {
@@ -188,4 +188,4 @@ export const makeMemory = Effect.gen(function* () {
     }),
   })
 })
-export const memoryLayer = Layer.effect(Service, makeMemory)
+export const layer = Layer.effect(Service, make)

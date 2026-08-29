@@ -5,8 +5,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product-store/transcript-repository"
-import * as TurnStore from "@rika/product-store/turn-repository"
+import * as TranscriptStore from "@rika/product/transcript-repository"
 import { Context, Deferred, Effect, Layer } from "effect"
 import {
   HostedExecutionReconciler,
@@ -34,9 +33,7 @@ it.effect("persists terminal execution state independently of transcript project
     Effect.gen(function* () {
       const settled = yield* Deferred.make<Turn.AgentExecutionTurn>()
       let current: Turn.AgentExecutionTurn = turn
-      const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
-      const turns = TurnRepository.Service.of({
-        ...turnRepository,
+      const turns = Layer.mock(TurnRepository.Service, {
         listNonterminal: Effect.sync(() => (current.status === "running" ? [current] : [])),
         listSteeringAdmissions: Effect.succeed([]),
         setStatus: (_id: Turn.TurnId, status: Parameters<TurnRepository.Interface["setStatus"]>[1], now: number) =>
@@ -61,7 +58,7 @@ it.effect("persists terminal execution state independently of transcript project
         hostedExecutionReconcilerLayer({
           pollIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),

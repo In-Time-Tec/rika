@@ -6,7 +6,7 @@ import type { Interface } from "@rika/product/turn-repository"
 import { rikaTurns } from "../../database/schema/product"
 import { decodeAgent } from "./row-codec"
 import { turnRowSelection } from "./reader"
-import { missing, repositoryError } from "../memory/errors"
+import { missing, repositoryError } from "./errors"
 
 export const makeTurnSqlState = (
   db: PgDrizzle.EffectPgDatabase,

@@ -7,7 +7,7 @@ import { rikaThreadQueueState, rikaTurnSteeringOutbox, rikaTurns } from "../../d
 import { decodeAgent, decodeQueueState } from "./row-codec"
 import { turnRowSelection } from "./reader"
 import { turnRowJson } from "./row-json-codec"
-import { repositoryError, submissionError } from "../memory/errors"
+import { repositoryError, submissionError } from "./errors"
 
 const queueSelection = {
   thread_id: rikaThreadQueueState.threadId,

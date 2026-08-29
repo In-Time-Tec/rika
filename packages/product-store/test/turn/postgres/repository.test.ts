@@ -1,5 +1,6 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ThreadResult from "@rika/product/thread-result"
@@ -26,14 +27,6 @@ import {
 import { migrations } from "../../../src/hosted/migrations"
 import * as TurnRepository from "../../../src/turn/postgres/repository"
 
-const provideLayer =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
-    Effect.gen(function* () {
-      const context = yield* Layer.build(layer)
-      return yield* effect.pipe(Effect.provide(context))
-    })
-
 type CurrentCreateInput = Omit<
   Parameters<TurnContract.Interface["createForSubmission"]>[0],
   "executionRoute" | "queueCapacity"
@@ -48,81 +41,6 @@ const create = (repository: TurnContract.Interface, input: CurrentCreateInput) =
     ...input,
     queueCapacity: input.queueCapacity ?? 128,
   })
-
-it.effect("memory editQueued replaces content and clears stale prompt parts", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const threadId = Thread.ThreadId.make("thread-edit")
-    yield* create(repository, { id: Turn.TurnId.make("active"), threadId, prompt: "active", now: 1 })
-    const queued = yield* create(repository, {
-      id: Turn.TurnId.make("queued"),
-      threadId,
-      prompt: "old",
-      promptParts: [{ type: "text", text: "old" }],
-      now: 2,
-    })
-    yield* repository.editQueued(queued.id, "edited", 3)
-    const stored = yield* repository.get(queued.id)
-    expect(stored?.prompt).toBe("edited")
-    expect(
-      stored !== undefined && ThreadResult.TurnResult.isAgentExecution(stored) ? stored.promptParts : undefined,
-    ).toBeUndefined()
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)
-
-it.effect("memory setStatus forbids transitions into or out of queued", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const threadId = Thread.ThreadId.make("thread-guard")
-    const active = yield* create(repository, { id: Turn.TurnId.make("active"), threadId, prompt: "active", now: 1 })
-    const queued = yield* create(repository, { id: Turn.TurnId.make("queued"), threadId, prompt: "queued", now: 2 })
-    expect((yield* Effect.result(repository.setStatus(active.id, "queued", 3)))._tag).toBe("Failure")
-    const before = yield* repository.readQueue(threadId)
-    expect(before.queuedCount).toBe(1)
-    expect((yield* Effect.result(repository.setStatus(queued.id, "completed", 4)))._tag).toBe("Failure")
-    const after = yield* repository.readQueue(threadId)
-    expect(after).toEqual(before)
-    expect((yield* repository.get(queued.id))?.status).toBe("queued")
-  }).pipe(provideLayer(TurnRepository.memoryLayer())),
-)
-
-it.effect("memory seeds queue revision to match the seeded queued count", () =>
-  Effect.gen(function* () {
-    const repository = yield* TurnRepository.Service
-    const snapshot = yield* repository.readQueue(Thread.ThreadId.make("thread-seed"))
-    expect(snapshot.queuedCount).toBe(2)
-    expect(snapshot.revision).toBe(2)
-  }).pipe(
-    provideLayer(
-      TurnRepository.memoryLayer([
-        {
-          _tag: "AgentExecution",
-          id: Turn.TurnId.make("s1"),
-          threadId: Thread.ThreadId.make("thread-seed"),
-          prompt: "one",
-          status: "queued",
-          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          _tag: "AgentExecution",
-          id: Turn.TurnId.make("s2"),
-          threadId: Thread.ThreadId.make("thread-seed"),
-          prompt: "two",
-          status: "queued",
-          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          createdAt: 2,
-          updatedAt: 2,
-        },
-      ]),
-    ),
-  ),
-)
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const readFileString = (url: URL) =>
@@ -177,6 +95,9 @@ it.effect.skipIf(databaseUrl === "")("runs the turn repository contract against 
           const threadId = Thread.ThreadId.make("turn-contract-main")
           const pageThreadId = Thread.ThreadId.make("turn-contract-page")
           const malformedThreadId = Thread.ThreadId.make("turn-contract-malformed")
+          const admissionThreadId = Thread.ThreadId.make("turn-contract-admission")
+          const requeueThreadId = Thread.ThreadId.make("turn-contract-requeue")
+          const shellThreadId = Thread.ThreadId.make("turn-contract-shell")
           const now = DateTime.toDate(DateTime.makeUnsafe("2099-01-01T00:00:00.000Z"))
 
           yield* db.insert(identityUser).values({
@@ -200,25 +121,29 @@ it.effect.skipIf(databaseUrl === "")("runs the turn repository contract against 
               })
               yield* tx.insert(rikaWorkspaces).values({ ownerId, path: workspace, createdAt: 1 })
               yield* tx.insert(rikaHostedThreads).values(
-                [threadId, pageThreadId, malformedThreadId].map((id) => ({
-                  id,
-                  ownerId,
-                  workspaceId: workspace,
-                  createdByUserId: "turn-contract-user",
-                  executorKind: "orb" as const,
-                  inheritProjectGrants: false,
-                  createdAt: now,
-                })),
+                [threadId, pageThreadId, malformedThreadId, admissionThreadId, requeueThreadId, shellThreadId].map(
+                  (id) => ({
+                    id,
+                    ownerId,
+                    workspaceId: workspace,
+                    createdByUserId: "turn-contract-user",
+                    executorKind: "orb" as const,
+                    inheritProjectGrants: false,
+                    createdAt: now,
+                  }),
+                ),
               )
               yield* tx.insert(rikaThreads).values(
-                [threadId, pageThreadId, malformedThreadId].map((id) => ({
-                  id,
-                  ownerId,
-                  workspace,
-                  title: id,
-                  createdAt: 1,
-                  updatedAt: 1,
-                })),
+                [threadId, pageThreadId, malformedThreadId, admissionThreadId, requeueThreadId, shellThreadId].map(
+                  (id) => ({
+                    id,
+                    ownerId,
+                    workspace,
+                    title: id,
+                    createdAt: 1,
+                    updatedAt: 1,
+                  }),
+                ),
               )
             }),
           )
@@ -288,17 +213,257 @@ it.effect.skipIf(databaseUrl === "")("runs the turn repository contract against 
           if (claim === undefined) return yield* Effect.die("Expected queued claim")
           expect(claim.turn.id).toBe(queued.id)
           expect(yield* repository.claimNextQueued(threadId, 7)).toBeUndefined()
-          const edited = yield* repository.editQueued(queued.id, "edited", 8)
+          yield* repository.releaseQueuedClaim(claim)
+          const released = yield* repository.claimNextQueued(threadId, 8)
+          if (released === undefined) return yield* Effect.die("Expected released claim")
+          expect(released.turn.id).toBe(queued.id)
+          yield* repository.resetQueueClaims
+          const reset = yield* repository.claimNextQueued(threadId, 9)
+          if (reset === undefined) return yield* Effect.die("Expected reset claim")
+          expect(reset.turn.id).toBe(queued.id)
+          const edited = yield* repository.editQueued(queued.id, "edited", 10)
           expect(edited).toMatchObject({ prompt: "edited", queue: { revision: 3, queuedCount: 2 } })
           expect(edited.promptParts).toBeUndefined()
-          expect(yield* repository.finishQueuedClaim(claim, "running", 9)).toEqual({ _tag: "Unavailable" })
-          const replacement = yield* repository.claimNextQueued(threadId, 10)
+          expect(yield* repository.finishQueuedClaim(reset, "running", 11)).toEqual({ _tag: "Unavailable" })
+          const replacement = yield* repository.claimNextQueued(threadId, 12)
           if (replacement === undefined) return yield* Effect.die("Expected replacement claim")
-          expect((yield* repository.finishQueuedClaim(replacement, "running", 11))._tag).toBe("Transitioned")
+          expect((yield* repository.finishQueuedClaim(replacement, "running", 13))._tag).toBe("Transitioned")
           expect((yield* repository.get(queued.id))?.status).toBe("running")
           expect(yield* repository.dequeue(dequeued.id)).toMatchObject({ revision: 5, queuedCount: 0 })
           expect(yield* repository.get(dequeued.id)).toBeUndefined()
           expect((yield* Effect.result(repository.dequeue(dequeued.id)))._tag).toBe("Failure")
+          expect((yield* repository.listRecentNonqueued(threadId, 1)).map((turn) => turn.id)).toEqual([queued.id])
+
+          const admissionTarget = yield* create(repository, {
+            id: Turn.TurnId.make("turn-admission-target"),
+            threadId: admissionThreadId,
+            prompt: "admission",
+            now: 20,
+          })
+          const startInput: ExecutionGateway.StartTurn = {
+            threadId: admissionThreadId,
+            turnId: admissionTarget.id,
+            workspaceId: workspace,
+            prompt: admissionTarget.prompt,
+            promptParts: [{ type: "text", text: admissionTarget.prompt }],
+            executionRoute: admissionTarget.executionRoute,
+            titleIntent: { _tag: "GenerateThreadTitle", expectedTitle: "Admission" },
+          }
+          expect(yield* repository.prepareExecutionAdmission(startInput, 21)).toEqual(startInput)
+          expect(yield* repository.prepareExecutionAdmission(startInput, 22)).toEqual(startInput)
+          expect(
+            (yield* Effect.result(repository.prepareExecutionAdmission({ ...startInput, prompt: "changed" }, 23)))._tag,
+          ).toBe("Failure")
+          expect(yield* repository.listUnlinkedExecutionAdmissions).toEqual([startInput])
+          const link: ExecutionGateway.ExecutionLink = {
+            runId: "run-admission-target",
+            turnId: admissionTarget.id,
+            threadId: admissionThreadId,
+          }
+          expect(
+            (yield* Effect.result(
+              repository.attachExecutionLink(admissionTarget.id, { ...link, threadId: pageThreadId }, 24),
+            ))._tag,
+          ).toBe("Failure")
+          expect(yield* repository.listUnlinkedExecutionAdmissions).toEqual([startInput])
+          expect(yield* repository.attachExecutionLink(admissionTarget.id, link, 25)).toMatchObject({
+            executionLink: link,
+          })
+          expect(yield* repository.listUnlinkedExecutionAdmissions).toEqual([])
+          expect(yield* repository.attachExecutionLink(admissionTarget.id, link, 26)).toMatchObject({
+            executionLink: link,
+          })
+          expect(
+            (yield* Effect.result(
+              repository.attachExecutionLink(admissionTarget.id, { ...link, runId: "different-run" }, 27),
+            ))._tag,
+          ).toBe("Failure")
+          expect(yield* repository.startAccepted(admissionTarget.id, 28)).toBe(true)
+          expect(yield* repository.startAccepted(admissionTarget.id, 29)).toBe(false)
+          expect(yield* repository.cancelUnlinked(admissionTarget.id, 30)).toBe(false)
+
+          const directInput: ExecutionGateway.SteeringInput = {
+            text: "direct steering",
+            idempotencyKey: "steering-direct",
+          }
+          const directAdmission = yield* repository.prepareSteeringAdmission(link, directInput, [], 31)
+          expect(directAdmission).toMatchObject({ target: link, input: directInput, outcome: { _tag: "Pending" } })
+          expect(yield* repository.prepareSteeringAdmission(link, directInput, [], 32)).toEqual(directAdmission)
+          expect(
+            (yield* Effect.result(
+              repository.prepareSteeringAdmission(link, { ...directInput, text: "changed" }, [], 33),
+            ))._tag,
+          ).toBe("Failure")
+          const directReceipt: ExecutionGateway.SteeringReceipt = { entryId: "entry-direct", sequence: 1 }
+          expect(yield* repository.acceptSteeringAdmission(directInput.idempotencyKey, directReceipt)).toMatchObject({
+            outcome: { _tag: "Accepted", receipt: directReceipt },
+          })
+          expect(yield* repository.acceptSteeringAdmission(directInput.idempotencyKey, directReceipt)).toMatchObject({
+            outcome: { _tag: "Accepted", receipt: directReceipt },
+          })
+          expect(
+            (yield* Effect.result(
+              repository.acceptSteeringAdmission(directInput.idempotencyKey, {
+                ...directReceipt,
+                sequence: 2,
+              }),
+            ))._tag,
+          ).toBe("Failure")
+          expect(
+            yield* repository.completeSteeringAdmission(directInput.idempotencyKey, link, directReceipt),
+          ).toBeUndefined()
+          expect(yield* repository.listSteeringAdmissions).toEqual([])
+
+          const steeringSource = yield* create(repository, {
+            id: Turn.TurnId.make("turn-steering-source"),
+            threadId: admissionThreadId,
+            prompt: "queued steering",
+            now: 34,
+          })
+          const queuedInput: ExecutionGateway.SteeringInput = {
+            text: steeringSource.prompt,
+            idempotencyKey: "steering-queued",
+          }
+          const preparedQueued = yield* repository.prepareQueuedSteeringAdmission(
+            steeringSource.id,
+            link,
+            queuedInput,
+            [],
+            35,
+          )
+          expect(preparedQueued).toMatchObject({
+            admission: { source: { id: steeringSource.id }, outcome: { _tag: "Pending" } },
+            queueChanged: true,
+            queue: { revision: 2, queuedCount: 0, change: { _tag: "Removed", turnId: steeringSource.id } },
+          })
+          expect(yield* repository.readQueue(admissionThreadId)).toMatchObject({ queuedCount: 0, turns: [] })
+          expect(
+            yield* repository.prepareQueuedSteeringAdmission(steeringSource.id, link, queuedInput, [], 36),
+          ).toMatchObject({ queueChanged: false, queue: { revision: 2, queuedCount: 0 } })
+          expect(
+            (yield* Effect.result(
+              repository.prepareQueuedSteeringAdmission(
+                steeringSource.id,
+                link,
+                { ...queuedInput, text: "changed" },
+                [],
+                37,
+              ),
+            ))._tag,
+          ).toBe("Failure")
+          const rejection = ExecutionGateway.SteeringFailure.make({ kind: "rejected", message: "target settled" })
+          expect(yield* repository.rejectSteeringAdmission(queuedInput.idempotencyKey, rejection)).toMatchObject({
+            outcome: {
+              _tag: "Rejected",
+              failure: rejection,
+              queue: { revision: 3, queuedCount: 1, change: { _tag: "Added", turn: { id: steeringSource.id } } },
+            },
+          })
+          expect(yield* repository.readQueue(admissionThreadId)).toMatchObject({
+            revision: 3,
+            queuedCount: 1,
+            turns: [{ id: steeringSource.id }],
+          })
+          expect(yield* repository.completeRejectedSteeringAdmission(queuedInput.idempotencyKey)).toBe(true)
+          expect(yield* repository.completeRejectedSteeringAdmission(queuedInput.idempotencyKey)).toBe(true)
+          expect(
+            yield* Effect.result(
+              repository.prepareQueuedSteeringAdmission(
+                Turn.TurnId.make("missing-steering-source"),
+                link,
+                { text: "missing", idempotencyKey: "steering-missing" },
+                [],
+                38,
+              ),
+            ),
+          ).toMatchObject({ _tag: "Failure", failure: { _tag: "QueuedTurnUnavailable" } })
+
+          const acceptedSource = yield* create(repository, {
+            id: Turn.TurnId.make("turn-steering-accepted-source"),
+            threadId: admissionThreadId,
+            prompt: "accepted steering",
+            now: 38,
+          })
+          const acceptedInput: ExecutionGateway.SteeringInput = {
+            text: acceptedSource.prompt,
+            idempotencyKey: "steering-accepted",
+          }
+          expect(
+            yield* repository.prepareQueuedSteeringAdmission(acceptedSource.id, link, acceptedInput, [], 39),
+          ).toMatchObject({ queueChanged: true, queue: { revision: 5, queuedCount: 1 } })
+          const acceptedReceipt: ExecutionGateway.SteeringReceipt = { entryId: "entry-accepted", sequence: 2 }
+          yield* repository.acceptSteeringAdmission(acceptedInput.idempotencyKey, acceptedReceipt)
+          expect(
+            yield* repository.completeSteeringAdmission(acceptedInput.idempotencyKey, link, acceptedReceipt),
+          ).toBeUndefined()
+          expect(yield* repository.get(acceptedSource.id)).toBeUndefined()
+          expect(yield* repository.dequeue(steeringSource.id)).toMatchObject({ revision: 6, queuedCount: 0 })
+
+          const requeueTarget = yield* create(repository, {
+            id: Turn.TurnId.make("turn-requeue-target"),
+            threadId: requeueThreadId,
+            prompt: "requeue",
+            now: 40,
+          })
+          expect(yield* repository.requeueAccepted(requeueTarget.id, 1, 41)).toMatchObject({
+            status: "queued",
+            queue: { revision: 1, queuedCount: 1 },
+          })
+          const requeueClaim = yield* repository.claimNextQueued(requeueThreadId, 42)
+          if (requeueClaim === undefined) return yield* Effect.die("Expected requeued claim")
+          expect(yield* repository.finishQueuedClaim(requeueClaim, "failed", 43)).toMatchObject({
+            _tag: "Transitioned",
+            turn: { status: "failed" },
+            queue: { revision: 2, queuedCount: 0 },
+          })
+          const settledRequeueTarget = yield* repository.get(requeueTarget.id)
+          if (settledRequeueTarget?._tag !== "AgentExecution")
+            return yield* Effect.die("Expected settled requeue target")
+          const copiedAgent = {
+            ...settledRequeueTarget,
+            id: Turn.TurnId.make("turn-agent-copy"),
+            threadId: shellThreadId,
+            createdAt: 44,
+            updatedAt: 44,
+          }
+          expect(yield* repository.copy(copiedAgent, 1)).toEqual(copiedAgent)
+
+          const runningShell: ThreadResult.RunningRecordedShellTurn = {
+            _tag: "RecordedShell",
+            id: Turn.TurnId.make("turn-shell-running"),
+            threadId: shellThreadId,
+            prompt: "$ printf shell",
+            command: "printf shell",
+            status: "running",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
+            createdAt: 44,
+            updatedAt: 44,
+          }
+          expect(yield* repository.createRecordedShell(runningShell)).toEqual(runningShell)
+          const terminalShell: ThreadResult.TerminalRecordedShellTurn = {
+            ...runningShell,
+            status: "completed",
+            result: { text: "shell", truncated: false, exitCode: 0 },
+            updatedAt: 45,
+          }
+          expect(
+            yield* repository.settleRecordedShell({ ...runningShell, command: "changed" }, terminalShell),
+          ).toBeUndefined()
+          expect(yield* repository.settleRecordedShell(runningShell, terminalShell)).toEqual(terminalShell)
+          expect(yield* repository.settleRecordedShell(runningShell, terminalShell)).toBeUndefined()
+          const copiedShell: ThreadResult.TerminalRecordedShellTurn = {
+            ...terminalShell,
+            id: Turn.TurnId.make("turn-shell-copy"),
+            createdAt: 46,
+            updatedAt: 46,
+          }
+          expect(yield* repository.copyRecordedShell(copiedShell)).toEqual(copiedShell)
+          expect((yield* repository.list(shellThreadId)).map((turn) => turn.id)).toEqual([
+            copiedAgent.id,
+            runningShell.id,
+            copiedShell.id,
+          ])
 
           const pageIds: Array<Turn.TurnId> = []
           for (let index = 1; index <= 4; index++) {

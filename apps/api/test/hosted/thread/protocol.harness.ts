@@ -342,6 +342,14 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
       expect(
         yield* protocol
           .admitCommand({
+            ...duplicate,
+            command: { _tag: "Cancel", payload: "changed" },
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
+      expect(
+        yield* protocol
+          .admitCommand({
             ...command("different-command", "1"),
             idempotencyKey: duplicate.idempotencyKey,
           })
@@ -1660,6 +1668,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           },
         },
       ])
+      expect(
+        yield* controllerA.receive({
+          ...duplicate,
+          requestId: RequestId.make("duplicate-payload-mismatch"),
+          command: { ...duplicate.command, text: "changed payload" },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandRejected", reason: "conflict" } }])
       expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({

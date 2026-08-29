@@ -2,9 +2,9 @@ import * as ThreadQuery from "@rika/product/thread-query-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Layer } from "effect"
 import { provideLayer } from "../turn/postgres/repository-layer.harness"
-import { Fixtures } from "./memory-repository.support"
-import { workspace, storedThread, storedTurn } from "./memory-repository.fixture"
-import { queryLayer } from "./memory-repository.harness"
+import { Fixtures, threadRecordsFixture, turnRecordsFixture } from "./process-local-index.support"
+import { workspace, storedThread, storedTurn } from "./process-local-index.fixture"
+import { queryLayer } from "./process-local-index.harness"
 
 describe("ThreadQuery", () => {
   it.effect("finds metadata and file content only in the current workspace", () =>
@@ -40,13 +40,16 @@ describe("ThreadQuery", () => {
         threadId: local.id,
         prompt: "initial",
       }
-      const threadRepository = yield* Fixtures.ThreadRepository.makeMemory([local, foreign])
-      const turns = yield* Fixtures.TurnRepository.makeMemory([localTurn])
+      const threadRepository = Context.get(
+        yield* Layer.build(threadRecordsFixture([local, foreign])),
+        Fixtures.ThreadRepository.Service,
+      )
+      const turns = Context.get(yield* Layer.build(turnRecordsFixture([localTurn])), Fixtures.TurnRepository.Service)
       const transcripts = Context.get(
         yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer()),
         Fixtures.TranscriptRepository.Service,
       )
-      const searches = yield* Fixtures.ThreadSearchRepository.makeMemory
+      const searches = yield* Fixtures.ThreadSearchRepository.make
       const dependencies = Layer.mergeAll(
         Layer.succeed(Fixtures.ThreadRepository.Service, threadRepository),
         Layer.succeed(Fixtures.TurnRepository.Service, turns),

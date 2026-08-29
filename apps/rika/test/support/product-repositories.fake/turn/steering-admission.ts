@@ -7,8 +7,7 @@ import {
   SteeringInput,
   SteeringReceipt,
 } from "@rika/product/execution-gateway"
-import { RepositoryError } from "@rika/product/turn-repository"
-import type { Interface } from "@rika/product/turn-repository"
+import { RepositoryError, type Interface } from "@rika/product/turn-repository"
 import { SteeringAdmission } from "@rika/product/turn-repository-steering"
 import { AgentExecutionTurn, TurnId } from "@rika/product/turn-record"
 import { queueState, withQueueState } from "./queue-state"

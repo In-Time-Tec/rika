@@ -3,10 +3,8 @@ import * as ConfigurationService from "@rika/configuration/configuration-service
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ConfigOperations from "@rika/product/configuration-operation"
 import { executionSessionLifecycleLayerTest, productLayer, Service } from "../../support/product-operation.harness"
-import * as ThreadRepository from "@rika/product-store/thread-repository"
 import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/transcript-repository"
-import * as TurnRepository from "@rika/product-store/turn-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
@@ -15,6 +13,8 @@ import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run } from "../../../src/command/root/rika"
+import * as ThreadRepositoryFake from "../../support/product-repositories.fake/record"
+import * as TurnRepositoryFake from "../../support/product-repositories.fake/turn/repository"
 
 const backend = ExecutionGateway.Service.of({
   ...ExecutionGateway.makeTest(),
@@ -71,8 +71,8 @@ const configServiceLayer = ConfigurationService.liveConfigurationLayer({
 }).pipe(Layer.provide(Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} }))), Layer.orDie)
 
 const operationLayer = (context: CliSandbox) => {
-  const repositoryLayer = ThreadRepository.memoryLayer()
-  const turnRepositoryLayer = TurnRepository.memoryLayer()
+  const repositoryLayer = ThreadRepositoryFake.memoryLayer()
+  const turnRepositoryLayer = TurnRepositoryFake.memoryLayer()
   const transcriptRepositoryLayer = TranscriptRepository.memoryLayer()
   return productLayer({
     executionSessionLifecycleLayer: executionSessionLifecycleLayerTest(),

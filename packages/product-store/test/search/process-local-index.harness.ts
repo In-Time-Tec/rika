@@ -1,9 +1,9 @@
 import * as ThreadQuery from "@rika/product/thread-query-service"
-import { Fixtures } from "./memory-repository.support"
+import { Fixtures, threadRecordsFixture, turnRecordsFixture } from "./process-local-index.support"
 import { Effect, Layer } from "effect"
 import * as ThreadSearchRepository from "@rika/product/thread-search-repository"
 
-import { workspace, storedThread, storedTurn, relatedThread, stateThreads } from "./memory-repository.fixture"
+import { workspace, storedThread, storedTurn, relatedThread, stateThreads } from "./process-local-index.fixture"
 export const search = Fixtures.ThreadSearchRepository.Service.of({
   search: (input) =>
     Effect.sync(() => {
@@ -52,8 +52,8 @@ export const search = Fixtures.ThreadSearchRepository.Service.of({
   removeThread: () => Effect.void,
 })
 export const repositories = Layer.mergeAll(
-  Fixtures.ThreadRepository.memoryLayer([storedThread, relatedThread, ...stateThreads.map(({ thread }) => thread)]),
-  Fixtures.TurnRepository.memoryLayer([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
+  threadRecordsFixture([storedThread, relatedThread, ...stateThreads.map(({ thread }) => thread)]),
+  turnRecordsFixture([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
   Fixtures.TranscriptRepository.memoryLayer(),
   Layer.succeed(Fixtures.ThreadSearchRepository.Service, search),
 )

@@ -1,16 +1,18 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as ThreadRepository from "@rika/product-store/thread-repository"
-import * as ThreadSearchRepository from "@rika/product-store/memory-thread-search-repository"
-import * as ThreadSummaryRepository from "@rika/product-store/thread-summary-repository"
-import * as TranscriptRepository from "@rika/product-store/transcript-repository"
-import * as TurnRepository from "@rika/product-store/turn-repository"
+import * as ThreadRepository from "@rika/product/thread-repository"
+import * as ThreadSearchIndex from "@rika/product-store/thread-search-index"
+import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TurnRepository from "@rika/product/turn-repository"
 import type * as TurnContract from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Context, Effect, Layer } from "effect"
+import * as ThreadRepositoryFake from "./product-repositories.fake/record"
+import * as TurnRepositoryFake from "./product-repositories.fake/turn/repository"
 
 export interface HistoricalTranscriptFixture {
   readonly threadId: string
@@ -19,12 +21,12 @@ export interface HistoricalTranscriptFixture {
 }
 
 export const makeTuiAppRepositoryLayers = () => {
-  const repositoryLayer = ThreadRepository.memoryLayer()
-  const turnRepositoryLayer = TurnRepository.memoryLayer()
+  const repositoryLayer = ThreadRepositoryFake.memoryLayer()
+  const turnRepositoryLayer = TurnRepositoryFake.memoryLayer()
   return {
     repositoryLayer,
     turnRepositoryLayer,
-    threadSearchRepositoryLayer: ThreadSearchRepository.memoryLayer,
+    threadSearchRepositoryLayer: ThreadSearchIndex.layer,
     threadSummaryRepositoryLayer: ThreadSummaryRepository.memoryLayer.pipe(
       Layer.provide(Layer.merge(repositoryLayer, turnRepositoryLayer)),
     ),
