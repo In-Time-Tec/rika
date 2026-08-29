@@ -194,6 +194,7 @@ const expected = {
     "migrations/postgres/0035-workspace-seeds.sql",
     "migrations/postgres/0037-hosted-product-thread-invariant.sql",
     "migrations/postgres/0038-authoritative-thread-command-ledger.sql",
+    "migrations/postgres/0039-bounded-thread-checkpoints.sql",
     "product-repositories",
     "product-repository",
     "provider-credentials",

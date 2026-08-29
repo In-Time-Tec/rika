@@ -1,7 +1,7 @@
 import "./protocol.harness"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { Context, Effect, Fiber, Layer } from "effect"
+import { Context, Effect, Fiber, Layer, Schema } from "effect"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
@@ -22,7 +22,7 @@ import {
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { HostedPresence } from "@rika/product/hosted-presence"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
-import { protocolVersion, type HostedThreadSnapshot } from "@rika/product/client-protocol"
+import { PendingAuthorization, protocolVersion, type HostedThreadSnapshot } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import {
@@ -54,6 +54,7 @@ import { HostedWorkspace, HostedWorkspaceError } from "../../../src/hosted/envir
 import { testToolPolicy } from "../execution/tool-policy.fixture"
 
 const timestamp = Timestamp.make("2026-08-21T00:00:00.000Z")
+const pendingAuthorizationsEquivalent = Schema.toEquivalence(Schema.Array(PendingAuthorization))
 const userId = BetterAuthUserId.make("user-1")
 const ownerId = OwnerId.make("owner-1")
 const threadId = ThreadId.make("thread-1")
@@ -117,6 +118,7 @@ const memoryStore = () => {
   let latestSnapshot: HostedThreadSnapshot | undefined
   let latestSnapshotCursor = 0n
   let latestSnapshotVersion = 0n
+  let latestSnapshotReplayRequired = false
   let snapshotSaves = 0
   const claims = new Map<string, string>()
   const acknowledgements: Array<{
@@ -178,9 +180,13 @@ const memoryStore = () => {
           })
         }
         if (input.snapshot !== undefined) {
+          const replayRequired =
+            latestSnapshot !== undefined &&
+            !pendingAuthorizationsEquivalent(latestSnapshot.pendingAuthorizations, input.snapshot.pendingAuthorizations)
           latestSnapshot = input.snapshot
           latestSnapshotCursor = cursor
           latestSnapshotVersion = BigInt(admitted.threadVersion)
+          latestSnapshotReplayRequired ||= replayRequired
         }
         const completed: ThreadProtocolCommand = {
           ...admitted,
@@ -211,10 +217,15 @@ const memoryStore = () => {
             createdAt: input.createdAt,
           }
         })
-        latestSnapshot = input.snapshot
-        latestSnapshotCursor = cursor
-        latestSnapshotVersion = version
         return written
+      }),
+    checkpoint: (input) =>
+      Effect.sync(() => {
+        latestSnapshot = input.snapshot
+        latestSnapshotCursor = BigInt(input.cursor)
+        latestSnapshotVersion = BigInt(input.threadVersion)
+        latestSnapshotReplayRequired = true
+        return true
       }),
     saveSnapshot: (input) =>
       Effect.sync(() => {
@@ -222,6 +233,7 @@ const memoryStore = () => {
         latestSnapshot = input.snapshot
         latestSnapshotCursor = BigInt(input.cursor)
         latestSnapshotVersion = BigInt(input.threadVersion)
+        latestSnapshotReplayRequired = false
       }),
     replay: (input) =>
       Effect.sync(() => {
@@ -229,8 +241,17 @@ const memoryStore = () => {
           input.throughCursor === undefined || BigInt(input.throughCursor) > cursor
             ? cursor
             : BigInt(input.throughCursor)
+        const afterCursor = BigInt(input.afterCursor)
+        const firstEvent = events.find(
+          (event) => BigInt(event.cursor) > afterCursor && BigInt(event.cursor) <= targetCursor,
+        )
+        const directTail = afterCursor === targetCursor || BigInt(firstEvent?.cursor ?? "-1") === afterCursor + 1n
+        const checkpointBehind = BigInt(input.afterCheckpointCursor ?? "-1") < latestSnapshotCursor
         const includeSnapshot =
-          input.includeSnapshot !== false && latestSnapshot !== undefined && latestSnapshotCursor <= targetCursor
+          input.includeSnapshot !== false &&
+          latestSnapshot !== undefined &&
+          latestSnapshotCursor <= targetCursor &&
+          (input.afterCursor === "0" || !directTail || (latestSnapshotReplayRequired && checkpointBehind))
         const replayCursor = includeSnapshot ? latestSnapshotCursor : BigInt(input.afterCursor)
         const replay = {
           threadVersion: ThreadVersion.make(String(version)),
@@ -247,6 +268,9 @@ const memoryStore = () => {
               event: event.event,
               createdAt: timestamp,
             })),
+          hasMore:
+            events.filter((event) => BigInt(event.cursor) > replayCursor && BigInt(event.cursor) <= targetCursor)
+              .length > input.limit,
         }
         if (includeSnapshot && latestSnapshot !== undefined)
           return {
@@ -291,6 +315,7 @@ const memoryStore = () => {
       latestSnapshot = undefined
       latestSnapshotCursor = 0n
       latestSnapshotVersion = 0n
+      latestSnapshotReplayRequired = false
     },
     dropEventsThrough: (throughCursor: string) => {
       const retained = events.filter((event) => BigInt(event.cursor) > BigInt(throughCursor))
@@ -502,9 +527,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
             _tag: "ThreadAttached",
             threadVersion: "1",
             cursor: "0",
-            snapshotThreadVersion: "1",
-            snapshotCursor: "0",
-            snapshot,
+            baseCursor: "0",
+            checkpoint: { threadVersion: "1", cursor: "0", snapshot },
             events: [],
           },
         },
@@ -648,7 +672,8 @@ it.effect("derives personal authority, admits a retried submission once, and res
           payload: {
             _tag: "ThreadAttached",
             cursor: "0",
-            snapshotCursor: "0",
+            baseCursor: "0",
+            checkpoint: { cursor: "0" },
             events: [],
             participants: [],
           },
@@ -890,7 +915,7 @@ it.effect("admits authorization decisions without applying them in the socket se
   const checkpoint = {
     version: ExecutionProjection.projectionVersion,
     cursor: "authorization-cursor",
-    state: JSON.stringify({ operation: "shell", arguments: "bun test" }),
+    state: '{"operation":"shell","arguments":"bun test"}',
   }
   let currentSnapshot: HostedThreadSnapshot = {
     ...snapshot,
@@ -987,7 +1012,7 @@ it.effect("admits authorization decisions without applying them in the socket se
         {
           payload: {
             _tag: "ThreadAttached",
-            snapshot: currentSnapshot,
+            checkpoint: { snapshot: currentSnapshot },
             events: [],
             participants: [],
           },
@@ -1034,9 +1059,8 @@ it.effect("admits authorization decisions without applying them in the socket se
             _tag: "ThreadAttached",
             threadVersion: "1",
             cursor: "0",
-            snapshotThreadVersion: "1",
-            snapshotCursor: "0",
-            snapshot: currentSnapshot,
+            baseCursor: "0",
+            checkpoint: { threadVersion: "0", cursor: "0", snapshot: currentSnapshot },
             events: [],
           },
         },
@@ -1101,7 +1125,7 @@ it.effect("admits authorization decisions without applying them in the socket se
   )
 })
 
-it.effect("labels outbound snapshots with durable cursors and resets compacted gaps", () => {
+it.effect("streams a contiguous tail and resets compacted cursors from a durable checkpoint", () => {
   const store = memoryStore()
   let currentSnapshot: HostedThreadSnapshot = snapshot
   const product: HostedProductService = {
@@ -1184,84 +1208,100 @@ it.effect("labels outbound snapshots with durable cursors and resets compacted g
         },
       })
 
-      currentSnapshot = snapshotWithTitle("Materialized ahead")
       const durableAhead = snapshotWithTitle("Durable one")
-      yield* store.appendEvents({
+      const first = yield* store.appendEvents({
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
-        snapshot: durableAhead,
         createdAt: timestamp,
       })
       expect(yield* pollOutbound(connection)).toMatchObject([
         { payload: { _tag: "ThreadEvent", event: { cursor: "1" } } },
+      ])
+      expect(store.snapshotSaves()).toBe(1)
+
+      yield* store.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: first[0]!.threadVersion,
+        cursor: first[0]!.cursor,
+        snapshot: durableAhead,
+        createdAt: timestamp,
+      })
+      expect(yield* pollOutbound(connection)).toMatchObject([
         {
           payload: {
             _tag: "ThreadSnapshot",
             cursor: "1",
             threadVersion: "0",
-            snapshot: currentSnapshot,
+            snapshot: durableAhead,
           },
         },
       ])
 
-      currentSnapshot = snapshotWithTitle("Materialized behind")
       const durableBehind = snapshotWithTitle("Durable two")
-      yield* store.appendEvents({
+      const second = yield* store.appendEvents({
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
-        snapshot: durableBehind,
         createdAt: timestamp,
       })
       expect(yield* pollOutbound(connection)).toMatchObject([
         { payload: { _tag: "ThreadEvent", event: { cursor: "2" } } },
-        {
-          payload: {
-            _tag: "ThreadSnapshot",
-            cursor: "2",
-            threadVersion: "0",
-            snapshot: currentSnapshot,
-          },
-        },
       ])
-
-      currentSnapshot = snapshotWithTitle("Materialized after compaction")
-      const durableCompacted = snapshotWithTitle("Durable compacted")
+      yield* store.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: second[0]!.threadVersion,
+        cursor: second[0]!.cursor,
+        snapshot: durableBehind,
+        createdAt: timestamp,
+      })
+      store.dropEventsThrough("2")
       yield* store.appendEvents({
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
-        snapshot: durableCompacted,
         createdAt: timestamp,
       })
-      store.dropEventsThrough("3")
-      expect(yield* pollOutbound(connection)).toMatchObject([
+      const compacted = yield* protocol.connect("ticket-compacted", "/api/v1/threads/socket")
+      expect(
+        yield* compacted.receive({
+          protocolVersion,
+          requestId: RequestId.make("attach-compacted"),
+          command: {
+            _tag: "AttachThread",
+            threadId,
+            afterCursor: ThreadEventCursor.make("1"),
+            afterCheckpointCursor: ThreadEventCursor.make("1"),
+          },
+        }),
+      ).toMatchObject([
         {
           payload: {
-            _tag: "ThreadSnapshot",
+            _tag: "ThreadAttached",
+            baseCursor: "2",
             cursor: "3",
-            threadVersion: "0",
-            snapshot: currentSnapshot,
+            checkpoint: { cursor: "2", snapshot: durableBehind },
+            events: [{ cursor: "3" }],
           },
         },
       ])
 
-      currentSnapshot = snapshotWithTitle("Projection at the same cursor")
-      const savesBeforeProjection = store.snapshotSaves()
-      expect(yield* pollOutbound(connection)).toMatchObject([
-        {
-          payload: {
-            _tag: "ThreadSnapshot",
-            cursor: "3",
-            threadVersion: "0",
-            snapshot: currentSnapshot,
+      const current = yield* protocol.connect("ticket-current", "/api/v1/threads/socket")
+      expect(
+        yield* current.receive({
+          protocolVersion,
+          requestId: RequestId.make("attach-current"),
+          command: {
+            _tag: "AttachThread",
+            threadId,
+            afterCursor: ThreadEventCursor.make("3"),
+            afterCheckpointCursor: ThreadEventCursor.make("2"),
           },
-        },
-      ])
-      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
-      expect(yield* pollOutbound(connection)).toEqual([])
-      expect(store.snapshotSaves()).toBe(savesBeforeProjection + 1)
+        }),
+      ).toMatchObject([{ payload: { _tag: "ThreadAttached", baseCursor: "3", cursor: "3", events: [] } }])
+      expect(store.snapshotSaves()).toBe(1)
     }),
   )
 })

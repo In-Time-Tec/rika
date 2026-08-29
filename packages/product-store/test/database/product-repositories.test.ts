@@ -13,7 +13,7 @@ import * as PgClient from "@effect/sql-pg/PgClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
-import { eq, sql as drizzleSql } from "drizzle-orm"
+import { and, eq, sql as drizzleSql } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { fileURLToPath } from "node:url"
@@ -221,23 +221,136 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           ])
 
           const key = "assistant:product-active"
-          yield* transcripts.replaceUnits(active, [
-            {
-              key,
+          const transcriptUnits = Array.from({ length: 4 }, (_, index) => {
+            const unitKey = index === 0 ? key : `${key}:${index}`
+            return {
+              key: unitKey,
               turnId: active.id,
-              order: UnitOrder.unitOrder(key, 0),
+              order: UnitOrder.unitOrder(unitKey, index),
               revision: 0,
-              content: { _tag: "Entry", role: "assistant", text: "persisted" },
-            },
-          ])
+              content: { _tag: "Entry" as const, role: "assistant" as const, text: `persisted ${index}` },
+            }
+          })
+          yield* transcripts.replaceUnits(active, transcriptUnits)
           expect(yield* transcripts.get(active.id)).toMatchObject({
             turn: { id: active.id },
-            units: [{ key, content: { text: "persisted" } }],
+            units: transcriptUnits,
           })
-          expect(yield* transcripts.page(threadId, { limit: 10 })).toMatchObject({
-            entries: [{ turn: { id: active.id }, unit: { key } }],
-            hasOlder: false,
+          const newestTranscript = yield* transcripts.page(threadId, { limit: 2 })
+          expect(newestTranscript).toMatchObject({
+            entries: transcriptUnits.slice(2).map((unit) => ({ turn: { id: active.id }, unit: { key: unit.key } })),
+            hasOlder: true,
             hasNewer: false,
+          })
+          const olderTranscript = yield* transcripts.page(threadId, {
+            before: newestTranscript.oldestCursor,
+            limit: 2,
+          })
+          expect(olderTranscript).toMatchObject({
+            entries: transcriptUnits.slice(0, 2).map((unit) => ({ turn: { id: active.id }, unit: { key: unit.key } })),
+            hasOlder: false,
+            hasNewer: true,
+          })
+          expect(yield* transcripts.page(threadId, { after: olderTranscript.newestCursor, limit: 2 })).toMatchObject({
+            entries: transcriptUnits.slice(2).map((unit) => ({ turn: { id: active.id }, unit: { key: unit.key } })),
+            hasOlder: true,
+            hasNewer: false,
+          })
+
+          const usageThreadId = Thread.ThreadId.make("product-usage-thread")
+          yield* seedAggregate(usageThreadId, "/work/product-usage", "Usage", 40)
+          const firstUsageTurn = yield* createTurn(turns, {
+            id: "product-usage-first",
+            threadId: usageThreadId,
+            prompt: "first usage",
+            now: 41,
+          })
+          yield* turns.setStatus(firstUsageTurn.id, "completed", 42)
+          const secondUsageTurn = yield* createTurn(turns, {
+            id: "product-usage-second",
+            threadId: usageThreadId,
+            prompt: "second usage",
+            now: 43,
+          })
+          yield* turns.setStatus(secondUsageTurn.id, "running", 44)
+          const firstUsage = {
+            ...ExecutionProjection.emptyUsageState(),
+            costNanoUsd: 10,
+            tokens: { total: 11, input: { total: 7 }, output: { total: 4 } },
+            pricedAttempts: 1,
+            countedAttempts: 1,
+            sourceComplete: true,
+            context: { requestOrdinal: 1, purpose: "conversation" as const, inputTokens: 7 },
+            contextPending: true,
+            active: { _tag: "Available" as const, accumulatedMillis: 5, activeSince: 100 },
+          }
+          const secondUsage = {
+            ...ExecutionProjection.emptyUsageState(),
+            tokens: { input: { cacheRead: 3 }, output: { reasoning: 2 } },
+            countedAttempts: 1,
+            context: { requestOrdinal: 2, purpose: "conversation" as const, inputTokens: 13 },
+            active: { _tag: "Available" as const, accumulatedMillis: 7, activeSince: 200 },
+          }
+          const projection = (
+            revision: number,
+            status: ExecutionProjection.ProjectionState["status"],
+            usage: ExecutionProjection.UsageState,
+          ): ExecutionProjection.Snapshot => ({
+            _tag: "ProjectionSnapshot",
+            revision,
+            checkpoint: {
+              version: ExecutionProjection.projectionVersion,
+              cursor: `usage-${revision}`,
+              state: "{}",
+            },
+            units: [],
+            hasOlder: false,
+            state: { status, usage, steering: { steeringMessages: 0, followUpMessages: 0 } },
+          })
+          expect(yield* transcripts.commitProjection(firstUsageTurn, projection(0, "completed", firstUsage))).toBe(
+            "committed",
+          )
+          expect(yield* transcripts.commitProjection(secondUsageTurn, projection(0, "running", secondUsage))).toBe(
+            "committed",
+          )
+          const contextCapacity = {
+            contextWindow: secondUsageTurn.executionRoute.main.compaction.contextWindow,
+            reserveTokens: secondUsageTurn.executionRoute.main.compaction.reserveTokens,
+          }
+          expect(yield* transcripts.usage(usageThreadId)).toEqual({
+            usage: ExecutionProjection.aggregateUsage([firstUsage, secondUsage]),
+            contextCapacity,
+          })
+
+          const replacedFirstUsage = {
+            ...ExecutionProjection.emptyUsageState(),
+            sourceComplete: true,
+            context: { requestOrdinal: 1, purpose: "conversation" as const, inputTokens: 8 },
+            contextPending: true,
+            active: { _tag: "Available" as const, accumulatedMillis: 9 },
+          }
+          expect(
+            yield* transcripts.commitProjection(firstUsageTurn, projection(1, "completed", replacedFirstUsage)),
+          ).toBe("committed")
+          expect(yield* transcripts.usage(usageThreadId)).toEqual({
+            usage: ExecutionProjection.aggregateUsage([replacedFirstUsage, secondUsage]),
+            contextCapacity,
+          })
+
+          const replacedSecondUsage = {
+            ...ExecutionProjection.emptyUsageState(),
+            sourceComplete: true,
+            active: { _tag: "Unavailable" as const },
+          }
+          expect(
+            yield* transcripts.commitProjection(secondUsageTurn, projection(1, "completed", replacedSecondUsage)),
+          ).toBe("committed")
+          expect(yield* transcripts.usage(usageThreadId)).toEqual({
+            usage: ExecutionProjection.aggregateUsage([replacedFirstUsage, replacedSecondUsage]),
+            contextCapacity: {
+              contextWindow: firstUsageTurn.executionRoute.main.compaction.contextWindow,
+              reserveTokens: firstUsageTurn.executionRoute.main.compaction.reserveTokens,
+            },
           })
 
           yield* sql`UPDATE rika_transcript_checkpoints
@@ -248,11 +361,18 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
                   revision = 99
               WHERE turn_id = ${active.id}`
           const obsoleteKey = "assistant:obsolete"
-          yield* sql`UPDATE rika_transcript_units
-              SET unit_key = ${obsoleteKey},
-                  unit_order_key = ${UnitOrder.encodeUnitOrder(UnitOrder.unitOrder(obsoleteKey, 0))},
-                  unit_json = '{}'
-              WHERE turn_id = ${active.id}`
+          yield* Effect.tryPromise(() =>
+            db
+              .update(schema.rikaTranscriptUnits)
+              .set({
+                unitKey: obsoleteKey,
+                unitOrderKey: UnitOrder.encodeUnitOrder(UnitOrder.unitOrder(obsoleteKey, 0)),
+                unitJson: "{}",
+              })
+              .where(
+                and(eq(schema.rikaTranscriptUnits.turnId, active.id), eq(schema.rikaTranscriptUnits.unitKey, key)),
+              ),
+          )
           expect(yield* transcripts.get(active.id)).toBeUndefined()
           const completedActive = yield* turns.get(active.id)
           if (completedActive?._tag !== "AgentExecution")

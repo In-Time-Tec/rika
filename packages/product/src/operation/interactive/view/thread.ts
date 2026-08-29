@@ -238,8 +238,15 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
     })
   }
   const publish = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
-    if (event._tag === "SelectionLoaded")
-      return replace(snapshotFromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0))
+    if (event._tag === "SelectionLoaded") {
+      const result = replace(
+        snapshotFromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0),
+      )
+      if (!snapshotRequired)
+        for (const value of event.projectionCheckpoints ?? [])
+          knownCheckpoints.set(String(value.turnId), value.checkpoint)
+      return result
+    }
     if (current !== undefined && event._tag === "ThreadTitled" && event.threadId === current.thread.id)
       return nextPatch({
         upsert: [],

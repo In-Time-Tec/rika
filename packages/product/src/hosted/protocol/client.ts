@@ -22,14 +22,10 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 4 as const
-export const previousProtocolVersion = 3 as const
+export const protocolVersion = 5 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
-export const ClientProtocolVersion = Schema.Union([
-  Schema.Literal(previousProtocolVersion),
-  Schema.Literal(protocolVersion),
-])
+export const ClientProtocolVersion = Schema.Literal(protocolVersion)
 export type ClientProtocolVersion = typeof ClientProtocolVersion.Type
 export const isSupportedClientProtocolVersion = Schema.is(ClientProtocolVersion)
 
@@ -241,6 +237,7 @@ export const ClientCommand = Schema.Union([
     Schema.TaggedStruct("AttachThread", {
       threadId: ThreadId,
       afterCursor: ThreadEventCursor,
+      afterCheckpointCursor: Schema.optionalKey(ThreadEventCursor),
     }),
   ),
   MutatingThreadCommand,
@@ -276,20 +273,6 @@ export const ClientMessage = strict(
   }),
 )
 export type ClientMessage = typeof ClientMessage.Type
-
-export const CompatibleClientMessage = strict(
-  Schema.Struct({
-    protocolVersion: ClientProtocolVersion,
-    requestId: RequestId,
-    command: ClientCommand,
-  }),
-)
-export type CompatibleClientMessage = typeof CompatibleClientMessage.Type
-
-export const normalizeClientMessage = (message: CompatibleClientMessage): ClientMessage => ({
-  ...message,
-  protocolVersion,
-})
 
 export const PendingAuthorization = strict(
   Schema.Struct({
@@ -367,6 +350,13 @@ export const CommandResult = Schema.Union([
 export type CommandResult = typeof CommandResult.Type
 
 const PresenceParticipant = Schema.Struct({ actor: ActorAttribution, status: PresenceStatus })
+const ThreadCheckpoint = strict(
+  Schema.Struct({
+    threadVersion: ThreadVersion,
+    cursor: ThreadEventCursor,
+    snapshot: HostedThreadSnapshot,
+  }),
+)
 
 export const ServerPayload = Schema.Union([
   strict(
@@ -403,11 +393,10 @@ export const ServerPayload = Schema.Union([
     Schema.TaggedStruct("ThreadAttached", {
       requestId: RequestId,
       threadId: ThreadId,
-      snapshotThreadVersion: ThreadVersion,
-      snapshotCursor: ThreadEventCursor,
+      baseCursor: ThreadEventCursor,
       threadVersion: ThreadVersion,
       cursor: ThreadEventCursor,
-      snapshot: HostedThreadSnapshot,
+      checkpoint: Schema.optionalKey(ThreadCheckpoint),
       events: Schema.Array(ThreadProtocolEvent),
       participants: Schema.Array(PresenceParticipant),
     }),
@@ -461,14 +450,6 @@ export const ServerFrame = strict(
   }),
 )
 export type ServerFrame = typeof ServerFrame.Type
-
-export const CompatibleServerFrame = strict(
-  Schema.Struct({
-    protocolVersion: ClientProtocolVersion,
-    payload: ServerPayload,
-  }),
-)
-export type CompatibleServerFrame = typeof CompatibleServerFrame.Type
 
 export const ClientTicketResponse = strict(
   Schema.Struct({

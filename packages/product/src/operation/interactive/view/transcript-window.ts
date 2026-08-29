@@ -2,7 +2,6 @@ import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type * as Turn from "@rika/product/turn-record"
 
 import * as TranscriptPage from "@rika/product/transcript-page"
-import * as ThreadResult from "@rika/product/thread-result"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ExecutionProjection from "../../../execution/projection/contract"
@@ -18,12 +17,7 @@ import {
   transcriptCursorFor,
   transcriptPageEncoder,
 } from "../../../thread/transcript/bounds"
-import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
 import * as InteractiveSelection from "./selection"
-import {
-  type PageCursor as TurnPageCursor,
-  type PageOptions as TurnPageOptions,
-} from "../../../thread/repository/turn-pagination"
 import { type InteractiveEvent } from "../session-event"
 import { type InteractiveRuntimeContext } from "../session"
 import { queueItem } from "../turn/queue"
@@ -61,116 +55,30 @@ export const boundedTranscriptPage = (input: {
   return Effect.succeed({ entries, hasOlder, oldestCursor })
 }
 
-const entriesFor = (
-  turn: Turn.Turn,
-  input: Pick<TranscriptRepository.Interface, "get">,
-  fail: (message: string) => Effect.Effect<never, OperationError, never>,
-) =>
-  Effect.gen(function* () {
-    if (turn.status === "queued") return []
-    if (ThreadResult.TurnResult.isRecordedShell(turn)) {
-      const running = recordedShellProjection({ id: turn.id, command: turn.command, status: "running" })
-      const shell = ThreadResult.TurnResult.isRunningRecordedShell(turn)
-        ? running
-        : settleRecordedShellProjection(running, turn)
-      return shell.units.map((unit) => ({
-        turn,
-        unit,
-        projectionRevision: shell.revision,
-        projectionModelPhase: -1,
-        projectionState: {
-          status: turn.status,
-          usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: turn.status !== "running" },
-          steering: { steeringMessages: 0, followUpMessages: 0 },
-        },
-      }))
-    }
-    const projection = yield* input.get(turn.id)
-    if (projection === undefined || projection.projectionVersion < ExecutionProjection.projectionVersion) {
-      if (!ThreadResult.TurnResult.isAgentExecution(turn)) return []
-      return [
-        {
-          turn,
-          unit: promptUnit(turn),
-          projectionRevision: 0,
-          projectionModelPhase: -1,
-          projectionState: {
-            status: turn.status === "accepted" ? "running" : turn.status,
-            usage: ExecutionProjection.emptyUsageState(),
-            steering: { steeringMessages: 0, followUpMessages: 0 },
-          },
-        },
-      ]
-    }
-    if (projection.projectionVersion !== ExecutionProjection.projectionVersion)
-      return yield* fail(`Turn ${turn.id} has unsupported projection version ${projection.projectionVersion}`)
-    const units = projection.units.length === 0 ? [promptUnit(projection.turn)] : projection.units
-    return units.map((unit) => ({
-      turn: projection.turn,
-      unit,
-      projectionRevision: projection.revision,
-      projectionModelPhase: -1,
-      projectionState: projection.state,
-    }))
-  })
-
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
-  readonly turns: Pick<TurnRepository.Interface, "page">
-  readonly transcripts: Pick<TranscriptRepository.Interface, "get" | "usage">
+  readonly transcripts: Pick<TranscriptRepository.Interface, "page">
   readonly encodeJson: <Value>(value: Value) => string
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
   Effect.gen(function* () {
-    // Pages arrive newest-first with turns ascending inside each page. Assemble the window
-    // newest-first so the byte cap retains the newest tail, then emit chronological output.
-    const turns: Array<Turn.Turn> = []
-    let hasOlder = false
-    let cursor: TurnPageCursor | undefined
-    while (true) {
-      const pageOptions: TurnPageOptions = cursor === undefined ? { limit: 50 } : { before: cursor, limit: 50 }
-      const turnPage = yield* input.turns.page(input.state.thread.id, pageOptions)
-      turns.push(...turnPage.turns.toReversed())
-      hasOlder = turnPage.hasOlder
-      if (!hasOlder) break
-      cursor = turnPage.oldestCursor
-      if (cursor === undefined) break
-    }
-    const entries: Array<TranscriptPage.Entry> = []
-    let bytes = 0
-    let truncated = false
-    for (const turn of turns) {
-      if (turn.status === "queued") continue
-      const turnEntries = yield* entriesFor(turn, input.transcripts, input.fail)
-      if (turnEntries.length === 0) continue
-      const turnBytes = transcriptPageEncoder.encode(input.encodeJson(turnEntries)).byteLength
-      if (bytes + turnBytes > maximumTranscriptPayloadBytes) {
-        truncated = true
-        break
-      }
-      for (const entry of turnEntries) entries.push(entry)
-      bytes += turnBytes
-    }
-    entries.reverse()
-    let oldestCursor: TranscriptPage.PageCursor | undefined = transcriptCursorFor(entries[0])
-    if (truncated) {
-      const bounded = boundTranscriptEntries(entries, input.encodeJson)
-      hasOlder = true
-      oldestCursor = bounded.partialCursor ?? transcriptCursorFor(bounded.entries[0])
-      return {
-        entries: bounded.entries,
-        hasOlder,
-        oldestCursor,
-        newestCursor: transcriptCursorFor(bounded.entries.at(-1)),
-        usage: yield* input.transcripts.usage(input.state.thread.id),
-      }
-    }
+    const page = yield* input.transcripts.page(input.state.thread.id, {
+      limit: 120,
+      projectionVersion: ExecutionProjection.projectionVersion,
+    })
+    const bounded = yield* boundedTranscriptPage({
+      entries: page.entries,
+      hasOlder: page.hasOlder,
+      encoder: input.encodeJson,
+      fail: input.fail,
+    })
     return {
-      entries,
-      hasOlder,
-      oldestCursor,
-      newestCursor: transcriptCursorFor(entries.at(-1)),
-      usage: yield* input.transcripts.usage(input.state.thread.id),
+      entries: bounded.entries,
+      hasOlder: bounded.hasOlder,
+      hasNewer: page.hasNewer,
+      oldestCursor: bounded.oldestCursor ?? page.oldestCursor,
+      newestCursor: transcriptCursorFor(bounded.entries.at(-1)),
+      usage: page.usage,
     }
   })
 
@@ -316,11 +224,9 @@ export type InteractiveTranscriptPageInput = InteractiveRuntimeContext &
 
 export const makeInitialTranscriptWindow = (input: Pick<InteractiveRuntimeContext, "encodeJson">) =>
   Effect.fn("ProductOperation.interactive.initialTranscriptWindow")(function* (state: SelectionEpochState) {
-    const turns = yield* TurnRepository.Service
     const transcripts = yield* TranscriptRepository.Service
     return yield* initialTranscriptWindow({
       state,
-      turns,
       transcripts,
       encodeJson: input.encodeJson,
       fail: operationError,
@@ -355,6 +261,7 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
     const request = state.epoch
     const loadedAt = yield* Clock.currentTimeMillis
     const turns = yield* TurnRepository.Service
+    const transcripts = yield* TranscriptRepository.Service
     if (isCurrentSelectionState(state) !== true) return
     const page = yield* loadInitialTranscriptWindow(state)
     let oldestCursor = page.oldestCursor
@@ -394,6 +301,7 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
           loading.committed = true
           const queue = yield* turns.readQueue(thread.id)
           const activeTurn = yield* turns.findActive(thread.id)
+          const activeProjection = activeTurn === undefined ? undefined : yield* transcripts.get(activeTurn.id)
           let event: Extract<InteractiveEvent, { readonly _tag: "SelectionLoaded" }> = {
             _tag: "SelectionLoaded",
             selectionEpoch: request,
@@ -406,6 +314,10 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
+            projectionCheckpoints:
+              activeProjection?.projectorCheckpoint === undefined
+                ? []
+                : [{ turnId: activeProjection.turn.id, checkpoint: activeProjection.projectorCheckpoint }],
           }
           if (oldestCursor !== undefined) event = { ...event, oldestCursor }
           if (page.newestCursor !== undefined) event = { ...event, newestCursor: page.newestCursor }

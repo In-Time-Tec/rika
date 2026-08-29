@@ -148,6 +148,10 @@ export type InteractiveEvent =
       readonly queuedCount?: number
       readonly queue: ReadonlyArray<QueueItem>
       readonly activeTurn?: Turn.Turn
+      readonly projectionCheckpoints: ReadonlyArray<{
+        readonly turnId: Turn.TurnId
+        readonly checkpoint: ExecutionProjection.Checkpoint
+      }>
     }
   | {
       readonly _tag: "ShellCompleted"
@@ -335,6 +339,9 @@ export const InteractiveEventSchema = Schema.Union([
       }),
     ),
     activeTurn: Schema.optionalKey(Turn.Turn),
+    projectionCheckpoints: Schema.Array(
+      Schema.Struct({ turnId: Turn.TurnId, checkpoint: ExecutionProjection.Checkpoint }),
+    ),
   }),
   Schema.Struct({
     _tag: Schema.tag("ShellCompleted"),

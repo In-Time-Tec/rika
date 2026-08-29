@@ -53,6 +53,7 @@
     "./migrations/postgres/0035-workspace-seeds.sql": "./migrations/postgres/0035-workspace-seeds.sql",
     "./migrations/postgres/0037-hosted-product-thread-invariant.sql": "./migrations/postgres/0037-hosted-product-thread-invariant.sql",
     "./migrations/postgres/0038-authoritative-thread-command-ledger.sql": "./migrations/postgres/0038-authoritative-thread-command-ledger.sql",
+    "./migrations/postgres/0039-bounded-thread-checkpoints.sql": "./migrations/postgres/0039-bounded-thread-checkpoints.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
     "./goal-repository": "./src/goal/repository.ts",
     "./thread-search-index": "./src/search/process-local-index.ts",

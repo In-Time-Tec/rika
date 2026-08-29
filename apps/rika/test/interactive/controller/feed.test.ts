@@ -32,6 +32,7 @@ it("projects a full snapshot beyond the old 120-unit window bound without trunca
     activitySequence: 0,
     queueRevision: 0,
     queue: [],
+    projectionCheckpoints: [],
     thread,
     entries: [
       entry("opening", 1, "opening"),
@@ -93,6 +94,7 @@ it("bounds the in-memory timeline to the newest units when a snapshot exceeds th
     activitySequence: 0,
     queueRevision: 0,
     queue: [],
+    projectionCheckpoints: [],
     thread,
     entries: units,
     hasOlder: false,

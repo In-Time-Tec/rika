@@ -36,8 +36,6 @@ import {
   rikaHostedThreadProtocolSnapshots,
   rikaHostedWorkspaces,
   rikaThreads,
-  rikaTranscriptCheckpoints,
-  rikaTurns,
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations } from "@rika/product-store/migrations"
@@ -45,7 +43,7 @@ import { layer } from "@rika/product-store/layer"
 import { and, count, eq, gt } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { FileSystem, Config, Context, DateTime, Deferred, Effect, Fiber, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, DateTime, Deferred, Effect, Layer, Random, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -265,17 +263,15 @@ const completeMockPrompt = (
     completedAt: later,
   }
   if (completedSnapshot !== undefined) Object.assign(completion, { snapshot: completedSnapshot })
-  return store
-    .completeCommand(completion)
-    .pipe(
-      Effect.orDie,
-      Effect.as({
-        _tag: "Admitted" as const,
-        commandId: input.operationKey,
-        turnId: input.turnId,
-        status,
-      }),
-    )
+  return store.completeCommand(completion).pipe(
+    Effect.orDie,
+    Effect.as({
+      _tag: "Admitted" as const,
+      commandId: input.operationKey,
+      turnId: input.turnId,
+      status,
+    }),
+  )
 }
 
 it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes socket tickets once", () =>
@@ -405,10 +401,17 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         { failure: { reason: "stale-version" } },
       ])
 
-      yield* protocol.appendEvents({
+      const appended = yield* protocol.appendEvents({
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        createdAt: later,
+      })
+      yield* protocol.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: appended[0]!.threadVersion,
+        cursor: appended[0]!.cursor,
         snapshot,
         createdAt: later,
       })
@@ -422,9 +425,9 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
       expect(replay).toMatchObject({
         threadVersion: "2",
         cursor: "2",
-        snapshot: { cursor: "2" },
+        snapshot: { cursor: "1" },
       })
-      expect(replay.events).toEqual([])
+      expect(replay.events).toMatchObject([{ cursor: "2" }])
       expect(
         yield* protocol.acknowledgeCursor({
           ownerId,
@@ -441,8 +444,8 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         afterCursor: ThreadEventCursor.make("0"),
         limit: 100,
       })
-      expect(compacted.snapshot?.cursor).toBe("2")
-      expect(compacted.events).toEqual([])
+      expect(compacted.snapshot?.cursor).toBe("1")
+      expect(compacted.events).toMatchObject([{ cursor: "2" }])
 
       yield* protocol.issueTicket({
         ticketId: "ticket",
@@ -885,7 +888,7 @@ it.effect.skipIf(!live)("keeps event versions and snapshots monotonic when comma
       )
       expect(
         snapshots.map(({ threadVersion, cursor }) => ({ version: String(threadVersion), cursor: String(cursor) })),
-      ).toMatchObject([{ version: "2", cursor: "2" }])
+      ).toMatchObject([{ version: "2", cursor: "1" }])
     }),
   ),
 )
@@ -1092,13 +1095,11 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
             cancelledAt: later,
           }
           if (input.claimToken !== undefined) Object.assign(cancellation, { claimToken: input.claimToken })
-          return protocol
-            .cancelPrompt(cancellation)
-            .pipe(
-              Effect.orDie,
-              Effect.tap(() => Effect.sync(() => cancelledPrompts.add(input.targetCommandId))),
-              Effect.map((resolution) => (resolution._tag === "Turn" ? { turnId: String(resolution.turnId) } : {})),
-            )
+          return protocol.cancelPrompt(cancellation).pipe(
+            Effect.orDie,
+            Effect.tap(() => Effect.sync(() => cancelledPrompts.add(input.targetCommandId))),
+            Effect.map((resolution) => (resolution._tag === "Turn" ? { turnId: String(resolution.turnId) } : {})),
+          )
         },
         authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
@@ -1219,13 +1220,6 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       const protocolStore = yield* setup(pool)
       const db = drizzle({ client: pool })
       let currentSnapshot: HostedThreadSnapshot = snapshot
-      let snapshotBarrier:
-        | {
-            readonly started: Deferred.Deferred<void>
-            readonly release: Deferred.Deferred<void>
-            reads: number
-          }
-        | undefined
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -1247,17 +1241,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
         threads: () => Effect.die("unused"),
         preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
-        snapshot: () =>
-          Effect.gen(function* () {
-            const captured = currentSnapshot
-            const barrier = snapshotBarrier
-            if (barrier !== undefined) {
-              barrier.reads += 1
-              if (barrier.reads === 2) yield* Deferred.succeed(barrier.started, undefined)
-              yield* Deferred.await(barrier.release)
-            }
-            return captured
-          }),
+        snapshot: () => Effect.succeed(currentSnapshot),
         interactive: () => Effect.die("unused"),
       }
       const dependencies = Layer.mergeAll(
@@ -1329,10 +1313,17 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
               revision: updatedAt,
             },
           }
-          yield* protocolStore.appendEvents({
+          const appended = yield* protocolStore.appendEvents({
             ownerId,
             threadId,
             events: [{ _tag: "ThreadViewSnapshot", snapshot: currentSnapshot.view }],
+            createdAt: later,
+          })
+          yield* protocolStore.saveSnapshot({
+            ownerId,
+            threadId,
+            threadVersion: appended[0]!.threadVersion,
+            cursor: appended[0]!.cursor,
             snapshot: currentSnapshot,
             createdAt: later,
           })
@@ -1390,100 +1381,6 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       yield* publish(3)
       const second = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
       expect(second.map(eventCursors)).toEqual([["2"], ["2"]])
-
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Projected checkpoint wake" },
-          revision: 4,
-        },
-      }
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaTurns).values({
-          id: "checkpoint-notify-turn",
-          threadId,
-          prompt: "$ printf projection",
-          status: "running",
-          createdAt: 4,
-          updatedAt: 4,
-          shellCommand: "printf projection",
-          turnKind: "RecordedShell",
-        }),
-      )
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaTranscriptCheckpoints).values({
-          turnId: "checkpoint-notify-turn",
-          threadId,
-          checkpointGeneration: 1,
-          revision: 0,
-          projectionVersion: ExecutionProjection.projectionVersion,
-          stateJson: "{}",
-          updatedAt: 4,
-        }),
-      )
-      const projected = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
-      expect(projected).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
-      ])
-
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Running before terminal transition" },
-          revision: 5,
-        },
-      }
-      snapshotBarrier = {
-        started: yield* Deferred.make<void>(),
-        release: yield* Deferred.make<void>(),
-        reads: 0,
-      }
-      const firstWake = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
-        concurrency: "unbounded",
-      }).pipe(Effect.forkChild)
-      yield* Effect.tryPromise(() =>
-        db
-          .update(rikaTranscriptCheckpoints)
-          .set({ updatedAt: 5 })
-          .where(eq(rikaTranscriptCheckpoints.turnId, "checkpoint-notify-turn")),
-      )
-      yield* Deferred.await(snapshotBarrier.started).pipe(Effect.timeout("5 seconds"))
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Completed after terminal transition" },
-          revision: 6,
-        },
-      }
-      yield* Effect.tryPromise(() =>
-        db
-          .update(rikaTurns)
-          .set({
-            status: "completed",
-            updatedAt: 6,
-            shellResultText: "",
-            shellResultTruncated: 0,
-            shellResultExitCode: 0,
-          })
-          .where(eq(rikaTurns.id, "checkpoint-notify-turn")),
-      )
-      yield* Deferred.succeed(snapshotBarrier.release, undefined)
-      expect(yield* Fiber.join(firstWake)).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
-      ])
-      snapshotBarrier = undefined
-      const terminal = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
-        concurrency: "unbounded",
-      }).pipe(Effect.timeout("5 seconds"))
-      expect(terminal).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
-      ])
     }),
   ),
 )
@@ -1785,6 +1682,14 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           },
         ],
       }
+      yield* protocolStore.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: ThreadVersion.make("3"),
+        cursor: ThreadEventCursor.make("3"),
+        snapshot: currentSnapshot,
+        createdAt: later,
+      })
       const approvalController = yield* open(protocolA)
       expect(
         yield* approvalController.receive({
@@ -1802,13 +1707,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
             _tag: "ThreadAttached",
             threadVersion: "3",
             cursor: "3",
-            snapshot: {
-              pendingAuthorizations: [
-                {
-                  authorizationId: "authorization-1",
-                  turnId: "approval-turn",
-                },
-              ],
+            checkpoint: {
+              cursor: "3",
+              snapshot: {
+                pendingAuthorizations: [
+                  {
+                    authorizationId: "authorization-1",
+                    turnId: "approval-turn",
+                  },
+                ],
+              },
             },
             events: [],
             participants: expect.any(Array),
@@ -2018,13 +1926,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const attachedReplay = replay[0]!.payload
       expect(attachedReplay).toMatchObject({
         _tag: "ThreadAttached",
-        snapshotCursor: "1005",
+        baseCursor: "3",
+        checkpoint: { cursor: "3" },
         threadVersion: "7",
         cursor: "1005",
         participants: expect.any(Array),
       })
       if (attachedReplay._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
-      expect(attachedReplay.events).toEqual([])
+      expect(attachedReplay.events).toHaveLength(1_002)
+      expect(attachedReplay.events[0]?.cursor).toBe("4")
+      expect(attachedReplay.events.at(-1)?.cursor).toBe("1005")
       expect(
         (yield* replayController.receive({
           protocolVersion,
@@ -2041,7 +1952,6 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
-        snapshot: currentSnapshot,
         createdAt: later,
       })
       yield* Effect.tryPromise(() =>
@@ -2067,11 +1977,11 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const appendOnlyAttachment = appendOnlyReplay[0]!.payload
       expect(appendOnlyAttachment).toMatchObject({
         _tag: "ThreadAttached",
-        snapshotCursor: "1006",
+        baseCursor: "1005",
         cursor: "1006",
+        events: [{ cursor: "1006" }],
       })
       if (appendOnlyAttachment._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
-      expect(appendOnlyAttachment.events).toEqual([])
 
       const duplicateControl = {
         protocolVersion,

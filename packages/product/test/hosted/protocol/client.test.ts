@@ -21,10 +21,7 @@ import {
 } from "../../../src/hosted/model"
 import {
   ClientMessage,
-  CompatibleClientMessage,
   inspectClientProtocolVersion,
-  normalizeClientMessage,
-  previousProtocolVersion,
   protocolMismatchFrame,
   protocolMismatchMessage,
   protocolVersion,
@@ -187,17 +184,7 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
   })
 
-  it("normalizes the compatible previous protocol and encodes older mismatches for the caller", () => {
-    const compatible = Schema.decodeSync(CompatibleClientMessage)({
-      protocolVersion: previousProtocolVersion,
-      requestId: "request-1",
-      command: { _tag: "Detach" },
-    })
-    expect(normalizeClientMessage(compatible)).toEqual({
-      protocolVersion,
-      requestId: "request-1",
-      command: { _tag: "Detach" },
-    })
+  it("encodes protocol mismatches for the caller", () => {
     const body = JSON.stringify({ protocolVersion: 2, requestId: "request-2", command: { _tag: "Detach" } })
     expect(inspectClientProtocolVersion(body)).toEqual({ protocolVersion: 2, requestId: "request-2" })
     const frame = Schema.decodeSync(
@@ -297,11 +284,10 @@ describe("hosted Thread client protocol", () => {
           _tag: "ThreadAttached",
           requestId,
           threadId,
-          snapshotThreadVersion: ThreadVersion.make("4"),
-          snapshotCursor: cursor,
+          baseCursor: cursor,
           threadVersion: ThreadVersion.make("4"),
           cursor,
-          snapshot,
+          checkpoint: { threadVersion: ThreadVersion.make("4"), cursor, snapshot },
           events: [],
           participants: [{ actor: personalActor, status: "viewing" }],
         },

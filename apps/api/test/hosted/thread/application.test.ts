@@ -117,6 +117,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
             releaseCommandClaim: () => Effect.die("unused"),
             completeCommand: () => Effect.die("unused"),
             appendEvents: () => Effect.die("unused"),
+            checkpoint: () => Effect.die("unused"),
             saveSnapshot: () => Effect.die("unused"),
             replay: () => Effect.die("unused"),
             acknowledgeCursor: () => Effect.die("unused"),

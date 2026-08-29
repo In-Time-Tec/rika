@@ -41,7 +41,7 @@ import {
 } from "@rika/product/hosted-model"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { InteractiveEventSchema } from "@rika/product/interactive-event"
-import { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import { HostedThreadSnapshot, PendingAuthorization } from "@rika/product/client-protocol"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import {
@@ -82,6 +82,7 @@ const decode =
     Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(databaseError))
 const jsonEquivalent = Schema.toEquivalence(JsonObject)
 const actorEquivalent = Schema.toEquivalence(ActorAttribution)
+const pendingAuthorizationsEquivalent = Schema.toEquivalence(Schema.Array(PendingAuthorization))
 const SubmitPromptIdentity = Schema.TaggedStruct("SubmitPrompt", {})
 const CommandCancellationIdentity = Schema.TaggedStruct("Cancel", {
   target: Schema.TaggedStruct("Command", { commandId: Schema.String }),
@@ -95,6 +96,7 @@ const bigintValue = (value: string) => sql<number>`${value}::bigint`
 const timestampValue = (value: string) => sql<Date>`${value}::timestamptz`
 const timestampText = (column: SQLWrapper) =>
   sql<string>`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+const checkpointInterval = 64n
 
 const commandFields = {
   ownerId: rikaHostedThreadProtocolCommands.ownerId,
@@ -367,6 +369,78 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         )
         .for("update"),
     )
+
+  const writeSnapshot = (
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: {
+      readonly ownerId: OwnerId
+      readonly threadId: ThreadId
+      readonly threadVersion: ThreadVersion
+      readonly cursor: ThreadEventCursor
+      readonly snapshot: HostedThreadSnapshot
+      readonly createdAt: Timestamp
+      readonly replayRequired?: boolean
+    },
+  ) =>
+    query(
+      tx
+        .insert(rikaHostedThreadProtocolSnapshots)
+        .values({
+          ownerId: input.ownerId,
+          threadId: input.threadId,
+          threadVersion: bigintValue(input.threadVersion),
+          cursor: bigintValue(input.cursor),
+          snapshot: input.snapshot,
+          replayRequired: input.replayRequired ?? false,
+          createdAt: timestampValue(input.createdAt),
+        })
+        .onConflictDoUpdate({
+          target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
+          set: {
+            cursor: bigintValue(input.cursor),
+            snapshot: input.snapshot,
+            replayRequired: sql`${rikaHostedThreadProtocolSnapshots.replayRequired} OR excluded.replay_required`,
+            createdAt: timestampValue(input.createdAt),
+          },
+          setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
+        }),
+    ).pipe(Effect.asVoid)
+
+  const checkpointDue = Effect.fn("ThreadProtocolStore.checkpointDue")(function* (
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    ownerId: OwnerId,
+    threadId: ThreadId,
+    cursor: ThreadEventCursor,
+    snapshot: HostedThreadSnapshot,
+  ) {
+    const latest = (yield* query(
+      tx
+        .select({
+          cursor: bigintText(rikaHostedThreadProtocolSnapshots.cursor),
+          snapshot: rikaHostedThreadProtocolSnapshots.snapshot,
+          replayRequired: rikaHostedThreadProtocolSnapshots.replayRequired,
+        })
+        .from(rikaHostedThreadProtocolSnapshots)
+        .where(
+          and(
+            eq(rikaHostedThreadProtocolSnapshots.ownerId, ownerId),
+            eq(rikaHostedThreadProtocolSnapshots.threadId, threadId),
+          ),
+        )
+        .orderBy(desc(rikaHostedThreadProtocolSnapshots.cursor))
+        .limit(1),
+    ))[0]
+    if (latest === undefined) return { due: true, replayRequired: false }
+    const stored = yield* decode(HostedThreadSnapshot)(latest.snapshot)
+    const authorizationChanged = !pendingAuthorizationsEquivalent(
+      stored.pendingAuthorizations,
+      snapshot.pendingAuthorizations,
+    )
+    return {
+      due: authorizationChanged || BigInt(cursor) - BigInt(latest.cursor) >= checkpointInterval,
+      replayRequired: authorizationChanged || latest.replayRequired,
+    }
+  })
 
   const applyPrompt: ThreadProtocolStoreService["applyPrompt"] = Effect.fn("ThreadProtocolStore.applyPrompt")(
     function* (input, stage) {
@@ -899,28 +973,20 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                   ),
                 ),
             )
-          if (input.snapshot !== undefined)
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
-                  ownerId: input.ownerId,
-                  threadId: input.threadId,
-                  threadVersion: bigintValue(threadVersion),
-                  cursor: bigintValue(cursor),
-                  snapshot: input.snapshot,
-                  createdAt: timestampValue(input.completedAt),
-                })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.completedAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+          const checkpointDecision =
+            input.snapshot === undefined
+              ? undefined
+              : yield* checkpointDue(tx, input.ownerId, input.threadId, cursor, input.snapshot)
+          if (input.snapshot !== undefined && checkpointDecision?.due === true)
+            yield* writeSnapshot(tx, {
+              ownerId: input.ownerId,
+              threadId: input.threadId,
+              threadVersion,
+              cursor,
+              snapshot: input.snapshot,
+              createdAt: input.completedAt,
+              replayRequired: checkpointDecision.replayRequired,
+            })
           const completed = yield* query(
             tx
               .update(rikaHostedThreadProtocolCommands)
@@ -972,28 +1038,39 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                   ),
                 ),
             )
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
+            if (input.snapshot !== undefined) {
+              const decision = yield* checkpointDue(tx, input.ownerId, input.threadId, cursor, input.snapshot)
+              if (decision.due)
+                yield* writeSnapshot(tx, {
                   ownerId: input.ownerId,
                   threadId: input.threadId,
-                  threadVersion: bigintValue(state.version),
-                  cursor: bigintValue(cursor),
+                  threadVersion: ThreadVersion.make(state.version),
+                  cursor,
                   snapshot: input.snapshot,
-                  createdAt: timestampValue(input.createdAt),
+                  createdAt: input.createdAt,
+                  replayRequired: decision.replayRequired,
                 })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.createdAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+            }
             return events
+          }),
+        )
+        .pipe(Effect.catchTag("SqlError", databaseError))
+    },
+  )
+
+  const checkpoint: ThreadProtocolStoreService["checkpoint"] = Effect.fn("ThreadProtocolStore.checkpoint")(
+    function* (input) {
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const state = (yield* stateForUpdate(tx, input.ownerId, input.threadId))[0]
+            if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+            if (state.version !== input.threadVersion || state.cursor !== input.cursor)
+              return yield* failure("conflict", "Thread protocol state advanced before its checkpoint was persisted")
+            const decision = yield* checkpointDue(tx, input.ownerId, input.threadId, input.cursor, input.snapshot)
+            if (!decision.due) return false
+            yield* writeSnapshot(tx, { ...input, replayRequired: decision.replayRequired })
+            return true
           }),
         )
         .pipe(Effect.catchTag("SqlError", databaseError))
@@ -1021,27 +1098,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             )
             if (rows[0] === undefined)
               return yield* failure("conflict", "Thread protocol state advanced before its snapshot was persisted")
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
-                  ownerId: input.ownerId,
-                  threadId: input.threadId,
-                  threadVersion: bigintValue(input.threadVersion),
-                  cursor: bigintValue(input.cursor),
-                  snapshot: input.snapshot,
-                  createdAt: timestampValue(input.createdAt),
-                })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(input.cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.createdAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+            yield* writeSnapshot(tx, input)
           }),
         )
         .pipe(Effect.catchTag("SqlError", databaseError))
@@ -1073,8 +1130,56 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           const targetCursor = ThreadEventCursor.make(
             (throughCursor < stateCursor ? throughCursor : stateCursor).toString(),
           )
+          if (BigInt(input.afterCursor) > BigInt(targetCursor))
+            return yield* failure("conflict", "Replay cursor is ahead of the committed Thread log")
+          if (
+            input.afterCheckpointCursor !== undefined &&
+            BigInt(input.afterCheckpointCursor) > BigInt(input.afterCursor)
+          )
+            return yield* failure("conflict", "Replay checkpoint cursor is ahead of its event cursor")
+          const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)
+          const readEvents = (cursor: ThreadEventCursor) =>
+            query(
+              tx
+                .select({
+                  sequence: bigintText(rikaHostedThreadProtocolEvents.sequence),
+                  cursor: bigintText(rikaHostedThreadProtocolEvents.cursor),
+                  threadVersion: bigintText(rikaHostedThreadProtocolEvents.threadVersion),
+                  event: rikaHostedThreadProtocolEvents.event,
+                  createdAt: timestampText(rikaHostedThreadProtocolEvents.createdAt),
+                })
+                .from(rikaHostedThreadProtocolEvents)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolEvents.ownerId, input.ownerId),
+                    eq(rikaHostedThreadProtocolEvents.threadId, input.threadId),
+                    gt(rikaHostedThreadProtocolEvents.cursor, bigintValue(cursor)),
+                    lte(rikaHostedThreadProtocolEvents.cursor, bigintValue(targetCursor)),
+                  ),
+                )
+                .orderBy(asc(rikaHostedThreadProtocolEvents.sequence))
+                .limit(limit + 1),
+            )
+          let replayCursor = input.afterCursor
+          let eventRows = yield* readEvents(replayCursor)
+          const directTail =
+            BigInt(replayCursor) === BigInt(targetCursor) ||
+            eventRows[0]?.cursor === (BigInt(replayCursor) + 1n).toString()
+          const retainedTail = directTail && (input.afterCursor !== "0" || input.afterCheckpointCursor !== undefined)
+          const requiredCheckpoint = retainedTail
+            ? and(
+                eq(rikaHostedThreadProtocolSnapshots.replayRequired, true),
+                gte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(input.afterCursor)),
+                input.afterCheckpointCursor === undefined
+                  ? lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor))
+                  : and(
+                      gt(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(input.afterCheckpointCursor)),
+                      lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                    ),
+              )
+            : undefined
           const snapshotRows =
-            input.includeSnapshot === false
+            input.includeSnapshot === false || (retainedTail && requiredCheckpoint === undefined)
               ? []
               : yield* query(
                   tx
@@ -1089,39 +1194,26 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                       and(
                         eq(rikaHostedThreadProtocolSnapshots.ownerId, input.ownerId),
                         eq(rikaHostedThreadProtocolSnapshots.threadId, input.threadId),
-                        lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                        requiredCheckpoint ??
+                          (replayCursor === "0"
+                            ? lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor))
+                            : and(
+                                gt(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(replayCursor)),
+                                lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                              )),
                         lte(rikaHostedThreadProtocolSnapshots.threadVersion, bigintValue(state.version)),
                       ),
                     )
-                    .orderBy(
-                      desc(rikaHostedThreadProtocolSnapshots.threadVersion),
-                      desc(rikaHostedThreadProtocolSnapshots.cursor),
-                    )
+                    .orderBy(desc(rikaHostedThreadProtocolSnapshots.cursor))
                     .limit(1),
                 )
           const snapshotRow = snapshotRows[0]
-          const replayCursor = snapshotRow?.cursor ?? input.afterCursor
-          const eventRows = yield* query(
-            tx
-              .select({
-                sequence: bigintText(rikaHostedThreadProtocolEvents.sequence),
-                cursor: bigintText(rikaHostedThreadProtocolEvents.cursor),
-                threadVersion: bigintText(rikaHostedThreadProtocolEvents.threadVersion),
-                event: rikaHostedThreadProtocolEvents.event,
-                createdAt: timestampText(rikaHostedThreadProtocolEvents.createdAt),
-              })
-              .from(rikaHostedThreadProtocolEvents)
-              .where(
-                and(
-                  eq(rikaHostedThreadProtocolEvents.ownerId, input.ownerId),
-                  eq(rikaHostedThreadProtocolEvents.threadId, input.threadId),
-                  gt(rikaHostedThreadProtocolEvents.cursor, bigintValue(replayCursor)),
-                  lte(rikaHostedThreadProtocolEvents.cursor, bigintValue(targetCursor)),
-                ),
-              )
-              .orderBy(asc(rikaHostedThreadProtocolEvents.sequence))
-              .limit(Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)),
-          )
+          if (snapshotRow !== undefined) {
+            replayCursor = ThreadEventCursor.make(snapshotRow.cursor)
+            eventRows = yield* readEvents(replayCursor)
+          }
+          const hasMore = eventRows.length > limit
+          eventRows = eventRows.slice(0, limit)
           const events: Array<ThreadProtocolEvent> = []
           for (const row of eventRows)
             events.push({
@@ -1137,6 +1229,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             threadVersion: ThreadVersion.make(state.version),
             cursor: ThreadEventCursor.make(state.cursor),
             events,
+            hasMore,
           }
           if (snapshotRow !== undefined)
             Object.assign(replayResult, {
@@ -1349,6 +1442,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     releaseCommandClaim,
     completeCommand,
     appendEvents,
+    checkpoint,
     saveSnapshot,
     replay,
     acknowledgeCursor,

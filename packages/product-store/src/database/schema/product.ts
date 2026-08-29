@@ -1531,6 +1531,7 @@ export const rikaHostedThreadProtocolSnapshots = pgTable(
     threadVersion: bigint("thread_version", { mode: "number" }).notNull(),
     cursor: bigint({ mode: "number" }).notNull(),
     snapshot: jsonb().notNull(),
+    replayRequired: boolean("replay_required").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (table) => [
@@ -2070,6 +2071,42 @@ export const rikaTranscriptCheckpoints = pgTable(
       sql`((projector_version IS NULL) OR (projector_version >= 1))`,
     ),
     check("rika_transcript_checkpoints_revision_check", sql`(revision >= '-1'::integer)`),
+  ],
+)
+
+export const rikaTranscriptThreadUsage = pgTable("rika_transcript_thread_usage", {
+  threadId: text("thread_id")
+    .primaryKey()
+    .references(() => rikaThreads.id, { onDelete: "cascade" }),
+  accumulatorJson: text("accumulator_json").notNull(),
+  summaryJson: text("summary_json").notNull(),
+  updatedAt: doublePrecision("updated_at").notNull(),
+})
+
+export const rikaTranscriptTurnUsage = pgTable(
+  "rika_transcript_turn_usage",
+  {
+    turnId: text("turn_id")
+      .primaryKey()
+      .references(() => rikaTurns.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => rikaThreads.id, { onDelete: "cascade" }),
+    createdAt: doublePrecision("created_at").notNull(),
+    usageJson: text("usage_json").notNull(),
+    hasContext: boolean("has_context").notNull(),
+    contextCapacityJson: text("context_capacity_json"),
+    activeSince: doublePrecision("active_since"),
+    updatedAt: doublePrecision("updated_at").notNull(),
+  },
+  (table) => [
+    index("rika_transcript_turn_usage_thread").on(table.threadId, table.createdAt.desc(), table.turnId.desc()),
+    index("rika_transcript_turn_usage_context")
+      .on(table.threadId, table.createdAt.desc(), table.turnId.desc())
+      .where(sql`has_context`),
+    index("rika_transcript_turn_usage_active")
+      .on(table.threadId, table.activeSince.asc())
+      .where(sql`active_since IS NOT NULL`),
   ],
 )
 

@@ -118,6 +118,7 @@ export interface ThreadReplay {
   readonly cursor: ThreadEventCursor
   readonly snapshot?: ThreadProtocolSnapshot
   readonly events: ReadonlyArray<ThreadProtocolEvent>
+  readonly hasMore: boolean
 }
 
 export interface ThreadSocketTicketBinding {
@@ -192,9 +193,17 @@ export interface ThreadProtocolStoreService {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly events: ReadonlyArray<InteractiveEvent>
-    readonly snapshot: HostedThreadSnapshot
+    readonly snapshot?: HostedThreadSnapshot
     readonly createdAt: Timestamp
   }) => Effect.Effect<ReadonlyArray<ThreadProtocolEvent>, HostedPersistenceError>
+  readonly checkpoint: (input: {
+    readonly ownerId: OwnerId
+    readonly threadId: ThreadId
+    readonly threadVersion: ThreadVersion
+    readonly cursor: ThreadEventCursor
+    readonly snapshot: HostedThreadSnapshot
+    readonly createdAt: Timestamp
+  }) => Effect.Effect<boolean, HostedPersistenceError>
   readonly saveSnapshot: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
@@ -208,6 +217,7 @@ export interface ThreadProtocolStoreService {
     readonly threadId: ThreadId
     readonly actor: ActorAttribution
     readonly afterCursor: ThreadEventCursor
+    readonly afterCheckpointCursor?: ThreadEventCursor
     readonly throughCursor?: ThreadEventCursor
     readonly includeSnapshot?: boolean
     readonly limit: number

@@ -112,6 +112,17 @@ const message = (cause: unknown) => {
   const encoded = JSON.stringify(cause)
   return encoded === undefined || encoded === "{}" ? String(cause) : encoded
 }
+const watchFailureMessage = (cause: unknown) => {
+  if (Schema.is(Errors.TreeCursorInvalid)(cause)) return `Run-tree checkpoint cursor is invalid: ${cause.message}`
+  if (Schema.is(Errors.TreeCursorRootMismatch)(cause)) return "Run-tree checkpoint belongs to a different root Run"
+  if (Schema.is(Errors.TreeCursorExpired)(cause)) return "Run-tree checkpoint expired before projection resumed"
+  if (Schema.is(Errors.TreeCursorFuture)(cause)) return "Run-tree checkpoint is ahead of committed execution"
+  if (Schema.is(Errors.TreeReplayLimitInvalid)(cause))
+    return `Run-tree replay limit ${cause.received} is outside ${cause.minimum}..${cause.maximum}`
+  if (Schema.is(Errors.RunNotFound)(cause)) return `Root Run ${cause.runId} is unavailable`
+  if (Schema.is(Errors.RuntimeUnavailable)(cause)) return cause.message
+  return message(cause)
+}
 const titleRunId = (rootRunId: string) => `${rootRunId}:title`
 const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
 const decodeCauseTag = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))
@@ -561,7 +572,26 @@ const make = (
         }
         if (input?.checkpoint !== undefined)
           watchOptions = { ...watchOptions, cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }
-        const rootEvents = RunTree.watch(watchOptions).pipe(
+        const replayThenWatch = (
+          cursor: RunTree.TreeCursor,
+        ): Stream.Stream<RunTree.TreeEvent, Runtime.TreeReplayError | Runtime.TreeEventsError, Runtime.Runtime> =>
+          Stream.unwrap(
+            RunTree.replay({ rootRunId: link.runId, cursor, limit: 1_000 }).pipe(
+              Effect.map((page) =>
+                Stream.concat(
+                  Stream.fromIterable(page.events),
+                  page.hasMore
+                    ? replayThenWatch(page.cursor)
+                    : RunTree.watch({ rootRunId: link.runId, cursor: page.cursor, settlement: "root-blocked" }),
+                ),
+              ),
+            ),
+          )
+        const rootTreeEvents =
+          input?.checkpoint === undefined
+            ? RunTree.watch(watchOptions)
+            : replayThenWatch(RunTree.TreeCursor.make(input.checkpoint.cursor))
+        const rootEvents = rootTreeEvents.pipe(
           Stream.provideService(Runtime.Runtime, runtime),
           Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
           Stream.tap(observeModel),
@@ -636,7 +666,7 @@ const make = (
             }),
           ),
           Stream.flatMap(Stream.fromIterable),
-          Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
+          Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: watchFailureMessage(cause) })),
         )
         return Stream.unwrap(
           Stream.broadcastN(projected, { n: 2, capacity: 64 }).pipe(

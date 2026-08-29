@@ -195,4 +195,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "d32c3936ca675abcedb11871cf6c5581cd1859e81b6e84a26159cfff99e794fa",
     url: new URL("../../migrations/postgres/0038-authoritative-thread-command-ledger.sql", import.meta.url),
   },
+  {
+    id: "product/0039_bounded_thread_checkpoints",
+    checksum: "70b6abf1cb130c44fb7d15517643be8d1624ee9ed9077151a3c933248626d408",
+    url: new URL("../../migrations/postgres/0039-bounded-thread-checkpoints.sql", import.meta.url),
+  },
 ]

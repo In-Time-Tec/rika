@@ -19,12 +19,11 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import {
   type ClientMessage,
-  HostedThreadSnapshot,
   ServerFrame,
   type WorkspacePlacement,
   protocolVersion,
 } from "@rika/product/client-protocol"
-import { ThreadProtocolStore, type ThreadProtocolCommand, type ThreadReplay } from "@rika/product/thread-protocol-store"
+import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
@@ -42,8 +41,6 @@ export const threadWebSocketAudience = "/api/v1/threads/socket"
 const ticketLifetimeMillis = 60_000
 const zeroCursor = ThreadEventCursor.make("0")
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const encodeThreadSnapshotJson = (snapshot: HostedThreadSnapshot) =>
-  encodeUnknownJson(Schema.encodeSync(HostedThreadSnapshot)(snapshot))
 const maximumAttachmentEvents = 10_000
 const maximumAttachmentBytes = 32 * 1024 * 1024
 const replayDistance = (cursor: string, afterCursor: string) => {
@@ -254,8 +251,8 @@ export const layerWithOptions = (
                 readonly threadId: ThreadId
                 readonly authority: ThreadAuthority
                 readonly cursor: ThreadEventCursor
+                readonly checkpointCursor: ThreadEventCursor
                 readonly knownHead: ThreadEventCursor
-                readonly snapshotFingerprint: string
                 readonly notificationGeneration: ThreadProtocolNotificationGeneration
                 readonly previewSubscription: HostedPreviewSubscription
               }
@@ -304,17 +301,27 @@ export const layerWithOptions = (
             authority: ThreadAuthority,
             threadId: ThreadId,
             afterCursor: ThreadEventCursor,
+            afterCheckpointCursor?: ThreadEventCursor,
           ) {
-            const readReplay = store
-              .replay({
-                ownerId: authority.ownerId,
-                threadId,
-                actor: authority.actor,
-                afterCursor,
-                limit: 1_000,
-              })
-              .pipe(Effect.mapError(storeFailure))
+            const baseReplayInput = {
+              ownerId: authority.ownerId,
+              threadId,
+              actor: authority.actor,
+              afterCursor,
+              limit: 1_000,
+            }
+            const readReplay = (
+              afterCheckpointCursor === undefined
+                ? store.replay(baseReplayInput)
+                : store.replay({ ...baseReplayInput, afterCheckpointCursor })
+            ).pipe(Effect.mapError(storeFailure))
             while (true) {
+              const replay = yield* readReplay
+              const directTail =
+                afterCursor !== zeroCursor &&
+                (afterCursor === replay.cursor ||
+                  replay.events[0]?.cursor === ThreadEventCursor.make((BigInt(afterCursor) + 1n).toString()))
+              if (replay.snapshot !== undefined || directTail) return replay
               const currentSnapshot = yield* operations
                 .snapshot(authority.ownerId, ProductThreadId.make(threadId))
                 .pipe(Effect.mapError(operationFailure))
@@ -325,14 +332,6 @@ export const layerWithOptions = (
                       ...currentSnapshot,
                       workspace: yield* options.workspacePlacement(authority.ownerId, threadId),
                     }
-              let replay = yield* readReplay
-              if (
-                replay.snapshot !== undefined &&
-                replay.snapshot.threadVersion === replay.threadVersion &&
-                replay.snapshot.cursor === replay.cursor &&
-                encodeThreadSnapshotJson(replay.snapshot.snapshot) === encodeThreadSnapshotJson(materializedSnapshot)
-              )
-                return replay
               const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
               const saved = yield* store
                 .saveSnapshot({
@@ -433,7 +432,12 @@ export const layerWithOptions = (
                 .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
                 .pipe(Effect.mapError(storeFailure))
               const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
-              let replay = yield* materializeSnapshot(authority, command.threadId, command.afterCursor)
+              let replay = yield* materializeSnapshot(
+                authority,
+                command.threadId,
+                command.afterCursor,
+                command.afterCheckpointCursor,
+              )
               const replayLag = replayDistance(replay.cursor, command.afterCursor)
               yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
               if (replayLag >= HostedObservability.replayLagAlertEvents)
@@ -442,11 +446,9 @@ export const layerWithOptions = (
                   threshold: HostedObservability.replayLagAlertEvents,
                 })
               const replaySnapshot = replay.snapshot
-              if (replaySnapshot === undefined) return yield* unavailable("Thread replay has no durable snapshot")
               const replayEvents = [...replay.events]
-              const snapshotCursor = replaySnapshot?.cursor ?? zeroCursor
-              const snapshotThreadVersion = replaySnapshot?.threadVersion ?? replay.threadVersion
-              let representedCursor = replayEvents.at(-1)?.cursor ?? snapshotCursor
+              const baseCursor = replaySnapshot?.cursor ?? command.afterCursor
+              let representedCursor = replayEvents.at(-1)?.cursor ?? baseCursor
               while (BigInt(representedCursor) < BigInt(replay.cursor)) {
                 const page = yield* store
                   .replay({
@@ -466,7 +468,7 @@ export const layerWithOptions = (
                   return yield* unavailable("Thread replay exceeds the attachment event limit")
                 representedCursor = page.events.at(-1)!.cursor
               }
-              let expectedCursor = BigInt(snapshotCursor) + 1n
+              let expectedCursor = BigInt(baseCursor) + 1n
               for (const event of replayEvents) {
                 if (BigInt(event.cursor) !== expectedCursor)
                   return yield* unavailable(
@@ -476,10 +478,11 @@ export const layerWithOptions = (
               }
               if (representedCursor !== replay.cursor)
                 return yield* unavailable("Thread replay terminal cursor is not represented")
-              const representedThreadVersion = replayEvents.at(-1)?.threadVersion ?? snapshotThreadVersion
-              const snapshot =
-                options.workspacePlacement === undefined
-                  ? replaySnapshot.snapshot
+              if (replaySnapshot === undefined && command.afterCursor === zeroCursor)
+                return yield* unavailable("Initial Thread replay has no durable checkpoint")
+              const checkpointSnapshot =
+                replaySnapshot === undefined || options.workspacePlacement === undefined
+                  ? replaySnapshot?.snapshot
                   : {
                       ...replaySnapshot.snapshot,
                       workspace: yield* options.workspacePlacement(authority.ownerId, command.threadId),
@@ -508,15 +511,13 @@ export const layerWithOptions = (
                   ),
                   Effect.orElseSucceed(() => []),
                 )
-              const attachment = frame({
+              const attachmentPayload = {
                 _tag: "ThreadAttached",
                 requestId: message.requestId,
                 threadId: command.threadId,
-                snapshotThreadVersion,
-                snapshotCursor,
-                threadVersion: representedThreadVersion,
+                baseCursor,
+                threadVersion: replay.threadVersion,
                 cursor: representedCursor,
-                snapshot,
                 events: replayEvents.map((event) => ({
                   threadId: event.threadId,
                   sequence: Sequence.make(event.sequence),
@@ -526,7 +527,16 @@ export const layerWithOptions = (
                   createdAt: event.createdAt,
                 })),
                 participants: participants.map(({ actor, status }) => ({ actor, status })),
-              })
+              } satisfies Extract<ServerFrame["payload"], { readonly _tag: "ThreadAttached" }>
+              if (replaySnapshot !== undefined && checkpointSnapshot !== undefined)
+                Object.assign(attachmentPayload, {
+                  checkpoint: {
+                    threadVersion: replaySnapshot.threadVersion,
+                    cursor: replaySnapshot.cursor,
+                    snapshot: checkpointSnapshot,
+                  },
+                })
+              const attachment = frame(attachmentPayload)
               const encodedAttachment = encodeUnknownJson(attachment)
               if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
                 return yield* unavailable("Thread replay exceeds the attachment byte limit")
@@ -536,8 +546,8 @@ export const layerWithOptions = (
                 threadId: command.threadId,
                 authority,
                 cursor: representedCursor,
+                checkpointCursor: replaySnapshot?.cursor ?? command.afterCheckpointCursor ?? zeroCursor,
                 knownHead: representedCursor,
-                snapshotFingerprint: encodeThreadSnapshotJson(snapshot),
                 notificationGeneration,
                 previewSubscription,
               }
@@ -799,19 +809,20 @@ export const layerWithOptions = (
               }
               if (current === undefined || attached !== current) return commandFrames
               const notificationGeneration = changes.generation(current.threadId)
-              yield* materializeSnapshot(current.authority, current.threadId, current.cursor)
               let replay = yield* store
                 .replay({
                   ownerId: current.authority.ownerId,
                   threadId: current.threadId,
                   actor: current.authority.actor,
                   afterCursor: current.cursor,
-                  includeSnapshot: false,
+                  afterCheckpointCursor: current.checkpointCursor,
                   limit: 1_000,
                 })
                 .pipe(Effect.mapError(storeFailure))
               let expectedCursor = BigInt(current.cursor) + 1n
-              let reset = replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor)
+              let reset =
+                (replay.snapshot !== undefined && BigInt(replay.snapshot.cursor) > BigInt(current.checkpointCursor)) ||
+                (replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor))
               for (const event of replay.events) {
                 if (BigInt(event.cursor) !== expectedCursor) reset = true
                 expectedCursor = BigInt(event.cursor) + 1n
@@ -823,11 +834,12 @@ export const layerWithOptions = (
                     threadId: current.threadId,
                     actor: current.authority.actor,
                     afterCursor: current.cursor,
+                    afterCheckpointCursor: current.checkpointCursor,
                     includeSnapshot: true,
                     limit: 1_000,
                   })
                   .pipe(Effect.mapError(storeFailure))
-                if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.cursor))
+                if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.checkpointCursor))
                   return yield* unavailable("Thread replay gap has no newer durable snapshot")
                 expectedCursor = BigInt(replay.snapshot.cursor) + 1n
                 for (const event of replay.events) {
@@ -837,22 +849,7 @@ export const layerWithOptions = (
                 }
               }
               const cursor = replay.events.at(-1)?.cursor ?? replay.snapshot?.cursor ?? current.cursor
-              const representedHead = cursor === replay.cursor
-              let durable: ThreadReplay | undefined
-              if (reset) durable = replay
-              else if (representedHead)
-                durable = yield* store
-                  .replay({
-                    ownerId: current.authority.ownerId,
-                    threadId: current.threadId,
-                    actor: current.authority.actor,
-                    afterCursor: cursor,
-                    throughCursor: cursor,
-                    includeSnapshot: true,
-                    limit: 1,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-              const snapshot = durable?.snapshot
+              const snapshot = reset ? replay.snapshot : undefined
               const projectedSnapshot =
                 snapshot === undefined || options.workspacePlacement === undefined
                   ? snapshot?.snapshot
@@ -860,16 +857,12 @@ export const layerWithOptions = (
                       ...snapshot.snapshot,
                       workspace: yield* options.workspacePlacement(current.authority.ownerId, current.threadId),
                     }
-              const snapshotFingerprint =
-                projectedSnapshot === undefined
-                  ? current.snapshotFingerprint
-                  : encodeThreadSnapshotJson(projectedSnapshot)
               if (attached !== current) return commandFrames
               attached = {
                 ...current,
                 cursor,
+                checkpointCursor: snapshot?.cursor ?? current.checkpointCursor,
                 knownHead: replay.cursor,
-                snapshotFingerprint,
                 notificationGeneration,
                 previewSubscription: current.previewSubscription,
               }
@@ -900,16 +893,6 @@ export const layerWithOptions = (
                   }),
                 ),
               )
-              if (!reset && projectedSnapshot !== undefined && snapshotFingerprint !== current.snapshotFingerprint)
-                frames.push(
-                  frame({
-                    _tag: "ThreadSnapshot",
-                    threadId: current.threadId,
-                    threadVersion: snapshot!.threadVersion,
-                    cursor: snapshot!.cursor,
-                    snapshot: projectedSnapshot,
-                  }),
-                )
               return [...commandFrames, ...frames]
             })
           })

@@ -118,11 +118,14 @@ const attached = (message: Message, value: HostedThreadSnapshot, cursor = "0"): 
   _tag: "ThreadAttached",
   requestId: message.requestId,
   threadId: message.command._tag === "AttachThread" ? message.command.threadId : HostedThreadId.make("invalid"),
-  snapshotThreadVersion: ThreadVersion.make(cursor),
-  snapshotCursor: ThreadEventCursor.make(cursor),
+  baseCursor: ThreadEventCursor.make(cursor),
   threadVersion: ThreadVersion.make(cursor),
   cursor: ThreadEventCursor.make(cursor),
-  snapshot: value,
+  checkpoint: {
+    threadVersion: ThreadVersion.make(cursor),
+    cursor: ThreadEventCursor.make(cursor),
+    snapshot: value,
+  },
   events: [],
   participants: [],
 })
@@ -1119,8 +1122,12 @@ it.effect("keeps pending cancellation when a reconnect attachment is rejected as
           if (attachments === 2) {
             socket.frame({
               ...attached(message, snapshot("thread-1", 0), "1"),
-              snapshotThreadVersion: ThreadVersion.make("0"),
-              snapshotCursor: ThreadEventCursor.make("0"),
+              baseCursor: ThreadEventCursor.make("0"),
+              checkpoint: {
+                threadVersion: ThreadVersion.make("0"),
+                cursor: ThreadEventCursor.make("0"),
+                snapshot: snapshot("thread-1", 0),
+              },
               events: [
                 {
                   threadId: HostedThreadId.make("thread-1"),
