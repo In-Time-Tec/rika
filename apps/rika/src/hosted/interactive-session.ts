@@ -55,6 +55,7 @@ type PreparedAttachment = {
   readonly checkpoint: HostedThreadSnapshot | undefined
   readonly baseCursor: bigint
   readonly terminalCursor: bigint
+  readonly representedVersion: bigint
   readonly view: ThreadView.ThreadViewSnapshot
 }
 type Projection = {
@@ -68,6 +69,7 @@ type Projection = {
   readonly committedCursor: string
   readonly checkpointCursor: string
   readonly version: string
+  readonly representedVersion: string
   readonly deliveredCursor: string
   readonly deliveredFingerprint: string | undefined
 }
@@ -104,7 +106,7 @@ const prepareAttachment = (attachment: Attachment, previous: Projection | undefi
   if (checkpoint !== undefined && BigInt(checkpoint.cursor) !== baseCursor)
     return { _tag: "Invalid", error: failure("Thread attachment checkpoint did not match its replay base") }
   let expectedCursor = baseCursor + 1n
-  let representedVersion = BigInt(checkpoint?.threadVersion ?? previous!.version)
+  let representedVersion = BigInt(checkpoint?.threadVersion ?? previous!.representedVersion)
   for (const event of attachment.events) {
     if (BigInt(event.cursor) !== expectedCursor)
       return { _tag: "Invalid", error: failure("Thread attachment replay was not contiguous") }
@@ -114,8 +116,10 @@ const prepareAttachment = (attachment: Attachment, previous: Projection | undefi
     representedVersion = eventVersion
     expectedCursor += 1n
   }
-  if (expectedCursor - 1n !== terminalCursor || representedVersion !== BigInt(attachment.threadVersion))
-    return { _tag: "Invalid", error: failure("Thread attachment terminal metadata was not represented") }
+  if (expectedCursor - 1n !== terminalCursor)
+    return { _tag: "Invalid", error: failure("Thread attachment terminal cursor was not represented") }
+  if (representedVersion > BigInt(attachment.threadVersion))
+    return { _tag: "Invalid", error: failure("Thread attachment represented version exceeded its terminal version") }
   let view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? previous!.view)
   if (view._tag === "Failure") return { _tag: "Invalid", error: failure("Thread attachment checkpoint was invalid") }
   for (const event of attachment.events) {
@@ -136,6 +140,7 @@ const prepareAttachment = (attachment: Attachment, previous: Projection | undefi
       checkpoint: checkpoint?.snapshot,
       baseCursor,
       terminalCursor,
+      representedVersion,
       view: view.success.snapshot(),
     },
   }
@@ -625,6 +630,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       committedCursor: String(payload.cursor),
       checkpointCursor: String(payload.cursor),
       version: String(payload.threadVersion),
+      representedVersion: String(payload.threadVersion),
       deliveredCursor,
       deliveredFingerprint,
     }
@@ -652,15 +658,17 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const cursor = BigInt(payload.cursor)
       const previousCursor = BigInt(previous.committedCursor)
       if (cursor < previousCursor) return
-      if (BigInt(payload.threadVersion) < BigInt(previous.version))
+      if (BigInt(payload.threadVersion) < BigInt(previous.representedVersion))
         return yield* failure("Thread snapshot version regressed")
-      const candidate = projectionFromSnapshot(
+      const projected = projectionFromSnapshot(
         payload,
         previous.participants,
         previous.deliveredCursor,
         previous.deliveredFingerprint,
       )
-      if (Schema.is(HostedError)(candidate)) return yield* candidate
+      if (Schema.is(HostedError)(projected)) return yield* projected
+      const candidate =
+        BigInt(projected.version) < BigInt(previous.version) ? { ...projected, version: previous.version } : projected
       const fingerprint = encodeThreadView(payload.snapshot.view)
       if (!replaceAuthority(previous, candidate)) return
       yield* publishProjectionState(candidate)
@@ -690,6 +698,15 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     const payload = prepared.attachment
     const checkpoint = prepared.checkpoint
     const basis = checkpoint === undefined ? previous! : undefined
+    if (
+      previous !== undefined &&
+      previous.threadId === threadId &&
+      BigInt(payload.threadVersion) < BigInt(previous.version)
+    )
+      return {
+        _tag: "Invalid" as const,
+        error: failure("Thread attachment terminal version regressed"),
+      }
     const authorizations =
       checkpoint === undefined
         ? basis!.authorizations
@@ -712,6 +729,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       committedCursor: String(payload.cursor),
       checkpointCursor: checkpoint === undefined ? basis!.checkpointCursor : String(payload.baseCursor),
       version: String(payload.threadVersion),
+      representedVersion: String(prepared.representedVersion),
       deliveredCursor,
       deliveredFingerprint: continuing ? previous.deliveredFingerprint : undefined,
     }
@@ -795,7 +813,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         const previous = BigInt(projection.committedCursor)
         if (next <= previous) return
         if (next !== previous + 1n) return yield* failure("Thread event cursor was not contiguous")
-        if (BigInt(payload.event.threadVersion) < BigInt(projection.version))
+        const eventVersion = BigInt(payload.event.threadVersion)
+        if (eventVersion < BigInt(projection.representedVersion))
           return yield* failure("Thread event version regressed")
         if (
           (payload.event.event._tag === "SubmissionAdmitted" || payload.event.event._tag === "SubmissionRejected") &&
@@ -817,7 +836,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         const candidate: Projection = {
           ...projection,
           view: nextView,
-          version: String(payload.event.threadVersion),
+          version: eventVersion < BigInt(projection.version) ? projection.version : String(payload.event.threadVersion),
+          representedVersion: String(payload.event.threadVersion),
           committedCursor: String(payload.event.cursor),
         }
         if (!replaceAuthority(projection, candidate)) return
