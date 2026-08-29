@@ -5,6 +5,7 @@ import * as ThreadResult from "@rika/product/thread-result"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
@@ -147,6 +148,7 @@ const appendRecordedShellOutput = (output: { readonly text: string; readonly tru
 
 export interface InteractiveRecordedShellInput {
   readonly options: InteractiveSessionInput["options"]
+  readonly turnId?: Turn.TurnId
   readonly dispatch: (event: InteractiveEvent) => void
   readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
   readonly ensureTurnSummary: InteractiveSessionInput["ensureTurnSummary"]
@@ -202,7 +204,7 @@ const runRecordedShellImpl = (
     const now = yield* Clock.currentTimeMillis
     const runningTurn: ThreadResult.RunningRecordedShellTurn = {
       _tag: "RecordedShell",
-      id: yield* options.makeTurnId,
+      id: input.turnId ?? (yield* options.makeTurnId),
       threadId: thread.id,
       prompt: `$ ${command}`,
       command,
@@ -330,6 +332,7 @@ export const makeInteractiveShell = (
   requestedThreadId: Thread.ThreadId | undefined,
   command: string,
   incognito: boolean,
+  turnId?: Turn.TurnId,
 ) => Effect.Effect<void, never, never>) => {
   const {
     options,
@@ -352,31 +355,34 @@ export const makeInteractiveShell = (
     recordedShellStartedEvent: shellStartedEvent,
     recordedShellSettledEvents: shellSettledEvents,
   } = input
-  return (requestedThreadId: Thread.ThreadId | undefined, command: string, incognito: boolean) => {
+  return (
+    requestedThreadId: Thread.ThreadId | undefined,
+    command: string,
+    incognito: boolean,
+    turnId?: Turn.TurnId,
+  ) => {
     const dispatch = sessionDispatch
     const toolRuntimeLayer: Layer.Layer<ToolRuntime.Service, OperationError, never> | undefined =
       options.toolRuntimeLayer?.(workspace)
     let ownerThreadId = requestedThreadId
-    const runOwnedShell = (thread: Thread.Thread) =>
-      runRecordedShell(
-        {
-          options,
-          dispatch,
-          emit,
-          ensureTurnSummary,
-          notifyThreadSummaries,
-          notifyTurnChanged,
-          publishInteractiveActivity,
-          sessionId,
-          executionDependencies,
-          executeShellCommand: runShellCommand,
-          recordedShellStartedEvent: shellStartedEvent,
-          recordedShellSettledEvents: shellSettledEvents,
-        },
-        thread,
-        command,
-        incognito,
-      )
+    const runOwnedShell = (thread: Thread.Thread) => {
+      let recordedShellInput: InteractiveRecordedShellInput = {
+        options,
+        dispatch,
+        emit,
+        ensureTurnSummary,
+        notifyThreadSummaries,
+        notifyTurnChanged,
+        publishInteractiveActivity,
+        sessionId,
+        executionDependencies,
+        executeShellCommand: runShellCommand,
+        recordedShellStartedEvent: shellStartedEvent,
+        recordedShellSettledEvents: shellSettledEvents,
+      }
+      if (turnId !== undefined) recordedShellInput = { ...recordedShellInput, turnId }
+      return runRecordedShell(recordedShellInput, thread, command, incognito)
+    }
     const program = Effect.gen(function* () {
       const threads = yield* ThreadRepository.Service
       const thread = yield* selectionAdmission.withPermits(1)(

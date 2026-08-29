@@ -202,6 +202,7 @@ const command = (id: string, expectedThreadVersion: string) => ({
   ownerId,
   threadId,
   commandId: CommandId.make(id),
+  turnId: TurnId.make(`turn-${id}`),
   idempotencyKey: IdempotencyKey.make(`${id}-key`),
   expectedThreadVersion: ThreadVersion.make(expectedThreadVersion),
   actor,
@@ -565,6 +566,52 @@ it.effect.skipIf(!live)("claims ordinary commands in Thread version order across
   ),
 )
 
+it.effect.skipIf(!live)("keeps same-Thread order and Turn identity stable across worker interruption", () =>
+  withDatabase((pool) =>
+    Effect.gen(function* () {
+      const protocol = yield* setup(pool)
+      const first = command("interrupted-first", "0")
+      const second = command("interrupted-second", "1")
+      yield* protocol.admitCommand(first)
+      yield* protocol.admitCommand(second)
+
+      const initial = yield* protocol.claimNextCommand({
+        claimToken: "interrupted-worker",
+        claimMillis: 60_000,
+      })
+      expect(initial).toMatchObject({ commandId: first.commandId, turnId: first.turnId })
+      yield* protocol.releaseCommandClaim({
+        ownerId,
+        threadId,
+        commandId: first.commandId,
+        claimToken: "interrupted-worker",
+      })
+
+      const recovered = yield* protocol.claimNextCommand({
+        claimToken: "recovered-worker",
+        claimMillis: 60_000,
+      })
+      expect(recovered).toMatchObject({ commandId: first.commandId, turnId: first.turnId })
+      yield* protocol.completeCommand({
+        ownerId,
+        threadId,
+        commandId: first.commandId,
+        claimToken: "recovered-worker",
+        result: { _tag: "Applied" },
+        events: [],
+        completedAt: later,
+      })
+
+      expect(
+        yield* protocol.claimNextCommand({
+          claimToken: "next-worker",
+          claimMillis: 60_000,
+        }),
+      ).toMatchObject({ commandId: second.commandId, turnId: second.turnId })
+    }),
+  ),
+)
+
 it.effect.skipIf(!live)("claims another Thread while one Thread command lane is locked", () =>
   withDatabase((pool) =>
     Effect.gen(function* () {
@@ -761,6 +808,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
       let completionAttempts = 0
       let admissionAttempts = 0
       const admittedEffects = new Set<string>()
+      const admittedTurnIds = new Set<string>()
       const workerProtocol = ThreadProtocolStore.of({
         ...protocol,
         completeCommand: (input) => {
@@ -789,10 +837,11 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           Effect.sync(() => {
             admissionAttempts += 1
             admittedEffects.add(input.operationKey)
+            admittedTurnIds.add(input.turnId)
             return {
               _tag: "Admitted" as const,
               commandId: input.operationKey,
-              turnId: `turn-${input.operationKey}`,
+              turnId: input.turnId,
               status: "accepted" as const,
             }
           }),
@@ -896,6 +945,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
       expect(completionAttempts).toBe(2)
       expect(admissionAttempts).toBe(2)
       expect(admittedEffects).toEqual(new Set(["server-owned-submit"]))
+      expect(admittedTurnIds).toEqual(new Set([input.turnId]))
       const replay = yield* protocol.replay({
         ownerId,
         threadId,
@@ -1824,6 +1874,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         threadId,
         actor,
         commandId: replayCommandId,
+        turnId: TurnId.make("turn-cursor-replay-command"),
         idempotencyKey: replayIdempotencyKey,
         expectedThreadVersion: ThreadVersion.make("6"),
         command: {
@@ -2085,6 +2136,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         ownerId: organizationOwnerId,
         threadId: organizationThreadId,
         commandId: CommandId.make("organization-command"),
+        turnId: TurnId.make("turn-organization-command"),
         idempotencyKey: IdempotencyKey.make("organization-command-key"),
         expectedThreadVersion: ThreadVersion.make("0"),
         actor: organizationActor,
@@ -2170,6 +2222,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
             ownerId: organizationOwnerId,
             threadId: organizationThreadId,
             commandId: CommandId.make("revoked-command"),
+            turnId: TurnId.make("turn-revoked-command"),
             idempotencyKey: IdempotencyKey.make("revoked-command-key"),
             expectedThreadVersion: ThreadVersion.make("1"),
             actor: organizationActor,

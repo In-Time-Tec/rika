@@ -36,6 +36,7 @@ import {
 import { StoreError } from "@rika/product/hosted-store"
 import { InteractiveEventSchema } from "@rika/product/interactive-event"
 import { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import { TurnId } from "@rika/product/turn-record"
 import {
   ThreadProtocolStore,
   type ThreadProtocolCommand,
@@ -76,6 +77,7 @@ const commandFields = {
   ownerId: rikaHostedThreadProtocolCommands.ownerId,
   threadId: rikaHostedThreadProtocolCommands.threadId,
   commandId: rikaHostedThreadProtocolCommands.commandId,
+  turnId: rikaHostedThreadProtocolCommands.turnId,
   idempotencyKey: rikaHostedThreadProtocolCommands.idempotencyKey,
   expectedThreadVersion: bigintText(rikaHostedThreadProtocolCommands.expectedVersion),
   threadVersion: bigintText(rikaHostedThreadProtocolCommands.threadVersion),
@@ -92,6 +94,7 @@ interface CommandRow {
   readonly ownerId: string
   readonly threadId: string
   readonly commandId: string
+  readonly turnId: string
   readonly idempotencyKey: string
   readonly expectedThreadVersion: string
   readonly threadVersion: string
@@ -109,6 +112,7 @@ const commandRow = Effect.fn("ThreadProtocolStore.commandRow")(function* (row: C
     ownerId: OwnerId.make(row.ownerId),
     threadId: ThreadId.make(row.threadId),
     commandId: CommandId.make(row.commandId),
+    turnId: TurnId.make(row.turnId),
     idempotencyKey: IdempotencyKey.make(row.idempotencyKey),
     expectedThreadVersion: ThreadVersion.make(row.expectedThreadVersion),
     threadVersion: ThreadVersion.make(row.threadVersion),
@@ -220,6 +224,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                   ownerId: input.ownerId,
                   threadId: input.threadId,
                   commandId: input.commandId,
+                  turnId: input.turnId,
                   idempotencyKey: input.idempotencyKey,
                   expectedVersion: bigintValue(input.expectedThreadVersion),
                   threadVersion: bigintValue(nextVersion),

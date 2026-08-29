@@ -1442,6 +1442,7 @@ export const rikaHostedThreadProtocolCommands = pgTable(
     ownerId: text("owner_id").notNull(),
     threadId: text("thread_id").notNull(),
     commandId: text("command_id").notNull(),
+    turnId: text("turn_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     expectedVersion: bigint("expected_version", { mode: "number" }).notNull(),
     threadVersion: bigint("thread_version", { mode: "number" }).notNull(),
@@ -1464,6 +1465,7 @@ export const rikaHostedThreadProtocolCommands = pgTable(
     }).onDelete("cascade"),
     unique("rika_hosted_thread_protocol_comma_thread_id_idempotency_key_key").on(table.threadId, table.idempotencyKey),
     unique("rika_hosted_thread_protocol_comman_thread_id_thread_version_key").on(table.threadId, table.threadVersion),
+    unique("rika_hosted_thread_protocol_commands_turn_id_key").on(table.turnId),
     check(
       "rika_hosted_thread_protocol_commands_check",
       sql`(((state = 'admitted'::text) AND (result IS NULL) AND (completed_at IS NULL)) OR ((state = 'completed'::text) AND (result IS NOT NULL) AND (event_cursor IS NOT NULL) AND (completed_at IS NOT NULL)))`,

@@ -196,7 +196,7 @@ export const promotePendingTurns = (input: {
     threadId: Thread.ThreadId,
     now: number,
   ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, OperationError, never>
-  readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, never, never>
   readonly emit: (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => void
   readonly makeTurnId: () => Effect.Effect<Turn.TurnId, never, never>
   readonly failureMessage: string
@@ -464,7 +464,7 @@ export const promotePendingTurns = (input: {
       if (claim === undefined) break
       claimed += 1
       const keepDraining = yield* Effect.uninterruptible(runPromoted(claim)).pipe(
-        Effect.ensuring(input.releaseTurnObserver(claim.turn.id).pipe(Effect.ignore)),
+        Effect.ensuring(input.releaseTurnObserver(claim.turn.threadId, claim.turn.id).pipe(Effect.ignore)),
       )
       if (!keepDraining) break
     }

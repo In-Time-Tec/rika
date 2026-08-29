@@ -1,10 +1,23 @@
-import { Clock, Context, Crypto, DateTime, Deferred, Effect, Layer, LayerMap, Queue, Schema, Semaphore } from "effect"
+import {
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Deferred,
+  Effect,
+  Layer,
+  LayerMap,
+  Queue,
+  RcMap,
+  Schema,
+  Semaphore,
+} from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as GoalService from "@rika/product/goal-service"
 import { ThreadId as HostedThreadId, type OwnerId } from "@rika/product/hosted-model"
-import { executeInteractiveCommand, type InteractiveCommand } from "@rika/product/interactive-command"
+import { executeInteractiveCommand, type InteractiveInvocation } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { operationError } from "@rika/product/operation-error"
@@ -46,11 +59,9 @@ export interface HostedThreadApplicationService {
     threadId: ThreadId,
   ) => Effect.Effect<Thread | undefined, HostedThreadApplicationError>
   readonly interactive: <A, E, R>(
-    input: {
+    input: InteractiveInvocation & {
       readonly ownerId: OwnerId
       readonly threadId: ThreadId
-      readonly commandId: string
-      readonly command: InteractiveCommand
     },
     persist: (batch: HostedInteractiveBatch) => Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, HostedThreadApplicationError | E, R>
@@ -64,9 +75,7 @@ export class HostedThreadApplication extends Context.Service<HostedThreadApplica
   "@rika/api/hosted/thread/application/HostedThreadApplication",
 ) {}
 
-interface InteractiveInvocation {
-  readonly commandId: string
-  readonly command: InteractiveCommand
+interface PendingInteractiveInvocation extends InteractiveInvocation {
   readonly events: Array<InteractiveEvent>
   readonly completed: Deferred.Deferred<HostedInteractiveBatch>
 }
@@ -80,9 +89,9 @@ export interface HostedInteractiveBatch {
 type MutableHostedInteractiveBatch = { -readonly [Key in keyof HostedInteractiveBatch]: HostedInteractiveBatch[Key] }
 
 interface HostedInteractiveSession {
-  readonly queue: Queue.Queue<InteractiveInvocation, ProductOperation.OperationUnavailable>
+  readonly queue: Queue.Queue<PendingInteractiveInvocation, ProductOperation.OperationUnavailable>
   readonly ready: Deferred.Deferred<void, ProductOperation.OperationUnavailable>
-  invocation: InteractiveInvocation | undefined
+  invocation: PendingInteractiveInvocation | undefined
 }
 
 const promptUnit = (turn: Turn): Unit => {
@@ -151,7 +160,6 @@ const pendingAuthorizations = (
 
 const ownerLayer = (
   ownerId: OwnerId,
-  currentInvocation: () => InteractiveInvocation,
   resolveExecutionRoute: NonNullable<
     Parameters<typeof ProductOperationService.productLayer>[0]["resolveExecutionRoute"]
   >,
@@ -183,7 +191,7 @@ const ownerLayer = (
         defaultWorkspace: "hosted",
         resolveExecutionRoute,
         makeThreadId: crypto.randomUUIDv4.pipe(Effect.orDie, Effect.map(ThreadId.make)),
-        makeTurnId: Effect.sync(() => TurnId.make(currentInvocation().commandId)),
+        makeTurnId: crypto.randomUUIDv4.pipe(Effect.orDie, Effect.map(TurnId.make)),
         interactive: runInteractive,
       })
       return Layer.merge(operations, Layer.succeedContext(repositoryContext)).pipe(
@@ -202,9 +210,9 @@ export const layer = Layer.effect(
     const store = yield* ThreadProtocolStore
     const modelRegistry = yield* HostedModelRegistry
     const ownerScope = yield* Effect.scope
-    const invocations = new Map<OwnerId, InteractiveInvocation>()
-    const interactiveAdmissions = new Map<OwnerId, Semaphore.Semaphore>()
-    const projectionAdmissions = new Map<string, Semaphore.Semaphore>()
+    const projectionAdmissions = yield* RcMap.make({
+      lookup: () => Semaphore.make(1),
+    })
     const interactiveSessions = new Map<string, HostedInteractiveSession>()
     const projectionTails = new Map<string, Deferred.Deferred<void, HostedThreadApplicationError>>()
     const backgroundEvents = yield* Queue.unbounded<{
@@ -213,11 +221,10 @@ export const layer = Layer.effect(
       readonly event: InteractiveEvent
       readonly persisted: Deferred.Deferred<void, HostedThreadApplicationError>
     }>()
-    const projectionAdmission = (key: string) => {
-      const current = projectionAdmissions.get(key) ?? Semaphore.makeUnsafe(1)
-      projectionAdmissions.set(key, current)
-      return current
-    }
+    const withProjectionAdmission = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
+      Effect.scoped(
+        RcMap.get(projectionAdmissions, key).pipe(Effect.flatMap((admission) => admission.withPermits(1)(effect))),
+      )
     const applicationFailure = (error: { readonly message: string }) =>
       HostedThreadApplicationError.make({
         message: error.message,
@@ -327,20 +334,19 @@ export const layer = Layer.effect(
           const current = yield* Queue.take(backgroundEvents)
           const key = `${current.ownerId}:${current.threadId}`
           const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const result = yield* projectionAdmission(key)
-            .withPermits(1)(
-              Effect.gen(function* () {
-                const snapshot = yield* repositorySnapshot(current.ownerId, ThreadId.make(current.threadId))
-                yield* store.appendEvents({
-                  ownerId: current.ownerId,
-                  threadId: current.threadId,
-                  events: [current.event],
-                  snapshot,
-                  createdAt,
-                })
-              }),
-            )
-            .pipe(Effect.mapError(applicationFailure), Effect.result)
+          const result = yield* withProjectionAdmission(
+            key,
+            Effect.gen(function* () {
+              const snapshot = yield* repositorySnapshot(current.ownerId, ThreadId.make(current.threadId))
+              yield* store.appendEvents({
+                ownerId: current.ownerId,
+                threadId: current.threadId,
+                events: [current.event],
+                snapshot,
+                createdAt,
+              })
+            }),
+          ).pipe(Effect.mapError(applicationFailure), Effect.result)
           if (result._tag === "Success") yield* Deferred.succeed(current.persisted, undefined)
           else yield* Deferred.fail(current.persisted, result.failure)
           if (projectionTails.get(key) === current.persisted) projectionTails.delete(key)
@@ -401,39 +407,26 @@ export const layer = Layer.effect(
           yield* Deferred.await(state.ready)
           while (true) {
             const invocation = yield* Queue.take(state.queue)
-            const admission = interactiveAdmissions.get(ownerId) ?? Semaphore.makeUnsafe(1)
-            interactiveAdmissions.set(ownerId, admission)
-            yield* admission.withPermits(1)(
-              Effect.gen(function* () {
-                invocations.set(ownerId, invocation)
-                state.invocation = invocation
-                const result = yield* executeInteractiveCommand(session, invocation.command).pipe(Effect.result)
-                yield* Effect.yieldNow
-                invocations.delete(ownerId)
-                state.invocation = undefined
-                const snapshot = yield* repositorySnapshot(ownerId, threadId).pipe(
-                  Effect.mapError((error) =>
-                    ProductOperation.OperationUnavailable.make({
-                      operation: "InteractiveSession",
-                      message: error.message,
-                    }),
-                  ),
-                )
-                const batch: MutableHostedInteractiveBatch = {
-                  events: invocation.events,
-                  snapshot,
-                }
-                if (result._tag === "Failure") batch.failure = result.failure
-                yield* Deferred.succeed(invocation.completed, batch)
-              }).pipe(
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    invocations.delete(ownerId)
-                    state.invocation = undefined
+            yield* Effect.gen(function* () {
+              state.invocation = invocation
+              const result = yield* executeInteractiveCommand(session, invocation).pipe(Effect.result)
+              yield* Effect.yieldNow
+              state.invocation = undefined
+              const snapshot = yield* repositorySnapshot(ownerId, threadId).pipe(
+                Effect.mapError((error) =>
+                  ProductOperation.OperationUnavailable.make({
+                    operation: "InteractiveSession",
+                    message: error.message,
                   }),
                 ),
-              ),
-            )
+              )
+              const batch: MutableHostedInteractiveBatch = {
+                events: invocation.events,
+                snapshot,
+              }
+              if (result._tag === "Failure") batch.failure = result.failure
+              yield* Deferred.succeed(invocation.completed, batch)
+            }).pipe(Effect.ensuring(Effect.sync(() => (state.invocation = undefined))))
           }
         }),
       )
@@ -441,11 +434,6 @@ export const layer = Layer.effect(
     const owners = yield* LayerMap.make((ownerId: OwnerId) =>
       ownerLayer(
         ownerId,
-        () => {
-          const invocation = invocations.get(ownerId)
-          if (invocation === undefined) throw new Error("Interactive invocation is unavailable")
-          return invocation
-        },
         (mode) =>
           modelRegistry.resolve(ownerId, mode).pipe(Effect.mapError((error) => operationError(error.message, error))),
         (input, session) => runInteractive(ownerId, input, session),
@@ -511,7 +499,8 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const key = `${input.ownerId}:${input.threadId}`
           const initialSnapshot = yield* currentSnapshot(input.ownerId, input.threadId)
-          return yield* projectionAdmission(key).withPermits(1)(
+          return yield* withProjectionAdmission(
+            key,
             Effect.gen(function* () {
               const batch = yield* Effect.scoped(
                 owners.contextEffect(input.ownerId).pipe(
@@ -520,7 +509,10 @@ export const layer = Layer.effect(
                       let state = interactiveSessions.get(key)
                       if (state === undefined) {
                         state = {
-                          queue: yield* Queue.unbounded<InteractiveInvocation, ProductOperation.OperationUnavailable>(),
+                          queue: yield* Queue.unbounded<
+                            PendingInteractiveInvocation,
+                            ProductOperation.OperationUnavailable
+                          >(),
                           ready: yield* Deferred.make<void, ProductOperation.OperationUnavailable>(),
                           invocation: undefined,
                         }
@@ -547,8 +539,9 @@ export const layer = Layer.effect(
                         )
                         yield* Deferred.await(state.ready)
                       }
-                      const invocation: InteractiveInvocation = {
+                      const invocation: PendingInteractiveInvocation = {
                         commandId: input.commandId,
+                        turnId: input.turnId,
                         command: input.command,
                         events: [],
                         completed: yield* Deferred.make<HostedInteractiveBatch>(),

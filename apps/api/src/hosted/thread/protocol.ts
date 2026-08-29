@@ -25,6 +25,7 @@ import {
 } from "@rika/product/client-protocol"
 import { ThreadProtocolStore, type ThreadProtocolCommand, type ThreadReplay } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
+import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
 import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "../product"
 import { HostedWorkspace } from "../environment/workspace"
@@ -390,6 +391,11 @@ export const layerWithOptions = (
                   ownerId: authority.ownerId,
                   threadId,
                   commandId: command.commandId,
+                  turnId: ProductTurnId.make(
+                    yield* crypto.randomUUIDv4.pipe(
+                      Effect.mapError(() => unavailable("Command identity allocation failed")),
+                    ),
+                  ),
                   idempotencyKey: command.idempotencyKey,
                   expectedThreadVersion: command.expectedThreadVersion,
                   actor: authority.actor,
@@ -700,6 +706,11 @@ export const layerWithOptions = (
                 ownerId: authority.ownerId,
                 threadId,
                 commandId: command.commandId,
+                turnId: ProductTurnId.make(
+                  yield* crypto.randomUUIDv4.pipe(
+                    Effect.mapError(() => unavailable("Command identity allocation failed")),
+                  ),
+                ),
                 idempotencyKey: command.idempotencyKey,
                 expectedThreadVersion: command.expectedThreadVersion,
                 actor: authority.actor,
@@ -767,6 +778,7 @@ export const layerWithOptions = (
                     ownerId: entry.command.ownerId,
                     threadId: entry.command.threadId,
                     commandId: entry.command.commandId,
+                    turnId: entry.command.turnId,
                     idempotencyKey: entry.command.idempotencyKey,
                     expectedThreadVersion: entry.command.expectedThreadVersion,
                     actor: entry.command.actor,

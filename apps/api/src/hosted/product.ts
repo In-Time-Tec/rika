@@ -161,6 +161,7 @@ export interface HostedProductService {
     readonly authority: ThreadAuthority
     readonly threadId: string
     readonly operationKey: string
+    readonly turnId: string
     readonly prompt: string
     readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
@@ -581,7 +582,7 @@ export const layer = (options: {
           .resolve(input.authority.ownerId, input.mode)
           .pipe(Effect.mapError(modelFailure))
         const commandId = CommandId.make(input.operationKey)
-        const turnId = TurnId.make(yield* crypto.randomUUIDv4)
+        const turnId = TurnId.make(input.turnId)
         const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
         const readinessProof = yield* options.promptAdmissionReadiness
         const promptInput = {
@@ -610,7 +611,8 @@ export const layer = (options: {
 
       const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
         const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
-        return yield* admitAuthorizedRun({ ...input, authority })
+        const turnId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable))
+        return yield* admitAuthorizedRun({ ...input, authority, turnId })
       })
 
       const cancelAuthorizedRunAdmission: HostedProductService["cancelAuthorizedRunAdmission"] = Effect.fn(

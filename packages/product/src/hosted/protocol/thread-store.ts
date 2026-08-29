@@ -1,6 +1,7 @@
 import { Context, Effect } from "effect"
 import type { InteractiveEvent } from "../../operation/interactive/event"
 import type { HostedThreadSnapshot } from "./client"
+import type { TurnId } from "../../thread/turn/record"
 import type {
   ActorAttribution,
   BetterAuthUserId,
@@ -21,6 +22,7 @@ export interface ThreadProtocolCommand {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
   readonly commandId: CommandId
+  readonly turnId: TurnId
   readonly idempotencyKey: IdempotencyKey
   readonly expectedThreadVersion: ThreadVersion
   readonly threadVersion: ThreadVersion
@@ -86,6 +88,7 @@ export interface ThreadProtocolStoreService {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly commandId: CommandId
+    readonly turnId: TurnId
     readonly idempotencyKey: IdempotencyKey
     readonly expectedThreadVersion: ThreadVersion
     readonly actor: ActorAttribution

@@ -205,7 +205,7 @@ const runSystemOperationImpl = (
       pendingTurnCapacity: factory.pendingTurnCapacity,
       makeThreadId: factory.options.makeThreadId,
       makeTurnId: factory.options.makeTurnId,
-      turnMutationAdmission: factory.turnMutationAdmission,
+      withThreadMutation: factory.withThreadMutation,
       backend: factory.backend,
       notifyThreadSummaries: typedNotifyThreadSummaries,
       deleteThread: factory.deleteThread,

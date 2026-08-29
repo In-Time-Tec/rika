@@ -67,7 +67,7 @@ export interface Dependencies {
     threadId: Thread.ThreadId,
     now: number,
   ) => Effect.Effect<TurnQueuePromotion.QueueClaim | undefined, TurnRepository.RepositoryError, never>
-  readonly releaseTurnObserver: (turnId: Turn.TurnId) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void, never, never>
   readonly queueMutationEvent: (queue: TurnQueuePromotion.QueueItemChange) => InteractiveEvent
   readonly executionDependencies: import("../interactive/session").InteractiveExecutionContext
   readonly staleQueuedTurnsError: typeof staleQueuedTurnsError

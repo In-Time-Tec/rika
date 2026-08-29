@@ -8,7 +8,7 @@ import type * as RootTurnOwner from "@rika/product/root-turn-owner"
 import { rankCase, statusRank, threadState, threadStateFromRank } from "@rika/product/thread-state"
 import * as ThreadRepository from "../../src/thread/memory-repository"
 import * as TurnRepository from "../../src/turn/memory/repository"
-import { Effect, Semaphore } from "effect"
+import { Effect } from "effect"
 
 const viaRank = (statuses: ReadonlyArray<string>) =>
   threadStateFromRank({
@@ -53,7 +53,7 @@ it.effect("keeps a failed cleanup tombstoned and retries the exact cleanup seque
       turns,
       sessions,
       rootTurns,
-      turnMutationAdmission: yield* Semaphore.make(1),
+      withThreadMutation: (_threadId, effect) => effect,
     })
     expect((yield* Effect.exit(saga.request(threadId)))._tag).toBe("Failure")
     expect(yield* repository.get(threadId)).toBeUndefined()
@@ -125,7 +125,7 @@ it.effect(
         turns,
         sessions,
         rootTurns,
-        turnMutationAdmission: yield* Semaphore.make(1),
+        withThreadMutation: (_threadId, effect) => effect,
       })
       yield* saga.request(threadId)
       expect(calls).toEqual([

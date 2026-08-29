@@ -4,7 +4,7 @@ import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TurnResult from "@rika/product/thread-result"
 import type * as RootTurnOwner from "../queue/root-owner"
-import { Clock, Effect, Semaphore } from "effect"
+import { Clock, Effect } from "effect"
 
 export interface Interface {
   readonly request: (threadId: Thread.ThreadId) => Effect.Effect<void, Error>
@@ -16,7 +16,10 @@ export const make = (input: {
   readonly turns: TurnRepository.Interface
   readonly sessions: ExecutionSessionLifecycle.Interface
   readonly rootTurns: RootTurnOwner.Interface
-  readonly turnMutationAdmission: Semaphore.Semaphore
+  readonly withThreadMutation: <A, E, R>(
+    threadId: Thread.ThreadId,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
 }): Interface => {
   // Title Runs live in their own isolated Sessions (one per ExecutionLink), so thread deletion
   // must cancel and await each persisted title session as well; they have no kernel of their own,
@@ -51,9 +54,7 @@ export const make = (input: {
     yield* input.threads.completeDeletion(threadId)
   })
   const request = Effect.fn("ThreadDeletion.request")(function* (threadId: Thread.ThreadId) {
-    yield* input.turnMutationAdmission.withPermits(1)(
-      input.threads.requestDeletion(threadId, yield* Clock.currentTimeMillis),
-    )
+    yield* input.withThreadMutation(threadId, input.threads.requestDeletion(threadId, yield* Clock.currentTimeMillis))
     yield* cleanup(threadId)
   })
   const reconcile = input.threads.pendingDeletions.pipe(

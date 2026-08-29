@@ -25,7 +25,7 @@ import {
 } from "@rika/product-store/database-schema"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted, Schema } from "effect"
+import { Config, Context, DateTime, Deferred, Effect, Fiber, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
@@ -82,6 +82,9 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           ]),
         )
         const cancellations: Array<{ readonly runId: string; readonly reason: string }> = []
+        const xCancellationEntered = yield* Deferred.make<void>()
+        const releaseXCancellation = yield* Deferred.make<void>()
+        const yCancellationEntered = yield* Deferred.make<void>()
         const gateway = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
         const databaseLayer = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
         const dependencies = Layer.mergeAll(
@@ -91,13 +94,14 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
           Layer.succeed(ExecutionGateway.Service, {
             ...gateway,
             cancelTurn: (link, reason) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
                 cancellations.push({ runId: link.runId, reason })
-              }).pipe(
-                Effect.andThen(
-                  Effect.fail(ExecutionGateway.CancelTurnFailure.make({ message: "Cancellation backend unavailable" })),
-                ),
-              ),
+                if (link.runId === "authorization-run") {
+                  yield* Deferred.succeed(xCancellationEntered, undefined)
+                  yield* Deferred.await(releaseXCancellation)
+                } else yield* Deferred.succeed(yCancellationEntered, undefined)
+                return yield* ExecutionGateway.CancelTurnFailure.make({ message: "Cancellation backend unavailable" })
+              }),
           }),
           ExecutionSessionLifecycle.layerTest(),
           hostedModelRegistryTestLayer,
@@ -319,16 +323,83 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         yield* Effect.tryPromise(() =>
           db.update(rikaTurns).set({ executionLinkJson: executionLink }).where(eq(rikaTurns.id, turn.id)),
         )
-        const cancellation = yield* application.interactive(
-          {
-            ownerId: OwnerId.make("other-owner"),
-            threadId: ThreadId.make("read-only-thread"),
-            commandId: "cancel-authorization-turn",
-            command: { _tag: "Cancel", targetTurnId: turn.id },
-          },
-          Effect.succeed,
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaThreads).values({
+            id: "parallel-thread",
+            ownerId: "other-owner",
+            workspace: "read-only-workspace",
+            title: "Parallel",
+            createdAt: 1,
+            updatedAt: 1,
+          }),
         )
-        expect(cancellations).toEqual([{ runId: "authorization-run", reason: "Cancelled by user" }])
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaHostedThreads).values({
+            id: "parallel-thread",
+            ownerId: "other-owner",
+            projectId: null,
+            workspaceId: "hosted-read-only-workspace",
+            createdByUserId: "other-user",
+            executorKind: "orb",
+            inheritProjectGrants: false,
+            createdAt,
+          }),
+        )
+        const parallelTurn: Turn.AgentExecutionTurn = {
+          ...turn,
+          id: Turn.TurnId.make("parallel-turn"),
+          threadId: ThreadId.make("parallel-thread"),
+          prompt: "Progress independently",
+        }
+        const parallelExecutionLink = yield* Schema.encodeEffect(JsonExecutionLink)({
+          runId: "parallel-run",
+          turnId: parallelTurn.id,
+          threadId: parallelTurn.threadId,
+        })
+        yield* Effect.tryPromise(() =>
+          db.insert(rikaTurns).values({
+            id: parallelTurn.id,
+            threadId: parallelTurn.threadId,
+            prompt: parallelTurn.prompt,
+            status: parallelTurn.status,
+            executionRouteJson,
+            executionLinkJson: parallelExecutionLink,
+            createdAt: parallelTurn.createdAt,
+            updatedAt: parallelTurn.updatedAt,
+          }),
+        )
+        const cancellationFiber = yield* Effect.forkChild(
+          application.interactive(
+            {
+              ownerId: OwnerId.make("other-owner"),
+              threadId: ThreadId.make("read-only-thread"),
+              commandId: "cancel-authorization-turn",
+              turnId: Turn.TurnId.make("cancel-authorization-turn"),
+              command: { _tag: "Cancel", targetTurnId: turn.id },
+            },
+            Effect.succeed,
+          ),
+        )
+        yield* Deferred.await(xCancellationEntered).pipe(Effect.timeout("5 seconds"))
+        const parallelCancellationFiber = yield* Effect.forkChild(
+          application.interactive(
+            {
+              ownerId: OwnerId.make("other-owner"),
+              threadId: parallelTurn.threadId,
+              commandId: "cancel-parallel-turn",
+              turnId: Turn.TurnId.make("cancel-parallel-turn"),
+              command: { _tag: "Cancel", targetTurnId: parallelTurn.id },
+            },
+            Effect.succeed,
+          ),
+        )
+        const parallelProgress = yield* Deferred.await(yCancellationEntered).pipe(Effect.timeoutOption("5 seconds"))
+        yield* Deferred.succeed(releaseXCancellation, undefined)
+        const cancellation = yield* Fiber.join(cancellationFiber)
+        yield* Fiber.join(parallelCancellationFiber)
+        expect(parallelProgress._tag).toBe("Some")
+        expect(cancellations).toContainEqual({ runId: "authorization-run", reason: "Cancelled by user" })
+        expect(cancellations).toContainEqual({ runId: "parallel-run", reason: "Cancelled by user" })
         expect(cancellation.events).toContainEqual({
           _tag: "ExecutionControlFailed",
           threadId: "read-only-thread",

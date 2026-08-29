@@ -295,6 +295,7 @@ export const layer = (options: {
             authority,
             threadId: record.threadId,
             operationKey: command.commandId,
+            turnId: record.turnId,
             prompt: command.text,
           }
           if (command.attachments !== undefined && command.attachments.length > 0) {
@@ -406,6 +407,7 @@ export const layer = (options: {
             ownerId: record.ownerId,
             threadId: ProductThreadId.make(record.threadId),
             commandId: interactiveCommand.commandId,
+            turnId: record.turnId,
             command: yield* productCommand(interactiveCommand),
           },
           (batch) =>

@@ -2,7 +2,7 @@ import type * as Thread from "@rika/product/thread-record"
 import type * as ExecutionRequest from "@rika/product/execution-request"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
 import type { ModeId } from "@rika/configuration/behavior-mode"
-import type { Context, Deferred, Effect, PlatformError, PubSub, Semaphore } from "effect"
+import type { Context, Deferred, Effect, PlatformError, PubSub } from "effect"
 import type { OperationUnavailable } from "../contract/product"
 import type { InteractiveEvent as ClientEvent } from "./event"
 import type { InteractiveEvent } from "./session-event"
@@ -20,11 +20,13 @@ export interface InteractiveSession {
     promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
+    turnId?: TurnId,
   ) => Effect.Effect<void, OperationUnavailable>
   readonly shell: (
     threadId: Thread.ThreadId | undefined,
     command: string,
     incognito: boolean,
+    turnId?: TurnId,
   ) => Effect.Effect<void, OperationUnavailable>
   readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
@@ -40,7 +42,11 @@ export interface InteractiveSession {
     authorizationId: string,
     checkpoint?: ExecutionProjection.Checkpoint,
   ) => Effect.Effect<void, OperationUnavailable>
-  readonly interruptAndSend: (prompt: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
+  readonly interruptAndSend: (
+    prompt: string,
+    targetTurnId?: string,
+    turnId?: TurnId,
+  ) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: (target?: {
     readonly turnId?: string
     readonly submissionId?: string
@@ -123,7 +129,7 @@ export interface InteractiveSessionInput {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly pendingTurnCapacity: number
   readonly rootTurnOwner: RootTurnOwnerInterface
-  readonly turnMutationAdmission: Semaphore.Semaphore
+  readonly withThreadMutation: <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly resolveExecutionRoute: (
     mode?: ModeId,
     tuning?: { readonly fastMode?: boolean },
@@ -165,7 +171,11 @@ export interface InteractiveSessionInput {
     turnId: TurnId,
     expectedStatus?: ExecutionStatusStatus,
   ) => Effect.Effect<boolean, TurnRepositoryError, never>
-  readonly releaseTurnObserver: (turnId: TurnId, notify?: boolean) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (
+    threadId: ThreadId,
+    turnId: TurnId,
+    notify?: boolean,
+  ) => Effect.Effect<void, never, never>
   readonly acquiredBackend: ExecutionGatewayInterface
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<TurnId>

@@ -232,12 +232,14 @@ export const makeInteractiveSessionEvents = (
     parts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     tuning?: { readonly fastMode?: boolean },
     submissionId?: string,
+    turnId?: import("@rika/product/turn-record").TurnId,
   ): Effect.Effect<void, OperationUnavailable, never> =>
-    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId)
+    input.submit(prompt, input.sessionDispatch, mode, parts, tuning, submissionId, turnId)
   const shell = InteractiveShell.makeInteractiveShell(input)
   return {
     events,
-    submit: (prompt, mode, parts, tuning, submissionId) => submit(prompt, mode, parts, tuning, submissionId),
+    submit: (prompt, mode, parts, tuning, submissionId, turnId) =>
+      submit(prompt, mode, parts, tuning, submissionId, turnId),
     newThread: input.safe(
       input.sessionDispatch,
       submissionAdmission.withPermits(1)(Effect.uninterruptible(input.createAndSelectThread())),
@@ -254,7 +256,7 @@ export const makeInteractiveSessionEvents = (
         Effect.provide(input.executionDependencies),
         Effect.mapError(operationUnavailable("InteractiveSession.archiveAndNewThread")),
       ),
-    shell: (threadId, command, incognito) => shell(threadId, command, incognito),
+    shell: (threadId, command, incognito, turnId) => shell(threadId, command, incognito, turnId),
     editQueued: (id, prompt) => input.safe(input.sessionDispatch, input.control.editQueued(id, prompt)),
     dequeue: (id) => input.safe(input.sessionDispatch, input.control.dequeue(id)),
     steerQueued: (id, text, requestId) =>
@@ -360,13 +362,13 @@ export const makeInteractiveSession = (
       events: (dispatch) => state.composition.attachFeed(implementation.events(dispatch)),
       currentView: typedOperationFeed.currentView,
       projectionCheckpoint: typedOperationFeed.projectionCheckpoint,
-      submit: (prompt, mode, parts, tuning, submissionId) =>
-        state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
+      submit: (prompt, mode, parts, tuning, submissionId, turnId) =>
+        state.composition.admit(implementation.submit(prompt, mode, parts, tuning, submissionId, turnId)),
       newThread: state.composition.admitLocal(implementation.newThread),
       archiveThread: state.composition.admitLocal(implementation.archiveThread),
       archiveAndNewThread: state.composition.admitLocal(implementation.archiveAndNewThread),
-      shell: (threadId, command, incognito) =>
-        state.composition.admitLocal(implementation.shell(threadId, command, incognito)),
+      shell: (threadId, command, incognito, turnId) =>
+        state.composition.admitLocal(implementation.shell(threadId, command, incognito, turnId)),
       editQueued: (turnId, prompt) => state.composition.admitLocal(implementation.editQueued(turnId, prompt)),
       dequeue: (turnId) => state.composition.admitLocal(implementation.dequeue(turnId)),
       steerQueued: (turnId, text, requestId) =>
@@ -377,8 +379,8 @@ export const makeInteractiveSession = (
         state.composition.admitLocal(implementation.approveAuthorization(turnId, authorizationId, checkpoint)),
       denyAuthorization: (turnId, authorizationId, checkpoint) =>
         state.composition.admitLocal(implementation.denyAuthorization(turnId, authorizationId, checkpoint)),
-      interruptAndSend: (prompt, targetTurnId) =>
-        state.composition.admitLocal(implementation.interruptAndSend(prompt, targetTurnId)),
+      interruptAndSend: (prompt, targetTurnId, turnId) =>
+        state.composition.admitLocal(implementation.interruptAndSend(prompt, targetTurnId, turnId)),
       cancel: (target) => state.composition.admitLocal(implementation.cancel(target)),
       quit: implementation.quit,
       selectThread: (threadId) => state.composition.admitLocal(implementation.selectThread(threadId)),

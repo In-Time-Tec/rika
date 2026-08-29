@@ -53,20 +53,15 @@ const admitInteractiveSubmissionImpl = (
   promptParts: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
   dispatch: (event: InteractiveEvent) => void,
   submissionId?: string,
+  turnId?: Turn.TurnId,
 ) => {
-  const {
-    options,
-    pendingTurnCapacity,
-    rootTurnOwner,
-    turnMutationAdmission,
-    resolveExecutionRoute,
-    ensureTurnSummary,
-  } = input
+  const { options, pendingTurnCapacity, rootTurnOwner, withThreadMutation, resolveExecutionRoute, ensureTurnSummary } =
+    input
   return Effect.gen(function* () {
     const turns = yield* TurnRepository.Service
     const executionRoute = yield* resolveExecutionRoute(mode, modelTuning, thread.workspace)
     let submission: TurnRepositoryContract.CreateInput = {
-      id: yield* options.makeTurnId,
+      id: turnId ?? (yield* options.makeTurnId),
       threadId: thread.id,
       prompt,
       executionRoute,
@@ -74,12 +69,15 @@ const admitInteractiveSubmissionImpl = (
       now: yield* Clock.currentTimeMillis,
     }
     if (promptParts !== undefined) submission = { ...submission, promptParts }
-    const observed = yield* turnMutationAdmission.withPermits(1)(
+    const observed = yield* withThreadMutation(
+      thread.id,
       admitInteractiveTurn({
         turns,
         submission,
-        claim: (turnId, status) =>
-          rootTurnOwner.claim(turnId, status).pipe(Effect.mapError((error) => operationError(String(error), error))),
+        claim: (claimedTurnId, status) =>
+          rootTurnOwner
+            .claim(claimedTurnId, status)
+            .pipe(Effect.mapError((error) => operationError(String(error), error))),
       }),
     )
     if (observed.turn.status !== "queued" && observed.claimed !== true)
@@ -106,6 +104,7 @@ export const admitInteractiveSubmission: {
     arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
     arg6: (event: InteractiveEvent) => void,
     arg7?: string,
+    arg8?: Turn.TurnId,
   ): (arg0: InteractiveRuntimeContext) => ReturnType<typeof admitInteractiveSubmissionImpl>
   (
     arg0: InteractiveRuntimeContext,
@@ -116,8 +115,9 @@ export const admitInteractiveSubmission: {
     arg5: ReadonlyArray<ExecutionRequest.PromptPart> | undefined,
     arg6: (event: InteractiveEvent) => void,
     arg7?: string,
+    arg8?: Turn.TurnId,
   ): ReturnType<typeof admitInteractiveSubmissionImpl>
-} = Function.dual(8, admitInteractiveSubmissionImpl)
+} = Function.dual(9, admitInteractiveSubmissionImpl)
 interface SettleInteractiveSubmissionState {
   readonly thread: Thread.Thread
   readonly turn: Turn.AgentExecutionTurn
@@ -330,7 +330,9 @@ const executeInteractiveSubmissionImpl = (
           ),
     ),
     Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error, undefined, turn.id))),
-    Effect.ensuring(releaseTurnObserver(turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)), Effect.ignore)),
+    Effect.ensuring(
+      releaseTurnObserver(turn.threadId, turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)), Effect.ignore),
+    ),
   )
 }
 export const executeInteractiveSubmission: {
@@ -374,6 +376,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
     promptParts?: ReadonlyArray<ExecutionRequest.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,
+    turnId?: Turn.TurnId,
   ) {
     let observerTurn: Turn.Turn | undefined
     let submissionThreadId: Thread.ThreadId | undefined
@@ -415,6 +418,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
         promptParts,
         dispatch,
         submissionId,
+        turnId,
       )
       const turn = admitted
       observerTurn = turn.status === "queued" ? undefined : turn
@@ -457,7 +461,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
           Effect.suspend(() =>
             observerTurn === undefined || executionLaunched
               ? Effect.void
-              : releaseTurnObserver(observerTurn!.id).pipe(
+              : releaseTurnObserver(observerTurn!.threadId, observerTurn!.id).pipe(
                   Effect.andThen(notifyTurnChanged(observerTurn!)),
                   Effect.ignore,
                 ),

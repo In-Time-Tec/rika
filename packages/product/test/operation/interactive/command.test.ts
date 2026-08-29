@@ -1,8 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { TurnId } from "@rika/product/turn-record"
 import * as ExecutionProjection from "../../../src/execution/projection/contract"
 import { executeInteractiveCommand } from "../../../src/operation/interactive/command"
 import type { InteractiveSession } from "../../../src/operation/interactive/session"
+
+const invocation = <Command>(command: Command) => ({
+  commandId: "command",
+  turnId: TurnId.make("invocation-turn"),
+  command,
+})
 
 const sessionWith = (overrides: Partial<InteractiveSession>): InteractiveSession => ({
   events: () => Effect.void,
@@ -40,18 +47,24 @@ describe("Interactive authorization commands", () => {
           Effect.sync(() => calls.push(["deny", turnId, authorizationId, checkpoint])),
       })
       const checkpoint = { version: ExecutionProjection.projectionVersion, cursor: "cursor", state: "{}" }
-      yield* executeInteractiveCommand(session, {
-        _tag: "ApproveAuthorization",
-        turnId: "turn",
-        authorizationId: "authorization",
-        checkpoint,
-      })
-      yield* executeInteractiveCommand(session, {
-        _tag: "DenyAuthorization",
-        turnId: "turn",
-        authorizationId: "authorization",
-        checkpoint,
-      })
+      yield* executeInteractiveCommand(
+        session,
+        invocation({
+          _tag: "ApproveAuthorization",
+          turnId: "turn",
+          authorizationId: "authorization",
+          checkpoint,
+        }),
+      )
+      yield* executeInteractiveCommand(
+        session,
+        invocation({
+          _tag: "DenyAuthorization",
+          turnId: "turn",
+          authorizationId: "authorization",
+          checkpoint,
+        }),
+      )
       expect(calls).toEqual([
         ["approve", "turn", "authorization", checkpoint],
         ["deny", "turn", "authorization", checkpoint],
@@ -67,11 +80,14 @@ describe("Interactive preview commands", () => {
       const session = sessionWith({
         previewThread: (threadId: string, requestId: number) => Effect.sync(() => calls.push([threadId, requestId])),
       })
-      yield* executeInteractiveCommand(session, {
-        _tag: "PreviewThread",
-        threadId: "thread",
-        requestId: 42,
-      })
+      yield* executeInteractiveCommand(
+        session,
+        invocation({
+          _tag: "PreviewThread",
+          threadId: "thread",
+          requestId: 42,
+        }),
+      )
       expect(calls).toEqual([["thread", 42]])
     }),
   )
@@ -85,9 +101,30 @@ describe("Interactive thread lifecycle commands", () => {
         archiveThread: Effect.sync(() => calls.push("archive")),
         archiveAndNewThread: Effect.sync(() => calls.push("archive-and-new")),
       })
-      yield* executeInteractiveCommand(session, { _tag: "ArchiveThread" })
-      yield* executeInteractiveCommand(session, { _tag: "ArchiveAndNewThread" })
+      yield* executeInteractiveCommand(session, invocation({ _tag: "ArchiveThread" }))
+      yield* executeInteractiveCommand(session, invocation({ _tag: "ArchiveAndNewThread" }))
       expect(calls).toEqual(["archive", "archive-and-new"])
+    }),
+  )
+})
+
+describe("Interactive Turn identity", () => {
+  it.effect("forwards the admitted Turn identity to Turn-creating commands", () =>
+    Effect.gen(function* () {
+      const calls: Array<unknown> = []
+      const session = sessionWith({
+        submit: (...args) => Effect.sync(() => calls.push(["submit", args[5]])),
+        shell: (...args) => Effect.sync(() => calls.push(["shell", args[3]])),
+        interruptAndSend: (...args) => Effect.sync(() => calls.push(["interrupt-and-send", args[2]])),
+      })
+      yield* executeInteractiveCommand(session, invocation({ _tag: "Submit", prompt: "work" }))
+      yield* executeInteractiveCommand(session, invocation({ _tag: "Shell", command: "pwd", incognito: false }))
+      yield* executeInteractiveCommand(session, invocation({ _tag: "InterruptAndSend", prompt: "new work" }))
+      expect(calls).toEqual([
+        ["submit", "invocation-turn"],
+        ["shell", "invocation-turn"],
+        ["interrupt-and-send", "invocation-turn"],
+      ])
     }),
   )
 })

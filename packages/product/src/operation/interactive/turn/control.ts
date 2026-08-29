@@ -246,7 +246,7 @@ export const makeInteractiveSessionControls = (
       }
     }
   })
-  const interruptAndSend = (prompt: string, targetTurnId?: string) =>
+  const interruptAndSend = (prompt: string, targetTurnId?: string, turnId?: Turn.TurnId) =>
     safe(
       sessionDispatch,
       Effect.gen(function* () {
@@ -256,7 +256,7 @@ export const makeInteractiveSessionControls = (
         if (turn === undefined || turn._tag !== "AgentExecution")
           return yield* operationError(`Interrupted Turn ${targetTurnId ?? "current"} is unavailable`)
         const thread = yield* threadForTurn(turn)
-        const pendingId = yield* options.makeTurnId
+        const pendingId = turnId ?? (yield* options.makeTurnId)
         const existing = yield* turns.get(pendingId)
         if (
           existing !== undefined &&

@@ -180,4 +180,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "89afe9f0dfe8c832a0de50f4608ff2b303329716808df0710d1cd770eae30598",
     url: new URL("../../migrations/postgres/0035-workspace-seeds.sql", import.meta.url),
   },
+  {
+    id: "product/0036_explicit_command_turn_identity",
+    checksum: "4136448fb7cb12fdf36ceef33b11e697cf958e2ceff2e574f421e52ec915f7bf",
+    url: new URL("../../migrations/postgres/0036-explicit-command-turn-identity.sql", import.meta.url),
+  },
 ]
