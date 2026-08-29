@@ -1,57 +1,79 @@
 # Rika
 
-Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. Read `PRODUCT.md` for direction and `CONTEXT.md` for vocabulary and ownership.
+Rika is a collaborative coding-agent CLI and OpenTUI application written in Effect TypeScript. A local Runner works in a user-controlled checkout; an explicitly selected Orb works in an isolated E2B workspace. The hosted API owns identity, access, Threads, and product state, while TenetKit owns durable execution and the agent loop.
 
-## Navigation
+Read [PRODUCT.md](PRODUCT.md) for product direction and [CONTEXT.md](CONTEXT.md) for exact vocabulary and ownership. Current behavior belongs in [docs/features](docs/features), lasting choices in [docs/decisions](docs/decisions), and meaningful costs in [docs/tradeoffs](docs/tradeoffs).
 
-- Start with `rg -n "<capability-or-symbol>" apps packages` to find the likely owner.
-- Open that owner and its matching tests before expanding to neighboring files.
+## Commands
 
-## Agent state
+This repository pins Bun 1.4.0 in `package.json`.
 
-- Every agent keeps all run-specific state under `.agents/state/<run>/`, including plans, TODO queues, notes, handoffs, and temporary investigation records.
-- `.agents/state/` is Git-ignored local state. Never force-add or commit anything beneath it.
-- Use a distinct child directory for each run or workstream so concurrent agents do not overwrite one another.
-- Durable product behavior, source code, tests, and repository documentation stay in their normal tracked locations; `.agents/state/` never becomes a source of implemented truth.
+| Task                                  | Command                                                                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Install dependencies                  | `bun install --frozen-lockfile`                                                                                                  |
+| Build every workspace                 | `bun run build`                                                                                                                  |
+| Run the development stack             | `bun run dev`                                                                                                                    |
+| Run the source CLI                    | `bun run --cwd apps/rika start -- --workspace "$PWD"`                                                                            |
+| Lint                                  | `bun run lint`                                                                                                                   |
+| Type-check                            | `bun run typecheck`                                                                                                              |
+| Run all deterministic unit tests      | `bun run test`                                                                                                                   |
+| Run one unit test                     | `bun --bun vitest run --project unit path/to/file.test.ts`                                                                       |
+| Run one process or TUI test           | `bun --bun vitest run --project proc path/to/file.proc.test.ts` or `bun --bun vitest run --project tui path/to/file.tui.test.ts` |
+| Run tests touched by the current diff | `bun run test-changed`                                                                                                           |
+| Format the repository                 | `bun run format`                                                                                                                 |
 
-## GREENFIELD PROJECT — BREAKING CHANGES ARE WELCOME!!!
+The full CI-equivalent check is:
 
-- THIS PROJECT HAS NO USERS!!! IT IS GREENFIELD!!!
-- DO NOT ASSUME THAT THE EXISTING FOUNDATION, ARCHITECTURE, OR IMPLEMENTATION IS CORRECT!!! BE SKEPTICAL, INVESTIGATE THE REAL PROBLEM, AND VERIFY THE BEST APPROACH!!!
-- CHANGE THE UNDERLYING FOUNDATION OR ARCHITECTURE WHEN EVIDENCE SHOWS THAT A DIFFERENT DESIGN IS BETTER!!! LARGE REFACTORS ARE ENCOURAGED WHEN THEY PRODUCE THE RIGHT LONG-TERM SYSTEM!!!
-- IMPLEMENT THE RIGHT FIX THAT WILL SCALE LONG TERM, NOT THE SMALLEST PATCH!!! DO NOT PAPER OVER A DESIGN PROBLEM WITH A LOCAL WORKAROUND!!!
-- BREAKING CHANGES ARE WELCOME!!! DO NOT PRESERVE LEGACY CODE OR BACKWARD COMPATIBILITY!!! REMOVE REPLACED CODE, OBSOLETE PATHS, AND TRANSITIONAL SHIMS!!!
+```bash
+bun run check
+bun run test
+bun run test-proc
+bun run test-tui
+```
 
-## Boundaries
+`bun run check` runs type-checking, ast-grep, oxlint, and repository lint. `bun run test` does not include process or TUI tests. Keep `*.test.ts`, `*.proc.test.ts`, and `*.tui.test.ts` in their matching Vitest projects; see the `writing-rika-tests` skill.
 
-- TenetKit owns durable execution and the agent loop; Rika owns product semantics and projections.
-- Use released TenetKit, Effect, and OpenTUI package exports. Never edit, import from, format, build, or test `repos/*`.
-- Use Effect services, schemas, streams, scopes, typed errors, platform APIs, and structured concurrency. Keep raw Promise or host APIs in a named outer adapter only when Effect has no equivalent.
-- Run Effects only at app, process, test-host, or framework boundaries. Keep pure computations pure.
-- Build CLI surfaces with `effect/unstable/cli`, use WebSockets for client and Executor transport, and keep OpenTUI imports in the TUI adapter.
-- Language-model provider SDKs are forbidden outside released TenetKit contracts. `@rika/coding-tools` may use web-research provider SDKs only when they preserve Effect interruption, retry, and resource semantics; otherwise use Effect HTTP adapters.
-- Browser Thread control is a FoldKit program. Runner and Orb execution are first-class; E2B remains the only Orb provider. Do not add IDE integration, Rivet, actors, interchangeable Orb providers, a local semantic code index, or ast-grep outline tools.
-- Do not create catch-all `utils`, `helpers`, `common`, or `lib` modules. Do not put comments in code.
+In an Amp orb, `.amp/services.yaml` owns the Docker daemon, secret service, development stack, readiness check, and Portal. Start or repair it with `amp orb services ensure`; do not start a second `bun run dev` beside it.
 
-## Documentation
+## Real product flows
 
-- `PRODUCT.md` owns audience, direction, and exclusions. It never lists features or status.
-- `CONTEXT.md` owns vocabulary, authority, and framework boundaries.
-- `docs/features/<capability>.md` owns one current capability contract. Keep it short and merge overlap into the owning capability.
-- `docs/decisions/<slug>.md` records only a lasting choice and why. `docs/tradeoffs/<slug>.md` records only a meaningful gain, cost, and rejected options.
-- Do not create documentation indexes, ledgers, status or evidence tables, numbered specs, decision-record metadata, plans, history sections, related-link sections, or Markdown meaning/structure validators.
-- `PLAN.md`, `TODO.md`, and `ISSUES.md` may track unfinished work but never define implemented product behavior.
-- The TenetKit native-runtime `PLAN.md` may record target interface changes and release acceptance for this clean-break migration.
-- A test-only Vitest alias may resolve TenetKit package imports to the TenetKit worktree before `0.15.0` is published. Production source must keep package-name imports. Remove the alias after Rika pins the released packages.
+Use a published install from [README.md](README.md), or run the current checkout through the `rika-acceptance` skill. Its script packages the current host target, checks the release inventory, version, help, and kernel runtime, then can launch that packaged binary.
 
-## Scripts and verification
+- **Local Runner:** `rika --workspace "$PWD"` opens the TUI and creates a Runner Thread by default. The same process registers that checkout as its Runner. See [Runner and Orb execution](docs/features/execution-placement.md).
+- **Headless Runner:** `rika --no-tui --workspace "$PWD" --allow-remote-thread-creation` keeps the checkout available for remotely created Runner Threads. Use `--deny-remote-thread-creation` when that must be forbidden explicitly.
+- **Orb:** choose `new in Orb` from the TUI command palette, or run `rika thread new`; the CLI command creates an Orb Thread from the current workspace seed and prints its ID. An Orb is prepared only after its first prompt and never silently becomes a Runner.
+- **Reconnect:** transport reconnect is automatic. To reopen after process exit, run `rika thread continue --last` or `rika thread continue <thread-id>`. Closing the TUI does not cancel hosted work. See [server lifecycle](docs/features/server-lifecycle.md) and [server transport](docs/features/server-transport.md).
+- **Continue work:** submit another prompt with Enter. If a Turn is active, Enter durably queues a Pending Turn; `rika run --thread <thread-id> "<prompt>"` submits one noninteractive follow-up to an existing Thread. See [execution control](docs/features/execution-control.md) and [the pending queue](docs/features/pending-turn-queue.md).
+- **Cancel:** while work is active, Ctrl+C sends a durable cancellation request; a second Ctrl+C force-quits the client. There is no CLI cancellation subcommand. When idle, Ctrl+C opens the exit menu instead. See [terminal lifecycle](docs/features/terminal-lifecycle.md).
 
-- Root everyday scripts are `build`, `check`, `dev`, `format`, `test`, and `typecheck`. Plain package, migration, release, and install workflows are allowed.
-- Keep one simple supported command per workflow and each `package.json` script to one command. Let Bun, Vitest, Turborepo, and their configuration own discovery, setup, concurrency, and task order instead of custom orchestration or one-off file lists.
-- Do not add colon-named aliases, dispatchers that hide old aliases, or wrappers for Git, Docker, status, logs, watch, coverage, vendor, or upstream commands.
-- Use `bun run package -- --target <target>` for target packaging.
-- Unit tests are the default and use `*.test.ts` for one owned behavior or interface. They may use real SQLite, filesystem, process, or OpenTUI adapters.
-- Hosted OpenTUI surfaces use `*.tui.test.ts` (`bun run test-tui` in CI). Process-lifecycle and transport tests that spawn servers, PTYs, or kill fixtures use `*.proc.test.ts` and run by `bun run test-proc` in CI. Both lanes run test files in parallel under Bun; keep every file hermetic so parallel workers cannot collide. The Darwin-only `performance-platform` resource gate is env-opt-in (`RIKA_PERFORMANCE_GATE=1`) because the interactive client needs a hosted account before it spawns its role tree. `bun run check` and `bun run test` stay fast and deterministic: no child processes, no packaged binaries, and no wall-clock assertions — waits poll observable conditions with generous ceilings instead of asserting durations.
-- `bun run test` owns all deterministic checks. Use `@effect/vitest` and `TestClock` for Effect behavior and time; use `bun:test` only when a Bun API requires it.
-- Packaged-product verification extracts each archive and checks its exact inventory, architecture, version, and help output in the release workflow, not per push. Manual TUI acceptance uses the pilotty and agent-tty skills.
-- Run focused tests while working; `bun run test-changed` runs only the tests a diff touches and finishes in seconds against an uncommitted change. Run `bun run check` and `bun run test` when the risk and time budget permit. Report what ran and what did not.
+The exhaustive local Runner, Orb, restart, cancellation, and recovery acceptance contract is [VERIFICATION.md](VERIFICATION.md). Use the `testing-with-pilotty` skill for fast interaction checks and `testing-with-agent-tty` for reviewer-facing recordings.
+
+## Sources of truth
+
+- `apps/rika` owns the packaged CLI, TUI process, hosted client, and local Runner.
+- `apps/api` owns hosted composition, HTTP and WebSocket entry points, model routing, command workers, and Executor assignment.
+- `apps/web` owns browser rendering and browser-local interaction only. `apps/proxy` is the only public Railway ingress.
+- `packages/product` owns Rika product contracts and rules. `packages/product-store` owns their PostgreSQL persistence and migrations.
+- `packages/execution` is Rika's TenetKit boundary. TenetKit remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
+- `packages/kernel` owns the `rika.*` cell bindings and Executor runtime. Kernel variables are working memory, not durable state; see [kernel state](docs/decisions/kernel-state-is-not-authority.md).
+- `packages/terminal` owns terminal state and presentation. Keep OpenTUI imports behind that adapter.
+- `packages/e2b-executor`, `packages/remote-execution`, and `infra/e2b` own Orb execution. E2B is the only remote workspace provider; see [the E2B decision](docs/decisions/e2b-remote-execution.md).
+- `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract.
+
+Use released TenetKit, Effect, FoldKit, and OpenTUI package exports. Do not edit, import from, format, build, or test anything under `repos/`. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
+
+Keep temporary run state under a distinct `.agents/state/<run>/` directory. It is ignored and must never become implemented product truth or be force-added to Git.
+
+## Production and shipping
+
+Treat these paths as production-sensitive:
+
+- `packages/identity/migrations`, `packages/product-store/migrations`, and `apps/api/src/database/migrate.ts` change PostgreSQL authority.
+- `apps/api/src/config`, `apps/api/src/security`, `packages/credential-vault`, `packages/identity`, and `packages/github-app` handle production identity, authorization, credentials, or repository access.
+- `apps/proxy/Caddyfile` and `apps/*/railway.json` define public ingress and Railway deployment behavior. Production follows `main`; pull requests receive isolated Railway environments as described in [the Railway decision](docs/decisions/railway-api.md).
+- `infra/e2b`, `packages/e2b-executor`, and `.github/workflows/executor-image.yml` define the immutable production Executor image and E2B template promotion.
+- `.github/workflows/publish.yml`, `install.sh`, and `scripts/packaging` define release installation and publication.
+
+Do not print secrets or put credentials in source, logs, Executor payloads, snapshots, or artifacts. Do not run production migrations, deploy, promote an Executor image, publish packages, create a release, or push a tag unless the user explicitly requests that exact external action.
+
+CI has separate `quality`, `tui`, and `proc` jobs. A `v*` tag runs the publish workflow: the tag must equal `v` plus `apps/rika/package.json`'s version, the tagged commit must have green CI unless an explicit audited override is used, native archives are built for `darwin-arm64`, `linux-arm64`, and `linux-x64`, and the workflow verifies inventory, architecture, checksums, and provenance before publishing GitHub and npm artifacts. The Executor image is promoted only by its separate manual workflow with a new generation and `promote=true`.
