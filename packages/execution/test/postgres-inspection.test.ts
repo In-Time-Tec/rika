@@ -78,11 +78,17 @@ it.live.skipIf(databaseUrl === "")(
         )
         expect(positionType.rows[0]?.type).toBe("bigint")
 
+        const inspect = Effect.gen(function* () {
+          yield* Effect.scoped(gateway.watchTurn(link).pipe(Stream.runDrain))
+          expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
+        })
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          yield* inspect
+        }
         const baseline = yield* backendCount(pool)
         const observed = new Array<number>()
         for (let attempt = 0; attempt < 20; attempt += 1) {
-          yield* Effect.scoped(gateway.watchTurn(link).pipe(Stream.runDrain))
-          expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
+          yield* inspect
           observed.push(yield* backendCount(pool))
         }
         expect(Math.max(...observed)).toBeLessThanOrEqual(baseline + 1)

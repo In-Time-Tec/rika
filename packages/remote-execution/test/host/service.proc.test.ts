@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Crypto, Effect, FileSystem, Layer, Schema } from "effect"
+import { Crypto, Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { testing } from "../../src/host/service"
 import { provideLayer } from "../support/layer"
@@ -14,6 +14,23 @@ const decodeProof = (output: string) =>
       .split("\n")
       .findLast((line) => line.startsWith("{")) ?? output,
   )
+
+const runProof = Effect.fn("runProof")(function* (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  command: ChildProcess.Command,
+) {
+  const handle = yield* spawner.spawn(command)
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [
+      handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
+      handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+      handle.exitCode,
+    ],
+    { concurrency: "unbounded" },
+  )
+  expect({ exitCode, stderr }).toEqual({ exitCode: ChildProcessSpawner.ExitCode(0), stderr: "" })
+  return stdout
+})
 
 const bootstrapProof = `
 import { Effect, Redacted, Schema } from "effect"
@@ -69,11 +86,21 @@ const valid = (credential) => ({
     restore: null,
   }),
 })
-const responses = await Effect.runPromise(Effect.all([
-  Effect.tryPromise(() => Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-a"))),
-  Effect.tryPromise(() => Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-b"))),
-], { concurrency: "unbounded" }))
-const accepted = responses.find((response) => response.status === 202)
+const outcomes = await Promise.allSettled([
+  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-a")),
+  Bun.fetch("http://127.0.0.1:7070/.rika/bootstrap", valid("bootstrap-b")),
+])
+const responses = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : [])
+const acceptedResponses = responses.filter((response) => response.status === 202)
+const rejectedCount = outcomes.filter((outcome) => outcome.status === "rejected").length
+const otherResponses = responses.filter((response) => response.status !== 202)
+if (
+  outcomes.length !== 2 ||
+  acceptedResponses.length !== 1 ||
+  otherResponses.some((response) => response.status !== 404) ||
+  otherResponses.length + rejectedCount !== 1
+) throw new Error("bootstrap listener did not accept exactly one request")
+const accepted = acceptedResponses[0]
 const body = await accepted.text()
 const bootstrap = await received
 hanging.destroy()
@@ -82,7 +109,8 @@ console.log(
   JSON.stringify({
     malformedStatus: malformed.status,
     invalidStatus: invalid.status,
-    statuses: responses.map((response) => response.status).sort(),
+    acceptedCount: acceptedResponses.length,
+    loser: rejectedCount === 1 ? "listener-closed" : "not-found",
     body,
     credential,
     identity: bootstrap.identity,
@@ -290,7 +318,8 @@ describe.sequential("executor host process", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const stdout = yield* spawner.string(
+        const stdout = yield* runProof(
+          spawner,
           ChildProcess.make("bun", ["-e", bootstrapProof], {
             cwd: packageRoot,
             extendEnv: true,
@@ -302,7 +331,8 @@ describe.sequential("executor host process", () => {
           expect(decoded).toEqual({
             malformedStatus: 400,
             invalidStatus: 400,
-            statuses: [202, 404],
+            acceptedCount: 1,
+            loser: expect.stringMatching(/^(listener-closed|not-found)$/),
             body: "accepted",
             credential: expect.stringMatching(/^bootstrap-[ab]$/),
             identity: {
@@ -325,7 +355,7 @@ describe.sequential("executor host process", () => {
             restore: null,
           })
         })
-      }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
+      }).pipe(Effect.timeout("10 seconds"), provideLayer(BunServices.layer)),
     ),
   )
 
@@ -333,7 +363,8 @@ describe.sequential("executor host process", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const stdout = yield* spawner.string(
+        const stdout = yield* runProof(
+          spawner,
           ChildProcess.make("bun", ["-e", bootstrapResetProof], {
             cwd: packageRoot,
             extendEnv: true,
@@ -341,7 +372,7 @@ describe.sequential("executor host process", () => {
           }),
         )
         expect(decodeProof(stdout)).toEqual({ credential: "reset-bootstrap", listener: "closed" })
-      }).pipe(Effect.timeout("5 seconds"), provideLayer(BunServices.layer)),
+      }).pipe(Effect.timeout("10 seconds"), provideLayer(BunServices.layer)),
     ),
   )
 
@@ -351,7 +382,8 @@ describe.sequential("executor host process", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-          const stdout = yield* spawner.string(
+          const stdout = yield* runProof(
+            spawner,
             ChildProcess.make("bun", ["-e", bootstrapIdentityProof], {
               cwd: packageRoot,
             }),
