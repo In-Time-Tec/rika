@@ -222,7 +222,7 @@ export const layer = (options: {
               cancellationIntervalMillis: 1_000,
             },
           },
-        }),
+        }).pipe(Layer.provide(retainedData)),
       )
       const hostedContext = Context.merge(
         Context.merge(

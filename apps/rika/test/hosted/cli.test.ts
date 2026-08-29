@@ -11,13 +11,14 @@ import {
   type IdentityRuntime,
 } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import {
   rikaHostedEnvironmentValues,
   rikaHostedExecutorAssignments,
   rikaHostedOwners,
-  rikaHostedThreadCommands,
   rikaHostedThreadEvents,
+  rikaHostedThreadProtocolCommands,
   rikaHostedThreads,
 } from "@rika/product-store/database-schema"
 import * as HostedStore from "@rika/product-store/layer"
@@ -300,6 +301,7 @@ it.layer(BunServices.layer)((test) => {
             databaseLayer,
             AuthorizationPolicy.layer,
             BunCrypto.layer,
+            ExecutionGateway.layerTest(),
             hostedModelRegistryTestLayer,
             hostedRepositoriesUnavailableLayer,
           )
@@ -588,9 +590,9 @@ it.layer(BunServices.layer)((test) => {
               ).pipe(Effect.orDie),
               Effect.tryPromise(() =>
                 databaseClient
-                  .select({ idempotencyKey: rikaHostedThreadCommands.idempotencyKey })
-                  .from(rikaHostedThreadCommands)
-                  .where(eq(rikaHostedThreadCommands.threadId, connection.threadId)),
+                  .select({ idempotencyKey: rikaHostedThreadProtocolCommands.idempotencyKey })
+                  .from(rikaHostedThreadProtocolCommands)
+                  .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
               ).pipe(Effect.orDie),
               Effect.tryPromise(() =>
                 databaseClient

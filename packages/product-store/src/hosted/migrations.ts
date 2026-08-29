@@ -190,4 +190,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "547bd9d542f3fc5414862652c825d0ac53bbdfbecc56ed35b4aeccefdd9128f9",
     url: new URL("../../migrations/postgres/0037-hosted-product-thread-invariant.sql", import.meta.url),
   },
+  {
+    id: "product/0038_authoritative_thread_command_ledger",
+    checksum: "d32c3936ca675abcedb11871cf6c5581cd1859e81b6e84a26159cfff99e794fa",
+    url: new URL("../../migrations/postgres/0038-authoritative-thread-command-ledger.sql", import.meta.url),
+  },
 ]

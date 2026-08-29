@@ -1,16 +1,21 @@
 import { Context, Effect } from "effect"
+import type { ExecutionLink, PreparedTurn } from "../../execution/gateway/service"
+import type { PromptPart } from "../../execution/request"
+import type { ExecutionRouteSnapshot } from "../../execution/route/snapshot"
 import type { InteractiveEvent } from "../../operation/interactive/event"
-import type { HostedThreadSnapshot } from "./client"
+import type { HostedThreadSnapshot, PromptAdmissionStatus } from "./client"
 import type { TurnId } from "../../thread/turn/record"
 import type {
   ActorAttribution,
   BetterAuthUserId,
   ClientId,
+  CommitCursor,
   CommandId,
   DeviceId,
   IdempotencyKey,
   JsonObject,
   OwnerId,
+  Sequence,
   ThreadEventCursor,
   ThreadId,
   ThreadVersion,
@@ -22,13 +27,18 @@ export interface ThreadProtocolCommand {
   readonly ownerId: OwnerId
   readonly threadId: ThreadId
   readonly commandId: CommandId
-  readonly turnId: TurnId
+  readonly turnId?: TurnId
   readonly idempotencyKey: IdempotencyKey
   readonly expectedThreadVersion: ThreadVersion
   readonly threadVersion: ThreadVersion
+  readonly sequence: Sequence
+  readonly commitCursor: CommitCursor
   readonly actor: ActorAttribution
   readonly command: JsonObject
   readonly state: "admitted" | "completed"
+  readonly workState?: "turn-activation-pending" | "turn-activation-requested"
+  readonly admissionStatus?: PromptAdmissionStatus
+  readonly cancelledByCommandId?: CommandId
   readonly result?: JsonObject
   readonly cursor?: ThreadEventCursor
   readonly admittedAt: Timestamp
@@ -42,6 +52,47 @@ export type CommandAdmission =
 export type CommandCompletion =
   | { readonly _tag: "Completed"; readonly command: ThreadProtocolCommand }
   | { readonly _tag: "Duplicate"; readonly command: ThreadProtocolCommand }
+
+export interface ApplyPromptInput {
+  readonly ownerId: OwnerId
+  readonly threadId: ThreadId
+  readonly commandId: CommandId
+  readonly claimToken?: string
+  readonly turnId: TurnId
+  readonly actor: ActorAttribution
+  readonly prompt: string
+  readonly promptParts?: ReadonlyArray<PromptPart>
+  readonly executionRoute: ExecutionRouteSnapshot
+  readonly prepared: PreparedTurn
+  readonly submissionId: string
+  readonly completedAt: Timestamp
+  readonly queueCapacity: number
+  readonly readinessProof: boolean
+}
+
+export type PromptApplication =
+  | {
+      readonly _tag: "Admitted"
+      readonly command: ThreadProtocolCommand
+      readonly turnId: TurnId
+      readonly status: PromptAdmissionStatus
+      readonly link: ExecutionLink
+    }
+  | { readonly _tag: "Cancelled"; readonly command: ThreadProtocolCommand }
+
+export interface CancelPromptInput {
+  readonly ownerId: OwnerId
+  readonly threadId: ThreadId
+  readonly cancelCommandId: CommandId
+  readonly targetCommandId: CommandId
+  readonly actor: ActorAttribution
+  readonly cancelledAt: Timestamp
+  readonly claimToken?: string
+}
+
+export type PromptCancellation =
+  | { readonly _tag: "Pending"; readonly targetCommandId: CommandId }
+  | { readonly _tag: "Turn"; readonly targetCommandId: CommandId; readonly turnId: TurnId }
 
 export interface ThreadProtocolEvent {
   readonly ownerId: OwnerId
@@ -88,13 +139,28 @@ export interface ThreadProtocolStoreService {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
     readonly commandId: CommandId
-    readonly turnId: TurnId
+    readonly turnId?: TurnId
     readonly idempotencyKey: IdempotencyKey
     readonly expectedThreadVersion: ThreadVersion
     readonly actor: ActorAttribution
     readonly command: JsonObject
     readonly admittedAt: Timestamp
   }) => Effect.Effect<CommandAdmission, HostedPersistenceError>
+  readonly admitServerCommand: (input: {
+    readonly ownerId: OwnerId
+    readonly threadId: ThreadId
+    readonly commandId: CommandId
+    readonly turnId?: TurnId
+    readonly idempotencyKey: IdempotencyKey
+    readonly actor: ActorAttribution
+    readonly command: JsonObject
+    readonly admittedAt: Timestamp
+  }) => Effect.Effect<CommandAdmission, HostedPersistenceError>
+  readonly applyPrompt: <E, R>(
+    input: ApplyPromptInput,
+    stage: Effect.Effect<ExecutionLink, E, R>,
+  ) => Effect.Effect<PromptApplication, HostedPersistenceError | E, R>
+  readonly cancelPrompt: (input: CancelPromptInput) => Effect.Effect<PromptCancellation, HostedPersistenceError>
   readonly claimNextCommand: (input: {
     readonly claimToken: string
     readonly claimMillis: number

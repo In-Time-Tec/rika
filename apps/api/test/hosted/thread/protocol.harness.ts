@@ -240,6 +240,44 @@ const command = (id: string, expectedThreadVersion: string) => ({
   admittedAt: now,
 })
 
+const completeMockPrompt = (
+  store: ThreadProtocolStore["Service"],
+  input: Parameters<HostedProductService["admitAuthorizedRun"]>[0],
+  status: "accepted" | "queued",
+  completedSnapshot?: HostedThreadSnapshot,
+) => {
+  if (input.claimToken === undefined) return Effect.die("Worker prompt admission is missing its command claim")
+  const completion: Parameters<ThreadProtocolStore["Service"]["completeCommand"]>[0] = {
+    ownerId: input.authority.ownerId,
+    threadId: ThreadId.make(input.threadId),
+    commandId: CommandId.make(input.operationKey),
+    claimToken: input.claimToken,
+    result: { _tag: "PromptAdmitted", status },
+    events: [
+      {
+        _tag: "SubmissionAdmitted",
+        threadId: ProductThreadId.make(input.threadId),
+        turnId: TurnId.make(input.turnId),
+        status: status === "accepted" ? "active" : "queued",
+        submissionId: input.submissionId ?? input.operationKey,
+      },
+    ],
+    completedAt: later,
+  }
+  if (completedSnapshot !== undefined) Object.assign(completion, { snapshot: completedSnapshot })
+  return store
+    .completeCommand(completion)
+    .pipe(
+      Effect.orDie,
+      Effect.as({
+        _tag: "Admitted" as const,
+        commandId: input.operationKey,
+        turnId: input.turnId,
+        status,
+      }),
+    )
+}
+
 it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes socket tickets once", () =>
   withDatabase((pool) =>
     Effect.gen(function* () {
@@ -890,13 +928,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
             admissionAttempts += 1
             admittedEffects.add(input.operationKey)
             admittedTurnIds.add(input.turnId)
-            return {
-              _tag: "Admitted" as const,
-              commandId: input.operationKey,
-              turnId: input.turnId,
-              status: "accepted" as const,
-            }
-          }),
+          }).pipe(Effect.andThen(completeMockPrompt(workerProtocol, input, "accepted"))),
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
         authorizeOwner: () => Effect.die("unused"),
@@ -1050,11 +1082,24 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
             }),
           ),
         cancelRunAdmission: () => Effect.die("unused"),
-        cancelAuthorizedRunAdmission: (input) =>
-          Effect.sync(() => {
-            cancelledPrompts.add(input.targetCommandId)
-            return {}
-          }),
+        cancelAuthorizedRunAdmission: (input) => {
+          const cancellation: Parameters<ThreadProtocolStore["Service"]["cancelPrompt"]>[0] = {
+            ownerId: input.authority.ownerId,
+            threadId: ThreadId.make(input.threadId),
+            cancelCommandId: CommandId.make(input.cancelCommandId),
+            targetCommandId: CommandId.make(input.targetCommandId),
+            actor: input.authority.actor,
+            cancelledAt: later,
+          }
+          if (input.claimToken !== undefined) Object.assign(cancellation, { claimToken: input.claimToken })
+          return protocol
+            .cancelPrompt(cancellation)
+            .pipe(
+              Effect.orDie,
+              Effect.tap(() => Effect.sync(() => cancelledPrompts.add(input.targetCommandId))),
+              Effect.map((resolution) => (resolution._tag === "Turn" ? { turnId: String(resolution.turnId) } : {})),
+            )
+        },
         authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
@@ -1467,6 +1512,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         authorizeThread: () => Effect.succeed({ ownerId, actor }),
         threadExecutionContext: () =>
           Effect.succeed({
+            workspaceId: "workspace-protocol",
             repository: {
               repositoryId: "repository-1",
               owner: "In-Time-Tec",
@@ -1499,13 +1545,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           Effect.sync(() => {
             if (!runs.some((run) => run.operationKey === input.operationKey))
               runs.push({ threadId: input.threadId, operationKey: input.operationKey, prompt: input.prompt })
-            return {
-              _tag: "Admitted" as const,
-              commandId: input.operationKey,
-              turnId: `turn-${input.operationKey}`,
-              status: "queued" as const,
-            }
-          }),
+          }).pipe(Effect.andThen(completeMockPrompt(protocolStore, input, "queued", currentSnapshot))),
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       }

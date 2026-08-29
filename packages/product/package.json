@@ -32,7 +32,7 @@
     "./workspace-preparation": "./src/hosted/environment/workspace-preparation.ts",
     "./hosted-authorization": "./src/hosted/identity/authorization.ts",
     "./hosted-client-authority": "./src/hosted/identity/client-authority.ts",
-    "./hosted-command-ledger": "./src/hosted/protocol/command-ledger.ts",
+    "./hosted-thread-event-store": "./src/hosted/protocol/thread-event-store.ts",
     "./hosted-identity-context": "./src/hosted/identity/context.ts",
     "./hosted-observability": "./src/hosted/observability.ts",
     "./hosted-model": "./src/hosted/model.ts",

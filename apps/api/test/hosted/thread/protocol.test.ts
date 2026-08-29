@@ -6,11 +6,13 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   BetterAuthUserId,
   ClientId,
+  CommitCursor,
   CommandId,
   DeviceId,
   IdempotencyKey,
   OwnerId,
   RequestId,
+  Sequence,
   ThreadEventCursor,
   ThreadId,
   ThreadVersion,
@@ -146,12 +148,17 @@ const memoryStore = () => {
         const admitted: ThreadProtocolCommand = {
           ...input,
           threadVersion: ThreadVersion.make(String(version)),
+          sequence: Sequence.make(String(version)),
+          commitCursor: CommitCursor.make(String(version)),
           state: "admitted",
         }
         commands.set(input.commandId, admitted)
         keys.set(input.idempotencyKey, input.commandId)
         return Effect.succeed({ _tag: "Admitted" as const, command: admitted })
       }),
+    admitServerCommand: () => Effect.die("unused"),
+    applyPrompt: () => Effect.die("unused"),
+    cancelPrompt: () => Effect.die("unused"),
     claimNextCommand: () => Effect.die("unused"),
     renewCommandClaim: (input) => Effect.sync(() => claims.get(input.commandId) === input.claimToken),
     releaseCommandClaim: (input) =>
@@ -316,6 +323,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
       }),
     threadExecutionContext: () =>
       Effect.succeed({
+        workspaceId: "workspace-1",
         repository: { identity: "repository-1", branch: "main" },
         branch: "main",
         executor: { assignmentId, kind: "runner", generation: "1" },
@@ -910,6 +918,7 @@ it.effect("admits authorization decisions without applying them in the socket se
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () =>
       Effect.succeed({
+        workspaceId: "workspace-1",
         repository: {
           identity: "In-Time-Tec/rika",
           branch: "feature/thread-controls",

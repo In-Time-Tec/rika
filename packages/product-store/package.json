@@ -8,7 +8,7 @@
     "./database-schema": "./src/database/schema/product.ts",
     "./assignments": "./src/hosted/assignments.ts",
     "./client-authority": "./src/hosted/client-authority.ts",
-    "./command-ledger": "./src/hosted/command-ledger.ts",
+    "./thread-event-store": "./src/hosted/thread-event-store.ts",
     "./environment-store": "./src/hosted/environment-store.ts",
     "./executor-operations": "./src/hosted/execution/operations.ts",
     "./execution-tool-policy": "./src/hosted/execution/tool-policy.ts",
@@ -52,6 +52,7 @@
     "./migrations/postgres/0034-atomic-thread-replacement.sql": "./migrations/postgres/0034-atomic-thread-replacement.sql",
     "./migrations/postgres/0035-workspace-seeds.sql": "./migrations/postgres/0035-workspace-seeds.sql",
     "./migrations/postgres/0037-hosted-product-thread-invariant.sql": "./migrations/postgres/0037-hosted-product-thread-invariant.sql",
+    "./migrations/postgres/0038-authoritative-thread-command-ledger.sql": "./migrations/postgres/0038-authoritative-thread-command-ledger.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
     "./goal-repository": "./src/goal/repository.ts",
     "./thread-search-index": "./src/search/process-local-index.ts",
@@ -67,7 +68,8 @@
     "@rika/remote-execution": "workspace:*",
     "@rika/transcript": "workspace:*",
     "drizzle-orm": "catalog:",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
@@ -77,7 +79,6 @@
     "@rika/extensions": "workspace:*",
     "@types/bun": "catalog:",
     "@types/pg": "catalog:",
-    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

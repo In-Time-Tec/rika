@@ -255,7 +255,13 @@ it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization ow
           ]),
         )
         yield* Effect.tryPromise(() =>
-          databaseClient.insert(schema.rikaHostedThreadCommands).values([
+          databaseClient.insert(schema.rikaHostedThreadProtocolState).values([
+            { ownerId: "personal-owner", threadId: "personal-thread", version: 1 },
+            { ownerId: "organization-owner", threadId: "org-thread", version: 1 },
+          ]),
+        )
+        yield* Effect.tryPromise(() =>
+          databaseClient.insert(schema.rikaHostedThreadProtocolCommands).values([
             {
               ownerId: "personal-owner",
               threadId: "personal-thread",
@@ -268,9 +274,11 @@ it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization ow
                 clientId: "personal-client",
                 deviceId: "personal-device",
               },
-              sequence: 1,
+              expectedVersion: 0,
+              threadVersion: 1,
               commitCursor: 1,
               command: {},
+              state: "admitted",
               admittedAt: now,
             },
             {
@@ -286,9 +294,11 @@ it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization ow
                 clientId: "org-client",
                 deviceId: "org-device",
               },
-              sequence: 1,
+              expectedVersion: 0,
+              threadVersion: 1,
               commitCursor: 1,
               command: {},
+              state: "admitted",
               admittedAt: now,
             },
           ]),
@@ -308,9 +318,9 @@ it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization ow
           "23503",
         )
         yield* rejects(
-          `INSERT INTO rika_hosted_thread_commands (owner_id,thread_id,command_id,idempotency_key,actor,sequence,commit_cursor,command,admitted_at)
+          `INSERT INTO rika_hosted_thread_protocol_commands (owner_id,thread_id,command_id,idempotency_key,actor,expected_version,thread_version,commit_cursor,command,state,admitted_at)
          VALUES ('personal-owner','personal-thread','bad-actor','bad-actor',
-         '{"_tag":"OrganizationActor","owner":{"_tag":"OrganizationOwner","organizationId":"org"},"userId":"org-user","membershipId":"org-membership","clientId":"org-client","deviceId":"org-device"}',2,2,'{}',now())`,
+         '{"_tag":"OrganizationActor","owner":{"_tag":"OrganizationOwner","organizationId":"org"},"userId":"org-user","membershipId":"org-membership","clientId":"org-client","deviceId":"org-device"}',1,2,2,'{}','admitted',now())`,
           "23514",
         )
         yield* rejects(

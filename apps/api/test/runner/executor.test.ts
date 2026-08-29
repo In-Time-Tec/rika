@@ -11,6 +11,7 @@ import {
   runMigration,
 } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import { BetterAuthUserId, DeviceId, OrganizationId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
 import {
@@ -25,7 +26,8 @@ import { layer as productPostgres } from "@rika/product-store/layer"
 import { emptyCursor, type Access, type RunnerHelloWire } from "@rika/remote-execution/protocol"
 import { and, count, eq, sql } from "drizzle-orm"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
-import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { Clock, Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../support/live-platform"
 import { Executor, service as executorLayer } from "../../src/executor/service"
@@ -226,6 +228,7 @@ const isolated = <A, E, R>(
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
+      yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
       const database = `rika_local_authority_${label}_${Math.abs(yield* Random.nextInt)}`
       const admin = new Pool({ connectionString: databaseUrl })
       yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
@@ -255,6 +258,7 @@ const isolated = <A, E, R>(
           BunCrypto.layer,
           hostedModelRegistryTestLayer,
           hostedRepositoriesUnavailableLayer,
+          ExecutionGateway.layerTest(),
           Layer.succeed(Controller, overrides?.controller ?? unusedController),
           Layer.succeed(HostedEnvironment, overrides?.environment ?? unusedHostedEnvironment),
           Layer.succeed(HostedToolPolicy, testToolPolicy),

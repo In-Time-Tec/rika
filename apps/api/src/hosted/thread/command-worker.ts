@@ -184,6 +184,14 @@ const repositoryServiceFailureKind = (reason: "conflict" | "invalid" | "missing"
   return "unavailable" as const
 }
 
+const durableCommandPayload = (record: ThreadProtocolCommand) => ({
+  ...record.command,
+  commandId: record.commandId,
+  threadId: record.threadId,
+  idempotencyKey: record.idempotencyKey,
+  expectedThreadVersion: record.expectedThreadVersion,
+})
+
 const productCommand = (command: InteractiveMutatingCommand) => {
   const value = (() => {
     switch (command._tag) {
@@ -270,7 +278,7 @@ export const layer = (options: {
         record: ThreadProtocolCommand,
         claimToken: string,
       ) {
-        const command = yield* Schema.decodeUnknownEffect(DurableThreadCommand)(record.command).pipe(
+        const command = yield* Schema.decodeUnknownEffect(DurableThreadCommand)(durableCommandPayload(record)).pipe(
           Effect.mapError(() =>
             CommandApplicationError.make({ kind: "invalid", message: "Durable Thread command is invalid" }),
           ),
@@ -292,11 +300,18 @@ export const layer = (options: {
           return yield* complete(record, claimToken, { _tag: "ThreadCreated", threadId: record.threadId }, [])
 
         if (command._tag === "SubmitPrompt") {
+          if (record.turnId === undefined)
+            return yield* CommandApplicationError.make({
+              kind: "invalid",
+              message: "Prompt command has no Turn identity",
+            })
           const admission = {
             authority,
             threadId: record.threadId,
             operationKey: command.commandId,
             turnId: record.turnId,
+            claimToken,
+            submissionId: command.submissionId ?? command.commandId,
             prompt: command.text,
           }
           if (command.attachments !== undefined && command.attachments.length > 0) {
@@ -311,16 +326,7 @@ export const layer = (options: {
           }
           if (command.mode !== undefined) Object.assign(admission, { mode: command.mode })
           const admitted = yield* product.admitAuthorizedRun(admission)
-          if (admitted._tag === "Cancelled") return yield* complete(record, claimToken, { _tag: "Applied" }, [])
-          return yield* complete(record, claimToken, { _tag: "PromptAdmitted", status: admitted.status }, [
-            {
-              _tag: "SubmissionAdmitted",
-              threadId: ProductThreadId.make(record.threadId),
-              turnId: ProductTurnId.make(admitted.turnId),
-              status: admitted.status === "accepted" ? "active" : "queued",
-              submissionId: command.submissionId ?? command.commandId,
-            },
-          ])
+          return admitted
         }
 
         if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
@@ -381,6 +387,7 @@ export const layer = (options: {
                   threadId: record.threadId,
                   cancelCommandId: command.commandId,
                   targetCommandId: command.target.commandId,
+                  claimToken,
                 })
                 .pipe(
                   Effect.map((resolution) =>
@@ -402,6 +409,11 @@ export const layer = (options: {
               agentResponseArrived: false,
             },
           ])
+        if (record.turnId === undefined)
+          return yield* CommandApplicationError.make({
+            kind: "invalid",
+            message: "Interactive command has no Turn identity",
+          })
 
         return yield* operations.interactive(
           {
@@ -469,11 +481,12 @@ export const layer = (options: {
           Effect.mapError(commandFailure),
           Effect.catch((error) => {
             if (error.kind === "unavailable") return Effect.fail(error)
+            const payload = durableCommandPayload(record)
             return complete(
               record,
               claimToken,
               { _tag: "Rejected", reason: error.kind, message: error.message },
-              rejectionEvents(Schema.is(DurableThreadCommand)(record.command) ? record.command : undefined, error),
+              rejectionEvents(Schema.is(DurableThreadCommand)(payload) ? payload : undefined, error),
             ).pipe(Effect.mapError(commandFailure))
           }),
           Effect.raceFirst(renew()),

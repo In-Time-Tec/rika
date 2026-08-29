@@ -774,19 +774,18 @@ export const layerWithOptions = (
               const commandFrames = new Array<ServerFrame>()
               for (const entry of [...pendingCommands.values()]) {
                 const notificationGeneration = changes.generation(entry.command.threadId)
-                const refreshed = yield* store
-                  .admitCommand({
-                    ownerId: entry.command.ownerId,
-                    threadId: entry.command.threadId,
-                    commandId: entry.command.commandId,
-                    turnId: entry.command.turnId,
-                    idempotencyKey: entry.command.idempotencyKey,
-                    expectedThreadVersion: entry.command.expectedThreadVersion,
-                    actor: entry.command.actor,
-                    command: entry.command.command,
-                    admittedAt: entry.command.admittedAt,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
+                const admission = {
+                  ownerId: entry.command.ownerId,
+                  threadId: entry.command.threadId,
+                  commandId: entry.command.commandId,
+                  idempotencyKey: entry.command.idempotencyKey,
+                  expectedThreadVersion: entry.command.expectedThreadVersion,
+                  actor: entry.command.actor,
+                  command: entry.command.command,
+                  admittedAt: entry.command.admittedAt,
+                }
+                if (entry.command.turnId !== undefined) Object.assign(admission, { turnId: entry.command.turnId })
+                const refreshed = yield* store.admitCommand(admission).pipe(Effect.mapError(storeFailure))
                 if (refreshed.command.state === "completed") {
                   pendingCommands.delete(String(entry.command.commandId))
                   commandFrames.push(frame(commandResult(refreshed.command, entry.requestId)))

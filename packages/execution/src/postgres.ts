@@ -1,4 +1,5 @@
 import { RunSchema, layer as upstreamLayer } from "@tenetkit/pg"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -267,7 +268,8 @@ export const layer = (
   | RunStore.RunStore
   | RunClaims.RunClaims
   | ExecutionHost.ExecutionHost,
-  InvalidOptions | RuntimeUnavailable
+  InvalidOptions | RuntimeUnavailable,
+  PgClient.PgClient
 > =>
   Layer.unwrap(
     validateOptions(options.postgres).pipe(
@@ -283,11 +285,8 @@ export const layer = (
             : { ...postgresLayerOptionsBase, subscriberQueueCapacity: options.subscriberQueueCapacity }
         const postgresLayerOptions =
           options.scheduler === undefined ? withQueue : { ...withQueue, scheduler: options.scheduler }
-        const client = RunSchema.layerClient({ url: postgres.url, maxConnections: postgres.maxConnections }).pipe(
-          Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
-        )
+        const client = Layer.effect(SqlClient, PgClient.PgClient)
         const runtime = upstreamLayer(postgresLayerOptions).pipe(
-          Layer.provide(client),
           Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
         )
         const worker = workerLayer(postgres.worker).pipe(Layer.provideMerge(runtime))

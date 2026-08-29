@@ -15,6 +15,7 @@ import {
   TreePolicy,
 } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import type * as PgClient from "@effect/sql-pg/PgClient"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import type { Status } from "@rika/product/execution-status"
@@ -756,7 +757,8 @@ export const layerHosted = (
   options: HostedOptions,
 ): Layer.Layer<
   ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Postgres.Readiness | Runtime.Runtime,
-  ExecutionGateway.StartTurnFailure
+  ExecutionGateway.StartTurnFailure,
+  PgClient.PgClient
 > =>
   Layer.unwrap(
     Effect.gen(function* () {

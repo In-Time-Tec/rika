@@ -1,7 +1,7 @@
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect"
 import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
-import { HostedCommandLedger } from "@rika/product/hosted-command-ledger"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
@@ -17,6 +17,7 @@ import {
   ThreadId,
 } from "@rika/product/hosted-model"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import type { PromptPart } from "@rika/product/execution-request"
 import { TurnId } from "@rika/product/turn-record"
 import type { RunnerProfile, RunnerTarget, RemoteThreadCreationPreference } from "@rika/product/runner-registration"
@@ -66,6 +67,7 @@ export interface OwnerAuthority {
 }
 
 export interface ThreadExecutionContext {
+  readonly workspaceId: string
   readonly repository: JsonObject | null
   readonly branch: string | null
   readonly executor: JsonObject
@@ -164,6 +166,8 @@ export interface HostedProductService {
     readonly threadId: string
     readonly operationKey: string
     readonly turnId: string
+    readonly claimToken?: string
+    readonly submissionId?: string
     readonly prompt: string
     readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
@@ -179,6 +183,7 @@ export interface HostedProductService {
     readonly threadId: string
     readonly cancelCommandId: string
     readonly targetCommandId: string
+    readonly claimToken?: string
   }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
   readonly authorizeOwner: (
     principal: AuthenticatedPrincipal,
@@ -211,7 +216,8 @@ export const layer = (options: {
     HostedProduct,
     Effect.gen(function* () {
       const clientAuthority = yield* HostedClientAuthority
-      const commands = yield* HostedCommandLedger
+      const protocol = yield* ThreadProtocolStore
+      const gateway = yield* ExecutionGateway.Service
       const repository = yield* ProductRepository
       const runners = yield* RunnerRegistrations
       const policy = yield* AuthorizationPolicy
@@ -558,6 +564,7 @@ export const layer = (options: {
             : Schema.decodeUnknownOption(Schema.NonEmptyString)(decodedRepository.branch)
         const branch = Option.getOrNull(decodedBranch)
         return {
+          workspaceId: row.workspaceId,
           repository: decodedRepository,
           branch,
           executor: {
@@ -586,23 +593,39 @@ export const layer = (options: {
           .pipe(Effect.mapError(modelFailure))
         const commandId = CommandId.make(input.operationKey)
         const turnId = TurnId.make(input.turnId)
-        const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const completedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
         const readinessProof = yield* options.promptAdmissionReadiness
+        const execution = yield* repository
+          .threadExecutionContext(input.authority.ownerId, input.threadId)
+          .pipe(Effect.mapError(repositoryFailure))
+        if (execution === undefined)
+          return yield* HostedProductError.make({ kind: "not-found", message: "Thread executor is unavailable" })
+        const startInput = {
+          threadId: input.threadId,
+          turnId: input.turnId,
+          workspaceId: execution.workspaceId,
+          prompt: input.prompt,
+          executionRoute,
+        }
+        if (input.promptParts !== undefined) Object.assign(startInput, { promptParts: input.promptParts })
+        const prepared = yield* gateway.prepareTurn(startInput)
         const promptInput = {
           ownerId: input.authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           commandId,
-          idempotencyKey: IdempotencyKey.make(input.operationKey),
           turnId,
           actor: input.authority.actor,
           prompt: input.prompt,
           executionRoute,
-          admittedAt,
+          prepared,
+          submissionId: input.submissionId ?? input.operationKey,
+          completedAt,
           queueCapacity: 32,
           readinessProof,
         }
         if (input.promptParts !== undefined) Object.assign(promptInput, { promptParts: input.promptParts })
-        const admitted = yield* commands.admitPrompt(promptInput)
+        if (input.claimToken !== undefined) Object.assign(promptInput, { claimToken: input.claimToken })
+        const admitted = yield* protocol.applyPrompt(promptInput, gateway.admitTurn(prepared))
         if (admitted._tag === "Cancelled") return { _tag: "Cancelled" as const, commandId: input.operationKey }
         return {
           _tag: "Admitted" as const,
@@ -615,21 +638,55 @@ export const layer = (options: {
       const admitRun: HostedProductService["admitRun"] = Effect.fn("HostedProduct.admitRun")(function* (input) {
         const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
         const turnId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable))
-        return yield* admitAuthorizedRun({ ...input, authority, turnId })
+        const admittedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const threadId = ThreadId.make(input.threadId)
+        const commandId = CommandId.make(input.operationKey)
+        yield* protocol
+          .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
+          .pipe(Effect.mapError(storeFailure))
+        const attachments = input.promptParts?.flatMap((part) => {
+          if (part.type !== "image") return []
+          const attachment = { mediaType: part.mediaType, data: part.data }
+          return [part.filename === undefined ? attachment : { ...attachment, filename: part.filename }]
+        })
+        const command = {
+          _tag: "SubmitPrompt",
+          commandId: input.operationKey,
+          threadId: input.threadId,
+          text: input.prompt,
+        }
+        if (input.mode !== undefined) Object.assign(command, { mode: input.mode })
+        if (attachments !== undefined && attachments.length > 0) Object.assign(command, { attachments })
+        const admission = yield* protocol
+          .admitServerCommand({
+            ownerId: authority.ownerId,
+            threadId,
+            commandId,
+            turnId: TurnId.make(turnId),
+            idempotencyKey: IdempotencyKey.make(input.operationKey),
+            actor: authority.actor,
+            command,
+            admittedAt,
+          })
+          .pipe(Effect.mapError(storeFailure))
+        if (admission.command.turnId === undefined) return yield* unavailable()
+        return yield* admitAuthorizedRun({ ...input, authority, turnId: String(admission.command.turnId) })
       })
 
       const cancelAuthorizedRunAdmission: HostedProductService["cancelAuthorizedRunAdmission"] = Effect.fn(
         "HostedProduct.cancelAuthorizedRunAdmission",
       )(function* (input) {
         const cancelledAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-        const cancellation = yield* commands.cancelPrompt({
+        const cancellationInput = {
           ownerId: input.authority.ownerId,
           threadId: ThreadId.make(input.threadId),
           cancelCommandId: CommandId.make(input.cancelCommandId),
           targetCommandId: CommandId.make(input.targetCommandId),
           actor: input.authority.actor,
           cancelledAt,
-        })
+        }
+        if (input.claimToken !== undefined) Object.assign(cancellationInput, { claimToken: input.claimToken })
+        const cancellation = yield* protocol.cancelPrompt(cancellationInput)
         return cancellation._tag === "Turn" ? { turnId: String(cancellation.turnId) } : {}
       }, Effect.mapError(storeFailure))
 
@@ -637,6 +694,28 @@ export const layer = (options: {
         "HostedProduct.cancelRunAdmission",
       )(function* (input) {
         const authority = yield* authorizeThread(input.principal, input.threadId, "thread:operate")
+        const cancelledAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
+        const threadId = ThreadId.make(input.threadId)
+        const commandId = CommandId.make(input.cancelCommandId)
+        yield* protocol
+          .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
+          .pipe(Effect.mapError(storeFailure))
+        yield* protocol
+          .admitServerCommand({
+            ownerId: authority.ownerId,
+            threadId,
+            commandId,
+            idempotencyKey: IdempotencyKey.make(input.cancelCommandId),
+            actor: authority.actor,
+            command: {
+              _tag: "Cancel",
+              commandId: input.cancelCommandId,
+              threadId: input.threadId,
+              target: { _tag: "Command", commandId: input.targetCommandId },
+            },
+            admittedAt: cancelledAt,
+          })
+          .pipe(Effect.mapError(storeFailure))
         return yield* cancelAuthorizedRunAdmission({ ...input, authority })
       })
 
@@ -677,6 +756,7 @@ export const postgresTest = (options: {
       Layer.mergeAll(
         postgresLayer(options.database),
         AuthorizationPolicy.layer,
+        ExecutionGateway.layerTest(),
         hostedModelRegistryTestLayer,
         hostedRepositoriesUnavailableLayer,
       ),

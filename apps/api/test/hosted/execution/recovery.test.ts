@@ -1,4 +1,3 @@
-import "./recovery.harness"
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMigrations, identityUser, runMigration } from "@rika/identity"
@@ -346,11 +345,12 @@ it.effect.skipIf(databaseUrl === "")(
               },
             ]),
           )
+          const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })
           const context = yield* Layer.build(
             hostedRecoveryLayer.pipe(
               Layer.provide(
                 Layer.mergeAll(
-                  PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }),
+                  postgres,
                   AuthorizationPolicy.layer,
                   ExecutionPostgres.layer({
                     postgres: {
@@ -366,7 +366,7 @@ it.effect.skipIf(databaseUrl === "")(
                       },
                     },
                     resolver: ExecutableResolver.makeStatic([]),
-                  }),
+                  }).pipe(Layer.provide(postgres)),
                 ),
               ),
             ),

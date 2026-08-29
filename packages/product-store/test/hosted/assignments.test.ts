@@ -10,7 +10,7 @@ import {
 } from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
-import { HostedCommandLedger } from "@rika/product/hosted-command-ledger"
+import { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
@@ -313,7 +313,7 @@ it.effect.skipIf(!live)(
             const context = yield* Layer.build(layer)
             yield* Effect.gen(function* () {
               const authority = yield* HostedClientAuthority
-              const ledger = yield* HostedCommandLedger
+              const ledger = yield* HostedThreadEventStore
               const assignments = yield* ExecutorAssignments
               yield* authority.registerDevice({
                 id: ids.device,

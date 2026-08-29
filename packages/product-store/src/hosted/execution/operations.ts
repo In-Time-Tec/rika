@@ -15,7 +15,7 @@ import {
   rikaHostedOwners,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
-  rikaHostedThreadCommands,
+  rikaHostedThreadProtocolCommands,
   rikaHostedWorkspaceCapabilityAdmissions,
 } from "../../database/schema/product"
 
@@ -781,12 +781,12 @@ const make = Effect.gen(function* () {
           if (updated[0] === undefined) return finalizeFailure("expected-fence-mismatch")
           const commands = yield* query(
             tx
-              .select({ sequence: rikaHostedThreadCommands.sequence })
-              .from(rikaHostedThreadCommands)
+              .select({ sequence: rikaHostedThreadProtocolCommands.threadVersion })
+              .from(rikaHostedThreadProtocolCommands)
               .where(
                 and(
-                  eq(rikaHostedThreadCommands.threadId, row.threadId),
-                  eq(rikaHostedThreadCommands.turnId, row.turnId),
+                  eq(rikaHostedThreadProtocolCommands.threadId, row.threadId),
+                  eq(rikaHostedThreadProtocolCommands.turnId, row.turnId),
                 ),
               )
               .limit(1),
@@ -826,12 +826,12 @@ const make = Effect.gen(function* () {
           if (updated[0] === undefined) return undefined
           const commands = yield* query(
             tx
-              .select({ sequence: rikaHostedThreadCommands.sequence })
-              .from(rikaHostedThreadCommands)
+              .select({ sequence: rikaHostedThreadProtocolCommands.threadVersion })
+              .from(rikaHostedThreadProtocolCommands)
               .where(
                 and(
-                  eq(rikaHostedThreadCommands.threadId, row.threadId),
-                  eq(rikaHostedThreadCommands.turnId, row.turnId),
+                  eq(rikaHostedThreadProtocolCommands.threadId, row.threadId),
+                  eq(rikaHostedThreadProtocolCommands.turnId, row.turnId),
                 ),
               )
               .limit(1),

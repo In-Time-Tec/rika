@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest"
+import { RunSchema } from "@tenetkit/pg"
 import { ModelRegistry } from "tenetkit"
 import { TestModel } from "tenetkit/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -57,7 +58,7 @@ it.live.skipIf(databaseUrl === "")(
                 cancellationIntervalMillis: 20,
               },
             },
-          }),
+          }).pipe(Layer.provide(RunSchema.layerClient({ url, maxConnections: 6 }))),
           scope,
         )
         const gateway = Context.get(context, ExecutionGateway.Service)

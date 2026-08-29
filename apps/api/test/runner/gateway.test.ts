@@ -21,7 +21,8 @@ import {
   rikaHostedProjects,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
-  rikaHostedThreadCommands,
+  rikaHostedThreadProtocolCommands,
+  rikaHostedThreadProtocolState,
   rikaHostedThreadEvents,
   rikaHostedThreads,
   rikaHostedWorkspaceCapabilityAdmissions,
@@ -355,7 +356,6 @@ const seed = (
           createdByUserId: "user-local-gateway",
           executorKind: "runner",
           inheritProjectGrants: false,
-          nextCommandSequence: 2,
           nextEventSequence: 1,
           createdAt: now,
         })
@@ -454,7 +454,10 @@ const seed = (
       }),
     )
     yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedThreadCommands).values({
+      databaseClient.insert(rikaHostedThreadProtocolState).values({ ownerId, threadId, version: 1 }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedThreadProtocolCommands).values({
         ownerId,
         threadId,
         commandId: `${operationKey}-command`,
@@ -476,12 +479,13 @@ const seed = (
                 clientId: "client-local-gateway",
                 deviceId,
               },
-        sequence: 1,
+        expectedVersion: 0,
+        threadVersion: 1,
         commitCursor: 1,
         command: { _tag: "SubmitPrompt", prompt: "restart" },
+        state: "admitted",
         admittedAt: now,
         turnId: "turn-local-gateway",
-        admissionStatus: "accepted",
       }),
     )
     yield* Effect.tryPromise(() =>

@@ -68,6 +68,7 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0035_workspace_seeds",
       "product/0036_explicit_command_turn_identity",
       "product/0037_hosted_product_thread_invariant",
+      "product/0038_authoritative_thread_command_ledger",
     ])
     for (const migration of migrations) {
       const sql = yield* readFile(migration.url)
