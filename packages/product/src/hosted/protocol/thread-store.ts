@@ -166,6 +166,7 @@ export interface ThreadProtocolStoreService {
     readonly claimToken: string
     readonly claimMillis: number
   }) => Effect.Effect<ThreadProtocolCommand | undefined, HostedPersistenceError>
+  readonly oldestRunnableCommandAt: Effect.Effect<number | undefined, HostedPersistenceError>
   readonly renewCommandClaim: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId

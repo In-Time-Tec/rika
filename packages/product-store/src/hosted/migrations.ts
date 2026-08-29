@@ -200,4 +200,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "70b6abf1cb130c44fb7d15517643be8d1624ee9ed9077151a3c933248626d408",
     url: new URL("../../migrations/postgres/0039-bounded-thread-checkpoints.sql", import.meta.url),
   },
+  {
+    id: "product/0040_rika_worker_notifications",
+    checksum: "67fcafb0053be9c6b143651a4c75da20469e337ff20a6da99c9232f47553161f",
+    url: new URL("../../migrations/postgres/0040-rika-worker-notifications.sql", import.meta.url),
+  },
 ]

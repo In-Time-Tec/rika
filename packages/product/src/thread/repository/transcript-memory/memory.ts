@@ -124,7 +124,7 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
             (turn.status === "completed" || turn.status === "failed" || turn.status === "cancelled") &&
             projection.state.status !== turn.status
           if (projection.projectionVersion < projectionVersion || active || terminalProjectionMissing)
-            candidates.push({ threadId: turn.threadId, turnId: turn.id })
+            candidates.push({ threadId: turn.threadId, turnId: turn.id, createdAt: turn.createdAt })
         }
         return candidates
       }),

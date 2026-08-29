@@ -53,6 +53,10 @@ import { layer as runnerExecutorLayer } from "../runner/executor"
 import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
 import { HostedPreviewBus, postgresHostedPreviewBusLayer } from "./thread/previews"
 import { HostedWorkspaceSeeds, layer as hostedWorkspaceSeedsLayer } from "./workspace-seeds"
+import { layer as hostedWorkerListenerLayer } from "./worker-listener"
+import { layer as hostedWorkerRuntimeLayer } from "./worker-runtime"
+
+const workerFallbackIntervalMillis = 30_000
 
 export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
@@ -105,6 +109,10 @@ export const layer = (options: {
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
       )
       const retainedData = Layer.succeedContext(data)
+      const workerListenerContext = yield* Layer.build(hostedWorkerListenerLayer(options.databaseUrl))
+      const workerRuntimeContext = yield* Layer.build(
+        hostedWorkerRuntimeLayer.pipe(Layer.provide(Layer.succeedContext(workerListenerContext))),
+      )
       const previewContext = yield* Layer.build(
         postgresHostedPreviewBusLayer({ databaseUrl: options.databaseUrl }).pipe(Layer.provide(retainedData)),
       )
@@ -218,7 +226,7 @@ export const layer = (options: {
               workerId: options.workerId,
               concurrency: 8,
               leaseMillis: 30_000,
-              fallbackIntervalMillis: 250,
+              fallbackIntervalMillis: workerFallbackIntervalMillis,
               cancellationIntervalMillis: 1_000,
             },
           },
@@ -231,6 +239,7 @@ export const layer = (options: {
         ),
         previewContext,
       )
+      const hostedWorkerContext = Context.merge(hostedContext, workerRuntimeContext)
       const recoveryContext = yield* Layer.build(
         hostedRecoveryLayer.pipe(
           Layer.provide(Layer.succeed(TenetRuntime.Runtime, Context.get(executionContext, TenetRuntime.Runtime))),
@@ -239,24 +248,30 @@ export const layer = (options: {
       )
       const executionReconcilerContext = yield* Layer.build(
         hostedExecutionReconcilerLayer({
-          pollIntervalMillis: 250,
-        }).pipe(Layer.provide(ProductRepositories.projectionLayer), Layer.provide(Layer.succeedContext(hostedContext))),
+          fallbackIntervalMillis: workerFallbackIntervalMillis,
+        }).pipe(
+          Layer.provide(ProductRepositories.projectionLayer),
+          Layer.provide(Layer.succeedContext(hostedWorkerContext)),
+        ),
       )
       const executionReconciler = Context.get(executionReconcilerContext, HostedExecutionReconciler)
       const projectionWorkerContext = yield* Layer.build(
         hostedProjectionWorkerLayer({
           concurrency: 4,
-          pollIntervalMillis: 250,
-        }).pipe(Layer.provide(ProductRepositories.projectionLayer), Layer.provide(Layer.succeedContext(hostedContext))),
+          fallbackIntervalMillis: workerFallbackIntervalMillis,
+        }).pipe(
+          Layer.provide(ProductRepositories.projectionLayer),
+          Layer.provide(Layer.succeedContext(hostedWorkerContext)),
+        ),
       )
       const projectionWorker = Context.get(projectionWorkerContext, HostedProjectionWorker)
       const turnWorkerContext = yield* Layer.build(
         hostedTurnWorkerLayer({
           workerId: options.workerId,
           leaseMillis: 120_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: workerFallbackIntervalMillis,
           concurrency: 32,
-        }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedContext))),
+        }).pipe(Layer.provide(HostedTurnWorkerStore.layer), Layer.provide(Layer.succeedContext(hostedWorkerContext))),
       )
       const turnWorker = Context.get(turnWorkerContext, HostedTurnWorker)
       const executionReadiness = Context.get(executionContext, ExecutionPostgres.Readiness)
@@ -305,13 +320,13 @@ export const layer = (options: {
       const threadCommandWorkerContext = yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: workerFallbackIntervalMillis,
           concurrency: 32,
         }).pipe(
           Layer.provide(
             Layer.succeedContext(
               Context.merge(
-                Context.merge(hostedContext, Context.merge(productContext, threadApplicationContext)),
+                Context.merge(hostedWorkerContext, Context.merge(productContext, threadApplicationContext)),
                 workspaceContext,
               ),
             ),

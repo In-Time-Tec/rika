@@ -58,6 +58,7 @@ import {
 } from "../../../src/hosted/thread/protocol"
 import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../src/hosted/environment/workspace"
+import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 import { testToolPolicy } from "../execution/tool-policy.fixture"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -949,8 +950,9 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, workerProtocol),
@@ -1116,9 +1118,10 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
           concurrency: 2,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, protocol),
@@ -1491,9 +1494,9 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
           concurrency: 8,
-        }).pipe(Layer.provide(dependencies)),
+        }).pipe(Layer.provide(hostedWorkerRuntimeLayerTest), Layer.provide(dependencies)),
       )
       const protocols = yield* Effect.all(
         [

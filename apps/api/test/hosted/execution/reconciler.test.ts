@@ -11,6 +11,7 @@ import {
   HostedExecutionReconciler,
   layer as hostedExecutionReconcilerLayer,
 } from "../../../src/hosted/execution/reconciler"
+import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 
 const threadId = Thread.ThreadId.make("thread")
 const turnId = Turn.TurnId.make("turn")
@@ -56,8 +57,9 @@ it.effect("persists terminal execution state independently of transcript project
       })
       const context = yield* Layer.build(
         hostedExecutionReconcilerLayer({
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),

@@ -34,11 +34,13 @@ export interface TurnClaim {
   readonly activationRequested: boolean
   readonly ownerId: string
   readonly claimedAt: number
+  readonly queuedAt: number
   readonly input: { readonly threadId: string; readonly turnId: string }
 }
 
 export interface HostedTurnWorkerStoreService {
   readonly claimNext: (request: ClaimRequest) => Effect.Effect<TurnClaim | undefined, HostedTurnWorkerStoreError>
+  readonly oldestRunnableAt: Effect.Effect<number | undefined, HostedTurnWorkerStoreError>
   readonly renew: (claim: TurnClaim, leaseMillis: number) => Effect.Effect<boolean, HostedTurnWorkerStoreError>
   readonly requestActivation: (claim: TurnClaim, now: number) => Effect.Effect<boolean, HostedTurnWorkerStoreError>
   readonly completeActivation: (
@@ -92,34 +94,54 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const db = yield* PgDrizzle.makeWithDefaults()
 
+    const runnableTurn = (queryDb: PgDrizzle.EffectPgDatabase) => {
+      const activeTurn = alias(rikaTurns, "active_turn")
+      const activeLane = queryDb
+        .select({ value: activeTurn.id })
+        .from(activeTurn)
+        .where(
+          and(
+            eq(activeTurn.threadId, rikaTurns.threadId),
+            eq(activeTurn.turnKind, "AgentExecution"),
+            ne(activeTurn.id, rikaTurns.id),
+            inArray(activeTurn.status, ["accepted", "running", "waiting", "cancelling"]),
+          ),
+        )
+      const activeCommand = alias(rikaHostedThreadProtocolCommands, "active_work_command")
+      const activeWorkClaim = queryDb
+        .select({ value: activeCommand.commandId })
+        .from(activeCommand)
+        .where(
+          and(
+            eq(activeCommand.threadId, rikaHostedThreadProtocolCommands.threadId),
+            ne(activeCommand.commandId, rikaHostedThreadProtocolCommands.commandId),
+            sql`${activeCommand.workState} is not null`,
+            sql`${activeCommand.claimExpiresAt} > transaction_timestamp()`,
+          ),
+        )
+      return and(
+        sql`${rikaHostedThreadProtocolCommands.workState} is not null`,
+        or(
+          isNull(rikaHostedThreadProtocolCommands.claimToken),
+          sql`${rikaHostedThreadProtocolCommands.claimExpiresAt} <= transaction_timestamp()`,
+        ),
+        or(
+          eq(rikaHostedThreadProtocolCommands.workState, "turn-activation-requested"),
+          eq(rikaTurns.status, "cancelled"),
+          and(
+            inArray(rikaTurns.status, ["accepted", "queued"]),
+            or(eq(rikaHostedThreads.executorKind, "runner"), readyExecutor(queryDb)),
+            sql`not exists (${activeLane})`,
+            sql`not exists (${activeWorkClaim})`,
+          ),
+        ),
+      )
+    }
+
     const claimNext: HostedTurnWorkerStoreService["claimNext"] = Effect.fn("HostedTurnWorkerStore.claimNext")(
       function* (request) {
         const claimed = yield* transaction(db, (tx) =>
           Effect.gen(function* () {
-            const activeTurn = alias(rikaTurns, "active_turn")
-            const activeLane = tx
-              .select({ value: activeTurn.id })
-              .from(activeTurn)
-              .where(
-                and(
-                  eq(activeTurn.threadId, rikaTurns.threadId),
-                  eq(activeTurn.turnKind, "AgentExecution"),
-                  ne(activeTurn.id, rikaTurns.id),
-                  inArray(activeTurn.status, ["accepted", "running", "waiting", "cancelling"]),
-                ),
-              )
-            const activeCommand = alias(rikaHostedThreadProtocolCommands, "active_work_command")
-            const activeWorkClaim = tx
-              .select({ value: activeCommand.commandId })
-              .from(activeCommand)
-              .where(
-                and(
-                  eq(activeCommand.threadId, rikaHostedThreadProtocolCommands.threadId),
-                  ne(activeCommand.commandId, rikaHostedThreadProtocolCommands.commandId),
-                  sql`${activeCommand.workState} is not null`,
-                  sql`${activeCommand.claimExpiresAt} > transaction_timestamp()`,
-                ),
-              )
             const row = (yield* query(
               tx
                 .select({
@@ -142,25 +164,7 @@ export const layer = Layer.effect(
                     eq(rikaHostedThreads.ownerId, rikaHostedThreadProtocolCommands.ownerId),
                   ),
                 )
-                .where(
-                  and(
-                    sql`${rikaHostedThreadProtocolCommands.workState} is not null`,
-                    or(
-                      isNull(rikaHostedThreadProtocolCommands.claimToken),
-                      sql`${rikaHostedThreadProtocolCommands.claimExpiresAt} <= transaction_timestamp()`,
-                    ),
-                    or(
-                      eq(rikaHostedThreadProtocolCommands.workState, "turn-activation-requested"),
-                      eq(rikaTurns.status, "cancelled"),
-                      and(
-                        inArray(rikaTurns.status, ["accepted", "queued"]),
-                        or(eq(rikaHostedThreads.executorKind, "runner"), readyExecutor(tx)),
-                        sql`not exists (${activeLane})`,
-                        sql`not exists (${activeWorkClaim})`,
-                      ),
-                    ),
-                  ),
-                )
+                .where(runnableTurn(tx))
                 .orderBy(
                   sql`case ${rikaHostedThreadProtocolCommands.workState} when 'turn-activation-requested' then 0 else 1 end`,
                   asc(rikaHostedThreadProtocolCommands.completedAt),
@@ -224,6 +228,7 @@ export const layer = Layer.effect(
           activationRequested: claimed.row.workState === "turn-activation-requested",
           ownerId: claimed.row.ownerId,
           claimedAt: claimed.claimedAt,
+          queuedAt: claimed.row.queuedAt,
           input: { threadId: claimed.row.threadId, turnId: claimed.row.turnId },
         }
         yield* HostedObservability.event("turn_claim", "success", turnClaim.input)
@@ -231,6 +236,29 @@ export const layer = Layer.effect(
         return turnClaim
       },
     )
+
+    const oldestRunnableAt: HostedTurnWorkerStoreService["oldestRunnableAt"] = query(
+      db
+        .select({
+          queuedAt: sql<number>`floor(${rikaTurns.createdAt})::bigint`,
+        })
+        .from(rikaHostedThreadProtocolCommands)
+        .innerJoin(rikaTurns, eq(rikaTurns.id, rikaHostedThreadProtocolCommands.turnId))
+        .innerJoin(
+          rikaHostedThreads,
+          and(
+            eq(rikaHostedThreads.id, rikaHostedThreadProtocolCommands.threadId),
+            eq(rikaHostedThreads.ownerId, rikaHostedThreadProtocolCommands.ownerId),
+          ),
+        )
+        .where(runnableTurn(db))
+        .orderBy(
+          sql`case ${rikaHostedThreadProtocolCommands.workState} when 'turn-activation-requested' then 0 else 1 end`,
+          asc(rikaHostedThreadProtocolCommands.completedAt),
+          asc(rikaHostedThreadProtocolCommands.commandId),
+        )
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]?.queuedAt))
 
     const claimAuthority = (tx: PgDrizzle.EffectPgDatabase, claim: TurnClaim) =>
       query(
@@ -363,6 +391,13 @@ export const layer = Layer.effect(
           ),
       ).pipe(Effect.asVoid)
 
-    return HostedTurnWorkerStore.of({ claimNext, renew, requestActivation, completeActivation, release })
+    return HostedTurnWorkerStore.of({
+      claimNext,
+      oldestRunnableAt,
+      renew,
+      requestActivation,
+      completeActivation,
+      release,
+    })
   }),
 )

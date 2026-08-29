@@ -799,13 +799,39 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     },
   )
 
+  const runnableCommand = (tx: PgDrizzle.EffectPgDatabase) => {
+    const predecessor = alias(rikaHostedThreadProtocolCommands, "predecessor")
+    return and(
+      eq(rikaHostedThreadProtocolCommands.state, "admitted"),
+      or(
+        isNull(rikaHostedThreadProtocolCommands.claimToken),
+        lte(rikaHostedThreadProtocolCommands.claimExpiresAt, sql`transaction_timestamp()`),
+      ),
+      notExists(
+        tx
+          .select({ commandId: predecessor.commandId })
+          .from(predecessor)
+          .where(
+            and(
+              eq(predecessor.threadId, rikaHostedThreadProtocolCommands.threadId),
+              lt(predecessor.threadVersion, rikaHostedThreadProtocolCommands.threadVersion),
+              eq(predecessor.state, "admitted"),
+              sql`not (${rikaHostedThreadProtocolCommands.command} ->> '_tag' = 'Cancel'
+                and ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> '_tag' = 'Command'
+                and ${predecessor.commandId} = ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> 'commandId'
+                and ${predecessor.command} ->> '_tag' = 'SubmitPrompt')`,
+            ),
+          ),
+      ),
+    )
+  }
+
   const claimNextCommand: ThreadProtocolStoreService["claimNextCommand"] = Effect.fn(
     "ThreadProtocolStore.claimNextCommand",
   )(function* (input) {
     return yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
-          const predecessor = alias(rikaHostedThreadProtocolCommands, "predecessor")
           const candidate = tx
             .select({
               threadId: rikaHostedThreadProtocolCommands.threadId,
@@ -817,27 +843,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             .where(
               and(
                 eq(rikaHostedThreadProtocolCommands.threadId, rikaHostedThreadProtocolState.threadId),
-                eq(rikaHostedThreadProtocolCommands.state, "admitted"),
-                or(
-                  isNull(rikaHostedThreadProtocolCommands.claimToken),
-                  lte(rikaHostedThreadProtocolCommands.claimExpiresAt, sql`transaction_timestamp()`),
-                ),
-                notExists(
-                  tx
-                    .select({ commandId: predecessor.commandId })
-                    .from(predecessor)
-                    .where(
-                      and(
-                        eq(predecessor.threadId, rikaHostedThreadProtocolCommands.threadId),
-                        lt(predecessor.threadVersion, rikaHostedThreadProtocolCommands.threadVersion),
-                        eq(predecessor.state, "admitted"),
-                        sql`not (${rikaHostedThreadProtocolCommands.command} ->> '_tag' = 'Cancel'
-                      and ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> '_tag' = 'Command'
-                      and ${predecessor.commandId} = ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> 'commandId'
-                      and ${predecessor.command} ->> '_tag' = 'SubmitPrompt')`,
-                      ),
-                    ),
-                ),
+                runnableCommand(tx),
               ),
             )
             .orderBy(asc(rikaHostedThreadProtocolCommands.threadVersion))
@@ -877,6 +883,21 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
       )
       .pipe(Effect.catchTag("SqlError", databaseError))
   })
+
+  const oldestRunnableCommandAt: ThreadProtocolStoreService["oldestRunnableCommandAt"] = query(
+    db
+      .select({
+        admittedAt: sql<number>`floor(extract(epoch from ${rikaHostedThreadProtocolCommands.admittedAt}) * 1000)::bigint`,
+      })
+      .from(rikaHostedThreadProtocolCommands)
+      .where(runnableCommand(db))
+      .orderBy(
+        asc(rikaHostedThreadProtocolCommands.admittedAt),
+        asc(rikaHostedThreadProtocolCommands.threadId),
+        asc(rikaHostedThreadProtocolCommands.threadVersion),
+      )
+      .limit(1),
+  ).pipe(Effect.map((rows) => rows[0]?.admittedAt))
 
   const renewCommandClaim: ThreadProtocolStoreService["renewCommandClaim"] = Effect.fn(
     "ThreadProtocolStore.renewCommandClaim",
@@ -1438,6 +1459,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     applyPrompt,
     cancelPrompt,
     claimNextCommand,
+    oldestRunnableCommandAt,
     renewCommandClaim,
     releaseCommandClaim,
     completeCommand,

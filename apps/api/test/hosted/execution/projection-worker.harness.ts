@@ -11,6 +11,7 @@ import {
   rikaThreads,
   rikaTranscriptCheckpoints,
   rikaTranscriptUnits,
+  rikaTurnSteeringOutbox,
   rikaTurns,
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
@@ -26,6 +27,7 @@ import {
   Effect,
   Exit,
   Layer,
+  Queue,
   Random,
   Redacted,
   Schema,
@@ -40,6 +42,11 @@ import { live as livePlatform } from "../../support/live-platform"
 import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
 import { HostedPreviewBus } from "../../../src/hosted/thread/previews"
+import { HostedWorkerListener, layer as hostedWorkerListenerLayer } from "../../../src/hosted/worker-listener"
+import {
+  layerTest as hostedWorkerRuntimeLayerTest,
+  workerNotificationChannel,
+} from "../../../src/hosted/worker-runtime"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const JsonRoute = Schema.fromJsonString(ExecutionRoute.ExecutionRouteSnapshot)
@@ -89,6 +96,19 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       }
       const aggregateContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
       const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(aggregateContext))
+      const notificationScope = yield* Scope.make()
+      const listenerContext = yield* Layer.buildWithScope(
+        hostedWorkerListenerLayer(Redacted.make(url)),
+        notificationScope,
+      )
+      const notifications = yield* Queue.unbounded<string>()
+      const listening = yield* Queue.unbounded<void>()
+      yield* Context.get(listenerContext, HostedWorkerListener).listen(
+        workerNotificationChannel,
+        (payload) => void Queue.offerUnsafe(notifications, payload),
+        () => void Queue.offerUnsafe(listening, undefined),
+      )
+      yield* Queue.take(listening)
       const route = yield* Schema.encodeEffect(JsonRoute)(ExecutionRoute.testExecutionRoute())
       const link = yield* Schema.encodeEffect(JsonLink)({
         runId: "projection-run",
@@ -153,6 +173,26 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           executionLinkJson: link,
         }),
       )
+      expect(
+        yield* Effect.all([Queue.take(notifications), Queue.take(notifications), Queue.take(notifications)]),
+      ).toEqual(["turn", "projection", "reconciliation"])
+      yield* Effect.tryPromise(() =>
+        db.insert(rikaTurnSteeringOutbox).values({
+          requestId: "projection-steering",
+          targetTurnId: "projection-turn",
+          threadId: "projection-thread",
+          admissionJson: "{}",
+          sourceWithdrawn: 0,
+          status: "pending",
+          preparedAt: 3,
+        }),
+      )
+      expect(yield* Queue.take(notifications)).toBe("reconciliation")
+      yield* Effect.tryPromise(() =>
+        db.delete(rikaTurnSteeringOutbox).where(eq(rikaTurnSteeringOutbox.requestId, "projection-steering")),
+      )
+      expect(yield* Queue.take(notifications)).toBe("reconciliation")
+      yield* Scope.close(notificationScope, Exit.void)
       const unitKey = "assistant:projection"
       const running: ExecutionProjection.Change = {
         _tag: "ProjectionSnapshot",
@@ -202,10 +242,11 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           Layer.merge(
             hostedProjectionWorkerLayer({
               concurrency: 2,
-              pollIntervalMillis: 10,
+              fallbackIntervalMillis: 10,
             }).pipe(Layer.provide(HostedPreviewBus.memoryLayer)),
-            hostedExecutionReconcilerLayer({ pollIntervalMillis: 10 }),
+            hostedExecutionReconcilerLayer({ fallbackIntervalMillis: 10 }),
           ).pipe(
+            Layer.provide(hostedWorkerRuntimeLayerTest),
             Layer.provide(ProductRepositories.projectionLayer),
             Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })),
             Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),

@@ -10,4 +10,5 @@ export interface PageOptions {
 export interface ProjectionRecoveryCandidate {
   readonly threadId: ThreadId
   readonly turnId: import("../turn/record").TurnId
+  readonly createdAt: number
 }

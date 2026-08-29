@@ -17,6 +17,7 @@ import {
   layer as hostedProjectionWorkerLayer,
 } from "../../../src/hosted/execution/projection-worker"
 import { HostedPreviewBus, makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
+import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 
 const threadId = Thread.ThreadId.make("thread-test")
 const turnId = Turn.TurnId.make("turn-test")
@@ -41,7 +42,10 @@ const state = (status: "running" | "completed") => ({
 })
 
 const testProjectionWorkerLayer = (options: Parameters<typeof hostedProjectionWorkerLayer>[0]) =>
-  hostedProjectionWorkerLayer(options).pipe(Layer.provide(HostedPreviewBus.memoryLayer))
+  hostedProjectionWorkerLayer(options).pipe(
+    Layer.provide(HostedPreviewBus.memoryLayer),
+    Layer.provide(hostedWorkerRuntimeLayerTest),
+  )
 
 it.effect("projects durable changes and publishes transient previews for a recovered Turn", () =>
   Effect.scoped(
@@ -56,7 +60,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
       })
       const transcripts = TranscriptRepository.Service.of({
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
-        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
+        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.succeed(projection),
         commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
           Effect.sync(() => {
@@ -119,8 +123,9 @@ it.effect("projects durable changes and publishes transient previews for a recov
       const context = yield* Layer.build(
         hostedProjectionWorkerLayer({
           concurrency: 2,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -199,7 +204,7 @@ it.effect("replays an existing transcript when its projection version is stale",
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "replayed" }),
       })
       yield* Layer.build(
-        testProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        testProjectionWorkerLayer({ concurrency: 1, fallbackIntervalMillis: 10 }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -228,7 +233,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       })
       const transcripts = TranscriptRepository.Service.of({
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
-        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
+        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.as(Effect.void, undefined),
       })
       const gateway = ExecutionGateway.Service.of({
@@ -238,7 +243,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
           Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
@@ -251,8 +256,8 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       const admitted = yield* worker.status
       yield* TestClock.adjust(11)
       const duplicateRejected = yield* worker.status
-      expect(duplicateRejected.oldestActiveProjectionAt).toBe(admitted.oldestActiveProjectionAt)
-      expect(duplicateRejected.oldestActiveProjectionAgeMillis).toBe(11)
+      expect(duplicateRejected.oldestActiveAt).toBe(admitted.oldestActiveAt)
+      expect(duplicateRejected.oldestActiveAgeMillis).toBe(10)
       expect(duplicateRejected).toMatchObject({
         active: 1,
         capacity: 1,
@@ -291,6 +296,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
             [silentTurnId, nextTurnId].map((candidateTurnId) => ({
               threadId,
               turnId: candidateTurnId,
+              createdAt: turn.createdAt,
             })),
           ),
         get: (id: Turn.TurnId) => Effect.sync(() => projections.get(id)),
@@ -339,7 +345,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 60_000,
+          fallbackIntervalMillis: 60_000,
         }).pipe(
           Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
@@ -362,7 +368,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
   ),
 )
 
-it.effect("rejects a stale projection worker when listing blocks after a successful poll", () =>
+it.effect("rejects a stale projection worker when listing blocks after a successful scan", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const lists = yield* Ref.make(0)
@@ -377,7 +383,7 @@ it.effect("rejects a stale projection worker when listing blocks after a success
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
           Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
@@ -403,7 +409,7 @@ it.effect("rejects the current projection list failure immediately", () =>
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
           Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
@@ -412,7 +418,7 @@ it.effect("rejects the current projection list failure immediately", () =>
       )
       const worker = Context.get(context, HostedProjectionWorker)
       yield* Effect.yieldNow
-      expect((yield* worker.status).poll._tag).toBe("Failed")
+      expect((yield* worker.status).scan._tag).toBe("Failed")
       expect((yield* Effect.exit(worker.ready))._tag).toBe("Failure")
     }),
   ),

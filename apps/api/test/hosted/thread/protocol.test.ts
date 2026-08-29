@@ -162,6 +162,7 @@ const memoryStore = () => {
     applyPrompt: () => Effect.die("unused"),
     cancelPrompt: () => Effect.die("unused"),
     claimNextCommand: () => Effect.die("unused"),
+    oldestRunnableCommandAt: Effect.map(Effect.void, (): number | undefined => undefined),
     renewCommandClaim: (input) => Effect.sync(() => claims.get(input.commandId) === input.claimToken),
     releaseCommandClaim: (input) =>
       Effect.sync(() => {
