@@ -946,6 +946,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
+        projectionCommitted: () => Effect.die("unused"),
       }
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
@@ -1114,6 +1115,7 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
+        projectionCommitted: () => Effect.die("unused"),
       }
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
@@ -1246,6 +1248,7 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
         thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
         interactive: () => Effect.die("unused"),
+        projectionCommitted: () => Effect.die("unused"),
       }
       const dependencies = Layer.mergeAll(
         Layer.succeed(HostedProduct, product),
@@ -1454,6 +1457,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
+        projectionCommitted: () => Effect.die("unused"),
         interactive: (input, persist) =>
           Effect.suspend(() => {
             effects.push(input.command)

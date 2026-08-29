@@ -4,7 +4,7 @@ import { Service, RepositoryError, type Interface } from "../transcript"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type { Unit } from "@rika/transcript/transcript-unit"
-import { Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import type { TurnId } from "@rika/product/turn-record"
 import type { Interface as TurnRepositoryInterface } from "../turn"
 
@@ -58,6 +58,7 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
     initial.set(projection.turn.id, materialize(projection))
   }
   const state = yield* Ref.make(initial)
+  const commitAdmission = yield* Semaphore.make(1)
   const get: Interface["get"] = (turnId) =>
     Ref.get(state).pipe(
       Effect.map((entries) => {
@@ -128,70 +129,87 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
         }
         return candidates
       }),
-    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
-      const upsert = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
-      yield* validateUnits(turn.id, upsert)
-      return yield* Ref.modify(state, (entries) => {
-        const current = entries.get(turn.id)
-        if (
-          change._tag === "ProjectionPatch" &&
-          (current?.projectionVersion !== ExecutionProjection.projectionVersion ||
-            current.revision !== change.baseRevision)
-        )
-          return ["stale" as const, entries]
-        if (
-          change._tag === "ProjectionSnapshot" &&
-          current !== undefined &&
-          (current.projectionVersion > ExecutionProjection.projectionVersion ||
-            (current.projectionVersion === ExecutionProjection.projectionVersion && current.revision > change.revision))
-        )
-          return ["stale" as const, entries]
-        const replacingOlderProjection =
-          change._tag === "ProjectionSnapshot" &&
-          current !== undefined &&
-          current.projectionVersion < ExecutionProjection.projectionVersion
-        const units = new Map((replacingOlderProjection ? [] : (current?.units ?? [])).map((unit) => [unit.key, unit]))
-        if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection)) units.clear()
-        for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
-        for (const unit of upsert) units.set(unit.key, clone(unit))
-        const candidateBase = {
-          turn: clone(turn),
-          units: [...units.values()],
-          checkpointGeneration: (current?.checkpointGeneration ?? -1) + 1,
-          revision: change.revision,
-          state: clone(change.state),
-          projectionVersion: ExecutionProjection.projectionVersion,
-        }
-        const candidate: Projection =
-          change.checkpoint === undefined
-            ? candidateBase
-            : { ...candidateBase, projectorCheckpoint: clone(change.checkpoint) }
-        const next = new Map(entries)
-        next.set(turn.id, materialize(candidate))
-        return ["committed" as const, next]
-      })
+    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change, withinTransaction) {
+      return yield* commitAdmission.withPermits(1)(
+        Effect.gen(function* () {
+          const upsert = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+          yield* validateUnits(turn.id, upsert)
+          const previous = yield* Ref.get(state)
+          const result = yield* Ref.modify(state, (entries) => {
+            const current = entries.get(turn.id)
+            if (
+              change._tag === "ProjectionPatch" &&
+              (current?.projectionVersion !== ExecutionProjection.projectionVersion ||
+                current.revision !== change.baseRevision)
+            )
+              return ["stale" as const, entries]
+            if (
+              change._tag === "ProjectionSnapshot" &&
+              current !== undefined &&
+              (current.projectionVersion > ExecutionProjection.projectionVersion ||
+                (current.projectionVersion === ExecutionProjection.projectionVersion &&
+                  current.revision > change.revision))
+            )
+              return ["stale" as const, entries]
+            const replacingOlderProjection =
+              change._tag === "ProjectionSnapshot" &&
+              current !== undefined &&
+              current.projectionVersion < ExecutionProjection.projectionVersion
+            const units = new Map(
+              (replacingOlderProjection ? [] : (current?.units ?? [])).map((unit) => [unit.key, unit]),
+            )
+            if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection)) units.clear()
+            for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
+            for (const unit of upsert) units.set(unit.key, clone(unit))
+            const candidateBase = {
+              turn: clone(turn),
+              units: [...units.values()],
+              checkpointGeneration: (current?.checkpointGeneration ?? -1) + 1,
+              revision: change.revision,
+              state: clone(change.state),
+              projectionVersion: ExecutionProjection.projectionVersion,
+            }
+            const candidate: Projection =
+              change.checkpoint === undefined
+                ? candidateBase
+                : { ...candidateBase, projectorCheckpoint: clone(change.checkpoint) }
+            const next = new Map(entries)
+            next.set(turn.id, materialize(candidate))
+            return ["committed" as const, next]
+          })
+          if (result === "committed" && withinTransaction !== undefined)
+            yield* withinTransaction.pipe(Effect.onError(() => Ref.set(state, previous)))
+          return result
+        }),
+      )
     }),
     replaceUnits: Effect.fn("TranscriptRepository.replaceUnits")(function* (turn, units) {
-      yield* validateUnits(turn.id, units)
-      const status =
-        turn.status === "queued" || turn.status === "accepted" || turn.status === "cancelling" ? "running" : turn.status
-      const projection: Projection = {
-        turn: clone(turn),
-        units: units.map(clone),
-        checkpointGeneration: ((yield* Ref.get(state)).get(turn.id)?.checkpointGeneration ?? -1) + 1,
-        revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0),
-        state: {
-          status,
-          usage: {
-            ...ExecutionProjection.emptyUsageState(),
-            sourceComplete: status === "completed" || status === "failed" || status === "cancelled",
-          },
-          steering: { steeringMessages: 0, followUpMessages: 0 },
-        },
-        projectionVersion: ExecutionProjection.projectionVersion,
-      }
-      yield* Ref.update(state, (entries) => new Map(entries).set(turn.id, materialize(projection)))
-      return materialize(projection)
+      return yield* commitAdmission.withPermits(1)(
+        Effect.gen(function* () {
+          yield* validateUnits(turn.id, units)
+          const status =
+            turn.status === "queued" || turn.status === "accepted" || turn.status === "cancelling"
+              ? "running"
+              : turn.status
+          const projection: Projection = {
+            turn: clone(turn),
+            units: units.map(clone),
+            checkpointGeneration: ((yield* Ref.get(state)).get(turn.id)?.checkpointGeneration ?? -1) + 1,
+            revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0),
+            state: {
+              status,
+              usage: {
+                ...ExecutionProjection.emptyUsageState(),
+                sourceComplete: status === "completed" || status === "failed" || status === "cancelled",
+              },
+              steering: { steeringMessages: 0, followUpMessages: 0 },
+            },
+            projectionVersion: ExecutionProjection.projectionVersion,
+          }
+          yield* Ref.update(state, (entries) => new Map(entries).set(turn.id, materialize(projection)))
+          return materialize(projection)
+        }),
+      )
     }),
     page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
       if (options.before !== undefined && options.after !== undefined)

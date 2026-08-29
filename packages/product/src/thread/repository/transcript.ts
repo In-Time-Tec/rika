@@ -22,6 +22,7 @@ export interface Interface {
   readonly commitProjection: (
     turn: AgentExecutionTurn,
     change: ExecutionProjection.Change,
+    withinTransaction?: Effect.Effect<void, RepositoryError>,
   ) => Effect.Effect<WriteResult, RepositoryError>
   readonly replaceUnits: (turn: Turn, units: ReadonlyArray<Unit>) => Effect.Effect<Projection, RepositoryError>
   readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<Page, RepositoryError>
@@ -37,7 +38,8 @@ export const productMemoryLayerWithTurns = Layer.succeed(
   Service.of({
     get: (): Effect.Effect<Projection | undefined> => Effect.as(Effect.void, undefined),
     listProjectionRecoveryCandidates: () => Effect.succeed([]),
-    commitProjection: () => Effect.succeed("committed"),
+    commitProjection: (_turn, _change, withinTransaction) =>
+      withinTransaction === undefined ? Effect.succeed("committed") : withinTransaction.pipe(Effect.as("committed")),
     replaceUnits: (turn, units) =>
       Effect.succeed({
         turn,

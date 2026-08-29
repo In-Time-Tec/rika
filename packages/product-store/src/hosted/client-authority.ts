@@ -53,7 +53,9 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedClientAuthorityServ
   yield* PgClient.PgClient
   const db = yield* PgDrizzle.makeWithDefaults()
 
-  const readThread = Effect.fn("HostedClientAuthority.readThread")(function* (input: ReadHostedThreadInput) {
+  const findThread = Effect.fn("HostedClientAuthority.findThread")(function* (
+    threadId: ReadHostedThreadInput["threadId"],
+  ) {
     const rows = yield* query(
       db
         .select({
@@ -67,7 +69,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedClientAuthorityServ
           createdAt: timestampText(rikaHostedThreads.createdAt),
         })
         .from(rikaHostedThreads)
-        .where(and(eq(rikaHostedThreads.id, input.threadId), eq(rikaHostedThreads.ownerId, input.ownerId))),
+        .where(eq(rikaHostedThreads.id, threadId)),
     )
     if (rows[0] === undefined) return undefined
     const row = yield* decode(ThreadRow, rows[0])
@@ -81,6 +83,10 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedClientAuthorityServ
       createdAt: row.createdAt,
     }
     return yield* decode(HostedThread, row.projectId === null ? thread : { ...thread, projectId: row.projectId })
+  })
+  const readThread = Effect.fn("HostedClientAuthority.readThread")(function* (input: ReadHostedThreadInput) {
+    const thread = yield* findThread(input.threadId)
+    return thread?.ownerId === input.ownerId ? thread : undefined
   })
 
   const registerDevice = Effect.fn("HostedClientAuthority.registerDevice")(function* (input: RegisterDeviceInput) {
@@ -268,6 +274,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedClientAuthorityServ
     registerDevice,
     authenticateClient,
     grantClientAuthority,
+    findThread,
     readThread,
     authorizeThread,
   })

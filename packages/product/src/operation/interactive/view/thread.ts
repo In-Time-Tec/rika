@@ -80,7 +80,7 @@ const snapshotFromSelection = (
     const current = grouped.get(id)
     if (current === undefined)
       grouped.set(id, {
-        turn: ThreadView.turnRecord(entry.turn),
+        turn: { ...ThreadView.turnRecord(entry.turn), status: entry.projectionState.status },
         units: [entry.unit],
         projectionRevision: entry.projectionRevision,
         usage: entry.projectionState.usage,

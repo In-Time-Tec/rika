@@ -17,6 +17,7 @@ import {
   layer as hostedProjectionWorkerLayer,
 } from "../../../src/hosted/execution/projection-worker"
 import { HostedPreviewBus, makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
+import { HostedThreadApplication } from "../../../src/hosted/thread/application"
 import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 
 const threadId = Thread.ThreadId.make("thread-test")
@@ -44,6 +45,11 @@ const state = (status: "running" | "completed") => ({
 const testProjectionWorkerLayer = (options: Parameters<typeof hostedProjectionWorkerLayer>[0]) =>
   hostedProjectionWorkerLayer(options).pipe(
     Layer.provide(HostedPreviewBus.memoryLayer),
+    Layer.provide(
+      Layer.mock(HostedThreadApplication, {
+        projectionCommitted: () => Effect.void,
+      }),
+    ),
     Layer.provide(hostedWorkerRuntimeLayerTest),
   )
 
@@ -51,6 +57,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
   Effect.scoped(
     Effect.gen(function* () {
       const projected = yield* Deferred.make<void>()
+      const projectionPublished = yield* Deferred.make<void>()
       const previews = yield* makeHostedPreviewBus()
       const subscription = yield* previews.bus.subscribe(HostedThreadId.make(threadId))
       let projection: Projection | undefined
@@ -62,7 +69,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.succeed(projection),
-        commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
+        commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change, withinTransaction) =>
           Effect.sync(() => {
             const common = {
               turn,
@@ -75,6 +82,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
             projection =
               change.checkpoint === undefined ? common : { ...common, projectorCheckpoint: change.checkpoint }
           }).pipe(
+            Effect.andThen(withinTransaction ?? Effect.void),
             Effect.andThen(change.state.status === "completed" ? Deferred.succeed(projected, undefined) : Effect.void),
             Effect.as("committed" as const),
           ),
@@ -130,9 +138,15 @@ it.effect("projects durable changes and publishes transient previews for a recov
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
           Layer.provide(Layer.succeed(HostedPreviewBus, previews.bus)),
+          Layer.provide(
+            Layer.mock(HostedThreadApplication, {
+              projectionCommitted: () => Deferred.succeed(projectionPublished, undefined),
+            }),
+          ),
         ),
       )
       yield* Deferred.await(projected)
+      yield* Deferred.await(projectionPublished)
       expect(yield* subscription.take).toEqual({
         _tag: "Preview",
         value: { threadId: HostedThreadId.make(threadId), turnId, preview },

@@ -69,6 +69,7 @@ export interface HostedThreadApplicationService {
     ownerId: OwnerId,
     threadId: ThreadId,
   ) => Effect.Effect<HostedThreadSnapshot, HostedThreadApplicationError>
+  readonly projectionCommitted: (threadId: ThreadId) => Effect.Effect<void, HostedThreadApplicationError>
 }
 
 export class HostedThreadApplication extends Context.Service<HostedThreadApplication, HostedThreadApplicationService>()(
@@ -552,6 +553,20 @@ export const layer = Layer.effect(
           )
         }),
       snapshot: currentSnapshot,
+      projectionCommitted: (threadId) =>
+        Effect.gen(function* () {
+          const hostedThread = yield* hosted.findThread(HostedThreadId.make(threadId))
+          if (hostedThread === undefined)
+            return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
+          const snapshot = yield* repositorySnapshot(hostedThread.ownerId, threadId)
+          yield* store.appendEvents({
+            ownerId: hostedThread.ownerId,
+            threadId: HostedThreadId.make(threadId),
+            events: [{ _tag: "ThreadViewSnapshot", snapshot: snapshot.view }],
+            snapshot,
+            createdAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
+          })
+        }).pipe(Effect.mapError(applicationFailure)),
     })
   }),
 )

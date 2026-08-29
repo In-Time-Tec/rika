@@ -38,7 +38,7 @@ export const transcriptSqlWrites = {
     db: PgDrizzle.EffectPgDatabase,
     get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
   ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
-    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
+    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change, withinTransaction) {
       const upserts = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
       yield* validateUnits(turn.id, upserts)
       const clock = yield* Clock.Clock
@@ -144,6 +144,7 @@ export const transcriptSqlWrites = {
                   setWhere: eq(rikaTranscriptUnits.unitOrderKey, sql`excluded.unit_order_key`),
                 })
             }
+            if (withinTransaction !== undefined) yield* withinTransaction
             return "committed" as const
           }),
         )

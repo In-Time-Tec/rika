@@ -56,6 +56,7 @@ export interface HostedClientAuthorityService {
     input: AuthenticateClientInput,
   ) => Effect.Effect<AuthenticatedClient, HostedPersistenceError>
   readonly grantClientAuthority: (input: GrantClientAuthorityInput) => Effect.Effect<void, HostedPersistenceError>
+  readonly findThread: (threadId: ThreadId) => Effect.Effect<HostedThread | undefined, HostedPersistenceError>
   readonly readThread: (input: ReadHostedThreadInput) => Effect.Effect<HostedThread | undefined, HostedPersistenceError>
   readonly authorizeThread: (input: AuthorizeHostedThreadInput) => Effect.Effect<void, HostedPersistenceError>
 }

@@ -1,11 +1,28 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
+import {
+  BetterAuthUserId,
+  ClientId,
+  DeviceId,
+  OwnerId,
+  ThreadEventCursor,
+  ThreadId as HostedThreadId,
+  Timestamp,
+} from "@rika/product/hosted-model"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
+import { ThreadId } from "@rika/product/thread-record"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import { TurnId } from "@rika/product/turn-record"
 import {
   rikaHostedOwners,
+  rikaHostedThreadProtocolState,
   rikaHostedThreads,
   rikaHostedWorkspaces,
   rikaThreads,
@@ -16,6 +33,8 @@ import {
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
+import { layer as hostedClientAuthorityLayer } from "@rika/product-store/client-authority"
+import { layer as threadProtocolStoreLayer } from "@rika/product-store/thread-protocol-store"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
@@ -41,7 +60,9 @@ import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import { layer as hostedExecutionReconcilerLayer } from "../../../src/hosted/execution/reconciler"
 import { layer as hostedProjectionWorkerLayer } from "../../../src/hosted/execution/projection-worker"
+import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
 import { HostedPreviewBus } from "../../../src/hosted/thread/previews"
+import { HostedThreadApplication, layer as hostedThreadApplicationLayer } from "../../../src/hosted/thread/application"
 import { HostedWorkerListener, layer as hostedWorkerListenerLayer } from "../../../src/hosted/worker-listener"
 import {
   layerTest as hostedWorkerRuntimeLayerTest,
@@ -237,6 +258,105 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       }
       const cursors = new Array<string | undefined>()
       const gatewayBase = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
+      const authorityContext = yield* Layer.build(
+        hostedClientAuthorityLayer.pipe(Layer.provide(Layer.succeedContext(aggregateContext))),
+      )
+      const protocolContext = yield* Layer.build(
+        threadProtocolStoreLayer.pipe(Layer.provide(Layer.succeedContext(aggregateContext))),
+      )
+      const actor = {
+        _tag: "PersonalActor" as const,
+        owner: { _tag: "PersonalOwner" as const, userId: BetterAuthUserId.make("projection-user") },
+        userId: BetterAuthUserId.make("projection-user"),
+        clientId: ClientId.make("projection-client"),
+        deviceId: DeviceId.make("projection-device"),
+      }
+      const authority = Context.get(authorityContext, HostedClientAuthority)
+      const authorizedAtMillis = DateTime.toEpochMillis(DateTime.nowUnsafe())
+      const authorizedAt = Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(authorizedAtMillis)))
+      const authorityExpiresAt = Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(authorizedAtMillis + 60_000)))
+      yield* authority.registerDevice({
+        id: actor.deviceId,
+        userId: actor.userId,
+        displayName: "Projection device",
+        publicKeyFingerprint: "projection-key",
+        now: authorizedAt,
+      })
+      yield* authority.authenticateClient({
+        id: actor.clientId,
+        userId: actor.userId,
+        deviceId: actor.deviceId,
+        now: authorizedAt,
+        expiresAt: authorityExpiresAt,
+      })
+      yield* authority.grantClientAuthority({
+        ownerId: OwnerId.make("projection-owner"),
+        actor,
+        now: authorizedAt,
+        expiresAt: authorityExpiresAt,
+      })
+      const protocol = Context.get(protocolContext, ThreadProtocolStore)
+      yield* protocol.initializeThread({
+        ownerId: OwnerId.make("projection-owner"),
+        threadId: HostedThreadId.make("projection-thread"),
+        actor,
+      })
+      const applicationContext = yield* Layer.build(
+        hostedThreadApplicationLayer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeedContext(aggregateContext),
+              Layer.succeedContext(authorityContext),
+              Layer.succeedContext(protocolContext),
+              Layer.succeed(ExecutionGateway.Service, gatewayBase),
+              ExecutionSessionLifecycle.layerTest(),
+              hostedModelRegistryTestLayer,
+              BunCrypto.layer,
+            ),
+          ),
+        ),
+      )
+      const application = Context.get(applicationContext, HostedThreadApplication)
+      yield* aggregateDatabase
+        .delete(rikaHostedThreadProtocolState)
+        .where(eq(rikaHostedThreadProtocolState.threadId, "projection-thread"))
+      const transactionalRepositories = yield* Layer.build(
+        ProductRepositories.projectionLayer.pipe(Layer.provide(Layer.succeedContext(aggregateContext))),
+      )
+      const transactionalTranscripts = Context.get(transactionalRepositories, TranscriptRepository.Service)
+      expect(
+        (yield* Effect.exit(
+          transactionalTranscripts.commitProjection(
+            {
+              _tag: "AgentExecution",
+              id: TurnId.make("projection-turn"),
+              threadId: ThreadId.make("projection-thread"),
+              prompt: "project",
+              status: "running",
+              executionRoute: ExecutionRoute.testExecutionRoute(),
+              executionLink: {
+                runId: "projection-run",
+                threadId: "projection-thread",
+                turnId: "projection-turn",
+              },
+              author: { _tag: "Human" },
+              lineage: { _tag: "Original" },
+              createdAt: 2,
+              updatedAt: 2,
+            },
+            running,
+            application
+              .projectionCommitted(ThreadId.make("projection-thread"))
+              .pipe(Effect.mapError((error) => TranscriptRepository.RepositoryError.make({ message: error.message }))),
+          ),
+        ))._tag,
+      ).toBe("Failure")
+      expect(yield* transactionalTranscripts.get(TurnId.make("projection-turn"))).toBeUndefined()
+      yield* protocol.initializeThread({
+        ownerId: OwnerId.make("projection-owner"),
+        threadId: HostedThreadId.make("projection-thread"),
+        actor,
+      })
       const build = (gateway: ExecutionGateway.Interface, scope: Scope.Scope) =>
         Layer.buildWithScope(
           Layer.merge(
@@ -248,7 +368,8 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           ).pipe(
             Layer.provide(hostedWorkerRuntimeLayerTest),
             Layer.provide(ProductRepositories.projectionLayer),
-            Layer.provide(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })),
+            Layer.provide(Layer.succeed(HostedThreadApplication, application)),
+            Layer.provide(Layer.succeedContext(aggregateContext)),
             Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
           ),
           scope,
@@ -321,6 +442,30 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       })
       expect(yield* Schema.decodeEffect(JsonUnit)(String(persisted[0]?.unit_json))).toMatchObject({
         content: { text: "complete" },
+      })
+      const replay = yield* protocol.replay({
+        ownerId: OwnerId.make("projection-owner"),
+        threadId: HostedThreadId.make("projection-thread"),
+        actor,
+        afterCursor: ThreadEventCursor.make("0"),
+        includeSnapshot: false,
+        limit: 10,
+      })
+      expect(replay.events).toHaveLength(2)
+      expect(replay.events.at(-1)).toMatchObject({
+        cursor: "2",
+        event: {
+          _tag: "ThreadViewSnapshot",
+          snapshot: {
+            turns: [
+              {
+                turn: { id: "projection-turn", status: "completed" },
+                projectionRevision: 1,
+                units: [{ content: { text: "complete" } }],
+              },
+            ],
+          },
+        },
       })
     } finally {
       yield* Effect.tryPromise(() => pool.end())

@@ -8,6 +8,7 @@ import type { ProjectionRecoveryCandidate } from "@rika/product/transcript-repos
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Context, Effect, Layer, Schema } from "effect"
 import { HostedPreviewBus } from "../thread/previews"
+import { HostedThreadApplication } from "../thread/application"
 import { HostedWorkerRuntime, type HostedWorkerStatus } from "../worker-runtime"
 
 export class HostedProjectionWorkerError extends Schema.TaggedError<HostedProjectionWorkerError>()(
@@ -34,6 +35,7 @@ export const layer = (options: { readonly concurrency: number; readonly fallback
       const transcripts = yield* TranscriptRepository.Service
       const backend = yield* ExecutionGateway.Service
       const previews = yield* HostedPreviewBus
+      const operations = yield* HostedThreadApplication
       const runtime = yield* HostedWorkerRuntime
       const project = (candidate: ProjectionRecoveryCandidate) =>
         HostedObservability.observe(
@@ -50,6 +52,12 @@ export const layer = (options: { readonly concurrency: number; readonly fallback
                 turnId: candidate.turnId,
                 preview,
               }),
+            onCommitted: () =>
+              operations
+                .projectionCommitted(candidate.threadId)
+                .pipe(
+                  Effect.mapError((error) => TranscriptRepository.RepositoryError.make({ message: error.message })),
+                ),
           }).pipe(Effect.asVoid),
         ).pipe(
           Effect.annotateLogs({

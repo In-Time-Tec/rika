@@ -467,6 +467,7 @@ describe("api HTTP", () => {
           thread: () => Effect.die("unused"),
           interactive: () => Effect.die("unused"),
           snapshot: () => Effect.die("unused"),
+          projectionCommitted: () => Effect.die("unused"),
         },
       }
       const listed = yield* response("/api/v1/threads/list", deps, {

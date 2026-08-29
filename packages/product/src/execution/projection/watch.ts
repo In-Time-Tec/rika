@@ -15,7 +15,9 @@ export const watch = (input: {
   readonly transcripts: TranscriptRepository.Interface
   readonly backend: ExecutionGateway.Interface
   readonly onChange?: (change: ExecutionProjection.Change) => void
-  readonly onCommitted?: (change: ExecutionProjection.Change) => Effect.Effect<void, never, never>
+  readonly onCommitted?: (
+    change: ExecutionProjection.Change,
+  ) => Effect.Effect<void, TranscriptRepository.RepositoryError, never>
   readonly onPreview?: (preview: ExecutionGateway.ModelPreviewEvent) => void
   readonly stallSilenceMs?: number | undefined
 }) =>
@@ -56,7 +58,7 @@ export const watch = (input: {
             )
           const commit = (change: ExecutionProjection.Change) =>
             Effect.gen(function* () {
-              const committed = yield* transcripts.commitProjection(turn, change)
+              const committed = yield* transcripts.commitProjection(turn, change, onCommitted?.(change))
               if (committed === "stale")
                 return yield* TranscriptRepository.RepositoryError.make({
                   message: `Turn ${turnId} projection revision is stale`,
@@ -64,7 +66,6 @@ export const watch = (input: {
               latestChange = change
               progressed = true
               yield* notify(() => onChange?.(change))
-              if (onCommitted !== undefined) yield* onCommitted(change)
             })
           let watchInput: Parameters<typeof backend.watchTurn>[1] = { prompt: turn.prompt, pricing }
           if (projection !== undefined) watchInput = { ...watchInput, units: projection.units }

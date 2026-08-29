@@ -395,6 +395,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
     preview: () => Effect.die("unused"),
     thread: () => Effect.succeed(snapshot.view.thread),
     snapshot: () => Effect.succeed(snapshot),
+    projectionCommitted: () => Effect.die("unused"),
     interactive: (input, persist) => {
       applied.push(input.commandId)
       return persist({
@@ -971,6 +972,7 @@ it.effect("admits authorization decisions without applying them in the socket se
         return persist({ events: [], snapshot: currentSnapshot })
       }),
     snapshot: () => Effect.succeed(currentSnapshot),
+    projectionCommitted: () => Effect.die("unused"),
   }
 
   const dependencies = Layer.mergeAll(
@@ -1152,6 +1154,7 @@ it.effect("streams a contiguous tail and resets compacted cursors from a durable
     thread: () => Effect.succeed(currentSnapshot.view.thread),
     interactive: () => Effect.die("unused"),
     snapshot: () => Effect.succeed(currentSnapshot),
+    projectionCommitted: () => Effect.die("unused"),
   }
   const dependencies = Layer.mergeAll(
     Layer.succeed(HostedProduct, product),

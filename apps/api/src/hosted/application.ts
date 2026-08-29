@@ -240,6 +240,9 @@ export const layer = (options: {
         previewContext,
       )
       const hostedWorkerContext = Context.merge(hostedContext, workerRuntimeContext)
+      const threadApplicationContext = yield* Layer.build(
+        hostedThreadApplicationLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
+      )
       const recoveryContext = yield* Layer.build(
         hostedRecoveryLayer.pipe(
           Layer.provide(Layer.succeed(TenetRuntime.Runtime, Context.get(executionContext, TenetRuntime.Runtime))),
@@ -261,7 +264,7 @@ export const layer = (options: {
           fallbackIntervalMillis: workerFallbackIntervalMillis,
         }).pipe(
           Layer.provide(ProductRepositories.projectionLayer),
-          Layer.provide(Layer.succeedContext(hostedWorkerContext)),
+          Layer.provide(Layer.succeedContext(Context.merge(hostedWorkerContext, threadApplicationContext))),
         ),
       )
       const projectionWorker = Context.get(projectionWorkerContext, HostedProjectionWorker)
@@ -313,9 +316,6 @@ export const layer = (options: {
         hostedPublicationLayer({ product: Context.get(productContext, HostedProduct), executor }).pipe(
           Layer.provide(Layer.succeedContext(repositoryContext)),
         ),
-      )
-      const threadApplicationContext = yield* Layer.build(
-        hostedThreadApplicationLayer.pipe(Layer.provide(Layer.succeedContext(hostedContext))),
       )
       const threadCommandWorkerContext = yield* Layer.build(
         hostedThreadCommandWorkerLayer({
