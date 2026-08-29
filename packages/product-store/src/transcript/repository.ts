@@ -14,7 +14,7 @@ import { transcriptSqlWrites } from "./sql-writes"
 
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
-const RecoveryRow = Schema.Struct({ thread_id: ThreadId, turn_id: TurnId })
+const RecoveryRow = Schema.Struct({ thread_id: ThreadId, turn_id: TurnId, created_at: Schema.Finite })
 
 export const layer = Layer.effect(
   Service,
@@ -35,7 +35,7 @@ export const layer = Layer.effect(
               ),
             )
           const rows = yield* db
-            .select({ thread_id: rikaTurns.threadId, turn_id: rikaTurns.id })
+            .select({ thread_id: rikaTurns.threadId, turn_id: rikaTurns.id, created_at: rikaTurns.createdAt })
             .from(rikaTurns)
             .leftJoin(rikaTranscriptCheckpoints, eq(rikaTranscriptCheckpoints.turnId, rikaTurns.id))
             .where(
@@ -56,7 +56,11 @@ export const layer = Layer.effect(
             .pipe(Effect.mapError(error))
           return yield* Effect.forEach(rows, (row) =>
             Schema.decodeEffect(RecoveryRow)(row).pipe(
-              Effect.map(({ thread_id, turn_id }) => ({ threadId: thread_id, turnId: turn_id })),
+              Effect.map(({ thread_id, turn_id, created_at }) => ({
+                threadId: thread_id,
+                turnId: turn_id,
+                createdAt: created_at,
+              })),
               Effect.mapError(error),
             ),
           )
@@ -67,4 +71,3 @@ export const layer = Layer.effect(
     })
   }),
 )
-export { makeMemory, memoryLayer, memoryLayerWithTurns } from "./memory-repository"

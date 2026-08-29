@@ -4,9 +4,9 @@ import { Effect, Layer, Schema, Stream } from "effect"
 import { ThreadToolHandlers } from "@rika/product/product-operation-service"
 import { provideLayer } from "../turn/postgres/repository-layer.harness"
 import { storeProjection } from "../turn/postgres/repository-transcript.fixture"
-import { Fixtures } from "./memory-repository.support"
-import { storedThread, storedTurn } from "./memory-repository.fixture"
-import { repositories, queryLayer } from "./memory-repository.harness"
+import { Fixtures } from "./process-local-index.support"
+import { storedThread, storedTurn } from "./process-local-index.fixture"
+import { repositories, queryLayer } from "./process-local-index.harness"
 
 describe("ThreadQuery", () => {
   it.effect("reads a standalone SubagentCard subtree through the same child selector as delegated tools", () =>

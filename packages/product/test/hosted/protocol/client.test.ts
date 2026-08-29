@@ -21,10 +21,7 @@ import {
 } from "../../../src/hosted/model"
 import {
   ClientMessage,
-  CompatibleClientMessage,
   inspectClientProtocolVersion,
-  normalizeClientMessage,
-  previousProtocolVersion,
   protocolMismatchFrame,
   protocolMismatchMessage,
   protocolVersion,
@@ -50,7 +47,7 @@ const idempotencyKey = IdempotencyKey.make("command-key")
 const expectedThreadVersion = ThreadVersion.make("3")
 const cursor = ThreadEventCursor.make("8")
 const now = Timestamp.make("2026-01-01T00:00:00.000Z")
-const checkpoint = { version: 5 as const, cursor: "projector-cursor", state: "{}" }
+const checkpoint = { version: 6 as const, cursor: "projector-cursor", state: "{}" }
 const personalOwner = { _tag: "PersonalOwner" as const, userId }
 const organizationOwner = { _tag: "OrganizationOwner" as const, organizationId }
 const personalActor = { _tag: "PersonalActor" as const, owner: personalOwner, userId, clientId, deviceId }
@@ -187,17 +184,7 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
   })
 
-  it("normalizes the compatible previous protocol and encodes older mismatches for the caller", () => {
-    const compatible = Schema.decodeSync(CompatibleClientMessage)({
-      protocolVersion: previousProtocolVersion,
-      requestId: "request-1",
-      command: { _tag: "Detach" },
-    })
-    expect(normalizeClientMessage(compatible)).toEqual({
-      protocolVersion,
-      requestId: "request-1",
-      command: { _tag: "Detach" },
-    })
+  it("encodes protocol mismatches for the caller", () => {
     const body = JSON.stringify({ protocolVersion: 2, requestId: "request-2", command: { _tag: "Detach" } })
     expect(inspectClientProtocolVersion(body)).toEqual({ protocolVersion: 2, requestId: "request-2" })
     const frame = Schema.decodeSync(
@@ -297,11 +284,10 @@ describe("hosted Thread client protocol", () => {
           _tag: "ThreadAttached",
           requestId,
           threadId,
-          snapshotThreadVersion: ThreadVersion.make("4"),
-          snapshotCursor: cursor,
+          baseCursor: cursor,
           threadVersion: ThreadVersion.make("4"),
           cursor,
-          snapshot,
+          checkpoint: { threadVersion: ThreadVersion.make("4"), cursor, snapshot },
           events: [],
           participants: [{ actor: personalActor, status: "viewing" }],
         },

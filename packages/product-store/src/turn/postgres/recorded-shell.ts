@@ -6,7 +6,7 @@ import { TurnResult } from "@rika/product/thread-result"
 import { rikaTurns } from "../../database/schema/product"
 import { decode } from "./row-codec"
 import { turnRowSelection } from "./reader"
-import { repositoryError } from "../memory/errors"
+import { repositoryError } from "./errors"
 
 const insert = (
   db: PgDrizzle.EffectPgDatabase,

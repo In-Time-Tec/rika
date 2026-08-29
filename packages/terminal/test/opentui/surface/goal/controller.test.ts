@@ -17,8 +17,8 @@ const cell = {
   id: "oracle-cell",
   status: "complete" as const,
   visual: "ts",
-  source: { text: source, lines: 1, truncated: false },
-  output: { stdout: "NESTED_CELL_STDOUT", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+  source: { text: source, lines: 1 },
+  output: { stdout: "NESTED_CELL_STDOUT", stderr: "" },
   durationMillis: 1_240,
   epoch: 0,
   notices: [],
@@ -70,14 +70,13 @@ describe("a subagent's own cell", () => {
     const cardOpen = { ...model(), expandedRowKeys: ["subagent:oracle-card"] }
     const collapsedCell = rendered(cardOpen)
     expect(collapsedCell).toContain(source)
-    expect(collapsedCell).toContain("1.2s · ▸")
+    expect(collapsedCell).not.toContain("1.2s")
     expect(collapsedCell).not.toContain("ts ")
     expect(collapsedCell).not.toContain("1 line")
     expect(collapsedCell).not.toContain("Read nested.txt")
     expect(collapsedCell).not.toContain("NESTED_CELL_STDOUT")
 
     const chunks = buildTranscript(cardOpen).styled.chunks
-    expect(chunks.find((chunk) => chunk.text.includes("1.2s"))?.fg).toBe(colors.subtle)
     expect(chunks.find((chunk) => chunk.text === "const")?.fg).not.toBe(colors.text)
 
     const cellOpen = { ...model(), expandedRowKeys: ["subagent:oracle-card", "cell:oracle-cell"] }
@@ -97,7 +96,7 @@ describe("a subagent's own cell", () => {
         base.blocks[0]!,
         {
           ...cell,
-          source: { text: `${longSource}\nresult.text`, lines: 2, truncated: false },
+          source: { text: `${longSource}\nresult.text`, lines: 2 },
         },
       ],
       expandedRowKeys: ["subagent:oracle-card", "cell:oracle-cell"],
@@ -109,5 +108,8 @@ describe("a subagent's own cell", () => {
     expect(lines.filter((line) => line.includes("const result"))).toHaveLength(1)
     expect(lines.some((line) => line.includes("result.text"))).toBe(true)
     for (const line of lines) expect(stringWidth(line)).toBeLessThanOrEqual(60)
+    const connectors = buildTranscript(current).styled.chunks.filter((chunk) => chunk.text.includes("│ "))
+    expect(connectors.length).toBeGreaterThan(0)
+    expect(connectors.every((chunk) => chunk.fg === colors.subtle)).toBe(true)
   })
 })

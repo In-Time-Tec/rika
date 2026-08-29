@@ -20,7 +20,6 @@ import {
   rikaHostedExecutorAssignments,
   rikaHostedOwners,
   rikaHostedRunnerRegistrations,
-  rikaHostedThreadCommands,
   rikaHostedThreadGrants,
   rikaHostedThreadProtocolCommands,
   rikaHostedThreads,
@@ -289,36 +288,26 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.asVoid)
 
   const loadAdmissionContext: ToolPolicyStoreService["loadAdmissionContext"] = (input) => {
-    const legacy = db.$with("legacy").as(
-      db
-        .select({ actor: rikaHostedThreadCommands.actor })
-        .from(rikaHostedThreadCommands)
-        .where(
-          and(eq(rikaHostedThreadCommands.threadId, input.threadId), eq(rikaHostedThreadCommands.turnId, input.turnId)),
-        )
-        .limit(1),
-    )
-    const protocol = db.$with("protocol").as(
+    const admission = db.$with("admission").as(
       db
         .select({ actor: rikaHostedThreadProtocolCommands.actor })
         .from(rikaHostedThreadProtocolCommands)
         .where(
           and(
             eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
-            eq(rikaHostedThreadProtocolCommands.commandId, input.turnId),
-            eq(sql<string>`${rikaHostedThreadProtocolCommands.command} ->> '_tag'`, "SubmitPrompt"),
+            eq(rikaHostedThreadProtocolCommands.turnId, input.turnId),
           ),
         )
         .limit(1),
     )
-    const actor = sql<Schema.Json>`coalesce(${legacy.actor}, ${protocol.actor})`
+    const actor = admission.actor
     const userId = sql<string>`${actor} ->> 'userId'`
     const clientId = sql<string>`${actor} ->> 'clientId'`
     const deviceId = sql<string>`${actor} ->> 'deviceId'`
     const membershipId = sql<string>`${actor} ->> 'membershipId'`
     return query(
       db
-        .with(legacy, protocol)
+        .with(admission)
         .select({
           ownerId: rikaHostedThreads.ownerId,
           actor,
@@ -356,8 +345,7 @@ export const make = Effect.gen(function* () {
             ),
           ),
         )
-        .leftJoin(legacy, sql`true`)
-        .leftJoin(protocol, sql`true`)
+        .leftJoin(admission, sql`true`)
         .innerJoin(
           rikaHostedClients,
           and(

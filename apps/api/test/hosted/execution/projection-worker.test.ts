@@ -9,8 +9,7 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product-store/transcript-repository"
-import * as TurnStore from "@rika/product-store/turn-repository"
+import * as TranscriptStore from "@rika/product/transcript-repository"
 import { Context, Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
@@ -18,6 +17,8 @@ import {
   layer as hostedProjectionWorkerLayer,
 } from "../../../src/hosted/execution/projection-worker"
 import { HostedPreviewBus, makeHostedPreviewBus } from "../../../src/hosted/thread/previews"
+import { HostedThreadApplication } from "../../../src/hosted/thread/application"
+import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 
 const threadId = Thread.ThreadId.make("thread-test")
 const turnId = Turn.TurnId.make("turn-test")
@@ -42,26 +43,33 @@ const state = (status: "running" | "completed") => ({
 })
 
 const testProjectionWorkerLayer = (options: Parameters<typeof hostedProjectionWorkerLayer>[0]) =>
-  hostedProjectionWorkerLayer(options).pipe(Layer.provide(HostedPreviewBus.memoryLayer))
+  hostedProjectionWorkerLayer(options).pipe(
+    Layer.provide(HostedPreviewBus.memoryLayer),
+    Layer.provide(
+      Layer.mock(HostedThreadApplication, {
+        projectionCommitted: () => Effect.void,
+      }),
+    ),
+    Layer.provide(hostedWorkerRuntimeLayerTest),
+  )
 
 it.effect("projects durable changes and publishes transient previews for a recovered Turn", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const projected = yield* Deferred.make<void>()
+      const projectionPublished = yield* Deferred.make<void>()
       const previews = yield* makeHostedPreviewBus()
       const subscription = yield* previews.bus.subscribe(HostedThreadId.make(threadId))
       let projection: Projection | undefined
-      const turnRepository = Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service)
-      const turns = TurnRepository.Service.of({
-        ...turnRepository,
+      const turns = Layer.mock(TurnRepository.Service, {
         get: () => Effect.succeed(turn),
         setStatus: () => Effect.die("projection worker settled the Turn"),
       })
       const transcripts = TranscriptRepository.Service.of({
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
-        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
+        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.succeed(projection),
-        commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change) =>
+        commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change, withinTransaction) =>
           Effect.sync(() => {
             const common = {
               turn,
@@ -74,6 +82,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
             projection =
               change.checkpoint === undefined ? common : { ...common, projectorCheckpoint: change.checkpoint }
           }).pipe(
+            Effect.andThen(withinTransaction ?? Effect.void),
             Effect.andThen(change.state.status === "completed" ? Deferred.succeed(projected, undefined) : Effect.void),
             Effect.as("committed" as const),
           ),
@@ -122,15 +131,22 @@ it.effect("projects durable changes and publishes transient previews for a recov
       const context = yield* Layer.build(
         hostedProjectionWorkerLayer({
           concurrency: 2,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(hostedWorkerRuntimeLayerTest),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
           Layer.provide(Layer.succeed(HostedPreviewBus, previews.bus)),
+          Layer.provide(
+            Layer.mock(HostedThreadApplication, {
+              projectionCommitted: () => Deferred.succeed(projectionPublished, undefined),
+            }),
+          ),
         ),
       )
       yield* Deferred.await(projected)
+      yield* Deferred.await(projectionPublished)
       expect(yield* subscription.take).toEqual({
         _tag: "Preview",
         value: { threadId: HostedThreadId.make(threadId), turnId, preview },
@@ -152,7 +168,14 @@ it.effect("replays an existing transcript when its projection version is stale",
   Effect.scoped(
     Effect.gen(function* () {
       const completedTurn: Turn.AgentExecutionTurn = { ...turn, status: "completed" }
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer([completedTurn])), TurnRepository.Service)
+      const turns = Context.get(
+        yield* Layer.build(
+          Layer.mock(TurnRepository.Service, {
+            get: () => Effect.succeed(completedTurn),
+          }),
+        ),
+        TurnRepository.Service,
+      )
       const stale: Projection = {
         turn: completedTurn,
         units: [],
@@ -195,7 +218,7 @@ it.effect("replays an existing transcript when its projection version is stale",
         inspectTurn: () => Effect.succeed({ status: "completed", cursor: "replayed" }),
       })
       yield* Layer.build(
-        testProjectionWorkerLayer({ concurrency: 1, pollIntervalMillis: 10 }).pipe(
+        testProjectionWorkerLayer({ concurrency: 1, fallbackIntervalMillis: 10 }).pipe(
           Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
@@ -219,13 +242,12 @@ it.effect("does not reset active projection age when a duplicate candidate is re
   Effect.scoped(
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
-      const turns = TurnRepository.Service.of({
-        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
+      const turns = Layer.mock(TurnRepository.Service, {
         get: () => Deferred.succeed(started, undefined).pipe(Effect.as(turn)),
       })
       const transcripts = TranscriptRepository.Service.of({
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
-        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId }]),
+        listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.as(Effect.void, undefined),
       })
       const gateway = ExecutionGateway.Service.of({
@@ -235,9 +257,9 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
@@ -248,8 +270,8 @@ it.effect("does not reset active projection age when a duplicate candidate is re
       const admitted = yield* worker.status
       yield* TestClock.adjust(11)
       const duplicateRejected = yield* worker.status
-      expect(duplicateRejected.oldestActiveProjectionAt).toBe(admitted.oldestActiveProjectionAt)
-      expect(duplicateRejected.oldestActiveProjectionAgeMillis).toBe(11)
+      expect(duplicateRejected.oldestActiveAt).toBe(admitted.oldestActiveAt)
+      expect(duplicateRejected.oldestActiveAgeMillis).toBe(10)
       expect(duplicateRejected).toMatchObject({
         active: 1,
         capacity: 1,
@@ -272,8 +294,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
         id,
         executionLink: { runId: `run-${id}`, threadId, turnId: id },
       })
-      const turns = TurnRepository.Service.of({
-        ...Context.get(yield* Layer.build(TurnStore.memoryLayer([turn])), TurnRepository.Service),
+      const turns = Layer.mock(TurnRepository.Service, {
         get: (id: Turn.TurnId) => Effect.succeed(turnFor(id)),
         setStatus: (id: Turn.TurnId) =>
           Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(Effect.as(turnFor(id))),
@@ -289,6 +310,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
             [silentTurnId, nextTurnId].map((candidateTurnId) => ({
               threadId,
               turnId: candidateTurnId,
+              createdAt: turn.createdAt,
             })),
           ),
         get: (id: Turn.TurnId) => Effect.sync(() => projections.get(id)),
@@ -337,9 +359,9 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 60_000,
+          fallbackIntervalMillis: 60_000,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(turns),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(Layer.succeed(ExecutionGateway.Service, gateway)),
         ),
@@ -360,7 +382,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
   ),
 )
 
-it.effect("rejects a stale projection worker when listing blocks after a successful poll", () =>
+it.effect("rejects a stale projection worker when listing blocks after a successful scan", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const lists = yield* Ref.make(0)
@@ -372,13 +394,12 @@ it.effect("rejects a stale projection worker when listing blocks after a success
             Effect.flatMap((count) => (count === 0 ? Effect.succeed([]) : Deferred.await(blocked))),
           ),
       })
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),
@@ -399,20 +420,19 @@ it.effect("rejects the current projection list failure immediately", () =>
         ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.die("list unavailable"),
       })
-      const turns = Context.get(yield* Layer.build(TurnStore.memoryLayer()), TurnRepository.Service)
       const context = yield* Layer.build(
         testProjectionWorkerLayer({
           concurrency: 1,
-          pollIntervalMillis: 10,
+          fallbackIntervalMillis: 10,
         }).pipe(
-          Layer.provide(Layer.succeed(TurnRepository.Service, turns)),
+          Layer.provide(Layer.mock(TurnRepository.Service, {})),
           Layer.provide(Layer.succeed(TranscriptRepository.Service, transcripts)),
           Layer.provide(ExecutionGateway.layerTest()),
         ),
       )
       const worker = Context.get(context, HostedProjectionWorker)
       yield* Effect.yieldNow
-      expect((yield* worker.status).poll._tag).toBe("Failed")
+      expect((yield* worker.status).scan._tag).toBe("Failed")
       expect((yield* Effect.exit(worker.ready))._tag).toBe("Failure")
     }),
   ),

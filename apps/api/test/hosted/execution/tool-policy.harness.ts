@@ -1,4 +1,5 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import { ActorAttribution } from "@rika/product/hosted-model"
@@ -25,6 +26,7 @@ import * as HostedPostgres from "@rika/product-store/layer"
 import type { AccessWire, BindingRequest } from "@rika/remote-execution/protocol"
 import { FileSystem, Config, Context, Crypto, DateTime, Effect, Layer, Random, Redacted, Schema } from "effect"
 import { and, count, eq } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { inspect } from "node:util"
 import { Pool } from "pg"
@@ -170,51 +172,75 @@ it.effect.skipIf(databaseUrl === "")(
               },
             ]),
           )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaHostedWorkspaces).values([
-              {
-                id: "personal-workspace",
-                ownerId: "personal-owner",
-                projectId: "personal-project",
-                createdByUserId: "personal-user",
-                executorKind: "orb",
-                inheritProjectGrants: false,
-                createdAt: now,
-              },
-              {
-                id: "organization-workspace",
-                ownerId: "organization-owner",
-                projectId: "organization-project",
-                createdByUserId: "organization-user",
-                executorKind: "orb",
-                inheritProjectGrants: false,
-                createdAt: now,
-              },
-            ]),
-          )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaHostedThreads).values([
-              {
-                id: "personal-thread",
-                ownerId: "personal-owner",
-                projectId: "personal-project",
-                workspaceId: "personal-workspace",
-                createdByUserId: "personal-user",
-                executorKind: "orb",
-                inheritProjectGrants: false,
-                createdAt: now,
-              },
-              {
-                id: "organization-thread",
-                ownerId: "organization-owner",
-                projectId: "organization-project",
-                workspaceId: "organization-workspace",
-                createdByUserId: "organization-user",
-                executorKind: "orb",
-                inheritProjectGrants: false,
-                createdAt: now,
-              },
-            ]),
+          const aggregateContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+          const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(aggregateContext))
+          yield* aggregateDatabase.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.insert(rikaHostedWorkspaces).values([
+                {
+                  id: "personal-workspace",
+                  ownerId: "personal-owner",
+                  projectId: "personal-project",
+                  createdByUserId: "personal-user",
+                  executorKind: "orb",
+                  inheritProjectGrants: false,
+                  createdAt: now,
+                },
+                {
+                  id: "organization-workspace",
+                  ownerId: "organization-owner",
+                  projectId: "organization-project",
+                  createdByUserId: "organization-user",
+                  executorKind: "orb",
+                  inheritProjectGrants: false,
+                  createdAt: now,
+                },
+              ])
+              yield* tx.insert(rikaWorkspaces).values([
+                { ownerId: "personal-owner", path: "personal-workspace", createdAt: 1 },
+                { ownerId: "organization-owner", path: "organization-workspace", createdAt: 1 },
+              ])
+              yield* tx.insert(rikaHostedThreads).values([
+                {
+                  id: "personal-thread",
+                  ownerId: "personal-owner",
+                  projectId: "personal-project",
+                  workspaceId: "personal-workspace",
+                  createdByUserId: "personal-user",
+                  executorKind: "orb",
+                  inheritProjectGrants: false,
+                  createdAt: now,
+                },
+                {
+                  id: "organization-thread",
+                  ownerId: "organization-owner",
+                  projectId: "organization-project",
+                  workspaceId: "organization-workspace",
+                  createdByUserId: "organization-user",
+                  executorKind: "orb",
+                  inheritProjectGrants: false,
+                  createdAt: now,
+                },
+              ])
+              yield* tx.insert(rikaThreads).values([
+                {
+                  id: "personal-thread",
+                  ownerId: "personal-owner",
+                  workspace: "personal-workspace",
+                  title: "Personal Thread",
+                  createdAt: 1,
+                  updatedAt: 1,
+                },
+                {
+                  id: "organization-thread",
+                  ownerId: "organization-owner",
+                  workspace: "organization-workspace",
+                  title: "Organization Thread",
+                  createdAt: 1,
+                  updatedAt: 1,
+                },
+              ])
+            }),
           )
           yield* Effect.tryPromise(() =>
             db.insert(rikaHostedProjectRepositories).values([
@@ -368,9 +394,11 @@ it.effect.skipIf(databaseUrl === "")(
                 ownerId: "personal-owner",
                 threadId: "personal-thread",
                 commandId: "personal-turn",
+                turnId: "personal-turn",
                 idempotencyKey: "personal-command",
                 expectedVersion: 0,
                 threadVersion: 1,
+                commitCursor: 1,
                 actor: personalActor,
                 command: { _tag: "SubmitPrompt" },
                 state: "admitted",
@@ -380,9 +408,11 @@ it.effect.skipIf(databaseUrl === "")(
                 ownerId: "organization-owner",
                 threadId: "organization-thread",
                 commandId: "organization-turn",
+                turnId: "organization-turn",
                 idempotencyKey: "organization-command",
                 expectedVersion: 0,
                 threadVersion: 1,
+                commitCursor: 1,
                 actor: organizationActor,
                 command: { _tag: "SubmitPrompt" },
                 state: "admitted",
@@ -450,19 +480,6 @@ it.effect.skipIf(databaseUrl === "")(
           }
           const authorizationState = yield* Schema.encodeEffect(Json)(authorizationProjectionState)
           yield* Effect.tryPromise(() =>
-            db.insert(rikaWorkspaces).values({ ownerId: "personal-owner", path: "hosted", createdAt: 1 }),
-          )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaThreads).values({
-              id: "personal-thread",
-              ownerId: "personal-owner",
-              workspace: "hosted",
-              title: "Personal Thread",
-              createdAt: 1,
-              updatedAt: 1,
-            }),
-          )
-          yield* Effect.tryPromise(() =>
             db.insert(rikaTurns).values({
               id: "personal-turn",
               threadId: "personal-thread",
@@ -478,9 +495,9 @@ it.effect.skipIf(databaseUrl === "")(
               turnId: "personal-turn",
               threadId: "personal-thread",
               revision: 0,
-              projectionVersion: 5,
+              projectionVersion: 6,
               stateJson: "{}",
-              projectorVersion: 5,
+              projectorVersion: 6,
               projectorCursor: "current-cursor",
               projectorState: authorizationState,
               updatedAt: 1,
@@ -494,7 +511,7 @@ it.effect.skipIf(databaseUrl === "")(
                 turnId: "personal-turn",
                 actor: personalActor,
                 authorizationId: "wrong-authorization",
-                checkpoint: { version: 5, cursor: "wrong", state: "wrong" },
+                checkpoint: { version: 6, cursor: "wrong", state: "wrong" },
                 decision: "approved",
               }),
             ),
@@ -510,7 +527,7 @@ it.effect.skipIf(databaseUrl === "")(
             actor: personalActor,
             authorizationId: "internal-approval",
             checkpoint: {
-              version: 5,
+              version: 6,
               cursor: "checkpoint-cursor",
               state: checkpointState,
             },
@@ -582,7 +599,7 @@ it.effect.skipIf(databaseUrl === "")(
           expect(records.find(({ phase }) => phase === "decision")).toMatchObject({
             authorizationId: "internal-approval",
             authorizationCheckpoint: {
-              version: 5,
+              version: 6,
               cursor: "checkpoint-cursor",
             },
           })

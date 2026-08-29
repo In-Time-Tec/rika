@@ -330,7 +330,7 @@
           "width": 1
         },
         {
-          "text": "Δ src/agent.ts ▾",
+          "text": "Δ src/agent.ts",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -348,10 +348,10 @@
             }
           },
           "attributes": 1,
-          "width": 16
+          "width": 14
         },
         {
-          "text": "                                                               ",
+          "text": "                                                                 ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -369,7 +369,7 @@
             }
           },
           "attributes": 0,
-          "width": 63
+          "width": 65
         }
       ]
     },

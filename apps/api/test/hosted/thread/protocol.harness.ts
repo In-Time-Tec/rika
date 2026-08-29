@@ -18,7 +18,9 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { HostedPresence } from "@rika/product/hosted-presence"
 import { protocolVersion, type HostedThreadSnapshot, type ServerFrame } from "@rika/product/client-protocol"
 import type { InteractiveCommand } from "@rika/product/interactive-command"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
@@ -26,19 +28,22 @@ import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
 import {
   rikaHostedClientAuthorities,
+  rikaHostedOwnerCounters,
+  rikaHostedOwners,
+  rikaHostedThreads,
   rikaHostedThreadProtocolCommands,
   rikaHostedThreadProtocolEvents,
   rikaHostedThreadProtocolSnapshots,
+  rikaHostedWorkspaces,
   rikaThreads,
-  rikaTranscriptCheckpoints,
-  rikaTurns,
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations } from "@rika/product-store/migrations"
 import { layer } from "@rika/product-store/layer"
 import { and, count, eq, gt } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { FileSystem, Config, Context, DateTime, Deferred, Effect, Fiber, Layer, Random, Redacted } from "effect"
+import { FileSystem, Config, Context, DateTime, Deferred, Effect, Layer, Random, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
@@ -53,6 +58,7 @@ import {
 } from "../../../src/hosted/thread/protocol"
 import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../src/hosted/environment/workspace"
+import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
 import { testToolPolicy } from "../execution/tool-policy.fixture"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -104,7 +110,10 @@ const snapshot = {
 }
 
 const withDatabase = <A, E, R>(
-  use: (pool: Pool, url: string) => Effect.Effect<A, E, R | HostedStore | ThreadProtocolStore>,
+  use: (
+    pool: Pool,
+    url: string,
+  ) => Effect.Effect<A, E, R | HostedClientAuthority | HostedPresence | ThreadProtocolStore>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -146,8 +155,9 @@ const withDatabase = <A, E, R>(
 const setup = (pool: Pool) =>
   Effect.gen(function* () {
     const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+    const db = drizzle({ client: pool })
     yield* Effect.tryPromise(() =>
-      drizzle({ client: pool }).insert(identityUser).values({
+      db.insert(identityUser).values({
         id: userId,
         name: userId,
         email: "protocol@example.test",
@@ -156,42 +166,61 @@ const setup = (pool: Pool) =>
         updatedAt: createdAt,
       }),
     )
-    const hosted = yield* HostedStore
-    yield* hosted.putOwner({ id: ownerId, identity: actor.owner, now })
-    yield* hosted.registerDevice({
+    const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
+    yield* aggregateDatabase.transaction((tx) =>
+      Effect.gen(function* () {
+        yield* tx.insert(rikaHostedOwners).values({ id: ownerId, kind: "personal", userId })
+        yield* tx.insert(rikaHostedOwnerCounters).values({ ownerId })
+        yield* tx.insert(rikaHostedWorkspaces).values({
+          id: workspaceId,
+          ownerId,
+          projectId: null,
+          createdByUserId: userId,
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt,
+        })
+        yield* tx.insert(rikaWorkspaces).values({ ownerId, path: workspaceId, createdAt: 1 })
+        yield* tx.insert(rikaHostedThreads).values({
+          id: threadId,
+          ownerId,
+          projectId: null,
+          workspaceId,
+          createdByUserId: userId,
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt,
+        })
+        yield* tx.insert(rikaThreads).values({
+          id: threadId,
+          ownerId,
+          workspace: workspaceId,
+          title: "Protocol Thread",
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      }),
+    )
+    const authority = yield* HostedClientAuthority
+    yield* authority.registerDevice({
       id: deviceId,
       userId,
       displayName: "Protocol device",
       publicKeyFingerprint: "protocol-key",
       now,
     })
-    yield* hosted.authenticateClient({
+    yield* authority.authenticateClient({
       id: clientId,
       userId,
       deviceId,
       now,
       expiresAt: authorityExpiresAt,
     })
-    yield* hosted.grantClientAuthority({
+    yield* authority.grantClientAuthority({
       ownerId,
       actor,
       now,
       expiresAt: authorityExpiresAt,
-    })
-    yield* hosted.createWorkspace({
-      id: workspaceId,
-      ownerId,
-      createdByUserId: userId,
-      executorKind: "runner",
-      now,
-    })
-    yield* hosted.createThread({
-      id: threadId,
-      ownerId,
-      workspaceId,
-      createdByUserId: userId,
-      executorKind: "runner",
-      now,
     })
     const protocol = yield* ThreadProtocolStore
     yield* protocol.initializeThread({ ownerId, threadId, actor })
@@ -202,12 +231,49 @@ const command = (id: string, expectedThreadVersion: string) => ({
   ownerId,
   threadId,
   commandId: CommandId.make(id),
+  turnId: TurnId.make(`turn-${id}`),
   idempotencyKey: IdempotencyKey.make(`${id}-key`),
   expectedThreadVersion: ThreadVersion.make(expectedThreadVersion),
   actor,
   command: { _tag: "Cancel" },
   admittedAt: now,
 })
+
+const completeMockPrompt = (
+  store: ThreadProtocolStore["Service"],
+  input: Parameters<HostedProductService["admitAuthorizedRun"]>[0],
+  status: "accepted" | "queued",
+  completedSnapshot?: HostedThreadSnapshot,
+) => {
+  if (input.claimToken === undefined) return Effect.die("Worker prompt admission is missing its command claim")
+  const completion: Parameters<ThreadProtocolStore["Service"]["completeCommand"]>[0] = {
+    ownerId: input.authority.ownerId,
+    threadId: ThreadId.make(input.threadId),
+    commandId: CommandId.make(input.operationKey),
+    claimToken: input.claimToken,
+    result: { _tag: "PromptAdmitted", status },
+    events: [
+      {
+        _tag: "SubmissionAdmitted",
+        threadId: ProductThreadId.make(input.threadId),
+        turnId: TurnId.make(input.turnId),
+        status: status === "accepted" ? "active" : "queued",
+        submissionId: input.submissionId ?? input.operationKey,
+      },
+    ],
+    completedAt: later,
+  }
+  if (completedSnapshot !== undefined) Object.assign(completion, { snapshot: completedSnapshot })
+  return store.completeCommand(completion).pipe(
+    Effect.orDie,
+    Effect.as({
+      _tag: "Admitted" as const,
+      commandId: input.operationKey,
+      turnId: input.turnId,
+      status,
+    }),
+  )
+}
 
 it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes socket tickets once", () =>
   withDatabase((pool) =>
@@ -311,6 +377,14 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
       expect(
         yield* protocol
           .admitCommand({
+            ...duplicate,
+            command: { _tag: "Cancel", payload: "changed" },
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
+      expect(
+        yield* protocol
+          .admitCommand({
             ...command("different-command", "1"),
             idempotencyKey: duplicate.idempotencyKey,
           })
@@ -328,10 +402,17 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         { failure: { reason: "stale-version" } },
       ])
 
-      yield* protocol.appendEvents({
+      const appended = yield* protocol.appendEvents({
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
+        createdAt: later,
+      })
+      yield* protocol.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: appended[0]!.threadVersion,
+        cursor: appended[0]!.cursor,
         snapshot,
         createdAt: later,
       })
@@ -345,9 +426,9 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
       expect(replay).toMatchObject({
         threadVersion: "2",
         cursor: "2",
-        snapshot: { cursor: "2" },
+        snapshot: { cursor: "1" },
       })
-      expect(replay.events).toEqual([])
+      expect(replay.events).toMatchObject([{ cursor: "2" }])
       expect(
         yield* protocol.acknowledgeCursor({
           ownerId,
@@ -364,8 +445,8 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
         afterCursor: ThreadEventCursor.make("0"),
         limit: 100,
       })
-      expect(compacted.snapshot?.cursor).toBe("2")
-      expect(compacted.events).toEqual([])
+      expect(compacted.snapshot?.cursor).toBe("1")
+      expect(compacted.events).toMatchObject([{ cursor: "2" }])
 
       yield* protocol.issueTicket({
         ticketId: "ticket",
@@ -565,20 +646,80 @@ it.effect.skipIf(!live)("claims ordinary commands in Thread version order across
   ),
 )
 
+it.effect.skipIf(!live)("keeps same-Thread order and Turn identity stable across worker interruption", () =>
+  withDatabase((pool) =>
+    Effect.gen(function* () {
+      const protocol = yield* setup(pool)
+      const first = command("interrupted-first", "0")
+      const second = command("interrupted-second", "1")
+      yield* protocol.admitCommand(first)
+      yield* protocol.admitCommand(second)
+
+      const initial = yield* protocol.claimNextCommand({
+        claimToken: "interrupted-worker",
+        claimMillis: 60_000,
+      })
+      expect(initial).toMatchObject({ commandId: first.commandId, turnId: first.turnId })
+      yield* protocol.releaseCommandClaim({
+        ownerId,
+        threadId,
+        commandId: first.commandId,
+        claimToken: "interrupted-worker",
+      })
+
+      const recovered = yield* protocol.claimNextCommand({
+        claimToken: "recovered-worker",
+        claimMillis: 60_000,
+      })
+      expect(recovered).toMatchObject({ commandId: first.commandId, turnId: first.turnId })
+      yield* protocol.completeCommand({
+        ownerId,
+        threadId,
+        commandId: first.commandId,
+        claimToken: "recovered-worker",
+        result: { _tag: "Applied" },
+        events: [],
+        completedAt: later,
+      })
+
+      expect(
+        yield* protocol.claimNextCommand({
+          claimToken: "next-worker",
+          claimMillis: 60_000,
+        }),
+      ).toMatchObject({ commandId: second.commandId, turnId: second.turnId })
+    }),
+  ),
+)
+
 it.effect.skipIf(!live)("claims another Thread while one Thread command lane is locked", () =>
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
       const otherThreadId = ThreadId.make("protocol-thread-other")
-      yield* hosted.createThread({
-        id: otherThreadId,
-        ownerId,
-        workspaceId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
-      })
+      yield* aggregateDatabase.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(rikaHostedThreads).values({
+            id: otherThreadId,
+            ownerId,
+            projectId: null,
+            workspaceId,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt: DateTime.toDate(DateTime.nowUnsafe()),
+          })
+          yield* tx.insert(rikaThreads).values({
+            id: otherThreadId,
+            ownerId,
+            workspace: workspaceId,
+            title: "Other protocol thread",
+            createdAt: 2,
+            updatedAt: 2,
+          })
+        }),
+      )
       yield* protocol.initializeThread({
         ownerId,
         threadId: otherThreadId,
@@ -748,7 +889,7 @@ it.effect.skipIf(!live)("keeps event versions and snapshots monotonic when comma
       )
       expect(
         snapshots.map(({ threadVersion, cursor }) => ({ version: String(threadVersion), cursor: String(cursor) })),
-      ).toMatchObject([{ version: "2", cursor: "2" }])
+      ).toMatchObject([{ version: "2", cursor: "1" }])
     }),
   ),
 )
@@ -757,10 +898,11 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const authority = yield* HostedClientAuthority
       let completionAttempts = 0
       let admissionAttempts = 0
       const admittedEffects = new Set<string>()
+      const admittedTurnIds = new Set<string>()
       const workerProtocol = ThreadProtocolStore.of({
         ...protocol,
         completeCommand: (input) => {
@@ -768,7 +910,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           completionAttempts += 1
           return completionAttempts === 1
             ? Effect.fail(
-                StoreError.make({
+                HostedPersistenceError.make({
                   reason: "database",
                   message: "simulated API interruption",
                 }),
@@ -789,13 +931,8 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
           Effect.sync(() => {
             admissionAttempts += 1
             admittedEffects.add(input.operationKey)
-            return {
-              _tag: "Admitted" as const,
-              commandId: input.operationKey,
-              turnId: `turn-${input.operationKey}`,
-              status: "accepted" as const,
-            }
-          }),
+            admittedTurnIds.add(input.turnId)
+          }).pipe(Effect.andThen(completeMockPrompt(workerProtocol, input, "accepted"))),
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
         authorizeOwner: () => Effect.die("unused"),
@@ -809,16 +946,18 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
+        projectionCommitted: () => Effect.die("unused"),
       }
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, workerProtocol),
-              Layer.succeed(HostedStore, hosted),
+              Layer.succeed(HostedClientAuthority, authority),
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(
@@ -896,6 +1035,7 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
       expect(completionAttempts).toBe(2)
       expect(admissionAttempts).toBe(2)
       expect(admittedEffects).toEqual(new Set(["server-owned-submit"]))
+      expect(admittedTurnIds).toEqual(new Set([input.turnId]))
       const replay = yield* protocol.replay({
         ownerId,
         threadId,
@@ -917,7 +1057,7 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
   withDatabase((pool) =>
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
-      const hosted = yield* HostedStore
+      const authority = yield* HostedClientAuthority
       const releasePrompt = yield* Deferred.make<void>()
       const cancelledPrompts = new Set<string>()
       const admittedPrompts = new Set<string>()
@@ -948,11 +1088,22 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
             }),
           ),
         cancelRunAdmission: () => Effect.die("unused"),
-        cancelAuthorizedRunAdmission: (input) =>
-          Effect.sync(() => {
-            cancelledPrompts.add(input.targetCommandId)
-            return {}
-          }),
+        cancelAuthorizedRunAdmission: (input) => {
+          const cancellation: Parameters<ThreadProtocolStore["Service"]["cancelPrompt"]>[0] = {
+            ownerId: input.authority.ownerId,
+            threadId: ThreadId.make(input.threadId),
+            cancelCommandId: CommandId.make(input.cancelCommandId),
+            targetCommandId: CommandId.make(input.targetCommandId),
+            actor: input.authority.actor,
+            cancelledAt: later,
+          }
+          if (input.claimToken !== undefined) Object.assign(cancellation, { claimToken: input.claimToken })
+          return protocol.cancelPrompt(cancellation).pipe(
+            Effect.orDie,
+            Effect.tap(() => Effect.sync(() => cancelledPrompts.add(input.targetCommandId))),
+            Effect.map((resolution) => (resolution._tag === "Turn" ? { turnId: String(resolution.turnId) } : {})),
+          )
+        },
         authorizeOwner: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
@@ -964,17 +1115,19 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.succeed(snapshot),
+        projectionCommitted: () => Effect.die("unused"),
       }
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
           concurrency: 2,
         }).pipe(
+          Layer.provide(hostedWorkerRuntimeLayerTest),
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(ThreadProtocolStore, protocol),
-              Layer.succeed(HostedStore, hosted),
+              Layer.succeed(HostedClientAuthority, authority),
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(
@@ -1072,13 +1225,6 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       const protocolStore = yield* setup(pool)
       const db = drizzle({ client: pool })
       let currentSnapshot: HostedThreadSnapshot = snapshot
-      let snapshotBarrier:
-        | {
-            readonly started: Deferred.Deferred<void>
-            readonly release: Deferred.Deferred<void>
-            reads: number
-          }
-        | undefined
       const product: HostedProductService = {
         ready: Effect.void,
         projects: () => Effect.succeed([]),
@@ -1100,18 +1246,9 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
         threads: () => Effect.die("unused"),
         preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
-        snapshot: () =>
-          Effect.gen(function* () {
-            const captured = currentSnapshot
-            const barrier = snapshotBarrier
-            if (barrier !== undefined) {
-              barrier.reads += 1
-              if (barrier.reads === 2) yield* Deferred.succeed(barrier.started, undefined)
-              yield* Deferred.await(barrier.release)
-            }
-            return captured
-          }),
+        snapshot: () => Effect.succeed(currentSnapshot),
         interactive: () => Effect.die("unused"),
+        projectionCommitted: () => Effect.die("unused"),
       }
       const dependencies = Layer.mergeAll(
         Layer.succeed(HostedProduct, product),
@@ -1182,10 +1319,17 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
               revision: updatedAt,
             },
           }
-          yield* protocolStore.appendEvents({
+          const appended = yield* protocolStore.appendEvents({
             ownerId,
             threadId,
             events: [{ _tag: "ThreadViewSnapshot", snapshot: currentSnapshot.view }],
+            createdAt: later,
+          })
+          yield* protocolStore.saveSnapshot({
+            ownerId,
+            threadId,
+            threadVersion: appended[0]!.threadVersion,
+            cursor: appended[0]!.cursor,
             snapshot: currentSnapshot,
             createdAt: later,
           })
@@ -1243,111 +1387,6 @@ it.effect.skipIf(!live)("resets compacted replica gaps and pushes contiguous eve
       yield* publish(3)
       const second = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
       expect(second.map(eventCursors)).toEqual([["2"], ["2"]])
-
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Projected checkpoint wake" },
-          revision: 4,
-        },
-      }
-      yield* Effect.tryPromise(() => db.insert(rikaWorkspaces).values({ ownerId, path: workspaceId, createdAt: 4 }))
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaThreads).values({
-          id: threadId,
-          ownerId,
-          workspace: workspaceId,
-          title: "Checkpoint notification",
-          createdAt: 4,
-          updatedAt: 4,
-        }),
-      )
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaTurns).values({
-          id: "checkpoint-notify-turn",
-          threadId,
-          prompt: "$ printf projection",
-          status: "running",
-          createdAt: 4,
-          updatedAt: 4,
-          shellCommand: "printf projection",
-          turnKind: "RecordedShell",
-        }),
-      )
-      yield* Effect.tryPromise(() =>
-        db.insert(rikaTranscriptCheckpoints).values({
-          turnId: "checkpoint-notify-turn",
-          threadId,
-          checkpointGeneration: 1,
-          revision: 0,
-          projectionVersion: ExecutionProjection.projectionVersion,
-          stateJson: "{}",
-          updatedAt: 4,
-        }),
-      )
-      const projected = yield* Effect.all([connectionA.outbound, connectionB.outbound], { concurrency: "unbounded" })
-      expect(projected).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: currentSnapshot } }],
-      ])
-
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Running before terminal transition" },
-          revision: 5,
-        },
-      }
-      snapshotBarrier = {
-        started: yield* Deferred.make<void>(),
-        release: yield* Deferred.make<void>(),
-        reads: 0,
-      }
-      const firstWake = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
-        concurrency: "unbounded",
-      }).pipe(Effect.forkChild)
-      yield* Effect.tryPromise(() =>
-        db
-          .update(rikaTranscriptCheckpoints)
-          .set({ updatedAt: 5 })
-          .where(eq(rikaTranscriptCheckpoints.turnId, "checkpoint-notify-turn")),
-      )
-      yield* Deferred.await(snapshotBarrier.started).pipe(Effect.timeout("5 seconds"))
-      currentSnapshot = {
-        ...currentSnapshot,
-        view: {
-          ...currentSnapshot.view,
-          thread: { ...currentSnapshot.view.thread, title: "Completed after terminal transition" },
-          revision: 6,
-        },
-      }
-      yield* Effect.tryPromise(() =>
-        db
-          .update(rikaTurns)
-          .set({
-            status: "completed",
-            updatedAt: 6,
-            shellResultText: "",
-            shellResultTruncated: 0,
-            shellResultExitCode: 0,
-          })
-          .where(eq(rikaTurns.id, "checkpoint-notify-turn")),
-      )
-      yield* Deferred.succeed(snapshotBarrier.release, undefined)
-      expect(yield* Fiber.join(firstWake)).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 5 } } } }],
-      ])
-      snapshotBarrier = undefined
-      const terminal = yield* Effect.all([connectionA.outbound, connectionB.outbound], {
-        concurrency: "unbounded",
-      }).pipe(Effect.timeout("5 seconds"))
-      expect(terminal).toMatchObject([
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
-        [{ payload: { _tag: "ThreadSnapshot", cursor: "2", snapshot: { view: { revision: 6 } } } }],
-      ])
     }),
   ),
 )
@@ -1376,6 +1415,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         authorizeThread: () => Effect.succeed({ ownerId, actor }),
         threadExecutionContext: () =>
           Effect.succeed({
+            workspaceId: "workspace-protocol",
             repository: {
               repositoryId: "repository-1",
               owner: "In-Time-Tec",
@@ -1408,13 +1448,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           Effect.sync(() => {
             if (!runs.some((run) => run.operationKey === input.operationKey))
               runs.push({ threadId: input.threadId, operationKey: input.operationKey, prompt: input.prompt })
-            return {
-              _tag: "Admitted" as const,
-              commandId: input.operationKey,
-              turnId: `turn-${input.operationKey}`,
-              status: "queued" as const,
-            }
-          }),
+          }).pipe(Effect.andThen(completeMockPrompt(protocolStore, input, "queued", currentSnapshot))),
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       }
@@ -1423,6 +1457,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         preview: () => Effect.die("unused"),
         thread: () => Effect.succeed(currentSnapshot.view.thread),
         snapshot: () => Effect.succeed(currentSnapshot),
+        projectionCommitted: () => Effect.die("unused"),
         interactive: (input, persist) =>
           Effect.suspend(() => {
             effects.push(input.command)
@@ -1463,9 +1498,9 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       yield* Layer.build(
         hostedThreadCommandWorkerLayer({
           claimMillis: 10_000,
-          pollIntervalMillis: 250,
+          fallbackIntervalMillis: 250,
           concurrency: 8,
-        }).pipe(Layer.provide(dependencies)),
+        }).pipe(Layer.provide(hostedWorkerRuntimeLayerTest), Layer.provide(dependencies)),
       )
       const protocols = yield* Effect.all(
         [
@@ -1577,6 +1612,13 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           },
         },
       ])
+      expect(
+        yield* controllerA.receive({
+          ...duplicate,
+          requestId: RequestId.make("duplicate-payload-mismatch"),
+          command: { ...duplicate.command, text: "changed payload" },
+        }),
+      ).toMatchObject([{ payload: { _tag: "CommandRejected", reason: "conflict" } }])
       expect(effects).toHaveLength(0)
 
       const contender = (id: string, requestId: string) => ({
@@ -1647,6 +1689,14 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
           },
         ],
       }
+      yield* protocolStore.checkpoint({
+        ownerId,
+        threadId,
+        threadVersion: ThreadVersion.make("3"),
+        cursor: ThreadEventCursor.make("3"),
+        snapshot: currentSnapshot,
+        createdAt: later,
+      })
       const approvalController = yield* open(protocolA)
       expect(
         yield* approvalController.receive({
@@ -1664,13 +1714,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
             _tag: "ThreadAttached",
             threadVersion: "3",
             cursor: "3",
-            snapshot: {
-              pendingAuthorizations: [
-                {
-                  authorizationId: "authorization-1",
-                  turnId: "approval-turn",
-                },
-              ],
+            checkpoint: {
+              cursor: "3",
+              snapshot: {
+                pendingAuthorizations: [
+                  {
+                    authorizationId: "authorization-1",
+                    turnId: "approval-turn",
+                  },
+                ],
+              },
             },
             events: [],
             participants: expect.any(Array),
@@ -1824,6 +1877,7 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         threadId,
         actor,
         commandId: replayCommandId,
+        turnId: TurnId.make("turn-cursor-replay-command"),
         idempotencyKey: replayIdempotencyKey,
         expectedThreadVersion: ThreadVersion.make("6"),
         command: {
@@ -1879,13 +1933,16 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const attachedReplay = replay[0]!.payload
       expect(attachedReplay).toMatchObject({
         _tag: "ThreadAttached",
-        snapshotCursor: "1005",
+        baseCursor: "3",
+        checkpoint: { cursor: "3" },
         threadVersion: "7",
         cursor: "1005",
         participants: expect.any(Array),
       })
       if (attachedReplay._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
-      expect(attachedReplay.events).toEqual([])
+      expect(attachedReplay.events).toHaveLength(1_002)
+      expect(attachedReplay.events[0]?.cursor).toBe("4")
+      expect(attachedReplay.events.at(-1)?.cursor).toBe("1005")
       expect(
         (yield* replayController.receive({
           protocolVersion,
@@ -1902,7 +1959,6 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
         ownerId,
         threadId,
         events: [{ _tag: "ExecutionControlled", action: "cancelled" }],
-        snapshot: currentSnapshot,
         createdAt: later,
       })
       yield* Effect.tryPromise(() =>
@@ -1928,11 +1984,11 @@ it.effect.skipIf(!live)("converges duplicate, reordered, and delayed replica fra
       const appendOnlyAttachment = appendOnlyReplay[0]!.payload
       expect(appendOnlyAttachment).toMatchObject({
         _tag: "ThreadAttached",
-        snapshotCursor: "1006",
+        baseCursor: "1005",
         cursor: "1006",
+        events: [{ cursor: "1006" }],
       })
       if (appendOnlyAttachment._tag !== "ThreadAttached") throw new Error("expected ThreadAttached")
-      expect(appendOnlyAttachment.events).toEqual([])
 
       const duplicateControl = {
         protocolVersion,
@@ -2018,7 +2074,9 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
     Effect.gen(function* () {
       const protocol = yield* setup(pool)
       const db = drizzle({ client: pool })
-      const hosted = yield* HostedStore
+      const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
+      const authority = yield* HostedClientAuthority
+      const presence = yield* HostedPresence
       const organizationId = OrganizationId.make("protocol-organization")
       const membershipId = BetterAuthMemberId.make("protocol-membership")
       const organizationOwnerId = OwnerId.make("protocol-organization-owner")
@@ -2050,31 +2108,47 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
           createdAt,
         }),
       )
-      yield* hosted.putOwner({
-        id: organizationOwnerId,
-        identity: organizationActor.owner,
-        now,
-      })
-      yield* hosted.grantClientAuthority({
+      yield* aggregateDatabase.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.insert(rikaHostedOwners).values({ id: organizationOwnerId, kind: "organization", organizationId })
+          yield* tx.insert(rikaHostedOwnerCounters).values({ ownerId: organizationOwnerId })
+          yield* tx.insert(rikaHostedWorkspaces).values({
+            id: organizationWorkspaceId,
+            ownerId: organizationOwnerId,
+            projectId: null,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt,
+          })
+          yield* tx
+            .insert(rikaWorkspaces)
+            .values({ ownerId: organizationOwnerId, path: organizationWorkspaceId, createdAt: 1 })
+          yield* tx.insert(rikaHostedThreads).values({
+            id: organizationThreadId,
+            ownerId: organizationOwnerId,
+            projectId: null,
+            workspaceId: organizationWorkspaceId,
+            createdByUserId: userId,
+            executorKind: "runner",
+            inheritProjectGrants: false,
+            createdAt,
+          })
+          yield* tx.insert(rikaThreads).values({
+            id: organizationThreadId,
+            ownerId: organizationOwnerId,
+            workspace: organizationWorkspaceId,
+            title: "Organization protocol thread",
+            createdAt: 1,
+            updatedAt: 1,
+          })
+        }),
+      )
+      yield* authority.grantClientAuthority({
         ownerId: organizationOwnerId,
         actor: organizationActor,
         now,
         expiresAt: authorityExpiresAt,
-      })
-      yield* hosted.createWorkspace({
-        id: organizationWorkspaceId,
-        ownerId: organizationOwnerId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
-      })
-      yield* hosted.createThread({
-        id: organizationThreadId,
-        ownerId: organizationOwnerId,
-        workspaceId: organizationWorkspaceId,
-        createdByUserId: userId,
-        executorKind: "runner",
-        now,
       })
       yield* protocol.initializeThread({
         ownerId: organizationOwnerId,
@@ -2085,6 +2159,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         ownerId: organizationOwnerId,
         threadId: organizationThreadId,
         commandId: CommandId.make("organization-command"),
+        turnId: TurnId.make("turn-organization-command"),
         idempotencyKey: IdempotencyKey.make("organization-command-key"),
         expectedThreadVersion: ThreadVersion.make("0"),
         actor: organizationActor,
@@ -2120,7 +2195,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         },
         completedAt: later,
       })
-      yield* hosted.upsertPresence({
+      yield* presence.upsert({
         ownerId: organizationOwnerId,
         threadId: organizationThreadId,
         actor: organizationActor,
@@ -2170,6 +2245,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
             ownerId: organizationOwnerId,
             threadId: organizationThreadId,
             commandId: CommandId.make("revoked-command"),
+            turnId: TurnId.make("turn-revoked-command"),
             idempotencyKey: IdempotencyKey.make("revoked-command-key"),
             expectedThreadVersion: ThreadVersion.make("1"),
             actor: organizationActor,
@@ -2182,8 +2258,8 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         failure: { reason: "invalid-authority" },
       })
       expect(
-        yield* hosted
-          .listPresence({
+        yield* presence
+          .list({
             ownerId: organizationOwnerId,
             threadId: organizationThreadId,
             actor: organizationActor,
@@ -2206,7 +2282,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         threadVersion: "0",
         cursor: "0",
       })
-      yield* hosted.upsertPresence({
+      yield* presence.upsert({
         ownerId,
         threadId,
         actor,
@@ -2214,7 +2290,7 @@ it.effect.skipIf(!live)("revokes organization authority without revoking the sam
         now: later,
         expiresAt: presenceExpiresAt,
       })
-      expect(yield* hosted.listPresence({ ownerId, threadId, actor, now: later })).toHaveLength(1)
+      expect(yield* presence.list({ ownerId, threadId, actor, now: later })).toHaveLength(1)
     }),
   ),
 )

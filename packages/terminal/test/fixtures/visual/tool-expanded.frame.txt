@@ -15,8 +15,8 @@
 
 
 
- ✓ Explored 1 file ▾
-  ✓ Read src/main.ts ▸
+ ✓ Explored 1 file
+  ✓ Read src/main.ts
 ╭───────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ─╮
 │                                                                              │
 │                                                                              │

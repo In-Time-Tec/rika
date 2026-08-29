@@ -1,4 +1,3 @@
-import "./recovery.harness"
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMigrations, identityUser, runMigration } from "@rika/identity"
@@ -9,12 +8,15 @@ import {
   rikaHostedOwners,
   rikaHostedThreads,
   rikaHostedWorkspaces,
+  rikaThreads,
+  rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
 import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { and, asc, eq, ne } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
 import { Address, ExecutableManifest, ExecutableResolver, Message } from "tenetkit/runtime"
@@ -70,6 +72,8 @@ it.effect.skipIf(databaseUrl === "")(
         const db = drizzle({ client: pool })
         try {
           yield* migrate(url, pool)
+          const aggregateContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+          const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(aggregateContext))
           const current = DateTime.nowUnsafe()
           const now = DateTime.toDate(current)
           yield* Effect.tryPromise(() =>
@@ -95,25 +99,36 @@ it.effect.skipIf(databaseUrl === "")(
           yield* Effect.tryPromise(() =>
             db.insert(rikaHostedOwners).values({ id: "recovery-owner", kind: "personal", userId: "recovery-user" }),
           )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaHostedWorkspaces).values({
-              id: "recovery-workspace",
-              ownerId: "recovery-owner",
-              createdByUserId: "recovery-user",
-              executorKind: "orb",
-              inheritProjectGrants: false,
-              createdAt: now,
-            }),
-          )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaHostedThreads).values({
-              id: "recovery-thread",
-              ownerId: "recovery-owner",
-              workspaceId: "recovery-workspace",
-              createdByUserId: "recovery-user",
-              executorKind: "orb",
-              inheritProjectGrants: false,
-              createdAt: now,
+          yield* aggregateDatabase.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.insert(rikaHostedWorkspaces).values({
+                id: "recovery-workspace",
+                ownerId: "recovery-owner",
+                createdByUserId: "recovery-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              })
+              yield* tx
+                .insert(rikaWorkspaces)
+                .values({ ownerId: "recovery-owner", path: "recovery-workspace", createdAt: 1 })
+              yield* tx.insert(rikaHostedThreads).values({
+                id: "recovery-thread",
+                ownerId: "recovery-owner",
+                workspaceId: "recovery-workspace",
+                createdByUserId: "recovery-user",
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              })
+              yield* tx.insert(rikaThreads).values({
+                id: "recovery-thread",
+                ownerId: "recovery-owner",
+                workspace: "recovery-workspace",
+                title: "Recovery",
+                createdAt: 1,
+                updatedAt: 1,
+              })
             }),
           )
           yield* Effect.tryPromise(() =>
@@ -314,7 +329,6 @@ it.effect.skipIf(databaseUrl === "")(
                     stdout: "",
                     stderr: "",
                     durationMillis: 1,
-                    truncation: [],
                   },
                 },
                 workspaceId: "recovery-workspace",
@@ -331,11 +345,12 @@ it.effect.skipIf(databaseUrl === "")(
               },
             ]),
           )
+          const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })
           const context = yield* Layer.build(
             hostedRecoveryLayer.pipe(
               Layer.provide(
                 Layer.mergeAll(
-                  PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }),
+                  postgres,
                   AuthorizationPolicy.layer,
                   ExecutionPostgres.layer({
                     postgres: {
@@ -346,12 +361,12 @@ it.effect.skipIf(databaseUrl === "")(
                         workerId: "hosted-recovery-live",
                         concurrency: 1,
                         leaseMillis: 30_000,
-                        pollIntervalMillis: 60_000,
+                        fallbackIntervalMillis: 60_000,
                         cancellationIntervalMillis: 60_000,
                       },
                     },
                     resolver: ExecutableResolver.makeStatic([]),
-                  }),
+                  }).pipe(Layer.provide(postgres)),
                 ),
               ),
             ),
@@ -372,7 +387,7 @@ it.effect.skipIf(databaseUrl === "")(
             status: "succeeded",
             resolution_idempotency_key: "tenet-auto:executor-terminal",
             resolution_json:
-              '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1,"truncation":[]}}}',
+              '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1}}}',
           })
           const operations = yield* recovery.inspect({
             principal,

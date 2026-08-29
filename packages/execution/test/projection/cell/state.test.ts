@@ -78,8 +78,8 @@ describe("TenetKit cell projection", () => {
     expect(opened).toMatchObject({
       status: "running",
       visual: "ts",
-      source: { lines: 3, truncated: false },
-      output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+      source: { lines: 3 },
+      output: { stdout: "", stderr: "" },
       epoch: 0,
       notices: [],
       files: [],
@@ -157,7 +157,7 @@ describe("TenetKit cell projection", () => {
     ])
   })
 
-  it("settles a completed cell with result, output, duration, epoch, and truncation counts", () => {
+  it("settles a completed cell with complete result, output, duration, and epoch", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-complete", "complete")
     projector.apply(started("cell-3", "6 * 7"))
@@ -174,10 +174,6 @@ describe("TenetKit cell projection", () => {
             stdout: "printed\n",
             stderr: "",
             durationMillis: 1_240,
-            truncation: [
-              { channel: "stdout", droppedBytes: 128, droppedEvents: 2 },
-              { channel: "stderr", droppedBytes: 8, droppedEvents: 1 },
-            ],
           },
           false,
         ),
@@ -188,7 +184,7 @@ describe("TenetKit cell projection", () => {
       result: 42,
       durationMillis: 1_240,
       epoch: 2,
-      output: { stdout: "printed\n", stderr: "", droppedBytes: 136, droppedEvents: 3 },
+      output: { stdout: "printed\n", stderr: "" },
     })
   })
 
@@ -214,7 +210,6 @@ describe("TenetKit cell projection", () => {
             stdout: "before throw",
             stderr: "trace",
             durationMillis: 12,
-            truncation: [],
           }),
           true,
         ),
@@ -357,49 +352,20 @@ describe("TenetKit cell projection", () => {
     expect(cellOf(change)?.epoch).toBe(1)
   })
 
-  it("bounds streamed output and authored source", () => {
+  it("keeps streamed output and authored source complete", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-bounded", "bounded")
     const source = `const value = "${"s".repeat(100_000)}"`
     const opened = cellOf(projector.apply(started("cell-8", source)))
-    expect(opened?.source.truncated).toBe(true)
-    expect(opened?.source.text.length).toBe(65_536)
-    let bounded: Cell | undefined
+    expect(opened?.source.text).toBe(source)
+    let complete: Cell | undefined
     for (let index = 0; index < 4; index += 1)
-      bounded = cellOf(
+      complete = cellOf(
         projector.apply(
           progress("cell-8", { _tag: "Stdout", cellId: "cell-8", sequence: index, text: "o".repeat(8_000) }),
         ),
       )
-    expect(bounded?.output.stdout.length).toBe(16_384)
-    expect(bounded?.output.stdout.startsWith("…")).toBe(true)
-  })
-
-  it("accumulates truncation markers streamed before completion", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-cell-truncated", "truncated")
-    projector.apply(started("cell-9", "noisy()"))
-    projector.apply(
-      progress("cell-9", {
-        _tag: "OutputTruncated",
-        cellId: "cell-9",
-        sequence: 0,
-        channel: "stdout",
-        droppedBytes: 64,
-        droppedEvents: 1,
-      }),
-    )
-    const change = projector.apply(
-      progress("cell-9", {
-        _tag: "OutputTruncated",
-        cellId: "cell-9",
-        sequence: 1,
-        channel: "stderr",
-        droppedBytes: 32,
-        droppedEvents: 2,
-      }),
-    )
-    expect(cellOf(change)?.output).toMatchObject({ droppedBytes: 96, droppedEvents: 3 })
+    expect(complete?.output.stdout).toBe("o".repeat(32_000))
   })
 
   it("renders an emitted image artifact as an ImageAttachment block", () => {

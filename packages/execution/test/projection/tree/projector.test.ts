@@ -120,6 +120,7 @@ describe("TenetKit tree projector", () => {
   it("preserves read, edit, and bash product semantics", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-tools", "use tools")
+    const stdout = "ok".repeat(10_000)
     const read = projector.apply(
       modelResponse("raw-root-run", {
         type: "tool-call",
@@ -174,7 +175,7 @@ describe("TenetKit tree projector", () => {
           result: Response.makePart("tool-result", {
             id: "bash-call",
             name: "bash",
-            result: { running: false, processId: "p1", exitCode: 0, stdout: "ok" },
+            result: { running: false, processId: "p1", exitCode: 0, stdout },
             encodedResult: {},
             isFailure: false,
             providerExecuted: false,
@@ -189,8 +190,8 @@ describe("TenetKit tree projector", () => {
       block: expect.objectContaining({
         detail: "bun test",
         status: "complete",
-        result: { running: false, processId: "p1", exitCode: 0, stdout: "ok" },
-        process: expect.objectContaining({ processId: "p1", exitCode: 0, stdout: "ok" }),
+        result: { running: false, processId: "p1", exitCode: 0, stdout },
+        process: expect.objectContaining({ processId: "p1", exitCode: 0, stdout }),
       }),
     })
   })
@@ -248,7 +249,6 @@ describe("TenetKit tree projector", () => {
                   stdout: "partial output",
                   stderr: "",
                   durationMillis: 8,
-                  truncation: [],
                 },
                 encodedResult: {},
                 isFailure: false,
@@ -276,7 +276,7 @@ describe("TenetKit tree projector", () => {
         _tag: "Block",
         block: expect.objectContaining({
           status: "complete",
-          source: { text: "const answer = { value: 6 * 7 }\nanswer\n", lines: 3, truncated: false },
+          source: { text: "const answer = { value: 6 * 7 }\nanswer\n", lines: 3 },
           result: 42,
           durationMillis: 8,
           epoch: 1,
@@ -325,7 +325,6 @@ describe("TenetKit tree projector", () => {
               stdout: "",
               stderr: "",
               durationMillis: 1,
-              truncation: [],
             },
             encodedResult: {},
             isFailure: false,

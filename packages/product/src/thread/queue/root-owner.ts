@@ -8,7 +8,16 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ExecutionProjectionWatch from "../../execution/projection/watch"
-import { Cause, Clock, Effect, Fiber, Schema, Scope, Semaphore } from "effect"
+import { Cause, Clock, Effect, Fiber, RcMap, Schema, Scope, Semaphore } from "effect"
+
+interface ThreadOwnerState {
+  readonly admission: Semaphore.Semaphore
+  readonly claimed: Set<string>
+  readonly reobserve: Set<string>
+  readonly running: Map<string, Fiber.Fiber<void, Error>>
+  readonly relaunch: Set<string>
+  quiesced: boolean
+}
 
 export interface Lifecycle {
   readonly run: (turnId: Turn.TurnId) => Effect.Effect<void, Error>
@@ -56,7 +65,7 @@ export interface Interface {
     turnId: Turn.TurnId,
     expectedStatus?: ExecutionStatus.Status,
   ) => Effect.Effect<boolean, TurnRepository.RepositoryError>
-  readonly release: (turnId: Turn.TurnId) => Effect.Effect<boolean>
+  readonly release: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<boolean>
   readonly claimQueued: (
     threadId: Thread.ThreadId,
     now: number,
@@ -84,7 +93,10 @@ export interface Interface {
     SteeringAdmissionRecovery,
     TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
   >
-  readonly acknowledgeSteeringRejection: (requestId: string) => Effect.Effect<boolean, TurnRepository.RepositoryError>
+  readonly acknowledgeSteeringRejection: (
+    threadId: Thread.ThreadId,
+    requestId: string,
+  ) => Effect.Effect<boolean, TurnRepository.RepositoryError>
   readonly watchTurn: (
     turnId: Turn.TurnId,
     onChange?: (change: ExecutionProjection.Change) => void,
@@ -94,7 +106,7 @@ export interface Interface {
     ExecutionGateway.WatchTurnFailure | TurnRepository.RepositoryError | TranscriptRepository.RepositoryError
   >
   readonly install: (lifecycle: Lifecycle) => Effect.Effect<void>
-  readonly accepted: (turnId: Turn.TurnId) => Effect.Effect<void>
+  readonly accepted: (threadId: Thread.ThreadId, turnId: Turn.TurnId) => Effect.Effect<void>
   readonly quiesceThread: (threadId: Thread.ThreadId) => Effect.Effect<void, TurnRepository.RepositoryError>
 }
 
@@ -104,57 +116,72 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
   backend: ExecutionGateway.Interface,
   scope?: Scope.Scope,
 ) {
-  const ownerAdmission = yield* Semaphore.make(1)
   const ownerScope = scope ?? (yield* Scope.make())
-  const claimed = new Set<string>()
-  const reobserve = new Set<string>()
-  const claimedThreads = new Map<string, string>()
-  const quiesced = new Set<string>()
-  const quiescedTurns = new Set<string>()
-  let lifecycle: Lifecycle | undefined
-  const running = new Map<string, Fiber.Fiber<void, Error>>()
-  const relaunch = new Set<string>()
-  const claim = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
-    ownerAdmission.withPermits(1)(
+  const threadOwners = yield* RcMap.make({
+    lookup: () =>
       Effect.gen(function* () {
-        const key = String(turnId)
-        if (claimed.has(key)) {
-          reobserve.add(key)
-          return false
-        }
-        const current = yield* turns.get(turnId)
-        if (
-          current === undefined ||
-          quiesced.has(String(current.threadId)) ||
-          current.status === "queued" ||
-          (ExecutionStatus.isTerminalStatus(current.status) && expectedStatus === undefined) ||
-          (expectedStatus !== undefined && current.status !== expectedStatus)
-        )
-          return false
-        claimed.add(key)
-        claimedThreads.set(key, String(current.threadId))
-        return true
+        return {
+          admission: yield* Semaphore.make(1),
+          claimed: new Set<string>(),
+          reobserve: new Set<string>(),
+          running: new Map<string, Fiber.Fiber<void, Error>>(),
+          relaunch: new Set<string>(),
+          quiesced: false,
+        } satisfies ThreadOwnerState
       }),
+    idleTimeToLive: Infinity,
+  }).pipe(Effect.provideService(Scope.Scope, ownerScope))
+  const withThreadState = <A, E, R>(
+    threadId: string,
+    use: (state: ThreadOwnerState) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    Effect.scoped(
+      RcMap.get(threadOwners, threadId).pipe(Effect.flatMap((state) => state.admission.withPermits(1)(use(state)))),
     )
-  const release = (turnId: Turn.TurnId) =>
-    ownerAdmission.withPermits(1)(
+  let lifecycle: Lifecycle | undefined
+  const claim = (turnId: Turn.TurnId, expectedStatus?: ExecutionStatus.Status) =>
+    Effect.gen(function* () {
+      const current = yield* turns.get(turnId)
+      if (current === undefined) return false
+      return yield* withThreadState(String(current.threadId), (state) =>
+        Effect.gen(function* () {
+          const latest = yield* turns.get(turnId)
+          if (latest === undefined || String(latest.threadId) !== String(current.threadId)) return false
+          const key = String(turnId)
+          if (state.claimed.has(key)) {
+            state.reobserve.add(key)
+            return false
+          }
+          if (
+            state.quiesced ||
+            latest.status === "queued" ||
+            (ExecutionStatus.isTerminalStatus(latest.status) && expectedStatus === undefined) ||
+            (expectedStatus !== undefined && latest.status !== expectedStatus)
+          )
+            return false
+          state.claimed.add(key)
+          return true
+        }),
+      )
+    })
+  const release = (threadId: Thread.ThreadId, turnId: Turn.TurnId) =>
+    withThreadState(String(threadId), (state) =>
       Effect.sync(() => {
         const key = String(turnId)
-        claimedThreads.delete(key)
-        claimed.delete(key)
-        return reobserve.delete(key)
+        state.claimed.delete(key)
+        return state.reobserve.delete(key)
       }),
     )
-  const launch = (turnId: Turn.TurnId): Effect.Effect<void> =>
-    ownerAdmission.withPermits(1)(
+  const launch = (state: ThreadOwnerState, turnId: Turn.TurnId): Effect.Effect<void> =>
+    state.admission.withPermits(1)(
       Effect.gen(function* () {
         const key = String(turnId)
         if (lifecycle === undefined) return
-        if (running.has(key)) {
-          relaunch.add(key)
+        if (state.running.has(key)) {
+          state.relaunch.add(key)
           return
         }
-        if (quiescedTurns.has(String(turnId)) || quiesced.has(claimedThreads.get(String(turnId)) ?? "")) return
+        if (state.quiesced) return
         const program = lifecycle.run(turnId).pipe(
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -164,38 +191,40 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
                 ),
           ),
           Effect.ensuring(
-            ownerAdmission
+            state.admission
               .withPermits(1)(
                 Effect.sync(() => {
-                  running.delete(key)
-                  return relaunch.delete(key)
+                  state.running.delete(key)
+                  return state.relaunch.delete(key)
                 }),
               )
-              .pipe(Effect.flatMap((requested) => (requested ? launch(turnId) : Effect.void))),
+              .pipe(Effect.flatMap((requested) => (requested ? launch(state, turnId) : Effect.void))),
           ),
         )
         const fiber = yield* Effect.forkIn(program, ownerScope)
-        running.set(key, fiber)
+        state.running.set(key, fiber)
       }),
     )
   const claimQueued = (threadId: Thread.ThreadId, now: number) =>
-    ownerAdmission.withPermits(1)(
+    withThreadState(String(threadId), (state) =>
       Effect.gen(function* () {
-        if (quiesced.has(String(threadId))) return undefined
+        if (state.quiesced) return undefined
         const queueClaim = yield* turns.claimNextQueued(threadId, now)
         if (queueClaim === undefined) return undefined
         const key = String(queueClaim.turn.id)
-        if (claimed.has(key)) {
+        if (state.claimed.has(key)) {
           yield* turns.releaseQueuedClaim(queueClaim)
           return undefined
         }
-        claimed.add(key)
-        claimedThreads.set(key, String(queueClaim.turn.threadId))
+        state.claimed.add(key)
         return queueClaim
       }),
     )
-  const admitPrepared = Effect.fn("RootTurnOwner.admitPrepared")(function* (input: ExecutionGateway.StartTurn) {
-    if (quiesced.has(input.threadId))
+  const admitPrepared = Effect.fn("RootTurnOwner.admitPrepared")(function* (
+    state: ThreadOwnerState,
+    input: ExecutionGateway.StartTurn,
+  ) {
+    if (state.quiesced)
       return yield* ExecutionGateway.StartTurnFailure.make({ message: `Thread ${input.threadId} is being deleted` })
     const link = yield* backend.startTurn(input)
     const turn = yield* turns.attachExecutionLink(Turn.TurnId.make(input.turnId), link, yield* Clock.currentTimeMillis)
@@ -205,12 +234,17 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         .pipe(Effect.mapError((failure) => ExecutionGateway.StartTurnFailure.make({ message: failure.message })))
     return link
   })
-  const recoverPrepared = (input: ExecutionGateway.StartTurn, attempts = 4, delay = 100): Effect.Effect<void, never> =>
-    admitPrepared(input).pipe(
+  const recoverPreparedWithState = (
+    state: ThreadOwnerState,
+    input: ExecutionGateway.StartTurn,
+    attempts = 4,
+    delay = 100,
+  ): Effect.Effect<void, never> =>
+    admitPrepared(state, input).pipe(
       Effect.asVoid,
       Effect.catch((error) =>
         attempts > 1
-          ? Effect.sleep(delay).pipe(Effect.andThen(recoverPrepared(input, attempts - 1, delay * 2)))
+          ? Effect.sleep(delay).pipe(Effect.andThen(recoverPreparedWithState(state, input, attempts - 1, delay * 2)))
           : Effect.logWarning("turn.execution-admission.recovery.failed").pipe(
               Effect.annotateLogs({
                 "rika.thread.id": input.threadId,
@@ -222,6 +256,8 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
             ),
       ),
     )
+  const recoverPrepared = (input: ExecutionGateway.StartTurn) =>
+    withThreadState(input.threadId, (state) => recoverPreparedWithState(state, input))
   const isSteeringFailure = Schema.is(ExecutionGateway.SteeringFailure)
   const rejection = (
     admission: TurnRepositorySteering.SteeringAdmission,
@@ -282,16 +318,52 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
               .map((entry) => entry.requestId) ?? [],
         ),
       )
+  const recoverSteeringAdmissions = Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const admissions = yield* turns.listSteeringAdmissions
+      const groups = new Map<string, Array<readonly [number, TurnRepositorySteering.SteeringAdmission]>>()
+      for (const [index, admission] of admissions.entries()) {
+        const threadId = String(admission.target.threadId)
+        const group = groups.get(threadId)
+        if (group === undefined) groups.set(threadId, [[index, admission]])
+        else group.push([index, admission])
+      }
+      const outcomes = new Array<SteeringAdmissionOutcome | undefined>(admissions.length)
+      yield* Effect.forEach(
+        groups,
+        ([threadId, group]) =>
+          withThreadState(threadId, () =>
+            Effect.forEach(
+              group,
+              ([index, admission]) =>
+                restore(recoverSteeringAdmission(admission)).pipe(
+                  Effect.tap((outcome) => Effect.sync(() => (outcomes[index] = outcome))),
+                ),
+              { discard: true },
+            ),
+          ),
+        { concurrency: "unbounded", discard: true },
+      )
+      const settled = outcomes.flatMap((outcome) => (outcome === undefined ? [] : [outcome]))
+      return {
+        rejected: settled.flatMap((outcome) => (outcome._tag === "Rejected" ? [outcome] : [])),
+        completed: settled.flatMap((outcome) => (outcome._tag === "Completed" ? [outcome] : [])),
+        pending: settled.some((outcome) => outcome._tag === "Pending" || outcome._tag === "Rejected"),
+      } satisfies SteeringAdmissionRecovery
+    }),
+  )
   return {
     claim,
     release,
     claimQueued,
     startTurn: (input) =>
-      Effect.uninterruptible(
-        Effect.gen(function* () {
-          const prepared = yield* turns.prepareExecutionAdmission(input, yield* Clock.currentTimeMillis)
-          return yield* admitPrepared(prepared)
-        }),
+      withThreadState(input.threadId, (state) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const prepared = yield* turns.prepareExecutionAdmission(input, yield* Clock.currentTimeMillis)
+            return yield* admitPrepared(state, prepared)
+          }),
+        ),
       ),
     recoverExecutionAdmissions: Effect.uninterruptible(
       Effect.suspend(() =>
@@ -303,7 +375,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       ),
     ),
     prepareSteering: (target, input) =>
-      ownerAdmission.withPermits(1)(
+      withThreadState(target.threadId, () =>
         Effect.gen(function* () {
           return yield* turns.prepareSteeringAdmission(
             target,
@@ -314,7 +386,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         }),
       ),
     prepareQueuedSteering: (source, target, input) =>
-      ownerAdmission.withPermits(1)(
+      withThreadState(target.threadId, () =>
         Effect.gen(function* () {
           return yield* turns.prepareQueuedSteeringAdmission(
             source,
@@ -325,23 +397,9 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
           )
         }),
       ),
-    recoverSteeringAdmissions: ownerAdmission.withPermits(1)(
-      Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const admissions = yield* turns.listSteeringAdmissions
-          const outcomes = yield* Effect.forEach(admissions, (steeringAdmission) =>
-            restore(recoverSteeringAdmission(steeringAdmission)),
-          )
-          return {
-            rejected: outcomes.flatMap((outcome) => (outcome._tag === "Rejected" ? [outcome] : [])),
-            completed: outcomes.flatMap((outcome) => (outcome._tag === "Completed" ? [outcome] : [])),
-            pending: outcomes.some((outcome) => outcome._tag === "Pending" || outcome._tag === "Rejected"),
-          } satisfies SteeringAdmissionRecovery
-        }),
-      ),
-    ),
-    acknowledgeSteeringRejection: (requestId) =>
-      ownerAdmission.withPermits(1)(turns.completeRejectedSteeringAdmission(requestId)),
+    recoverSteeringAdmissions,
+    acknowledgeSteeringRejection: (threadId, requestId) =>
+      withThreadState(String(threadId), () => turns.completeRejectedSteeringAdmission(requestId)),
     watchTurn: (turnId, onChange, onPreview) => {
       if (onChange === undefined) {
         if (onPreview === undefined) return ExecutionProjectionWatch.watch({ turnId, turns, transcripts, backend })
@@ -355,27 +413,23 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       Effect.sync(() => {
         lifecycle = installed
       }),
-    accepted: launch,
+    accepted: (threadId, turnId) =>
+      Effect.scoped(RcMap.get(threadOwners, String(threadId)).pipe(Effect.flatMap((state) => launch(state, turnId)))),
     quiesceThread: (threadId) =>
-      Effect.gen(function* () {
-        const threadTurns = yield* turns.list(threadId)
-        const keys = new Set(threadTurns.map((turn) => String(turn.id)))
-        const fibers = yield* ownerAdmission.withPermits(1)(
-          Effect.sync(() => {
-            quiesced.add(String(threadId))
-            const owned = [...running].flatMap(([key, fiber]) => (keys.has(key) ? [fiber] : []))
-            for (const key of keys) {
-              quiescedTurns.add(key)
-              claimed.delete(key)
-              claimedThreads.delete(key)
-              reobserve.delete(key)
-              relaunch.delete(key)
-              running.delete(key)
-            }
-            return owned
-          }),
-        )
-        yield* Effect.forEach(fibers, Fiber.interrupt, { concurrency: "unbounded", discard: true })
-      }),
+      withThreadState(String(threadId), (state) =>
+        Effect.sync(() => {
+          state.quiesced = true
+          const fibers = [...state.running.values()]
+          state.claimed.clear()
+          state.reobserve.clear()
+          state.relaunch.clear()
+          state.running.clear()
+          return fibers
+        }),
+      ).pipe(
+        Effect.flatMap((fibers) =>
+          Effect.forEach(fibers, Fiber.interrupt, { concurrency: "unbounded", discard: true }),
+        ),
+      ),
   } satisfies Interface
 })

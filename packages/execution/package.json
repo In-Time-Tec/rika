@@ -13,6 +13,7 @@
     "./test-harness": "./src/test-harness.ts"
   },
   "dependencies": {
+    "@effect/sql-pg": "catalog:",
     "@aws-sdk/client-bedrock-runtime": "catalog:",
     "@aws-sdk/credential-provider-node": "catalog:",
     "@rika/coding-tools": "workspace:*",
@@ -27,6 +28,7 @@
     "@effect/vitest": "catalog:",
     "@rika/configuration": "workspace:*",
     "@types/bun": "catalog:",
+    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

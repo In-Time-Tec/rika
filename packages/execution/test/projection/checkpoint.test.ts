@@ -5,7 +5,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { reviewIntent } from "@rika/product/review-policy"
-import { Runtime } from "tenetkit/runtime"
+import { RunTree, Runtime } from "tenetkit/runtime"
 import { FanOut } from "tenetkit/runtime/driver"
 import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Stream } from "effect"
@@ -107,8 +107,9 @@ it.live(
           const runtime = Context.get(context, Runtime.Runtime)
           const link = yield* gateway.startTurn(input(testExecutionRoute()))
           yield* gateway.cancelTurn(link, "stop review")
+          const checkpoint = yield* RunTree.checkpoint(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
           return {
-            tree: yield* runtime.inspectTree(link.runId),
+            tree: checkpoint.inspection,
             fanOut: yield* runtime.inspectFanOut(FanOut.fanOutIdFor(link.runId, "review-turn:review")),
           }
         }),

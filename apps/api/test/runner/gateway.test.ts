@@ -1,4 +1,5 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
 import {
@@ -20,7 +21,8 @@ import {
   rikaHostedProjects,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
-  rikaHostedThreadCommands,
+  rikaHostedThreadProtocolCommands,
+  rikaHostedThreadProtocolState,
   rikaHostedThreadEvents,
   rikaHostedThreads,
   rikaHostedWorkspaceCapabilityAdmissions,
@@ -38,9 +40,11 @@ import {
   type AccessWire,
   type CellResponse,
 } from "@rika/remote-execution/protocol"
+import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
 import { and, count, eq, sql } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { type PgInsertValue } from "drizzle-orm/pg-core"
 import { FileSystem, Config, Context, Deferred, Effect, Fiber, Layer, Random, Redacted, Schema } from "effect"
@@ -261,6 +265,7 @@ const seed = (
     const ownerId = `${ownerKind}-owner-local-gateway`
     const now = sql`transaction_timestamp()`
     const future = sql`transaction_timestamp() + interval '5 minutes'`
+    const aggregateDatabase = yield* PgDrizzle.makeWithDefaults()
     yield* Effect.tryPromise(() =>
       databaseClient.insert(identityUser).values({
         id: "user-local-gateway",
@@ -331,42 +336,37 @@ const seed = (
         updatedAt: now,
       }),
     )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedWorkspaces).values({
-        id: "workspace-local-gateway",
-        ownerId,
-        projectId: "project-local-gateway",
-        createdByUserId: "user-local-gateway",
-        executorKind: "runner",
-        inheritProjectGrants: false,
-        createdAt: now,
-      }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedThreads).values({
-        id: "thread-local-gateway",
-        ownerId,
-        projectId: "project-local-gateway",
-        workspaceId: "workspace-local-gateway",
-        createdByUserId: "user-local-gateway",
-        executorKind: "runner",
-        inheritProjectGrants: false,
-        nextCommandSequence: 2,
-        nextEventSequence: 1,
-        createdAt: now,
-      }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaWorkspaces).values({ ownerId, path: "workspace-local-gateway", createdAt: 1 }),
-    )
-    yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaThreads).values({
-        id: "thread-local-gateway",
-        ownerId,
-        workspace: "workspace-local-gateway",
-        title: "Local",
-        createdAt: 1,
-        updatedAt: 1,
+    yield* aggregateDatabase.transaction((tx) =>
+      Effect.gen(function* () {
+        yield* tx.insert(rikaHostedWorkspaces).values({
+          id: "workspace-local-gateway",
+          ownerId,
+          projectId: "project-local-gateway",
+          createdByUserId: "user-local-gateway",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          createdAt: now,
+        })
+        yield* tx.insert(rikaWorkspaces).values({ ownerId, path: "workspace-local-gateway", createdAt: 1 })
+        yield* tx.insert(rikaHostedThreads).values({
+          id: "thread-local-gateway",
+          ownerId,
+          projectId: "project-local-gateway",
+          workspaceId: "workspace-local-gateway",
+          createdByUserId: "user-local-gateway",
+          executorKind: "runner",
+          inheritProjectGrants: false,
+          nextEventSequence: 1,
+          createdAt: now,
+        })
+        yield* tx.insert(rikaThreads).values({
+          id: "thread-local-gateway",
+          ownerId,
+          workspace: "workspace-local-gateway",
+          title: "Local",
+          createdAt: 1,
+          updatedAt: 1,
+        })
       }),
     )
     yield* Effect.tryPromise(() =>
@@ -454,7 +454,10 @@ const seed = (
       }),
     )
     yield* Effect.tryPromise(() =>
-      databaseClient.insert(rikaHostedThreadCommands).values({
+      databaseClient.insert(rikaHostedThreadProtocolState).values({ ownerId, threadId, version: 1 }),
+    )
+    yield* Effect.tryPromise(() =>
+      databaseClient.insert(rikaHostedThreadProtocolCommands).values({
         ownerId,
         threadId,
         commandId: `${operationKey}-command`,
@@ -476,12 +479,13 @@ const seed = (
                 clientId: "client-local-gateway",
                 deviceId,
               },
-        sequence: 1,
+        expectedVersion: 0,
+        threadVersion: 1,
         commitCursor: 1,
         command: { _tag: "SubmitPrompt", prompt: "restart" },
+        state: "admitted",
         admittedAt: now,
         turnId: "turn-local-gateway",
-        admissionStatus: "accepted",
       }),
     )
     yield* Effect.tryPromise(() =>
@@ -580,7 +584,12 @@ const isolated = <A, E, R>(
     try {
       const activePool = yield* migrate(url)
       pool = activePool
-      return yield* run({ url, databaseClient: drizzle({ client: activePool }) })
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+          return yield* run({ url, databaseClient: drizzle({ client: activePool }) }).pipe(Effect.provide(context))
+        }),
+      )
     } finally {
       const cleanupPool = pool
       yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
@@ -850,15 +859,29 @@ it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the call
           failure: { kind: "cancelled", message: "Cell operation was cancelled" },
         }
         yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-deadline-first", deadlineAt)))
+        yield* eventually(() =>
+          target.sent
+            .map((value) => decode(value))
+            .find(
+              (message) =>
+                message._tag === "CellExecute" && message.request.operationKey === "operation-deadline-first",
+            ),
+        )
         yield* TestClock.adjust("1 second")
-        const deadline = yield* gateway.execute(cellRequest("operation-deadline-first", deadlineAt))
-        expect(deadline).toMatchObject({ outcome: "unknown", eventPersisted: false })
+        expect(running.pollUnsafe()).toBeUndefined()
         expect(
           target.sent
             .map((value) => decode(value))
             .some((message) => message._tag === "CellCancel" && message.operationKey === "operation-deadline-first"),
-        ).toBe(true)
+        ).toBe(false)
+        yield* TestClock.adjust("100 millis")
         yield* persistTerminal(gateway, target, access, "operation-deadline-first", cancelled, "cancelled")
+        expect(yield* Fiber.join(running)).toMatchObject({
+          response: cancelled,
+          outcome: "cancelled",
+          eventPersisted: true,
+        })
         yield* gateway.receive(
           target,
           encode({
@@ -1212,7 +1235,7 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
           _tag: "Unknown",
           message: "Machine outcome is unknown at the operation deadline",
         })
-        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: false })
+        expect(running.pollUnsafe()).toBeUndefined()
         expect(binding.pollUnsafe()).toBeUndefined()
         expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
           [],
@@ -1221,6 +1244,8 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
         yield* Deferred.await(cleanupCompleted)
         yield* Fiber.join(binding)
         yield* Fiber.join(advancing)
+        yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+        expect(yield* Fiber.join(running)).toMatchObject({ outcome: "unknown", eventPersisted: false })
         expect(second.sent.map((value) => decode(value)).filter((message) => message._tag === "BindingResult")).toEqual(
           [
             expect.objectContaining({
@@ -1558,13 +1583,17 @@ it.effect.skipIf(!live)("reports an overdue dispatch without replacing the Runne
         const left = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const right = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         yield* TestClock.adjust("1 second")
-        const results = yield* Effect.all(
-          [
-            left.execute(cellRequest("operation-overdue", deadlineAt)),
-            right.execute(cellRequest("operation-overdue", deadlineAt)),
-          ],
-          { concurrency: 2 },
+        const waiting = yield* Effect.forkChild(
+          Effect.all(
+            [
+              left.execute(cellRequest("operation-overdue", deadlineAt)),
+              right.execute(cellRequest("operation-overdue", deadlineAt)),
+            ],
+            { concurrency: 2 },
+          ),
         )
+        yield* TestClock.adjust(CellTerminalSettlementGraceMillis)
+        const results = yield* Fiber.join(waiting)
         expect(results.map((result) => result.response)).toEqual([
           {
             _tag: "DomainFailure",

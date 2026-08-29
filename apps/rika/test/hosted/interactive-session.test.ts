@@ -118,11 +118,14 @@ const attached = (message: Message, value: HostedThreadSnapshot, cursor = "0"): 
   _tag: "ThreadAttached",
   requestId: message.requestId,
   threadId: message.command._tag === "AttachThread" ? message.command.threadId : HostedThreadId.make("invalid"),
-  snapshotThreadVersion: ThreadVersion.make(cursor),
-  snapshotCursor: ThreadEventCursor.make(cursor),
+  baseCursor: ThreadEventCursor.make(cursor),
   threadVersion: ThreadVersion.make(cursor),
   cursor: ThreadEventCursor.make(cursor),
-  snapshot: value,
+  checkpoint: {
+    threadVersion: ThreadVersion.make(cursor),
+    cursor: ThreadEventCursor.make(cursor),
+    snapshot: value,
+  },
   events: [],
   participants: [],
 })
@@ -539,6 +542,63 @@ it.effect("reconnects after the delivered cursor without duplicating the project
         attaches.map((message) => message.command._tag === "AttachThread" && String(message.command.afterCursor)),
       ).toEqual(["0", "1"])
       expect(received.filter((tag) => tag === "ThreadViewSnapshot")).toHaveLength(2)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("reattaches when admitted command versions are ahead of the replayed event cursor", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let attachments = 0
+      const harness = makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          attachments += 1
+          if (attachments === 1) {
+            socket.frame(attached(message, waitingSnapshot()))
+            return
+          }
+          socket.frame({
+            _tag: "ThreadAttached",
+            requestId: message.requestId,
+            threadId: message.command.threadId,
+            baseCursor: ThreadEventCursor.make("0"),
+            threadVersion: ThreadVersion.make("2"),
+            cursor: ThreadEventCursor.make("1"),
+            events: [event("thread-1", "1")],
+            participants: [],
+          })
+          return
+        }
+        if (message.command._tag === "SubmitPrompt") {
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+          return
+        }
+        if (message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("2"),
+          })
+      })
+      const hosted = yield* runSession(harness)
+      yield* hosted.session.submit("queued behind the active Turn")
+      yield* hosted.session.cancel()
+      harness.sockets[0]!.close()
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "reconnecting")
+      yield* reconnect(harness)
+      yield* eventually(() => hosted.states.at(-1)?.connectivity === "connected")
+      expect(hosted.session.currentView()?.thread.updatedAt).toBe(1)
+      yield* TestClock.adjust("10 seconds")
+      expect(harness.sockets).toHaveLength(2)
       yield* hosted.session.quit
     }),
   ),
@@ -1119,8 +1179,12 @@ it.effect("keeps pending cancellation when a reconnect attachment is rejected as
           if (attachments === 2) {
             socket.frame({
               ...attached(message, snapshot("thread-1", 0), "1"),
-              snapshotThreadVersion: ThreadVersion.make("0"),
-              snapshotCursor: ThreadEventCursor.make("0"),
+              baseCursor: ThreadEventCursor.make("0"),
+              checkpoint: {
+                threadVersion: ThreadVersion.make("0"),
+                cursor: ThreadEventCursor.make("0"),
+                snapshot: snapshot("thread-1", 0),
+              },
               events: [
                 {
                   threadId: HostedThreadId.make("thread-1"),

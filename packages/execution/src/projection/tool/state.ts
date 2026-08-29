@@ -1,7 +1,6 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Function, Option, Schema } from "effect"
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { toolTextLimit } from "../values"
 
 type Tool = Extract<Block, { readonly _tag: "ToolCall" }>
 type ToolFile = Tool["files"][number]
@@ -140,7 +139,7 @@ const makeToolImpl = (id: string, name: string, input: string, previous?: Tool):
   return tool
 }
 
-const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean, encodedOutput: string): Tool => {
+const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean): Tool => {
   const decoded = Schema.decodeUnknownOption(ToolOutput)(output)
   const value = Option.isSome(decoded) ? decoded.value : emptyOutput
   const statusText = (value.status ?? "").toLowerCase()
@@ -163,8 +162,7 @@ const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean
   if (failed) fileStatus = "failed"
   const resolved = value.diff ?? ""
   const json = Schema.decodeUnknownOption(Schema.Json)(output)
-  let result: Schema.Json = encodedOutput.slice(0, toolTextLimit)
-  if (Option.isSome(json) && JSON.stringify(json.value).length <= toolTextLimit) result = json.value
+  const result: Schema.Json = Option.isSome(json) ? json.value : String(output)
   let completed: Tool = {
     ...tool,
     status: completionStatus,
@@ -197,11 +195,9 @@ export const completeTool: {
     arg0: Parameters<typeof completeToolImpl>[0],
     arg1: Parameters<typeof completeToolImpl>[1],
     arg2: Parameters<typeof completeToolImpl>[2],
-    arg3: Parameters<typeof completeToolImpl>[3],
   ): ReturnType<typeof completeToolImpl>
   (
     arg1: Parameters<typeof completeToolImpl>[1],
     arg2: Parameters<typeof completeToolImpl>[2],
-    arg3: Parameters<typeof completeToolImpl>[3],
   ): (arg0: Parameters<typeof completeToolImpl>[0]) => ReturnType<typeof completeToolImpl>
-} = Function.dual(4, completeToolImpl)
+} = Function.dual(3, completeToolImpl)

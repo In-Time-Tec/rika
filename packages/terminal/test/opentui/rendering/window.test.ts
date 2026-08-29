@@ -10,6 +10,8 @@ test("toggles expandable transcript headers without selecting them and keeps bod
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const pointers: Array<string> = []
+      setup.renderer.setMousePointer = (style) => pointers.push(style)
       let model: Model = {
         ...initial("/work", "high"),
         input: "draft remains editable",
@@ -58,6 +60,8 @@ test("toggles expandable transcript headers without selecting them and keeps bod
         expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
         expect(commandIsBlue()).toBe(false)
         const header = records().get("tool:shell-selection:header")!.renderable
+        yield* openTui(() => setup.mockMouse.moveTo(header.screenX + 2, header.screenY))
+        expect(pointers.at(-1)).toBe("pointer")
         yield* openTui(() => setup.mockMouse.click(header.screenX + 2, header.screenY))
         yield* openTui(() => setup.flush())
         expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })

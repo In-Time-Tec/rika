@@ -1,6 +1,3 @@
-export const cellTextLimit = 16_384
-export const cellSourceLimit = 65_536
-
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import { partialInputRecord } from "@rika/product/execution-transcript-contract"
 import { Cell as TenetCell } from "tenetkit/repl"
@@ -30,7 +27,7 @@ const sourceLines = (text: string): number => (text.length === 0 ? 0 : text.spli
 const JsonFromString = Schema.fromJsonString(Schema.Json)
 const resultValue = (value: string): Schema.Json => {
   const decoded = Schema.decodeOption(JsonFromString)(value)
-  return Option.isSome(decoded) ? decoded.value : bounded(value, cellTextLimit)
+  return Option.isSome(decoded) ? decoded.value : value
 }
 
 const meaningfulLines = (source: string): ReadonlyArray<string> =>
@@ -52,16 +49,6 @@ const lineCounts = (patch: string) => {
     if (line.startsWith("-") && !line.startsWith("---")) deletions += 1
   }
   return { additions, deletions }
-}
-
-const truncationTotals = (value: ReadonlyArray<TenetCell.Truncation>) => {
-  let droppedBytes = 0
-  let droppedEvents = 0
-  for (const entry of value) {
-    droppedBytes += entry.droppedBytes
-    droppedEvents += entry.droppedEvents
-  }
-  return { droppedBytes, droppedEvents }
 }
 
 export interface CellProjection {
@@ -127,14 +114,11 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     recover(node, state, block.status === "running" || block.status === "unknown")
   }
 
-  const withSource = (block: Cell, source: string): Cell => {
-    const text = bounded(source, cellSourceLimit)
-    return {
-      ...block,
-      visual: visualOf(text),
-      source: { text, lines: sourceLines(text), truncated: source.length > cellSourceLimit },
-    }
-  }
+  const withSource = (block: Cell, source: string): Cell => ({
+    ...block,
+    visual: visualOf(source),
+    source: { text: source, lines: sourceLines(source) },
+  })
 
   const openCell = (node: Node, rawId: string, source: string) => {
     if (node.hidden) return
@@ -145,8 +129,8 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       id: identity.blockId,
       status: "running",
       visual: "ts",
-      source: { text: "", lines: 0, truncated: false },
-      output: { stdout: "", stderr: "", droppedBytes: 0, droppedEvents: 0 },
+      source: { text: "", lines: 0 },
+      output: { stdout: "", stderr: "" },
       epoch: 0,
       notices: [],
       calls: [],
@@ -157,7 +141,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
 
   const appendCellSource = (node: Node, rawId: string, delta: string) => {
     const identity = cellState(node, rawId)
-    identity.partial = bounded(`${identity.partial}${delta}`, cellSourceLimit * 2)
+    identity.partial = `${identity.partial}${delta}`
     openCell(node, rawId, optionalString(partialInputRecord(identity.partial).code))
   }
 
@@ -181,7 +165,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       key: `${blockId}:${event.sequence}`,
       path: event.name ?? "workspace",
       kind: /^--- \/dev\/null$/m.test(patch) ? "add" : "update",
-      patch: bounded(patch, cellTextLimit),
+      patch,
       ...lineCounts(patch),
       preview: false,
       status: "complete",
@@ -227,7 +211,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
           ...next,
           output: {
             ...next.output,
-            stdout: bounded(`${next.output.stdout}${optionalString(event.text)}`, cellTextLimit),
+            stdout: `${next.output.stdout}${optionalString(event.text)}`,
           },
         }
         break
@@ -236,22 +220,12 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
           ...next,
           output: {
             ...next.output,
-            stderr: bounded(`${next.output.stderr}${optionalString(event.text)}`, cellTextLimit),
+            stderr: `${next.output.stderr}${optionalString(event.text)}`,
           },
         }
         break
       case "Result":
         next = { ...next, result: resultValue(optionalString(event.value)) }
-        break
-      case "OutputTruncated":
-        next = {
-          ...next,
-          output: {
-            ...next.output,
-            droppedBytes: next.output.droppedBytes + event.droppedBytes,
-            droppedEvents: next.output.droppedEvents + event.droppedEvents,
-          },
-        }
         break
       case "Display": {
         const mediaType = optionalString(event.mediaType)
@@ -283,15 +257,13 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       const decoded = Schema.decodeUnknownOption(TenetCell.CellResult)(result)
       if (Option.isNone(decoded)) return
       const success = decoded.value
-      const totals = truncationTotals(success.truncation)
       write(node, rawId, {
         ...block,
         status: "complete",
         result: resultValue(success.value),
         output: {
-          stdout: bounded(success.stdout, cellTextLimit),
-          stderr: bounded(success.stderr, cellTextLimit),
-          ...totals,
+          stdout: success.stdout,
+          stderr: success.stderr,
         },
         epoch: success.epoch,
         durationMillis: success.durationMillis,
@@ -303,17 +275,14 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const failure = decoded.value
     const outcome = failureOutcome(failure)
     const executionFailure = failure._tag === "tenetkit/repl/CellExecutionFailed" ? failure : undefined
-    const totals = truncationTotals(executionFailure?.truncation ?? [])
     const stdout = executionFailure?.stdout ?? ""
     const stderr = executionFailure?.stderr ?? ""
     const failed: Cell = {
       ...block,
       status: outcome.status,
       output: {
-        stdout: stdout.length === 0 ? block.output.stdout : bounded(stdout, cellTextLimit),
-        stderr: stderr.length === 0 ? block.output.stderr : bounded(stderr, cellTextLimit),
-        droppedBytes: Math.max(block.output.droppedBytes, totals.droppedBytes),
-        droppedEvents: Math.max(block.output.droppedEvents, totals.droppedEvents),
+        stdout: stdout.length === 0 ? block.output.stdout : stdout,
+        stderr: stderr.length === 0 ? block.output.stderr : stderr,
       },
       epoch: "epoch" in failure ? failure.epoch : block.epoch,
     }

@@ -10,7 +10,7 @@
 
 
 
- Δ src/agent.ts ▾
+ Δ src/agent.ts
    ...
    224     {
    225       name: "oracle",

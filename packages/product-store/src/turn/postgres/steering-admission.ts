@@ -16,7 +16,7 @@ import { rikaThreadQueueState, rikaTurnSteeringOutbox, rikaTurns } from "../../d
 import { decodeAgent, decodeQueueState } from "./row-codec"
 import { turnRowSelection } from "./reader"
 import { turnRowJson } from "./row-json-codec"
-import { queuedTurnUnavailable, repositoryError } from "../memory/errors"
+import { queuedTurnUnavailable, repositoryError } from "./errors"
 
 const admissionSelection = {
   request_id: rikaTurnSteeringOutbox.requestId,

@@ -173,7 +173,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           Effect.map((value) => ({ _tag: "Success" as const, value })),
           Effect.catch((error) => Effect.succeed({ _tag: "Failure" as const, error })),
           Effect.onInterrupt(() =>
-            turns.releaseQueuedClaim(promoted).pipe(Effect.andThen(dependencies.releaseTurnObserver(promoted.turn.id))),
+            turns
+              .releaseQueuedClaim(promoted)
+              .pipe(Effect.andThen(dependencies.releaseTurnObserver(promoted.turn.threadId, promoted.turn.id))),
           ),
         )
         if (prepared._tag === "Failure") {
@@ -181,17 +183,17 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           if (transition._tag === "Transitioned") {
             dependencies.publishInteractiveActivity(0, dependencies.queueMutationEvent(transition.queue))
           }
-          yield* dependencies.releaseTurnObserver(promoted.turn.id)
+          yield* dependencies.releaseTurnObserver(promoted.turn.threadId, promoted.turn.id)
           continue
         }
         const transition = yield* turns.finishQueuedClaim(promoted, "running", yield* Clock.currentTimeMillis)
         if (transition._tag === "Unavailable") {
-          yield* dependencies.releaseTurnObserver(promoted.turn.id)
+          yield* dependencies.releaseTurnObserver(promoted.turn.threadId, promoted.turn.id)
           continue
         }
         dependencies.publishInteractiveActivity(0, dependencies.queueMutationEvent(transition.queue))
         yield* runTurn(transition.turn, prepared.value).pipe(
-          Effect.ensuring(dependencies.releaseTurnObserver(transition.turn.id)),
+          Effect.ensuring(dependencies.releaseTurnObserver(transition.turn.threadId, transition.turn.id)),
         )
       }
     })
@@ -227,7 +229,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     const runTurnWithRetry = Effect.fn("ProductOperation.runTurnWithRetry")(function* () {
       let attempt = 0
       let current = submitted
-      let last = yield* runTurn(current).pipe(Effect.ensuring(dependencies.releaseTurnObserver(current.id)))
+      let last = yield* runTurn(current).pipe(
+        Effect.ensuring(dependencies.releaseTurnObserver(current.threadId, current.id)),
+      )
       while (true) {
         attempt += 1
         if (last.result.status !== "failed") return last
@@ -265,7 +269,9 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
         if (!ThreadResult.TurnResult.isAgentExecution(retryTurn)) return last
         yield* dependencies.ensureTurnSummary(retryTurn)
         current = retryTurn
-        last = yield* runTurn(current).pipe(Effect.ensuring(dependencies.releaseTurnObserver(current.id)))
+        last = yield* runTurn(current).pipe(
+          Effect.ensuring(dependencies.releaseTurnObserver(current.threadId, current.id)),
+        )
       }
     })
     const completed = yield* runTurnWithRetry()

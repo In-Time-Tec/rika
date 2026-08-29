@@ -1,19 +1,8 @@
-import {
-  Cause,
-  Clock,
-  Context,
-  Crypto,
-  DateTime,
-  Effect,
-  FiberMap,
-  Function,
-  Layer,
-  Schema,
-  SubscriptionRef,
-} from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Function, Layer, Schema } from "effect"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
-import { HostedStore, StoreError } from "@rika/product/hosted-store"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { CreateThreadCommand, MutatingThreadCommand, isDurableThreadEvent } from "@rika/product/client-protocol"
 import * as ExecutionProjection from "@rika/product/execution-projection"
@@ -24,6 +13,7 @@ import { HostedProduct, HostedProductError, type ThreadAuthority } from "../prod
 import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
 import { HostedToolPolicy, HostedToolPolicyError } from "../execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../environment/workspace"
+import { HostedWorkerRuntime, type HostedWorkerStatus } from "../worker-runtime"
 
 export class HostedThreadCommandWorkerError extends Schema.TaggedError<HostedThreadCommandWorkerError>()(
   "HostedThreadCommandWorkerError",
@@ -40,25 +30,7 @@ export class HostedThreadCommandWorker extends Context.Service<
   HostedThreadCommandWorkerService
 >()("@rika/api/hosted/thread/command-worker/HostedThreadCommandWorker") {}
 
-type PollStatus =
-  | { readonly _tag: "Starting" }
-  | { readonly _tag: "Succeeded"; readonly at: number }
-  | { readonly _tag: "Failed"; readonly at: number; readonly message: string }
-
-interface WorkerState {
-  readonly poll: PollStatus
-  readonly lastSuccessfulPollAt: number | undefined
-  readonly lastFailure: { readonly at: number; readonly message: string } | undefined
-}
-
-export interface HostedThreadCommandWorkerStatus extends WorkerState {
-  readonly active: number
-  readonly capacity: number
-  readonly availableCapacity: number
-  readonly pollAgeMillis: number | undefined
-  readonly lastSuccessfulPollAgeMillis: number | undefined
-  readonly lastFailureAgeMillis: number | undefined
-}
+export type HostedThreadCommandWorkerStatus = HostedWorkerStatus
 
 class CommandApplicationError extends Schema.TaggedError<CommandApplicationError>()("CommandApplicationError", {
   kind: Schema.Literals(["invalid", "forbidden", "not-found", "conflict", "unavailable"]),
@@ -74,7 +46,7 @@ type InteractiveMutatingCommand = Exclude<
 >
 type CommandFailure =
   | CommandApplicationError
-  | StoreError
+  | HostedPersistenceError
   | HostedProductError
   | HostedWorkspaceError
   | HostedToolPolicyError
@@ -106,10 +78,9 @@ export const commandControlFailure: {
   ): ReturnType<typeof commandControlFailureImpl>
 } = Function.dual(2, commandControlFailureImpl)
 
-const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 const commandFailure = (error: CommandFailure) => {
   if (Schema.is(CommandApplicationError)(error)) return error
-  if (Schema.is(StoreError)(error)) {
+  if (Schema.is(HostedPersistenceError)(error)) {
     let kind: CommandApplicationError["kind"] = "unavailable"
     if (error.reason === "invalid-authority") kind = "forbidden"
     else if (error.reason === "not-found") kind = "not-found"
@@ -183,6 +154,14 @@ const repositoryServiceFailureKind = (reason: "conflict" | "invalid" | "missing"
   return "unavailable" as const
 }
 
+const durableCommandPayload = (record: ThreadProtocolCommand) => ({
+  ...record.command,
+  commandId: record.commandId,
+  threadId: record.threadId,
+  idempotencyKey: record.idempotencyKey,
+  expectedThreadVersion: record.expectedThreadVersion,
+})
+
 const productCommand = (command: InteractiveMutatingCommand) => {
   const value = (() => {
     switch (command._tag) {
@@ -222,25 +201,21 @@ const productCommand = (command: InteractiveMutatingCommand) => {
 
 export const layer = (options: {
   readonly claimMillis: number
-  readonly pollIntervalMillis: number
+  readonly fallbackIntervalMillis: number
   readonly concurrency?: number
 }) =>
-  Layer.unwrap(
+  Layer.effect(
+    HostedThreadCommandWorker,
     Effect.gen(function* () {
       const protocol = yield* ThreadProtocolStore
-      const hosted = yield* HostedStore
+      const hosted = yield* HostedClientAuthority
       const product = yield* HostedProduct
       const operations = yield* HostedThreadApplication
       const workspace = yield* HostedWorkspace
       const toolPolicy = yield* HostedToolPolicy
       const crypto = yield* Crypto.Crypto
       const concurrency = options.concurrency ?? 1
-      const active = yield* FiberMap.make<string>()
-      const health = yield* SubscriptionRef.make<WorkerState>({
-        poll: { _tag: "Starting" },
-        lastSuccessfulPollAt: undefined,
-        lastFailure: undefined,
-      })
+      const runtime = yield* HostedWorkerRuntime
 
       const complete = Effect.fn("HostedThreadCommandWorker.complete")(function* (
         record: ThreadProtocolCommand,
@@ -269,7 +244,7 @@ export const layer = (options: {
         record: ThreadProtocolCommand,
         claimToken: string,
       ) {
-        const command = yield* Schema.decodeUnknownEffect(DurableThreadCommand)(record.command).pipe(
+        const command = yield* Schema.decodeUnknownEffect(DurableThreadCommand)(durableCommandPayload(record)).pipe(
           Effect.mapError(() =>
             CommandApplicationError.make({ kind: "invalid", message: "Durable Thread command is invalid" }),
           ),
@@ -291,10 +266,18 @@ export const layer = (options: {
           return yield* complete(record, claimToken, { _tag: "ThreadCreated", threadId: record.threadId }, [])
 
         if (command._tag === "SubmitPrompt") {
+          if (record.turnId === undefined)
+            return yield* CommandApplicationError.make({
+              kind: "invalid",
+              message: "Prompt command has no Turn identity",
+            })
           const admission = {
             authority,
             threadId: record.threadId,
             operationKey: command.commandId,
+            turnId: record.turnId,
+            claimToken,
+            submissionId: command.submissionId ?? command.commandId,
             prompt: command.text,
           }
           if (command.attachments !== undefined && command.attachments.length > 0) {
@@ -309,16 +292,7 @@ export const layer = (options: {
           }
           if (command.mode !== undefined) Object.assign(admission, { mode: command.mode })
           const admitted = yield* product.admitAuthorizedRun(admission)
-          if (admitted._tag === "Cancelled") return yield* complete(record, claimToken, { _tag: "Applied" }, [])
-          return yield* complete(record, claimToken, { _tag: "PromptAdmitted", status: admitted.status }, [
-            {
-              _tag: "SubmissionAdmitted",
-              threadId: ProductThreadId.make(record.threadId),
-              turnId: ProductTurnId.make(admitted.turnId),
-              status: admitted.status === "accepted" ? "active" : "queued",
-              submissionId: command.submissionId ?? command.commandId,
-            },
-          ])
+          return admitted
         }
 
         if (command._tag === "EnsureRepositoryService" || command._tag === "StopRepositoryService") {
@@ -379,6 +353,7 @@ export const layer = (options: {
                   threadId: record.threadId,
                   cancelCommandId: command.commandId,
                   targetCommandId: command.target.commandId,
+                  claimToken,
                 })
                 .pipe(
                   Effect.map((resolution) =>
@@ -400,12 +375,18 @@ export const layer = (options: {
               agentResponseArrived: false,
             },
           ])
+        if (record.turnId === undefined)
+          return yield* CommandApplicationError.make({
+            kind: "invalid",
+            message: "Interactive command has no Turn identity",
+          })
 
         return yield* operations.interactive(
           {
             ownerId: record.ownerId,
             threadId: ProductThreadId.make(record.threadId),
             commandId: interactiveCommand.commandId,
+            turnId: record.turnId,
             command: yield* productCommand(interactiveCommand),
           },
           (batch) =>
@@ -466,11 +447,12 @@ export const layer = (options: {
           Effect.mapError(commandFailure),
           Effect.catch((error) => {
             if (error.kind === "unavailable") return Effect.fail(error)
+            const payload = durableCommandPayload(record)
             return complete(
               record,
               claimToken,
               { _tag: "Rejected", reason: error.kind, message: error.message },
-              rejectionEvents(Schema.is(DurableThreadCommand)(record.command) ? record.command : undefined, error),
+              rejectionEvents(Schema.is(DurableThreadCommand)(payload) ? payload : undefined, error),
             ).pipe(Effect.mapError(commandFailure))
           }),
           Effect.raceFirst(renew()),
@@ -478,97 +460,42 @@ export const layer = (options: {
         )
       }
 
-      const poll = Effect.gen(function* () {
-        if ((yield* FiberMap.size(active)) >= concurrency) {
-          const succeededAt = yield* Clock.currentTimeMillis
-          yield* SubscriptionRef.update(health, (state) => ({
-            ...state,
-            poll: { _tag: "Succeeded", at: succeededAt } as const,
-            lastSuccessfulPollAt: succeededAt,
-          }))
-          yield* Effect.sleep(options.pollIntervalMillis)
-          return
-        }
-        const claimToken = yield* crypto.randomUUIDv4
-        const command = yield* protocol.claimNextCommand({
-          claimToken,
-          claimMillis: options.claimMillis,
-        })
-        if (command !== undefined)
-          yield* FiberMap.run(
-            active,
-            `${command.threadId}:${command.commandId}`,
-            execute(command, claimToken).pipe(
-              Effect.catchCause((cause) => {
-                if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-                return Clock.currentTimeMillis.pipe(
-                  Effect.flatMap((at) =>
-                    SubscriptionRef.update(health, (state) => ({
-                      ...state,
-                      lastFailure: { at, message: "Thread command application failed" },
-                    })),
-                  ),
-                  Effect.andThen(Effect.logError("hosted-thread-command-worker.failed")),
-                )
-              }),
-            ),
-          )
-        const succeededAt = yield* Clock.currentTimeMillis
-        yield* SubscriptionRef.update(health, (state) => ({
-          ...state,
-          poll: { _tag: "Succeeded", at: succeededAt } as const,
-          lastSuccessfulPollAt: succeededAt,
-        }))
-        if (command === undefined) yield* Effect.sleep(options.pollIntervalMillis)
-      }).pipe(
-        Effect.catchCause((cause) => {
-          if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-          return Clock.currentTimeMillis.pipe(
-            Effect.flatMap((at) =>
-              SubscriptionRef.update(health, (state) => ({
-                ...state,
-                poll: { _tag: "Failed", at, message: "Thread command worker poll failed" } as const,
-                lastFailure: { at, message: "Thread command worker poll failed" },
-              })),
-            ),
-            Effect.andThen(Effect.logError("hosted-thread-command-worker.poll-failed")),
-            Effect.andThen(Effect.sleep(options.pollIntervalMillis)),
-          )
-        }),
-      )
-
-      const status: Effect.Effect<HostedThreadCommandWorkerStatus> = Effect.gen(function* () {
-        const state = yield* SubscriptionRef.get(health)
-        const now = yield* Clock.currentTimeMillis
-        const activeCount = yield* FiberMap.size(active)
-        const pollAt = state.poll._tag === "Starting" ? undefined : state.poll.at
-        return {
-          ...state,
-          active: activeCount,
-          capacity: concurrency,
-          availableCapacity: Math.max(0, concurrency - activeCount),
-          pollAgeMillis: age(now, pollAt),
-          lastSuccessfulPollAgeMillis: age(now, state.lastSuccessfulPollAt),
-          lastFailureAgeMillis: age(now, state.lastFailure?.at),
-        }
-      })
-      const service = HostedThreadCommandWorker.of({
-        status,
-        ready: status.pipe(
-          Effect.flatMap((state) => {
-            if (state.poll._tag === "Starting")
-              return Effect.fail(HostedThreadCommandWorkerError.make({ message: "Command worker has not polled" }))
-            if (state.poll._tag === "Failed")
-              return Effect.fail(HostedThreadCommandWorkerError.make({ message: state.poll.message }))
-            if (state.pollAgeMillis !== undefined && state.pollAgeMillis > options.pollIntervalMillis * 4)
-              return Effect.fail(HostedThreadCommandWorkerError.make({ message: "Command worker poll is stale" }))
-            return Effect.void
+      const worker = yield* runtime.register({
+        domain: "command",
+        concurrency,
+        fallbackIntervalMillis: options.fallbackIntervalMillis,
+        scanFailureMessage: "Thread command worker scan failed",
+        executionFailureMessage: "Thread command application failed",
+        scan: (control) =>
+          Effect.gen(function* () {
+            for (let attempt = 0; attempt < control.availableCapacity; attempt += 1) {
+              const claimToken = yield* crypto.randomUUIDv4
+              const command = yield* protocol.claimNextCommand({
+                claimToken,
+                claimMillis: options.claimMillis,
+              })
+              if (command === undefined) break
+              const started = yield* control.start({
+                key: `${command.threadId}:${command.commandId}`,
+                runnableAt: DateTime.toEpochMillis(DateTime.makeUnsafe(command.admittedAt)),
+                effect: execute(command, claimToken),
+              })
+              if (!started)
+                yield* protocol.releaseCommandClaim({
+                  ownerId: command.ownerId,
+                  threadId: command.threadId,
+                  commandId: command.commandId,
+                  claimToken,
+                })
+            }
+            return { oldestRunnableAt: yield* protocol.oldestRunnableCommandAt }
           }),
+      })
+      return HostedThreadCommandWorker.of({
+        status: worker.status,
+        ready: worker.ready.pipe(
+          Effect.mapError((error) => HostedThreadCommandWorkerError.make({ message: error.message })),
         ),
       })
-      return Layer.merge(
-        Layer.succeed(HostedThreadCommandWorker, service),
-        Layer.effectDiscard(Effect.forkScoped(Effect.forever(poll))),
-      )
     }),
   )

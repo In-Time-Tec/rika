@@ -180,4 +180,29 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "89afe9f0dfe8c832a0de50f4608ff2b303329716808df0710d1cd770eae30598",
     url: new URL("../../migrations/postgres/0035-workspace-seeds.sql", import.meta.url),
   },
+  {
+    id: "product/0036_explicit_command_turn_identity",
+    checksum: "4136448fb7cb12fdf36ceef33b11e697cf958e2ceff2e574f421e52ec915f7bf",
+    url: new URL("../../migrations/postgres/0036-explicit-command-turn-identity.sql", import.meta.url),
+  },
+  {
+    id: "product/0037_hosted_product_thread_invariant",
+    checksum: "547bd9d542f3fc5414862652c825d0ac53bbdfbecc56ed35b4aeccefdd9128f9",
+    url: new URL("../../migrations/postgres/0037-hosted-product-thread-invariant.sql", import.meta.url),
+  },
+  {
+    id: "product/0038_authoritative_thread_command_ledger",
+    checksum: "d32c3936ca675abcedb11871cf6c5581cd1859e81b6e84a26159cfff99e794fa",
+    url: new URL("../../migrations/postgres/0038-authoritative-thread-command-ledger.sql", import.meta.url),
+  },
+  {
+    id: "product/0039_bounded_thread_checkpoints",
+    checksum: "70b6abf1cb130c44fb7d15517643be8d1624ee9ed9077151a3c933248626d408",
+    url: new URL("../../migrations/postgres/0039-bounded-thread-checkpoints.sql", import.meta.url),
+  },
+  {
+    id: "product/0040_rika_worker_notifications",
+    checksum: "67fcafb0053be9c6b143651a4c75da20469e337ff20a6da99c9232f47553161f",
+    url: new URL("../../migrations/postgres/0040-rika-worker-notifications.sql", import.meta.url),
+  },
 ]

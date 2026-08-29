@@ -1,16 +1,21 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
+import * as HostedExecution from "@rika/execution"
+import * as ExecutionPostgres from "@rika/execution/postgres"
+import * as RemoteCells from "@rika/execution/remote-cells"
 import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { PromptPart } from "@rika/product/execution-request"
 import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
+import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { BetterAuthUserId, DeviceId, OrganizationId, WorkspaceId } from "@rika/product/hosted-model"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
 import {
   rikaHostedExecutorAssignments,
   rikaHostedOwners,
   rikaHostedProjects,
-  rikaHostedThreadCommands,
+  rikaHostedThreadProtocolCommands,
+  rikaHostedThreadProtocolEvents,
   rikaHostedThreadGrants,
   rikaHostedThreads,
   rikaHostedWorkspaceSeeds,
@@ -19,20 +24,28 @@ import {
   rikaThreadQueueState,
   rikaTurnAdmissionOutbox,
   rikaTurns,
+  rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import { asc, count as rowCount, eq, inArray } from "drizzle-orm"
+import { layer as productPostgres } from "@rika/product-store/layer"
+import { HostedTurnWorkerStore, layer as hostedTurnWorkerStoreLayer } from "@rika/product-store/turn-worker-store"
+import { asc, count as rowCount, eq, inArray, sql } from "drizzle-orm"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
-import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted, Ref, Schema } from "effect"
+import { Clock, Config, Context, DateTime, Effect, FileSystem, Layer, Random, Redacted, Ref, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { Pool } from "pg"
 import { live as livePlatform } from "../support/live-platform"
 import {
   HostedProduct,
   HostedProductError,
+  layer as hostedProductLayer,
   postgresTest,
   type AdmittedRun,
   type AuthenticatedPrincipal,
 } from "../../src/hosted/product"
+import { testLayer as hostedModelRegistryTestLayer } from "../../src/hosted/environment/model-registry"
+import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../src/hosted/repositories"
+import { runs as tenetkitRuns } from "../../src/hosted/execution/tenetkit-schema"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
@@ -84,17 +97,18 @@ const withDatabase = <A, E, R>(
       const url = parsed.toString()
       let pool: Pool | undefined
       try {
+        yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
         const activePool = new Pool({ connectionString: url })
         pool = activePool
         for (const migration of [...identityMigrations, ...productMigrations]) {
-          const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+          const migrationSql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
             fileSystem.readFileString(migration.url.pathname),
           )
           yield* runMigration({
             pool: activePool,
             id: migration.id,
             checksum: migration.checksum,
-            sql,
+            sql: migrationSql,
           })
         }
         const context = yield* Layer.build(
@@ -114,6 +128,271 @@ const withDatabase = <A, E, R>(
       }
     }),
   ).pipe(livePlatform)
+
+const remoteCells = HostedExecution.remoteCells({
+  cells: RemoteCells.layer({
+    execute: () => RemoteCells.Unavailable.make({ message: "Test remote cells are unavailable" }),
+    cancel: () => RemoteCells.Unavailable.make({ message: "Test remote cells are unavailable" }),
+  }),
+  admit: () => Effect.void,
+})
+
+const withAuthoritativeDatabase = <A, E, R>(
+  label: string,
+  use: (
+    database: NodePgDatabase,
+  ) => Effect.Effect<A, E, R | HostedProduct | HostedTurnWorkerStore | ExecutionGateway.Service>,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
+      const database = `rika_hosted_ledger_${label}_${suffix}`
+      const admin = new Pool({ connectionString: databaseUrl })
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+      const parsed = new URL(databaseUrl)
+      parsed.pathname = `/${database}`
+      const url = parsed.toString()
+      let pool: Pool | undefined
+      try {
+        yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
+        const activePool = new Pool({ connectionString: url })
+        pool = activePool
+        for (const migration of [...identityMigrations, ...productMigrations]) {
+          const migrationSql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+            fileSystem.readFileString(migration.url.pathname),
+          )
+          yield* runMigration({
+            pool: activePool,
+            id: migration.id,
+            checksum: migration.checksum,
+            sql: migrationSql,
+          })
+        }
+        yield* ExecutionPostgres.applySchema({ url, source: "hosted-thread-command-test" })
+        const dataContext = yield* Layer.build(
+          Layer.mergeAll(
+            productPostgres({ url: Redacted.make(url), maxConnections: 8 }),
+            AuthorizationPolicy.layer,
+            BunCrypto.layer,
+            hostedModelRegistryTestLayer,
+            hostedRepositoriesUnavailableLayer,
+          ),
+        )
+        const data = Layer.succeedContext(dataContext)
+        const executionContext = yield* Layer.build(
+          HostedExecution.layerHosted({
+            kernel: { runtimeVersion: Bun.version, dataRoot: `/tmp/rika-hosted-ledger-${suffix}` },
+            openAiAccountAccess: () => ({
+              acquire: Effect.die("The atomic admission test does not execute the model"),
+              refreshRejected: () => Effect.die("The atomic admission test does not refresh model credentials"),
+            }),
+            cells: remoteCells,
+            postgres: {
+              url,
+              source: "hosted-thread-command-test",
+              maxConnections: 8,
+              worker: {
+                workerId: `hosted-thread-command-${suffix}`,
+                concurrency: 1,
+                leaseMillis: 30_000,
+                fallbackIntervalMillis: 60_000,
+                cancellationIntervalMillis: 60_000,
+              },
+            },
+          }).pipe(Layer.provide(data)),
+        )
+        const productContext = yield* Layer.build(
+          hostedProductLayer({
+            orb: {
+              templateBuildId: "hosted-thread-command-test",
+              providerScope: "hosted-thread-command-test",
+            },
+            promptAdmissionReadiness: Effect.succeed(true),
+          }).pipe(Layer.provide(Layer.succeedContext(Context.merge(dataContext, executionContext)))),
+        )
+        const turnWorkerContext = yield* Layer.build(hostedTurnWorkerStoreLayer.pipe(Layer.provide(data)))
+        return yield* use(drizzle({ client: activePool })).pipe(
+          Effect.provide(Context.merge(Context.merge(productContext, executionContext), turnWorkerContext)),
+        )
+      } finally {
+        const cleanupPool = pool
+        yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
+      }
+    }),
+  ).pipe(livePlatform)
+
+it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run atomically", () =>
+  withAuthoritativeDatabase("atomic-run", (database) =>
+    Effect.gen(function* () {
+      const authenticated = principal("atomic-run-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      const product = yield* HostedProduct
+      const fingerprint = CheckoutFingerprint.make("atomic-run-checkout")
+      yield* product.registerRunner({
+        principal: authenticated,
+        checkoutFingerprint: fingerprint,
+        registration: {
+          workspaceIdentity: WorkspaceId.make("atomic-run-workspace"),
+          repository: { identity: "In-Time-Tec/rika", branch: "main" },
+          kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+          capabilities: { cells: true, checkpoints: false, pty: false },
+        },
+      })
+      const connection = yield* product.createConnection({
+        principal: authenticated,
+        owner: personal(authenticated.userId),
+        executorKind: "runner",
+        runnerTarget: { deviceId: DeviceId.make(authenticated.deviceId), checkoutFingerprint: fingerprint },
+      })
+      const input = {
+        principal: authenticated,
+        threadId: connection.threadId,
+        operationKey: "atomic-run-command",
+        prompt: "stage this Run atomically",
+      } as const
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`CREATE FUNCTION reject_atomic_run_completion() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected command completion failure'; END $$;
+            CREATE TRIGGER reject_atomic_run_completion
+            BEFORE UPDATE ON rika_hosted_thread_protocol_commands
+            FOR EACH ROW WHEN (OLD.state = 'admitted' AND NEW.state = 'completed')
+            EXECUTE FUNCTION reject_atomic_run_completion();`),
+        ),
+      )
+      const failed = yield* product.admitRun(input).pipe(Effect.result)
+      expect(failed).toMatchObject({ _tag: "Failure" })
+      const rolledBack = {
+        commands: yield* Effect.tryPromise(() =>
+          database
+            .select({ state: rikaHostedThreadProtocolCommands.state })
+            .from(rikaHostedThreadProtocolCommands)
+            .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
+        ),
+        turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
+        runs: yield* Effect.tryPromise(() =>
+          database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId)),
+        ),
+        events: yield* Effect.tryPromise(() =>
+          database.$count(
+            rikaHostedThreadProtocolEvents,
+            eq(rikaHostedThreadProtocolEvents.threadId, connection.threadId),
+          ),
+        ),
+      }
+      expect(rolledBack).toEqual({ commands: [{ state: "admitted" }], turns: 0, runs: 0, events: 0 })
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`DROP TRIGGER reject_atomic_run_completion ON rika_hosted_thread_protocol_commands;
+            DROP FUNCTION reject_atomic_run_completion();`),
+        ),
+      )
+      const admitted = yield* requireAdmitted(product.admitRun(input))
+      expect(yield* product.admitRun(input)).toEqual(admitted)
+      expect(yield* failureKind(product.admitRun({ ...input, prompt: "different payload" }))).toBe("conflict")
+      const committed = {
+        commands: yield* Effect.tryPromise(() =>
+          database
+            .select({
+              state: rikaHostedThreadProtocolCommands.state,
+              workState: rikaHostedThreadProtocolCommands.workState,
+              turnId: rikaHostedThreadProtocolCommands.turnId,
+              result: rikaHostedThreadProtocolCommands.result,
+            })
+            .from(rikaHostedThreadProtocolCommands)
+            .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
+        ),
+        turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
+        runs: yield* Effect.tryPromise(() =>
+          database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId)),
+        ),
+        events: yield* Effect.tryPromise(() =>
+          database.$count(
+            rikaHostedThreadProtocolEvents,
+            eq(rikaHostedThreadProtocolEvents.threadId, connection.threadId),
+          ),
+        ),
+      }
+      expect(committed).toEqual({
+        commands: [
+          {
+            state: "completed",
+            workState: "turn-activation-pending",
+            turnId: admitted.turnId,
+            result: { _tag: "PromptAdmitted", status: "accepted" },
+          },
+        ],
+        turns: 1,
+        runs: 1,
+        events: 1,
+      })
+
+      const turnWorkerStore = yield* HostedTurnWorkerStore
+      const gateway = yield* ExecutionGateway.Service
+      const firstClaim = yield* turnWorkerStore.claimNext({
+        workerId: "activation-worker-1",
+        claimToken: "activation-claim-1",
+        leaseMillis: 30_000,
+      })
+      if (firstClaim === undefined) return yield* Effect.die("Staged Run activation was not claimed")
+      expect(firstClaim).toMatchObject({
+        activationRequested: false,
+        input: { threadId: connection.threadId, turnId: admitted.turnId },
+        admissionLink: { threadId: connection.threadId, turnId: admitted.turnId },
+        preparedExecution: { threadId: connection.threadId, turnId: admitted.turnId },
+      })
+      expect(firstClaim.expiresAt - firstClaim.claimedAt).toBe(30_000)
+      expect(yield* turnWorkerStore.requestActivation(firstClaim, yield* Clock.currentTimeMillis)).toBe(true)
+      const firstActivation = yield* gateway.activateTurn(firstClaim.preparedExecution, firstClaim.admissionLink)
+      yield* Effect.tryPromise(() =>
+        database
+          .update(rikaHostedThreadProtocolCommands)
+          .set({ claimExpiresAt: sql`transaction_timestamp() - interval '1 millisecond'` })
+          .where(eq(rikaHostedThreadProtocolCommands.commandId, input.operationKey)),
+      )
+      const recoveredClaim = yield* turnWorkerStore.claimNext({
+        workerId: "activation-worker-2",
+        claimToken: "activation-claim-2",
+        leaseMillis: 30_000,
+      })
+      if (recoveredClaim === undefined) return yield* Effect.die("Unacknowledged Run activation was not recovered")
+      expect(recoveredClaim.activationRequested).toBe(true)
+      const recoveredActivation = yield* gateway.activateTurn(
+        recoveredClaim.preparedExecution,
+        recoveredClaim.admissionLink,
+      )
+      expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(firstActivation)
+      expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(recoveredActivation)
+      expect(
+        yield* Effect.tryPromise(() => database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId))),
+      ).toBe(1)
+      yield* turnWorkerStore.completeActivation(recoveredClaim, recoveredActivation, yield* Clock.currentTimeMillis)
+      expect(
+        yield* Effect.tryPromise(() =>
+          database
+            .select({
+              workState: rikaHostedThreadProtocolCommands.workState,
+              claimToken: rikaHostedThreadProtocolCommands.claimToken,
+            })
+            .from(rikaHostedThreadProtocolCommands)
+            .where(eq(rikaHostedThreadProtocolCommands.commandId, input.operationKey)),
+        ),
+      ).toEqual([{ workState: null, claimToken: null }])
+    }),
+  ),
+)
 
 it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost response", () =>
   withDatabase("create-retry", (database) =>
@@ -169,6 +448,124 @@ it.effect.skipIf(!live)("reuses deterministic Thread creation after a lost respo
         name: "Divergent retry",
       })
       expect(yield* failureKind(product.createConnection({ ...input, projectId: project.id }))).toBe("conflict")
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("rolls back failed aggregate creation and rejects one-sided Thread state", () =>
+  withDatabase("aggregate-invariant", (database) =>
+    Effect.gen(function* () {
+      const authenticated = principal("aggregate-invariant-user")
+      const createdAt = DateTime.toDate(DateTime.nowUnsafe())
+      yield* Effect.tryPromise(() =>
+        database.insert(identityUser).values({
+          id: authenticated.userId,
+          name: authenticated.userId,
+          email: `${authenticated.userId}@example.test`,
+          emailVerified: true,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      )
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`CREATE FUNCTION reject_aggregate_product_thread() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected aggregate failure'; END $$;
+            CREATE TRIGGER reject_aggregate_product_thread BEFORE INSERT ON rika_threads
+            FOR EACH ROW EXECUTE FUNCTION reject_aggregate_product_thread();`),
+        ),
+      )
+      const product = yield* HostedProduct
+      const threadId = "aggregate-rollback-thread"
+      expect(
+        yield* product
+          .createConnection({
+            principal: authenticated,
+            owner: personal(authenticated.userId),
+            executorKind: "orb",
+            threadId,
+          })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      yield* Effect.tryPromise(() =>
+        database.execute(
+          sql.raw(`DROP TRIGGER reject_aggregate_product_thread ON rika_threads;
+          DROP FUNCTION reject_aggregate_product_thread();`),
+        ),
+      )
+      const rolledBack = {
+        hostedThreads: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedThreads, eq(rikaHostedThreads.id, threadId)),
+        ),
+        hostedWorkspaces: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedWorkspaces, eq(rikaHostedWorkspaces.id, `${threadId}-workspace`)),
+        ),
+        threads: yield* Effect.tryPromise(() => database.$count(rikaThreads, eq(rikaThreads.id, threadId))),
+        workspaces: yield* Effect.tryPromise(() =>
+          database.$count(rikaWorkspaces, eq(rikaWorkspaces.path, `${threadId}-workspace`)),
+        ),
+      }
+      expect(rolledBack).toEqual({ hostedThreads: 0, hostedWorkspaces: 0, threads: 0, workspaces: 0 })
+
+      const owners = yield* Effect.tryPromise(() =>
+        database
+          .select({ id: rikaHostedOwners.id })
+          .from(rikaHostedOwners)
+          .where(eq(rikaHostedOwners.userId, authenticated.userId)),
+      )
+      const ownerId = owners[0]?.id
+      if (ownerId === undefined) return yield* Effect.die("Aggregate rollback owner was not created")
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaHostedWorkspaces).values({
+          id: "hosted-orphan-workspace",
+          ownerId,
+          createdByUserId: authenticated.userId,
+          executorKind: "orb",
+          inheritProjectGrants: false,
+          createdAt,
+        }),
+      )
+      expect(
+        yield* Effect.tryPromise(() =>
+          database.transaction((tx) =>
+            tx.insert(rikaHostedThreads).values({
+              id: "hosted-orphan-thread",
+              ownerId,
+              workspaceId: "hosted-orphan-workspace",
+              createdByUserId: authenticated.userId,
+              executorKind: "orb",
+              inheritProjectGrants: false,
+              createdAt,
+            }),
+          ),
+        ).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      yield* Effect.tryPromise(() =>
+        database.insert(rikaWorkspaces).values({ ownerId, path: "product-orphan-workspace", createdAt: 1 }),
+      )
+      expect(
+        yield* Effect.tryPromise(() =>
+          database.transaction((tx) =>
+            tx.insert(rikaThreads).values({
+              id: "product-orphan-thread",
+              ownerId,
+              workspace: "product-orphan-workspace",
+              title: "Orphan",
+              createdAt: 1,
+              updatedAt: 1,
+            }),
+          ),
+        ).pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure" })
+      const orphans = {
+        hosted: yield* Effect.tryPromise(() =>
+          database.$count(rikaHostedThreads, eq(rikaHostedThreads.id, "hosted-orphan-thread")),
+        ),
+        product: yield* Effect.tryPromise(() =>
+          database.$count(rikaThreads, eq(rikaThreads.id, "product-orphan-thread")),
+        ),
+      }
+      expect(orphans).toEqual({ hosted: 0, product: 0 })
     }),
   ),
 )
@@ -361,19 +758,19 @@ it.effect.skipIf(!live)("supports a projectless personal connection for a user w
             user_id: rikaHostedOwners.userId,
             created_by_user_id: rikaHostedThreads.createdByUserId,
             assignment_id: rikaHostedExecutorAssignments.id,
-            actor: rikaHostedThreadCommands.actor,
-            turn_id: rikaHostedThreadCommands.turnId,
+            actor: rikaHostedThreadProtocolCommands.actor,
+            turn_id: rikaHostedThreadProtocolCommands.turnId,
             status: rikaTurns.status,
             prompt: rikaTurns.prompt,
             memberships: database.$count(identityMember, eq(identityMember.userId, "personal-user")),
             turn_count: database.$count(rikaTurns, eq(rikaTurns.threadId, rikaHostedThreads.id)),
             queued_count: rikaThreadQueueState.queuedCount,
           })
-          .from(rikaHostedThreadCommands)
-          .innerJoin(rikaHostedThreads, eq(rikaHostedThreads.id, rikaHostedThreadCommands.threadId))
+          .from(rikaHostedThreadProtocolCommands)
+          .innerJoin(rikaHostedThreads, eq(rikaHostedThreads.id, rikaHostedThreadProtocolCommands.threadId))
           .innerJoin(rikaHostedExecutorAssignments, eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id))
-          .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedThreadCommands.ownerId))
-          .innerJoin(rikaTurns, eq(rikaTurns.id, rikaHostedThreadCommands.turnId))
+          .innerJoin(rikaHostedOwners, eq(rikaHostedOwners.id, rikaHostedThreadProtocolCommands.ownerId))
+          .innerJoin(rikaTurns, eq(rikaTurns.id, rikaHostedThreadProtocolCommands.turnId))
           .innerJoin(rikaThreadQueueState, eq(rikaThreadQueueState.threadId, rikaHostedThreads.id)),
       )
       expect(facts).toHaveLength(1)
@@ -470,12 +867,20 @@ it.effect.skipIf(!live)("serializes prompt admission against cancellation in bot
       expect(
         yield* Effect.tryPromise(() =>
           database
-            .select({ command_id: rikaHostedThreadCommands.commandId, turn_id: rikaHostedThreadCommands.turnId })
-            .from(rikaHostedThreadCommands)
-            .where(eq(rikaHostedThreadCommands.threadId, connection.threadId))
-            .orderBy(asc(rikaHostedThreadCommands.commandId)),
+            .select({
+              command_id: rikaHostedThreadProtocolCommands.commandId,
+              turn_id: rikaHostedThreadProtocolCommands.turnId,
+            })
+            .from(rikaHostedThreadProtocolCommands)
+            .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId))
+            .orderBy(asc(rikaHostedThreadProtocolCommands.commandId)),
         ),
-      ).toMatchObject([{ command_id: "submit-admitted", turn_id: admitted.turnId }])
+      ).toEqual([
+        { command_id: "cancel-first", turn_id: null },
+        { command_id: "cancel-second", turn_id: null },
+        { command_id: "submit-admitted", turn_id: admitted.turnId },
+        { command_id: "submit-cancelled", turn_id: expect.any(String) },
+      ])
     }),
   ),
 )
@@ -514,7 +919,10 @@ it.effect.skipIf(!live)("rejects new prompts without mutation and replays them t
           const [commands, turns, queues] = yield* Effect.all([
             Effect.orDie(
               Effect.tryPromise(() =>
-                database.$count(rikaHostedThreadCommands, eq(rikaHostedThreadCommands.threadId, connection.threadId)),
+                database.$count(
+                  rikaHostedThreadProtocolCommands,
+                  eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId),
+                ),
               ),
             ),
             Effect.orDie(
@@ -526,7 +934,7 @@ it.effect.skipIf(!live)("rejects new prompts without mutation and replays them t
               ),
             ),
           ])
-          expect([{ commands, turns, queues }]).toMatchObject([{ commands: 0, turns: 0, queues: 0 }])
+          expect([{ commands, turns, queues }]).toMatchObject([{ commands: 1, turns: 0, queues: 0 }])
           yield* Ref.set(ready, true)
           const admitted = yield* product.admitRun(input)
           yield* Ref.set(ready, false)
@@ -951,9 +1359,9 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
       yield* operate
       const commands = yield* Effect.tryPromise(() =>
         database
-          .select({ actor: rikaHostedThreadCommands.actor })
-          .from(rikaHostedThreadCommands)
-          .where(eq(rikaHostedThreadCommands.commandId, "operator-run")),
+          .select({ actor: rikaHostedThreadProtocolCommands.actor })
+          .from(rikaHostedThreadProtocolCommands)
+          .where(eq(rikaHostedThreadProtocolCommands.commandId, "operator-run")),
       )
       expect(commands[0]?.actor).toMatchObject({
         _tag: "OrganizationActor",

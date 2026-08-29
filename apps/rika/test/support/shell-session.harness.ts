@@ -1,8 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as InteractiveSession from "@rika/product/interactive-session"
-import * as ThreadRepository from "@rika/product-store/thread-repository"
-import * as TranscriptRepository from "@rika/product-store/transcript-repository"
-import * as TurnRepository from "@rika/product-store/turn-repository"
+import * as ThreadRepository from "@rika/product/thread-repository"
+import * as TranscriptRepository from "@rika/product/transcript-repository"
+import * as TurnRepository from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -18,6 +18,8 @@ import {
   Service,
   type OperationServiceInterface,
 } from "./product-operation.harness"
+import * as ThreadRepositoryFake from "./product-repositories.fake/record"
+import * as TurnRepositoryFake from "./product-repositories.fake/turn/repository"
 
 type RepositoryContext = Context.Context<
   ThreadRepository.Service | TurnRepository.Service | TranscriptRepository.Service
@@ -34,8 +36,8 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
     directory: temporaryDirectory,
     prefix: "rika-shell-session-",
   })
-  const repositoryLayer: Layer.Layer<ThreadRepository.Service> = ThreadRepository.memoryLayer().pipe(Layer.orDie)
-  const turnRepositoryLayer: Layer.Layer<TurnRepository.Service> = TurnRepository.memoryLayer().pipe(Layer.orDie)
+  const repositoryLayer: Layer.Layer<ThreadRepository.Service> = ThreadRepositoryFake.memoryLayer().pipe(Layer.orDie)
+  const turnRepositoryLayer: Layer.Layer<TurnRepository.Service> = TurnRepositoryFake.memoryLayer().pipe(Layer.orDie)
   const transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service> = TranscriptRepository.memoryLayer().pipe(
     Layer.orDie,
   )

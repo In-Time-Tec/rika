@@ -19,7 +19,6 @@ const instructionFacts = (modules = make(options)) => ({
   modules,
   workspace: options.workspace,
   workspaceState: "not empty" as const,
-  channelBytes: 16_384,
   cellDeadlineMillis: 120_000,
 })
 
@@ -113,13 +112,7 @@ it("states the kernel house rules from its mounted workspace and limits", () => 
   expect(text).toContain("pre-mounted globals; never import")
   expect(text).toContain("Variables persist across all your cells; accumulate state")
   expect(text).toContain('Your workspace is "/actual/workspace" and it is empty.')
-  /**
-   * The channel bound is stated once, from the value the kernel actually enforces. Naming a second,
-   * smaller number beside it read as the real budget, so cells piped their own output through head
-   * and paid another cell to see the rest.
-   */
-  expect(text).toContain("capped at 16KB")
-  expect(text).toContain("rather than piping it through head or tail")
+  expect(text).toContain("terminal result values are returned complete")
   expect(text).toContain("Run shell commands with rika.processes.start")
   expect(text).toContain("rika.processes -> start({ command, workdir, timeoutMillis: 0-60000 })")
   expect(text).toContain("status({ processId, waitMillis: 0-10000 })")

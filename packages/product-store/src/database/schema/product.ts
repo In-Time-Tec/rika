@@ -1278,8 +1278,8 @@ export const rikaHostedTerminalWriterLeases = pgTable(
   ],
 )
 
-export const rikaHostedThreadCommands = pgTable(
-  "rika_hosted_thread_commands",
+export const rikaHostedThreadProtocolCommands = pgTable(
+  "rika_hosted_thread_protocol_commands",
   {
     ownerId: text("owner_id")
       .notNull()
@@ -1287,54 +1287,94 @@ export const rikaHostedThreadCommands = pgTable(
     threadId: text("thread_id").notNull(),
     commandId: text("command_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
-    actor: jsonb().notNull(),
-    sequence: bigint({ mode: "number" }).notNull(),
+    expectedVersion: bigint("expected_version", { mode: "number" }).notNull(),
+    threadVersion: bigint("thread_version", { mode: "number" }).notNull(),
     commitCursor: bigint("commit_cursor", { mode: "number" }).notNull(),
+    actor: jsonb().notNull(),
     command: jsonb().notNull(),
+    state: text().notNull(),
+    workState: text("work_state"),
+    preparedTurnJson: text("prepared_turn_json"),
+    result: jsonb(),
+    eventCursor: bigint("event_cursor", { mode: "number" }),
     admittedAt: timestamp("admitted_at", { withTimezone: true }).notNull(),
-    turnId: text("turn_id").references(() => rikaTurns.id, { onDelete: "restrict" }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    turnId: text("turn_id"),
     admissionStatus: text("admission_status"),
+    cancelledByCommandId: text("cancelled_by_command_id"),
   },
   (table) => [
-    primaryKey({ columns: [table.threadId, table.commandId], name: "rika_hosted_thread_commands_pkey" }),
+    primaryKey({ columns: [table.threadId, table.commandId], name: "rika_hosted_thread_protocol_commands_pkey" }),
     foreignKey({
       columns: [table.threadId, table.ownerId],
-      foreignColumns: [rikaHostedThreads.id, rikaHostedThreads.ownerId],
-      name: "rika_hosted_thread_commands_thread_id_owner_id_fkey",
+      foreignColumns: [rikaHostedThreadProtocolState.threadId, rikaHostedThreadProtocolState.ownerId],
+      name: "rika_hosted_thread_protocol_commands_thread_id_owner_id_fkey",
     }).onDelete("cascade"),
-    index("rika_hosted_thread_commands_cursor").using(
+    unique("rika_hosted_thread_protocol_commands_owner_id_commit_cursor_key").on(table.ownerId, table.commitCursor),
+    unique("rika_hosted_thread_protocol_comma_thread_id_idempotency_key_key").on(table.threadId, table.idempotencyKey),
+    unique("rika_hosted_thread_protocol_comman_thread_id_thread_version_key").on(table.threadId, table.threadVersion),
+    unique("rika_hosted_thread_protocol_commands_thread_owner_version_key").on(
+      table.threadId,
+      table.ownerId,
+      table.threadVersion,
+    ),
+    index("rika_hosted_thread_protocol_commands_cursor").using(
       "btree",
       table.ownerId.asc().nullsLast(),
       table.threadId.asc().nullsLast(),
       table.commitCursor.asc().nullsLast(),
     ),
-    index("rika_hosted_thread_commands_sequence").using(
-      "btree",
-      table.ownerId.asc().nullsLast(),
-      table.threadId.asc().nullsLast(),
-      table.sequence.asc().nullsLast(),
-    ),
-    index("rika_hosted_thread_commands_turn")
+    index("rika_hosted_thread_protocol_commands_turn")
       .using("btree", table.ownerId.asc().nullsLast(), table.threadId.asc().nullsLast(), table.turnId.asc().nullsLast())
       .where(sql`(turn_id IS NOT NULL)`),
-    unique("rika_hosted_thread_commands_owner_id_commit_cursor_key").on(table.ownerId, table.commitCursor),
-    unique("rika_hosted_thread_commands_thread_id_idempotency_key_key").on(table.threadId, table.idempotencyKey),
-    unique("rika_hosted_thread_commands_thread_id_owner_id_sequence_key").on(
-      table.threadId,
-      table.ownerId,
-      table.sequence,
-    ),
-    unique("rika_hosted_thread_commands_turn_id_key").on(table.turnId),
-    check("rika_hosted_thread_commands_actor_check", sql`(jsonb_typeof(actor) = 'object'::text)`),
+    unique("rika_hosted_thread_protocol_commands_turn_id_key").on(table.turnId),
+    check("rika_hosted_thread_protocol_commands_actor_check", sql`(jsonb_typeof(actor) = 'object'::text)`),
     check(
-      "rika_hosted_thread_commands_admission_status_check",
+      "rika_hosted_thread_protocol_commands_admission_status_check",
       sql`(admission_status = ANY (ARRAY['accepted'::text, 'queued'::text]))`,
     ),
-    check("rika_hosted_thread_commands_check", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
-    check("rika_hosted_thread_commands_check1", sql`((turn_id IS NULL) = (admission_status IS NULL))`),
-    check("rika_hosted_thread_commands_command_check", sql`(jsonb_typeof(command) = 'object'::text)`),
-    check("rika_hosted_thread_commands_commit_cursor_check", sql`(commit_cursor >= 1)`),
-    check("rika_hosted_thread_commands_sequence_check", sql`(sequence >= 1)`),
+    check(
+      "rika_hosted_thread_protocol_commands_actor_owner_check",
+      sql`rika_hosted_actor_matches_owner(actor, owner_id)`,
+    ),
+    check("rika_hosted_thread_protocol_commands_command_check", sql`(jsonb_typeof(command) = 'object'::text)`),
+    check("rika_hosted_thread_protocol_commands_commit_cursor_check", sql`(commit_cursor >= 1)`),
+    check("rika_hosted_thread_protocol_commands_event_cursor_check", sql`(event_cursor >= 0)`),
+    check("rika_hosted_thread_protocol_commands_expected_version_check", sql`(expected_version >= 0)`),
+    check("rika_hosted_thread_protocol_commands_thread_version_check", sql`(thread_version > 0)`),
+    check(
+      "rika_hosted_thread_protocol_commands_state_check",
+      sql`(state = ANY (ARRAY['admitted'::text, 'completed'::text]))`,
+    ),
+    check(
+      "rika_hosted_thread_protocol_commands_result_check",
+      sql`(((state = 'admitted') AND result IS NULL AND event_cursor IS NULL AND completed_at IS NULL AND work_state IS NULL AND admission_status IS NULL AND cancelled_by_command_id IS NULL) OR (state = 'completed' AND result IS NOT NULL AND event_cursor IS NOT NULL AND completed_at IS NOT NULL))`,
+    ),
+    check("rika_hosted_thread_protocol_commands_claim_pair", sql`((claim_token IS NULL) = (claim_expires_at IS NULL))`),
+    check(
+      "rika_hosted_thread_protocol_commands_claim_state",
+      sql`((state = 'admitted') OR (work_state IS NOT NULL) OR (claim_token IS NULL))`,
+    ),
+    check(
+      "rika_hosted_thread_protocol_commands_work_state_check",
+      sql`(work_state IS NULL OR work_state = ANY (ARRAY['turn-activation-pending'::text, 'turn-activation-requested'::text]))`,
+    ),
+    check(
+      "rika_hosted_thread_protocol_commands_work_turn_check",
+      sql`(work_state IS NULL OR (state = 'completed' AND turn_id IS NOT NULL AND admission_status IS NOT NULL AND prepared_turn_json IS NOT NULL))`,
+    ),
+    check(
+      "rika_hosted_thread_protocol_commands_cancel_check",
+      sql`(cancelled_by_command_id IS NULL OR (state = 'completed' AND cancelled_by_command_id <> command_id))`,
+    ),
+    index("rika_hosted_thread_protocol_commands_claims")
+      .on(table.claimExpiresAt)
+      .where(sql`(claim_token IS NOT NULL)`),
+    index("rika_hosted_thread_protocol_commands_work")
+      .on(table.workState, table.completedAt, table.threadId)
+      .where(sql`(work_state IS NOT NULL)`),
   ],
 )
 
@@ -1369,9 +1409,9 @@ export const rikaHostedThreadEvents = pgTable(
     foreignKey({
       columns: [table.threadId, table.ownerId, table.commandSequence],
       foreignColumns: [
-        rikaHostedThreadCommands.threadId,
-        rikaHostedThreadCommands.ownerId,
-        rikaHostedThreadCommands.sequence,
+        rikaHostedThreadProtocolCommands.threadId,
+        rikaHostedThreadProtocolCommands.ownerId,
+        rikaHostedThreadProtocolCommands.threadVersion,
       ],
       name: "rika_hosted_thread_events_thread_id_owner_id_command_seque_fkey",
     }).onDelete("restrict"),
@@ -1436,53 +1476,6 @@ export const rikaHostedThreadGrants = pgTable(
   ],
 )
 
-export const rikaHostedThreadProtocolCommands = pgTable(
-  "rika_hosted_thread_protocol_commands",
-  {
-    ownerId: text("owner_id").notNull(),
-    threadId: text("thread_id").notNull(),
-    commandId: text("command_id").notNull(),
-    idempotencyKey: text("idempotency_key").notNull(),
-    expectedVersion: bigint("expected_version", { mode: "number" }).notNull(),
-    threadVersion: bigint("thread_version", { mode: "number" }).notNull(),
-    actor: jsonb().notNull(),
-    command: jsonb().notNull(),
-    state: text().notNull(),
-    result: jsonb(),
-    eventCursor: bigint("event_cursor", { mode: "number" }),
-    admittedAt: timestamp("admitted_at", { withTimezone: true }).notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    claimToken: text("claim_token"),
-    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
-  },
-  (table) => [
-    primaryKey({ columns: [table.threadId, table.commandId], name: "rika_hosted_thread_protocol_commands_pkey" }),
-    foreignKey({
-      columns: [table.threadId, table.ownerId],
-      foreignColumns: [rikaHostedThreadProtocolState.threadId, rikaHostedThreadProtocolState.ownerId],
-      name: "rika_hosted_thread_protocol_commands_thread_id_owner_id_fkey",
-    }).onDelete("cascade"),
-    unique("rika_hosted_thread_protocol_comma_thread_id_idempotency_key_key").on(table.threadId, table.idempotencyKey),
-    unique("rika_hosted_thread_protocol_comman_thread_id_thread_version_key").on(table.threadId, table.threadVersion),
-    check(
-      "rika_hosted_thread_protocol_commands_check",
-      sql`(((state = 'admitted'::text) AND (result IS NULL) AND (completed_at IS NULL)) OR ((state = 'completed'::text) AND (result IS NOT NULL) AND (event_cursor IS NOT NULL) AND (completed_at IS NOT NULL)))`,
-    ),
-    check("rika_hosted_thread_protocol_commands_event_cursor_check", sql`(event_cursor >= 0)`),
-    check("rika_hosted_thread_protocol_commands_expected_version_check", sql`(expected_version >= 0)`),
-    check(
-      "rika_hosted_thread_protocol_commands_state_check",
-      sql`(state = ANY (ARRAY['admitted'::text, 'completed'::text]))`,
-    ),
-    check("rika_hosted_thread_protocol_commands_thread_version_check", sql`(thread_version > 0)`),
-    check("rika_hosted_thread_protocol_commands_claim_pair", sql`((claim_token IS NULL) = (claim_expires_at IS NULL))`),
-    check("rika_hosted_thread_protocol_commands_claim_state", sql`((state = 'admitted') OR (claim_token IS NULL))`),
-    index("rika_hosted_thread_protocol_commands_claims")
-      .on(table.claimExpiresAt)
-      .where(sql`(state = 'admitted')`),
-  ],
-)
-
 export const rikaHostedThreadProtocolCursors = pgTable(
   "rika_hosted_thread_protocol_cursors",
   {
@@ -1502,32 +1495,6 @@ export const rikaHostedThreadProtocolCursors = pgTable(
       name: "rika_hosted_thread_protocol_cursors_thread_id_owner_id_fkey",
     }).onDelete("cascade"),
     check("rika_hosted_thread_protocol_cursors_cursor_check", sql`(cursor >= 0)`),
-  ],
-)
-
-export const rikaHostedPromptCancellations = pgTable(
-  "rika_hosted_prompt_cancellations",
-  {
-    ownerId: text("owner_id").notNull(),
-    threadId: text("thread_id").notNull(),
-    targetCommandId: text("target_command_id").notNull(),
-    cancelCommandId: text("cancel_command_id").notNull(),
-    actor: jsonb().notNull(),
-    cancelledAt: timestamp("cancelled_at", { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.threadId, table.targetCommandId], name: "rika_hosted_prompt_cancellations_pkey" }),
-    unique("rika_hosted_prompt_cancellations_thread_id_cancel_command_id_key").on(
-      table.threadId,
-      table.cancelCommandId,
-    ),
-    foreignKey({
-      columns: [table.threadId, table.ownerId],
-      foreignColumns: [rikaHostedThreads.id, rikaHostedThreads.ownerId],
-      name: "rika_hosted_prompt_cancellations_thread_id_owner_id_fkey",
-    }).onDelete("cascade"),
-    check("rika_hosted_prompt_cancellations_actor_check", sql`(jsonb_typeof(actor) = 'object')`),
-    check("rika_hosted_prompt_cancellations_owner_check", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
   ],
 )
 
@@ -1564,6 +1531,7 @@ export const rikaHostedThreadProtocolSnapshots = pgTable(
     threadVersion: bigint("thread_version", { mode: "number" }).notNull(),
     cursor: bigint({ mode: "number" }).notNull(),
     snapshot: jsonb().notNull(),
+    replayRequired: boolean("replay_required").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (table) => [
@@ -1652,7 +1620,6 @@ export const rikaHostedThreads = pgTable(
     createdByUserId: text("created_by_user_id").notNull(),
     executorKind: rikaHostedExecutorKind("executor_kind").notNull(),
     inheritProjectGrants: boolean("inherit_project_grants").notNull(),
-    nextCommandSequence: bigint("next_command_sequence", { mode: "number" }).default(1).notNull(),
     nextEventSequence: bigint("next_event_sequence", { mode: "number" }).default(1).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
@@ -1685,7 +1652,6 @@ export const rikaHostedThreads = pgTable(
       "rika_hosted_threads_check",
       sql`((executor_kind = 'orb'::rika_hosted_executor_kind) OR (inherit_project_grants = false))`,
     ),
-    check("rika_hosted_threads_next_command_sequence_check", sql`(next_command_sequence >= 1)`),
     check("rika_hosted_threads_next_event_sequence_check", sql`(next_event_sequence >= 1)`),
   ],
 )
@@ -1827,38 +1793,6 @@ export const rikaHostedToolAuditRecords = pgTable(
     ),
     check("rika_hosted_tool_audit_records_turn_id_check", sql`(length(turn_id) > 0)`),
     check("rika_hosted_tool_audit_records_workspace_id_check", sql`(length(workspace_id) > 0)`),
-  ],
-)
-
-export const rikaHostedTurnClaims = pgTable(
-  "rika_hosted_turn_claims",
-  {
-    turnId: text("turn_id")
-      .primaryKey()
-      .references(() => rikaTurns.id, { onDelete: "cascade" }),
-    ownerId: text("owner_id")
-      .notNull()
-      .references(() => rikaHostedOwners.id, { onDelete: "cascade" }),
-    threadId: text("thread_id")
-      .notNull()
-      .references(() => rikaThreads.id, { onDelete: "cascade" }),
-    workerId: text("worker_id").notNull(),
-    claimToken: text("claim_token").notNull(),
-    claimedAt: doublePrecision("claimed_at").notNull(),
-    heartbeatAt: doublePrecision("heartbeat_at").notNull(),
-    expiresAt: doublePrecision("expires_at").notNull(),
-  },
-  (table) => [
-    index("rika_hosted_turn_claims_expiry").using(
-      "btree",
-      table.expiresAt.asc().nullsLast(),
-      table.threadId.asc().nullsLast(),
-    ),
-    unique("rika_hosted_turn_claims_claim_token_key").on(table.claimToken),
-    unique("rika_hosted_turn_claims_thread_id_key").on(table.threadId),
-    check("rika_hosted_turn_claims_check", sql`(expires_at > heartbeat_at)`),
-    check("rika_hosted_turn_claims_claim_token_check", sql`(length(claim_token) > 0)`),
-    check("rika_hosted_turn_claims_worker_id_check", sql`(length(worker_id) > 0)`),
   ],
 )
 
@@ -2101,6 +2035,7 @@ export const rikaThreads = pgTable(
       table.updatedAt.desc().nullsFirst(),
       table.id.asc().nullsLast(),
     ),
+    unique("rika_threads_hosted_authority").on(table.id, table.ownerId, table.workspace),
     check("rika_threads_archived_check", sql`(archived = ANY (ARRAY[0, 1]))`),
     check("rika_threads_pinned_check", sql`(pinned = ANY (ARRAY[0, 1]))`),
   ],
@@ -2139,6 +2074,42 @@ export const rikaTranscriptCheckpoints = pgTable(
   ],
 )
 
+export const rikaTranscriptThreadUsage = pgTable("rika_transcript_thread_usage", {
+  threadId: text("thread_id")
+    .primaryKey()
+    .references(() => rikaThreads.id, { onDelete: "cascade" }),
+  accumulatorJson: text("accumulator_json").notNull(),
+  summaryJson: text("summary_json").notNull(),
+  updatedAt: doublePrecision("updated_at").notNull(),
+})
+
+export const rikaTranscriptTurnUsage = pgTable(
+  "rika_transcript_turn_usage",
+  {
+    turnId: text("turn_id")
+      .primaryKey()
+      .references(() => rikaTurns.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => rikaThreads.id, { onDelete: "cascade" }),
+    createdAt: doublePrecision("created_at").notNull(),
+    usageJson: text("usage_json").notNull(),
+    hasContext: boolean("has_context").notNull(),
+    contextCapacityJson: text("context_capacity_json"),
+    activeSince: doublePrecision("active_since"),
+    updatedAt: doublePrecision("updated_at").notNull(),
+  },
+  (table) => [
+    index("rika_transcript_turn_usage_thread").on(table.threadId, table.createdAt.desc(), table.turnId.desc()),
+    index("rika_transcript_turn_usage_context")
+      .on(table.threadId, table.createdAt.desc(), table.turnId.desc())
+      .where(sql`has_context`),
+    index("rika_transcript_turn_usage_active")
+      .on(table.threadId, table.activeSince.asc())
+      .where(sql`active_since IS NOT NULL`),
+  ],
+)
+
 export const rikaTranscriptUnits = pgTable(
   "rika_transcript_units",
   {
@@ -2174,23 +2145,13 @@ export const rikaTranscriptUnits = pgTable(
   ],
 )
 
-export const rikaTurnAdmissionOutbox = pgTable(
-  "rika_turn_admission_outbox",
-  {
-    turnId: text("turn_id")
-      .primaryKey()
-      .references(() => rikaTurns.id, { onDelete: "cascade" }),
-    startInputJson: text("start_input_json").notNull(),
-    preparedTurnJson: text("prepared_turn_json"),
-    admissionLinkJson: text("admission_link_json"),
-    preparedAt: doublePrecision("prepared_at").notNull(),
-    admittedAt: doublePrecision("admitted_at"),
-    activationRequestedAt: doublePrecision("activation_requested_at"),
-  },
-  (table) => [
-    index("rika_turn_admission_outbox_activation").on(table.activationRequestedAt, table.preparedAt, table.turnId),
-  ],
-)
+export const rikaTurnAdmissionOutbox = pgTable("rika_turn_admission_outbox", {
+  turnId: text("turn_id")
+    .primaryKey()
+    .references(() => rikaTurns.id, { onDelete: "cascade" }),
+  startInputJson: text("start_input_json").notNull(),
+  preparedAt: doublePrecision("prepared_at").notNull(),
+})
 
 export const rikaTurnSteeringOutbox = pgTable(
   "rika_turn_steering_outbox",

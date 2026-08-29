@@ -1,14 +1,21 @@
 import { expect, it } from "@effect/vitest"
 
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMember, identityOrganization, identityUser } from "@rika/identity"
-import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import {
+  AssignmentRevision,
+  type ExecutorAssignment,
+  type WorkspaceCapabilitySnapshot,
+} from "@rika/product/executor-assignment"
 import { ExecutorAssignments, type Access, type Version } from "@rika/product/executor-assignments"
+import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
+import { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
 import {
   BetterAuthMemberId,
   BetterAuthUserId,
   ClientId,
-  CommandId,
+  CheckpointId,
   DeviceId,
   EventId,
   ExecutorAssignmentId,
@@ -24,9 +31,9 @@ import {
   Timestamp,
   WorkspaceId,
 } from "@rika/product/hosted-model"
-import { HostedStore } from "@rika/product/hosted-store"
 import { CheckoutFingerprint } from "@rika/product/runner-registration"
-import { sql as drizzleSql } from "drizzle-orm"
+import { eq, sql as drizzleSql } from "drizzle-orm"
+import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Config, Effect, FileSystem, Layer, Random, Redacted, Schema } from "effect"
 import { fileURLToPath } from "node:url"
@@ -112,25 +119,30 @@ const isolated = <A, E, R>(
     readonly url: string
     readonly pool: Pool
     readonly database: NodePgDatabase
+    readonly effectDatabase: PgDrizzle.EffectPgDatabase
   }) => Effect.Effect<A, E, R>,
 ) =>
-  Effect.gen(function* () {
-    const database = `rika_local_recovery_${Math.abs(yield* Random.nextInt)}`
-    const admin = new Pool({ connectionString: databaseUrl })
-    yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
-    const parsed = new URL(databaseUrl)
-    parsed.pathname = `/${database}`
-    const url = parsed.toString()
-    const pool = new Pool({ connectionString: url })
-    const databaseClient = drizzle({ client: pool })
-    try {
-      return yield* run({ url, pool, database: databaseClient })
-    } finally {
-      yield* Effect.tryPromise(() => pool.end())
-      yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
-      yield* Effect.tryPromise(() => admin.end())
-    }
-  })
+  Effect.scoped(
+    Effect.gen(function* () {
+      const database = `rika_local_recovery_${Math.abs(yield* Random.nextInt)}`
+      const admin = new Pool({ connectionString: databaseUrl })
+      yield* Effect.tryPromise(() => admin.query(`CREATE DATABASE "${database}"`))
+      const parsed = new URL(databaseUrl)
+      parsed.pathname = `/${database}`
+      const url = parsed.toString()
+      const pool = new Pool({ connectionString: url })
+      const databaseClient = drizzle({ client: pool })
+      const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+      const effectDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
+      try {
+        return yield* run({ url, pool, database: databaseClient, effectDatabase })
+      } finally {
+        yield* Effect.tryPromise(() => pool.end())
+        yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
+        yield* Effect.tryPromise(() => admin.end())
+      }
+    }),
+  )
 
 const seedIdentity = (database: NodePgDatabase) =>
   Effect.gen(function* () {
@@ -163,6 +175,53 @@ const seedIdentity = (database: NodePgDatabase) =>
       }),
     )
   })
+
+const seedRecoveryAggregate = (database: PgDrizzle.EffectPgDatabase) =>
+  database.transaction((tx) =>
+    Effect.gen(function* () {
+      const now = drizzleSql`transaction_timestamp()`
+      yield* tx
+        .insert(schema.rikaHostedOwners)
+        .values({ id: ids.owner, kind: "organization", organizationId: ids.organization })
+      yield* tx.insert(schema.rikaHostedOwnerCounters).values({ ownerId: ids.owner })
+      yield* tx.insert(schema.rikaHostedProjects).values({
+        id: ids.project,
+        ownerId: ids.owner,
+        name: "Recovery",
+        createdByUserId: ids.user,
+        createdAt: now,
+        updatedAt: now,
+      })
+      yield* tx.insert(schema.rikaHostedWorkspaces).values({
+        id: ids.workspace,
+        ownerId: ids.owner,
+        projectId: ids.project,
+        createdByUserId: ids.user,
+        executorKind: "runner",
+        inheritProjectGrants: false,
+        createdAt: now,
+      })
+      yield* tx.insert(schema.rikaWorkspaces).values({ ownerId: ids.owner, path: ids.workspace, createdAt: 1 })
+      yield* tx.insert(schema.rikaHostedThreads).values({
+        id: ids.thread,
+        ownerId: ids.owner,
+        projectId: ids.project,
+        workspaceId: ids.workspace,
+        createdByUserId: ids.user,
+        executorKind: "runner",
+        inheritProjectGrants: false,
+        createdAt: now,
+      })
+      yield* tx.insert(schema.rikaThreads).values({
+        id: ids.thread,
+        ownerId: ids.owner,
+        workspace: ids.workspace,
+        title: "Recovery",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }),
+  )
 
 it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects recovery constraints", () =>
   isolated(({ pool }) =>
@@ -203,48 +262,11 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
 )
 
 it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconstructable fence", () =>
-  isolated(({ pool, database }) =>
+  isolated(({ pool, database, effectDatabase }) =>
     Effect.gen(function* () {
       yield* apply(pool, [...identityMigrations, ...migrations])
       yield* seedIdentity(database)
-      yield* Effect.tryPromise(() =>
-        database
-          .insert(schema.rikaHostedOwners)
-          .values({ id: "owner-recovery", kind: "organization", organizationId: "organization-recovery" }),
-      )
-      yield* Effect.tryPromise(() =>
-        database.insert(schema.rikaHostedProjects).values({
-          id: "project-recovery",
-          ownerId: "owner-recovery",
-          name: "Recovery",
-          createdByUserId: "user-recovery",
-          createdAt: drizzleSql`transaction_timestamp()`,
-          updatedAt: drizzleSql`transaction_timestamp()`,
-        }),
-      )
-      yield* Effect.tryPromise(() =>
-        database.insert(schema.rikaHostedWorkspaces).values({
-          id: "workspace-recovery",
-          ownerId: "owner-recovery",
-          projectId: "project-recovery",
-          createdByUserId: "user-recovery",
-          executorKind: "runner",
-          inheritProjectGrants: false,
-          createdAt: drizzleSql`transaction_timestamp()`,
-        }),
-      )
-      yield* Effect.tryPromise(() =>
-        database.insert(schema.rikaHostedThreads).values({
-          id: "thread-recovery",
-          ownerId: "owner-recovery",
-          projectId: "project-recovery",
-          workspaceId: "workspace-recovery",
-          createdByUserId: "user-recovery",
-          executorKind: "runner",
-          inheritProjectGrants: false,
-          createdAt: drizzleSql`transaction_timestamp()`,
-        }),
-      )
+      yield* seedRecoveryAggregate(effectDatabase)
       yield* Effect.tryPromise(() =>
         database.insert(schema.rikaHostedExecutorAssignments).values({
           id: "assignment-recovery",
@@ -280,48 +302,34 @@ it.effect.skipIf(!live)("fails closed when a dispatched operation has no reconst
 it.effect.skipIf(!live)(
   "accepts an exact old-fence recovered event and rejects the wrong generation, lease, executor, and process",
   () =>
-    isolated(({ url, pool, database }) =>
+    isolated(({ url, pool, database, effectDatabase }) =>
       Effect.gen(function* () {
         yield* apply(pool, [...identityMigrations, ...migrations])
         yield* seedIdentity(database)
+        yield* seedRecoveryAggregate(effectDatabase)
         const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
         yield* Effect.scoped(
           Effect.gen(function* () {
             const context = yield* Layer.build(layer)
             yield* Effect.gen(function* () {
-              const store = yield* HostedStore
+              const authority = yield* HostedClientAuthority
+              const ledger = yield* HostedThreadEventStore
               const assignments = yield* ExecutorAssignments
-              const owner = yield* store.putOwner({
-                id: ids.owner,
-                identity: { _tag: "OrganizationOwner", organizationId: ids.organization },
-                now: at(0),
-              })
-              expect(owner).toMatchObject({
-                id: ids.owner,
-                identity: { _tag: "OrganizationOwner", organizationId: ids.organization },
-              })
-              yield* store.createProject({
-                id: ids.project,
-                ownerId: ids.owner,
-                name: "Recovery",
-                createdByUserId: ids.user,
-                now: at(0),
-              })
-              yield* store.registerDevice({
+              yield* authority.registerDevice({
                 id: ids.device,
                 userId: ids.user,
                 displayName: "Recovery",
                 publicKeyFingerprint: "sha256:recovery",
                 now: at(0),
               })
-              yield* store.authenticateClient({
+              yield* authority.authenticateClient({
                 id: ids.client,
                 userId: ids.user,
                 deviceId: ids.device,
                 now: at(0),
                 expiresAt: at(59),
               })
-              yield* store.grantClientAuthority({
+              yield* authority.grantClientAuthority({
                 ownerId: ids.owner,
                 actor: {
                   _tag: "OrganizationActor",
@@ -333,39 +341,6 @@ it.effect.skipIf(!live)(
                 },
                 now: at(0),
                 expiresAt: at(59),
-              })
-              yield* store.createWorkspace({
-                id: ids.workspace,
-                ownerId: ids.owner,
-                projectId: ids.project,
-                createdByUserId: ids.user,
-                executorKind: "runner",
-                now: at(0),
-              })
-              yield* store.createThread({
-                id: ids.thread,
-                ownerId: ids.owner,
-                projectId: ids.project,
-                workspaceId: ids.workspace,
-                createdByUserId: ids.user,
-                executorKind: "runner",
-                now: at(0),
-              })
-              yield* store.admitCommand({
-                ownerId: ids.owner,
-                threadId: ids.thread,
-                commandId: CommandId.make("operation-recovered"),
-                idempotencyKey: IdempotencyKey.make("operation-recovered"),
-                actor: {
-                  _tag: "OrganizationActor",
-                  owner: { _tag: "OrganizationOwner", organizationId: ids.organization },
-                  userId: ids.user,
-                  membershipId: ids.member,
-                  clientId: ids.client,
-                  deviceId: ids.device,
-                },
-                command: { _tag: "SubmitPrompt", prompt: "recover" },
-                admittedAt: at(1),
               })
               const created = yield* assignments.create({
                 id: ids.assignment,
@@ -440,37 +415,332 @@ it.effect.skipIf(!live)(
                 assignmentId: access.assignmentId,
                 assignmentGeneration: access.assignmentGeneration,
                 leaseEpoch: access.leaseEpoch,
-                commandSequence: Sequence.make("1"),
+                commandSequence: null,
                 event: unknownEvent,
                 executorInstanceId: String(access.executorInstanceId),
                 processIncarnation: access.processIncarnation,
               }
-              const first = yield* store.appendRecoveredEvent(recovered)
+              const first = yield* ledger.appendRecoveredEvent(recovered)
               expect(first.event).toEqual(unknownEvent)
-              expect(yield* store.appendRecoveredEvent(recovered)).toEqual(first)
+              expect(yield* ledger.appendRecoveredEvent(recovered)).toEqual(first)
               expect(
-                (yield* Effect.result(
-                  store.appendRecoveredEvent({ ...recovered, assignmentGeneration: FencingGeneration.make("9") }),
-                ))._tag,
-              ).toBe("Failure")
+                yield* Effect.result(
+                  ledger.appendRecoveredEvent({ ...recovered, assignmentGeneration: FencingGeneration.make("9") }),
+                ),
+              ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
               expect(
-                (yield* Effect.result(
-                  store.appendRecoveredEvent({ ...recovered, leaseEpoch: AssignmentLeaseEpoch.make("9") }),
-                ))._tag,
-              ).toBe("Failure")
+                yield* Effect.result(
+                  ledger.appendRecoveredEvent({ ...recovered, leaseEpoch: AssignmentLeaseEpoch.make("9") }),
+                ),
+              ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
               expect(
-                (yield* Effect.result(
-                  store.appendRecoveredEvent({ ...recovered, executorInstanceId: "other-executor" }),
-                ))._tag,
-              ).toBe("Failure")
+                yield* Effect.result(
+                  ledger.appendRecoveredEvent({ ...recovered, executorInstanceId: "other-executor" }),
+                ),
+              ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
               expect(
-                (yield* Effect.result(
-                  store.appendRecoveredEvent({ ...recovered, processIncarnation: "other-process" }),
-                ))._tag,
-              ).toBe("Failure")
+                yield* Effect.result(
+                  ledger.appendRecoveredEvent({ ...recovered, processIncarnation: "other-process" }),
+                ),
+              ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
             }).pipe(Effect.provideContext(context))
           }),
         )
       }),
     ),
+)
+
+it.effect.skipIf(!live)("enforces the executor assignment contract with PostgreSQL time and fences", () =>
+  isolated(({ pool, database, effectDatabase, url }) =>
+    Effect.gen(function* () {
+      yield* apply(pool, [...identityMigrations, ...migrations])
+      yield* seedIdentity(database)
+      yield* seedRecoveryAggregate(effectDatabase)
+      const suffixes = [
+        "session",
+        "checkpoint",
+        "replacement",
+        "authority",
+        "capabilities",
+        "no-checkout",
+        "expired-bootstrap",
+        "expired-lease",
+      ] as const
+      yield* effectDatabase.transaction((tx) =>
+        Effect.forEach(
+          suffixes,
+          (suffix) =>
+            Effect.gen(function* () {
+              const now = drizzleSql`transaction_timestamp()`
+              const workspaceId = `workspace-${suffix}`
+              const threadId = `thread-${suffix}`
+              yield* tx.insert(schema.rikaHostedWorkspaces).values({
+                id: workspaceId,
+                ownerId: ids.owner,
+                projectId: null,
+                createdByUserId: ids.user,
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              })
+              yield* tx.insert(schema.rikaWorkspaces).values({ ownerId: ids.owner, path: workspaceId, createdAt: 1 })
+              yield* tx.insert(schema.rikaHostedThreads).values({
+                id: threadId,
+                ownerId: ids.owner,
+                projectId: null,
+                workspaceId,
+                createdByUserId: ids.user,
+                executorKind: "orb",
+                inheritProjectGrants: false,
+                createdAt: now,
+              })
+              yield* tx.insert(schema.rikaThreads).values({
+                id: threadId,
+                ownerId: ids.owner,
+                workspace: workspaceId,
+                title: suffix,
+                createdAt: 1,
+                updatedAt: 1,
+              })
+            }),
+          { discard: true },
+        ),
+      )
+
+      const layer = HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(layer)
+          yield* Effect.gen(function* () {
+            const assignments = yield* ExecutorAssignments
+            const capabilitiesFor = (digestCharacter: string): WorkspaceCapabilitySnapshot => ({
+              ...capabilities,
+              environmentDigest: `sha256:${digestCharacter.repeat(64)}`,
+            })
+            const open = (suffix: (typeof suffixes)[number]) =>
+              Effect.gen(function* () {
+                const before = yield* Effect.tryPromise(() =>
+                  pool.query<{ readonly now: Date }>("SELECT clock_timestamp() AS now"),
+                )
+                const created = yield* assignments.create({
+                  id: ExecutorAssignmentId.make(`assignment-${suffix}`),
+                  ownerId: ids.owner,
+                  threadId: ThreadId.make(`thread-${suffix}`),
+                  workspaceId: WorkspaceId.make(`workspace-${suffix}`),
+                  placement: { _tag: "OrbPlacement", templateBuildId: "template", providerScope: "scope" },
+                  checkout: null,
+                })
+                const after = yield* Effect.tryPromise(() =>
+                  pool.query<{ readonly now: Date }>("SELECT clock_timestamp() AS now"),
+                )
+                const createdAt = Date.parse(created.createdAt)
+                expect(createdAt).toBeGreaterThanOrEqual(before.rows[0]!.now.getTime())
+                expect(createdAt).toBeLessThanOrEqual(after.rows[0]!.now.getTime())
+                const provisioning = yield* assignments.beginProvisioning({
+                  ...version(created),
+                  bootstrapCredentialDigest: Redacted.make("bootstrap"),
+                  bootstrapLifetimeMillis: 60_000,
+                })
+                const bound = yield* assignments.bindProviderInstance({
+                  ...version(provisioning),
+                  providerInstanceId: `sandbox-${suffix}`,
+                })
+                const active = yield* assignments.openSession({
+                  ...version(bound),
+                  providerInstanceId: `sandbox-${suffix}`,
+                  executorInstanceId: ids.executor,
+                  processIncarnation: `process-${suffix}`,
+                  capabilities: capabilitiesFor("a"),
+                  presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
+                  sessionCredentialDigest: Redacted.make("session"),
+                  leaseLifetimeMillis: 60_000,
+                })
+                if (active.lifecycle._tag !== "Active") return yield* Effect.die("assignment did not become active")
+                const access: Access = {
+                  assignmentId: active.id,
+                  assignmentGeneration: active.generation,
+                  providerInstanceId: active.lifecycle.providerInstanceId,
+                  executorInstanceId: active.lifecycle.executorInstanceId,
+                  processIncarnation: active.lifecycle.processIncarnation,
+                  leaseEpoch: active.lifecycle.leaseEpoch,
+                  presentedSessionCredentialDigest: Redacted.make("session"),
+                }
+                return { bound, active, access }
+              })
+
+            const session = yield* open("session")
+            expect(yield* assignments.getForThread(ThreadId.make("thread-session"))).toEqual(session.active)
+            expect(session.active).not.toHaveProperty("bootstrapCredentialDigest")
+            expect(session.active).not.toHaveProperty("sessionCredentialDigest")
+            const bootstrapReplay = yield* Effect.result(
+              assignments.openSession({
+                ...version(session.active),
+                providerInstanceId: "sandbox-session",
+                executorInstanceId: ids.executor,
+                processIncarnation: "process-session",
+                capabilities: capabilitiesFor("b"),
+                presentedBootstrapCredentialDigest: Redacted.make("bootstrap"),
+                sessionCredentialDigest: Redacted.make("another-session"),
+                leaseLifetimeMillis: 60_000,
+              }),
+            )
+            expect(bootstrapReplay).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
+            const reconnected = yield* assignments.reconnect({ access: session.access, leaseLifetimeMillis: 60_000 })
+            expect(reconnected.lifecycle).toMatchObject({ _tag: "Active", leaseEpoch: "2" })
+            expect(yield* Effect.result(assignments.authenticate(session.access))).toMatchObject({
+              _tag: "Failure",
+              failure: { reason: "stale-fence" },
+            })
+            expect(AssignmentRevision.make(session.bound.revision)).toBe("2")
+
+            const checkpointSession = yield* open("checkpoint")
+            const cursor = { sequence: Sequence.make("1"), value: "event-1" }
+            yield* assignments.heartbeat({ access: checkpointSession.access, cursor, leaseLifetimeMillis: 60_000 })
+            const checkpointInput = {
+              access: checkpointSession.access,
+              id: CheckpointId.make("checkpoint-contract"),
+              objectKey: "checkpoints/checkpoint.tar.zst",
+              contentDigest: `sha256:${"a".repeat(64)}`,
+              sizeBytes: 1024,
+              format: "tar.zst" as const,
+              cursor,
+              metadata: { source: "filesystem" },
+            }
+            const checkpoint = yield* assignments.commitCheckpoint(checkpointInput)
+            expect(yield* assignments.commitCheckpoint(checkpointInput)).toEqual(checkpoint)
+            expect(yield* assignments.latestCheckpoint(checkpointSession.active.id)).toEqual(checkpoint)
+            expect(
+              yield* Effect.result(
+                assignments.commitCheckpoint({ ...checkpointInput, sizeBytes: checkpointInput.sizeBytes + 1 }),
+              ),
+            ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
+            expect(
+              yield* Effect.result(
+                assignments.heartbeat({
+                  access: checkpointSession.access,
+                  cursor: { sequence: Sequence.make("0"), value: "" },
+                  leaseLifetimeMillis: 60_000,
+                }),
+              ),
+            ).toMatchObject({ _tag: "Failure", failure: { reason: "conflict" } })
+
+            const replacementSession = yield* open("replacement")
+            if (replacementSession.active.placement._tag !== "OrbPlacement")
+              return yield* Effect.die("assignment is not placed in an Orb")
+            const replacement = yield* assignments.beginReplacement({
+              ...version(replacementSession.active),
+              placement: { ...replacementSession.active.placement, templateBuildId: "template-v2" },
+              bootstrapCredentialDigest: Redacted.make("replacement-bootstrap"),
+              bootstrapLifetimeMillis: 60_000,
+            })
+            expect(replacement).toMatchObject({
+              generation: "2",
+              capabilityGeneration: null,
+              capabilities: null,
+              lifecycle: { _tag: "Provisioning", providerInstanceId: null },
+            })
+            expect(yield* Effect.result(assignments.authenticate(replacementSession.access))).toMatchObject({
+              _tag: "Failure",
+              failure: { reason: "stale-fence" },
+            })
+
+            const authoritySession = yield* open("authority")
+            const unauthorizedPlacements: ReadonlyArray<ExecutorAssignment["placement"]> = [
+              { _tag: "OrbPlacement", templateBuildId: "template-v2", providerScope: "another-scope" },
+              {
+                _tag: "RunnerPlacement",
+                deviceId: DeviceId.make("another-device"),
+                checkoutFingerprint: CheckoutFingerprint.make("another-checkout"),
+                requestingDeviceId: DeviceId.make("another-requester"),
+              },
+            ]
+            for (const placement of unauthorizedPlacements)
+              expect(
+                yield* Effect.result(
+                  assignments.beginReplacement({
+                    ...version(authoritySession.active),
+                    placement,
+                    bootstrapCredentialDigest: Redacted.make("replacement-bootstrap"),
+                    bootstrapLifetimeMillis: 60_000,
+                  }),
+                ),
+              ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-authority" } })
+
+            const capabilitySession = yield* open("capabilities")
+            const refreshedCapabilities = capabilitiesFor("c")
+            const updated = yield* assignments.updateCapabilities({
+              access: capabilitySession.access,
+              capabilities: refreshedCapabilities,
+            })
+            expect(updated.capabilityGeneration).toBe(updated.generation)
+            expect(updated.capabilities).toEqual(refreshedCapabilities)
+            const paused = yield* assignments.pause(version(updated))
+            expect(paused.capabilities).toEqual(refreshedCapabilities)
+            const capabilityReplacement = yield* assignments.beginReplacement({
+              ...version(paused),
+              placement: paused.placement,
+              bootstrapCredentialDigest: Redacted.make("replacement-capabilities"),
+              bootstrapLifetimeMillis: 60_000,
+            })
+            expect(capabilityReplacement).toMatchObject({ capabilityGeneration: null, capabilities: null })
+
+            expect((yield* open("no-checkout")).active.checkout).toBeNull()
+
+            const expiredBootstrapCreated = yield* assignments.create({
+              id: ExecutorAssignmentId.make("assignment-expired-bootstrap"),
+              ownerId: ids.owner,
+              threadId: ThreadId.make("thread-expired-bootstrap"),
+              workspaceId: WorkspaceId.make("workspace-expired-bootstrap"),
+              placement: { _tag: "OrbPlacement", templateBuildId: "template", providerScope: "scope" },
+              checkout: null,
+            })
+            const expiredProvisioning = yield* assignments.beginProvisioning({
+              ...version(expiredBootstrapCreated),
+              bootstrapCredentialDigest: Redacted.make("expired-bootstrap"),
+              bootstrapLifetimeMillis: 60_000,
+            })
+            const expiredBound = yield* assignments.bindProviderInstance({
+              ...version(expiredProvisioning),
+              providerInstanceId: "sandbox-expired",
+            })
+            yield* Effect.tryPromise(() =>
+              database
+                .update(schema.rikaHostedExecutorAssignments)
+                .set({ bootstrapExpiresAt: drizzleSql`clock_timestamp() - interval '1 second'` })
+                .where(eq(schema.rikaHostedExecutorAssignments.id, expiredBound.id)),
+            )
+            expect(yield* assignments.isBootstrapLive(version(expiredBound))).toBe(false)
+            expect(
+              yield* Effect.result(
+                assignments.openSession({
+                  ...version(expiredBound),
+                  providerInstanceId: "sandbox-expired",
+                  executorInstanceId: ids.executor,
+                  processIncarnation: "expired",
+                  capabilities: capabilitiesFor("d"),
+                  presentedBootstrapCredentialDigest: Redacted.make("expired-bootstrap"),
+                  sessionCredentialDigest: Redacted.make("expired-session"),
+                  leaseLifetimeMillis: 60_000,
+                }),
+              ),
+            ).toMatchObject({ _tag: "Failure", failure: { reason: "stale-fence" } })
+
+            const expiredLease = yield* open("expired-lease")
+            yield* Effect.tryPromise(() =>
+              database
+                .update(schema.rikaHostedExecutorAssignments)
+                .set({ leaseExpiresAt: drizzleSql`clock_timestamp() - interval '1 second'` })
+                .where(eq(schema.rikaHostedExecutorAssignments.id, expiredLease.active.id)),
+            )
+            expect(yield* Effect.result(assignments.authenticate(expiredLease.access))).toMatchObject({
+              _tag: "Failure",
+              failure: { reason: "stale-fence" },
+            })
+            const renewed = yield* assignments.reconnect({ access: expiredLease.access, leaseLifetimeMillis: 60_000 })
+            expect(renewed.lifecycle).toMatchObject({ _tag: "Active", leaseEpoch: "2" })
+          }).pipe(Effect.provideContext(context))
+        }),
+      )
+    }),
+  ),
 )

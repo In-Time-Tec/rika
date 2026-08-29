@@ -110,6 +110,7 @@ export const makeInteractiveSelectionProjection = (input: InteractiveSelectionPr
       queueRevision: queue.revision,
       queuedCount: queue.queuedCount,
       queue: queue.turns.map(queueItem),
+      projectionCheckpoints: [],
     }
     dispatch(activeTurn === undefined ? loaded : { ...loaded, activeTurn })
   })

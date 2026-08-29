@@ -1,4 +1,4 @@
-import { Service, RepositoryError } from "@rika/product/turn-repository"
+import { PageCursor, Service, RepositoryError, defaultPageSize, maximumPageSize } from "@rika/product/turn-repository"
 import type { Interface } from "@rika/product/turn-repository"
 type PageResult = Effect.Success<ReturnType<Interface["page"]>>
 export { Service, RepositoryError }
@@ -7,8 +7,7 @@ import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Layer } from "effect"
 import { TurnId } from "@rika/product/turn-record"
 import { rikaTurns } from "../../database/schema/product"
-import { repositoryError } from "../memory/errors"
-import { cursorFor, pageSize } from "../memory/state"
+import { repositoryError } from "./errors"
 import { decode, decodeAgent } from "./row-codec"
 import { readTurn, turnRowSelection } from "./reader"
 import { listAgentTurns } from "./queries"
@@ -18,6 +17,11 @@ import * as TurnSqlSteeringAdmission from "./steering-admission"
 import * as TurnSqlState from "./state"
 import * as TurnSqlSubmission from "./submission"
 import * as TurnSqlRecordedShell from "./recorded-shell"
+
+const pageSize = (limit: number | undefined) =>
+  Math.min(maximumPageSize, Math.max(1, Math.floor(limit ?? defaultPageSize)))
+const cursorFor = (turn: import("@rika/product/turn-record").Turn | undefined) =>
+  turn === undefined ? undefined : PageCursor.make({ createdAt: turn.createdAt, id: turn.id })
 
 export const layer = Layer.effect(
   Service,
@@ -116,4 +120,3 @@ export const layer = Layer.effect(
     })
   }),
 )
-export { makeMemory, memoryLayer, memoryCoordinator } from "../memory/repository"

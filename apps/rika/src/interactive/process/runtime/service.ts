@@ -105,6 +105,25 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       ),
     )
   }
+  const cancel = (target: Parameters<typeof session.cancel>[0] = {}) => {
+    const turnId = loop.model.activeTurnId
+    fork(
+      session.cancel(target).pipe(
+        provideLayerScoped(BunServices.layer),
+        Effect.catch((failure) =>
+          Effect.sync(() => {
+            loop.model = update(
+              loop.model,
+              turnId === undefined
+                ? { _tag: "CancelFailed", message: failure.message }
+                : { _tag: "CancelFailed", turnId, message: failure.message },
+            )
+            loop.renderer?.surface.update(loop.model)
+          }),
+        ),
+      ),
+    )
+  }
   const interrupt = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const lifecycle = yield* SubscriptionRef.get(loop.lifecycle)
@@ -115,19 +134,21 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         loop.model.busy ||
         loop.model.activeTurnId !== undefined ||
         loop.model.activity !== undefined,
+      cancellationPending: loop.model.cancelPending,
       now,
     })
     if (decision._tag === "Ignore") return
     if (decision._tag === "Cancel") {
-      yield* SubscriptionRef.set(loop.lifecycle, { _tag: "Cancelling" })
-      run(session.cancel())
+      loop.model = { ...loop.model, cancelPending: true, activity: { _tag: "Waiting" } }
+      loop.renderer?.surface.update(loop.model)
+      cancel()
       return
     }
     if (decision._tag === "ForceQuit") {
       Deferred.doneUnsafe(loop.forceQuit, Effect.void)
       return
     }
-    if (lifecycle._tag === "Running" || lifecycle._tag === "Cancelling")
+    if (lifecycle._tag === "Running")
       loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
     close(tuiSignalExitCode("SIGINT"), true, now)
   })
@@ -389,7 +410,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     approveAuthorization: (turnId, authorizationId) => run(session.approveAuthorization(turnId, authorizationId)),
     denyAuthorization: (turnId, authorizationId) => run(session.denyAuthorization(turnId, authorizationId)),
     interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
-    cancel: (target) => run(session.cancel(target)),
+    cancel,
     newThread: () => startSelection(() => session.newThread, true),
     selectThread: (id) => {
       loop.requestedThreadId = id

@@ -93,7 +93,11 @@ export const observeRootTurn = (input: {
     turnId: Turn.TurnId,
     expectedStatus?: ExecutionStatus.Status,
   ) => Effect.Effect<boolean, TurnRepository.RepositoryError, never>
-  readonly release: (turnId: Turn.TurnId, notify?: boolean) => Effect.Effect<void, OperationError, never>
+  readonly release: (
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    notify?: boolean,
+  ) => Effect.Effect<void, OperationError, never>
   readonly watch: Effect.Effect<
     void,
     | OperationError
@@ -121,7 +125,7 @@ export const observeRootTurn = (input: {
                 ? Effect.succeed(false)
                 : restore(input.watch).pipe(
                     Effect.as(true),
-                    Effect.ensuring(input.release(input.turn.id, false).pipe(Effect.ignore)),
+                    Effect.ensuring(input.release(input.turn.threadId, input.turn.id, false).pipe(Effect.ignore)),
                   ),
             ),
           ),
@@ -160,7 +164,11 @@ export interface InteractiveFollowingInput {
     turnId: Turn.TurnId,
     expectedStatus?: ExecutionStatus.Status,
   ) => Effect.Effect<boolean, TurnRepository.RepositoryError, never>
-  readonly releaseTurnObserver: (turnId: Turn.TurnId, notify?: boolean) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    notify?: boolean,
+  ) => Effect.Effect<void, never, never>
 }
 
 export const makeInteractiveFollowing = (input: InteractiveFollowingInput) => {
@@ -313,7 +321,10 @@ export const makeInteractiveSupervision = (
                   const thread = yield* threads.get(rejection.queue.threadId)
                   if (thread !== undefined) yield* Effect.forkChild(settleThread(thread, publishObserved))
                 }
-                yield* rootTurnOwner.acknowledgeSteeringRejection(rejection.admission.input.idempotencyKey)
+                yield* rootTurnOwner.acknowledgeSteeringRejection(
+                  Thread.ThreadId.make(rejection.admission.target.threadId),
+                  rejection.admission.input.idempotencyKey,
+                )
               }),
             )
             if (handled._tag === "Failure")

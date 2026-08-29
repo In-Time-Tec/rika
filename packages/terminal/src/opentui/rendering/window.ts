@@ -73,8 +73,6 @@ export const iconChar: {
   ): (arg0: Parameters<typeof iconCharImpl>[0]) => ReturnType<typeof iconCharImpl>
 } = Function.dual((args) => args.length >= 2, iconCharImpl)
 
-export const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
-
 export { subagentPhrase } from "@rika/transcript/subagent-presentation"
 
 export const cancelledAgentLabel = (activeLabel: string): string =>

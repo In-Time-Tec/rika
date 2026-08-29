@@ -1,4 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
+import { PromptPart } from "@rika/product/execution-request"
+import { ExecutionRouteSnapshot } from "@rika/product/execution-route-snapshot"
 import {
   and,
   asc,
@@ -6,6 +9,7 @@ import {
   eq,
   gt,
   gte,
+  inArray,
   isNull,
   lt,
   lte,
@@ -23,19 +27,23 @@ import {
   ActorAttribution,
   BetterAuthUserId,
   ClientId,
+  CommitCursor,
   CommandId,
   DeviceId,
   IdempotencyKey,
   JsonObject,
   OwnerId,
+  Sequence,
   ThreadEventCursor,
   ThreadId,
   ThreadVersion,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { StoreError } from "@rika/product/hosted-store"
+import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { InteractiveEventSchema } from "@rika/product/interactive-event"
-import { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import { HostedThreadSnapshot, PendingAuthorization } from "@rika/product/client-protocol"
+import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
+import { TurnId } from "@rika/product/turn-record"
 import {
   ThreadProtocolStore,
   type ThreadProtocolCommand,
@@ -45,6 +53,7 @@ import {
 import {
   rikaHostedClients,
   rikaHostedDevices,
+  rikaHostedOwnerCounters,
   rikaHostedThreadProtocolCommands,
   rikaHostedThreadProtocolCursors,
   rikaHostedThreadProtocolEvents,
@@ -52,12 +61,19 @@ import {
   rikaHostedThreadProtocolState,
   rikaHostedThreads,
   rikaHostedThreadSocketTickets,
+  rikaThreadQueueState,
+  rikaThreads,
+  rikaTurns,
 } from "../database/schema/product"
 import { requireThreadAccess } from "./authority"
 
 const databaseError = (cause: unknown) =>
-  StoreError.make({ reason: "database", message: `Thread protocol PostgreSQL operation failed: ${String(cause)}` })
-const failure = (reason: StoreError["reason"], message: string) => StoreError.make({ reason, message })
+  HostedPersistenceError.make({
+    reason: "database",
+    message: `Thread protocol PostgreSQL operation failed: ${String(cause)}`,
+  })
+const failure = (reason: HostedPersistenceError["reason"], message: string) =>
+  HostedPersistenceError.make({ reason, message })
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 const decode =
@@ -66,22 +82,37 @@ const decode =
     Schema.decodeUnknownEffect(schema)(value).pipe(Effect.mapError(databaseError))
 const jsonEquivalent = Schema.toEquivalence(JsonObject)
 const actorEquivalent = Schema.toEquivalence(ActorAttribution)
+const pendingAuthorizationsEquivalent = Schema.toEquivalence(Schema.Array(PendingAuthorization))
+const SubmitPromptIdentity = Schema.TaggedStruct("SubmitPrompt", {})
+const CommandCancellationIdentity = Schema.TaggedStruct("Cancel", {
+  target: Schema.TaggedStruct("Command", { commandId: Schema.String }),
+})
+const ExecutionRouteJson = Schema.fromJsonString(ExecutionRouteSnapshot)
+const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
+const ExecutionLinkJson = Schema.fromJsonString(ExecutionGateway.ExecutionLink)
+const PreparedTurnJson = Schema.fromJsonString(ExecutionGateway.PreparedTurn)
 const bigintText = (column: SQLWrapper) => sql<string>`${column}::text`
 const bigintValue = (value: string) => sql<number>`${value}::bigint`
 const timestampValue = (value: string) => sql<Date>`${value}::timestamptz`
 const timestampText = (column: SQLWrapper) =>
   sql<string>`to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`
+const checkpointInterval = 64n
 
 const commandFields = {
   ownerId: rikaHostedThreadProtocolCommands.ownerId,
   threadId: rikaHostedThreadProtocolCommands.threadId,
   commandId: rikaHostedThreadProtocolCommands.commandId,
+  turnId: rikaHostedThreadProtocolCommands.turnId,
   idempotencyKey: rikaHostedThreadProtocolCommands.idempotencyKey,
   expectedThreadVersion: bigintText(rikaHostedThreadProtocolCommands.expectedVersion),
   threadVersion: bigintText(rikaHostedThreadProtocolCommands.threadVersion),
+  commitCursor: bigintText(rikaHostedThreadProtocolCommands.commitCursor),
   actor: rikaHostedThreadProtocolCommands.actor,
   command: rikaHostedThreadProtocolCommands.command,
   state: rikaHostedThreadProtocolCommands.state,
+  workState: rikaHostedThreadProtocolCommands.workState,
+  admissionStatus: rikaHostedThreadProtocolCommands.admissionStatus,
+  cancelledByCommandId: rikaHostedThreadProtocolCommands.cancelledByCommandId,
   result: rikaHostedThreadProtocolCommands.result,
   cursor: bigintText(rikaHostedThreadProtocolCommands.eventCursor),
   admittedAt: timestampText(rikaHostedThreadProtocolCommands.admittedAt),
@@ -92,12 +123,17 @@ interface CommandRow {
   readonly ownerId: string
   readonly threadId: string
   readonly commandId: string
+  readonly turnId: string | null
   readonly idempotencyKey: string
   readonly expectedThreadVersion: string
   readonly threadVersion: string
+  readonly commitCursor: string
   readonly actor: unknown
   readonly command: unknown
   readonly state: string
+  readonly workState: string | null
+  readonly admissionStatus: string | null
+  readonly cancelledByCommandId: string | null
   readonly result: unknown | null
   readonly cursor: string | null
   readonly admittedAt: string
@@ -112,11 +148,26 @@ const commandRow = Effect.fn("ThreadProtocolStore.commandRow")(function* (row: C
     idempotencyKey: IdempotencyKey.make(row.idempotencyKey),
     expectedThreadVersion: ThreadVersion.make(row.expectedThreadVersion),
     threadVersion: ThreadVersion.make(row.threadVersion),
+    sequence: Sequence.make(row.threadVersion),
+    commitCursor: CommitCursor.make(row.commitCursor),
     actor: yield* decode(ActorAttribution)(row.actor),
     command: yield* decode(JsonObject)(row.command),
     state: yield* decode(Schema.Literals(["admitted", "completed"]))(row.state),
     admittedAt: Timestamp.make(row.admittedAt),
   }
+  if (row.turnId !== null) Object.assign(command, { turnId: TurnId.make(row.turnId) })
+  if (row.workState !== null)
+    Object.assign(command, {
+      workState: yield* decode(Schema.Literals(["turn-activation-pending", "turn-activation-requested"]))(
+        row.workState,
+      ),
+    })
+  if (row.admissionStatus !== null)
+    Object.assign(command, {
+      admissionStatus: yield* decode(Schema.Literals(["accepted", "queued"]))(row.admissionStatus),
+    })
+  if (row.cancelledByCommandId !== null)
+    Object.assign(command, { cancelledByCommandId: CommandId.make(row.cancelledByCommandId) })
   if (row.result !== null) Object.assign(command, { result: yield* decode(JsonObject)(row.result) })
   if (row.cursor !== null) Object.assign(command, { cursor: ThreadEventCursor.make(row.cursor) })
   if (row.completedAt !== null) Object.assign(command, { completedAt: Timestamp.make(row.completedAt) })
@@ -158,96 +209,109 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
       .pipe(Effect.catchTag("SqlError", databaseError))
   })
 
-  const admitCommand: ThreadProtocolStoreService["admitCommand"] = Effect.fn("ThreadProtocolStore.admitCommand")(
-    function* (input) {
-      return yield* db
-        .transaction((tx) =>
-          Effect.gen(function* () {
-            yield* requireThreadAccess(tx, input, "thread:control", input.admittedAt)
-            const states = yield* query(
-              tx
-                .select({ version: bigintText(rikaHostedThreadProtocolState.version) })
-                .from(rikaHostedThreadProtocolState)
-                .where(
-                  and(
-                    eq(rikaHostedThreadProtocolState.ownerId, input.ownerId),
-                    eq(rikaHostedThreadProtocolState.threadId, input.threadId),
-                  ),
-                )
-                .for("update"),
-            )
-            const state = states[0]
-            if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
-            const existingRows = yield* query(
-              tx
-                .select(commandFields)
-                .from(rikaHostedThreadProtocolCommands)
-                .where(
-                  and(
-                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
-                    or(
-                      eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
-                      eq(rikaHostedThreadProtocolCommands.idempotencyKey, input.idempotencyKey),
-                    ),
-                  ),
-                )
-                .for("update"),
-            )
-            if (existingRows.length > 0) {
-              if (existingRows.length !== 1)
-                return yield* failure("conflict", "Command identities refer to different commands")
-              const existing = yield* commandRow(existingRows[0]!)
-              if (
-                existing.commandId !== input.commandId ||
-                existing.idempotencyKey !== input.idempotencyKey ||
-                existing.expectedThreadVersion !== input.expectedThreadVersion ||
-                !actorEquivalent(existing.actor, input.actor) ||
-                !jsonEquivalent(existing.command, input.command)
+  const admit = Effect.fn("ThreadProtocolStore.admit")(function* (
+    input:
+      | Parameters<ThreadProtocolStoreService["admitCommand"]>[0]
+      | Parameters<ThreadProtocolStoreService["admitServerCommand"]>[0],
+    expectedVersion: ThreadVersion | undefined,
+  ) {
+    return yield* db
+      .transaction((tx) =>
+        Effect.gen(function* () {
+          yield* requireThreadAccess(tx, input, "thread:control", input.admittedAt)
+          const state = (yield* query(
+            tx
+              .select({ version: bigintText(rikaHostedThreadProtocolState.version) })
+              .from(rikaHostedThreadProtocolState)
+              .where(
+                and(
+                  eq(rikaHostedThreadProtocolState.ownerId, input.ownerId),
+                  eq(rikaHostedThreadProtocolState.threadId, input.threadId),
+                ),
               )
-                return yield* failure("conflict", "Command identity was reused with incompatible input")
-              return { _tag: "Duplicate" as const, command: existing }
-            }
-            if (state.version !== input.expectedThreadVersion)
-              return yield* failure(
-                "stale-version",
-                `Expected Thread version ${input.expectedThreadVersion}; current is ${state.version}`,
-              )
-            const nextVersion = (BigInt(state.version) + 1n).toString()
-            const inserted = yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolCommands)
-                .values({
-                  ownerId: input.ownerId,
-                  threadId: input.threadId,
-                  commandId: input.commandId,
-                  idempotencyKey: input.idempotencyKey,
-                  expectedVersion: bigintValue(input.expectedThreadVersion),
-                  threadVersion: bigintValue(nextVersion),
-                  actor: input.actor,
-                  command: input.command,
-                  state: "admitted",
-                  admittedAt: timestampValue(input.admittedAt),
-                })
-                .returning(commandFields),
-            )
-            yield* query(
-              tx
-                .update(rikaHostedThreadProtocolState)
-                .set({ version: bigintValue(nextVersion) })
-                .where(
-                  and(
-                    eq(rikaHostedThreadProtocolState.ownerId, input.ownerId),
-                    eq(rikaHostedThreadProtocolState.threadId, input.threadId),
+              .for("update"),
+          ))[0]
+          if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+          const existingRows = yield* query(
+            tx
+              .select(commandFields)
+              .from(rikaHostedThreadProtocolCommands)
+              .where(
+                and(
+                  eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                  or(
+                    eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+                    eq(rikaHostedThreadProtocolCommands.idempotencyKey, input.idempotencyKey),
                   ),
-                )
-                .returning({ threadId: rikaHostedThreadProtocolState.threadId }),
+                ),
+              )
+              .for("update"),
+          )
+          if (existingRows.length > 0) {
+            if (existingRows.length !== 1)
+              return yield* failure("conflict", "Command identities refer to different commands")
+            const existing = yield* commandRow(existingRows[0]!)
+            if (
+              existing.commandId !== input.commandId ||
+              existing.idempotencyKey !== input.idempotencyKey ||
+              (expectedVersion !== undefined && existing.expectedThreadVersion !== expectedVersion) ||
+              !actorEquivalent(existing.actor, input.actor) ||
+              !jsonEquivalent(existing.command, input.command)
             )
-            return { _tag: "Admitted" as const, command: yield* commandRow(inserted[0]!) }
-          }),
-        )
-        .pipe(Effect.catchTag("SqlError", databaseError))
-    },
-  )
+              return yield* failure("conflict", "Command identity was reused with incompatible input")
+            return { _tag: "Duplicate" as const, command: existing }
+          }
+          const currentVersion = ThreadVersion.make(state.version)
+          if (expectedVersion !== undefined && currentVersion !== expectedVersion)
+            return yield* failure(
+              "stale-version",
+              `Expected Thread version ${expectedVersion}; current is ${currentVersion}`,
+            )
+          const nextVersion = (BigInt(currentVersion) + 1n).toString()
+          const cursors = yield* query(
+            tx
+              .update(rikaHostedOwnerCounters)
+              .set({ nextCommitCursor: sql`${rikaHostedOwnerCounters.nextCommitCursor} + 1` })
+              .where(eq(rikaHostedOwnerCounters.ownerId, input.ownerId))
+              .returning({ cursor: sql<string>`(${rikaHostedOwnerCounters.nextCommitCursor} - 1)::text` }),
+          )
+          if (cursors[0] === undefined) return yield* failure("invalid-authority", "Owner authority is not initialized")
+          const values = {
+            ownerId: input.ownerId,
+            threadId: input.threadId,
+            commandId: input.commandId,
+            idempotencyKey: input.idempotencyKey,
+            expectedVersion: bigintValue(currentVersion),
+            threadVersion: bigintValue(nextVersion),
+            commitCursor: bigintValue(cursors[0].cursor),
+            actor: input.actor,
+            command: input.command,
+            state: "admitted",
+            admittedAt: timestampValue(input.admittedAt),
+          }
+          if (input.turnId !== undefined) Object.assign(values, { turnId: input.turnId })
+          const inserted = yield* query(
+            tx.insert(rikaHostedThreadProtocolCommands).values(values).returning(commandFields),
+          )
+          yield* query(
+            tx
+              .update(rikaHostedThreadProtocolState)
+              .set({ version: bigintValue(nextVersion) })
+              .where(
+                and(
+                  eq(rikaHostedThreadProtocolState.ownerId, input.ownerId),
+                  eq(rikaHostedThreadProtocolState.threadId, input.threadId),
+                ),
+              ),
+          )
+          return { _tag: "Admitted" as const, command: yield* commandRow(inserted[0]!) }
+        }),
+      )
+      .pipe(Effect.catchTag("SqlError", databaseError))
+  })
+
+  const admitCommand: ThreadProtocolStoreService["admitCommand"] = (input) => admit(input, input.expectedThreadVersion)
+  const admitServerCommand: ThreadProtocolStoreService["admitServerCommand"] = (input) => admit(input, undefined)
 
   const writeEvents = Effect.fn("ThreadProtocolStore.writeEvents")(function* (
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -306,13 +370,468 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
         .for("update"),
     )
 
+  const writeSnapshot = (
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: {
+      readonly ownerId: OwnerId
+      readonly threadId: ThreadId
+      readonly threadVersion: ThreadVersion
+      readonly cursor: ThreadEventCursor
+      readonly snapshot: HostedThreadSnapshot
+      readonly createdAt: Timestamp
+      readonly replayRequired?: boolean
+    },
+  ) =>
+    query(
+      tx
+        .insert(rikaHostedThreadProtocolSnapshots)
+        .values({
+          ownerId: input.ownerId,
+          threadId: input.threadId,
+          threadVersion: bigintValue(input.threadVersion),
+          cursor: bigintValue(input.cursor),
+          snapshot: input.snapshot,
+          replayRequired: input.replayRequired ?? false,
+          createdAt: timestampValue(input.createdAt),
+        })
+        .onConflictDoUpdate({
+          target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
+          set: {
+            cursor: bigintValue(input.cursor),
+            snapshot: input.snapshot,
+            replayRequired: sql`${rikaHostedThreadProtocolSnapshots.replayRequired} OR excluded.replay_required`,
+            createdAt: timestampValue(input.createdAt),
+          },
+          setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
+        }),
+    ).pipe(Effect.asVoid)
+
+  const checkpointDue = Effect.fn("ThreadProtocolStore.checkpointDue")(function* (
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    ownerId: OwnerId,
+    threadId: ThreadId,
+    cursor: ThreadEventCursor,
+    snapshot: HostedThreadSnapshot,
+  ) {
+    const latest = (yield* query(
+      tx
+        .select({
+          cursor: bigintText(rikaHostedThreadProtocolSnapshots.cursor),
+          snapshot: rikaHostedThreadProtocolSnapshots.snapshot,
+          replayRequired: rikaHostedThreadProtocolSnapshots.replayRequired,
+        })
+        .from(rikaHostedThreadProtocolSnapshots)
+        .where(
+          and(
+            eq(rikaHostedThreadProtocolSnapshots.ownerId, ownerId),
+            eq(rikaHostedThreadProtocolSnapshots.threadId, threadId),
+          ),
+        )
+        .orderBy(desc(rikaHostedThreadProtocolSnapshots.cursor))
+        .limit(1),
+    ))[0]
+    if (latest === undefined) return { due: true, replayRequired: false }
+    const stored = yield* decode(HostedThreadSnapshot)(latest.snapshot)
+    const authorizationChanged = !pendingAuthorizationsEquivalent(
+      stored.pendingAuthorizations,
+      snapshot.pendingAuthorizations,
+    )
+    return {
+      due: authorizationChanged || BigInt(cursor) - BigInt(latest.cursor) >= checkpointInterval,
+      replayRequired: authorizationChanged || latest.replayRequired,
+    }
+  })
+
+  const applyPrompt: ThreadProtocolStoreService["applyPrompt"] = Effect.fn("ThreadProtocolStore.applyPrompt")(
+    function* (input, stage) {
+      if (input.prompt.length === 0) return yield* failure("conflict", "Prompt cannot be empty")
+      if (input.prepared.threadId !== input.threadId || input.prepared.turnId !== input.turnId)
+        return yield* failure("conflict", "Prepared Runtime admission identifies a different Turn")
+      const queueCapacity = Math.trunc(input.queueCapacity)
+      if (queueCapacity < 1) return yield* failure("conflict", "Prompt queue capacity must be positive")
+      const admittedAtMillis = Date.parse(input.completedAt)
+      if (!Number.isFinite(admittedAtMillis)) return yield* failure("conflict", "Prompt admission timestamp is invalid")
+      const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(input.executionRoute).pipe(
+        Effect.mapError(databaseError),
+      )
+      const promptParts =
+        input.promptParts === undefined
+          ? undefined
+          : yield* Schema.encodeEffect(PromptPartsJson)(input.promptParts).pipe(Effect.mapError(databaseError))
+      const preparedTurn = yield* Schema.encodeEffect(PreparedTurnJson)(input.prepared).pipe(
+        Effect.mapError(databaseError),
+      )
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const state = (yield* stateForUpdate(tx, input.ownerId, input.threadId))[0]
+            if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+            const current = (yield* query(
+              tx
+                .select({
+                  ...commandFields,
+                  claimToken: rikaHostedThreadProtocolCommands.claimToken,
+                  claimActive: sql<boolean>`${rikaHostedThreadProtocolCommands.claimExpiresAt} > transaction_timestamp()`,
+                })
+                .from(rikaHostedThreadProtocolCommands)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.ownerId, input.ownerId),
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+                  ),
+                )
+                .for("update"),
+            ))[0]
+            if (current === undefined) return yield* failure("not-found", "Command is unavailable")
+            const currentCommand = yield* commandRow(current)
+            if (!actorEquivalent(currentCommand.actor, input.actor))
+              return yield* failure("conflict", "Command actor does not match its durable admission")
+            if (currentCommand.turnId !== undefined && currentCommand.turnId !== input.turnId)
+              return yield* failure("conflict", "Command identifies a different Turn")
+            if (current.state === "completed") {
+              if (current.cancelledByCommandId !== null) return { _tag: "Cancelled" as const, command: currentCommand }
+              const persisted = (yield* query(
+                tx
+                  .select({ link: rikaTurns.executionLinkJson })
+                  .from(rikaTurns)
+                  .where(and(eq(rikaTurns.id, input.turnId), eq(rikaTurns.threadId, input.threadId))),
+              ))[0]
+              if (persisted?.link === null || persisted === undefined || currentCommand.admissionStatus === undefined)
+                return yield* failure("conflict", "Completed prompt command has no durable Runtime admission")
+              return {
+                _tag: "Admitted" as const,
+                command: currentCommand,
+                turnId: input.turnId,
+                status: currentCommand.admissionStatus,
+                link: yield* Schema.decodeEffect(ExecutionLinkJson)(persisted.link).pipe(
+                  Effect.mapError(databaseError),
+                ),
+              }
+            }
+            if (
+              input.claimToken !== undefined &&
+              (current.claimToken !== input.claimToken || current.claimActive !== true)
+            )
+              return yield* failure("stale-fence", "Command application claim is expired or fenced")
+            if (!Schema.is(SubmitPromptIdentity)(current.command))
+              return yield* failure("conflict", "Command is not a prompt submission")
+            const cancellation = (yield* query(
+              tx
+                .select({ commandId: rikaHostedThreadProtocolCommands.commandId })
+                .from(rikaHostedThreadProtocolCommands)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.ownerId, input.ownerId),
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    sql`${rikaHostedThreadProtocolCommands.command} ->> '_tag' = 'Cancel'`,
+                    sql`${rikaHostedThreadProtocolCommands.command} -> 'target' ->> '_tag' = 'Command'`,
+                    sql`${rikaHostedThreadProtocolCommands.command} -> 'target' ->> 'commandId' = ${input.commandId}`,
+                    or(
+                      eq(rikaHostedThreadProtocolCommands.state, "admitted"),
+                      and(
+                        eq(rikaHostedThreadProtocolCommands.state, "completed"),
+                        sql`${rikaHostedThreadProtocolCommands.result} ->> '_tag' = 'Applied'`,
+                      ),
+                    ),
+                  ),
+                )
+                .orderBy(asc(rikaHostedThreadProtocolCommands.threadVersion))
+                .limit(1),
+            ))[0]
+            if (cancellation !== undefined) {
+              const cancelled = yield* query(
+                tx
+                  .update(rikaHostedThreadProtocolCommands)
+                  .set({
+                    state: "completed",
+                    result: { _tag: "Applied" },
+                    eventCursor: bigintValue(state.cursor),
+                    completedAt: timestampValue(input.completedAt),
+                    cancelledByCommandId: cancellation.commandId,
+                    claimToken: null,
+                    claimExpiresAt: null,
+                  })
+                  .where(
+                    and(
+                      eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                      eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+                    ),
+                  )
+                  .returning(commandFields),
+              )
+              return { _tag: "Cancelled" as const, command: yield* commandRow(cancelled[0]!) }
+            }
+            if (!input.readinessProof) return yield* failure("database", "Prompt admission workers are unavailable")
+            const productThread = yield* query(
+              tx
+                .select({ present: sql<number>`1` })
+                .from(rikaThreads)
+                .where(and(eq(rikaThreads.id, input.threadId), eq(rikaThreads.ownerId, input.ownerId)))
+                .for("key share"),
+            )
+            if (productThread[0] === undefined)
+              return yield* failure("invalid-authority", "Thread has no product state for the owner")
+            const collidingTurn = yield* query(
+              tx
+                .select({ present: sql<number>`1` })
+                .from(rikaTurns)
+                .where(eq(rikaTurns.id, input.turnId)),
+            )
+            if (collidingTurn[0] !== undefined) return yield* failure("conflict", "Turn identity is already in use")
+            const occupied = yield* query(
+              tx
+                .select({ present: sql<number>`1` })
+                .from(rikaTurns)
+                .where(
+                  and(
+                    eq(rikaTurns.threadId, input.threadId),
+                    eq(rikaTurns.turnKind, "AgentExecution"),
+                    inArray(rikaTurns.status, ["queued", "accepted", "running", "waiting", "cancelling"]),
+                  ),
+                )
+                .limit(1),
+            )
+            const status = occupied[0] === undefined ? ("accepted" as const) : ("queued" as const)
+            yield* query(
+              tx.insert(rikaTurns).values({
+                id: input.turnId,
+                threadId: input.threadId,
+                turnKind: "AgentExecution",
+                prompt: input.prompt,
+                promptPartsJson: promptParts ?? null,
+                executionRouteJson: executionRoute,
+                authorJson: '{"_tag":"Human"}',
+                lineageJson: '{"_tag":"Original"}',
+                status,
+                createdAt: admittedAtMillis,
+                updatedAt: admittedAtMillis,
+              }),
+            )
+            yield* query(tx.insert(rikaThreadQueueState).values({ threadId: input.threadId }).onConflictDoNothing())
+            if (status === "queued") {
+              const queueRows = yield* query(
+                tx
+                  .update(rikaThreadQueueState)
+                  .set({
+                    revision: sql`${rikaThreadQueueState.revision} + 1`,
+                    queuedCount: sql`${rikaThreadQueueState.queuedCount} + 1`,
+                  })
+                  .where(
+                    and(
+                      eq(rikaThreadQueueState.threadId, input.threadId),
+                      sql`${rikaThreadQueueState.queuedCount} < ${queueCapacity}`,
+                    ),
+                  )
+                  .returning({ threadId: rikaThreadQueueState.threadId }),
+              )
+              if (queueRows[0] === undefined) return yield* failure("conflict", "Thread prompt queue is full")
+            }
+            const link = yield* stage
+            if (link.turnId !== input.turnId || link.threadId !== input.threadId)
+              return yield* failure("conflict", "Runtime admission identifies a different Turn")
+            const encodedLink = yield* Schema.encodeEffect(ExecutionLinkJson)(link).pipe(Effect.mapError(databaseError))
+            yield* query(
+              tx.update(rikaTurns).set({ executionLinkJson: encodedLink }).where(eq(rikaTurns.id, input.turnId)),
+            )
+            const events = yield* writeEvents(tx, {
+              ownerId: input.ownerId,
+              threadId: input.threadId,
+              threadVersion: ThreadVersion.make(state.version),
+              firstCursor: BigInt(state.cursor) + 1n,
+              events: [
+                {
+                  _tag: "SubmissionAdmitted",
+                  threadId: ProductThreadId.make(input.threadId),
+                  turnId: input.turnId,
+                  status: status === "accepted" ? "active" : "queued",
+                  submissionId: input.submissionId,
+                },
+              ],
+              createdAt: input.completedAt,
+            })
+            const cursor = events.at(-1)!.cursor
+            yield* query(
+              tx
+                .update(rikaHostedThreadProtocolState)
+                .set({ eventCursor: bigintValue(cursor) })
+                .where(eq(rikaHostedThreadProtocolState.threadId, input.threadId)),
+            )
+            const completed = yield* query(
+              tx
+                .update(rikaHostedThreadProtocolCommands)
+                .set({
+                  state: "completed",
+                  result: { _tag: "PromptAdmitted", status },
+                  eventCursor: bigintValue(cursor),
+                  completedAt: timestampValue(input.completedAt),
+                  turnId: input.turnId,
+                  admissionStatus: status,
+                  workState: "turn-activation-pending",
+                  preparedTurnJson: preparedTurn,
+                  claimToken: null,
+                  claimExpiresAt: null,
+                })
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+                  ),
+                )
+                .returning(commandFields),
+            )
+            return {
+              _tag: "Admitted" as const,
+              command: yield* commandRow(completed[0]!),
+              turnId: input.turnId,
+              status,
+              link,
+            }
+          }),
+        )
+        .pipe(Effect.catchTag("SqlError", databaseError))
+    },
+  )
+
+  const cancelPrompt: ThreadProtocolStoreService["cancelPrompt"] = Effect.fn("ThreadProtocolStore.cancelPrompt")(
+    function* (input) {
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            yield* requireThreadAccess(tx, input, "thread:control", input.cancelledAt)
+            const state = (yield* stateForUpdate(tx, input.ownerId, input.threadId))[0]
+            if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+            const cancel = (yield* query(
+              tx
+                .select({
+                  actor: rikaHostedThreadProtocolCommands.actor,
+                  command: rikaHostedThreadProtocolCommands.command,
+                  state: rikaHostedThreadProtocolCommands.state,
+                  resultTag: sql<string | null>`${rikaHostedThreadProtocolCommands.result} ->> '_tag'`,
+                  claimToken: rikaHostedThreadProtocolCommands.claimToken,
+                  claimActive: sql<boolean>`${rikaHostedThreadProtocolCommands.claimExpiresAt} > transaction_timestamp()`,
+                })
+                .from(rikaHostedThreadProtocolCommands)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    eq(rikaHostedThreadProtocolCommands.commandId, input.cancelCommandId),
+                  ),
+                )
+                .for("update"),
+            ))[0]
+            if (cancel === undefined || !Schema.is(CommandCancellationIdentity)(cancel.command))
+              return yield* failure("conflict", "Cancellation command does not identify the target")
+            if (cancel.command.target.commandId !== input.targetCommandId)
+              return yield* failure("conflict", "Cancellation command does not identify the target")
+            const cancelActor = yield* decode(ActorAttribution)(cancel.actor)
+            if (!actorEquivalent(cancelActor, input.actor))
+              return yield* failure("conflict", "Cancellation actor does not match its durable admission")
+            if (cancel.state === "completed" && cancel.resultTag !== "Applied")
+              return yield* failure("conflict", "Rejected cancellation cannot be applied")
+            if (
+              input.claimToken !== undefined &&
+              (cancel.claimToken !== input.claimToken || cancel.claimActive !== true)
+            )
+              return yield* failure("stale-fence", "Cancellation command claim is expired or fenced")
+            if (input.claimToken === undefined && cancel.state === "admitted")
+              yield* query(
+                tx
+                  .update(rikaHostedThreadProtocolCommands)
+                  .set({
+                    state: "completed",
+                    result: { _tag: "Applied" },
+                    eventCursor: bigintValue(state.cursor),
+                    completedAt: timestampValue(input.cancelledAt),
+                  })
+                  .where(
+                    and(
+                      eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                      eq(rikaHostedThreadProtocolCommands.commandId, input.cancelCommandId),
+                    ),
+                  ),
+              )
+            const target = (yield* query(
+              tx
+                .select({ ...commandFields, tag: sql<string>`${rikaHostedThreadProtocolCommands.command} ->> '_tag'` })
+                .from(rikaHostedThreadProtocolCommands)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    eq(rikaHostedThreadProtocolCommands.commandId, input.targetCommandId),
+                  ),
+                )
+                .for("update"),
+            ))[0]
+            if (target === undefined) return { _tag: "Pending" as const, targetCommandId: input.targetCommandId }
+            if (target.tag !== "SubmitPrompt")
+              return yield* failure("conflict", "Cancellation target is not a prompt submission")
+            if (target.state === "admitted")
+              yield* query(
+                tx
+                  .update(rikaHostedThreadProtocolCommands)
+                  .set({
+                    state: "completed",
+                    result: { _tag: "Applied" },
+                    eventCursor: bigintValue(state.cursor),
+                    completedAt: timestampValue(input.cancelledAt),
+                    cancelledByCommandId: input.cancelCommandId,
+                    claimToken: null,
+                    claimExpiresAt: null,
+                  })
+                  .where(
+                    and(
+                      eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                      eq(rikaHostedThreadProtocolCommands.commandId, input.targetCommandId),
+                    ),
+                  ),
+              )
+            return target.turnId === null || target.state !== "completed" || target.admissionStatus === null
+              ? { _tag: "Pending" as const, targetCommandId: input.targetCommandId }
+              : {
+                  _tag: "Turn" as const,
+                  targetCommandId: input.targetCommandId,
+                  turnId: TurnId.make(target.turnId),
+                }
+          }),
+        )
+        .pipe(Effect.catchTag("SqlError", databaseError))
+    },
+  )
+
+  const runnableCommand = (tx: PgDrizzle.EffectPgDatabase) => {
+    const predecessor = alias(rikaHostedThreadProtocolCommands, "predecessor")
+    return and(
+      eq(rikaHostedThreadProtocolCommands.state, "admitted"),
+      or(
+        isNull(rikaHostedThreadProtocolCommands.claimToken),
+        lte(rikaHostedThreadProtocolCommands.claimExpiresAt, sql`transaction_timestamp()`),
+      ),
+      notExists(
+        tx
+          .select({ commandId: predecessor.commandId })
+          .from(predecessor)
+          .where(
+            and(
+              eq(predecessor.threadId, rikaHostedThreadProtocolCommands.threadId),
+              lt(predecessor.threadVersion, rikaHostedThreadProtocolCommands.threadVersion),
+              eq(predecessor.state, "admitted"),
+              sql`not (${rikaHostedThreadProtocolCommands.command} ->> '_tag' = 'Cancel'
+                and ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> '_tag' = 'Command'
+                and ${predecessor.commandId} = ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> 'commandId'
+                and ${predecessor.command} ->> '_tag' = 'SubmitPrompt')`,
+            ),
+          ),
+      ),
+    )
+  }
+
   const claimNextCommand: ThreadProtocolStoreService["claimNextCommand"] = Effect.fn(
     "ThreadProtocolStore.claimNextCommand",
   )(function* (input) {
     return yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
-          const predecessor = alias(rikaHostedThreadProtocolCommands, "predecessor")
           const candidate = tx
             .select({
               threadId: rikaHostedThreadProtocolCommands.threadId,
@@ -324,27 +843,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             .where(
               and(
                 eq(rikaHostedThreadProtocolCommands.threadId, rikaHostedThreadProtocolState.threadId),
-                eq(rikaHostedThreadProtocolCommands.state, "admitted"),
-                or(
-                  isNull(rikaHostedThreadProtocolCommands.claimToken),
-                  lte(rikaHostedThreadProtocolCommands.claimExpiresAt, sql`transaction_timestamp()`),
-                ),
-                notExists(
-                  tx
-                    .select({ commandId: predecessor.commandId })
-                    .from(predecessor)
-                    .where(
-                      and(
-                        eq(predecessor.threadId, rikaHostedThreadProtocolCommands.threadId),
-                        lt(predecessor.threadVersion, rikaHostedThreadProtocolCommands.threadVersion),
-                        eq(predecessor.state, "admitted"),
-                        sql`not (${rikaHostedThreadProtocolCommands.command} ->> '_tag' = 'Cancel'
-                      and ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> '_tag' = 'Command'
-                      and ${predecessor.commandId} = ${rikaHostedThreadProtocolCommands.command} -> 'target' ->> 'commandId'
-                      and ${predecessor.command} ->> '_tag' = 'SubmitPrompt')`,
-                      ),
-                    ),
-                ),
+                runnableCommand(tx),
               ),
             )
             .orderBy(asc(rikaHostedThreadProtocolCommands.threadVersion))
@@ -384,6 +883,21 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
       )
       .pipe(Effect.catchTag("SqlError", databaseError))
   })
+
+  const oldestRunnableCommandAt: ThreadProtocolStoreService["oldestRunnableCommandAt"] = query(
+    db
+      .select({
+        admittedAt: sql<number>`floor(extract(epoch from ${rikaHostedThreadProtocolCommands.admittedAt}) * 1000)::bigint`,
+      })
+      .from(rikaHostedThreadProtocolCommands)
+      .where(runnableCommand(db))
+      .orderBy(
+        asc(rikaHostedThreadProtocolCommands.admittedAt),
+        asc(rikaHostedThreadProtocolCommands.threadId),
+        asc(rikaHostedThreadProtocolCommands.threadVersion),
+      )
+      .limit(1),
+  ).pipe(Effect.map((rows) => rows[0]?.admittedAt))
 
   const renewCommandClaim: ThreadProtocolStoreService["renewCommandClaim"] = Effect.fn(
     "ThreadProtocolStore.renewCommandClaim",
@@ -480,28 +994,20 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                   ),
                 ),
             )
-          if (input.snapshot !== undefined)
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
-                  ownerId: input.ownerId,
-                  threadId: input.threadId,
-                  threadVersion: bigintValue(threadVersion),
-                  cursor: bigintValue(cursor),
-                  snapshot: input.snapshot,
-                  createdAt: timestampValue(input.completedAt),
-                })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.completedAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+          const checkpointDecision =
+            input.snapshot === undefined
+              ? undefined
+              : yield* checkpointDue(tx, input.ownerId, input.threadId, cursor, input.snapshot)
+          if (input.snapshot !== undefined && checkpointDecision?.due === true)
+            yield* writeSnapshot(tx, {
+              ownerId: input.ownerId,
+              threadId: input.threadId,
+              threadVersion,
+              cursor,
+              snapshot: input.snapshot,
+              createdAt: input.completedAt,
+              replayRequired: checkpointDecision.replayRequired,
+            })
           const completed = yield* query(
             tx
               .update(rikaHostedThreadProtocolCommands)
@@ -553,28 +1059,39 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                   ),
                 ),
             )
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
+            if (input.snapshot !== undefined) {
+              const decision = yield* checkpointDue(tx, input.ownerId, input.threadId, cursor, input.snapshot)
+              if (decision.due)
+                yield* writeSnapshot(tx, {
                   ownerId: input.ownerId,
                   threadId: input.threadId,
-                  threadVersion: bigintValue(state.version),
-                  cursor: bigintValue(cursor),
+                  threadVersion: ThreadVersion.make(state.version),
+                  cursor,
                   snapshot: input.snapshot,
-                  createdAt: timestampValue(input.createdAt),
+                  createdAt: input.createdAt,
+                  replayRequired: decision.replayRequired,
                 })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.createdAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+            }
             return events
+          }),
+        )
+        .pipe(Effect.catchTag("SqlError", databaseError))
+    },
+  )
+
+  const checkpoint: ThreadProtocolStoreService["checkpoint"] = Effect.fn("ThreadProtocolStore.checkpoint")(
+    function* (input) {
+      return yield* db
+        .transaction((tx) =>
+          Effect.gen(function* () {
+            const state = (yield* stateForUpdate(tx, input.ownerId, input.threadId))[0]
+            if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
+            if (state.version !== input.threadVersion || state.cursor !== input.cursor)
+              return yield* failure("conflict", "Thread protocol state advanced before its checkpoint was persisted")
+            const decision = yield* checkpointDue(tx, input.ownerId, input.threadId, input.cursor, input.snapshot)
+            if (!decision.due) return false
+            yield* writeSnapshot(tx, { ...input, replayRequired: decision.replayRequired })
+            return true
           }),
         )
         .pipe(Effect.catchTag("SqlError", databaseError))
@@ -602,27 +1119,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             )
             if (rows[0] === undefined)
               return yield* failure("conflict", "Thread protocol state advanced before its snapshot was persisted")
-            yield* query(
-              tx
-                .insert(rikaHostedThreadProtocolSnapshots)
-                .values({
-                  ownerId: input.ownerId,
-                  threadId: input.threadId,
-                  threadVersion: bigintValue(input.threadVersion),
-                  cursor: bigintValue(input.cursor),
-                  snapshot: input.snapshot,
-                  createdAt: timestampValue(input.createdAt),
-                })
-                .onConflictDoUpdate({
-                  target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-                  set: {
-                    cursor: bigintValue(input.cursor),
-                    snapshot: input.snapshot,
-                    createdAt: timestampValue(input.createdAt),
-                  },
-                  setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-                }),
-            )
+            yield* writeSnapshot(tx, input)
           }),
         )
         .pipe(Effect.catchTag("SqlError", databaseError))
@@ -654,8 +1151,56 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
           const targetCursor = ThreadEventCursor.make(
             (throughCursor < stateCursor ? throughCursor : stateCursor).toString(),
           )
+          if (BigInt(input.afterCursor) > BigInt(targetCursor))
+            return yield* failure("conflict", "Replay cursor is ahead of the committed Thread log")
+          if (
+            input.afterCheckpointCursor !== undefined &&
+            BigInt(input.afterCheckpointCursor) > BigInt(input.afterCursor)
+          )
+            return yield* failure("conflict", "Replay checkpoint cursor is ahead of its event cursor")
+          const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)
+          const readEvents = (cursor: ThreadEventCursor) =>
+            query(
+              tx
+                .select({
+                  sequence: bigintText(rikaHostedThreadProtocolEvents.sequence),
+                  cursor: bigintText(rikaHostedThreadProtocolEvents.cursor),
+                  threadVersion: bigintText(rikaHostedThreadProtocolEvents.threadVersion),
+                  event: rikaHostedThreadProtocolEvents.event,
+                  createdAt: timestampText(rikaHostedThreadProtocolEvents.createdAt),
+                })
+                .from(rikaHostedThreadProtocolEvents)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolEvents.ownerId, input.ownerId),
+                    eq(rikaHostedThreadProtocolEvents.threadId, input.threadId),
+                    gt(rikaHostedThreadProtocolEvents.cursor, bigintValue(cursor)),
+                    lte(rikaHostedThreadProtocolEvents.cursor, bigintValue(targetCursor)),
+                  ),
+                )
+                .orderBy(asc(rikaHostedThreadProtocolEvents.sequence))
+                .limit(limit + 1),
+            )
+          let replayCursor = input.afterCursor
+          let eventRows = yield* readEvents(replayCursor)
+          const directTail =
+            BigInt(replayCursor) === BigInt(targetCursor) ||
+            eventRows[0]?.cursor === (BigInt(replayCursor) + 1n).toString()
+          const retainedTail = directTail && (input.afterCursor !== "0" || input.afterCheckpointCursor !== undefined)
+          const requiredCheckpoint = retainedTail
+            ? and(
+                eq(rikaHostedThreadProtocolSnapshots.replayRequired, true),
+                gte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(input.afterCursor)),
+                input.afterCheckpointCursor === undefined
+                  ? lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor))
+                  : and(
+                      gt(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(input.afterCheckpointCursor)),
+                      lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                    ),
+              )
+            : undefined
           const snapshotRows =
-            input.includeSnapshot === false
+            input.includeSnapshot === false || (retainedTail && requiredCheckpoint === undefined)
               ? []
               : yield* query(
                   tx
@@ -670,39 +1215,26 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
                       and(
                         eq(rikaHostedThreadProtocolSnapshots.ownerId, input.ownerId),
                         eq(rikaHostedThreadProtocolSnapshots.threadId, input.threadId),
-                        lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                        requiredCheckpoint ??
+                          (replayCursor === "0"
+                            ? lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor))
+                            : and(
+                                gt(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(replayCursor)),
+                                lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
+                              )),
                         lte(rikaHostedThreadProtocolSnapshots.threadVersion, bigintValue(state.version)),
                       ),
                     )
-                    .orderBy(
-                      desc(rikaHostedThreadProtocolSnapshots.threadVersion),
-                      desc(rikaHostedThreadProtocolSnapshots.cursor),
-                    )
+                    .orderBy(desc(rikaHostedThreadProtocolSnapshots.cursor))
                     .limit(1),
                 )
           const snapshotRow = snapshotRows[0]
-          const replayCursor = snapshotRow?.cursor ?? input.afterCursor
-          const eventRows = yield* query(
-            tx
-              .select({
-                sequence: bigintText(rikaHostedThreadProtocolEvents.sequence),
-                cursor: bigintText(rikaHostedThreadProtocolEvents.cursor),
-                threadVersion: bigintText(rikaHostedThreadProtocolEvents.threadVersion),
-                event: rikaHostedThreadProtocolEvents.event,
-                createdAt: timestampText(rikaHostedThreadProtocolEvents.createdAt),
-              })
-              .from(rikaHostedThreadProtocolEvents)
-              .where(
-                and(
-                  eq(rikaHostedThreadProtocolEvents.ownerId, input.ownerId),
-                  eq(rikaHostedThreadProtocolEvents.threadId, input.threadId),
-                  gt(rikaHostedThreadProtocolEvents.cursor, bigintValue(replayCursor)),
-                  lte(rikaHostedThreadProtocolEvents.cursor, bigintValue(targetCursor)),
-                ),
-              )
-              .orderBy(asc(rikaHostedThreadProtocolEvents.sequence))
-              .limit(Math.min(Math.max(Math.trunc(input.limit), 1), 1_000)),
-          )
+          if (snapshotRow !== undefined) {
+            replayCursor = ThreadEventCursor.make(snapshotRow.cursor)
+            eventRows = yield* readEvents(replayCursor)
+          }
+          const hasMore = eventRows.length > limit
+          eventRows = eventRows.slice(0, limit)
           const events: Array<ThreadProtocolEvent> = []
           for (const row of eventRows)
             events.push({
@@ -718,6 +1250,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
             threadVersion: ThreadVersion.make(state.version),
             cursor: ThreadEventCursor.make(state.cursor),
             events,
+            hasMore,
           }
           if (snapshotRow !== undefined)
             Object.assign(replayResult, {
@@ -922,11 +1455,16 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
   return ThreadProtocolStore.of({
     initializeThread,
     admitCommand,
+    admitServerCommand,
+    applyPrompt,
+    cancelPrompt,
     claimNextCommand,
+    oldestRunnableCommandAt,
     renewCommandClaim,
     releaseCommandClaim,
     completeCommand,
     appendEvents,
+    checkpoint,
     saveSnapshot,
     replay,
     acknowledgeCursor,

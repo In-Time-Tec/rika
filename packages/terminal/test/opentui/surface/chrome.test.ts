@@ -68,6 +68,11 @@ describe("semantic subagent and authorization transcript rows", () => {
     const subagent = transcriptUnits(collapsed).find((unit) => unit.kind === "subagent")
     expect(subagent).toMatchObject({ kind: "subagent", children: [{ blocks: [1] }] })
     expect(expandableRowIds(collapsed)).toContain("subagent:subagent-local")
+    const header = rendered(collapsed)
+      .split("\n")
+      .find((line) => line.includes("Review working"))!
+    expect(header).toContain("Review working")
+    expect(header).not.toMatch(/[▸▾]/u)
     const expanded = { ...collapsed, expandedRowKeys: [transcriptUnitId(collapsed, subagent!)] }
     const output = rendered(expanded)
     expect(output).toContain("Review correctness")

@@ -15,6 +15,7 @@ import {
   TreePolicy,
 } from "tenetkit/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
+import type * as PgClient from "@effect/sql-pg/PgClient"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import type { Status } from "@rika/product/execution-status"
@@ -110,6 +111,17 @@ const message = (cause: unknown) => {
   if (cause instanceof Error && cause.message.length > 0) return cause.message
   const encoded = JSON.stringify(cause)
   return encoded === undefined || encoded === "{}" ? String(cause) : encoded
+}
+const watchFailureMessage = (cause: unknown) => {
+  if (Schema.is(Errors.TreeCursorInvalid)(cause)) return `Run-tree checkpoint cursor is invalid: ${cause.message}`
+  if (Schema.is(Errors.TreeCursorRootMismatch)(cause)) return "Run-tree checkpoint belongs to a different root Run"
+  if (Schema.is(Errors.TreeCursorExpired)(cause)) return "Run-tree checkpoint expired before projection resumed"
+  if (Schema.is(Errors.TreeCursorFuture)(cause)) return "Run-tree checkpoint is ahead of committed execution"
+  if (Schema.is(Errors.TreeReplayLimitInvalid)(cause))
+    return `Run-tree replay limit ${cause.received} is outside ${cause.minimum}..${cause.maximum}`
+  if (Schema.is(Errors.RunNotFound)(cause)) return `Root Run ${cause.runId} is unavailable`
+  if (Schema.is(Errors.RuntimeUnavailable)(cause)) return cause.message
+  return message(cause)
 }
 const titleRunId = (rootRunId: string) => `${rootRunId}:title`
 const isApprovalResponseFailure = Schema.is(ExecutionGateway.ApprovalResponseFailure)
@@ -336,7 +348,8 @@ const make = (
             kind: "stale",
             message: "Authorization is no longer pending",
           })
-        const inspection = yield* RunTree.inspect(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const checkpoint = yield* RunTree.checkpoint(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
+        const inspection = checkpoint.inspection
         if (!inspection.runs.some(({ run }) => run.runId === target.runId))
           return yield* ExecutionGateway.ApprovalResponseFailure.make({
             kind: "mismatch",
@@ -559,7 +572,26 @@ const make = (
         }
         if (input?.checkpoint !== undefined)
           watchOptions = { ...watchOptions, cursor: RunTree.TreeCursor.make(input.checkpoint.cursor) }
-        const rootEvents = RunTree.watch(watchOptions).pipe(
+        const replayThenWatch = (
+          cursor: RunTree.TreeCursor,
+        ): Stream.Stream<RunTree.TreeEvent, Runtime.TreeReplayError | Runtime.TreeEventsError, Runtime.Runtime> =>
+          Stream.unwrap(
+            RunTree.replay({ rootRunId: link.runId, cursor, limit: 1_000 }).pipe(
+              Effect.map((page) =>
+                Stream.concat(
+                  Stream.fromIterable(page.events),
+                  page.hasMore
+                    ? replayThenWatch(page.cursor)
+                    : RunTree.watch({ rootRunId: link.runId, cursor: page.cursor, settlement: "root-blocked" }),
+                ),
+              ),
+            ),
+          )
+        const rootTreeEvents =
+          input?.checkpoint === undefined
+            ? RunTree.watch(watchOptions)
+            : replayThenWatch(RunTree.TreeCursor.make(input.checkpoint.cursor))
+        const rootEvents = rootTreeEvents.pipe(
           Stream.provideService(Runtime.Runtime, runtime),
           Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
           Stream.tap(observeModel),
@@ -634,7 +666,7 @@ const make = (
             }),
           ),
           Stream.flatMap(Stream.fromIterable),
-          Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: message(cause) })),
+          Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: watchFailureMessage(cause) })),
         )
         return Stream.unwrap(
           Stream.broadcastN(projected, { n: 2, capacity: 64 }).pipe(
@@ -669,13 +701,14 @@ const make = (
         )
       },
       inspectTurn: (link) =>
-        RunTree.inspect(link.runId).pipe(
+        RunTree.checkpoint(link.runId).pipe(
           Effect.provideService(Runtime.Runtime, runtime),
-          Effect.map((inspection) => {
+          Effect.map((checkpoint) => {
+            const inspection = checkpoint.inspection
             const root = inspection.runs.find(({ run }) => run.runId === link.runId)
             return root === undefined
               ? { status: "unavailable" as const }
-              : { status: status(root.run.status), cursor: inspection.cursor }
+              : { status: status(root.run.status), cursor: checkpoint.cursor }
           }),
           Effect.catchTag("tenetkit/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
@@ -754,7 +787,8 @@ export const layerHosted = (
   options: HostedOptions,
 ): Layer.Layer<
   ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Postgres.Readiness | Runtime.Runtime,
-  ExecutionGateway.StartTurnFailure
+  ExecutionGateway.StartTurnFailure,
+  PgClient.PgClient
 > =>
   Layer.unwrap(
     Effect.gen(function* () {

@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope } from "effect"
+import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
   Address,
@@ -18,7 +18,7 @@ const worker = {
   workerId: "railway-worker-01",
   concurrency: 4,
   leaseMillis: 30_000,
-  pollIntervalMillis: 200,
+  fallbackIntervalMillis: 200,
   cancellationIntervalMillis: 100,
 } as const
 
@@ -36,7 +36,7 @@ it.effect("validates the complete PostgreSQL and worker configuration", () =>
       workerId: "railway-worker-01",
       concurrency: 4,
       lease: 30_000,
-      pollInterval: 200,
+      fallbackInterval: 200,
       cancellationInterval: 100,
       onClaim: Postgres.observeClaim,
     })
@@ -82,7 +82,7 @@ it.effect("rejects missing identities and non-positive PostgreSQL worker bounds 
       { ...options, worker: { ...worker, workerId: "" } },
       { ...options, worker: { ...worker, concurrency: 0 } },
       { ...options, worker: { ...worker, leaseMillis: 0 } },
-      { ...options, worker: { ...worker, pollIntervalMillis: 0 } },
+      { ...options, worker: { ...worker, fallbackIntervalMillis: 0 } },
       { ...options, worker: { ...worker, cancellationIntervalMillis: 0 } },
     ]
     for (const candidate of invalid) {
@@ -106,6 +106,7 @@ const workerDependencies = (
   )
 
 const claims = (claimReadyRuns: RunClaims.Interface["claimReadyRuns"]): RunClaims.Interface => ({
+  changes: Stream.concat(Stream.succeed(undefined), Stream.never),
   claimReadyRuns,
   refreshLease: () => Effect.succeed(true),
   releaseClaim: () => Effect.void,
@@ -138,7 +139,7 @@ it.effect("runs the RuntimeWorker loop only for its owning scope", () =>
     yield* Deferred.await(started)
     yield* Effect.yieldNow
     expect(runtimeWorker.workerId).toBe(worker.workerId)
-    expect((yield* runtimeWorker.status).poll._tag).toBe("Succeeded")
+    expect((yield* runtimeWorker.status).scan._tag).toBe("Succeeded")
     const beforeClose = yield* Ref.get(ticks)
     yield* Scope.close(scope, Exit.void)
     yield* TestClock.adjust("1 second")
@@ -233,19 +234,20 @@ it.effect("reports a worker defect and keeps the supervised loop running", () =>
     const runtimeWorker = Context.get(context, RuntimeWorker.RuntimeWorker)
     yield* Deferred.await(attempted)
     yield* Effect.yieldNow
-    expect((yield* runtimeWorker.status).poll._tag).toBe("Failed")
-    yield* TestClock.adjust(worker.pollIntervalMillis)
-    expect((yield* runtimeWorker.status).poll._tag).toBe("Succeeded")
+    expect((yield* runtimeWorker.status).scan._tag).toBe("Failed")
+    yield* TestClock.adjust(worker.fallbackIntervalMillis)
+    expect((yield* runtimeWorker.status).scan._tag).toBe("Succeeded")
     expect(yield* Ref.get(attempts)).toBeGreaterThanOrEqual(2)
   }).pipe(Effect.scoped),
 )
 
 const workerStatus = (
-  poll: RuntimeWorker.WorkerStatus["poll"],
+  scan: RuntimeWorker.WorkerStatus["scan"],
   overrides: Partial<RuntimeWorker.WorkerStatus> = {},
 ): RuntimeWorker.WorkerStatus => ({
-  poll,
-  lastSuccessfulPollAt: poll._tag === "Succeeded" ? poll.at : undefined,
+  scan,
+  wakeup: { _tag: "Ready", at: 0 },
+  lastFallbackAt: undefined,
   lastFailure: undefined,
   active: 0,
   capacity: 4,
@@ -258,18 +260,18 @@ const readinessWorker = (status: Ref.Ref<RuntimeWorker.WorkerStatus>) => ({
   status: Ref.get(status),
 })
 
-it.effect("uses only the current poll result and exact freshness fence for readiness", () =>
+it.effect("uses only the current scan result and exact fallback freshness fence for readiness", () =>
   Effect.gen(function* () {
     const now = 10_000
-    const interval = worker.pollIntervalMillis
+    const interval = worker.fallbackIntervalMillis
     const starting = yield* Effect.exit(
       Postgres.checkWorkerReadiness(workerStatus({ _tag: "Starting" }), now, interval),
     )
     expect(starting._tag).toBe("Failure")
 
     const failed = workerStatus(
-      { _tag: "Failed", at: now, message: "latest poll failed" },
-      { lastSuccessfulPollAt: now - 1 },
+      { _tag: "Failed", at: now, message: "latest scan failed" },
+      { wakeup: { _tag: "Ready", at: now - 1 } },
     )
     expect((yield* Effect.exit(Postgres.checkWorkerReadiness(failed, now, interval)))._tag).toBe("Failure")
 
@@ -286,13 +288,17 @@ it.effect("returns exact proof after recovery and exposes non-gating worker diag
     const retainedFailure = { at: 8_000, message: "earlier failure" }
     const status = yield* Ref.make(
       workerStatus(
-        { _tag: "Failed", at: 9_900, message: "poll failed" },
-        { lastSuccessfulPollAt: 9_800, lastFailure: retainedFailure },
+        { _tag: "Failed", at: 9_900, message: "scan failed" },
+        {
+          wakeup: { _tag: "Failed", at: 9_950, message: "listener failed" },
+          lastFallbackAt: 9_000,
+          lastFailure: retainedFailure,
+        },
       ),
     )
     const readiness = Postgres.makeReadiness({
       source: options.source,
-      pollIntervalMillis: worker.pollIntervalMillis,
+      fallbackIntervalMillis: worker.fallbackIntervalMillis,
       worker: readinessWorker(status),
       schema: Effect.void,
     })
@@ -303,6 +309,8 @@ it.effect("returns exact proof after recovery and exposes non-gating worker diag
       workerStatus(
         { _tag: "Succeeded", at: 10_000 },
         {
+          wakeup: { _tag: "Failed", at: 9_950, message: "listener failed" },
+          lastFallbackAt: 9_000,
           lastFailure: retainedFailure,
           active: 4,
           capacity: 4,
@@ -316,14 +324,16 @@ it.effect("returns exact proof after recovery and exposes non-gating worker diag
       workerId: worker.workerId,
     })
     expect(yield* readiness.status).toEqual({
-      poll: { _tag: "Succeeded", at: 10_000 },
-      lastSuccessfulPollAt: 10_000,
+      scan: { _tag: "Succeeded", at: 10_000 },
+      wakeup: { _tag: "Failed", at: 9_950, message: "listener failed" },
+      lastFallbackAt: 9_000,
       lastFailure: retainedFailure,
       active: 4,
       capacity: 4,
       oldestClaimAt: 1,
-      pollAgeMillis: 0,
-      lastSuccessfulPollAgeMillis: 0,
+      scanAgeMillis: 0,
+      wakeupAgeMillis: 50,
+      lastFallbackAgeMillis: 1_000,
       oldestClaimAgeMillis: 9_999,
       lastFailureAgeMillis: 2_000,
       availableCapacity: 0,

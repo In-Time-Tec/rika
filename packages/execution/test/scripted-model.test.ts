@@ -553,7 +553,7 @@ it.effect("changes the admitted executable when any kernel profile input changes
         { ...kernel, runtimeVersion: "9.9.9" },
         { ...kernel, dataRoot: "/other-data" },
         { ...kernel, trustMode: "trusted-workspace" as const },
-        { ...kernel, limits: { sourceBytes: 1_024, channelBytes: 2_048, cellDeadlineMillis: 5_000 } },
+        { ...kernel, limits: { sourceBytes: 1_024, cellDeadlineMillis: 5_000 } },
       ],
       (variant) => configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel: variant }),
     )

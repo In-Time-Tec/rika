@@ -9,6 +9,7 @@ import { and, eq, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Clock, Effect, Schema } from "effect"
 import { rikaTranscriptCheckpoints, rikaTranscriptUnits } from "../database/schema/product"
+import { updateThreadUsage } from "./sql-usage"
 
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
@@ -37,7 +38,7 @@ export const transcriptSqlWrites = {
     db: PgDrizzle.EffectPgDatabase,
     get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
   ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
-    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change) {
+    commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change, withinTransaction) {
       const upserts = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
       yield* validateUnits(turn.id, upserts)
       const clock = yield* Clock.Clock
@@ -46,15 +47,15 @@ export const transcriptSqlWrites = {
           Effect.gen(function* () {
             const checkpoint = change.checkpoint
             const now = clock.currentTimeMillisUnsafe()
-            const storedCheckpoint =
-              change._tag === "ProjectionSnapshot" && change.hasOlder
-                ? (yield* tx
-                    .select({ projectionVersion: rikaTranscriptCheckpoints.projectionVersion })
-                    .from(rikaTranscriptCheckpoints)
-                    .where(eq(rikaTranscriptCheckpoints.turnId, turn.id))
-                    .for("update")
-                    .limit(1))[0]
-                : undefined
+            const storedCheckpoint = (yield* tx
+              .select({
+                projectionVersion: rikaTranscriptCheckpoints.projectionVersion,
+                stateJson: rikaTranscriptCheckpoints.stateJson,
+              })
+              .from(rikaTranscriptCheckpoints)
+              .where(eq(rikaTranscriptCheckpoints.turnId, turn.id))
+              .for("update")
+              .limit(1))[0]
             const replacingOlderProjection =
               storedCheckpoint !== undefined &&
               storedCheckpoint.projectionVersion < ExecutionProjection.projectionVersion
@@ -110,6 +111,7 @@ export const transcriptSqlWrites = {
                     )
                     .returning({ turnId: rikaTranscriptCheckpoints.turnId })
             if (rows.length === 0) return "stale" as const
+            yield* updateThreadUsage(tx, turn, change.state.usage, now)
             if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection))
               yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const key of change._tag === "ProjectionPatch" ? change.remove : [])
@@ -142,6 +144,7 @@ export const transcriptSqlWrites = {
                   setWhere: eq(rikaTranscriptUnits.unitOrderKey, sql`excluded.unit_order_key`),
                 })
             }
+            if (withinTransaction !== undefined) yield* withinTransaction
             return "committed" as const
           }),
         )
@@ -192,6 +195,7 @@ export const transcriptSqlWrites = {
                   updatedAt: sql`excluded.updated_at`,
                 },
               })
+            yield* updateThreadUsage(tx, turn, state.usage, now)
             yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
             for (const unit of units) {
               const order = TranscriptOrdering.encodeUnitOrder(unit.order)

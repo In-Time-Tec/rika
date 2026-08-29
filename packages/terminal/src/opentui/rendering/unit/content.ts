@@ -30,7 +30,6 @@ import {
   wrapTextToWidth,
   wrapBodyText,
   iconChar,
-  markerText,
   cancelledAgentLabel,
   failedAgentLabel,
   subagentPhrase,
@@ -74,7 +73,6 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (cancelled) return fg(colors.amber)("⊘")
     return failed ? fg(colors.red)("✕") : fg(colors.green)("✓")
   }
-  const marker = (expanded: boolean): TextChunk => fg(colors.subtle)(expanded ? " ▾" : " ▸")
   const rowExpanded = (id: string): boolean => model.expandedRowKeys.includes(id)
   const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
   let nestedRanges: Array<UnitLineRange> = []
@@ -180,16 +178,9 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     rowExpanded,
     highlight,
     statusIcon,
-    marker,
   })
 
-  const renderOtherToolBody = (
-    unit: ToolUnit,
-    selected: boolean,
-    expanded: boolean,
-    hasChildren = false,
-    hasTerminal = false,
-  ) => {
+  const renderOtherToolBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
     const failed = unit.block.status === "failed"
     const running = unit.block.status === "running"
     const cancelled = unit.block.status === "cancelled"
@@ -205,14 +196,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const shellFailure =
       failed && unit.block.presentation.family === "shell" ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
     const output = agent || !toolOutputDisplayed(unit.block) ? undefined : toolResultText(unit.block.result)
-    const expandable =
-      hasChildren ||
-      hasTerminal ||
-      (agent ? running || unit.block.detail.length > 0 : output !== undefined && output.length > 0)
     if (selected)
-      highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${shellFailure}${expandable ? markerText(expanded) : ""}`,
-      )
+      highlight(`${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${shellFailure}`)
     else {
       append(statusIcon(failed, running, cancelled))
       const baseSummary = toolDetail(unit.index, {
@@ -221,7 +206,6 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       }).summary
       for (const chunk of renderToolSummary(baseSummary, { leading: " " })[0]!) append(chunk)
       if (shellFailure.length > 0) append(fg(colors.red)(shellFailure))
-      if (expandable) append(marker(expanded))
     }
     if (expanded && agent && unit.block.detail.length > 0) {
       renderAgentPrompt(unit.block.detail, "  ")
@@ -247,10 +231,16 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
     const start = line
-    const appendIndented = (chunk: TextChunk | TerminalTextChunk) =>
-      append(
-        chunk.text.includes("\n") ? { ...chunk, text: chunk.text.replaceAll("\n", `\n${continuationPrefix}`) } : chunk,
-      )
+    const appendIndented = (chunk: TextChunk | TerminalTextChunk) => {
+      const parts = chunk.text.split("\n")
+      for (const [index, part] of parts.entries()) {
+        if (index > 0) {
+          append(fg(colors.text)("\n"))
+          append(dim(fg(colors.subtle)(continuationPrefix)))
+        }
+        if (part.length > 0) append({ ...chunk, text: part })
+      }
+    }
     renderCellBody(block, false, expanded, rowWidth - stringWidth(continuationPrefix), spinnerFrame, appendIndented, {
       nestedRanges,
       rowExpanded,
@@ -300,10 +290,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       append(bold(fg(colors.amber)("$ ")))
       const suffix = " (cancelled)"
       const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
-      const commandWidth = Math.max(
-        1,
-        rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix) - (expandable ? 2 : 0),
-      )
+      const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix))
       for (const [rowIndex, row] of wrapTextToWidth(command, commandWidth).entries()) {
         if (rowIndex > 0) {
           append(fg(colors.text)("\n"))
@@ -317,10 +304,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       if (block.presentation.family === "shell") {
         const failure = failed ? ` (exit code: ${shellExitCode(block) ?? 1})` : ""
         const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
-        const commandWidth = Math.max(
-          1,
-          rowWidth - stringWidth(branchPrefix) - 4 - stringWidth(failure) - (expandable ? 2 : 0),
-        )
+        const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 4 - stringWidth(failure))
         append(fg(colors.text)(" "))
         append(dim(fg(colors.text)("$ ")))
         const command = shellCommandText(block)
@@ -337,7 +321,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
         if (failure.length > 0) append(fg(colors.red)(failure))
       } else
         for (const [labelIndex, labelLine] of renderToolSummary(detail.summary, {
-          width: rowWidth - stringWidth(continuationPrefix) - (expandable ? 2 : 0),
+          width: rowWidth - stringWidth(continuationPrefix),
         }).entries()) {
           if (labelIndex > 0) {
             append(fg(colors.text)("\n"))
@@ -346,7 +330,6 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
           for (const chunk of labelLine) append(chunk)
         }
     }
-    if (expandable) append(marker(expanded))
     const headerEnd = line
     const rangeIndex = nestedRanges.length
     const nestedRangeBase: UnitLineRange = {
@@ -390,7 +373,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       end: children.length === 0 ? line : (nestedRanges[rangeIndex + 1]?.start ?? start + 1) - 1,
     }
   }
-  const renderSubagentHeader = (unit: SubagentTranscriptUnit, expanded: boolean) => {
+  const renderSubagentHeader = (unit: SubagentTranscriptUnit, width: number) => {
     const block = blockAt(unit.block)
     if (block?._tag !== "SubagentCard") return
     const running = block.status === "running" || block.status === "waiting" || block.status === "cancelling"
@@ -398,8 +381,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const cancelled = block.status === "cancelled"
     const label = subagentPhrase(block.name, block.status)
     append(block.status === "queued" ? fg(colors.subtle)("◷") : statusIcon(failed, running, cancelled))
-    append(fg(colors.text)(` ${label}`))
-    append(marker(expanded))
+    const visibleLabel = truncateToWidth(` ${label}`, Math.max(0, width - 1))
+    append(fg(colors.text)(visibleLabel))
   }
   const renderSubagentContents = (unit: SubagentTranscriptUnit, bodyIndent: string) => {
     const block = blockAt(unit.block)
@@ -430,7 +413,10 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
     const start = line
-    renderSubagentHeader(unit, expanded)
+    renderSubagentHeader(
+      unit,
+      Math.max(2, transcriptWrapWidth(model.width) - stringWidth(`${visiblePrefix}${last ? "└" : "├"} `)),
+    )
     const rangeIndex = nestedRanges.length
     nestedRanges.push({
       start,
@@ -447,7 +433,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     }
   }
   const renderSubagentUnitBody = (unit: SubagentTranscriptUnit, expanded: boolean) => {
-    renderSubagentHeader(unit, expanded)
+    renderSubagentHeader(unit, transcriptWrapWidth(model.width))
     if (expanded) renderSubagentContents(unit, "  ")
   }
   const renderCellUnitBody = (index: number, selected: boolean, expanded: boolean) => {
@@ -484,7 +470,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       let color = colors.amber
       if (block.status === "denied" || block.status === "cancelled" || block.status === "expired") color = colors.red
       else if (selected) color = colors.blue
-      append(fg(color)(`${icon} Authorization ${block.status}: ${block.operation}${expanded ? " ▾" : " ▸"}`))
+      append(fg(color)(`${icon} Authorization ${block.status}: ${block.operation}`))
       if (selected && block.status === "pending" && model.input.length === 0)
         append(bold(fg(colors.blue)("\n  [a] Approve   [d] Deny")))
       if (expanded) {
@@ -521,13 +507,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
     else if (unit.kind === "block") renderPlainBlock(unit.block, selected, expanded)
     else if (unit.children !== undefined || unit.agentResponse !== undefined) {
-      renderOtherToolBody(
-        toolUnitsFor(model, unit.blocks)[0]!,
-        selected,
-        expanded,
-        unit.children !== undefined,
-        unit.agentResponse !== undefined,
-      )
+      renderOtherToolBody(toolUnitsFor(model, unit.blocks)[0]!, selected, expanded)
       if (expanded)
         for (const [childIndex, child] of (unit.children ?? []).entries())
           renderNested(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined)

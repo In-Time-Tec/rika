@@ -1,17 +1,13 @@
 import { Deferred, Effect, Exit, FiberSet, Function, Queue, Schema, Scope } from "effect"
 import type { IdentityConfig } from "@rika/identity"
 import {
-  CompatibleClientMessage,
-  CompatibleServerFrame,
   ClientMessage,
   type ClientProtocolVersion,
   inspectClientProtocolVersion,
   isSupportedClientProtocolVersion,
-  normalizeClientMessage,
   protocolMismatchCloseCode,
   protocolMismatchFrame,
   protocolMismatchMessage,
-  protocolVersion,
   ServerFrame,
 } from "@rika/product/client-protocol"
 import type { Gateway, Socket } from "../executor/gateway"
@@ -224,9 +220,8 @@ const session = (
     runConcurrent,
   })
 
-const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(CompatibleClientMessage))
+const decodeThreadMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMessage))
 const encodeThreadFrame = Schema.encodeSync(Schema.fromJsonString(ServerFrame))
-const encodeCompatibleThreadFrame = Schema.encodeSync(Schema.fromJsonString(CompatibleServerFrame))
 const maximumThreadSocketBytes = 32 * 1024 * 1024
 
 interface EncodedThreadFrames {
@@ -234,15 +229,8 @@ interface EncodedThreadFrames {
   readonly bytes: number
 }
 
-const encodeThreadFrames = (
-  frames: ReadonlyArray<ServerFrame>,
-  negotiatedVersion: ClientProtocolVersion = protocolVersion,
-): EncodedThreadFrames => {
-  const values = frames.map((frame) =>
-    negotiatedVersion === protocolVersion
-      ? encodeThreadFrame(frame)
-      : encodeCompatibleThreadFrame({ ...frame, protocolVersion: negotiatedVersion }),
-  )
+const encodeThreadFrames = (frames: ReadonlyArray<ServerFrame>): EncodedThreadFrames => {
+  const values = frames.map((frame) => encodeThreadFrame(frame))
   return { values, bytes: values.reduce((total, value) => total + Buffer.byteLength(value), 0) }
 }
 
@@ -281,7 +269,7 @@ const threadSession = (
     Effect.sync(() => {
       if (!acceptingOutput || frames.length === 0) return
       if (negotiatedVersion === undefined) return
-      const encoded = encodeThreadFrames(frames, negotiatedVersion)
+      const encoded = encodeThreadFrames(frames)
       if (outboundBytes + encoded.bytes > maximumThreadSocketBytes || !Queue.offerUnsafe(outbound, encoded)) {
         acceptingOutput = false
         socket.close(1013, "Thread output limit exceeded")
@@ -344,7 +332,7 @@ const threadSession = (
               Effect.andThen(
                 Effect.gen(function* () {
                   const processed = yield* Deferred.make<void>()
-                  yield* Queue.offer(inbound, { message: normalizeClientMessage(decoded), processed })
+                  yield* Queue.offer(inbound, { message: decoded, processed })
                   yield* Deferred.await(processed)
                 }),
               ),

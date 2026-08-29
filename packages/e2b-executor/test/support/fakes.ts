@@ -1,7 +1,7 @@
 import { Crypto, Deferred, Effect, Layer, Option, Redacted } from "effect"
 import { AssignmentError, ExecutorAssignments } from "@rika/product/executor-assignments"
 import { CheckpointId, ExecutorAssignmentId, OwnerId, ThreadId, WorkspaceId } from "@rika/product/hosted-model"
-import { layer as assignmentLayer } from "@rika/product-store/memory-assignments"
+import { assignmentLayer } from "./assignments.fake"
 import { CheckpointError, Vault } from "../../src/checkpoint"
 import { Credentials } from "../../src/checkout"
 import { Controller, type ControllerError, type Options, layer as controllerLayer } from "../../src/controller"

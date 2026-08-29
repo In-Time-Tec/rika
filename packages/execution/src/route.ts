@@ -783,7 +783,6 @@ export const configure = (
     const cellSurface = BindingModules.cellInstructions({
       modules: mountedModules,
       workspace: options.workspace,
-      channelBytes: limits.channelBytes,
       cellDeadlineMillis: limits.cellDeadlineMillis,
     })
     const withSurface = (own: string) => agentInstructionsWith(cellSurface, own)

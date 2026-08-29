@@ -13,14 +13,17 @@ import { clampThreadTitle } from "../../thread/query/title-policy"
 import { Input } from "../contract/product"
 import { OperationUnavailable } from "../contract/product"
 import { OperationError, operationError } from "../error"
-import { Clock, Context, Effect, Semaphore, Console } from "effect"
+import { Clock, Context, Effect, Console } from "effect"
 
 export interface Dependencies {
   readonly defaultWorkspace: string
   readonly pendingTurnCapacity: number
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
-  readonly turnMutationAdmission: Semaphore.Semaphore
+  readonly withThreadMutation: <A, E, R>(
+    threadId: Thread.ThreadId,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
   readonly backend: ExecutionGateway.Interface
   readonly notifyThreadSummaries: Effect.Effect<void, OperationError, ThreadSummaryRepository.Service>
   readonly deleteThread: (threadId: Thread.ThreadId) => Effect.Effect<void, Error>
@@ -209,7 +212,8 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
         return
       }
       case "fork": {
-        return yield* dependencies.turnMutationAdmission.withPermits(1)(
+        const plan = yield* dependencies.withThreadMutation(
+          Thread.ThreadId.make(input.threadId),
           Effect.gen(function* () {
             const source = yield* dependencies.requireThread(repository, input.threadId)
             const sourceTurns = yield* turns.list(source.id)
@@ -233,20 +237,26 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
                 capacity: dependencies.pendingTurnCapacity,
                 count: queuedCopies,
               })
+            return { source, copiedSourceTurns, forkId }
+          }),
+        )
+        return yield* dependencies.withThreadMutation(
+          plan.forkId,
+          Effect.gen(function* () {
             let forkCreated = false
             return yield* Effect.gen(function* () {
               const fork = yield* repository.create({
-                id: forkId,
-                workspace: source.workspace,
-                title: source.title,
+                id: plan.forkId,
+                workspace: plan.source.workspace,
+                title: plan.source.title,
                 now,
               })
               forkCreated = true
               yield* repository.setArchived(fork.id, true, now)
-              if (source.labels.length > 0) yield* repository.label(fork.id, source.labels, now)
+              if (plan.source.labels.length > 0) yield* repository.label(fork.id, plan.source.labels, now)
               const summaries = yield* ThreadSummaryRepository.Service
               const transcripts = yield* TranscriptRepository.Service
-              for (const sourceTurn of copiedSourceTurns) {
+              for (const sourceTurn of plan.copiedSourceTurns) {
                 const id = yield* dependencies.makeTurnId
                 if (ThreadResult.TurnResult.isRecordedShell(sourceTurn)) {
                   if (!ThreadResult.TurnResult.isTerminalRecordedShell(sourceTurn))
@@ -274,11 +284,11 @@ export const run = Effect.fn("ThreadOperation.run")(function* (
             }).pipe(
               Effect.onError(() =>
                 forkCreated
-                  ? repository.discard(forkId).pipe(
+                  ? repository.discard(plan.forkId).pipe(
                       Effect.catch((error) =>
                         Effect.logError("thread.fork.cleanup.failed").pipe(
                           Effect.annotateLogs({
-                            "rika.thread.id": String(forkId),
+                            "rika.thread.id": String(plan.forkId),
                             "rika.failure.kind": String(error),
                           }),
                         ),

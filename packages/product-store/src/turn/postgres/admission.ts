@@ -8,7 +8,7 @@ import { Effect, Schema } from "effect"
 import { rikaTurnAdmissionOutbox, rikaTurns } from "../../database/schema/product"
 import { decodeAgent } from "./row-codec"
 import { turnRowJson } from "./row-json-codec"
-import { missing, repositoryError } from "../memory/errors"
+import { missing, repositoryError } from "./errors"
 
 const OutboxRow = Schema.Struct({
   turn_id: Schema.String,

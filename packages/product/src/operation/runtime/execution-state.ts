@@ -1,4 +1,4 @@
-import { Context, Effect, PubSub, Scope, Semaphore, Layer } from "effect"
+import { Context, Effect, PubSub, RcMap, Scope, Semaphore, Layer } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadDeletion from "../../thread/lifecycle/deletion"
@@ -74,7 +74,7 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
   readonly pendingTurnCapacity: number
   readonly watchedThreadIds: () => Set<string>
   readonly queueMutationEvent: queueMutationEvent
-  readonly turnMutationAdmission: Semaphore.Semaphore
+  readonly withThreadMutation: <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<TurnId>
   readonly rootTurnOwner: RootTurnOwnerInterface
@@ -103,7 +103,11 @@ export interface ProductOperationExecutionState extends ProductOperationExecutio
     turnId: TurnId,
     expectedStatus?: Status,
   ) => Effect.Effect<boolean, TurnRepositoryError, never>
-  readonly releaseTurnObserver: (turnId: TurnId, notify?: boolean) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (
+    threadId: ThreadId,
+    turnId: TurnId,
+    notify?: boolean,
+  ) => Effect.Effect<void, never, never>
   readonly createObservedSubmission: (
     turns: TurnRepositoryInterface,
     submission: CreateInput,
@@ -131,7 +135,15 @@ export const buildProductOperationExecutionState = (
     } = input
     const ownerScope: Scope.Scope = rawOwnerScope
     const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
-    const turnMutationAdmission = yield* Semaphore.make(1)
+    const threadMutationAdmissions = yield* RcMap.make({
+      lookup: () => Semaphore.make(1),
+    }).pipe(Effect.provideService(Scope.Scope, ownerScope))
+    const withThreadMutation = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+      Effect.scoped(
+        RcMap.get(threadMutationAdmissions, String(threadId)).pipe(
+          Effect.flatMap((admission) => admission.withPermits(1)(effect)),
+        ),
+      )
     const turnChanges = yield* PubSub.sliding<void>(1)
     const dirtyTurnObservers = new Set<TurnId>()
     const watched = () => watchedThreadIds(sessionThreadViews)
@@ -156,7 +168,7 @@ export const buildProductOperationExecutionState = (
       turns: Context.get(dependencyContext, TurnRepository.Service),
       sessions: executionSessionLifecycle,
       rootTurns: rootTurnOwner,
-      turnMutationAdmission,
+      withThreadMutation,
     })
     yield* threadDeletion.reconcile
     const threadRepository = Context.get(dependencyContext, ThreadRepository.Service)
@@ -168,17 +180,18 @@ export const buildProductOperationExecutionState = (
         return yield* TurnRepository.RepositoryError.make({ message: `Thread ${threadId} does not exist` })
     })
     const createForSubmission = (turns: TurnRepositoryInterface, submission: CreateInput) =>
-      turnMutationAdmission.withPermits(1)(
+      withThreadMutation(
+        submission.threadId,
         requireAdmission(submission.threadId).pipe(
           Effect.andThen(turns.createForSubmission(submission)),
           Effect.mapError((error) => operationError(String(error), error)),
         ),
       )
     const claimTurnObserver = (turnId: TurnId, expectedStatus?: Status) => rootTurnOwner.claim(turnId, expectedStatus)
-    const releaseTurnObserver = (turnId: TurnId, notify = true) =>
+    const releaseTurnObserver = (threadId: ThreadId, turnId: TurnId, notify = true) =>
       Effect.uninterruptible(
         rootTurnOwner
-          .release(turnId)
+          .release(threadId, turnId)
           .pipe(
             Effect.tap((reobserve) =>
               notify || reobserve
@@ -196,14 +209,14 @@ export const buildProductOperationExecutionState = (
         return turn.status === "queued"
           ? { turn, claimed: false }
           : { turn, claimed: yield* rootTurnOwner.claim(turn.id, turn.status) }
-      }).pipe(turnMutationAdmission.withPermits(1))
+      }).pipe((effect) => withThreadMutation(submission.threadId, effect))
     const claimQueuedTurn = (threadId: ThreadId, now: number) =>
       requireAdmission(threadId).pipe(Effect.andThen(rootTurnOwner.claimQueued(threadId, now)))
     const execution = yield* ProductOperationExecutionRuntime.makeProductOperationExecution({
       options,
       ownerScope,
       pendingTurnCapacity,
-      turnMutationAdmission,
+      withThreadMutation,
       turnChanges,
       dirtyTurnObservers,
       rootTurnOwner,
@@ -230,7 +243,7 @@ export const buildProductOperationExecutionState = (
       pendingTurnCapacity,
       watchedThreadIds: watched,
       queueMutationEvent: input.queueMutationEvent ?? queueMutationEventValue,
-      turnMutationAdmission,
+      withThreadMutation,
       turnChanges,
       dirtyTurnObservers,
       rootTurnOwner,

@@ -132,13 +132,10 @@ export const surfaceOf = (modules: ReadonlyArray<HostBindingRegistry.Module<Bind
  * rather than a catalogue, because a model shown a bare list of module names answers with one of
  * them as a tool name — and the only tool that exists is the cell.
  */
-const bytes = (value: number): string => (value % 1_024 === 0 ? `${value / 1_024}KB` : `${value} bytes`)
-
 export interface CellInstructionFacts {
   readonly modules: ReadonlyArray<HostBindingRegistry.Module<BindingRequirements>>
   readonly workspace: string
   readonly workspaceState?: "empty" | "not empty"
-  readonly channelBytes: number
   readonly cellDeadlineMillis: number
 }
 
@@ -153,7 +150,7 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
       : `Your workspace is ${JSON.stringify(facts.workspace)} and it is ${facts.workspaceState}.`,
     "A relative path resolves from your workspace, and an absolute path is read and written as given,",
     "so a sibling repository is reachable through the same workspace tools rather than through the shell.",
-    `Cell stdout and stderr are each capped at ${bytes(facts.channelBytes)}, so read a result whole rather than piping it through head or tail and paying a second cell to see the rest.`,
+    "Cell stdout, stderr, and terminal result values are returned complete.",
     "Run shell commands with rika.processes.start; it is the supported shell path.",
     "Wait for one with rika.processes.status({ processId, waitMillis }), which returns as soon as the",
     "process settles. Sleeping inside a cell spends the cell's own deadline on waiting instead.",
@@ -163,8 +160,8 @@ export const cellInstructions = (facts: CellInstructionFacts): string =>
     '  const found = await rika.workspace.search({ pattern: "secret" })',
     '  found.text.split("\\n").length',
     "",
-    "The value of a cell's last expression comes back to you. Printing costs a separate channel and",
-    "is truncated, so end a cell with what you want to read.",
+    "The value of a cell's last expression comes back to you. End a cell with what you want to read",
+    "rather than printing it when the value itself is the useful result.",
     "",
     "Workspace results have exact shapes: (await rika.workspace.read({ path })).text is file content;",
     "rika.workspace.search returns { text, matches: [{ path, line, text }], matchesTruncation?: { kept, total },",

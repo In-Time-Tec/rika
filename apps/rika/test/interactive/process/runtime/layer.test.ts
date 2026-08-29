@@ -107,7 +107,7 @@ it.effect("routes an admitted cell through the pool the composition root supplie
           runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
           bindingsDigest: KernelProfile.bindingsDigest(["workspace"]),
           workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
-          limits: { sourceBytes: CellTool.maxSourceBytes, channelBytes: 4_096, cellDeadlineMillis: 1_000 },
+          limits: { sourceBytes: CellTool.maxSourceBytes, cellDeadlineMillis: 1_000 },
           trustMode: "trusted-local",
         }),
         script: (request) => {

@@ -52,8 +52,10 @@ const failure = (message: string) => HostedError.make({ kind: "network", message
 const protocolFailure = (message: string) => HostedError.make({ kind: "protocol", message })
 type PreparedAttachment = {
   readonly attachment: Attachment
-  readonly snapshotCursor: bigint
+  readonly checkpoint: HostedThreadSnapshot | undefined
+  readonly baseCursor: bigint
   readonly terminalCursor: bigint
+  readonly representedVersion: bigint
   readonly view: ThreadView.ThreadViewSnapshot
 }
 type Projection = {
@@ -61,10 +63,13 @@ type Projection = {
   readonly view: ThreadView.ThreadViewSnapshot
   readonly authorizations: ReadonlyMap<string, HostedThreadSnapshot["pendingAuthorizations"][number]>
   readonly target: "runner" | "orb"
+  readonly workspace: HostedThreadSnapshot["workspace"]
   readonly activity: InteractiveConnection.Activity
   readonly participants: number
   readonly committedCursor: string
+  readonly checkpointCursor: string
   readonly version: string
+  readonly representedVersion: string
   readonly deliveredCursor: string
   readonly deliveredFingerprint: string | undefined
 }
@@ -80,10 +85,11 @@ type AttachmentValidation =
   | { readonly _tag: "Invalid"; readonly error: HostedError }
   | { readonly _tag: "Valid"; readonly prepared: PreparedAttachment }
 
-const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
+const prepareAttachment = (attachment: Attachment, previous: Projection | undefined): AttachmentValidation => {
   const threadId = String(attachment.threadId)
-  if (!hostedThreadSnapshotMatches(attachment.snapshot, threadId))
-    return { _tag: "Invalid", error: failure("Thread attachment snapshot identity did not match its response") }
+  const checkpoint = attachment.checkpoint
+  if (checkpoint !== undefined && !hostedThreadSnapshotMatches(checkpoint.snapshot, threadId))
+    return { _tag: "Invalid", error: failure("Thread attachment checkpoint identity did not match its response") }
   if (
     attachment.events.some((event) => {
       const eventThreadId = interactiveEventThreadId(event.event)
@@ -91,12 +97,16 @@ const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
     })
   )
     return { _tag: "Invalid", error: failure("Thread attachment event identity did not match its response") }
-  const snapshotCursor = BigInt(attachment.snapshotCursor)
+  const baseCursor = BigInt(attachment.baseCursor)
   const terminalCursor = BigInt(attachment.cursor)
-  if (snapshotCursor > terminalCursor)
-    return { _tag: "Invalid", error: failure("Thread attachment snapshot exceeded its terminal cursor") }
-  let expectedCursor = snapshotCursor + 1n
-  let representedVersion = BigInt(attachment.snapshotThreadVersion)
+  if (baseCursor > terminalCursor)
+    return { _tag: "Invalid", error: failure("Thread attachment base exceeded its terminal cursor") }
+  if (checkpoint === undefined && (previous?.threadId !== threadId || BigInt(previous.deliveredCursor) !== baseCursor))
+    return { _tag: "Invalid", error: failure("Thread attachment tail has no matching local checkpoint") }
+  if (checkpoint !== undefined && BigInt(checkpoint.cursor) !== baseCursor)
+    return { _tag: "Invalid", error: failure("Thread attachment checkpoint did not match its replay base") }
+  let expectedCursor = baseCursor + 1n
+  let representedVersion = BigInt(checkpoint?.threadVersion ?? previous!.representedVersion)
   for (const event of attachment.events) {
     if (BigInt(event.cursor) !== expectedCursor)
       return { _tag: "Invalid", error: failure("Thread attachment replay was not contiguous") }
@@ -106,10 +116,12 @@ const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
     representedVersion = eventVersion
     expectedCursor += 1n
   }
-  if (expectedCursor - 1n !== terminalCursor || representedVersion !== BigInt(attachment.threadVersion))
-    return { _tag: "Invalid", error: failure("Thread attachment terminal metadata was not represented") }
-  let view = ThreadView.fromSnapshot(attachment.snapshot.view)
-  if (view._tag === "Failure") return { _tag: "Invalid", error: failure("Thread attachment snapshot was invalid") }
+  if (expectedCursor - 1n !== terminalCursor)
+    return { _tag: "Invalid", error: failure("Thread attachment terminal cursor was not represented") }
+  if (representedVersion > BigInt(attachment.threadVersion))
+    return { _tag: "Invalid", error: failure("Thread attachment represented version exceeded its terminal version") }
+  let view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? previous!.view)
+  if (view._tag === "Failure") return { _tag: "Invalid", error: failure("Thread attachment checkpoint was invalid") }
   for (const event of attachment.events) {
     if (event.event._tag === "ThreadViewSnapshot") {
       view = ThreadView.fromSnapshot(event.event.snapshot)
@@ -123,7 +135,14 @@ const prepareAttachment = (attachment: Attachment): AttachmentValidation => {
   }
   return {
     _tag: "Valid",
-    prepared: { attachment, snapshotCursor, terminalCursor, view: view.success.snapshot() },
+    prepared: {
+      attachment,
+      checkpoint: checkpoint?.snapshot,
+      baseCursor,
+      terminalCursor,
+      representedVersion,
+      view: view.success.snapshot(),
+    },
   }
 }
 const ErrorMessage = Schema.Struct({ message: Schema.String })
@@ -153,7 +172,11 @@ interface PhysicalConnection {
     onRejected?: (outcome: Rejected) => Effect.Effect<void>,
   ) => Effect.Effect<CommandOutcome, HostedError>
   readonly acknowledge: (requestId: string, threadId: string, cursor: string) => Effect.Effect<void, HostedError>
-  readonly attach: (threadId: string, cursor: string) => Effect.Effect<PendingAttachment, HostedError>
+  readonly attach: (
+    threadId: string,
+    cursor: string,
+    checkpointCursor?: string,
+  ) => Effect.Effect<PendingAttachment, HostedError>
   readonly invalidate: Effect.Effect<void>
   readonly detach: Effect.Effect<void, HostedError>
   readonly done: Effect.Effect<never, HostedError>
@@ -185,6 +208,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
   readonly profile: Profile
   readonly threadId: () => string
   readonly cursor: (threadId: string) => string
+  readonly checkpointCursor: (threadId: string) => string | undefined
   readonly resolving: () => boolean
   readonly opening: (connection: PhysicalConnection) => Effect.Effect<void>
   readonly receive: (payload: Payload, connection: PhysicalConnection) => Effect.Effect<void, HostedError>
@@ -243,7 +267,7 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
       if (outcome._tag === "CommandAdmitted" && !completeOnAdmission) outcome = yield* next
       return outcome
     }).pipe(Effect.ensuring(Effect.sync(() => outcomes.delete(requestId))))
-  const attach = (threadId: string, cursor: string) =>
+  const attach = (threadId: string, cursor: string, checkpointCursor?: string) =>
     Effect.gen(function* () {
       const requestId = `attach:${threadId}:${yield* randomId}`
       const waiter = {
@@ -251,14 +275,15 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         processed: yield* Deferred.make<void, HostedError>(),
       }
       attachments.set(requestId, waiter)
+      const attachCommand: Extract<ClientCommand, { readonly _tag: "AttachThread" }> = {
+        _tag: "AttachThread",
+        threadId: ThreadId.make(threadId),
+        afterCursor: ThreadEventCursor.make(cursor),
+      }
+      if (checkpointCursor !== undefined)
+        Object.assign(attachCommand, { afterCheckpointCursor: ThreadEventCursor.make(checkpointCursor) })
       yield* socket
-        .send(
-          envelope(requestId, {
-            _tag: "AttachThread",
-            threadId: ThreadId.make(threadId),
-            afterCursor: ThreadEventCursor.make(cursor),
-          }),
-        )
+        .send(envelope(requestId, attachCommand))
         .pipe(Effect.onError(() => Effect.sync(() => attachments.delete(requestId))))
       const attachment = yield* Deferred.await(waiter.response).pipe(
         Effect.ensuring(Effect.sync(() => attachments.delete(requestId))),
@@ -348,7 +373,9 @@ const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(fu
         "attach",
         { threadId: initialThreadId },
         Effect.gen(function* () {
-          const pending = yield* restore(physical.attach(initialThreadId, input.cursor(initialThreadId)))
+          const pending = yield* restore(
+            physical.attach(initialThreadId, input.cursor(initialThreadId), input.checkpointCursor(initialThreadId)),
+          )
           yield* input.attached(pending.attachment, physical).pipe(
             Effect.andThen(input.processed(pending.attachment, physical)),
             Effect.andThen(pending.complete),
@@ -592,6 +619,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         ]),
       ),
       target: payload.snapshot.executorKind,
+      workspace: payload.snapshot.workspace,
       activity: projectionActivity(
         payload.snapshot.view,
         payload.snapshot.pendingAuthorizations,
@@ -600,7 +628,9 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       ),
       participants,
       committedCursor: String(payload.cursor),
+      checkpointCursor: String(payload.cursor),
       version: String(payload.threadVersion),
+      representedVersion: String(payload.threadVersion),
       deliveredCursor,
       deliveredFingerprint,
     }
@@ -628,15 +658,17 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const cursor = BigInt(payload.cursor)
       const previousCursor = BigInt(previous.committedCursor)
       if (cursor < previousCursor) return
-      if (BigInt(payload.threadVersion) < BigInt(previous.version))
+      if (BigInt(payload.threadVersion) < BigInt(previous.representedVersion))
         return yield* failure("Thread snapshot version regressed")
-      const candidate = projectionFromSnapshot(
+      const projected = projectionFromSnapshot(
         payload,
         previous.participants,
         previous.deliveredCursor,
         previous.deliveredFingerprint,
       )
-      if (Schema.is(HostedError)(candidate)) return yield* candidate
+      if (Schema.is(HostedError)(projected)) return yield* projected
+      const candidate =
+        BigInt(projected.version) < BigInt(previous.version) ? { ...projected, version: previous.version } : projected
       const fingerprint = encodeThreadView(payload.snapshot.view)
       if (!replaceAuthority(previous, candidate)) return
       yield* publishProjectionState(candidate)
@@ -664,25 +696,40 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     if (view._tag === "Failure")
       return { _tag: "Invalid" as const, error: failure("Thread committed view was invalid") }
     const payload = prepared.attachment
+    const checkpoint = prepared.checkpoint
+    const basis = checkpoint === undefined ? previous! : undefined
+    if (
+      previous !== undefined &&
+      previous.threadId === threadId &&
+      BigInt(payload.threadVersion) < BigInt(previous.version)
+    )
+      return {
+        _tag: "Invalid" as const,
+        error: failure("Thread attachment terminal version regressed"),
+      }
+    const authorizations =
+      checkpoint === undefined
+        ? basis!.authorizations
+        : new Map(
+            checkpoint.pendingAuthorizations.map((pending) => [
+              `${pending.turnId}:${pending.authorizationId}`,
+              pending,
+            ]),
+          )
+    const target = checkpoint?.executorKind ?? basis!.target
+    const workspace = checkpoint === undefined ? basis!.workspace : checkpoint.workspace
     const candidate: Projection = {
       threadId,
       view: view.success.snapshot(),
-      authorizations: new Map(
-        payload.snapshot.pendingAuthorizations.map((pending) => [
-          `${pending.turnId}:${pending.authorizationId}`,
-          pending,
-        ]),
-      ),
-      target: payload.snapshot.executorKind,
-      activity: projectionActivity(
-        prepared.view,
-        payload.snapshot.pendingAuthorizations,
-        payload.snapshot.executorKind,
-        payload.snapshot.workspace,
-      ),
+      authorizations,
+      target,
+      workspace,
+      activity: projectionActivity(prepared.view, [...authorizations.values()], target, workspace),
       participants: payload.participants.length,
       committedCursor: String(payload.cursor),
+      checkpointCursor: checkpoint === undefined ? basis!.checkpointCursor : String(payload.baseCursor),
       version: String(payload.threadVersion),
+      representedVersion: String(prepared.representedVersion),
       deliveredCursor,
       deliveredFingerprint: continuing ? previous.deliveredFingerprint : undefined,
     }
@@ -702,7 +749,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     })
   const commitInitialAttachment = (attachment: Attachment) =>
     Effect.gen(function* () {
-      const validation = prepareAttachment(attachment)
+      const validation = prepareAttachment(attachment, authority())
       if (validation._tag === "Invalid") return yield* validation.error
       const threadId = String(validation.prepared.attachment.threadId)
       const plan = planAttachment(validation.prepared, authority())
@@ -766,7 +813,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         const previous = BigInt(projection.committedCursor)
         if (next <= previous) return
         if (next !== previous + 1n) return yield* failure("Thread event cursor was not contiguous")
-        if (BigInt(payload.event.threadVersion) < BigInt(projection.version))
+        const eventVersion = BigInt(payload.event.threadVersion)
+        if (eventVersion < BigInt(projection.representedVersion))
           return yield* failure("Thread event version regressed")
         if (
           (payload.event.event._tag === "SubmissionAdmitted" || payload.event.event._tag === "SubmissionRejected") &&
@@ -788,7 +836,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         const candidate: Projection = {
           ...projection,
           view: nextView,
-          version: String(payload.event.threadVersion),
+          version: eventVersion < BigInt(projection.version) ? projection.version : String(payload.event.threadVersion),
+          representedVersion: String(payload.event.threadVersion),
           committedCursor: String(payload.event.cursor),
         }
         if (!replaceAuthority(projection, candidate)) return
@@ -835,7 +884,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                 Effect.flatMap((connection) =>
                   connection.attach(
                     threadId,
-                    previous?.threadId === threadId ? previous.deliveredCursor : (threadCursors.get(threadId) ?? "0"),
+                    previous?.threadId === threadId ? previous.deliveredCursor : "0",
+                    previous?.threadId === threadId ? previous.checkpointCursor : undefined,
                   ),
                 ),
               ),
@@ -850,9 +900,10 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                   selection._tag !== "Loading" ||
                   selection.token !== request.token ||
                   selection.threadId !== threadId)
-              const validation = outcome._tag === "Success" ? prepareAttachment(outcome.value.attachment) : undefined
               const currentAuthority =
                 selection._tag === "Loading" && selection.token === request.token ? selection.authority : undefined
+              const validation =
+                outcome._tag === "Success" ? prepareAttachment(outcome.value.attachment, currentAuthority) : undefined
               const plan =
                 validation?._tag === "Valid" ? planAttachment(validation.prepared, currentAuthority) : undefined
               let invalid: HostedError | undefined
@@ -967,10 +1018,9 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               const physical = yield* makePhysicalConnection({
                 profile,
                 threadId: () => authority()?.threadId ?? input.threadId,
-                cursor: (threadId) =>
-                  authority()?.threadId === threadId
-                    ? authority()!.deliveredCursor
-                    : (threadCursors.get(threadId) ?? "0"),
+                cursor: (threadId) => (authority()?.threadId === threadId ? authority()!.deliveredCursor : "0"),
+                checkpointCursor: (threadId) =>
+                  authority()?.threadId === threadId ? authority()!.checkpointCursor : undefined,
                 resolving: () => selection._tag === "Loading" && selection.authority === undefined,
                 opening: (connection) =>
                   Effect.sync(() => {

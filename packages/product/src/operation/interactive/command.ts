@@ -1,4 +1,5 @@
 import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as ExecutionRequest from "@rika/product/execution-request"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Effect, Function, Schema } from "effect"
@@ -73,7 +74,15 @@ export const InteractiveCommand = Schema.Union([
 ])
 export type InteractiveCommand = typeof InteractiveCommand.Type
 
-const executeInteractiveCommandImpl = (session: InteractiveSession, command: InteractiveCommand) => {
+export const InteractiveInvocation = Schema.Struct({
+  commandId: Schema.String,
+  turnId: Turn.TurnId,
+  command: InteractiveCommand,
+})
+export type InteractiveInvocation = typeof InteractiveInvocation.Type
+
+const executeInteractiveCommandImpl = (session: InteractiveSession, invocation: InteractiveInvocation) => {
+  const command = invocation.command
   switch (command._tag) {
     case "Submit":
       return session.submit(
@@ -82,9 +91,10 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
         command.promptParts,
         command.modelTuning,
         command.submissionId,
+        invocation.turnId,
       )
     case "Shell":
-      return session.shell(command.threadId, command.command, command.incognito)
+      return session.shell(command.threadId, command.command, command.incognito, invocation.turnId)
     case "EditQueued":
       return session.editQueued(command.turnId, command.prompt)
     case "Dequeue":
@@ -98,7 +108,7 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "DenyAuthorization":
       return session.denyAuthorization(command.turnId, command.authorizationId, command.checkpoint)
     case "InterruptAndSend":
-      return session.interruptAndSend(command.prompt, command.targetTurnId)
+      return session.interruptAndSend(command.prompt, command.targetTurnId, invocation.turnId)
     case "Cancel":
       return session.cancel(command.targetTurnId === undefined ? undefined : { turnId: command.targetTurnId })
     case "Quit":
@@ -121,6 +131,6 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
 }
 
 export const executeInteractiveCommand: {
-  (command: InteractiveCommand): (session: InteractiveSession) => Effect.Effect<void, OperationUnavailable>
-  (session: InteractiveSession, command: InteractiveCommand): Effect.Effect<void, OperationUnavailable>
+  (invocation: InteractiveInvocation): (session: InteractiveSession) => Effect.Effect<void, OperationUnavailable>
+  (session: InteractiveSession, invocation: InteractiveInvocation): Effect.Effect<void, OperationUnavailable>
 } = Function.dual(2, executeInteractiveCommandImpl)

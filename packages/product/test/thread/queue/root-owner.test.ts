@@ -41,9 +41,95 @@ it.effect("coalesces an observer request that arrives before the current observe
     )
     expect(yield* owner.claim(turn.id)).toBe(true)
     expect(yield* owner.claim(turn.id)).toBe(false)
-    expect(yield* owner.release(turn.id)).toBe(true)
+    expect(yield* owner.release(turn.threadId, turn.id)).toBe(true)
     expect(yield* owner.claim(turn.id)).toBe(true)
-    expect(yield* owner.release(turn.id)).toBe(false)
+    expect(yield* owner.release(turn.threadId, turn.id)).toBe(false)
+  }),
+)
+
+it.effect("lets another Thread start while one Thread is blocked", () =>
+  Effect.gen(function* () {
+    const xEntered = yield* Deferred.make<void>()
+    const releaseX = yield* Deferred.make<void>()
+    const yEntered = yield* Deferred.make<void>()
+    const repository = TurnRepository.Service.of({
+      prepareExecutionAdmission: (input) => Effect.succeed(input),
+      attachExecutionLink: (turnId: Turn.TurnId, executionLink: ExecutionGateway.ExecutionLink) =>
+        Effect.succeed({
+          ...turn,
+          id: turnId,
+          threadId: Thread.ThreadId.make(executionLink.threadId),
+          executionLink,
+        }),
+    })
+    const owner = yield* make(
+      repository,
+      TranscriptRepository.Service.of({}),
+      ExecutionGateway.Service.of({
+        startTurn: (input) =>
+          (input.threadId === "thread-x"
+            ? Deferred.succeed(xEntered, undefined).pipe(Effect.andThen(Deferred.await(releaseX)))
+            : Deferred.succeed(yEntered, undefined)
+          ).pipe(Effect.as({ runId: `run-${input.turnId}`, threadId: input.threadId, turnId: input.turnId })),
+      }),
+    )
+    const start = (threadId: string, turnId: string) =>
+      owner.startTurn({
+        threadId,
+        turnId,
+        workspaceId: "/workspace",
+        prompt: "work",
+        executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+      })
+    const x = yield* Effect.forkChild(start("thread-x", "turn-x"))
+    yield* Deferred.await(xEntered)
+    const y = yield* Effect.forkChild(start("thread-y", "turn-y"))
+    yield* Effect.yieldNow
+    const yProgressedWhileXWasBlocked = yield* Deferred.isDone(yEntered)
+    yield* Deferred.succeed(releaseX, undefined)
+    yield* Fiber.join(x)
+    yield* Fiber.join(y)
+    expect(yProgressedWhileXWasBlocked).toBe(true)
+  }),
+)
+
+it.effect("quiesces only the affected Thread fibers", () =>
+  Effect.gen(function* () {
+    const xEntered = yield* Deferred.make<void>()
+    const yEntered = yield* Deferred.make<void>()
+    const xInterrupted = yield* Deferred.make<void>()
+    const yInterrupted = yield* Deferred.make<void>()
+    const finishY = yield* Deferred.make<void>()
+    const xTurn = { ...turn, id: Turn.TurnId.make("turn-x"), threadId: Thread.ThreadId.make("thread-x") }
+    const yTurn = { ...turn, id: Turn.TurnId.make("turn-y"), threadId: Thread.ThreadId.make("thread-y") }
+    const owner = yield* make(
+      TurnRepository.Service.of({
+        get: (turnId) => Effect.succeed(turnId === xTurn.id ? xTurn : yTurn),
+      }),
+      TranscriptRepository.Service.of({}),
+      ExecutionGateway.Service.of({}),
+    )
+    yield* owner.install({
+      run: (turnId) =>
+        (turnId === xTurn.id
+          ? Deferred.succeed(xEntered, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() => Deferred.succeed(xInterrupted, undefined).pipe(Effect.asVoid)),
+            )
+          : Deferred.succeed(yEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(finishY)),
+              Effect.onInterrupt(() => Deferred.succeed(yInterrupted, undefined).pipe(Effect.asVoid)),
+            )
+        ).pipe(Effect.asVoid),
+    })
+    yield* owner.accepted(xTurn.threadId, xTurn.id)
+    yield* owner.accepted(yTurn.threadId, yTurn.id)
+    yield* Deferred.await(xEntered)
+    yield* Deferred.await(yEntered)
+    yield* owner.quiesceThread(xTurn.threadId)
+    expect(yield* Deferred.isDone(xInterrupted)).toBe(true)
+    expect(yield* Deferred.isDone(yInterrupted)).toBe(false)
+    yield* Deferred.succeed(finishY, undefined)
   }),
 )
 
@@ -684,7 +770,7 @@ it.effect("retries unknown steering admissions with one identity and journals de
       rejected: [{ admission: { input: { idempotencyKey: "request-rejected" } }, notify: false }],
       pending: true,
     })
-    yield* rejectingOwner.acknowledgeSteeringRejection("request-rejected")
+    yield* rejectingOwner.acknowledgeSteeringRejection(turn.threadId, "request-rejected")
     expect(yield* rejectedRepository.listSteeringAdmissions).toEqual([])
 
     const oversizedSource = {
@@ -968,7 +1054,7 @@ it.effect("keeps late accepted callbacks behind a quiesced Thread fence", () =>
     yield* owner.install({ run: () => Effect.sync(() => (launches += 1)).pipe(Effect.asVoid) })
     expect(yield* owner.claim(turn.id, "running")).toBe(true)
     yield* owner.quiesceThread(turn.threadId)
-    yield* owner.accepted(turn.id)
+    yield* owner.accepted(turn.threadId, turn.id)
     yield* Effect.yieldNow
     expect(launches).toBe(0)
   }),
@@ -986,7 +1072,7 @@ it.effect("claims a terminal turn only while its recovered status still matches"
     expect(yield* owner.claim(turn.id)).toBe(false)
     expect(yield* owner.claim(turn.id, "failed")).toBe(false)
     expect(yield* owner.claim(turn.id, "completed")).toBe(true)
-    expect(yield* owner.release(turn.id)).toBe(false)
+    expect(yield* owner.release(turn.threadId, turn.id)).toBe(false)
 
     current = { ...current, status: "failed" }
     expect(yield* owner.claim(turn.id, "completed")).toBe(false)

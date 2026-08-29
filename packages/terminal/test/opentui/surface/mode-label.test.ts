@@ -99,7 +99,7 @@ test("renders a finished subagent response as markdown inside the expanded unit"
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
 
-  expect(text).toContain("Oracle has spoken ▾")
+  expect(text).toContain("Oracle has spoken")
   expect(text).toContain("Review the code")
   expect(text).toContain("Child result")
   expect(text).toContain("Checks passed.")

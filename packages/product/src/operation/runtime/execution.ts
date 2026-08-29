@@ -1,5 +1,5 @@
 import * as TurnRepository from "@rika/product/turn-repository"
-import { Context, Effect, Layer, PlatformError, PubSub, Scope, Semaphore } from "effect"
+import { Context, Effect, Layer, PlatformError, PubSub, Scope } from "effect"
 import { operationError } from "../error"
 import * as ExecutionLifecycle from "./execution-lifecycle"
 import * as ExecutionProjectionRuntime from "./execution-projection"
@@ -108,7 +108,7 @@ export interface ProductOperationExecutionInput {
   readonly options: import("../foundation/options").ProductLayerOptions<Error, Error, Error, Error, Error>
   readonly ownerScope: Scope.Scope
   readonly pendingTurnCapacity: number
-  readonly turnMutationAdmission: Semaphore.Semaphore
+  readonly withThreadMutation: <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly turnChanges: PubSub.PubSub<void>
   readonly dirtyTurnObservers: Set<TurnId>
   readonly rootTurnOwner: RootTurnOwnerInterface
@@ -133,7 +133,11 @@ export interface ProductOperationExecutionInput {
     turnId: TurnId,
     expectedStatus?: ExecutionStatusStatus,
   ) => Effect.Effect<boolean, TurnRepositoryError, never>
-  readonly releaseTurnObserver: (turnId: TurnId, notify?: boolean) => Effect.Effect<void, never, never>
+  readonly releaseTurnObserver: (
+    threadId: ThreadId,
+    turnId: TurnId,
+    notify?: boolean,
+  ) => Effect.Effect<void, never, never>
   readonly claimQueuedTurn: (
     threadId: ThreadId,
     now: number,

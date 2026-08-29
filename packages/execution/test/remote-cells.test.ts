@@ -16,7 +16,7 @@ const profile = KernelProfile.make({
   runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
   bindingsDigest: KernelProfile.bindingsDigest(["workspace"]),
   workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
-  limits: { sourceBytes: CellTool.maxSourceBytes, channelBytes: 4_096, cellDeadlineMillis: 1_000 },
+  limits: { sourceBytes: CellTool.maxSourceBytes, cellDeadlineMillis: 1_000 },
   trustMode: "trusted-local",
 })
 
@@ -43,7 +43,6 @@ const result = (cellId: string, value = "2") => ({
   stdout: "",
   stderr: "",
   durationMillis: 1,
-  truncation: [],
 })
 
 const remoteRequest = RemoteCells.Request.make({
@@ -299,7 +298,6 @@ it.effect("reports a remote success or domain failure that won the cancellation 
       stdout: "",
       stderr: "",
       durationMillis: 1,
-      truncation: [],
     }
     const responses: Array<RemoteCells.TransportResponse> = [
       { _tag: "Success", result: completed },
@@ -453,7 +451,6 @@ it.effect("decodes an encoded remote cell failure before returning it to TenetKi
                 stdout: "",
                 stderr: "",
                 durationMillis: 250,
-                truncation: [],
               },
             }),
           cancel: () => Effect.die("unused"),
@@ -678,7 +675,6 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
                 stdout: "",
                 stderr: "",
                 durationMillis: deadlineMillis,
-                truncation: [],
               }),
             }
           : { _tag: "Value", value: "2" }

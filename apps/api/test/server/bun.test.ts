@@ -3,12 +3,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Schema, Scope, Stream }
 import { TestClock } from "effect/testing"
 import * as Socket from "effect/unstable/socket/Socket"
 import type { CliDeviceDirectory, IdentityConfig, IdentityDirectory, IdentityRuntime } from "@rika/identity"
-import {
-  CompatibleServerFrame,
-  previousProtocolVersion,
-  protocolVersion,
-  ServerFrame,
-} from "@rika/product/client-protocol"
+import { protocolVersion, ServerFrame } from "@rika/product/client-protocol"
 import { Timestamp } from "@rika/product/hosted-model"
 import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { HostedProductService } from "../../src/hosted/product"
@@ -144,14 +139,16 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
           workerId: "test",
         }),
         status: Effect.succeed({
-          poll: { _tag: "Starting" },
-          lastSuccessfulPollAt: undefined,
+          scan: { _tag: "Starting" },
+          wakeup: { _tag: "Starting" },
+          lastFallbackAt: undefined,
           lastFailure: undefined,
           active: 0,
           capacity: 1,
           oldestClaimAt: undefined,
-          pollAgeMillis: undefined,
-          lastSuccessfulPollAgeMillis: undefined,
+          scanAgeMillis: undefined,
+          wakeupAgeMillis: undefined,
+          lastFallbackAgeMillis: undefined,
           oldestClaimAgeMillis: undefined,
           lastFailureAgeMillis: undefined,
           availableCapacity: 1,
@@ -566,33 +563,6 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
     yield* Scope.close(detachedScope, Exit.void)
     yield* Deferred.succeed(releaseDetachedReceive, undefined)
     yield* Deferred.await(detachedReceiveCompleted)
-    const legacyReply = yield* Effect.scoped(
-      Layer.build(Socket.layerWebSocketConstructorGlobal).pipe(
-        Effect.flatMap((context) =>
-          Effect.provide(
-            Effect.gen(function* () {
-              const socket = yield* Socket.makeWebSocket(`${baseUrl.replace("http:", "ws:")}/api/v1/threads/socket`, {
-                protocols: ["rika.thread.v1", "rika.ticket.secret"],
-              })
-              const writer = yield* socket.writer
-              const opened = yield* Deferred.make<void>()
-              const response = yield* Deferred.make<string>()
-              yield* socket
-                .runString((message) => Deferred.succeed(response, message), {
-                  onOpen: Deferred.succeed(opened, undefined),
-                })
-                .pipe(Effect.forkScoped)
-              yield* Deferred.await(opened)
-              yield* writer(
-                `{"protocolVersion":${previousProtocolVersion},"requestId":"request-legacy","command":{"_tag":"AttachThread","threadId":"thread-legacy","afterCursor":"0"}}`,
-              )
-              return yield* Deferred.await(response)
-            }),
-            context,
-          ),
-        ),
-      ),
-    )
     yield* Effect.tryPromise(() => running.server.stop(true))
     yield* Scope.close(resourceScope, Exit.void)
     expect(connected).toEqual(["secret", "/api/v1/threads/socket"])
@@ -602,19 +572,10 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
         requestId: "request-1",
         command: { _tag: "Detach" },
       },
-      {
-        protocolVersion,
-        requestId: "request-legacy",
-        command: { _tag: "AttachThread", threadId: "thread-legacy", afterCursor: "0" },
-      },
     ])
     expect(receiveStartedAfterOutboundStopped).toBe(true)
     expect(yield* Schema.decodeEffect(Schema.fromJsonString(ServerFrame))(reply)).toEqual({
       protocolVersion,
-      payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
-    })
-    expect(yield* Schema.decodeEffect(Schema.fromJsonString(CompatibleServerFrame))(legacyReply)).toEqual({
-      protocolVersion: previousProtocolVersion,
       payload: { _tag: "Heartbeat", at: "2026-08-21T00:00:00.000Z" },
     })
   }),

@@ -160,14 +160,16 @@ const executor: Executor = {
 const execution = {
   check: Effect.succeed({ backend: "postgres" as const, source: "test", workerId: "test-worker" }),
   status: Effect.succeed({
-    poll: { _tag: "Starting" as const },
-    lastSuccessfulPollAt: undefined,
+    scan: { _tag: "Starting" as const },
+    wakeup: { _tag: "Starting" as const },
+    lastFallbackAt: undefined,
     lastFailure: undefined,
     active: 0,
     capacity: 1,
     oldestClaimAt: undefined,
-    pollAgeMillis: undefined,
-    lastSuccessfulPollAgeMillis: undefined,
+    scanAgeMillis: undefined,
+    wakeupAgeMillis: undefined,
+    lastFallbackAgeMillis: undefined,
     oldestClaimAgeMillis: undefined,
     lastFailureAgeMillis: undefined,
     availableCapacity: 1,
@@ -465,6 +467,7 @@ describe("api HTTP", () => {
           thread: () => Effect.die("unused"),
           interactive: () => Effect.die("unused"),
           snapshot: () => Effect.die("unused"),
+          projectionCommitted: () => Effect.die("unused"),
         },
       }
       const listed = yield* response("/api/v1/threads/list", deps, {

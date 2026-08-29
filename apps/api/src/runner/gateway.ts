@@ -19,6 +19,7 @@ import {
   type BindingOutcome,
   type MachineOutcome,
 } from "@rika/remote-execution/protocol"
+import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import {
   AssignmentLeaseEpoch,
   EventId,
@@ -27,7 +28,7 @@ import {
   IdempotencyKey,
   Sequence,
 } from "@rika/product/hosted-model"
-import { HostedStore } from "@rika/product/hosted-store"
+import { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
 import {
   Cause,
   Clock,
@@ -167,7 +168,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   toolPolicy: HostedToolPolicyService,
 ) {
   const operations = yield* HostedExecutionOperations
-  const store = yield* HostedStore
+  const store = yield* HostedThreadEventStore
   const crypto = yield* Crypto.Crypto
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
@@ -989,13 +990,19 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
         const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(input.assignmentId)))
         return finalResult(row.response, row.terminalOutcome, session?.access)
       }
-      if ((yield* Clock.currentTimeMillis) >= DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))) {
+      const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))
+      const settlementDeadlineAtMillis = deadlineAtMillis + CellTerminalSettlementGraceMillis
+      const now = yield* Clock.currentTimeMillis
+      if (now >= deadlineAtMillis && row.state === "accepted") {
         const timedOut = yield* timeoutAccepted(input)
         if (timedOut !== undefined) return timedOut
+      }
+      if (now >= settlementDeadlineAtMillis) {
         yield* sendCancel(input.assignmentId, input.operationKey, input.attempt)
         return { response: unknownResponse, outcome: "unknown", eventPersisted: false }
       }
-      return yield* Effect.sleep("100 millis").pipe(Effect.andThen(waitForTerminal(input)))
+      const nextBoundary = now < deadlineAtMillis ? deadlineAtMillis : settlementDeadlineAtMillis
+      return yield* Effect.sleep(Math.min(100, nextBoundary - now)).pipe(Effect.andThen(waitForTerminal(input)))
     })
 
   const awaitResult = Effect.fn("RunnerGateway.awaitResult")(function* (

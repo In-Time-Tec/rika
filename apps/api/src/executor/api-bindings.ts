@@ -7,7 +7,7 @@ import * as GoalService from "@rika/product/goal-service"
 import type { OwnerId } from "@rika/product/hosted-model"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
-import * as ThreadSearchRepository from "@rika/product-store/memory-thread-search-repository"
+import * as ThreadSearchIndex from "@rika/product-store/thread-search-index"
 import { Layer } from "effect"
 
 export type Services =
@@ -24,7 +24,7 @@ export const layer = ({
   readonly dataRoot: string
 }): Layer.Layer<Services, never, PgClient.PgClient> => {
   const root = `${dataRoot}/bindings/${encodeURIComponent(String(ownerId))}`
-  const repositories = Layer.merge(ProductRepositories.layer(ownerId), ThreadSearchRepository.memoryLayer)
+  const repositories = Layer.merge(ProductRepositories.layer(ownerId), ThreadSearchIndex.layer)
   const services = Layer.mergeAll(
     ThreadQuery.Runtime.factoryLayer,
     HarnessStoreLocations.layer({

@@ -6,7 +6,7 @@ import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Random } from "effect"
 import { rikaThreadQueueState, rikaTurnSteeringOutbox, rikaTurns } from "../../database/schema/product"
 import { decodeAgent, decodeQueueState } from "./row-codec"
-import { repositoryError, submissionError } from "../memory/errors"
+import { repositoryError, submissionError } from "./errors"
 
 type QueueSnapshot = Effect.Success<ReturnType<Interface["readQueue"]>>
 type QueueClaim = Parameters<Interface["finishQueuedClaim"]>[0]

@@ -424,7 +424,7 @@ test("does not animate a cancelled subagent again when a new turn starts", () =>
       try {
         surface.update(cancelled)
         yield* openTui(() => setup.renderOnce())
-        expect(header()).toContain("⊘ Subagent cancelled ▸")
+        expect(header()).toContain("⊘ Subagent cancelled")
 
         surface.update({
           ...cancelled,
@@ -440,7 +440,7 @@ test("does not animate a cancelled subagent again when a new turn starts", () =>
         const after = header()
 
         expect(after).toBe(before)
-        expect(after).toContain("⊘ Subagent cancelled ▸")
+        expect(after).toContain("⊘ Subagent cancelled")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

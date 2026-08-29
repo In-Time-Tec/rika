@@ -1,5 +1,5 @@
 import * as Turn from "@rika/product/turn-record"
-import { Clock, Effect } from "effect"
+import { Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "../../../support/tui-app.harness"
 import { model } from "../../../support/tui-model.fixture"
@@ -7,7 +7,7 @@ import { model } from "../../../support/tui-model.fixture"
 const tuiTestTimeout = 90_000
 
 test(
-  "retains prior turns across an active-only resync at realistic tool and child volume",
+  "retains the bounded recent window across an active-only resync at realistic tool and child volume",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -27,7 +27,7 @@ test(
         )
         let reloadTurnIds: ReadonlyArray<string> = []
         const fixturePageCursors: Array<string> = []
-        let reachedOldest = false
+        let hasOlderHistory = false
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           height: 300,
@@ -45,7 +45,7 @@ test(
                 !fixturePageCursors.includes(cursor)
               )
                 fixturePageCursors.push(cursor)
-              if (!event.snapshot.hasOlder) reachedOldest = true
+              if (String(event.snapshot.thread.id) === threadId && event.snapshot.hasOlder) hasOlderHistory = true
             }
             return event
           },
@@ -91,28 +91,9 @@ test(
         yield* app.reload
         const reloaded = app.frame()
 
-        // The full timeline arrives in the initial snapshot: hasOlder is false immediately and no
-        // page fetches exist to walk. PageUp travels the in-memory transcript to the seeded marker.
-        expect(reachedOldest, "the full thread loads with hasOlder false").toBe(true)
-        // The seeded history arrives complete in one snapshot: the fixture thread's window is
-        // assembled newest-first with a single true-oldest cursor, so no page fetches are needed.
-        expect(fixturePageCursors, "the fixture window has one true-oldest cursor").toHaveLength(1)
-        const pagingDeadline = (yield* Clock.currentTimeMillis) + 20_000
-        let paged = app.frame()
-        let previous = ""
-        while (!paged.includes(marker) && paged !== previous && (yield* Clock.currentTimeMillis) < pagingDeadline) {
-          previous = paged
-          yield* app.pressPageUp
-          paged = app.frame()
-        }
-        const projection = yield* app.transcript(Turn.TurnId.make("tui-pageup-thread-history"))
-        const projectedMarker = projection?.units.some((unit) => JSON.stringify(unit.content).includes(marker)) === true
-        expect(projectedMarker || paged.includes(marker), "page-up reaches the seeded historical window").toBe(true)
-
-        if (paged.includes(marker)) {
-          app.pressKey("\u001b[F")
-          yield* Effect.sleep("500 millis")
-        }
+        expect(hasOlderHistory, "the bounded fixture window reports older history").toBe(true)
+        expect(fixturePageCursors, "initial load and active reload expose their bounded oldest cursors").toHaveLength(2)
+        expect(reloaded).not.toContain(marker)
         yield* app.waitTranscript(
           Turn.TurnId.make("tui-turn-0"),
           (liveProjection) =>

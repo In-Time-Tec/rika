@@ -439,7 +439,7 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         const activityFrame = setup.captureCharFrame()
-        expect(activityFrame).toMatch(/[⠀-⣿] Exploring 1 file ▸/u)
+        expect(activityFrame).toMatch(/[⠀-⣿] Exploring 1 file/u)
         expect(activityFrame).toContain("Edited src/main.ts +1 -1")
         model = update(model, {
           _tag: "BlockAdded",

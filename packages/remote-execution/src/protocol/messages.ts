@@ -123,17 +123,8 @@ export const Frame = Schema.Struct({
 })
 export type Frame = typeof Frame.Type
 
-export const OperationFence = Schema.Struct({
-  operationKey: Identifier,
-  attempt: Generation,
-})
-export type OperationFence = typeof OperationFence.Type
-
 export const OperationReplayPolicy = Schema.Literals(["pure", "provider-idempotent", "never"])
 export type OperationReplayPolicy = typeof OperationReplayPolicy.Type
-
-export const TerminalOutcome = Schema.Literals(["accepted", "unknown"])
-export type TerminalOutcome = typeof TerminalOutcome.Type
 
 export const PtyGap = Schema.Struct({
   fromCursor: Sequence,

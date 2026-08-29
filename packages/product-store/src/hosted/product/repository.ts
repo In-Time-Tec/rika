@@ -63,6 +63,7 @@ export interface ThreadAuthorityProjection {
 
 export interface ThreadExecutionProjection {
   readonly assignmentId: string
+  readonly workspaceId: string
   readonly executorKind: "runner" | "orb"
   readonly generation: string
   readonly lifecycle: string
@@ -744,6 +745,7 @@ const make = Effect.gen(function* () {
         db
           .select({
             assignmentId: rikaHostedExecutorAssignments.id,
+            workspaceId: rikaHostedExecutorAssignments.workspaceId,
             executorKind: rikaHostedExecutorAssignments.executorKind,
             generation: rikaHostedExecutorAssignments.generation,
             lifecycle: rikaHostedExecutorAssignments.lifecycle,
@@ -781,6 +783,7 @@ const make = Effect.gen(function* () {
       }
       return {
         assignmentId: row.assignmentId,
+        workspaceId: row.workspaceId,
         executorKind: row.executorKind,
         generation: String(row.generation),
         lifecycle: row.lifecycle,

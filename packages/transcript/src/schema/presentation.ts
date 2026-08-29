@@ -107,15 +107,12 @@ const ImageAttachment = Schema.TaggedStruct("ImageAttachment", {
   bytes: Schema.optionalKey(Schema.Finite),
 })
 const CellSource = Schema.Struct({
-  text: Schema.String.check(Schema.isMaxLength(65_536)),
+  text: Schema.String,
   lines: Schema.Finite,
-  truncated: Schema.Boolean,
 })
 const CellOutput = Schema.Struct({
   stdout: Schema.String,
   stderr: Schema.String,
-  droppedBytes: Schema.Finite,
-  droppedEvents: Schema.Finite,
 })
 const CellNotice = Schema.Struct({
   kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready"]),

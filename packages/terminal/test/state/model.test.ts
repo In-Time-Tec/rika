@@ -36,7 +36,9 @@ const rendered = (current: Model) =>
 
 describe("web page tool output", () => {
   test("is expandable rather than hidden", () => {
-    expect(rendered(model([]))).toContain("▸")
+    const collapsed = rendered(model([]))
+    expect(collapsed).toContain("Read https://example.com")
+    expect(collapsed).not.toContain("Heading")
   })
 
   test("renders markdown instead of raw source when expanded", () => {

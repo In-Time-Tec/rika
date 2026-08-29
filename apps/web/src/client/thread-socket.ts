@@ -2,11 +2,13 @@ import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
 import {
+  type ClientCommand,
   hostedThreadSnapshotMatches,
   interactiveEventThreadId,
   protocolVersion,
   ServerFrame,
 } from "@rika/product/client-protocol"
+import { ThreadEventCursor, ThreadId } from "@rika/product/hosted-model"
 import * as ThreadView from "@rika/product/thread-view"
 
 export const frameEventName = "rika:thread-frame"
@@ -40,6 +42,7 @@ let socket: WebSocket | undefined
 let candidate: WebSocket | undefined
 let attachedThreadId: string | undefined
 let attachedCursor = 0n
+let attachedCheckpointCursor = 0n
 let attachedVersion = 0n
 let attachedView: ThreadView.ThreadViewAccumulator | undefined
 let sequence = 0
@@ -49,18 +52,26 @@ const failed = (message: string) => ThreadConnectionFailed.make({ message })
 const requestId = (kind: string) => `${kind}:${(sequence += 1)}`
 const emit = (detail: ThreadFrameDetail) => window.dispatchEvent(new CustomEvent(frameEventName, { detail }))
 const validateAttachment = (payload: Attachment, threadId: string): ThreadView.ThreadViewAccumulator | undefined => {
+  const checkpoint = payload.checkpoint
   if (
     String(payload.threadId) !== threadId ||
-    !hostedThreadSnapshotMatches(payload.snapshot, threadId) ||
+    (checkpoint !== undefined && !hostedThreadSnapshotMatches(checkpoint.snapshot, threadId)) ||
     payload.events.some((event) => {
       const eventThreadId = interactiveEventThreadId(event.event)
       return String(event.threadId) !== threadId || (eventThreadId !== undefined && eventThreadId !== threadId)
     })
   )
     return undefined
-  let expectedCursor = BigInt(payload.snapshotCursor) + 1n
-  let representedVersion = BigInt(payload.snapshotThreadVersion)
-  let view = ThreadView.fromSnapshot(payload.snapshot.view)
+  const baseCursor = BigInt(payload.baseCursor)
+  if (checkpoint !== undefined && BigInt(checkpoint.cursor) !== baseCursor) return undefined
+  if (
+    checkpoint === undefined &&
+    (attachedThreadId !== threadId || attachedView === undefined || attachedCursor !== baseCursor)
+  )
+    return undefined
+  let expectedCursor = baseCursor + 1n
+  let representedVersion = BigInt(checkpoint?.threadVersion ?? attachedVersion)
+  let view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? attachedView!.snapshot())
   if (view._tag === "Failure") return undefined
   for (const event of payload.events) {
     if (BigInt(event.cursor) !== expectedCursor || BigInt(event.threadVersion) < representedVersion) return undefined
@@ -140,6 +151,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
   const selectedGeneration = ++generation
   supersedeCandidate()
   const afterCursor = attachedThreadId === threadId ? attachedCursor : 0n
+  const afterCheckpointCursor = attachedThreadId === threadId ? attachedCheckpointCursor : undefined
   const httpClient = yield* Effect.scoped(Layer.build(FetchHttpClient.layer))
   const response = yield* HttpClient.post("/api/v1/thread-sessions").pipe(
     Effect.provideContext(httpClient),
@@ -207,6 +219,8 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         candidate = undefined
         attachedThreadId = threadId
         attachedCursor = BigInt(payload.cursor)
+        attachedCheckpointCursor =
+          payload.checkpoint === undefined ? (afterCheckpointCursor ?? 0n) : BigInt(payload.checkpoint.cursor)
         attachedVersion = BigInt(payload.threadVersion)
         attachedView = view
         active = true
@@ -279,6 +293,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
           return
         }
         attachedCursor = cursor
+        attachedCheckpointCursor = cursor
         attachedVersion = version
         attachedView = view.success
         acknowledge(current, attachedThreadId!, attachedCursor)
@@ -319,13 +334,14 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
     }
     current.addEventListener("message", receive)
     current.addEventListener("close", closed)
-    current.send(
-      encodeJson({
-        protocolVersion,
-        requestId: attachRequestId,
-        command: { _tag: "AttachThread", threadId, afterCursor: String(afterCursor) },
-      }),
-    )
+    const command = {
+      _tag: "AttachThread",
+      threadId: ThreadId.make(threadId),
+      afterCursor: ThreadEventCursor.make(String(afterCursor)),
+    } satisfies Extract<ClientCommand, { readonly _tag: "AttachThread" }>
+    if (afterCheckpointCursor !== undefined)
+      Object.assign(command, { afterCheckpointCursor: ThreadEventCursor.make(String(afterCheckpointCursor)) })
+    current.send(encodeJson({ protocolVersion, requestId: attachRequestId, command }))
     return Effect.sync(() => {
       if (active) return
       if (candidate === current) candidate = undefined
