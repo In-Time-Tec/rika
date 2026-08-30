@@ -8,7 +8,7 @@ import {
   platformManifest,
   platformPackageName,
 } from "../../scripts/packaging/npm-package"
-import { archiveName, archiveRoot, targetNames } from "../../scripts/packaging/package-contract"
+import { archiveName, archiveRoot, packageBinEntries, targetNames } from "../../scripts/packaging/package-contract"
 import * as ReleaseDownload from "../../apps/rika/src/release/download"
 import * as ReleaseInstall from "../../apps/rika/src/release/install"
 import * as ReleaseUpdate from "../../apps/rika/src/release/update"
@@ -24,9 +24,7 @@ describe("install contract", () => {
   test("install.sh validates the kernel-capable archive inventory", () => {
     expect(installer).toContain("verify_archive_inventory")
     expect(installer).toContain('"${archive_root}/INSTALL"')
-    expect(installer).toContain('"${archive_root}/bin/rika"')
-    for (const required of [".rika-kernel-runtime", ".rika-kernel-worker.js", "text-result.js"])
-      expect(installer).toContain(required)
+    for (const required of packageBinEntries) expect(installer).toContain(`"${"${archive_root}"}/bin/${required}"`)
     for (const forbidden of [".rika-interactive", ".rika-performance"]) expect(installer).not.toContain(forbidden)
   })
 

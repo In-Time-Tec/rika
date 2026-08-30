@@ -2,6 +2,12 @@ import { Effect, FileSystem, Path, PlatformError, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { expect, test } from "vitest"
 import { live } from "../support/platform"
+import {
+  kernelRuntime,
+  kernelWorker,
+  packageBinEntries,
+  packageExecutable,
+} from "../../scripts/packaging/package-contract"
 
 const rootUrl = new URL("../..", import.meta.url)
 
@@ -54,12 +60,17 @@ const publish = Effect.fn("installUpgrade.publish")(function* (
   yield* fileSystem.remove(stage, { recursive: true, force: true })
   yield* fileSystem.makeDirectory(path.join(payload, "bin"), { recursive: true })
   yield* fileSystem.writeFileString(path.join(payload, "INSTALL"), "install fixture\n")
-  yield* fileSystem.writeFileString(path.join(payload, "bin", "rika"), marker)
-  yield* fileSystem.writeFileString(path.join(payload, "bin", ".rika-kernel-runtime"), `runtime ${marker}`)
-  yield* fileSystem.writeFileString(path.join(payload, "bin", ".rika-kernel-worker.js"), `worker ${marker}`)
-  yield* fileSystem.writeFileString(path.join(payload, "bin", "text-result.js"), `support ${marker}`)
-  yield* fileSystem.chmod(path.join(payload, "bin", "rika"), 0o755)
-  yield* fileSystem.chmod(path.join(payload, "bin", ".rika-kernel-runtime"), 0o755)
+  yield* Effect.forEach(
+    packageBinEntries,
+    (entry) =>
+      fileSystem.writeFileString(
+        path.join(payload, "bin", entry),
+        entry === packageExecutable ? marker : `${entry} ${marker}`,
+      ),
+    { concurrency: "unbounded", discard: true },
+  )
+  yield* fileSystem.chmod(path.join(payload, "bin", packageExecutable), 0o755)
+  yield* fileSystem.chmod(path.join(payload, "bin", kernelRuntime), 0o755)
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = path.join(releases, archiveFile)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -112,11 +123,8 @@ const acceptance = Effect.gen(function* () {
   expect(upgrade.stderr).toBe("")
   expect(upgrade.exitCode).toBe(0)
   expect(yield* fileSystem.readFileString(command)).toBe("second")
-  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", ".rika-kernel-runtime"))).toBe("runtime second")
-  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", ".rika-kernel-worker.js"))).toBe(
-    "worker second",
-  )
-  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", "text-result.js"))).toBe("support second")
+  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelRuntime))).toBe(`${kernelRuntime} second`)
+  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelWorker))).toBe(`${kernelWorker} second`)
   for (const stale of [".rika-interactive", ".rika-performance", ".rika-server"]) {
     expect(yield* fileSystem.exists(path.join(installRoot, "bin", stale))).toBe(false)
   }

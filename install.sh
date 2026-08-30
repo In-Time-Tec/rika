@@ -77,7 +77,7 @@ verify_archive_inventory() {
   archive_path="$1"
   archive_root="$2"
   actual="$(tar -tzf "$archive_path" | LC_ALL=C sort)"
-  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" "${archive_root}/bin/.rika-kernel-runtime" "${archive_root}/bin/.rika-kernel-worker.js" "${archive_root}/bin/text-result.js" | LC_ALL=C sort)"
+  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" "${archive_root}/bin/.rika-kernel-runtime" "${archive_root}/bin/.rika-kernel-worker.js" | LC_ALL=C sort)"
   [ "$actual" = "$expected" ] || fail "release archive has unexpected contents"
 }
 
