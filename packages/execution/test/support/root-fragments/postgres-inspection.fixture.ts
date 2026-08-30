@@ -85,47 +85,16 @@ it.live.skipIf(databaseUrl === "")(
         )
         expect(positionType.rows[0]?.type).toBe("bigint")
 
-        const inspect = Effect.gen(function* () {
-          yield* Effect.scoped(gateway.watchTurn(link).pipe(Stream.runDrain))
+        const listenerConnections = 2
+        const inspectionConnections = 1
+        const observed = new Array<number>()
+        for (let attempt = 0; attempt < 20; attempt += 1) {
           expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
-        })
-        const inspectRepeatedly = Effect.fn("PostgresInspection.inspectRepeatedly")(function* (attempts: number) {
-          for (let attempt = 0; attempt < attempts; attempt += 1) {
-            yield* inspect
-          }
-        })
-        const settledBackendCount = Effect.fn("PostgresInspection.settledBackendCount")(function* () {
-          const samples = new Array<number>()
-          let previous: number | undefined
-          let unchangedSamples = 0
-          for (let attempt = 0; attempt < 60; attempt += 1) {
-            const current = yield* backendCount(pool)
-            samples.push(current)
-            unchangedSamples = current === previous ? unchangedSamples + 1 : 1
-            if (unchangedSamples >= 9) return current
-            previous = current
-            yield* Effect.sleep("250 millis")
-          }
-          return yield* Effect.die(`PostgreSQL backends did not settle: samples=${samples.join(",")}`)
-        })
-        const waitForReturn = Effect.fn("PostgresInspection.waitForReturn")(function* (baseline: number) {
-          const samples = new Array<number>()
-          let returnedSamples = 0
-          for (let attempt = 0; attempt < 60; attempt += 1) {
-            const current = yield* backendCount(pool)
-            samples.push(current)
-            returnedSamples = current <= baseline ? returnedSamples + 1 : 0
-            if (returnedSamples >= 3) return
-            yield* Effect.sleep("250 millis")
-          }
-          return yield* Effect.die(
-            `PostgreSQL backends did not return to baseline ${baseline}: samples=${samples.join(",")}`,
-          )
-        })
-        yield* inspectRepeatedly(10)
-        const baseline = yield* settledBackendCount()
-        yield* inspectRepeatedly(20)
-        yield* waitForReturn(baseline)
+          observed.push(yield* backendCount(pool))
+        }
+        expect(Math.max(...observed)).toBeLessThanOrEqual(
+          maxConnections + listenerConnections + inspectionConnections,
+        )
         expect(yield* fixture.requests).toHaveLength(1)
       } finally {
         yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)

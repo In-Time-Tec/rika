@@ -1,4 +1,4 @@
-import { createTestRenderer, TestRecorder } from "@opentui/core/testing"
+import { createTestRenderer, ManualClock, TestRecorder } from "@opentui/core/testing"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
@@ -132,7 +132,11 @@ const detailCases = [
 it.effect("publishes an expanded transcript as one settled frame", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(
+      setup.renderer,
+      { key: () => undefined, resize: () => undefined },
+      { clock: new ManualClock() },
+    )
     const recorder = new TestRecorder(setup.renderer)
     try {
       const collapsed = _collapsedSubagentModel(4, 50)
@@ -158,7 +162,11 @@ it.effect("publishes an expanded transcript as one settled frame", () =>
 it.effect.each(detailCases)("publishes expanded %s as one settled frame", ([_, expected, models]) =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new Surface(
+      setup.renderer,
+      { key: () => undefined, resize: () => undefined },
+      { clock: new ManualClock() },
+    )
     const recorder = new TestRecorder(setup.renderer)
     try {
       const [collapsed, expanded] = models()
@@ -184,7 +192,11 @@ it.effect.each(detailCases)("publishes expanded %s as one settled frame", ([_, e
 it.effect("publishes collapse, scroll clamp, anchor fallback, and scrollbar removal in one frame", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(
+      setup.renderer,
+      { key: () => undefined, resize: () => undefined },
+      { clock: new ManualClock() },
+    )
     const recorder = new TestRecorder(setup.renderer)
     try {
       const collapsed = _collapsedSubagentModel(0, 50)
@@ -218,7 +230,11 @@ it.effect("publishes collapse, scroll clamp, anchor fallback, and scrollbar remo
 it.effect("rebases an anchor removed by collapse to a surviving transcript row", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
-    const surface = new ViewportProbeSurface(setup.renderer, { key: () => undefined, resize: () => undefined })
+    const surface = new ViewportProbeSurface(
+      setup.renderer,
+      { key: () => undefined, resize: () => undefined },
+      { clock: new ManualClock() },
+    )
     const recorder = new TestRecorder(setup.renderer)
     try {
       const source = _collapsedSubagentModel(80, 50)
