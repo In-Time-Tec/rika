@@ -38,7 +38,7 @@
       ],
       "env": ["RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL"]
     },
-    "//#test-tui": {
+    "//#test-tui:run": {
       "inputs": [
         "vitest.config.ts",
         "tsconfig.json",
@@ -48,9 +48,10 @@
         "scripts/**",
         "test/**",
         "!**/dist/**"
-      ]
+      ],
+      "env": ["ENV", "BASH_ENV"]
     },
-    "//#test-proc": {
+    "//#test-proc:run": {
       "inputs": [
         "vitest.config.ts",
         "tsconfig.json",
@@ -60,7 +61,8 @@
         "scripts/**",
         "test/**",
         "!**/dist/**"
-      ]
+      ],
+      "env": ["ENV", "BASH_ENV"]
     },
     "//#ast-grep-check": {
       "inputs": [

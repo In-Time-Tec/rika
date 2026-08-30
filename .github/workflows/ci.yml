@@ -66,8 +66,14 @@ jobs:
           noise="$(sh -lc true 2>&1)"
           [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: Check
+        env:
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
         run: bun run check
       - name: Unit tests
+        env:
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
         run: bun run test
 
   tui:
@@ -120,6 +126,9 @@ jobs:
           noise="$(sh -lc true 2>&1)"
           [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: TUI app tests
+        env:
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
         run: bun run test-tui
 
   proc:
@@ -172,6 +181,9 @@ jobs:
           noise="$(sh -lc true 2>&1)"
           [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: Process lifecycle tests
+        env:
+          TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
         run: bun run test-proc
 
   check:

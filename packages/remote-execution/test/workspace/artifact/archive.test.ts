@@ -169,6 +169,7 @@ describe("Workspace archive", () => {
             "-c",
             "user.email=rika@example.test",
             "commit",
+            "--no-gpg-sign",
             "--quiet",
             "-m",
             "fixture",

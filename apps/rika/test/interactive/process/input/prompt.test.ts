@@ -360,7 +360,7 @@ test("parses the exact NUL-delimited output from a real Git repository", () =>
       yield* command("git", "-C", root, "config", "user.name", "Test")
       yield* fileSystem.writeFileString(path.join(root, "old name.ts"), "one\ntwo\nthree\n")
       yield* command("git", "-C", root, "add", ".")
-      yield* command("git", "-C", root, "commit", "-qm", "initial")
+      yield* command("git", "-C", root, "commit", "--no-gpg-sign", "-qm", "initial")
       yield* fileSystem.makeDirectory(path.join(root, "docs", "nested"), { recursive: true })
       yield* fileSystem.makeDirectory(path.join(root, "untracked", "deep"), { recursive: true })
       yield* command("git", "-C", root, "mv", "old name.ts", "docs/nested/new -> name.ts")
