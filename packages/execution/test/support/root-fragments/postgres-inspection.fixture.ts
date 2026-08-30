@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest"
+import * as PgClient from "@effect/sql-pg/PgClient"
 import { RunSchema } from "@tenetkit/pg"
 import { ModelRegistry } from "tenetkit"
 import { TestModel } from "tenetkit/test"
@@ -6,7 +7,6 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Config, Context, Effect, Exit, Layer, Random, Scope, Stream } from "effect"
 import { Pool } from "pg"
-import * as Postgres from "../../../src/postgres"
 import { layerHosted } from "../../../src/engine/runtime"
 import { remoteCell } from "../adapters"
 
@@ -36,7 +36,11 @@ it.live.skipIf(databaseUrl === "")(
       const pool = new Pool({ connectionString: url })
       const scope = yield* Scope.make()
       try {
-        yield* Postgres.applySchema({ url, source: "postgres-inspection-test" })
+        const postgresContext = yield* Layer.buildWithScope(
+          RunSchema.layerClient({ url, maxConnections }),
+          scope,
+        )
+        yield* RunSchema.apply("postgres-inspection-test").pipe(Effect.provide(postgresContext))
         const fixture = yield* TestModel.make([TestModel.turn([TestModel.text("POSTGRES_INSPECTION_OK")])], {
           provider: "test",
           model: "test",
@@ -61,7 +65,9 @@ it.live.skipIf(databaseUrl === "")(
                 cancellationIntervalMillis: 20,
               },
             },
-          }).pipe(Layer.provide(RunSchema.layerClient({ url, maxConnections }))),
+          }).pipe(
+            Layer.provide(Layer.succeed(PgClient.PgClient, Context.get(postgresContext, PgClient.PgClient))),
+          ),
           scope,
         )
         const gateway = Context.get(context, ExecutionGateway.Service)

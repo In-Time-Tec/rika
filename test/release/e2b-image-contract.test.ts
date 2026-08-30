@@ -45,6 +45,12 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(dockerfile).toContain("packages/kernel/src/executor-runtime.ts")
       expect(dockerfile).toContain('import { workerModule } from "tenetkit/repl/bun"')
       expect(yield* text("start.sh")).toContain("packages/remote-execution/src/host/service.ts")
+      expect(yield* text("doctor.ts")).toContain(
+        "/opt/rika/packages/remote-execution/src/host/machinery/machine-doctor.ts",
+      )
+      expect(yield* text("packages/remote-execution/src/host/machinery/machine-doctor.ts", root)).toContain(
+        "rika-workspace:machine-environment",
+      )
       expect(lock).toContain(`"tenetkit": "${manifest.workspaces.catalog.tenetkit}"`)
     }),
   )

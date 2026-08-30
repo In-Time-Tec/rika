@@ -163,7 +163,7 @@ const program = Effect.gen(function* () {
       const output = yield* command([
         "bun",
         "run",
-        "/opt/rika/packages/remote-execution/src/host/machine-doctor.ts",
+        "/opt/rika/packages/remote-execution/src/host/machinery/machine-doctor.ts",
         temp,
       ])
       if (output !== "rika-workspace:machine-environment")
