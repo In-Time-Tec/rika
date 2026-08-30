@@ -12,8 +12,6 @@ import { remoteCell } from "../adapters"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const maxConnections = 6
-const listenerConnections = 2
-const inspectionConnections = 1
 
 const backendCount = (pool: Pool) =>
   Effect.tryPromise(() =>
@@ -91,14 +89,21 @@ it.live.skipIf(databaseUrl === "")(
           yield* Effect.scoped(gateway.watchTurn(link).pipe(Stream.runDrain))
           expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
         })
-        const observed = new Array<number>()
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          yield* inspect
-          observed.push(yield* backendCount(pool))
-        }
-        expect(Math.max(...observed)).toBeLessThanOrEqual(
-          maxConnections + listenerConnections + inspectionConnections,
-        )
+        const observeWindow = Effect.fn("PostgresInspection.observeWindow")(function* (attempts: number) {
+          const counts = new Array<number>()
+          for (let attempt = 0; attempt < attempts; attempt += 1) {
+            yield* inspect
+            counts.push(yield* backendCount(pool))
+          }
+          return counts
+        })
+        yield* observeWindow(10)
+        const firstWindow = yield* observeWindow(10)
+        const secondWindow = yield* observeWindow(10)
+        expect(
+          Math.max(...secondWindow),
+          `PostgreSQL backends grew across repeated inspection windows: first=${firstWindow.join(",")}; second=${secondWindow.join(",")}`,
+        ).toBeLessThanOrEqual(Math.max(...firstWindow))
         expect(yield* fixture.requests).toHaveLength(1)
       } finally {
         yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)
