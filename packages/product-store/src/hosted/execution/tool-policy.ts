@@ -3,14 +3,11 @@ import { identityMember } from "@rika/identity"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import {
   ActorAttribution,
-  type ActorAttribution as ActorAttributionValue,
-  type BetterAuthUserId as BetterAuthUserIdValue,
-  ExecutorAssignmentId,
-  ExecutorInstanceId,
-  type HostedOwner,
   OwnerId,
-  ThreadId,
-  WorkspaceId,
+  type BetterAuthUserId,
+  type HostedOwner,
+  type ThreadId,
+  type WorkspaceId,
 } from "@rika/product/hosted-model"
 import { Context, Effect, Layer, Schema } from "effect"
 import {
@@ -28,119 +25,20 @@ import {
   rikaHostedProjectGrants,
   rikaTranscriptCheckpoints,
 } from "../../database/schema/product"
+import {
+  auditValues,
+  decodeAuditRecord,
+  failure,
+  sameDecision,
+  ToolPolicyStoreError,
+  type AdmissionContext,
+  type AdmissionFence,
+  type AuditAppend,
+  type AuditRecord,
+  type DecisionAppend,
+} from "./tool-policy-audit"
 
-const AuditPhase = Schema.Literals(["admission", "decision", "outcome"])
-const AuditDecision = Schema.Literals(["not-required", "pending", "approved", "denied"])
-const AuditOutcome = Schema.Literals(["admitted", "suspended", "succeeded", "failed", "denied", "unknown"])
-const ToolPolicy = Schema.Struct({
-  id: Schema.String,
-  version: Schema.Int,
-  capability: Schema.NonEmptyString,
-  capabilities: Schema.Array(Schema.NonEmptyString),
-  sideEffect: Schema.String,
-  approval: Schema.String,
-  replayPolicy: Schema.String,
-})
-const AuditCheckpoint = Schema.Struct({ version: Schema.Int, cursor: Schema.String, digest: Schema.String })
-const AuditExecutor = Schema.Struct({
-  kind: Schema.Literals(["runner", "orb"]),
-  assignmentId: ExecutorAssignmentId,
-  generation: Schema.Int,
-  leaseEpoch: Schema.Int,
-  instanceId: Schema.String,
-  executorId: ExecutorInstanceId,
-  processIncarnation: Schema.String,
-})
-const AuditRepository = Schema.Struct({ identity: Schema.NonEmptyString })
-
-export type ToolPolicy = typeof ToolPolicy.Type
-export type AuditCheckpoint = typeof AuditCheckpoint.Type
-export type AuditExecutor = typeof AuditExecutor.Type
-export type AuditRepository = typeof AuditRepository.Type
-export type AuditDecision = typeof AuditDecision.Type
-export type AuditOutcome = typeof AuditOutcome.Type
-
-export interface AuditRecord {
-  readonly sequence: string
-  readonly auditGroupId: string
-  readonly phase: typeof AuditPhase.Type
-  readonly ownerId: OwnerId
-  readonly threadId: ThreadId
-  readonly turnId: string
-  readonly actor: ActorAttributionValue
-  readonly decisionActor: ActorAttributionValue | null
-  readonly policy: ToolPolicy
-  readonly authorizationId: string | null
-  readonly authorizationCheckpoint: AuditCheckpoint | null
-  readonly module: string
-  readonly operation: string
-  readonly operationKey: string
-  readonly callId: string
-  readonly argumentsDigest: string
-  readonly workspaceId: WorkspaceId
-  readonly repository: AuditRepository | null
-  readonly branch: string | null
-  readonly executor: AuditExecutor
-  readonly decision: AuditDecision
-  readonly outcome: AuditOutcome
-  readonly occurredAt: string
-}
-
-export interface AuditAppend {
-  readonly auditGroupId: string
-  readonly phase: typeof AuditPhase.Type
-  readonly ownerId: OwnerId
-  readonly threadId: ThreadId
-  readonly turnId: string
-  readonly actor: ActorAttributionValue
-  readonly decisionActor?: ActorAttributionValue
-  readonly policy: ToolPolicy
-  readonly authorizationId?: string
-  readonly authorizationCheckpoint?: AuditCheckpoint
-  readonly module: string
-  readonly operation: string
-  readonly operationKey: string
-  readonly callId: string
-  readonly argumentsDigest: string
-  readonly workspaceId: WorkspaceId
-  readonly repository: AuditRepository | null
-  readonly branch: string | null
-  readonly executor: AuditExecutor
-  readonly decision: AuditDecision
-  readonly outcome: AuditOutcome
-}
-
-export interface AdmissionFence {
-  readonly assignmentId: ExecutorAssignmentId
-  readonly target: "runner" | "orb"
-  readonly generation: number
-  readonly leaseEpoch: number
-  readonly providerInstanceId: string
-  readonly executorInstanceId: ExecutorInstanceId
-  readonly processIncarnation: string
-}
-
-export interface AdmissionContext {
-  readonly ownerId: OwnerId
-  readonly actor: ActorAttributionValue
-  readonly executorKind: "runner" | "orb"
-  readonly repositoryIdentity: string | null
-  readonly branch: string | null
-}
-
-export interface DecisionAppend {
-  readonly record: AuditAppend & { readonly phase: "decision"; readonly authorizationId: string }
-  readonly expectedProjector: {
-    readonly version: number
-    readonly runId: string
-    readonly approvalId: string
-  }
-}
-
-export class ToolPolicyStoreError extends Schema.TaggedError<ToolPolicyStoreError>()("ToolPolicyStoreError", {
-  kind: Schema.Literals(["unavailable", "conflict"]),
-  message: Schema.String,
-}) {}
+export * from "./tool-policy-audit"
 
 export interface ToolPolicyStoreService {
   readonly insertAudit: (record: AuditAppend) => Effect.Effect<void, ToolPolicyStoreError>
@@ -160,12 +58,12 @@ export interface ToolPolicyStoreService {
     input: DecisionAppend,
   ) => Effect.Effect<"inserted" | "same" | "conflict", ToolPolicyStoreError>
   readonly resolveOwner: (input: {
-    readonly principalUserId: BetterAuthUserIdValue
+    readonly principalUserId: BetterAuthUserId
     readonly owner: HostedOwner
   }) => Effect.Effect<OwnerId | undefined, ToolPolicyStoreError>
   readonly listInspectionRecords: (input: {
     readonly ownerId: OwnerId
-    readonly principalUserId: BetterAuthUserIdValue
+    readonly principalUserId: BetterAuthUserId
     readonly limit: number
   }) => Effect.Effect<ReadonlyArray<AuditRecord>, ToolPolicyStoreError>
 }
@@ -174,108 +72,9 @@ export class ToolPolicyStore extends Context.Service<ToolPolicyStore, ToolPolicy
   "@rika/product-store/hosted/execution/tool-policy/ToolPolicyStore",
 ) {}
 
-const failure = (cause: unknown) =>
-  ToolPolicyStoreError.make({ kind: "unavailable", message: `Tool policy store is unavailable: ${String(cause)}` })
 const query = <A extends object, E, R>(value: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   value.pipe(Effect.mapError(failure))
 const decoded = <A, E, R>(value: Effect.Effect<A, E, R>) => value.pipe(Effect.mapError(failure))
-
-const values = (record: AuditAppend) => ({
-  auditGroupId: record.auditGroupId,
-  phase: record.phase,
-  ownerId: record.ownerId,
-  threadId: record.threadId,
-  turnId: record.turnId,
-  actor: record.actor,
-  decisionActor: record.decisionActor ?? null,
-  policyId: record.policy.id,
-  policyVersion: record.policy.version,
-  capability: record.policy.capability,
-  capabilities: record.policy.capabilities,
-  sideEffect: record.policy.sideEffect,
-  approval: record.policy.approval,
-  replayPolicy: record.policy.replayPolicy,
-  authorizationId: record.authorizationId ?? null,
-  authorizationCheckpoint: record.authorizationCheckpoint ?? null,
-  module: record.module,
-  operation: record.operation,
-  operationKey: record.operationKey,
-  callId: record.callId,
-  argumentsDigest: record.argumentsDigest,
-  workspaceId: record.workspaceId,
-  repository: record.repository,
-  branch: record.branch,
-  executor: record.executor,
-  decision: record.decision,
-  outcome: record.outcome,
-})
-
-type AuditRow = typeof rikaHostedToolAuditRecords.$inferSelect
-
-const decodeRecord = (row: AuditRow): Effect.Effect<AuditRecord, ToolPolicyStoreError> =>
-  Effect.gen(function* () {
-    const phase = yield* decoded(Schema.decodeUnknownEffect(AuditPhase)(row.phase))
-    const ownerId = yield* decoded(Schema.decodeEffect(OwnerId)(row.ownerId))
-    const threadId = yield* decoded(Schema.decodeEffect(ThreadId)(row.threadId))
-    const workspaceId = yield* decoded(Schema.decodeEffect(WorkspaceId)(row.workspaceId))
-    const actor = yield* decoded(Schema.decodeUnknownEffect(ActorAttribution)(row.actor))
-    const decisionActor =
-      row.decisionActor === null
-        ? null
-        : yield* decoded(Schema.decodeUnknownEffect(ActorAttribution)(row.decisionActor))
-    const capabilities = yield* decoded(
-      Schema.decodeUnknownEffect(Schema.Array(Schema.NonEmptyString))(row.capabilities),
-    )
-    const authorizationCheckpoint =
-      row.authorizationCheckpoint === null
-        ? null
-        : yield* decoded(Schema.decodeUnknownEffect(AuditCheckpoint)(row.authorizationCheckpoint))
-    const repository =
-      row.repository === null ? null : yield* decoded(Schema.decodeUnknownEffect(AuditRepository)(row.repository))
-    const executor = yield* decoded(Schema.decodeUnknownEffect(AuditExecutor)(row.executor))
-    const decision = yield* decoded(Schema.decodeUnknownEffect(AuditDecision)(row.decision))
-    const outcome = yield* decoded(Schema.decodeUnknownEffect(AuditOutcome)(row.outcome))
-    return {
-      sequence: String(row.sequence),
-      auditGroupId: row.auditGroupId,
-      phase,
-      ownerId,
-      threadId,
-      turnId: row.turnId,
-      actor,
-      decisionActor,
-      policy: {
-        id: row.policyId,
-        version: row.policyVersion,
-        capability: row.capability,
-        capabilities,
-        sideEffect: row.sideEffect,
-        approval: row.approval,
-        replayPolicy: row.replayPolicy,
-      },
-      authorizationId: row.authorizationId,
-      authorizationCheckpoint,
-      module: row.module,
-      operation: row.operation,
-      operationKey: row.operationKey,
-      callId: row.callId,
-      argumentsDigest: row.argumentsDigest,
-      workspaceId,
-      repository,
-      branch: row.branch,
-      executor,
-      decision,
-      outcome,
-      occurredAt: row.occurredAt.toISOString(),
-    }
-  })
-
-const sameDecision = (left: AuditRecord, right: AuditAppend) =>
-  JSON.stringify(left.decisionActor) === JSON.stringify(right.decisionActor ?? null) &&
-  JSON.stringify(left.authorizationCheckpoint) === JSON.stringify(right.authorizationCheckpoint ?? null) &&
-  left.authorizationId === (right.authorizationId ?? null) &&
-  left.decision === right.decision &&
-  left.outcome === right.outcome
 
 export const make = Effect.gen(function* () {
   const db = yield* PgDrizzle.makeWithDefaults()
@@ -283,7 +82,7 @@ export const make = Effect.gen(function* () {
     query(
       db
         .insert(rikaHostedToolAuditRecords)
-        .values(values(record))
+        .values(auditValues(record))
         .returning({ sequence: rikaHostedToolAuditRecords.sequence }),
     ).pipe(Effect.asVoid)
 
@@ -462,7 +261,7 @@ export const make = Effect.gen(function* () {
           ),
         )
         .orderBy(desc(rikaHostedToolAuditRecords.sequence)),
-    ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, decodeRecord)))
+    ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, decodeAuditRecord)))
 
   const appendDecision: ToolPolicyStoreService["appendDecision"] = (input) =>
     db
@@ -481,7 +280,7 @@ export const make = Effect.gen(function* () {
               .limit(1),
           )
           if (existing[0] !== undefined)
-            return sameDecision(yield* decodeRecord(existing[0]), input.record) ? "same" : "conflict"
+            return sameDecision(input.record)(yield* decodeAuditRecord(existing[0])) ? "same" : "conflict"
           const checkpoint = yield* query(
             tx
               .select({ turnId: rikaTranscriptCheckpoints.turnId })
@@ -527,7 +326,7 @@ export const make = Effect.gen(function* () {
           yield* query(
             tx
               .insert(rikaHostedToolAuditRecords)
-              .values(values(input.record))
+              .values(auditValues(input.record))
               .onConflictDoNothing({
                 target: rikaHostedToolAuditRecords.auditGroupId,
                 where: sql`${rikaHostedToolAuditRecords.phase} = 'decision'`,
@@ -546,7 +345,7 @@ export const make = Effect.gen(function* () {
               )
               .limit(1),
           )
-          return stored[0] !== undefined && sameDecision(yield* decodeRecord(stored[0]), input.record)
+          return stored[0] !== undefined && sameDecision(input.record)(yield* decodeAuditRecord(stored[0]))
             ? "inserted"
             : "conflict"
         }),
@@ -653,7 +452,7 @@ export const make = Effect.gen(function* () {
         )
         .orderBy(desc(rikaHostedToolAuditRecords.sequence))
         .limit(Math.min(Math.max(input.limit, 1), 500)),
-    ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeRecord(row.record))))
+    ).pipe(Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeAuditRecord(row.record))))
 
   return ToolPolicyStore.of({
     insertAudit,

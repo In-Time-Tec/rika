@@ -23,6 +23,41 @@ const bodyText = (request: HttpClientRequest.HttpClientRequest) => {
   return new TextDecoder().decode(request.body.body)
 }
 
+const hostedResponse = (request: HttpClientRequest.HttpClientRequest, path: string) => {
+  if (path === "/api/v1/projects")
+    return response(request, {
+      id: "project-2",
+      ownerId: "owner-1",
+      owner: { kind: "organization", organizationId: "org-1" },
+      slug: "remote",
+      name: "Remote",
+    })
+  if (path === "/api/v1/environment/DEPLOY_TOKEN")
+    return response(request, {
+      id: "environment-1",
+      name: "DEPLOY_TOKEN",
+      scope: "project",
+      classification: "secret",
+      phases: ["runtime"],
+      revision: "2",
+      state: request.method === "DELETE" ? "revoked" : "active",
+    })
+  if (path.endsWith("/repository-publications"))
+    return response(request, {
+      publicationId: "publication-1",
+      state: "completed",
+      branch: "rika/thread-1",
+      ref: "refs/heads/rika/thread-1",
+      commitSha: "0123456789abcdef0123456789abcdef01234567",
+      targetBranch: "main",
+      targetCommitSha: "0123456789abcdef0123456789abcdef01234567",
+      targetProtected: true,
+      pushResult: {},
+      pullRequestResult: {},
+    })
+  return undefined
+}
+
 it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endpoints", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -30,6 +65,8 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
       const client = HttpClient.make((request) => {
         requests.push(request)
         const path = new URL(request.url).pathname
+        const routed = hostedResponse(request, path)
+        if (routed !== undefined) return Effect.succeed(routed)
         if (path === "/api/v1/auth/cli/registrations")
           return Effect.succeed(response(request, { client_id: "install-client" }))
         if (path === "/api/auth/device/code")
@@ -66,43 +103,6 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
                   name: "API",
                 },
               ],
-            }),
-          )
-        if (path === "/api/v1/projects")
-          return Effect.succeed(
-            response(request, {
-              id: "project-2",
-              ownerId: "owner-1",
-              owner: { kind: "organization", organizationId: "org-1" },
-              slug: "remote",
-              name: "Remote",
-            }),
-          )
-        if (path === "/api/v1/environment/DEPLOY_TOKEN")
-          return Effect.succeed(
-            response(request, {
-              id: "environment-1",
-              name: "DEPLOY_TOKEN",
-              scope: "project",
-              classification: "secret",
-              phases: ["runtime"],
-              revision: "2",
-              state: request.method === "DELETE" ? "revoked" : "active",
-            }),
-          )
-        if (path.endsWith("/repository-publications"))
-          return Effect.succeed(
-            response(request, {
-              publicationId: "publication-1",
-              state: "completed",
-              branch: "rika/thread-1",
-              ref: "refs/heads/rika/thread-1",
-              commitSha: "0123456789abcdef0123456789abcdef01234567",
-              targetBranch: "main",
-              targetCommitSha: "0123456789abcdef0123456789abcdef01234567",
-              targetProtected: true,
-              pushResult: {},
-              pullRequestResult: {},
             }),
           )
         if (path === "/api/v1/auth/cli/devices")

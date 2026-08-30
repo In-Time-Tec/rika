@@ -25,12 +25,8 @@ describe("ContextMeter", () => {
   })
 
   test("renders deterministic Pac-Man, vacuum, and flash glyphs", () => {
-    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 0, muncher: true }).join("")).toBe(
-      "ᗧ·······",
-    )
-    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 1, muncher: true }).join("")).toBe(
-      "ᗤ·······",
-    )
+    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 0, muncher: true }).join("")).toBe("ᗧ·······")
+    expect(ContextMeter.animatedGlyphs(reading(0), { cells: 8, tick: 1, muncher: true }).join("")).toBe("ᗤ·······")
     expect(ContextMeter.animatedGlyphs(reading(208_294), { cells: 8, tick: 0, muncher: true }).join("")).toBe(
       "━ᗧ······",
     )

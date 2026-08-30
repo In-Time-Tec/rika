@@ -169,14 +169,17 @@ describe("linked Turn settlement authority", () => {
             persisted.set(String(id), updated)
             return updated
           }),
-        queueMutationEvent: (change) => ({
-          _tag: "QueueUpdated",
-          selectionEpoch: 0,
-          threadId: change.threadId,
-          revision: change.revision,
-          queuedCount: change.queuedCount,
-          change: { _tag: "Removed", turnId: change.change.turnId },
-        }),
+        queueMutationEvent: (change) => {
+          if (change.change._tag !== "Removed") throw new Error("expected a removed queue item")
+          return {
+            _tag: "QueueUpdated",
+            selectionEpoch: 0,
+            threadId: change.threadId,
+            revision: change.revision,
+            queuedCount: change.queuedCount,
+            change: { _tag: "Removed", turnId: change.change.turnId },
+          }
+        },
         claimQueuedTurn: () =>
           Effect.sync(() => {
             const claim = claims[nextClaim]
@@ -322,10 +325,10 @@ describe("linked Turn settlement authority", () => {
         dependencies,
       ).pipe(Effect.result)
 
-      expect(result).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "OperationUnavailable", message: expect.stringContaining("local watcher failed") },
-      })
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Success") return
+      expect(result.failure._tag).toBe("OperationUnavailable")
+      expect(result.failure.message).toContain("local watcher failed")
       expect(starts).toBe(1)
       expect(releases).toBe(1)
       expect(queueReads).toBe(1)

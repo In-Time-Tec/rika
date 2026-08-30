@@ -1,7 +1,7 @@
 import * as Thread from "@rika/product/thread-record"
 import { Function, Clock, Effect, Queue, Ref, Semaphore } from "effect"
-import { type InteractiveEvent, type InteractiveEvent as RuntimeEvent } from "../session-event"
-import { type InteractiveEvent as ClientEvent } from "../event"
+import type { InteractiveEvent, InteractiveEvent as RuntimeEvent } from "../session-event"
+import type { InteractiveEvent as ClientEvent } from "../event"
 import * as InteractiveThreadView from "./thread"
 import { OperationUnavailable } from "../../contract/product"
 
@@ -47,37 +47,55 @@ const rememberThread = (state: State, threadIds: Set<string>, id: string) => {
   threadIds.add(id)
 }
 
-export const isCritical = (event: InteractiveEvent): boolean => {
-  switch (event._tag) {
-    case "AssistantCompleted":
-    case "ContextDiagnostics":
-    case "ExecutionControlFailed":
-    case "ExecutionFailed":
-    case "SubmissionRejected":
-    case "QueueFull":
-    case "ShellCompleted":
-    case "ExecutionControlled":
-    case "ThreadTitled":
-    case "GoalChanged":
-    case "ThreadPreviewLoaded":
-    case "ThreadPreviewFailed":
-    case "TurnSettled":
-      return true
-    case "TurnRetryScheduled":
-    case "ExecutionModelPreviewChanged":
-      return false
-    case "ThreadsListed":
-    case "ThreadRefolding":
-    case "ExecutionProjectionChanged":
-    case "ExecutionProjectionResyncRequired":
-    case "QueueUpdated":
-    case "ThreadViewResyncRequired":
-    case "TurnStarted":
-    case "SubmissionAdmitted":
-    case "SelectionLoaded":
-    case "ThreadActivated":
-      return false
+const criticalTags: ReadonlySet<InteractiveEvent["_tag"]> = new Set([
+  "AssistantCompleted",
+  "ContextDiagnostics",
+  "ExecutionControlFailed",
+  "ExecutionFailed",
+  "SubmissionRejected",
+  "QueueFull",
+  "ShellCompleted",
+  "ExecutionControlled",
+  "ThreadTitled",
+  "GoalChanged",
+  "ThreadPreviewLoaded",
+  "ThreadPreviewFailed",
+  "TurnSettled",
+])
+const transcriptTags: ReadonlySet<InteractiveEvent["_tag"]> = new Set([
+  "ExecutionProjectionChanged",
+  "ExecutionProjectionResyncRequired",
+  "TurnStarted",
+  "SelectionLoaded",
+])
+const queueTags: ReadonlySet<InteractiveEvent["_tag"]> = new Set(["QueueUpdated", "ThreadViewResyncRequired"])
+
+export const isCritical = (event: InteractiveEvent): boolean => criticalTags.has(event._tag)
+
+const rememberPreview = (
+  state: State,
+  event: Extract<InteractiveEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>,
+) => {
+  const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
+  if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity) {
+    state.criticalOverflowed = true
+    return
   }
+  const preview: Extract<ClientEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>["preview"] = {
+    _tag: "ModelPreviewCleared",
+    runId: event.preview.runId,
+    attemptFence: event.preview.attemptFence,
+    generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
+  }
+  state.previewInvalidations.set(key, {
+    ...event,
+    preview: event.preview.parentId === undefined ? preview : { ...preview, parentId: event.preview.parentId },
+  })
+}
+
+const rememberCritical = (state: State, event: InteractiveEvent) => {
+  if (state.critical.length >= capacity) state.criticalOverflowed = true
+  else state.critical.push(event)
 }
 
 const rememberImpl = (state: State, event: InteractiveEvent) => {
@@ -88,59 +106,31 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     return
   }
   if (state.criticalOverflowed) return
+  if (isCritical(event)) {
+    rememberCritical(state, event)
+    return
+  }
   const id = overflowEventThreadId(event)
+  if (transcriptTags.has(event._tag)) {
+    if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
+    return
+  }
+  if (queueTags.has(event._tag)) {
+    if (id !== undefined) rememberThread(state, state.queueThreadIds, id)
+    return
+  }
   switch (event._tag) {
-    case "ExecutionModelPreviewChanged": {
-      const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
-      if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity) {
-        state.criticalOverflowed = true
-        return
-      }
-      const preview: Extract<ClientEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>["preview"] = {
-        _tag: "ModelPreviewCleared",
-        runId: event.preview.runId,
-        attemptFence: event.preview.attemptFence,
-        generation: event.preview._tag === "ModelPreviewCleared" ? event.preview.generation : 0,
-      }
-      state.previewInvalidations.set(key, {
-        ...event,
-        preview: event.preview.parentId === undefined ? preview : { ...preview, parentId: event.preview.parentId },
-      })
-      return
-    }
-    case "ExecutionProjectionChanged":
-    case "ExecutionProjectionResyncRequired":
-    case "TurnStarted":
-    case "SelectionLoaded":
-      if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
-      return
-    case "QueueUpdated":
-    case "ThreadViewResyncRequired":
-      if (id !== undefined) rememberThread(state, state.queueThreadIds, id)
+    case "ExecutionModelPreviewChanged":
+      rememberPreview(state, event)
       return
     case "ThreadActivated":
       state.activated = event
-      return
+      break
     case "ThreadsListed":
       state.summaries = event
       return
     case "ThreadRefolding":
       if (id !== undefined) state.refolds.set(id, event)
-      return
-    case "AssistantCompleted":
-    case "ContextDiagnostics":
-    case "ExecutionControlFailed":
-    case "ExecutionFailed":
-    case "SubmissionRejected":
-    case "QueueFull":
-    case "ShellCompleted":
-    case "ExecutionControlled":
-    case "ThreadTitled":
-    case "GoalChanged":
-    case "ThreadPreviewLoaded":
-    case "ThreadPreviewFailed":
-      if (state.critical.length >= capacity) state.criticalOverflowed = true
-      else state.critical.push(event)
   }
 }
 

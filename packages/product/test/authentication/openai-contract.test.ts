@@ -46,6 +46,6 @@ describe("OpenAI authentication flow", () => {
       id_token_add_organizations: "true",
       codex_cli_simplified_flow: "true",
     })
-    expect(String(state)).not.toContain("private-state")
+    expect(JSON.stringify(state)).not.toContain("private-state")
   })
 })

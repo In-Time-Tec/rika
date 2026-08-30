@@ -1,7 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted } from "effect"
 import { ControllerError, type Receipt, type ReconnectWelcome, type Welcome } from "@rika/e2b-executor/controller"
-import { type ExecutorAssignment } from "@rika/product/executor-assignment"
+import type { ExecutorAssignment } from "@rika/product/executor-assignment"
 import { AssignmentError, ExecutorAssignments, type Access } from "@rika/product/executor-assignments"
 import {
   HostedExecutionOperations,

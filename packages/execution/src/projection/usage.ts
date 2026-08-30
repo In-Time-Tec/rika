@@ -1,7 +1,7 @@
 import type { RunEvent } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
-import { type Node } from "./model"
-import { type AttemptStart, type ModelCallState } from "./persistence"
+import type { Node } from "./model"
+import type { AttemptStart, ModelCallState } from "./persistence"
 import { add, occurredAt } from "./decoding"
 
 export interface UsageAccounting {
@@ -51,6 +51,10 @@ export interface PersistedUsage {
   readonly activeAccumulatedMillis: number
   readonly activeSince?: number
   readonly lastLifecycleAt?: number
+}
+
+const setDefined = <A extends object, K extends PropertyKey, V>(target: A, key: K, value: V | undefined): void => {
+  if (value !== undefined) Object.assign(target, { [key]: value })
 }
 
 export const makeUsageAccounting = (pricing: "included" | "metered" = "metered"): UsageAccounting => {
@@ -123,19 +127,19 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     const failedProviderTotal = add(current?.failedProviderTotal, value.failedProviderTotal)
     const input: Projection.TokenTotals["input"] = {}
     const output: Projection.TokenTotals["output"] = {}
-    if (inputTotal !== undefined) Object.assign(input, { total: inputTotal })
-    if (inputUncached !== undefined) Object.assign(input, { uncached: inputUncached })
-    if (inputCacheRead !== undefined) Object.assign(input, { cacheRead: inputCacheRead })
-    if (inputCacheWrite !== undefined) Object.assign(input, { cacheWrite: inputCacheWrite })
-    if (outputTotal !== undefined) Object.assign(output, { total: outputTotal })
-    if (outputText !== undefined) Object.assign(output, { text: outputText })
-    if (outputReasoning !== undefined) Object.assign(output, { reasoning: outputReasoning })
+    setDefined(input, "total", inputTotal)
+    setDefined(input, "uncached", inputUncached)
+    setDefined(input, "cacheRead", inputCacheRead)
+    setDefined(input, "cacheWrite", inputCacheWrite)
+    setDefined(output, "total", outputTotal)
+    setDefined(output, "text", outputText)
+    setDefined(output, "reasoning", outputReasoning)
     const next: Projection.TokenTotals = {
       input,
       output,
     }
-    if (total !== undefined) Object.assign(next, { total })
-    if (failedProviderTotal !== undefined) Object.assign(next, { failedProviderTotal })
+    setDefined(next, "total", total)
+    setDefined(next, "failedProviderTotal", failedProviderTotal)
     if (JSON.stringify(next) !== JSON.stringify({ input: {}, output: {} })) usageState = { ...usageState, tokens: next }
   }
 
@@ -145,6 +149,20 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     while (settledAttemptKeys.size > Projection.limits.settledAttemptKeys)
       settledAttemptKeys.delete(settledAttemptKeys.values().next().value!)
     return true
+  }
+
+  const accountPrice = (cost: number | undefined) => {
+    if (pricing === "included") {
+      usageState = { ...usageState, includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
+      return
+    }
+    if (cost === undefined) {
+      usageState = { ...usageState, unpricedAttempts: usageState.unpricedAttempts + 1 }
+      return
+    }
+    const costNanoUsd = add(usageState.costNanoUsd, cost)
+    if (costNanoUsd !== undefined)
+      usageState = { ...usageState, costNanoUsd, pricedAttempts: usageState.pricedAttempts + 1 }
   }
 
   const recordAttempt = (input: {
@@ -168,18 +186,7 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
         ? undefined
         : input.inputTotal + input.outputTotal)
     addTokenTotals({ ...input, attemptTotal })
-    if (pricing === "included") usageState = { ...usageState, includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
-    else if (input.costNanoUsd === undefined)
-      usageState = { ...usageState, unpricedAttempts: usageState.unpricedAttempts + 1 }
-    else {
-      const costNanoUsd = add(usageState.costNanoUsd, input.costNanoUsd)
-      if (costNanoUsd !== undefined)
-        usageState = {
-          ...usageState,
-          costNanoUsd,
-          pricedAttempts: usageState.pricedAttempts + 1,
-        }
-    }
+    accountPrice(input.costNanoUsd)
     usageState = {
       ...usageState,
       ...(attemptTotal === undefined

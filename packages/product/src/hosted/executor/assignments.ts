@@ -129,7 +129,7 @@ export interface ResumeInput extends Version {
   readonly bootstrapLifetimeMillis: number
 }
 
-export interface TerminateInput extends Version {}
+export type TerminateInput = Version
 
 export interface CommitCheckpointInput {
   readonly access: Access

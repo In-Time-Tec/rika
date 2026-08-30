@@ -1,9 +1,7 @@
 import {
   StyledText,
   TextRenderable,
-  dim,
   fg,
-  italic,
   type BoxRenderable,
   type CliRenderer,
   type MouseEvent,
@@ -19,39 +17,26 @@ import { escapePathTarget } from "../../../presentation/transcript/tool/detail"
 import type { PathTarget } from "../../../presentation/transcript/tool/detail-types"
 import type { TranscriptUnit } from "../../../presentation/transcript/tool/types"
 import { colors } from "../../../presentation/terminal/theme"
-import { terminalSafeText } from "../../../presentation/terminal/safe-text"
 import { boundedTranscriptModel, transcriptWrapWidth } from "../../rendering/transcript/window"
 import {
   transcriptUnitRevision,
-  type TentativeTranscriptLayout,
   type TranscriptRangeBundle,
   type TranscriptUnitCacheEntry,
 } from "../../rendering/transcript/revision"
 import { transcriptUnitBuilder } from "../../rendering/unit/content"
-import { wrapTextToWidth } from "../../rendering/window"
 import { splitStyledLines } from "../../rendering/transcript/styled-lines"
-import { renderMarkdownLines, toOpenColor } from "../../rendering/text-adapter"
+import { toOpenColor } from "../../rendering/text-adapter"
 import type { Model } from "../../../state/model"
 import type { TranscriptRenderableDescriptor, TranscriptRenderableRecord, TranscriptRenderInput } from "./types"
+import {
+  buildTentativeTranscriptUnitBundles,
+  tentativeTranscriptContainsMarkdown,
+  type TranscriptRowsCache,
+} from "./rendering-models"
 
-export type TranscriptRowsCache = Map<string, TranscriptUnitCacheEntry>
+export { tentativeTranscriptContainsMarkdown }
+export type { TranscriptRowsCache }
 export type TranscriptPathTarget = PathTarget
-
-export const tentativeTranscriptContainsMarkdown = ({
-  text,
-  sourceLength,
-}: {
-  readonly text: string
-  readonly sourceLength: number
-}) => {
-  const probe = text.slice(Math.max(0, sourceLength - 16))
-  return (
-    /[\\`*[\]<>#|~]/u.test(probe) ||
-    /(?:^|\n)[ \t]*(?:[-+>]|\d{1,9}[.)])[ \t]+/u.test(probe) ||
-    /(?:^|\n)[ \t]*(?:={2,}|-{3,})[ \t]*(?:\n|$)/u.test(probe) ||
-    /(?:^|[^\p{L}\p{N}])_(?=\S)|_(?:$|[^\p{L}\p{N}])/u.test(probe)
-  )
-}
 
 const isolateSpinnerChunk = (content: StyledText, spinnerGlyph: string) => {
   const chunkIndex = content.chunks.findIndex((chunk) => chunk.text.includes(spinnerGlyph))
@@ -129,101 +114,6 @@ const buildTranscriptUnitBundles = (
     appendBands(range, rangeIndex, "body", styledLines.slice(headerEnd + 1, range.end + 1), headerEnd + 1)
   }
   return { revision, bundles }
-}
-
-const buildTentativeTranscriptUnitBundles = (
-  key: string,
-  text: string,
-  width: number,
-  tone: TentativeTranscriptLayout["tone"],
-  revision: string,
-  cached: TranscriptUnitCacheEntry | undefined,
-): TranscriptUnitCacheEntry => {
-  const previous = cached?.tentative
-  const layout: TentativeTranscriptLayout =
-    previous === undefined || previous.width !== width || previous.tone !== tone || previous.sourceLength > text.length
-      ? {
-          width,
-          tone,
-          markdown: false,
-          sourceLength: 0,
-          pending: "",
-          pendingSource: "",
-          bands: [[]],
-          stableContent: [],
-        }
-      : previous
-  const sourceDelta = text.slice(layout.sourceLength)
-  if (
-    tone === "answer" &&
-    (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength }))
-  ) {
-    layout.markdown = true
-    layout.sourceLength = text.length
-    const bundles: Array<TranscriptRangeBundle> = []
-    const lines = renderMarkdownLines(text.trimEnd(), width)
-    for (let start = 0; start < lines.length; start += transcriptRenderableBandRows) {
-      const band = lines.slice(start, start + transcriptRenderableBandRows)
-      const chunks: Array<TextChunk> = []
-      for (const [index, line] of band.entries()) {
-        chunks.push(...line)
-        if (index < band.length - 1) chunks.push(fg(colors.text)("\n"))
-      }
-      const bandKey = start === 0 ? `${key}:body` : `${key}:body:${start}`
-      bundles.push({
-        key: bandKey,
-        rows: band.length,
-        descriptors: [
-          {
-            key: bandKey,
-            revision: `${revision}#${start}`,
-            content: new StyledText(chunks),
-            selectable: false,
-          },
-        ],
-      })
-    }
-    return { revision, bundles, tentative: layout }
-  }
-  if (sourceDelta.length > 0) {
-    let source = layout.pendingSource + sourceDelta
-    const trailing = source.charCodeAt(source.length - 1)
-    const deferTrailing = source.endsWith("\r") || (trailing >= 0xd800 && trailing <= 0xdbff)
-    layout.pendingSource = deferTrailing ? source.slice(-1) : ""
-    if (deferTrailing) source = source.slice(0, -1)
-    const rows = wrapTextToWidth(layout.pending + terminalSafeText(source), width)
-    for (const row of rows.slice(0, -1)) {
-      const band = layout.bands.at(-1)!
-      band.push(row)
-      if (band.length === transcriptRenderableBandRows) layout.bands.push([])
-    }
-    layout.pending = rows.at(-1) ?? ""
-    layout.sourceLength = text.length
-  }
-  const content = (value: string): StyledText =>
-    new StyledText([tone === "reasoning" ? dim(italic(fg(colors.text)(value))) : fg(colors.text)(value)])
-  const bundles: Array<TranscriptRangeBundle> = []
-  for (const [index, band] of layout.bands.entries()) {
-    const tail = index === layout.bands.length - 1
-    const rows = tail ? [...band, layout.pending] : band
-    if (rows.length === 0) continue
-    const value = rows.join("\n")
-    const styled = tail ? content(value) : (layout.stableContent[index] ??= content(value))
-    const bandKey = index === 0 ? `${key}:body` : `${key}:body:${index * transcriptRenderableBandRows}`
-    bundles.push({
-      key: bandKey,
-      rows: rows.length,
-      descriptors: [
-        {
-          key: bandKey,
-          revision: tail ? `${revision}#${index}` : `${key}:${width}:${index}`,
-          content: styled,
-          selectable: false,
-        },
-      ],
-    })
-  }
-  return { revision, bundles, tentative: layout }
 }
 
 interface ReconcileTranscriptRenderablesOptions {
@@ -390,6 +280,135 @@ interface ProjectTranscriptRowsOptions {
   readonly openPath: ((target: PathTarget) => void) | undefined
 }
 
+interface OrderedBundle {
+  readonly gapBefore: boolean
+  readonly rows: number
+  readonly bundle: TranscriptRangeBundle
+}
+
+const tentativeUnit = (model: Model, unit: TranscriptUnit, unitKey: string) => {
+  if (unitKey.startsWith("entry:tentative:") && unit.kind === "entry")
+    return { text: model.entries[unit.entry]?.text ?? "", tone: "answer" as const }
+  if (!unitKey.startsWith("block:tentative:") || unit.kind !== "reasoning") return undefined
+  const block = Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[unit.block]))
+  return { text: block?._tag === "Reasoning" ? block.text : "", tone: "reasoning" as const }
+}
+
+const projectBundles = (options: ProjectTranscriptRowsOptions, model: Model) => {
+  const builder = transcriptUnitBuilder(model, options.spinnerGlyph)
+  const expandedSet = new Set(model.expandedRowKeys)
+  const unitCache: TranscriptRowsCache = new Map()
+  const orderedBundles: Array<OrderedBundle> = []
+  let renderedUnits = 0
+  for (const unit of transcriptUnits(model)) {
+    if (!builder.isUnitVisible(unit)) continue
+    const gapBefore = renderedUnits++ > 0
+    const unitKey = transcriptUnitId(model, unit)
+    const revision = transcriptUnitRevision(model, unit, unitKey, expandedSet)
+    const cached = options.unitCache.get(unitKey)
+    const tentative = tentativeUnit(model, unit, unitKey)
+    let entry: TranscriptUnitCacheEntry
+    if (cached?.revision === revision) entry = cached
+    else if (tentative === undefined)
+      entry = buildTranscriptUnitBundles(builder, unit, revision, options.spinnerGlyph, options.onToggle)
+    else
+      entry = buildTentativeTranscriptUnitBundles({
+        key: unitKey,
+        text: tentative.text,
+        width: transcriptWrapWidth(model.width),
+        tone: tentative.tone,
+        revision,
+        cached,
+      })
+    unitCache.set(unitKey, entry)
+    for (const [index, bundle] of entry.bundles.entries())
+      orderedBundles.push({
+        gapBefore: index === 0 && gapBefore,
+        rows: bundle.rows + (index === 0 && gapBefore ? 1 : 0),
+        bundle,
+      })
+  }
+  return { unitCache, orderedBundles }
+}
+
+const initialBandRange = (
+  options: ProjectTranscriptRowsOptions,
+  bundles: ReadonlyArray<OrderedBundle>,
+  rowPrefix: ReadonlyArray<number>,
+  rowTotal: number,
+  budget: number,
+) => {
+  let end = Math.min(
+    bundles.length,
+    Number.isFinite(options.bandEnd) ? Math.max(0, Math.floor(options.bandEnd)) : bundles.length,
+  )
+  if (rowTotal <= budget) end = bundles.length
+  if (rowTotal > budget && options.mountAnchorKey !== undefined) {
+    const anchor = bundles.findIndex((current) =>
+      current.bundle.descriptors.some((descriptor) => descriptor.key === options.mountAnchorKey),
+    )
+    if (anchor >= 0) end = anchor + 1
+  }
+  let start = end
+  if (options.bandTargetTop === undefined) {
+    while (start > 0 && (start === end || rowPrefix[end]! - rowPrefix[start]! < budget)) start -= 1
+    return { start, end }
+  }
+  let low = 0
+  let high = end
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (rowPrefix[middle + 1]! <= options.bandTargetTop) low = middle + 1
+    else high = middle
+  }
+  return { start: Math.min(low, Math.max(0, end - 1)), end }
+}
+
+const includeSelectedBands = (
+  options: ProjectTranscriptRowsOptions,
+  bundles: ReadonlyArray<OrderedBundle>,
+  range: { readonly start: number; readonly end: number },
+) => {
+  const selected = new Set(options.renderer.getSelection()?.touchedRenderables ?? [])
+  if (selected.size === 0) return range
+  const bandByKey = new Map<string, number>()
+  for (const [index, current] of bundles.entries())
+    for (const descriptor of current.bundle.descriptors) bandByKey.set(descriptor.key, index)
+  let { start, end } = range
+  for (const record of options.records.values()) {
+    if (!selected.has(record.renderable)) continue
+    const index = bandByKey.get(record.key)
+    if (index === undefined) continue
+    start = Math.min(start, index)
+    end = Math.max(end, index + 1)
+  }
+  return { start, end }
+}
+
+const mountedDescriptors = (
+  bundles: ReadonlyArray<OrderedBundle>,
+  rowPrefix: ReadonlyArray<number>,
+  start: number,
+  end: number,
+) => {
+  const descriptors: Array<TranscriptRenderableDescriptor> = []
+  const rowByKey = new Map<string, number>()
+  for (const [mountedIndex, { gapBefore, bundle }] of bundles.slice(start, end).entries()) {
+    const row = rowPrefix[start + mountedIndex] ?? 0
+    if (gapBefore) {
+      rowByKey.set(`${bundle.key}:gap`, row)
+      descriptors.push({
+        key: `${bundle.key}:gap`,
+        revision: "gap",
+        content: new StyledText([fg(toOpenColor(colors.text))(" ")]),
+      })
+    }
+    for (const descriptor of bundle.descriptors) rowByKey.set(descriptor.key, row + (gapBefore ? 1 : 0))
+    descriptors.push(...bundle.descriptors)
+  }
+  return { descriptors, rowByKey }
+}
+
 export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => {
   const { model } = options
   const input = {
@@ -411,117 +430,25 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
   )
     options.renderer.clearSelection()
   const boundedModel = boundedTranscriptModel(model, options.windowEnd)
-  const builder = transcriptUnitBuilder(boundedModel, options.spinnerGlyph)
-  const expandedSet = new Set(boundedModel.expandedRowKeys)
-  const unitCache: TranscriptRowsCache = new Map()
-  const orderedBundles: Array<{
-    readonly gapBefore: boolean
-    readonly rows: number
-    readonly bundle: TranscriptRangeBundle
-  }> = []
-  let renderedUnits = 0
-  for (const unit of transcriptUnits(boundedModel)) {
-    if (!builder.isUnitVisible(unit)) continue
-    renderedUnits += 1
-    const gapBefore = renderedUnits > 1
-    const unitKey = transcriptUnitId(boundedModel, unit)
-    const revision = transcriptUnitRevision(boundedModel, unit, unitKey, expandedSet)
-    const cached = options.unitCache.get(unitKey)
-    let tentative: { readonly text: string; readonly tone: "answer" | "reasoning" } | undefined
-    if (unitKey.startsWith("entry:tentative:") && unit.kind === "entry")
-      tentative = { text: boundedModel.entries[unit.entry]?.text ?? "", tone: "answer" }
-    if (unitKey.startsWith("block:tentative:") && unit.kind === "reasoning") {
-      const block = Option.getOrUndefined(Schema.decodeUnknownOption(Block)(boundedModel.blocks[unit.block]))
-      tentative = {
-        text: block?._tag === "Reasoning" ? block.text : "",
-        tone: "reasoning",
-      }
-    }
-    let entry: TranscriptUnitCacheEntry
-    if (cached !== undefined && cached.revision === revision) entry = cached
-    else if (tentative === undefined)
-      entry = buildTranscriptUnitBundles(builder, unit, revision, options.spinnerGlyph, options.onToggle)
-    else
-      entry = buildTentativeTranscriptUnitBundles(
-        unitKey,
-        tentative.text,
-        transcriptWrapWidth(boundedModel.width),
-        tentative.tone,
-        revision,
-        cached,
-      )
-    unitCache.set(unitKey, entry)
-    for (const [index, bundle] of entry.bundles.entries())
-      orderedBundles.push({
-        gapBefore: index === 0 && gapBefore,
-        rows: bundle.rows + (index === 0 && gapBefore ? 1 : 0),
-        bundle,
-      })
-  }
+  const { unitCache, orderedBundles } = projectBundles(options, boundedModel)
   const rowPrefix: Array<number> = [0]
   for (const current of orderedBundles) rowPrefix.push(rowPrefix.at(-1)! + current.rows)
   const rowTotal = rowPrefix.at(-1) ?? 0
-  let bandEnd = Math.min(
-    orderedBundles.length,
-    Number.isFinite(options.bandEnd) ? Math.max(0, Math.floor(options.bandEnd)) : orderedBundles.length,
-  )
   const budget = mountedTranscriptRowBudget(options.viewportHeight > 0 ? options.viewportHeight : model.height)
-  if (rowTotal <= budget) bandEnd = orderedBundles.length
-  if (rowTotal > budget && options.mountAnchorKey !== undefined) {
-    const anchorBand = orderedBundles.findIndex((current) =>
-      current.bundle.descriptors.some((descriptor) => descriptor.key === options.mountAnchorKey),
-    )
-    if (anchorBand >= 0) bandEnd = anchorBand + 1
-  }
-  let bandStart = bandEnd
-  if (options.bandTargetTop !== undefined) {
-    let low = 0
-    let high = bandEnd
-    while (low < high) {
-      const middle = (low + high) >> 1
-      if (rowPrefix[middle + 1]! <= options.bandTargetTop) low = middle + 1
-      else high = middle
-    }
-    bandStart = Math.min(low, Math.max(0, bandEnd - 1))
-  } else
-    while (bandStart > 0 && (bandStart === bandEnd || rowPrefix[bandEnd]! - rowPrefix[bandStart]! < budget))
-      bandStart -= 1
-  const selection = options.renderer.getSelection()
-  const selected = new Set(selection?.touchedRenderables ?? [])
-  if (selected.size > 0) {
-    const bandByKey = new Map<string, number>()
-    for (const [index, current] of orderedBundles.entries())
-      for (const descriptor of current.bundle.descriptors) bandByKey.set(descriptor.key, index)
-    for (const record of options.records.values()) {
-      if (!selected.has(record.renderable)) continue
-      const index = bandByKey.get(record.key)
-      if (index === undefined) continue
-      bandStart = Math.min(bandStart, index)
-      bandEnd = Math.max(bandEnd, index + 1)
-    }
-  }
-  const mounted = orderedBundles.slice(bandStart, bandEnd)
+  const range = includeSelectedBands(
+    options,
+    orderedBundles,
+    initialBandRange(options, orderedBundles, rowPrefix, rowTotal, budget),
+  )
+  const bandStart = range.start
+  const bandEnd = range.end
   const rowsBefore = rowPrefix[bandStart] ?? 0
   const rowsAfter = Math.max(0, rowTotal - (rowPrefix[bandEnd] ?? rowTotal))
   options.topSpacer.height = rowsBefore
   options.topSpacer.visible = rowsBefore > 0
   options.bottomSpacer.height = rowsAfter
   options.bottomSpacer.visible = rowsAfter > 0
-  const descriptors: Array<TranscriptRenderableDescriptor> = []
-  const rowByKey = new Map<string, number>()
-  for (const [mountedIndex, { gapBefore, bundle }] of mounted.entries()) {
-    const row = rowPrefix[bandStart + mountedIndex] ?? 0
-    if (gapBefore) {
-      rowByKey.set(`${bundle.key}:gap`, row)
-      descriptors.push({
-        key: `${bundle.key}:gap`,
-        revision: "gap",
-        content: new StyledText([fg(toOpenColor(colors.text))(" ")]),
-      })
-    }
-    for (const descriptor of bundle.descriptors) rowByKey.set(descriptor.key, row + (gapBefore ? 1 : 0))
-    descriptors.push(...bundle.descriptors)
-  }
+  const { descriptors, rowByKey } = mountedDescriptors(orderedBundles, rowPrefix, bandStart, bandEnd)
   const children = reconcileTranscriptRenderables({
     renderer: options.renderer,
     content: options.content,

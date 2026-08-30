@@ -41,9 +41,10 @@ describe("executor orphan reaper", () => {
   it.effect("runs one recurring cleanup from service startup", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make(0)
-      const running = yield* orphanReaper(Ref.update(calls, (count) => count + 1), "5 minutes").pipe(
-        Effect.forkChild({ startImmediately: true }),
-      )
+      const running = yield* orphanReaper(
+        Ref.update(calls, (count) => count + 1),
+        "5 minutes",
+      ).pipe(Effect.forkChild({ startImmediately: true }))
 
       expect(yield* Ref.get(calls)).toBe(1)
 

@@ -5,7 +5,7 @@ import { it } from "@effect/vitest"
 import { Effect } from "effect"
 import { renderTranscriptStyled } from "../../../src/opentui/rendering/renderer"
 import { create } from "../../../src/opentui/surface/service"
-import { type Mode } from "../../../src/state/model"
+import type { Mode } from "../../../src/state/model"
 
 let activeSetup: TestRendererSetup
 const opentui = {
@@ -34,7 +34,10 @@ const createScoped = (callbacks: Parameters<typeof create>[0]) =>
   Effect.acquireRelease(
     Effect.gen(function* () {
       activeSetup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 }))
-      return yield* create({ ...callbacks, makeRenderer: () => Effect.succeed(activeSetup.renderer) })
+      return yield* create({
+        ...callbacks,
+        makeRenderer: () => Effect.succeed(activeSetup.renderer),
+      })
     }),
     (created) => Effect.sync(created.releaseTerminal),
   )
@@ -82,9 +85,8 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
     expect(modeLabelText()).toBe(" ctx ᗧ······· 0% ─ medium ")
     expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
     expect(surface.inputBox.bottomTitle).toBe("")
-    expect(surface.workspaceLabel.content).toEqual(
-      expect.objectContaining({ chunks: [expect.objectContaining({ text: " /workspace " })] }),
-    )
+    expect(styledText(surface.workspaceLabel.content).chunks).toHaveLength(1)
+    expect(styledText(surface.workspaceLabel.content).chunks[0]?.text).toBe(" /workspace ")
     expect(surface.palette.visible).toBe(false)
 
     surface.update(model({ width: 40, input: "one\ntwo\nthree", cursor: 13 }))
@@ -125,11 +127,7 @@ it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =
       expect(surface.inputBox.title).toBe("")
       expect(modeLabelText()).toBe(` ctx ᗧ······· 0% ─ ${mode} `)
       expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
-      expect(surface.statusLabel.content).toEqual(
-        expect.objectContaining({
-          chunks: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(" Sending ") })]),
-        }),
-      )
+      expect(styledText(surface.statusLabel.content).chunks.some(({ text }) => text.includes(" Sending "))).toBe(true)
     }
 
     surface.update(

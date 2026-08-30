@@ -22,6 +22,38 @@ const databaseError = (cause: unknown) =>
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 const equivalentEvidence = Schema.toEquivalence(WorkspacePreparationEvidence)
+const evidenceMatchesAssignment = (
+  evidence: WorkspacePreparationEvidence,
+  assignment: { readonly workspaceId: string; readonly repositoryId: string | null; readonly commitSha: string | null },
+) =>
+  evidence.workspaceId === assignment.workspaceId &&
+  evidence.repositoryId === assignment.repositoryId &&
+  evidence.commitSha === assignment.commitSha &&
+  evidence.setup.commitSha === assignment.commitSha &&
+  (evidence.resume === null || evidence.resume.commitSha === assignment.commitSha)
+
+const completedDuplicate = (
+  existing: WorkspacePreparation,
+  input: Parameters<WorkspacePreparationsService["complete"]>[0],
+) =>
+  existing.state === "ready" &&
+  existing.leaseEpoch === input.access.leaseEpoch &&
+  existing.attempt === input.attempt &&
+  existing.phase === input.phase &&
+  existing.evidence !== null &&
+  equivalentEvidence(existing.evidence, input.evidence)
+
+const failedDuplicate = (
+  existing: WorkspacePreparation,
+  input: Parameters<WorkspacePreparationsService["fail"]>[0],
+  message: string,
+) =>
+  existing.state === "failed" &&
+  existing.leaseEpoch === input.access.leaseEpoch &&
+  existing.attempt === input.attempt &&
+  existing.phase === input.phase &&
+  existing.failure?.message === message &&
+  existing.failure.retryable === input.retryable
 const preparationFields = {
   assignmentId: rikaHostedWorkspacePreparations.assignmentId,
   ownerId: rikaHostedWorkspacePreparations.ownerId,
@@ -224,14 +256,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
     if (assignment.workspaceId !== input.workspaceId)
       return yield* failure("invalid", "Workspace preparation identity does not match its assignment")
     const completed = "evidence" in input
-    if (
-      completed &&
-      (input.evidence.workspaceId !== assignment.workspaceId ||
-        input.evidence.repositoryId !== assignment.repositoryId ||
-        input.evidence.commitSha !== assignment.commitSha ||
-        input.evidence.setup.commitSha !== assignment.commitSha ||
-        (input.evidence.resume !== null && input.evidence.resume.commitSha !== assignment.commitSha))
-    )
+    if (completed && !evidenceMatchesAssignment(input.evidence, assignment))
       return yield* failure("invalid", "Workspace readiness evidence does not match its assignment checkout")
     const message = completed ? null : input.message.slice(0, 2_048)
     const rows = yield* query(
@@ -258,19 +283,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
     )
     if (rows[0] === undefined) {
       const existing = yield* current(input.access.assignmentId, input.access.assignmentGeneration)
-      const duplicate = completed
-        ? existing.state === "ready" &&
-          existing.leaseEpoch === input.access.leaseEpoch &&
-          existing.attempt === input.attempt &&
-          existing.phase === input.phase &&
-          existing.evidence !== null &&
-          equivalentEvidence(existing.evidence, input.evidence)
-        : existing.state === "failed" &&
-          existing.leaseEpoch === input.access.leaseEpoch &&
-          existing.attempt === input.attempt &&
-          existing.phase === input.phase &&
-          existing.failure?.message === message &&
-          existing.failure.retryable === input.retryable
+      const duplicate = completed ? completedDuplicate(existing, input) : failedDuplicate(existing, input, message!)
       if (!duplicate) return yield* failure("stale-fence", "Workspace preparation completion fence is stale")
     }
     return yield* current(input.access.assignmentId, input.access.assignmentGeneration)

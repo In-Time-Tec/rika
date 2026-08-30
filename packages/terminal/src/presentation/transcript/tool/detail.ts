@@ -76,54 +76,70 @@ const withTarget = (detail: ToolDetail, target: ToolDetail["target"]): ToolDetai
   return { ...detail, target }
 }
 
+type ToolCall = Extract<TranscriptBlock, { _tag: "ToolCall" }>
+
+const detailKind = (call: ToolCall): ToolKind =>
+  call.presentation.family === "explore" &&
+  (call.presentation.action === "read" || call.presentation.action === "media")
+    ? "read"
+    : toolKind(call.name, call.presentation.family)
+
+const detailTarget = (path: string | undefined, offset: number | undefined): ToolDetail["target"] => {
+  if (path === undefined) return undefined
+  return offset === undefined ? { path } : { path, line: offset + 1, column: 1 }
+}
+
+const readDetail = (
+  block: number,
+  call: ToolCall,
+  path: string | undefined,
+  target: ToolDetail["target"],
+): ToolDetail => {
+  const displayPath = path === undefined ? undefined : escapePathTarget(path)
+  const verb = call.presentation.action === "media" ? "Viewed" : "Read"
+  const location = path === undefined ? undefined : call.detail.match(/\s+L\d+(?:-\d+)?$/)?.[0]
+  const detail = path === undefined ? call.detail : `${displayPath}${location ?? ""}`
+  return withTarget(withLabel(block, summary(verb, detail || displayPath || call.name)), target)
+}
+
+const searchDetail = (block: number, call: ToolCall, input: ToolInput, target: ToolDetail["target"]): ToolDetail => {
+  const query = stringValue([input.pattern, input.query, input.glob, input.path])
+  return withTarget(
+    withLabel(
+      block,
+      summary(call.presentation.action === "grep" ? "Grep" : "Searched", call.detail || query || "workspace"),
+    ),
+    target,
+  )
+}
+
+const shellDetail = (block: number, call: ToolCall, input: ToolInput): ToolDetail => {
+  const command = call.detail || stringValue([input.command, input.cmd, input.script]) || ""
+  return withLabel(block, summary("$", command || (call.input.trimStart().startsWith("{") ? "" : call.input)))
+}
+
+const otherDetail = (block: number, call: ToolCall): ToolDetail => {
+  let label = call.presentation.completeLabel
+  if (call.status === "running") label = call.presentation.activeLabel
+  else if (call.status === "failed") label = call.presentation.failedLabel ?? call.presentation.completeLabel
+  const value = call.presentation.family === "agent" ? agentToolSummary(label) : summary(label, call.detail)
+  return { ...withLabel(block, value) }
+}
+
 export const toolDetail: {
   (call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): (block: number) => ToolDetail
   (block: number, call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolDetail
 } = Function.dual(2, (block: number, call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolDetail => {
   const input = inputValue(call.input)
-  const kind =
-    call.presentation.family === "explore" &&
-    (call.presentation.action === "read" || call.presentation.action === "media")
-      ? "read"
-      : toolKind(call.name, call.presentation.family)
+  const kind = detailKind(call)
   const path = call.files[0]?.path ?? stringValue([input.path, input.file_path, input.file])
   const offset = input.offset === undefined ? undefined : Math.max(0, Math.trunc(input.offset))
-  let target: ToolDetail["target"]
-  if (path === undefined) target = undefined
-  else if (offset === undefined) target = { path }
-  else target = { path, line: offset + 1, column: 1 }
+  const target = detailTarget(path, offset)
   const displayPath = path === undefined ? undefined : escapePathTarget(path)
-  if (kind === "read") {
-    const verb = call.presentation.action === "media" ? "Viewed" : "Read"
-    const location = path === undefined ? undefined : call.detail.match(/\s+L\d+(?:-\d+)?$/)?.[0]
-    const detail = path === undefined ? call.detail : `${displayPath}${location ?? ""}`
-    return withTarget(withLabel(block, summary(verb, detail || displayPath || call.name)), target)
-  }
-  if (kind === "search") {
-    const query = stringValue([input.pattern, input.query, input.glob, input.path])
-    return withTarget(
-      withLabel(
-        block,
-        summary(call.presentation.action === "grep" ? "Grep" : "Searched", call.detail || query || "workspace"),
-      ),
-      target,
-    )
-  }
+  if (kind === "read") return readDetail(block, call, path, target)
+  if (kind === "search") return searchDetail(block, call, input, target)
   if (kind === "edit") return withTarget(withLabel(block, summary("Edit", displayPath ?? call.detail)), target)
-  if (kind === "shell") {
-    const command = call.detail || stringValue([input.command, input.cmd, input.script]) || ""
-    return withLabel(block, summary("$", command || (call.input.trimStart().startsWith("{") ? "" : call.input)))
-  }
-  let label = call.presentation.completeLabel
-  if (call.status === "running") {
-    label = call.presentation.activeLabel
-  } else if (call.status === "failed") {
-    label = call.presentation.failedLabel ?? call.presentation.completeLabel
-  }
-  const value = call.presentation.family === "agent" ? agentToolSummary(label) : summary(label, call.detail)
-  return {
-    ...withLabel(block, value),
-  }
+  return kind === "shell" ? shellDetail(block, call, input) : otherDetail(block, call)
 })
 
 export const toolDetails: {

@@ -2,7 +2,7 @@ import { StyledText } from "@opentui/core"
 import { Function, Data, Effect } from "effect"
 
 import { initial, type Model } from "../../../../src/state/model"
-import { type ThreadItem } from "../../../../src/state/thread/model"
+import type { ThreadItem } from "../../../../src/state/thread/model"
 import { update } from "../../../../src/state/reducer/model"
 
 export class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}

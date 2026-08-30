@@ -131,8 +131,7 @@ export const layer = (options: {
           )
             return yield* failure("Credential refresh lock is unavailable")
           yield* removeAbandonedLock
-          if ((yield* Clock.currentTimeMillis) >= deadline)
-            return yield* failure("Credential refresh lock timed out")
+          if ((yield* Clock.currentTimeMillis) >= deadline) return yield* failure("Credential refresh lock timed out")
           yield* Effect.sleep(options.lockRetry ?? 50)
         }
       })

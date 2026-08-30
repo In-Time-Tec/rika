@@ -7,7 +7,7 @@ import { NestedOperationFailed } from "@rika/kernel/nested-operation-envelope"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
 import { HostBindingRegistry } from "tenetkit/repl"
-import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Layer, Option, Ref, Schema } from "effect"
+import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Inspectable, Layer, Option, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as HostedKernel from "../../src/host/kernel"
 import {
@@ -69,7 +69,7 @@ const toolContext = (operationKey: string, toolCallId: string) =>
 const resultValue = (response: CellResponse) => {
   if (response._tag !== "Success") return ""
   const result = Schema.decodeUnknownOption(Schema.Struct({ value: Schema.Json }))(response.result)
-  return Option.isSome(result) ? String(result.value.value) : ""
+  return Option.isSome(result) ? Inspectable.toStringUnknown(result.value.value) : ""
 }
 
 describe("hosted TypeScript kernel", () => {
@@ -248,8 +248,7 @@ describe("hosted TypeScript kernel", () => {
         const manifest = yield* bindingManifest(registry.descriptors)
         const bindingContractDigest = yield* Ref.make<string | undefined>("f".repeat(64))
         const states = yield* Ref.make(new Map<string, import("../../src/protocol/cells").State>())
-        let kernel: HostedKernel.Interface
-        kernel = yield* HostedKernel.make({
+        const kernel: HostedKernel.Interface = yield* HostedKernel.make({
           workspaceIdentity: "workspace-1",
           workspacePath: root,
           dataRoot: root,
@@ -332,7 +331,7 @@ describe("hosted TypeScript kernel", () => {
       const fileSystem = yield* FileSystem.FileSystem
       const sources = yield* Effect.all(
         [
-          "../../src/host/foreground.ts",
+          "../../src/host/session/foreground.ts",
           "../../src/host/service.ts",
           "../../src/host/kernel.ts",
           "../../../kernel/src/cell-executor.ts",

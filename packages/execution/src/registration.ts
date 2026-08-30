@@ -49,11 +49,12 @@ export const codecs = {
   tool: codec("rika-tool", "1", ToolPayload),
 }
 
-export const toolPayload = (value: Tool.Any): typeof ToolPayload.Type => ({
-  name: value.name,
-  description: value.description,
-  schema: Tool.getJsonSchema(value),
-})
+export const toolPayload = (value: Tool.Any): typeof ToolPayload.Type => {
+  const metadata = Schema.decodeUnknownSync(
+    Schema.Struct({ name: Schema.String, description: Schema.UndefinedOr(Schema.String) }),
+  )(value)
+  return { ...metadata, schema: Tool.getJsonSchema(value) }
+}
 
 export const toolPin = (value: Tool.Any): Pins.CapabilityPin =>
   Pins.makeCapability({ ...codecs.tool.identity, ...toolPayload(value) })

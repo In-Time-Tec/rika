@@ -323,7 +323,7 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
       const admissions = yield* turns.listSteeringAdmissions
       const groups = new Map<string, Array<readonly [number, TurnRepositorySteering.SteeringAdmission]>>()
       for (const [index, admission] of admissions.entries()) {
-        const threadId = String(admission.target.threadId)
+        const threadId = admission.target.threadId
         const group = groups.get(threadId)
         if (group === undefined) groups.set(threadId, [[index, admission]])
         else group.push([index, admission])

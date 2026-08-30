@@ -14,35 +14,30 @@ import {
   rikaHostedThreadProtocolCommands,
   rikaHostedThreadProtocolState,
   rikaHostedThreads,
-  rikaHostedToolAuditRecords,
   rikaHostedWorkspaces,
   rikaThreads,
-  rikaTranscriptCheckpoints,
-  rikaTurns,
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as HostedPostgres from "@rika/product-store/layer"
 import type { AccessWire, BindingRequest } from "@rika/remote-execution/protocol"
 import { FileSystem, Config, Context, Crypto, DateTime, Effect, Layer, Random, Redacted, Schema } from "effect"
-import { and, count, eq } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { inspect } from "node:util"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import {
   HostedToolPolicy,
   argumentsDigest,
   layer as toolPolicyLayer,
-  organizationOwner,
-  personalOwner,
   policyFor,
-  type RecordDecisionInput,
 } from "../../../src/hosted/execution/tool-policy"
 
+import { authorizationAssertions } from "./tool-policy-authorization.harness"
+import { auditAssertions } from "./tool-policy-audit.harness"
+import { organizationAssertions } from "./tool-policy-organization.harness"
+
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
-const Json = Schema.fromJsonString(Schema.Json)
 
 const personalActor = Schema.decodeSync(ActorAttribution)({
   _tag: "PersonalActor",
@@ -465,244 +460,10 @@ it.effect.skipIf(databaseUrl === "")(
             authorizationId: "internal-approval",
             outcome: "suspended",
           })
-          const authorizationProjectionState = {
-            authorizations: [
-              [
-                "internal-approval",
-                {
-                  authorizationId: "internal-approval",
-                  rawRunId: "personal-turn",
-                  approvalId: "personal-approval",
-                  unitKey: "personal-authorization",
-                },
-              ],
-            ],
-          }
-          const authorizationState = yield* Schema.encodeEffect(Json)(authorizationProjectionState)
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaTurns).values({
-              id: "personal-turn",
-              threadId: "personal-thread",
-              prompt: "prompt",
-              status: "waiting",
-              executionRouteJson: "{}",
-              createdAt: 1,
-              updatedAt: 1,
-            }),
-          )
-          yield* Effect.tryPromise(() =>
-            db.insert(rikaTranscriptCheckpoints).values({
-              turnId: "personal-turn",
-              threadId: "personal-thread",
-              revision: 0,
-              projectionVersion: 6,
-              stateJson: "{}",
-              projectorVersion: 6,
-              projectorCursor: "current-cursor",
-              projectorState: authorizationState,
-              updatedAt: 1,
-            }),
-          )
-          expect(
-            yield* Effect.result(
-              policy.recordDecision({
-                ownerId: "personal-owner",
-                threadId: "personal-thread",
-                turnId: "personal-turn",
-                actor: personalActor,
-                authorizationId: "wrong-authorization",
-                checkpoint: { version: 6, cursor: "wrong", state: "wrong" },
-                decision: "approved",
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
-          const checkpointState = yield* Schema.encodeEffect(Json)({
-            ...authorizationProjectionState,
-            marker: `checkpoint-with-${rawMarker}`,
-          })
-          const authorizationDecision: RecordDecisionInput = {
-            ownerId: "personal-owner",
-            threadId: "personal-thread",
-            turnId: "personal-turn",
-            actor: personalActor,
-            authorizationId: "internal-approval",
-            checkpoint: {
-              version: 6,
-              cursor: "checkpoint-cursor",
-              state: checkpointState,
-            },
-            decision: "approved",
-          }
-          const conflictingState = yield* Schema.encodeEffect(Json)({
-            authorizations: [
-              [
-                "internal-approval",
-                {
-                  authorizationId: "internal-approval",
-                  rawRunId: "different-run",
-                  approvalId: "different-approval",
-                  unitKey: "different-authorization",
-                },
-              ],
-            ],
-          })
-          expect(
-            yield* Effect.result(
-              policy.recordDecision({
-                ...authorizationDecision,
-                checkpoint: {
-                  ...authorizationDecision.checkpoint,
-                  state: conflictingState,
-                },
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { kind: "conflict" } })
-          expect(
-            (yield* Effect.tryPromise(() =>
-              db
-                .select({ count: count() })
-                .from(rikaHostedToolAuditRecords)
-                .where(eq(rikaHostedToolAuditRecords.phase, "decision")),
-            ))[0]?.count,
-          ).toBe(0)
-          yield* policy.recordDecision(authorizationDecision)
-          yield* policy.recordDecision(authorizationDecision)
-          expect(
-            yield* Effect.result(
-              policy.recordDecision({
-                ...authorizationDecision,
-                decision: "denied",
-              }),
-            ),
-          ).toMatchObject({
-            _tag: "Failure",
-            failure: { kind: "conflict" },
-          })
+          yield* authorizationAssertions.run(policy, db, personalActor, rawMarker)
           yield* policy.outcome({ ...admission, outcome: "succeeded" })
-          const records = yield* policy.list({
-            principal: { userId: "personal-user" },
-            owner: personalOwner("personal-user"),
-            limit: 100,
-          })
-          expect(
-            records.map(({ phase, decision, outcome }) => ({
-              phase,
-              decision,
-              outcome,
-            })),
-          ).toEqual([
-            { phase: "outcome", decision: "pending", outcome: "succeeded" },
-            { phase: "decision", decision: "approved", outcome: "admitted" },
-            { phase: "outcome", decision: "pending", outcome: "suspended" },
-            { phase: "admission", decision: "pending", outcome: "admitted" },
-          ])
-          expect(records.find(({ phase }) => phase === "decision")).toMatchObject({
-            authorizationId: "internal-approval",
-            authorizationCheckpoint: {
-              version: 6,
-              cursor: "checkpoint-cursor",
-            },
-          })
-          const stored = inspect(yield* Effect.tryPromise(() => db.select().from(rikaHostedToolAuditRecords)), {
-            depth: null,
-          })
-          expect(stored).not.toContain(rawMarker)
-          expect(stored).not.toContain("command")
-          const mutation = yield* Effect.result(
-            Effect.tryPromise(() =>
-              db
-                .update(rikaHostedToolAuditRecords)
-                .set({ outcome: "failed" })
-                .where(eq(rikaHostedToolAuditRecords.sequence, 1)),
-            ),
-          )
-          expect(mutation._tag).toBe("Failure")
-          const deletion = yield* Effect.result(
-            Effect.tryPromise(() =>
-              db.delete(rikaHostedToolAuditRecords).where(eq(rikaHostedToolAuditRecords.sequence, 1)),
-            ),
-          )
-          expect(deletion._tag).toBe("Failure")
-          const foreign = yield* Effect.result(
-            policy.list({
-              principal: { userId: "foreign-user" },
-              owner: personalOwner("personal-user"),
-              limit: 100,
-            }),
-          )
-          expect(foreign).toMatchObject({
-            _tag: "Failure",
-            failure: { kind: "forbidden" },
-          })
-          const revokedAt = DateTime.toDate(DateTime.nowUnsafe())
-          yield* Effect.tryPromise(() =>
-            db
-              .update(rikaHostedClientAuthorities)
-              .set({ revokedAt })
-              .where(
-                and(
-                  eq(rikaHostedClientAuthorities.clientId, "personal-client"),
-                  eq(rikaHostedClientAuthorities.ownerId, "personal-owner"),
-                ),
-              ),
-          )
-          expect(
-            yield* Effect.result(
-              policy.begin({
-                threadId: "personal-thread",
-                turnId: "personal-turn",
-                workspaceId: "personal-workspace",
-                operationKey: "revoked-operation",
-                callId: "revoked-call",
-                request,
-                access: access("personal-assignment", "personal-instance"),
-                policy: policyFor(request),
-                argumentsDigest: admission.argumentsDigest,
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { kind: "forbidden" } })
-
-          const organizationRequest = {
-            module: "workspace",
-            operation: "read",
-            input: { path: "README.md" },
-            sessionId: "organization-thread",
-            cellId: "organization-call",
-          } satisfies BindingRequest
-          const organizationAdmission = yield* policy.begin({
-            threadId: "organization-thread",
-            turnId: "organization-turn",
-            workspaceId: "organization-workspace",
-            operationKey: "organization-operation",
-            callId: "organization-call",
-            request: organizationRequest,
-            access: access("organization-assignment", "organization-instance"),
-            policy: policyFor(organizationRequest),
-            argumentsDigest: yield* argumentsDigest(organizationRequest.input).pipe(
-              Effect.provideService(Crypto.Crypto, crypto),
-            ),
-          })
-          yield* policy.outcome({
-            ...organizationAdmission,
-            outcome: "succeeded",
-          })
-          expect(
-            yield* policy.list({
-              principal: { userId: "organization-user" },
-              owner: organizationOwner("organization-1"),
-              limit: 100,
-            }),
-          ).toHaveLength(2)
-          yield* Effect.tryPromise(() => db.delete(identityMember).where(eq(identityMember.id, "organization-member")))
-          expect(
-            yield* Effect.result(
-              policy.list({
-                principal: { userId: "organization-user" },
-                owner: organizationOwner("organization-1"),
-                limit: 100,
-              }),
-            ),
-          ).toMatchObject({ _tag: "Failure", failure: { kind: "forbidden" } })
+          yield* auditAssertions.run(policy, db, personalActor, rawMarker, request, admission, access)
+          yield* organizationAssertions.run(policy, db, organizationActor, crypto, access)
         } finally {
           yield* Effect.tryPromise(() => pool.end())
           yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

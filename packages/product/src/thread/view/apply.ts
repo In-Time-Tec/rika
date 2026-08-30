@@ -218,83 +218,109 @@ export class ThreadViewAccumulator {
     return this.materialized
   }
 
-  apply(patch: ThreadViewPatch): Result.Result<ThreadViewDelta, ThreadViewApplyError> {
+  private revisionError(patch: ThreadViewPatch): ThreadViewApplyError | undefined {
     const threadId = this.currentHeader.thread.id
     if (String(patch.threadId) !== String(threadId))
-      return Result.fail(
-        ThreadViewForeignThread.make({
-          expectedThreadId: threadId,
-          receivedThreadId: patch.threadId,
-        }),
-      )
+      return ThreadViewForeignThread.make({ expectedThreadId: threadId, receivedThreadId: patch.threadId })
     if (patch.revision <= patch.baseRevision)
-      return Result.fail(
-        ThreadViewNonMonotonicRevision.make({
-          threadId,
-          baseRevision: patch.baseRevision,
-          revision: patch.revision,
-        }),
-      )
+      return ThreadViewNonMonotonicRevision.make({
+        threadId,
+        baseRevision: patch.baseRevision,
+        revision: patch.revision,
+      })
     if (patch.baseRevision !== this.currentRevision || patch.revision !== patch.baseRevision + 1)
-      return Result.fail(
-        ResyncRequired.make({
-          threadId,
-          expectedRevision: this.currentRevision + 1,
-          receivedBaseRevision: patch.baseRevision,
-          currentRevision: this.currentRevision,
-        }),
-      )
+      return ResyncRequired.make({
+        threadId,
+        expectedRevision: this.currentRevision + 1,
+        receivedBaseRevision: patch.baseRevision,
+        currentRevision: this.currentRevision,
+      })
+    return undefined
+  }
+
+  private collectionError(patch: ThreadViewPatch, header: ThreadViewHeader): ThreadViewApplyError | undefined {
+    const threadId = this.currentHeader.thread.id
     const duplicateUpsert = duplicateKey(patch.upsert.map((unit) => unit.key))
-    if (duplicateUpsert !== undefined) return Result.fail(duplicateError(threadId, "upsert", duplicateUpsert))
+    if (duplicateUpsert !== undefined) return duplicateError(threadId, "upsert", duplicateUpsert)
     const duplicateRemove = duplicateKey(patch.remove)
-    if (duplicateRemove !== undefined) return Result.fail(duplicateError(threadId, "remove", duplicateRemove))
+    if (duplicateRemove !== undefined) return duplicateError(threadId, "remove", duplicateRemove)
     const removeSet = new Set(patch.remove)
     const conflict = patch.upsert.find((unit) => removeSet.has(unit.key))
-    if (conflict !== undefined) return Result.fail(invalidError(threadId, "conflicting-item-change", conflict.key))
-    const turnChangeIds = patch.turnChanges.map((change) =>
-      String(change._tag === "UpsertTurn" ? change.turn.id : change.turnId),
+    if (conflict !== undefined) return invalidError(threadId, "conflicting-item-change", conflict.key)
+    const duplicateTurnChange = duplicateKey(
+      patch.turnChanges.map((change) => String(change._tag === "UpsertTurn" ? change.turn.id : change.turnId)),
     )
-    const duplicateTurnChange = duplicateKey(turnChangeIds)
-    if (duplicateTurnChange !== undefined)
-      return Result.fail(duplicateError(threadId, "turn-changes", duplicateTurnChange))
-    const header = patch.header ?? this.currentHeader
+    if (duplicateTurnChange !== undefined) return duplicateError(threadId, "turn-changes", duplicateTurnChange)
     if (String(header.thread.id) !== String(threadId))
-      return Result.fail(invalidError(threadId, "invalid-header", String(header.thread.id)))
+      return invalidError(threadId, "invalid-header", String(header.thread.id))
     const duplicatePending = duplicateKey(header.pending.map((entry) => String(entry.id)))
-    if (duplicatePending !== undefined) return Result.fail(duplicateError(threadId, "pending", duplicatePending))
-    for (const key of patch.remove)
-      if (!this.unitOwners.has(key)) return Result.fail(invalidError(threadId, "missing-item", key))
+    if (duplicatePending !== undefined) return duplicateError(threadId, "pending", duplicatePending)
+    if (header.pending.length > limits.pending) return invalidError(threadId, "bounds-exceeded")
+    return undefined
+  }
+
+  private unitError(patch: ThreadViewPatch): ThreadViewApplyError | undefined {
+    const threadId = this.currentHeader.thread.id
+    for (const key of patch.remove) if (!this.unitOwners.has(key)) return invalidError(threadId, "missing-item", key)
     for (const unit of patch.upsert) {
       const owner = this.unitOwners.get(unit.key)
-      if (owner !== undefined && owner !== unit.turnId)
-        return Result.fail(invalidError(threadId, "unit-turn-mismatch", unit.key))
-      if (owner !== undefined) {
-        const current = this.turnsById.get(owner)?.units.get(unit.key)
-        if (current !== undefined && unit.revision < current.revision)
-          return Result.fail(invalidError(threadId, "unit-revision-regressed", unit.key))
-      }
+      if (owner !== undefined && owner !== unit.turnId) return invalidError(threadId, "unit-turn-mismatch", unit.key)
+      const current = owner === undefined ? undefined : this.turnsById.get(owner)?.units.get(unit.key)
+      if (current !== undefined && unit.revision < current.revision)
+        return invalidError(threadId, "unit-revision-regressed", unit.key)
     }
-    const changes = new Map<string, ThreadViewPatch["turnChanges"][number]>()
+    return undefined
+  }
+
+  private turnChangesError(
+    patch: ThreadViewPatch,
+    changes: Map<string, ThreadViewPatch["turnChanges"][number]>,
+  ): ThreadViewApplyError | undefined {
+    const threadId = this.currentHeader.thread.id
     for (const change of patch.turnChanges) {
       const key = String(change._tag === "UpsertTurn" ? change.turn.id : change.turnId)
       const current = this.turnsById.get(key)
-      if (change._tag === "RemoveTurn") {
-        if (current === undefined) return Result.fail(invalidError(threadId, "missing-turn", key))
-      } else {
-        if (String(change.turn.threadId) !== String(threadId))
-          return Result.fail(invalidError(threadId, "turn-thread-mismatch", key))
-        if (current !== undefined && change.projectionRevision < current.state.projectionRevision)
-          return Result.fail(invalidError(threadId, "projection-revision-regressed", key))
-      }
+      if (change._tag === "RemoveTurn" && current === undefined) return invalidError(threadId, "missing-turn", key)
+      if (change._tag === "UpsertTurn" && String(change.turn.threadId) !== String(threadId))
+        return invalidError(threadId, "turn-thread-mismatch", key)
+      if (
+        change._tag === "UpsertTurn" &&
+        current !== undefined &&
+        change.projectionRevision < current.state.projectionRevision
+      )
+        return invalidError(threadId, "projection-revision-regressed", key)
       changes.set(key, change)
     }
+    return undefined
+  }
+
+  private upsertTurnError(
+    patch: ThreadViewPatch,
+    changes: Map<string, ThreadViewPatch["turnChanges"][number]>,
+  ): ThreadViewApplyError | undefined {
+    const threadId = this.currentHeader.thread.id
     for (const unit of patch.upsert) {
       const change = changes.get(unit.turnId)
-      const exists =
-        change?._tag === "RemoveTurn" ? false : change?._tag === "UpsertTurn" || this.turnsById.has(unit.turnId)
-      if (!exists) return Result.fail(invalidError(threadId, "missing-turn", unit.turnId))
+      const exists = change?._tag === "UpsertTurn" || (change?._tag !== "RemoveTurn" && this.turnsById.has(unit.turnId))
+      if (!exists) return invalidError(threadId, "missing-turn", unit.turnId)
     }
-    if (header.pending.length > limits.pending) return Result.fail(invalidError(threadId, "bounds-exceeded"))
+    return undefined
+  }
+
+  apply(patch: ThreadViewPatch): Result.Result<ThreadViewDelta, ThreadViewApplyError> {
+    const revisionError = this.revisionError(patch)
+    if (revisionError !== undefined) return Result.fail(revisionError)
+    const removeSet = new Set(patch.remove)
+    const header = patch.header ?? this.currentHeader
+    const collectionError = this.collectionError(patch, header)
+    if (collectionError !== undefined) return Result.fail(collectionError)
+    const unitError = this.unitError(patch)
+    if (unitError !== undefined) return Result.fail(unitError)
+    const changes = new Map<string, ThreadViewPatch["turnChanges"][number]>()
+    const turnChangesError = this.turnChangesError(patch, changes)
+    if (turnChangesError !== undefined) return Result.fail(turnChangesError)
+    const upsertTurnError = this.upsertTurnError(patch, changes)
+    if (upsertTurnError !== undefined) return Result.fail(upsertTurnError)
 
     const deltas = new Map<
       string,

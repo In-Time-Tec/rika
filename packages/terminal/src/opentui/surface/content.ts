@@ -90,7 +90,7 @@ export const statusContent: {
   (model: Model, phase: number, currentTimeMillis: number): StyledText | string
 } = Function.dual(3, statusContentImpl)
 
-export const animationActive = (model: Model): boolean =>
+const primaryAnimationActive = (model: Model): boolean =>
   model.compactionShimmer !== undefined ||
   model.busy ||
   model.activity !== undefined ||
@@ -98,15 +98,17 @@ export const animationActive = (model: Model): boolean =>
   model.connection?.connectivity === "connecting" ||
   model.connection?.connectivity === "reconnecting" ||
   connectionActivity(model) !== undefined ||
-  panelLoading(model) !== undefined ||
-  (model.contextDetailsOpen &&
-    model.usageTime?._tag === "Available" &&
-    model.usageTime.activeSince !== undefined) ||
+  panelLoading(model) !== undefined
+
+const detailAnimationActive = (model: Model): boolean =>
+  (model.contextDetailsOpen && model.usageTime?._tag === "Available" && model.usageTime.activeSince !== undefined) ||
   (model.modePicker.open && model.modePicker.turnTick !== undefined) ||
   model.modeCommit !== undefined ||
   model.contextAnimation.flashTicks > 0 ||
   model.contextAnimation.compactTick !== undefined ||
   (model.threadSidebar.open && model.threads.some((thread) => thread.status !== "idle" && thread.status !== "error"))
+
+export const animationActive = (model: Model): boolean => primaryAnimationActive(model) || detailAnimationActive(model)
 
 /**
  * Gates the goal timer's EXISTENCE. `model.goal !== undefined` would pin the timer on forever after

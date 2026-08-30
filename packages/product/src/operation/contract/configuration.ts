@@ -38,6 +38,8 @@ interface HttpProviderDetails {
   readonly apiKeyEnv?: string
 }
 
+type ProviderDetails = BedrockDetails | HttpProviderDetails
+
 const json = <Value>(value: Value) => Console.log(JSON.stringify(value, null, 2))
 
 export const run = Effect.fn("ConfigOperations.run")(function* (
@@ -52,8 +54,8 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   const adapter = yield* Adapter
   const config = yield* configService.effective
   const route = ModelRouteResolution.resolveModelRoute(config.settings, config.settings.defaultMode)
-  const providers = Object.fromEntries(
-    Object.entries(config.settings.providers).map(([id, provider]) => {
+  const providers: Record<string, ProviderDetails> = Object.fromEntries(
+    Object.entries(config.settings.providers).map(([id, provider]): [string, ProviderDetails] => {
       if (provider.protocol === "amazon-bedrock") {
         let details: BedrockDetails = {
           authMode: provider.authMode,

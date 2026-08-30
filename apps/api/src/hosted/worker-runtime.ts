@@ -178,7 +178,7 @@ export const layer = Layer.effect(
           Effect.uninterruptible(
             Effect.gen(function* () {
               const startedAt = yield* Clock.currentTimeMillis
-              const token = Symbol()
+              const token = Symbol("hosted-worker-execution")
               const admitted = yield* Ref.modify(activeWork, (current) => {
                 if (current.has(input.key) || current.size >= registration.concurrency) return [false, current]
                 return [true, new Map(current).set(input.key, { token, startedAt, runnableAt: input.runnableAt })]
@@ -251,9 +251,7 @@ export const layer = Layer.effect(
                   }),
                 ),
               ),
-              Effect.andThen(
-                Effect.fail(new HostedWorkerScanFailure({ message: registration.scanFailureMessage })),
-              ),
+              Effect.andThen(Effect.fail(new HostedWorkerScanFailure({ message: registration.scanFailureMessage }))),
             )
           }),
         )

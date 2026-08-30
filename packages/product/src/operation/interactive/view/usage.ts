@@ -26,6 +26,10 @@ const difference = (next: number | undefined, previous: number | undefined): num
   return Math.max(0, next - (previous ?? 0))
 }
 
+const defined = <A extends object, K extends string, V>(target: A, key: K, value: V | undefined): void => {
+  if (value !== undefined) Object.assign(target, { [key]: value })
+}
+
 const tokenDifference = (
   next: ExecutionProjection.TokenTotals | undefined,
   previous: ExecutionProjection.TokenTotals | undefined,
@@ -43,16 +47,53 @@ const tokenDifference = (
   const text = difference(next.output.text, previous?.output.text)
   const reasoning = difference(next.output.reasoning, previous?.output.reasoning)
   const failedProviderTotal = difference(next.failedProviderTotal, previous?.failedProviderTotal)
-  if (total !== undefined) tokens.total = total
-  if (inputTotal !== undefined) input.total = inputTotal
-  if (uncached !== undefined) input.uncached = uncached
-  if (cacheRead !== undefined) input.cacheRead = cacheRead
-  if (cacheWrite !== undefined) input.cacheWrite = cacheWrite
-  if (outputTotal !== undefined) output.total = outputTotal
-  if (text !== undefined) output.text = text
-  if (reasoning !== undefined) output.reasoning = reasoning
-  if (failedProviderTotal !== undefined) tokens.failedProviderTotal = failedProviderTotal
+  defined(tokens, "total", total)
+  defined(input, "total", inputTotal)
+  defined(input, "uncached", uncached)
+  defined(input, "cacheRead", cacheRead)
+  defined(input, "cacheWrite", cacheWrite)
+  defined(output, "total", outputTotal)
+  defined(output, "text", text)
+  defined(output, "reasoning", reasoning)
+  defined(tokens, "failedProviderTotal", failedProviderTotal)
   return tokens
+}
+
+const usageDelta = (
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+): ExecutionProjection.UsageState => {
+  const prior = previous ?? ExecutionProjection.emptyUsageState()
+  const previousActive = prior.active._tag === "Available" ? prior.active.accumulatedMillis : 0
+  const nextActive = next.active._tag === "Available" ? next.active.accumulatedMillis : 0
+  const costNanoUsd = difference(next.costNanoUsd, prior.costNanoUsd)
+  const tokens = tokenDifference(next.tokens, prior.tokens)
+  const delta: ExecutionProjection.UsageState = {
+    pricedAttempts: Math.max(0, next.pricedAttempts - prior.pricedAttempts),
+    unpricedAttempts: Math.max(0, next.unpricedAttempts - prior.unpricedAttempts),
+    includedAttempts: Math.max(0, (next.includedAttempts ?? 0) - (prior.includedAttempts ?? 0)),
+    countedAttempts: Math.max(0, next.countedAttempts - prior.countedAttempts),
+    uncountedAttempts: Math.max(0, next.uncountedAttempts - prior.uncountedAttempts),
+    sourceComplete: next.sourceComplete,
+    contextPending: next.contextPending,
+    active:
+      next.active._tag === "Unavailable"
+        ? { _tag: "Unavailable" }
+        : { _tag: "Available", accumulatedMillis: Math.max(0, nextActive - previousActive) },
+  }
+  defined(delta, "costNanoUsd", costNanoUsd)
+  defined(delta, "tokens", tokens)
+  return delta
+}
+
+const currentActive = (
+  aggregate: ExecutionProjection.UsageState,
+  next: ExecutionProjection.UsageState,
+): ExecutionProjection.UsageState["active"] => {
+  if (aggregate.active._tag === "Unavailable") return aggregate.active
+  return next.active._tag === "Available" && next.active.activeSince !== undefined
+    ? { _tag: "Available", accumulatedMillis: aggregate.active.accumulatedMillis, activeSince: next.active.activeSince }
+    : { _tag: "Available", accumulatedMillis: aggregate.active.accumulatedMillis }
 }
 
 export const threadUsage = {
@@ -62,40 +103,9 @@ export const threadUsage = {
     next: ExecutionProjection.UsageState,
     turn: import("@rika/product/turn-record").Turn | undefined,
   ): ThreadView.ThreadViewUsage => {
-    const previousActive = previous?.active._tag === "Available" ? previous.active.accumulatedMillis : 0
-    const nextActive = next.active._tag === "Available" ? next.active.accumulatedMillis : 0
-    const costNanoUsd = difference(next.costNanoUsd, previous?.costNanoUsd)
-    const tokens = tokenDifference(next.tokens, previous?.tokens)
-    const deltaBase = {
-      pricedAttempts: Math.max(0, next.pricedAttempts - (previous?.pricedAttempts ?? 0)),
-      unpricedAttempts: Math.max(0, next.unpricedAttempts - (previous?.unpricedAttempts ?? 0)),
-      includedAttempts: Math.max(0, (next.includedAttempts ?? 0) - (previous?.includedAttempts ?? 0)),
-      countedAttempts: Math.max(0, next.countedAttempts - (previous?.countedAttempts ?? 0)),
-      uncountedAttempts: Math.max(0, next.uncountedAttempts - (previous?.uncountedAttempts ?? 0)),
-      sourceComplete: next.sourceComplete,
-      contextPending: next.contextPending,
-      active:
-        next.active._tag === "Unavailable"
-          ? { _tag: "Unavailable" }
-          : { _tag: "Available", accumulatedMillis: Math.max(0, nextActive - previousActive) },
-    } satisfies ExecutionProjection.UsageState
-    let delta: ExecutionProjection.UsageState
-    if (costNanoUsd === undefined) {
-      if (tokens === undefined) delta = deltaBase
-      else delta = { ...deltaBase, tokens }
-    } else if (tokens === undefined) delta = { ...deltaBase, costNanoUsd }
-    else delta = { ...deltaBase, costNanoUsd, tokens }
-    const aggregate = ExecutionProjection.aggregateUsage([current.state, delta])
+    const aggregate = ExecutionProjection.aggregateUsage([current.state, usageDelta(previous, next)])
     const context = next.context ?? current.state.context
-    let active: ExecutionProjection.UsageState["active"]
-    if (aggregate.active._tag === "Unavailable") active = aggregate.active
-    else if (next.active._tag === "Available" && next.active.activeSince !== undefined)
-      active = {
-        _tag: "Available",
-        accumulatedMillis: aggregate.active.accumulatedMillis,
-        activeSince: next.active.activeSince,
-      }
-    else active = { _tag: "Available", accumulatedMillis: aggregate.active.accumulatedMillis }
+    const active = currentActive(aggregate, next)
     let contextCapacity = current.contextCapacity
     if (next.context !== undefined && turn?._tag === "AgentExecution")
       contextCapacity = {

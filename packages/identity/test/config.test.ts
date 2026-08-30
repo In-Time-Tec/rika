@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Redacted, Schema } from "effect"
+import { Effect, Inspectable, Redacted, Schema } from "effect"
 import { IdentityConfigError, loadIdentityConfig, type Environment } from "../src/config"
 
 const productionEnvironment = {
@@ -35,7 +35,7 @@ describe("IdentityConfig", () => {
       expect(config.resource).toBe("https://api.example.com/api/v1")
       expect(config.trustedOrigins).toEqual(["https://api.example.com", "https://console.example.com"])
       expect(Redacted.value(config.databaseUrl)).toBe(productionEnvironment.DATABASE_URL)
-      expect(String(config.authSecret)).not.toContain(productionEnvironment.BETTER_AUTH_SECRET)
+      expect(Inspectable.toStringUnknown(config.authSecret)).not.toContain(productionEnvironment.BETTER_AUTH_SECRET)
       expect(config.github?.clientId).toBe("github-client")
       expect(config.mail?.emailFrom).toBe("Rika <no-reply@example.com>")
     }),

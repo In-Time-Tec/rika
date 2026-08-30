@@ -5,10 +5,9 @@ import type { ThreadItem } from "../../state/thread/model"
 import { Function } from "effect"
 import { isLoading } from "../../state/loadable"
 import { filteredThreads } from "../../state/thread/navigation"
-import { escapeControlCharacters } from "../../presentation/terminal/format"
+import { escapeControlCharacters, truncateToWidth } from "../../presentation/terminal/format"
 import { relativeTime } from "../../presentation/terminal/relative-time"
 import { colors } from "../../presentation/terminal/theme"
-import { truncateToWidth } from "../../presentation/terminal/format"
 const threadAge = (updatedAt: number | undefined, now: number): string =>
   updatedAt === undefined || updatedAt <= 0 ? "" : relativeTime(now - updatedAt)
 

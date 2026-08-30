@@ -1,9 +1,8 @@
-import { Service } from "@rika/product/goal-repository"
+import { RepositoryError, Service } from "@rika/product/goal-repository"
 export { Service }
 import { eq, ne } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Layer, Schema } from "effect"
-import { RepositoryError } from "@rika/product/goal-repository"
 import { Goal } from "@rika/product/goal-record"
 import { rikaGoals } from "../database/schema/product"
 

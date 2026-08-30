@@ -27,11 +27,11 @@ const ApplyInput = Schema.Struct({
   replacements: Schema.Array(Replacement).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 })
 
-const run = (request: typeof CodingToolRuntime.Request.Type) =>
+const run = (request: CodingToolRuntime.Request) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const applyOne = (replacement: typeof Replacement.Type) => {
-  const request: typeof CodingToolRuntime.Request.Type =
+  const request: CodingToolRuntime.Request =
     replacement.replaceAll === undefined
       ? { _tag: "Edit", path: replacement.path, oldStr: replacement.oldStr, newStr: replacement.newStr }
       : {

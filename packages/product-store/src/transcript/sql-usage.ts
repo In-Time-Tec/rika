@@ -81,19 +81,21 @@ const replaceOptional = (
 
 const activeMillis = (usage: ExecutionProjection.UsageState | undefined) =>
   usage?.active._tag === "Available" ? usage.active.accumulatedMillis : 0
-
-const replaceContribution = (
+const count = (condition: boolean) => (condition ? 1 : 0)
+const replaceInputTotals = (
   current: UsageAccumulator,
   previous: ExecutionProjection.UsageState | undefined,
   next: ExecutionProjection.UsageState,
-): UsageAccumulator => ({
-  contributions: current.contributions + (previous === undefined ? 1 : 0),
-  incomplete: current.incomplete - (previous?.sourceComplete === false ? 1 : 0) + (next.sourceComplete ? 0 : 1),
-  costNanoUsd: replaceOptional(current.costNanoUsd, previous?.costNanoUsd, next.costNanoUsd),
-  tokens: current.tokens - (previous?.tokens === undefined ? 0 : 1) + (next.tokens === undefined ? 0 : 1),
-  tokenTotal: replaceOptional(current.tokenTotal, previous?.tokens?.total, next.tokens?.total),
+) => ({
   inputTotal: replaceOptional(current.inputTotal, previous?.tokens?.input.total, next.tokens?.input.total),
   inputUncached: replaceOptional(current.inputUncached, previous?.tokens?.input.uncached, next.tokens?.input.uncached),
+  ...replaceInputCacheTotals(current, previous, next),
+})
+const replaceInputCacheTotals = (
+  current: UsageAccumulator,
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+) => ({
   inputCacheRead: replaceOptional(
     current.inputCacheRead,
     previous?.tokens?.input.cacheRead,
@@ -104,8 +106,22 @@ const replaceContribution = (
     previous?.tokens?.input.cacheWrite,
     next.tokens?.input.cacheWrite,
   ),
+})
+const replaceOutputTotals = (
+  current: UsageAccumulator,
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+) => ({
+  tokenTotal: replaceOptional(current.tokenTotal, previous?.tokens?.total, next.tokens?.total),
   outputTotal: replaceOptional(current.outputTotal, previous?.tokens?.output.total, next.tokens?.output.total),
   outputText: replaceOptional(current.outputText, previous?.tokens?.output.text, next.tokens?.output.text),
+  ...replaceOutputRemainder(current, previous, next),
+})
+const replaceOutputRemainder = (
+  current: UsageAccumulator,
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+) => ({
   outputReasoning: replaceOptional(
     current.outputReasoning,
     previous?.tokens?.output.reasoning,
@@ -116,27 +132,40 @@ const replaceContribution = (
     previous?.tokens?.failedProviderTotal,
     next.tokens?.failedProviderTotal,
   ),
+})
+
+const replaceContribution = (
+  current: UsageAccumulator,
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+): UsageAccumulator => ({
+  ...replaceInputTotals(current, previous, next),
+  ...replaceOutputTotals(current, previous, next),
+  contributions: current.contributions + count(previous === undefined),
+  incomplete: current.incomplete - count(previous?.sourceComplete === false) + count(!next.sourceComplete),
+  costNanoUsd: replaceOptional(current.costNanoUsd, previous?.costNanoUsd, next.costNanoUsd),
+  tokens: current.tokens - count(previous?.tokens !== undefined) + count(next.tokens !== undefined),
+  ...replaceAttemptTotals(current, previous, next),
+  activeAvailable:
+    current.activeAvailable - count(previous?.active._tag === "Available") + count(next.active._tag === "Available"),
+  activeAccumulatedMillis: current.activeAccumulatedMillis - activeMillis(previous) + activeMillis(next),
+})
+
+const replaceAttemptTotals = (
+  current: UsageAccumulator,
+  previous: ExecutionProjection.UsageState | undefined,
+  next: ExecutionProjection.UsageState,
+) => ({
   pricedAttempts: current.pricedAttempts - (previous?.pricedAttempts ?? 0) + next.pricedAttempts,
   unpricedAttempts: current.unpricedAttempts - (previous?.unpricedAttempts ?? 0) + next.unpricedAttempts,
   includedAttempts: current.includedAttempts - (previous?.includedAttempts ?? 0) + (next.includedAttempts ?? 0),
   countedAttempts: current.countedAttempts - (previous?.countedAttempts ?? 0) + next.countedAttempts,
   uncountedAttempts: current.uncountedAttempts - (previous?.uncountedAttempts ?? 0) + next.uncountedAttempts,
-  activeAvailable:
-    current.activeAvailable -
-    (previous?.active._tag === "Available" ? 1 : 0) +
-    (next.active._tag === "Available" ? 1 : 0),
-  activeAccumulatedMillis: current.activeAccumulatedMillis - activeMillis(previous) + activeMillis(next),
 })
 
 const optional = (value: typeof OptionalSum.Type) => (value.present === 0 ? undefined : value.sum)
 
-const summarize = (
-  accumulator: UsageAccumulator,
-  newest: ExecutionProjection.UsageState | undefined,
-  context: ExecutionProjection.UsageState | undefined,
-  contextCapacity: ContextCapacity | undefined,
-  activeSince: number | undefined,
-): UsageSummary => {
+const tokenParts = (accumulator: UsageAccumulator) => {
   const input: ExecutionProjection.TokenTotals["input"] = {}
   const output: ExecutionProjection.TokenTotals["output"] = {}
   const inputTotal = optional(accumulator.inputTotal)
@@ -153,11 +182,23 @@ const summarize = (
   if (outputTotal !== undefined) Object.assign(output, { total: outputTotal })
   if (outputText !== undefined) Object.assign(output, { text: outputText })
   if (outputReasoning !== undefined) Object.assign(output, { reasoning: outputReasoning })
-  let active: ExecutionProjection.UsageState["active"]
-  if (accumulator.activeAvailable === 0) active = { _tag: "Unavailable" }
-  else if (activeSince === undefined)
-    active = { _tag: "Available", accumulatedMillis: accumulator.activeAccumulatedMillis }
-  else active = { _tag: "Available", accumulatedMillis: accumulator.activeAccumulatedMillis, activeSince }
+  return { input, output }
+}
+
+const activeUsage = (accumulator: UsageAccumulator, activeSince: number | undefined) => {
+  if (accumulator.activeAvailable === 0) return { _tag: "Unavailable" as const }
+  const available = { _tag: "Available" as const, accumulatedMillis: accumulator.activeAccumulatedMillis }
+  return activeSince === undefined ? available : { ...available, activeSince }
+}
+
+const summarize = (
+  accumulator: UsageAccumulator,
+  newest: ExecutionProjection.UsageState | undefined,
+  context: ExecutionProjection.UsageState | undefined,
+  contextCapacity: ContextCapacity | undefined,
+  activeSince: number | undefined,
+): UsageSummary => {
+  const { input, output } = tokenParts(accumulator)
   const usage: ExecutionProjection.UsageState = {
     pricedAttempts: accumulator.pricedAttempts,
     unpricedAttempts: accumulator.unpricedAttempts,
@@ -166,7 +207,7 @@ const summarize = (
     uncountedAttempts: accumulator.uncountedAttempts,
     sourceComplete: accumulator.contributions > 0 && accumulator.incomplete === 0,
     contextPending: newest?.contextPending ?? false,
-    active,
+    active: activeUsage(accumulator, activeSince),
   }
   const costNanoUsd = optional(accumulator.costNanoUsd)
   if (accumulator.pricedAttempts > 0 && costNanoUsd !== undefined) Object.assign(usage, { costNanoUsd })
@@ -181,6 +222,20 @@ const summarize = (
   if (context?.context !== undefined) Object.assign(usage, { context: context.context })
   return contextCapacity === undefined ? { usage } : { usage, contextCapacity }
 }
+
+const contextCapacityFor = (turn: Turn, next: ExecutionProjection.UsageState): ContextCapacity | undefined => {
+  if (next.context === undefined || turn._tag !== "AgentExecution") return undefined
+  return {
+    contextWindow: turn.executionRoute.main.compaction.contextWindow,
+    reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
+  }
+}
+
+const decodeOptionalUsage = (row: { readonly usageJson: string } | undefined) =>
+  row === undefined ? undefined : decodeUsage(row.usageJson)
+
+const decodeOptionalCapacity = (value: string | null | undefined) =>
+  value === null || value === undefined ? undefined : decodeCapacity(value)
 
 export const updateThreadUsage = Effect.fn("TranscriptRepository.updateThreadUsage")(function* (
   tx: Transaction,
@@ -209,13 +264,7 @@ export const updateThreadUsage = Effect.fn("TranscriptRepository.updateThreadUsa
     .where(eq(rikaTranscriptTurnUsage.turnId, turn.id))
     .limit(1))[0]
   const previous = stored === undefined ? undefined : decodeUsage(stored.usageJson)
-  const contextCapacity =
-    next.context === undefined || turn._tag !== "AgentExecution"
-      ? undefined
-      : {
-          contextWindow: turn.executionRoute.main.compaction.contextWindow,
-          reserveTokens: turn.executionRoute.main.compaction.reserveTokens,
-        }
+  const contextCapacity = contextCapacityFor(turn, next)
   yield* tx
     .insert(rikaTranscriptTurnUsage)
     .values({
@@ -262,11 +311,9 @@ export const updateThreadUsage = Effect.fn("TranscriptRepository.updateThreadUsa
     .limit(1))[0]
   const summary = summarize(
     accumulator,
-    newestRow === undefined ? undefined : decodeUsage(newestRow.usageJson),
-    contextRow === undefined ? undefined : decodeUsage(contextRow.usageJson),
-    contextRow?.contextCapacityJson === null || contextRow?.contextCapacityJson === undefined
-      ? undefined
-      : decodeCapacity(contextRow.contextCapacityJson),
+    decodeOptionalUsage(newestRow),
+    decodeOptionalUsage(contextRow),
+    decodeOptionalCapacity(contextRow?.contextCapacityJson),
     activeRow?.activeSince ?? undefined,
   )
   yield* tx

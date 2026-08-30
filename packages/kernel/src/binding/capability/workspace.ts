@@ -54,7 +54,7 @@ const ReplaceInput = Schema.Struct({
   replaceAll: Schema.optionalKey(Schema.Boolean),
 })
 
-const run = (request: typeof CodingToolRuntime.Request.Type) =>
+const run = (request: CodingToolRuntime.Request) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const read = (result: CodingToolResult.Result) => ({ text: result.text, truncated: result.truncated })
@@ -102,7 +102,7 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
     output: Listed,
     failure: Failure,
     handle: (input) => {
-      let request: typeof CodingToolRuntime.Request.Type = { _tag: "List" }
+      let request: CodingToolRuntime.Request = { _tag: "List" }
       if (input.path !== undefined) request = { ...request, path: input.path }
       if (input.depth !== undefined) request = { ...request, depth: input.depth }
       return Effect.map(run(request), listed)

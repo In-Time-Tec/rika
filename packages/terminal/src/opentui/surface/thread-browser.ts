@@ -13,6 +13,14 @@ export interface ThreadBrowserLayout {
   readonly listWidth: number
 }
 
+interface PreviewLayout {
+  readonly horizontal: boolean
+  readonly listWidth: number
+  readonly listHeight: number
+  readonly previewWidth: number
+  readonly previewHeight: number
+}
+
 const previewDocuments = new WeakMap<ReadyPreview, Model>()
 
 const previewDocument = (preview: ReadyPreview, workspace: string, mode: Model["mode"]): Model => {
@@ -85,15 +93,38 @@ export class ThreadBrowser {
     parent.add(this.root)
   }
 
+  private previewLayout(model: Model, width: number, height: number): PreviewLayout {
+    const horizontal = model.width >= 120
+    const listWidth = threadSwitcherListWidth(model, width)
+    const listHeight = horizontal ? height : Math.max(5, Math.min(height - 4, Math.floor(height * 0.42)))
+    return {
+      horizontal,
+      listWidth,
+      listHeight,
+      previewWidth: horizontal ? Math.max(4, width - listWidth - 2) : width,
+      previewHeight: horizontal ? Math.max(4, height - 3) : Math.max(4, height - listHeight - 2),
+    }
+  }
+
+  private showPreviewStatus(model: Model, previewWidth: number, previewHeight: number): void {
+    this.transcript.scrollbar.visible = false
+    let label = "No preview"
+    if (model.threadPreview._tag === "Loading") label = "Loading preview"
+    else if (model.threadPreview._tag === "Failed") label = "Preview unavailable"
+    const innerWidth = Math.max(1, previewWidth - 2)
+    const clipped = label.slice(0, innerWidth)
+    const left = Math.max(0, Math.floor((innerWidth - clipped.length) / 2))
+    this.status.content = new StyledText([fg(colors.text)(" ".repeat(left)), dim(fg(colors.text)(clipped))])
+    this.status.top = Math.max(0, Math.floor((previewHeight - 3) / 2))
+    this.status.width = innerWidth
+    this.status.visible = true
+  }
+
   update(model: Model, width: number, height: number, now: number): ThreadBrowserLayout {
     this.root.visible = true
     this.root.width = width
     this.root.height = height
-    const horizontal = model.width >= 120
-    const listWidth = threadSwitcherListWidth(model, width)
-    const listHeight = horizontal ? height : Math.max(5, Math.min(height - 4, Math.floor(height * 0.42)))
-    const previewWidth = horizontal ? Math.max(4, width - listWidth - 2) : width
-    const previewHeight = horizontal ? Math.max(4, height - 3) : Math.max(4, height - listHeight - 2)
+    const { horizontal, listWidth, listHeight, previewWidth, previewHeight } = this.previewLayout(model, width, height)
     this.list.width = listWidth
     this.list.height = listHeight
     this.list.content = threadSwitcherListContent(model, listWidth, listHeight, now)
@@ -132,17 +163,7 @@ export class ThreadBrowser {
       this.status.visible = false
       return { listWidth }
     }
-    this.transcript.scrollbar.visible = false
-    let label = "No preview"
-    if (model.threadPreview._tag === "Loading") label = "Loading preview"
-    else if (model.threadPreview._tag === "Failed") label = "Preview unavailable"
-    const innerWidth = Math.max(1, previewWidth - 2)
-    const clipped = label.slice(0, innerWidth)
-    const left = Math.max(0, Math.floor((innerWidth - clipped.length) / 2))
-    this.status.content = new StyledText([fg(colors.text)(" ".repeat(left)), dim(fg(colors.text)(clipped))])
-    this.status.top = Math.max(0, Math.floor((previewHeight - 3) / 2))
-    this.status.width = innerWidth
-    this.status.visible = true
+    this.showPreviewStatus(model, previewWidth, previewHeight)
     return { listWidth }
   }
 

@@ -82,6 +82,68 @@ const latestOutcomeFor = (
   return selected?.source.outcome
 }
 
+interface SourceUpdate {
+  readonly sources: ReadonlyMap<string, ExecutionOutcomeSource>
+  readonly changedOwners: ReadonlySet<string>
+  readonly changed: boolean
+}
+
+const updateSources = (
+  current: ReadonlyMap<string, ExecutionOutcomeSource>,
+  units: ReadonlyArray<Unit>,
+  removedKeys: ReadonlyArray<string>,
+  writtenToolIds: ReadonlySet<string>,
+  parentId?: string,
+): SourceUpdate => {
+  const sources = new Map(current)
+  const changedOwners = new Set<string>()
+  let changed = false
+  for (const key of removedKeys) {
+    const previous = sources.get(key)
+    if (previous === undefined) continue
+    sources.delete(key)
+    changedOwners.add(previous.owner)
+    changed = true
+  }
+  for (const candidate of units) {
+    const owner = parentId ?? candidate.parentId
+    const previous = sources.get(candidate.key)
+    if (candidate.executionOutcome === undefined || owner === undefined) {
+      if (previous === undefined) continue
+      sources.delete(candidate.key)
+      changedOwners.add(previous.owner)
+      changed = true
+      continue
+    }
+    if (
+      previous?.owner === owner &&
+      previous.outcome === candidate.executionOutcome &&
+      previous.revision === candidate.revision
+    )
+      continue
+    sources.set(candidate.key, { owner, outcome: candidate.executionOutcome, revision: candidate.revision })
+    if (previous !== undefined) changedOwners.add(previous.owner)
+    changedOwners.add(owner)
+    changed = true
+  }
+  for (const owner of writtenToolIds) changedOwners.add(owner)
+  return { sources, changedOwners, changed }
+}
+
+const reconcileOutcomes = (
+  current: Readonly<Record<string, ExecutionOutcome>>,
+  sources: ReadonlyMap<string, ExecutionOutcomeSource>,
+  changedOwners: ReadonlySet<string>,
+): Readonly<Record<string, ExecutionOutcome>> => {
+  const changed = new Map(Object.entries(current))
+  for (const owner of changedOwners) {
+    const next = latestOutcomeFor(sources, owner)
+    if (next === undefined) changed.delete(owner)
+    else changed.set(owner, next)
+  }
+  return Object.fromEntries(changed)
+}
+
 const updateExecutionOutcomesImpl = (
   model: Model,
   units: ReadonlyArray<Unit>,
@@ -91,59 +153,12 @@ const updateExecutionOutcomesImpl = (
 ): Model => {
   const currentOutcomes = decodeOutcomes(model.childExecutionOutcomes)
   const currentSources = outcomeSources.get(model.childExecutionOutcomes) ?? new Map<string, ExecutionOutcomeSource>()
-  const sources = new Map(currentSources)
-  let sourcesChanged = false
-  const changedOwners = new Set<string>()
-  const writeSources = () => {
-    sourcesChanged = true
-    return sources
-  }
-  for (const key of removedKeys) {
-    const previous = sources.get(key)
-    if (previous === undefined) continue
-    writeSources().delete(key)
-    changedOwners.add(previous.owner)
-  }
-  for (const candidate of units) {
-    const owner = parentId ?? candidate.parentId
-    const previous = sources.get(candidate.key)
-    if (candidate.executionOutcome === undefined || owner === undefined) {
-      if (previous !== undefined) {
-        writeSources().delete(candidate.key)
-        changedOwners.add(previous.owner)
-      }
-      continue
-    }
-    if (
-      previous?.owner === owner &&
-      previous.outcome === candidate.executionOutcome &&
-      previous.revision === candidate.revision
-    )
-      continue
-    writeSources().set(candidate.key, {
-      owner,
-      outcome: candidate.executionOutcome,
-      revision: candidate.revision,
-    })
-    if (previous !== undefined) changedOwners.add(previous.owner)
-    changedOwners.add(owner)
-  }
-  for (const owner of writtenToolIds) changedOwners.add(owner)
+  const sourceUpdate = updateSources(currentSources, units, removedKeys, writtenToolIds, parentId)
+  const { sources, changedOwners } = sourceUpdate
+  const sourcesChanged = sourceUpdate.changed
   if (!sourcesChanged && changedOwners.size === 0) return model
-  const outcomes = { ...currentOutcomes }
-  let outcomesChanged = sourcesChanged
-  for (const owner of changedOwners) {
-    const next = latestOutcomeFor(sources, owner)
-    if (next === undefined) {
-      if (outcomes[owner] !== undefined) {
-        delete outcomes[owner]
-        outcomesChanged = true
-      }
-    } else if (outcomes[owner] !== next) {
-      outcomes[owner] = next
-      outcomesChanged = true
-    }
-  }
+  const outcomes = reconcileOutcomes(currentOutcomes, sources, changedOwners)
+  const outcomesChanged = sourcesChanged || changedOwners.size > 0
   const outcomeRecord = outcomesChanged ? outcomes : currentOutcomes
   if (sourcesChanged) outcomeSources.set(outcomeRecord, sources)
   let projected: Model = outcomesChanged ? { ...model, childExecutionOutcomes: outcomeRecord } : model

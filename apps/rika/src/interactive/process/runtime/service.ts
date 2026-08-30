@@ -4,17 +4,22 @@ import * as ProcessLifecycle from "../lifecycle/contract"
 import * as ProcessPrompt from "../input/prompt"
 import * as ProcessWorkspace from "../workspace/context"
 import * as ProcessLayer from "./layer"
+import { pendingActionConsumer } from "./pending-action"
 import * as ProcessSignals from "../lifecycle/signals"
-import * as PaletteController from "../../controller/palette"
-import { classifyPrompt, displayInput, promptParts } from "@rika/terminal/terminal-session"
-import { execute, type Adapter, type ModelTuning } from "@rika/terminal/terminal-session"
+import {
+  classifyPrompt,
+  displayInput,
+  type Adapter,
+  type ModelTuning,
+  promptParts,
+} from "@rika/terminal/terminal-session"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import type { Mode } from "@rika/terminal/terminal-state"
 type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
-import { Cause, Clock, Deferred, Effect, Exit, Fiber, FileSystem, Option, Schema, SubscriptionRef } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, FileSystem, SubscriptionRef } from "effect"
 import * as Logging from "../../../diagnostics/file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { InteractiveRuntimeContext } from "./context"
@@ -148,8 +153,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       Deferred.doneUnsafe(loop.forceQuit, Effect.void)
       return
     }
-    if (lifecycle._tag === "Running")
-      loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
+    if (lifecycle._tag === "Running") loop.renderer?.surface.showToast("Quitting… press ctrl+c again to force quit")
     close(tuiSignalExitCode("SIGINT"), true, now)
   })
   const terminate = () => close(tuiSignalExitCode("SIGTERM"))
@@ -260,7 +264,8 @@ export const makeProcessRuntime = (runtime: Runtime) => {
     const generation = (loop.selectionGeneration += 1)
     loop.newThreadSelectionGeneration = acceptsCreatedThread ? generation : undefined
     const previous = loop.selectionFiber
-    let selectedFiber: Fiber.Fiber<void, never>
+    let selectedFiber: Fiber.Fiber<void, never> | undefined = undefined
+    let settled = false
     selectedFiber = fork(
       (previous === undefined ? Effect.void : Fiber.interrupt(previous)).pipe(
         Effect.andThen(
@@ -279,12 +284,13 @@ export const makeProcessRuntime = (runtime: Runtime) => {
         ),
         Effect.ensuring(
           Effect.sync(() => {
+            settled = true
             if (loop.selectionFiber === selectedFiber) loop.selectionFiber = undefined
           }),
         ),
       ),
     )
-    loop.selectionFiber = selectedFiber
+    if (!settled) loop.selectionFiber = selectedFiber
     return selectedFiber
   }
   requestSelectionResync = (threadId) => {
@@ -419,70 +425,7 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const newOrbThread = session.newOrbThread
   if (newOrbThread !== undefined) adapter.newOrbThread = () => startSelection(() => newOrbThread, true)
-  const SetSubagentLimit = Schema.TaggedStruct("SetSubagentLimit", {
-    limit: Schema.Literals(["maxDepth", "maxSubagents"]),
-    value: Schema.Finite,
-  })
-  const PromptPartSchema = Schema.Union([
-    Schema.Struct({ type: Schema.Literal("text"), text: Schema.String, pasted: Schema.optionalKey(Schema.Boolean) }),
-    Schema.Struct({ type: Schema.Literal("image"), path: Schema.String }),
-  ])
-  const PendingAction = Schema.Union([
-    SetSubagentLimit,
-    Schema.TaggedStruct("Submit", {
-      prompt: Schema.String,
-      parts: Schema.Array(PromptPartSchema),
-      mode: Schema.String,
-      tuning: Schema.optionalKey(Schema.Struct({ fastMode: Schema.optionalKey(Schema.Boolean) })),
-      submissionId: Schema.optionalKey(Schema.String),
-    }),
-    Schema.TaggedStruct("EditQueued", { id: Schema.String, prompt: Schema.String }),
-    Schema.TaggedStruct("SteerQueued", { id: Schema.String, prompt: Schema.String, requestId: Schema.String }),
-    Schema.TaggedStruct("Dequeue", { id: Schema.String }),
-    Schema.TaggedStruct("Steer", {
-      prompt: Schema.String,
-      requestId: Schema.String,
-      turnId: Schema.optionalKey(Schema.String),
-    }),
-    Schema.TaggedStruct("ApproveAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
-    Schema.TaggedStruct("DenyAuthorization", { turnId: Schema.String, authorizationId: Schema.String }),
-    Schema.TaggedStruct("InterruptAndSend", { prompt: Schema.String }),
-    Schema.TaggedStruct("Cancel", {
-      submissionId: Schema.optionalKey(Schema.String),
-      threadId: Schema.optionalKey(Schema.String),
-    }),
-    Schema.TaggedStruct("Quit", {}),
-    Schema.TaggedStruct("NewThread", {}),
-    Schema.TaggedStruct("NewOrbThread", {}),
-    Schema.TaggedStruct("SelectThread", { id: Schema.String }),
-  ])
-  const consumePendingAction = () => {
-    const decoded = Schema.decodeUnknownOption(PendingAction)(loop.model.pendingAction)
-    if (Option.isNone(decoded)) {
-      loop.model = update(loop.model, { _tag: "PaletteActionConsumed" })
-      return
-    }
-    const action = decoded.value
-    if (action._tag === "SetSubagentLimit")
-      run(
-        PaletteController.writeSubagentLimit(loop.model.workspace, action.limit, action.value).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              loop.renderer?.surface.showToast(
-                `${action.limit === "maxDepth" ? "Max depth" : "Max subagents"} set to ${action.value}`,
-              )
-            }),
-          ),
-          Effect.catch(() =>
-            Effect.sync(() => {
-              loop.renderer?.surface.showToast("Could not update workspace subagent settings", "#e06c75")
-            }),
-          ),
-        ),
-      )
-    else execute(adapter, action)
-    loop.model = update(loop.model, { _tag: "PaletteActionConsumed" })
-  }
+  const consumePendingAction = pendingActionConsumer({ loop, adapter, run })
 
   return {
     pauseTerminal,

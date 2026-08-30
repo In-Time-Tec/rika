@@ -1,11 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Ref, Semaphore } from "effect"
 import { testing } from "../../src/host/service"
+import type { IncomingMessage } from "../../src/protocol/messages"
+
+type PhaseGrant = Extract<IncomingMessage, { readonly _tag: "PhaseEnvironmentGranted" }>
 
 describe("hosted phase environment", () => {
   it.effect("keeps phase values in memory and restarts kernels when runtime authorization changes", () =>
     Effect.gen(function* () {
-      const grants = yield* Ref.make(new Map())
+      const grants = yield* Ref.make(new Map<string, PhaseGrant>())
       const applied = yield* Ref.make(new Map([["session-1", `sha256:${"a".repeat(64)}`]]))
       const access = yield* Semaphore.make(1)
       const environment = { SETUP_TOKEN: "setup-value" }
@@ -33,7 +36,7 @@ describe("hosted phase environment", () => {
         executor,
         access,
       )
-      expect(environment).toEqual({ RUNTIME_TOKEN: "runtime-value" })
+      expect(environment).toEqual({ SETUP_TOKEN: "setup-value", RUNTIME_TOKEN: "runtime-value" })
       expect(restarts).toEqual(["session-1"])
       expect(yield* Ref.get(applied)).toEqual(new Map([["session-1", `sha256:${"b".repeat(64)}`]]))
       expect(yield* Ref.get(grants)).toEqual(new Map())

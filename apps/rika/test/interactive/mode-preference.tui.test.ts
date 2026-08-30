@@ -1,6 +1,6 @@
 import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import * as TuiApp from "../support/tui-app.harness"
 import { model } from "../support/tui-model.fixture"
 
@@ -83,11 +83,12 @@ test(
         ])
         expect(cells?.at(0)?.result).toMatchObject({ processId: "1", running: true })
         expect(cells?.at(1)?.result).toMatchObject({ running: true })
-        expect(cells?.at(2)?.result).toMatchObject({
-          text: expect.stringContaining("FINAL_OUTPUT"),
-          running: false,
-          exitCode: 0,
-        })
+        const completedResult = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ text: Schema.String, running: Schema.Boolean, exitCode: Schema.Finite }),
+        )(cells?.at(2)?.result).pipe(Effect.orDie)
+        expect(completedResult.running).toBe(false)
+        expect(completedResult.exitCode).toBe(0)
+        expect(completedResult.text).toContain("FINAL_OUTPUT")
         expect(cells?.every(({ status }) => status === "complete")).toBe(true)
 
         app.pressKey("\t")

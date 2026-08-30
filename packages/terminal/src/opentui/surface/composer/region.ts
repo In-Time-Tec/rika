@@ -168,6 +168,34 @@ const modeDescription = new Map<string, string>(
   }),
 )
 
+const modeDial = (
+  width: number,
+  center: number,
+  thumbWidth: number,
+  target: number,
+  from: number,
+  turning: boolean,
+): string => {
+  const dial = Array.from({ length: width }, () => "╌")
+  for (let index = 0; index < thumbWidth; index += 1) if (center + index < dial.length) dial[center + index] = "━"
+  if (turning) {
+    const edge = target >= from ? center + thumbWidth : center - 1
+    if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
+  }
+  return dial.join("")
+}
+
+const modeLabelChunks = (labels: ReturnType<typeof modeSelectorLabels>, selected: string): Array<TextChunk> => {
+  const chunks: Array<TextChunk> = []
+  let column = 0
+  for (const label of labels) {
+    chunks.push(fg(colors.text)(" ".repeat(Math.max(0, label.start - column))))
+    chunks.push(label.mode === selected ? bold(fg(modeColor(selected))(label.text)) : dim(fg(colors.text)(label.text)))
+    column = label.end
+  }
+  return chunks
+}
+
 export const paletteContent: {
   (
     arg1: Parameters<typeof paletteContentImpl>[1],
@@ -201,23 +229,10 @@ const modePickerContentImpl = (model: Model, innerWidth: number): StyledText => 
   const from = modeSelectorNotchAtPosition(labels, fromPosition)
   const targetLabel = labels[model.modePicker.selected]
   const thumbWidth = targetLabel === undefined ? selected.length : targetLabel.end - targetLabel.start
-  const dial = Array.from({ length: innerWidth }, () => "╌")
-  for (let index = 0; index < thumbWidth; index += 1) if (center + index < dial.length) dial[center + index] = "━"
-  if (model.modePicker.turnTick !== undefined) {
-    const edge = target >= from ? center + thumbWidth : center - 1
-    if (edge >= 0 && edge < dial.length) dial[edge] = "╾"
-  }
+  const dial = modeDial(innerWidth, center, thumbWidth, target, from, model.modePicker.turnTick !== undefined)
   if (!compact) line("")
-  line(dial.join(""), (value) => fg(modeColor(selected))(value))
-  const labelChunks: Array<TextChunk> = []
-  let column = 0
-  for (const label of labels) {
-    labelChunks.push(fg(colors.text)(" ".repeat(Math.max(0, label.start - column))))
-    labelChunks.push(
-      label.mode === selected ? bold(fg(modeColor(selected))(label.text)) : dim(fg(colors.text)(label.text)),
-    )
-    column = label.end
-  }
+  line(dial, (value) => fg(modeColor(selected))(value))
+  const labelChunks = modeLabelChunks(labels, selected)
   chunks.push(fg(colors.text)("\n"), ...labelChunks)
   if (compact) {
     line(modeDescription.get(selected) ?? `${selected} mode`, (value) => fg(colors.muted)(value))

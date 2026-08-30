@@ -61,6 +61,33 @@ export interface QueueDeltaResult {
   readonly resync: boolean
 }
 
+interface AppliedChange {
+  readonly queue: Array<QueueItem>
+  readonly selection: string | undefined
+  readonly resync: boolean
+}
+
+const applyChange = (model: Model, change: QueueChange): AppliedChange => {
+  const queue = [...model.queue]
+  let selection = model.queueSelection
+  if (change._tag === "Added") {
+    const existing = queue.findIndex((item) => item.id === change.item.id)
+    if (existing >= 0 && queue[existing]!.provisional !== true) return { queue, selection, resync: true }
+    if (existing >= 0) queue[existing] = change.item
+    else queue.splice(Math.min(change.position ?? queue.length, queue.length), 0, change.item)
+    return { queue, selection, resync: false }
+  }
+  const id = change._tag === "Updated" ? change.item.id : change.turnId
+  const index = queue.findIndex((item) => item.id === id)
+  if (index < 0) return { queue, selection, resync: true }
+  if (change._tag === "Updated") queue[index] = change.item
+  else {
+    queue.splice(index, 1)
+    if (selection === change.turnId) selection = queue[Math.min(index, queue.length - 1)]?.id
+  }
+  return { queue, selection, resync: false }
+}
+
 export const applyQueueDelta: {
   (model: Model, threadId: string, revision: number, change: QueueChange, queuedCount?: number): QueueDeltaResult
   (threadId: string, revision: number, change: QueueChange, queuedCount?: number): (model: Model) => QueueDeltaResult
@@ -71,23 +98,9 @@ export const applyQueueDelta: {
     if (model.queueThreadId !== threadId || model.queueRevision === undefined) return { model, resync: true }
     if (revision <= model.queueRevision) return { model, resync: false }
     if (revision !== model.queueRevision + 1) return { model, resync: true }
-    const queue = [...model.queue]
-    let selection = model.queueSelection
-    if (change._tag === "Added") {
-      const existing = queue.findIndex((item) => item.id === change.item.id)
-      if (existing >= 0 && queue[existing]!.provisional !== true) return { model, resync: true }
-      if (existing >= 0) queue[existing] = change.item
-      else queue.splice(Math.min(change.position ?? queue.length, queue.length), 0, change.item)
-    } else if (change._tag === "Updated") {
-      const index = queue.findIndex((item) => item.id === change.item.id)
-      if (index < 0) return { model, resync: true }
-      queue[index] = change.item
-    } else {
-      const index = queue.findIndex((item) => item.id === change.turnId)
-      if (index < 0) return { model, resync: true }
-      queue.splice(index, 1)
-      if (model.queueSelection === change.turnId) selection = queue[Math.min(index, queue.length - 1)]?.id
-    }
+    const applied = applyChange(model, change)
+    if (applied.resync) return { model, resync: true }
+    const { queue, selection } = applied
     return {
       model: {
         ...model,

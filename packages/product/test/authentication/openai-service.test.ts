@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { CredentialDisk } from "@rika/product/openai-auth-contract"
 import { Effect, Exit, Option, Redacted, Schema } from "effect"
 import { AuthError, Host, Http } from "./openai-service.fixture"
 import { Service } from "./openai-service.fake"
@@ -15,13 +16,16 @@ describe("OpenAI browser authentication", () => {
     return Effect.gen(function* () {
       const service = yield* Service
       const credential = yield* service.loginBrowser()
-      expect(credential.generation).toBe(Option.getOrThrow(store.value()).generation)
-      expect(credential.fingerprint).toBe(Option.getOrThrow(store.value()).fingerprint)
+      const stored = store.value()
+      expect(Option.isSome(stored)).toBe(true)
+      if (Option.isNone(stored)) return
+      const persisted = yield* Schema.encodeEffect(Schema.fromJsonString(CredentialDisk))(stored.value)
+      expect(persisted).toContain(credential.generation)
+      expect(persisted).toContain(credential.fingerprint)
       expect(credential.fingerprint).not.toContain("account-secret")
-      expect(yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(credential)).not.toContain(
-        "refresh-secret",
-      )
-      expect(String(credential.accountId)).not.toContain("account-secret")
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(credential)
+      expect(encoded).not.toContain("refresh-secret")
+      expect(encoded).not.toContain("account-secret")
     }).pipe(provideLayer(dependencies(store.layer, http, host)))
   })
 

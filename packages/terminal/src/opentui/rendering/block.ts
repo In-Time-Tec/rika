@@ -1,4 +1,4 @@
-import type { ColorInput, TextChunk } from "@opentui/core"
+import { bg, dim, fg, StyledText, underline, type ColorInput, type TextChunk } from "@opentui/core"
 import { Function, Schema } from "effect"
 import { subagentPhrase } from "@rika/transcript/subagent-presentation"
 import { cellBodyText } from "@rika/transcript/cell-presentation"
@@ -14,9 +14,7 @@ import {
   truncateToWidth,
 } from "../../presentation/terminal/format"
 import { renderDiff } from "../../presentation/tool/diff-renderer"
-import { fg, dim, bg, underline, StyledText } from "@opentui/core"
-import { boundedThreadSidebarWidth } from "../../state/layout/model"
-import { fileSidebarLayoutWidth } from "../../state/layout/model"
+import { boundedThreadSidebarWidth, fileSidebarLayoutWidth } from "../../state/layout/model"
 import { decodeThreadItems } from "../../state/thread/model"
 import { isThreadBusy } from "../../state/thread/predicate"
 import { toOpenColor } from "./text-adapter"
@@ -60,78 +58,103 @@ const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, c
   if (cancelled) return "⊘"
   return failed ? "✕" : "✓"
 }
+const cardIcon = (block: Extract<TranscriptBlock, { _tag: "SubagentCard" | "AuthorizationCard" }>): string => {
+  if (block.status === "queued") return "◷"
+  if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") return "⠿"
+  if (block.status === "complete" || block.status === "approved") return "✓"
+  if (block.status === "cancelled") return "⊘"
+  if (block.status === "pending") return "?"
+  return block._tag === "AuthorizationCard" ? "✕" : "✗"
+}
+const renderCardBlock = (
+  block: Extract<TranscriptBlock, { _tag: "SubagentCard" | "AuthorizationCard" }>,
+  body: (text: string) => string,
+): string => {
+  if (block._tag === "AuthorizationCard")
+    return `${cardIcon(block)} Authorization ${block.status}: ${block.operation} · ${block.capability}`
+  const detail = block.summary.length === 0 ? block.prompt : block.summary
+  return `${cardIcon(block)} ${subagentPhrase(block.name, block.status)}${detail.length === 0 ? "" : `\n${body(detail)}`}`
+}
+const renderCompaction = (
+  block: Extract<TranscriptBlock, { _tag: "Compaction" }>,
+  body: (text: string) => string,
+): string => {
+  if (block.status === "running") return "↻ Auto-compacting context…"
+  if (block.status === "failed") return `✗ Auto-compaction failed\n${body(block.summary)}`
+  if (block.status === "cancelled") return "⊘ Auto-compaction cancelled"
+  return `${completedCompactionIcon} Auto-compacted${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
+}
+const renderToolCall = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): string => {
+  const running = block.status === "running"
+  const icon = iconChar(block.status === "failed", running, "⠿", block.status === "cancelled")
+  const label = running ? block.presentation.activeLabel : block.presentation.completeLabel
+  return `${icon} ${label}${block.detail.length === 0 ? "" : ` ${block.detail}`}`
+}
+const renderImageAttachment = (block: Extract<TranscriptBlock, { _tag: "ImageAttachment" }>): string => {
+  const dimensions = block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
+  const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
+  return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
+}
+const renderCell = (block: Extract<TranscriptBlock, { _tag: "Cell" }>, body: (text: string) => string): string => {
+  const running = block.status === "running"
+  const icon = iconChar(
+    block.status === "failed" || block.status === "unknown",
+    running,
+    "⠿",
+    block.status === "cancelled",
+  )
+  const output = cellBodyText(block)
+  const glyph = block.visual === "shell" ? " $" : ""
+  return `${icon}${glyph}${output.length === 0 ? "" : `\n${body(output)}`}`
+}
+const renderHeading = (text: string, width: number, body: (text: string) => string): string => {
+  const lines = wrapTextToWidth(text, Math.max(1, width))
+  const rest = lines.slice(1).join(" ")
+  return rest.length === 0 ? lines[0]! : `${lines[0]}\n${body(rest)}`
+}
+const renderError = (block: Extract<TranscriptBlock, { _tag: "Error" }>, width: number): string => {
+  const message = block.detail.length === 0 ? block.title : `${block.title}: ${block.detail}`
+  return wrapTextToWidth(formatCliError(message), Math.max(1, width)).join("\n")
+}
+const renderToolResult = (
+  block: Extract<TranscriptBlock, { _tag: "ToolResult" }>,
+  body: (text: string) => string,
+): string => `${block.failed ? "✕" : "✓"} Result\n${body(block.output)}`
 export const renderBlock: {
   (width?: number): (block: TranscriptBlock) => string
   (block: TranscriptBlock): string
   (block: TranscriptBlock, width?: number): string
 } = Function.dual(
   (args) => args.length > 1 || !Schema.is(Schema.Finite)(args[0]),
-  (block: TranscriptBlock, width = 80): string => {
+  (block: TranscriptBlock, width: number = 80): string => {
     const body = (text: string) => wrapBodyText(text, width, "  ")
-    const head = (text: string) => {
-      const lines = wrapTextToWidth(text, Math.max(1, width))
-      const rest = lines.slice(1).join(" ")
-      return rest.length === 0 ? lines[0]! : `${lines[0]}\n${body(rest)}`
-    }
     switch (block._tag) {
       case "Reasoning":
         return `◇ Reasoning\n${body(block.text)}`
-      case "ToolCall": {
-        const running = block.status === "running"
-        const icon = iconChar(block.status === "failed", running, "⠿", block.status === "cancelled")
-        const label = running ? block.presentation.activeLabel : block.presentation.completeLabel
-        return `${icon} ${label}${block.detail.length === 0 ? "" : ` ${block.detail}`}`
-      }
+      case "ToolCall":
+        return renderToolCall(block)
       case "ToolResult":
-        return `${block.failed ? "✕" : "✓"} Result\n${body(block.output)}`
+        return renderToolResult(block, body)
       case "Diff":
         return `Δ ${block.path}\n${renderDiff(block.patch, width)}`
       case "ContextUsage":
         return `◷ Context ${block.text}${block.cost === undefined ? "" : ` · ${block.cost}`}`
       case "Compaction":
-        if (block.status === "running") return "↻ Auto-compacting context…"
-        if (block.status === "failed") return `✗ Auto-compaction failed\n${body(block.summary)}`
-        if (block.status === "cancelled") return "⊘ Auto-compaction cancelled"
-        return `${completedCompactionIcon} Auto-compacted${block.summary.length === 0 ? "" : `\n${body(block.summary)}`}`
+        return renderCompaction(block, body)
       case "Notification":
-        return `${head(`! ${block.title}`)}\n${body(block.detail)}`
-      case "Error": {
-        const message = block.detail.length === 0 ? block.title : `${block.title}: ${block.detail}`
-        return wrapTextToWidth(formatCliError(message), Math.max(1, width)).join("\n")
-      }
+        return `${renderHeading(`! ${block.title}`, width, body)}\n${body(block.detail)}`
+      case "Error":
+        return renderError(block, width)
       case "SubagentCard": {
-        let icon = "✗"
-        if (block.status === "queued") icon = "◷"
-        else if (block.status === "running" || block.status === "waiting" || block.status === "cancelling") icon = "⠿"
-        else if (block.status === "complete") icon = "✓"
-        else if (block.status === "cancelled") icon = "⊘"
-        const detail = block.summary.length === 0 ? block.prompt : block.summary
-        return `${icon} ${subagentPhrase(block.name, block.status)}${detail.length === 0 ? "" : `\n${body(detail)}`}`
+        return renderCardBlock(block, body)
       }
       case "AuthorizationCard": {
-        let icon = "✕"
-        if (block.status === "pending") icon = "?"
-        else if (block.status === "approved") icon = "✓"
-        return `${icon} Authorization ${block.status}: ${block.operation} · ${block.capability}`
+        return renderCardBlock(block, body)
       }
-      case "ImageAttachment": {
-        const dimensions =
-          block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
-        const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
-        return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
-      }
-      case "Cell": {
-        const running = block.status === "running"
-        const icon = iconChar(
-          block.status === "failed" || block.status === "unknown",
-          running,
-          "⠿",
-          block.status === "cancelled",
-        )
-        const output = cellBodyText(block)
-        const glyph = block.visual === "shell" ? " $" : ""
-        return `${icon}${glyph}${output.length === 0 ? "" : `\n${body(output)}`}`
-      }
+      case "ImageAttachment":
+        return renderImageAttachment(block)
+      case "Cell":
+        return renderCell(block, body)
     }
   },
 )
@@ -142,7 +165,7 @@ export const renderSidebar: {
   (model: Model, spinnerFrame?: string): StyledText
 } = Function.dual(
   (args) => args.length > 1 || !Schema.is(Schema.String)(args[0]),
-  (model, spinnerFrame = "⠭"): StyledText => {
+  (model: Model, spinnerFrame: string = "⠭"): StyledText => {
     const chunks: Array<TextChunk> = []
     const threads = decodeThreadItems(model.threads)
     const sidebarWidth = boundedThreadSidebarWidth(model.width)

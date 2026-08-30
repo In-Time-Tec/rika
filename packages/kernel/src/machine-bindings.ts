@@ -9,7 +9,7 @@ import { Context, Data, Effect, Layer, Schema } from "effect"
 export type Services = CodingToolRuntime.Service | ShellProcessRegistry.Service | McpRuntime.McpRuntimeService
 
 export type Request =
-  | { readonly _tag: "CodingTool"; readonly request: typeof CodingToolRuntime.Request.Type }
+  | { readonly _tag: "CodingTool"; readonly request: CodingToolRuntime.Request }
   | { readonly _tag: "ProcessStop"; readonly processId: string }
   | { readonly _tag: "McpDiscover"; readonly server: McpConfiguration.Server }
   | {
@@ -47,7 +47,7 @@ export interface Interface {
 
 export class Client extends Context.Service<Client, Interface>()("@rika/kernel/machine-bindings/Client") {}
 
-const cancelledTool = (request: typeof CodingToolRuntime.Request.Type) =>
+const cancelledTool = (request: CodingToolRuntime.Request) =>
   CodingToolRuntime.ToolError.make({
     tool: request._tag === "Shell" ? "bash" : request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
     message: "Cell operation was cancelled before the machine tool completed.",
@@ -58,7 +58,7 @@ const cancelledTool = (request: typeof CodingToolRuntime.Request.Type) =>
     nextAction: "Submit a new request if this work should continue",
   })
 
-const uncertainTool = (request: typeof CodingToolRuntime.Request.Type, message: string) =>
+const uncertainTool = (request: CodingToolRuntime.Request, message: string) =>
   CodingToolRuntime.ToolError.make({
     tool: request._tag === "Shell" ? "bash" : request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase(),
     message,

@@ -10,10 +10,58 @@ import { filteredFiles } from "../../state/thread/navigation"
 import { paletteContent, modePickerContent } from "./composer/region"
 import { modeSelectorIndexAtColumn, modeSelectorLabels } from "../../presentation/terminal/mode-selector-layout"
 import { filePickerContent } from "./overlay-content"
-import { type ProjectedEditorRenderable } from "./renderables"
+import type { ProjectedEditorRenderable } from "./renderables"
 import { SurfacePointer } from "./pointer/model"
 
+const threadOverlayTitle = (model: Model): string =>
+  model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
+
 export abstract class SurfaceOverlay extends SurfacePointer {
+  private selectedOverlay(model: Model): "threads" | "files" | "modes" | "context" | "palette" | undefined {
+    if (model.threadSwitcher.open) return "threads"
+    if (model.palette.open || model.paletteOpen) return "palette"
+    if (model.filePicker.open) return "files"
+    if (model.modePicker.open) return "modes"
+    if (model.contextDetailsOpen) return "context"
+    return undefined
+  }
+
+  private renderPaletteOverlay(model: Model, composerTop: number): void {
+    const results = filter(model.palette.query)
+    const boxWidth = Math.max(1, Math.min(80, model.width - 4))
+    const boxHeight = Math.min(Math.max(1, composerTop), model.palette.limit === undefined ? results.length + 5 : 6)
+    this.paletteBox.width = boxWidth
+    this.paletteBox.height = boxHeight
+    this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
+    this.paletteBox.top = Math.max(0, Math.floor((composerTop - boxHeight) / 2))
+    if (model.palette.limit === "maxDepth") this.paletteBox.title = " Set Max Depth "
+    else if (model.palette.limit === "maxSubagents") this.paletteBox.title = " Set Max Subagents "
+    else this.paletteBox.title = " Command Palette "
+    this.paletteBox.titleColor = toOpenColor(colors.amber)
+    this.paletteBox.titleAlignment = "left"
+    this.palette.content =
+      model.palette.limit === undefined
+        ? paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
+        : `\n\nEnter an integer from 0 to 1024`
+    this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
+  }
+
+  private renderFileOverlay(model: Model, contentLeft: number, contentWidth: number, composerTop: number): void {
+    const entries = filteredFiles(model).map((file) => `@${file}`)
+    const maxRows = Math.max(1, Math.min(20, composerTop - 1))
+    const visibleEntries = entries.slice(0, Math.max(1, maxRows))
+    const innerWidth = Math.max(...visibleEntries.map((entry) => stringWidth(entry)), 19)
+    const availableWidth = contentWidth > 4 ? contentWidth - 4 : contentWidth
+    const boxWidth = Math.max(1, Math.min(innerWidth + 4, availableWidth))
+    const boxHeight = Math.min(Math.max(1, composerTop), Math.max(3, visibleEntries.length + 2))
+    this.paletteBox.width = boxWidth
+    this.paletteBox.height = boxHeight
+    this.paletteBox.left = contentLeft + Math.min(2, Math.max(0, contentWidth - boxWidth))
+    this.paletteBox.top = Math.max(0, composerTop - boxHeight)
+    this.paletteBox.title = ""
+    this.palette.content = filePickerContent(model, visibleEntries, Math.max(1, boxWidth - 4))
+  }
+
   private overlayDivider(label: string, width: number): StyledText {
     return new StyledText([
       fg(colors.text)("├─ "),
@@ -62,6 +110,11 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     this.overlayEditor.focusable = editor === this.overlayEditor
     editor.showCursor = true
   }
+  private finishOverlay(cursorEditor: ProjectedEditorRenderable): void {
+    this.focusEditor(cursorEditor)
+    if (cursorEditor !== this.overlayEditor) this.overlayEditor.visible = false
+    this.renderer.requestRender()
+  }
   protected refreshContextDetails(model: Model, width = this.paletteBox.width, height = this.paletteBox.height): void {
     this.palette.content = contextDetails(
       model,
@@ -72,12 +125,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
   }
   protected updateOverlay(model: Model, contentLeft: number, contentWidth: number, renderedInputHeight: number): void {
     const composerTop = model.height - renderedInputHeight
-    let overlay: "threads" | "files" | "modes" | "context" | "palette" | undefined
-    if (model.threadSwitcher.open) overlay = "threads"
-    else if (model.palette.open || model.paletteOpen) overlay = "palette"
-    else if (model.filePicker.open) overlay = "files"
-    else if (model.modePicker.open) overlay = "modes"
-    else if (model.contextDetailsOpen) overlay = "context"
+    const overlay = this.selectedOverlay(model)
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible && overlay !== "threads"
     if (overlay !== "threads") this.threadBrowser.hide()
@@ -93,23 +141,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
     this.palette.onMouseDown = undefined
     let cursorEditor: ProjectedEditorRenderable = this.composerEditor
     if (overlay === "palette") {
-      const results = filter(model.palette.query)
-      const boxWidth = Math.max(1, Math.min(80, model.width - 4))
-      const boxHeight = Math.min(Math.max(1, composerTop), model.palette.limit === undefined ? results.length + 5 : 6)
-      this.paletteBox.width = boxWidth
-      this.paletteBox.height = boxHeight
-      this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
-      this.paletteBox.top = Math.max(0, Math.floor((composerTop - boxHeight) / 2))
-      if (model.palette.limit === "maxDepth") this.paletteBox.title = " Set Max Depth "
-      else if (model.palette.limit === "maxSubagents") this.paletteBox.title = " Set Max Subagents "
-      else this.paletteBox.title = " Command Palette "
-      this.paletteBox.titleColor = toOpenColor(colors.amber)
-      this.paletteBox.titleAlignment = "left"
-      this.palette.content =
-        model.palette.limit === undefined
-          ? paletteContent(model, results, Math.max(1, boxWidth - 4), Math.max(1, boxHeight - 2))
-          : `\n\nEnter an integer from 0 to 1024`
-      this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
+      this.renderPaletteOverlay(model, composerTop)
       cursorEditor = this.overlayEditor
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
@@ -204,19 +236,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       }
       this.refreshContextDetails(model, boxWidth, boxHeight)
     } else if (overlay === "files") {
-      const entries = filteredFiles(model).map((file) => `@${file}`)
-      const maxRows = Math.max(1, Math.min(20, composerTop - 1))
-      const visibleEntries = entries.slice(0, Math.max(1, maxRows))
-      const innerWidth = Math.max(...visibleEntries.map((entry) => stringWidth(entry)), 19)
-      const availableWidth = contentWidth > 4 ? contentWidth - 4 : contentWidth
-      const boxWidth = Math.max(1, Math.min(innerWidth + 4, availableWidth))
-      const boxHeight = Math.min(Math.max(1, composerTop), Math.max(3, visibleEntries.length + 2))
-      this.paletteBox.width = boxWidth
-      this.paletteBox.height = boxHeight
-      this.paletteBox.left = contentLeft + Math.min(2, Math.max(0, contentWidth - boxWidth))
-      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
-      this.paletteBox.title = ""
-      this.palette.content = filePickerContent(model, visibleEntries, Math.max(1, boxWidth - 4))
+      this.renderFileOverlay(model, contentLeft, contentWidth, composerTop)
     } else if (overlay === "threads") {
       const overlayWidth = Math.max(1, Math.min(140, model.width - 4))
       const overlayHeight = Math.min(Math.max(1, composerTop), Math.max(6, composerTop - 2))
@@ -224,7 +244,7 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       this.paletteBox.height = overlayHeight
       this.paletteBox.left = Math.max(0, Math.floor((model.width - overlayWidth) / 2))
       this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
-      this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
+      this.paletteBox.title = threadOverlayTitle(model)
       this.paletteBox.titleAlignment = "left"
       this.renderOverlayHints([" Opt+W/Ctrl+T all workspaces ", " Esc close "], modeColor(model.mode), {
         left: this.paletteBox.left,
@@ -249,8 +269,6 @@ export abstract class SurfaceOverlay extends SurfacePointer {
       )
       cursorEditor = this.overlayEditor
     }
-    this.focusEditor(cursorEditor)
-    if (cursorEditor !== this.overlayEditor) this.overlayEditor.visible = false
-    this.renderer.requestRender()
+    this.finishOverlay(cursorEditor)
   }
 }

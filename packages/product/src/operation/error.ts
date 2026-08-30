@@ -1,7 +1,6 @@
 import * as ExecutionGateway from "../execution/gateway/service"
-import { Function } from "effect"
+import { Cause, Function, Schema } from "effect"
 import * as TurnRepository from "../thread/repository/turn"
-import { Cause, Schema } from "effect"
 import { StaleQueuedTurns } from "../thread/queue/pending-policy"
 
 export class OperationError extends Schema.TaggedError<OperationError>()("OperationError", {

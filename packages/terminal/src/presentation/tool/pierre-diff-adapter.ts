@@ -50,6 +50,56 @@ const contentChunks = (row: Extract<Row, { number: number }>): ReadonlyArray<Ter
 const pierreCache = new Map<string, ReadonlyArray<TerminalTextChunk> | null>()
 const pierreCacheLimit = 256
 
+type ParsedFile = ReturnType<typeof parsePatchFiles>[number]["files"][number]
+
+const appendHunkRows = (rows: Array<Row>, file: ParsedFile): boolean => {
+  let hasContent = false
+  const lang = languageForPath(file.name)
+  for (const hunk of file.hunks) {
+    const { oldStart, newStart } = hunkStarts(hunk.hunkSpecs ?? "")
+    if (newStart > 1 || rows.length > 0) rows.push({ ellipsis: true })
+    for (const group of hunk.hunkContent) {
+      const contextLines = group.type === "context" ? group.lines : 0
+      for (let index = 0; index < contextLines; index += 1) {
+        rows.push({
+          number: newStart + group.additionLineIndex + index,
+          marker: " ",
+          content: strip(file.additionLines[group.additionLineIndex + index]),
+          lang,
+        })
+        hasContent = true
+      }
+      if (group.type === "context") continue
+      for (let index = 0; index < group.deletions; index += 1) {
+        rows.push({
+          number: oldStart + group.deletionLineIndex + index,
+          marker: "-",
+          content: strip(file.deletionLines[group.deletionLineIndex + index]),
+          lang,
+        })
+        hasContent = true
+      }
+      for (let index = 0; index < group.additions; index += 1) {
+        rows.push({
+          number: newStart + group.additionLineIndex + index,
+          marker: "+",
+          content: strip(file.additionLines[group.additionLineIndex + index]),
+          lang,
+        })
+        hasContent = true
+      }
+    }
+  }
+  return hasContent
+}
+
+const diffRows = (parsed: ReturnType<typeof parsePatchFiles>): ReadonlyArray<Row> | undefined => {
+  const rows: Array<Row> = []
+  let hasContent = false
+  for (const result of parsed) for (const file of result.files) hasContent = appendHunkRows(rows, file) || hasContent
+  return hasContent ? rows : undefined
+}
+
 export const renderPierreDiff: {
   (options: DiffRenderOptions): (patch: string) => TerminalStyledText | undefined
   (patch: string, options: DiffRenderOptions): TerminalStyledText | undefined
@@ -76,51 +126,8 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
     return null
   }
   if (!Array.isArray(parsed) || parsed.length === 0) return null
-  const rows: Array<Row> = []
-  let hasContent = false
-  for (const result of parsed)
-    for (const file of result.files) {
-      const additions = file.additionLines
-      const deletions = file.deletionLines
-      const lang = languageForPath(file.name)
-      for (const hunk of file.hunks) {
-        const { oldStart, newStart } = hunkStarts(hunk.hunkSpecs ?? "")
-        if (newStart > 1 || rows.length > 0) rows.push({ ellipsis: true })
-        for (const group of hunk.hunkContent) {
-          if (group.type === "context") {
-            for (let index = 0; index < group.lines; index += 1) {
-              rows.push({
-                number: newStart + group.additionLineIndex + index,
-                marker: " ",
-                content: strip(additions[group.additionLineIndex + index]),
-                lang,
-              })
-              hasContent = true
-            }
-          } else {
-            for (let index = 0; index < group.deletions; index += 1) {
-              rows.push({
-                number: oldStart + group.deletionLineIndex + index,
-                marker: "-",
-                content: strip(deletions[group.deletionLineIndex + index]),
-                lang,
-              })
-              hasContent = true
-            }
-            for (let index = 0; index < group.additions; index += 1) {
-              rows.push({
-                number: newStart + group.additionLineIndex + index,
-                marker: "+",
-                content: strip(additions[group.additionLineIndex + index]),
-                lang,
-              })
-              hasContent = true
-            }
-          }
-        }
-      }
-    }
-  if (!hasContent) return null
+  const rows = diffRows(parsed)
+  if (rows === undefined) return null
   const numberWidth = Math.max(1, ...rows.flatMap((row) => ("ellipsis" in row ? [] : [String(row.number).length])))
   const chunks: Array<TerminalTextChunk> = []
   rows.forEach((row, index) => {

@@ -10,7 +10,7 @@ export default defineConfig({
   build: {
     outDir: "dist/client",
     emptyOutDir: false,
-    rollupOptions: {
+    rolldownOptions: {
       input: fileURLToPath(new URL("./src/client/entry", import.meta.url)),
       output: {
         entryFileNames: "thread-client.js",

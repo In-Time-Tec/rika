@@ -32,6 +32,33 @@ const IdentityClaims = Schema.Struct({
 
 const ExpiryClaims = Schema.Struct({ exp: Schema.optionalKey(Schema.Int) })
 
+const requiredTokens = (
+  response: typeof Contract.TokenResponse.Type,
+  previous?: typeof Contract.CredentialDisk.Type,
+) => {
+  const tokens = {
+    accessToken: response.access_token ?? previous?.accessToken,
+    idToken: response.id_token ?? previous?.idToken,
+    refreshToken: response.refresh_token ?? previous?.refreshToken,
+  }
+  return tokens.accessToken === undefined || tokens.idToken === undefined || tokens.refreshToken === undefined
+    ? undefined
+    : { accessToken: tokens.accessToken, idToken: tokens.idToken, refreshToken: tokens.refreshToken }
+}
+
+const validExpiry = (value: number | undefined) => value === undefined || (value >= 0 && Number.isSafeInteger(value))
+
+const expiryAt = (
+  now: number,
+  response: typeof Contract.TokenResponse.Type,
+  tokenExpiry: number | undefined,
+  previous?: typeof Contract.CredentialDisk.Type,
+) => {
+  if (response.access_token !== undefined && response.expires_in !== undefined) return now + response.expires_in * 1000
+  if (tokenExpiry !== undefined) return tokenExpiry * 1000
+  return previous?.expiresAt ?? now + 8 * 86_400_000
+}
+
 const decodeJwt = <S extends Schema.Constraint>(token: string, schema: S) =>
   Effect.gen(function* () {
     const part = token.split(".")[1]
@@ -86,12 +113,9 @@ export namespace Flow {
   ) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
-      const accessToken = response.access_token ?? previous?.accessToken
-      const idToken = response.id_token ?? previous?.idToken
-      const refreshToken = response.refresh_token ?? previous?.refreshToken
-      if (accessToken === undefined || idToken === undefined || refreshToken === undefined) {
-        return yield* authError("protocol", "Token exchange was incomplete")
-      }
+      const tokens = requiredTokens(response, previous)
+      if (tokens === undefined) return yield* authError("protocol", "Token exchange was incomplete")
+      const { accessToken, idToken, refreshToken } = tokens
       const claims = yield* decodeJwt(idToken, IdentityClaims)
       const identity = claims["https://api.openai.com/auth"]
       const accountId = identity.chatgpt_account_id
@@ -109,23 +133,10 @@ export namespace Flow {
       }
       const accessClaims = yield* decodeJwt(accessToken, ExpiryClaims).pipe(Effect.option)
       const tokenExpiry = Option.isSome(accessClaims) ? accessClaims.value.exp : undefined
-      if (
-        response.expires_in !== undefined &&
-        (response.expires_in < 0 || !Number.isSafeInteger(response.expires_in))
-      ) {
+      if (!validExpiry(response.expires_in) || !validExpiry(tokenExpiry)) {
         return yield* authError("protocol", "Token expiry is invalid")
       }
-      if (tokenExpiry !== undefined && (tokenExpiry < 0 || !Number.isSafeInteger(tokenExpiry))) {
-        return yield* authError("protocol", "Token expiry is invalid")
-      }
-      let expiresAt: number
-      if (response.access_token !== undefined && response.expires_in !== undefined) {
-        expiresAt = now + response.expires_in * 1000
-      } else if (tokenExpiry !== undefined) {
-        expiresAt = tokenExpiry * 1000
-      } else {
-        expiresAt = previous?.expiresAt ?? now + 8 * 86_400_000
-      }
+      const expiresAt = expiryAt(now, response, tokenExpiry, previous)
       return Contract.CredentialDisk.make({
         formatVersion: configuration.credentialFormatVersion,
         accessToken,

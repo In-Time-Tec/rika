@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Redacted, Schema } from "effect"
-import { Pool, type PoolClient, type PoolConfig } from "pg"
+import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg"
 import type { IdentityDatabaseConfig } from "../config"
 import {
   IdentityDirectoryError,
@@ -126,9 +126,14 @@ export const makePostgresIdentityDirectory = (db: IdentityDatabase): IdentityDir
   ),
 })
 
-const clientQuery = (client: PoolClient, operation: string, text: string, values?: unknown[]) =>
+const clientQuery = <Row extends QueryResultRow = never>(
+  client: PoolClient,
+  operation: string,
+  text: string,
+  values?: unknown[],
+) =>
   Effect.tryPromise({
-    try: () => client.query(text, values),
+    try: () => client.query<Row>(text, values),
     catch: postgresError(operation),
   })
 
@@ -158,7 +163,7 @@ export const runMigration = (input: {
           "add migration checksums",
           "alter table rika_api_migration add column if not exists checksum text",
         )
-        const applied = yield* clientQuery(
+        const applied = yield* clientQuery<{ readonly checksum: string }>(
           client,
           "check migration",
           "select checksum from rika_api_migration where id = $1",

@@ -175,10 +175,10 @@ export const overlayPendingSubmissions: {
     entries.push(entry)
     items.push({ ...item, index })
   }
-  const queue = [...model.queue]
-  for (const item of previous.queue) {
-    if (item.provisional === true && !queue.some((candidate) => candidate.id === item.id)) queue.push(item)
-  }
+  const missingQueue = previous.queue.filter(
+    (item) => item.provisional === true && !model.queue.some((candidate) => candidate.id === item.id),
+  )
+  const queue = [...model.queue, ...missingQueue]
   const restoreSending =
     previous.busy && !model.busy && previous.submittedDrafts.some((draft) => draft.turnId === undefined)
   const overlaid = {

@@ -10,7 +10,5 @@ export const writeGoodbye = (model: Model): void => {
     if (threadId !== undefined) Object.assign(input, { threadId })
     if (threadTitle !== undefined) Object.assign(input, { threadTitle })
     stdout.write(renderGoodbye(input))
-  } catch {
-    return
-  }
+  } catch {}
 }

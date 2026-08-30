@@ -51,7 +51,7 @@ describe("ConfigContract", () => {
       ConfigContract.decodeSettingsInput("settings.json", {
         providers: { custom: { baseUrl: "https://models.test" } },
       }),
-    ).toThrowError(/unknown key custom/)
+    ).toThrow(/unknown key custom/)
   })
 
   it("accepts the openrouter provider override with a stored credential identity", () => {
@@ -69,7 +69,7 @@ describe("ConfigContract", () => {
       ConfigContract.decodeSettingsInput("settings.json", {
         providers: { openrouter: { credentialIdentity: "" } },
       }),
-    ).toThrowError(/credentialIdentity must be a non-empty string/)
+    ).toThrow(/credentialIdentity must be a non-empty string/)
   })
 
   it("resolves openrouter aliases through the openai preset into every route role", () => {
@@ -107,11 +107,12 @@ describe("ConfigContract", () => {
       ["medium", "main"],
       ["medium", "oracle"],
     ] as const) {
-      expect(ConfigContract.resolveModelRoute(settings, mode, role)).toMatchObject({
+      const resolved = ConfigContract.resolveModelRoute(settings, mode, role)
+      expect(resolved).toMatchObject({
         providerId: "openrouter",
         model: "~deepseek/deepseek-v4-flash-latest",
-        options: { reasoning: { effort: expect.any(String) } },
       })
+      expect(resolved.options).toHaveProperty("reasoning.effort")
     }
     expect(ConfigContract.resolveThreadTitleRoute(settings)).toMatchObject({
       providerId: "openrouter",
@@ -149,7 +150,7 @@ describe("ConfigContract", () => {
     { authRefresh: { command: "", args: [] } },
     { authRefresh: { command: "aws", args: "sso login" } },
   ])("rejects unsafe or malformed Bedrock settings %#", (bedrock) => {
-    expect(() => ConfigContract.decodeSettingsInput("settings.json", { providers: { bedrock } })).toThrowError()
+    expect(() => ConfigContract.decodeSettingsInput("settings.json", { providers: { bedrock } })).toThrow()
   })
 
   it("allows HTTP Bedrock endpoints only for explicit loopback testing", () => {
@@ -189,7 +190,7 @@ describe("ConfigContract", () => {
           old: { base: "terra", provider: "bedrock", candidates: ["model"], displayName: "Old" },
         },
       }),
-    ).toThrowError(/unknown key base/)
+    ).toThrow(/unknown key base/)
   })
 
   it("accepts custom modes with direct role and agent routes and rejects the removed nested route shape", () => {
@@ -215,12 +216,12 @@ describe("ConfigContract", () => {
     ])
       expect(() =>
         ConfigContract.decodeSettingsInput("settings.json", { modes: { custom: { main: route } } }),
-      ).toThrowError()
+      ).toThrow()
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", {
         modelRoutes: { modes: { high: { main: { alias: "sol" } } } },
       }),
-    ).toThrowError(/unknown key modes/)
+    ).toThrow(/unknown key modes/)
   })
 
   it("accepts arbitrary web search provider credentials and rejects malformed entries", () => {
@@ -234,23 +235,22 @@ describe("ConfigContract", () => {
       { providers: { exa: {} } },
       { providers: { exa: { apiKey: "secret", extra: true } } },
     ]) {
-      expect(() => ConfigContract.decodeSettingsInput("settings.json", { webSearch })).toThrowError()
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { webSearch })).toThrow()
     }
   })
 
   it.each(["gateways", "models", "agents", "compaction", "permissions"])(
     "rejects user-owned internal configuration key %s",
-    (key) =>
-      expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: {} })).toThrowError(/unknown key/),
+    (key) => expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: {} })).toThrow(/unknown key/),
   )
 
   it.each(["contextWindow", "maxInputTokens", "maxOutputTokens", "keepRecentTokens"])(
     "rejects user-owned model policy key %s at every provider boundary",
     (key) => {
-      expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: 1 })).toThrowError(/unknown key/)
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: 1 })).toThrow(/unknown key/)
       expect(() =>
         ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { [key]: 1 } } }),
-      ).toThrowError(/unknown key/)
+      ).toThrow(/unknown key/)
     },
   )
 
@@ -259,7 +259,7 @@ describe("ConfigContract", () => {
     (key) =>
       expect(() =>
         ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { [key]: "secret" } } }),
-      ).toThrowError(/unknown key/),
+      ).toThrow(/unknown key/),
   )
 
   it.each([
@@ -270,9 +270,9 @@ describe("ConfigContract", () => {
     "http:models.test/v1",
     "https://models.test\t/v1",
   ])("rejects invalid provider URL %s", (baseUrl) => {
-    expect(() =>
-      ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { baseUrl } } }),
-    ).toThrowError(/absolute HTTP or HTTPS URL/)
+    expect(() => ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { baseUrl } } })).toThrow(
+      /absolute HTTP or HTTPS URL/,
+    )
   })
 
   it.each([
@@ -285,9 +285,9 @@ describe("ConfigContract", () => {
     "https://models.test/v1?key=secret",
     "https://models.test/v1#secret",
   ])("rejects credentials in provider URL %s", (baseUrl) => {
-    expect(() =>
-      ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { baseUrl } } }),
-    ).toThrowError(/cannot contain credentials/)
+    expect(() => ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { baseUrl } } })).toThrow(
+      /cannot contain credentials/,
+    )
   })
 
   it.each(["openai_api_key", "OpenAI_API_KEY", "1OPENAI_API_KEY", "OPENAI-API-KEY", "OPENAI API KEY", ""])(
@@ -295,7 +295,7 @@ describe("ConfigContract", () => {
     (apiKeyEnv) =>
       expect(() =>
         ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { apiKeyEnv } } }),
-      ).toThrowError(/uppercase environment variable/),
+      ).toThrow(/uppercase environment variable/),
   )
 
   it("rejects effort variants without normal options before route resolution", () => {
@@ -310,7 +310,7 @@ describe("ConfigContract", () => {
           },
         },
       }),
-    ).toThrowError(/effort low must set normal options/)
+    ).toThrow(/effort low must set normal options/)
   })
 
   it("resolves every default route through a reusable gpt-5.6 policy bundle", () => {
@@ -366,19 +366,19 @@ describe("ConfigContract", () => {
         low: { ...ConfigContract.defaults.modes.low!, main: { alias: "empty", effort: "low" } },
       },
     }
-    expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrowError(/no provider candidates/)
+    expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrow(/no provider candidates/)
   })
 
   it("accepts supported logging levels and rejects custom log paths", () => {
     expect(ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "debug" } })).toEqual({
       logging: { level: "debug" },
     })
-    expect(() => ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "verbose" } })).toThrowError(
+    expect(() => ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "verbose" } })).toThrow(
       /Logging level/,
     )
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "info", file: "/tmp/rika.log" } }),
-    ).toThrowError(/unknown key file/)
+    ).toThrow(/unknown key file/)
   })
 
   it("accepts non-negative recursive subagent limits and merges each setting by scope", () => {
@@ -404,7 +404,7 @@ describe("ConfigContract", () => {
       { maxSubagents: 1_025 },
       { maxSubagents: "4" },
     ])
-      expect(() => ConfigContract.decodeSettingsInput("settings.json", { subagents })).toThrowError(
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { subagents })).toThrow(
         /integer between 0 and 1024/,
       )
     expect(
@@ -412,7 +412,7 @@ describe("ConfigContract", () => {
     ).toEqual({ subagents: { maxDepth: 1_024, maxSubagents: 1_024 } })
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { subagents: { maxDepth: 1, maxPerDepth: 4 } }),
-    ).toThrowError(/unknown key maxPerDepth/)
+    ).toThrow(/unknown key maxPerDepth/)
   })
 
   it.each([
@@ -426,7 +426,7 @@ describe("ConfigContract", () => {
     ["notifications", { enabled: "yes" }],
     ["notifications", { enabled: true, unsupported: true }],
   ])("rejects malformed %s configuration", (key, value) => {
-    expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: value })).toThrowError()
+    expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: value })).toThrow()
   })
 
   it("accepts a boolean streamingOnly provider override and rejects other types", () => {
@@ -434,7 +434,7 @@ describe("ConfigContract", () => {
     expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { streamingOnly: "yes" } } }),
-    ).toThrowError(/streamingOnly must be a boolean/)
+    ).toThrow(/streamingOnly must be a boolean/)
   })
 
   it("marks only chatgpt.com base URLs as streaming-only", () => {

@@ -1,9 +1,8 @@
-import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { partialInputRecord } from "@rika/product/execution-transcript-contract"
+import { partialInputRecord, type Block, type Unit } from "@rika/product/execution-transcript-contract"
 import { Cell as TenetCell } from "tenetkit/repl"
 import type { RunEvent } from "tenetkit/runtime"
 import { Option, Schema } from "effect"
-import { type CellState, type Node } from "../model"
+import type { CellState, Node } from "../model"
 import { bounded, optionalString, record, string } from "../values"
 import { eventNotice, restartNotification } from "../recovery"
 import { failureOutcome } from "./outcome"
@@ -49,6 +48,58 @@ const lineCounts = (patch: string) => {
     if (line.startsWith("-") && !line.startsWith("---")) deletions += 1
   }
   return { additions, deletions }
+}
+
+const hostCall = (event: Extract<TenetCell.CellEvent, { readonly _tag: "HostCall" }>): CellHostCall => {
+  let call: CellHostCall = {
+    id: event.requestId,
+    module: event.module,
+    operation: event.operation,
+    inputSummary: bounded(event.inputSummary, 2_048),
+    status: event.status,
+  }
+  if (event.durationMillis !== undefined) call = { ...call, durationMillis: event.durationMillis }
+  if (event.message !== undefined) call = { ...call, message: bounded(event.message, 2_048) }
+  return call
+}
+
+const updateCellEvent = (block: Cell, event: TenetCell.CellEvent): Cell => {
+  switch (event._tag) {
+    case "HostCall": {
+      if (event.requestId.length === 0) return block
+      const call = hostCall(event)
+      const index = block.calls.findIndex((current) => current.id === call.id)
+      return {
+        ...block,
+        calls: index < 0 ? [...block.calls, call] : block.calls.map((current, at) => (at === index ? call : current)),
+      }
+    }
+    case "Stdout":
+      return { ...block, output: { ...block.output, stdout: `${block.output.stdout}${optionalString(event.text)}` } }
+    case "Stderr":
+      return { ...block, output: { ...block.output, stderr: `${block.output.stderr}${optionalString(event.text)}` } }
+    case "Result":
+      return { ...block, result: resultValue(optionalString(event.value)) }
+    default:
+      return block
+  }
+}
+
+const failedCell = (block: Cell, failure: TenetCell.CellFailure): Cell => {
+  const outcome = failureOutcome(failure)
+  const executionFailure = failure._tag === "tenetkit/repl/CellExecutionFailed" ? failure : undefined
+  const failed: Cell = {
+    ...block,
+    status: outcome.status,
+    output: {
+      stdout: executionFailure?.stdout || block.output.stdout,
+      stderr: executionFailure?.stderr || block.output.stderr,
+    },
+    epoch: "epoch" in failure ? failure.epoch : block.epoch,
+  }
+  if (executionFailure !== undefined) Object.assign(failed, { durationMillis: executionFailure.durationMillis })
+  if (outcome.error !== undefined) Object.assign(failed, { error: outcome.error })
+  return failed
 }
 
 export interface CellProjection {
@@ -186,64 +237,23 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       return
     }
     const event = decoded.value
-    let next = appendNotice({ ...block, epoch: "epoch" in event ? event.epoch : block.epoch }, eventNotice(event))
-    switch (event._tag) {
-      case "HostCall": {
-        if (event.requestId.length === 0) return
-        let call: CellHostCall = {
-          id: event.requestId,
-          module: event.module,
-          operation: event.operation,
-          inputSummary: bounded(event.inputSummary, 2_048),
-          status: event.status,
-        }
-        if (event.durationMillis !== undefined) call = { ...call, durationMillis: event.durationMillis }
-        if (event.message !== undefined) call = { ...call, message: bounded(event.message, 2_048) }
-        const index = block.calls.findIndex((current) => current.id === call.id)
-        next = {
-          ...next,
-          calls: index < 0 ? [...block.calls, call] : block.calls.map((current, at) => (at === index ? call : current)),
-        }
-        break
+    let next = updateCellEvent(
+      appendNotice({ ...block, epoch: "epoch" in event ? event.epoch : block.epoch }, eventNotice(event)),
+      event,
+    )
+    if (event._tag === "Display") {
+      const mediaType = optionalString(event.mediaType)
+      if (mediaType.startsWith("image/"))
+        put(
+          unit(node, localId("cell-artifact", node.publicId, rawId, event.sequence), {
+            _tag: "Block",
+            block: imageAttachment(event),
+          }),
+        )
+      else if (diffMediaTypes.has(mediaType)) {
+        const file = diffFile(next.id, event)
+        if (file !== undefined) next = { ...next, files: [...next.files, file] }
       }
-      case "Stdout":
-        next = {
-          ...next,
-          output: {
-            ...next.output,
-            stdout: `${next.output.stdout}${optionalString(event.text)}`,
-          },
-        }
-        break
-      case "Stderr":
-        next = {
-          ...next,
-          output: {
-            ...next.output,
-            stderr: `${next.output.stderr}${optionalString(event.text)}`,
-          },
-        }
-        break
-      case "Result":
-        next = { ...next, result: resultValue(optionalString(event.value)) }
-        break
-      case "Display": {
-        const mediaType = optionalString(event.mediaType)
-        if (mediaType.startsWith("image/"))
-          put(
-            unit(node, localId("cell-artifact", node.publicId, rawId, event.sequence), {
-              _tag: "Block",
-              block: imageAttachment(event),
-            }),
-          )
-        else if (diffMediaTypes.has(mediaType)) {
-          const file = diffFile(next.id, event)
-          if (file !== undefined) next = { ...next, files: [...next.files, file] }
-        }
-        break
-      }
-      default:
-        break
     }
     write(node, rawId, next)
     const restarted = restartNotification(event)
@@ -253,42 +263,27 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   const completeCell = (node: Node, rawId: string, result: ToolResult, isFailure: boolean) => {
     const block = cellBlock(node, rawId)
     if (block === undefined) return
-    if (!isFailure) {
-      const decoded = Schema.decodeUnknownOption(TenetCell.CellResult)(result)
-      if (Option.isNone(decoded)) return
-      const success = decoded.value
+    const success = Schema.decodeUnknownOption(TenetCell.CellResult)(result)
+    if (!isFailure && Option.isSome(success)) {
       write(node, rawId, {
         ...block,
         status: "complete",
-        result: resultValue(success.value),
+        result: resultValue(success.value.value),
         output: {
-          stdout: success.stdout,
-          stderr: success.stderr,
+          stdout: success.value.stdout,
+          stderr: success.value.stderr,
         },
-        epoch: success.epoch,
-        durationMillis: success.durationMillis,
+        epoch: success.value.epoch,
+        durationMillis: success.value.durationMillis,
       })
       return
     }
+    if (!isFailure) return
     const decoded = Schema.decodeUnknownOption(TenetCell.CellFailure)(result)
     if (Option.isNone(decoded)) return
     const failure = decoded.value
     const outcome = failureOutcome(failure)
-    const executionFailure = failure._tag === "tenetkit/repl/CellExecutionFailed" ? failure : undefined
-    const stdout = executionFailure?.stdout ?? ""
-    const stderr = executionFailure?.stderr ?? ""
-    const failed: Cell = {
-      ...block,
-      status: outcome.status,
-      output: {
-        stdout: stdout.length === 0 ? block.output.stdout : stdout,
-        stderr: stderr.length === 0 ? block.output.stderr : stderr,
-      },
-      epoch: "epoch" in failure ? failure.epoch : block.epoch,
-    }
-    if (executionFailure !== undefined) Object.assign(failed, { durationMillis: executionFailure.durationMillis })
-    if (outcome.error !== undefined) Object.assign(failed, { error: outcome.error })
-    write(node, rawId, failed)
+    write(node, rawId, failedCell(block, failure))
     if (outcome.diagnostic !== undefined)
       error(node, "cell", outcome.diagnostic.title, outcome.diagnostic.detail, rawId)
   }

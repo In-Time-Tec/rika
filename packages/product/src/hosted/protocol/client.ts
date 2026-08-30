@@ -79,34 +79,16 @@ export const isDurableThreadEvent = (event: InteractiveEvent) =>
   Schema.is(InteractiveEventSchema)(event)
 
 export const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
-  switch (event._tag) {
-    case "ThreadViewSnapshot":
-      return String(event.snapshot.thread.id)
-    case "ThreadViewPatch":
-      return String(event.patch.threadId)
-    case "ResyncRequired":
-    case "ExecutionModelPreviewChanged":
-    case "ContextDiagnostics":
-    case "ThreadRefolding":
-    case "QueueFull":
-    case "SubmissionAdmitted":
-    case "ShellCompleted":
-    case "ThreadTitled":
-    case "GoalChanged":
-    case "ThreadActivated":
-    case "ThreadPreviewLoaded":
-    case "ThreadPreviewFailed":
-    case "TurnRetryScheduled":
-      return String(event.threadId)
-    case "ExecutionFailed":
-    case "ExecutionControlFailed":
-    case "ExecutionControlled":
-    case "SubmissionRejected":
-      return event.threadId === undefined ? undefined : String(event.threadId)
-    case "ThreadsListed":
-    case "AssistantCompleted":
-      return undefined
-  }
+  if (event._tag === "ThreadViewSnapshot") return String(event.snapshot.thread.id)
+  if (event._tag === "ThreadViewPatch") return String(event.patch.threadId)
+  return eventThreadId(event)
+}
+
+const eventThreadId = (
+  event: Exclude<InteractiveEvent, { readonly _tag: "ThreadViewSnapshot" | "ThreadViewPatch" }>,
+) => {
+  if (!("threadId" in event) || event.threadId === undefined) return undefined
+  return String(event.threadId)
 }
 
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })

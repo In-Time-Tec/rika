@@ -7,9 +7,9 @@ import {
   boundedTranscriptModel,
   maxMountedTranscriptEntries,
 } from "../../../../src/opentui/rendering/transcript/window"
-import { type Model } from "../../../../src/state/model"
+import type { Model } from "../../../../src/state/model"
 import { update } from "../../../../src/state/reducer/model"
-import { type TranscriptBlock, type TranscriptItem } from "../../../../src/state/transcript/model"
+import type { TranscriptBlock, TranscriptItem } from "../../../../src/state/transcript/model"
 import { handlers, model } from "./window.fixture"
 import { openTui, styledTextValue } from "../../../support/surface/transcript/pane-geometry.fixture"
 
@@ -159,7 +159,12 @@ test("limits transcript formatting input before reconciliation", () => {
   expect(bounded.entries).toHaveLength(maxMountedTranscriptEntries)
   expect(bounded.items).toHaveLength(maxMountedTranscriptEntries)
   expect(bounded.entries[0]?.text).toBe("answer 800")
-  expect(bounded.items[0]).toEqual({ _tag: "Entry", index: 0, id: "answer-800", turnId: "turn-800" })
+  expect(bounded.items[0]).toEqual({
+    _tag: "Entry",
+    index: 0,
+    id: "answer-800",
+    turnId: "turn-800",
+  })
   const older = boundedTranscriptModel(state, maxMountedTranscriptEntries + 200)
   expect(older.entries).toHaveLength(maxMountedTranscriptEntries)
   expect(older.entries[0]?.text).toBe("answer 200")

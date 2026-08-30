@@ -121,6 +121,27 @@ const atOrAfter = (cursor: PageCursor) =>
     ),
   )!
 
+const validatePageOptions = (options: Parameters<Interface["page"]>[1]) => {
+  if (options?.before !== undefined && options.after !== undefined)
+    return RepositoryError.make({ message: "Transcript page cannot use before and after together" })
+  const limit = options?.limit ?? 200
+  return Number.isInteger(limit) && limit >= 1 && limit <= 500
+    ? limit
+    : RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
+}
+
+const decodeEntry = (raw: typeof PageRow.Encoded) =>
+  Effect.gen(function* () {
+    const row = yield* Schema.decodeEffect(PageRow)(raw).pipe(Effect.mapError(error))
+    const turn = yield* decode(row).pipe(Effect.mapError(error))
+    const unit = yield* Schema.decodeEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
+    const cursor = { createdAt: turn.createdAt, turnId: turn.id, orderKey: row.unit_order_key }
+    if (unit.turnId !== turn.id || TranscriptOrdering.encodeUnitOrder(unit.order) !== cursor.orderKey)
+      return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} does not match its durable identity` })
+    const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(Effect.mapError(error))
+    return { turn, unit, cursor, revision: row.projection_revision, projectionState }
+  })
+
 export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Interface, "page" | "usage"> => {
   const usage = Effect.fn("TranscriptRepository.usage")(function* (threadId: ThreadId) {
     const row = (yield* db
@@ -134,11 +155,9 @@ export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Inte
   }, Effect.mapError(error))
   return {
     page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
-      if (options.before !== undefined && options.after !== undefined)
-        return yield* RepositoryError.make({ message: "Transcript page cannot use before and after together" })
-      const limit = options.limit ?? 200
-      if (!Number.isInteger(limit) || limit < 1 || limit > 500)
-        return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
+      const validated = validatePageOptions(options)
+      if (Schema.is(RepositoryError)(validated)) return yield* validated
+      const limit = validated
       const conditions = [eq(rikaTranscriptUnits.threadId, threadId), ne(rikaTurns.status, "queued")]
       if (options.projectionVersion !== undefined)
         conditions.push(eq(rikaTranscriptCheckpoints.projectionVersion, options.projectionVersion))
@@ -166,20 +185,7 @@ export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Inte
         .pipe(Effect.mapError(error))
       const hasExtra = loaded.length > limit
       const rows = loaded.slice(0, limit)
-      const decoded = yield* Effect.forEach(rows, (raw) =>
-        Effect.gen(function* () {
-          const row = yield* Schema.decodeEffect(PageRow)(raw).pipe(Effect.mapError(error))
-          const turn = yield* decode(row).pipe(Effect.mapError(error))
-          const unit = yield* Schema.decodeEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
-          const cursor = { createdAt: turn.createdAt, turnId: turn.id, orderKey: String(row.unit_order_key) }
-          if (unit.turnId !== turn.id || TranscriptOrdering.encodeUnitOrder(unit.order) !== cursor.orderKey)
-            return yield* RepositoryError.make({
-              message: `Transcript unit ${unit.key} does not match its durable identity`,
-            })
-          const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(Effect.mapError(error))
-          return { turn, unit, cursor, revision: Number(row.projection_revision), projectionState }
-        }),
-      )
+      const decoded = yield* Effect.forEach(rows, decodeEntry)
       const selected = newestFirst ? decoded.toReversed() : decoded
       const boundaryExists = (condition: SQL<unknown>) => {
         const boundaryConditions = [

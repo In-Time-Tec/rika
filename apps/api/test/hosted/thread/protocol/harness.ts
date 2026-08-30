@@ -1,0 +1,6 @@
+import "../protocol-store.harness"
+import "../protocol-ordering.harness"
+import "../protocol-worker.harness"
+import "../protocol-replication.harness"
+import "../protocol-authority.harness"
+import "./convergence.harness"

@@ -48,7 +48,7 @@ test("persists the final buffered record before settling on process.exit", () =>
         const diagnostics = `${dataRoot}/diagnostics`
         const names = yield* fs.readDirectory(diagnostics)
         expect(names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])
-        const [closedName] = names.filter((name) => /^server-.+\.jsonl$/.test(name))
+        const closedName = names.find((name) => /^server-.+\.jsonl$/.test(name))
         expect(closedName).toBeDefined()
         expect(yield* fs.readFileString(`${diagnostics}/${closedName}`)).toContain("logging.hardexit.fixture")
       }),
@@ -76,7 +76,7 @@ test("persists every accepted record when process.exit wins before the ordinary 
         const diagnostics = `${dataRoot}/diagnostics`
         const names = yield* fs.readDirectory(diagnostics)
         expect(names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])
-        const [closedName] = names.filter((name) => /^server-.+\.jsonl$/.test(name))
+        const closedName = names.find((name) => /^server-.+\.jsonl$/.test(name))
         expect(closedName).toBeDefined()
         const contents = (yield* fs.readFileString(`${diagnostics}/${closedName}`)).trim()
         const messages = contents.split("\n").map((line) => decodeLogRecord(line).message)
@@ -140,7 +140,7 @@ test("flushes and closes diagnostics when signaled after the first-draw boundary
         const diagnostics = `${dataRoot}/diagnostics`
         const names = yield* fs.readDirectory(diagnostics)
         expect(names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])
-        const [closedName] = names.filter((name) => /^client-.+\.jsonl$/.test(name))
+        const closedName = names.find((name) => /^client-.+\.jsonl$/.test(name))
         expect(closedName).toBeDefined()
         const contents = yield* fs.readFileString(`${diagnostics}/${closedName}`)
         expect(contents).toContain("logging.signal.fixture")

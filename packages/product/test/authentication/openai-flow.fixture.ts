@@ -1,5 +1,4 @@
-import { Function } from "effect"
-import { Crypto, Effect, Encoding, Layer } from "effect"
+import { Crypto, Effect, Encoding, Function, Layer } from "effect"
 import { createHash } from "node:crypto"
 import * as Flow from "../../src/authentication/openai-service"
 import * as Contract from "../../src/authentication/openai-contract"

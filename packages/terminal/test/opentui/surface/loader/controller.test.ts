@@ -134,7 +134,7 @@ test("keeps collapsed tool, Edited, and subagent rows free of the left gutter", 
   const lines = nonEmptyLines(collapsed)
   expect(lines.some((line) => line.includes("Edited"))).toBe(true)
   expect(lines.some((line) => line.includes("Subagent finished"))).toBe(true)
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })
 test("does not add an active-agent count to agent labels", () => {
   const blocks = Array.from({ length: 4 }, (_, index) => ({
@@ -155,14 +155,14 @@ test("renders an expanded subagent body without any added left rail", () => {
   expect(lines[0]).toContain("Subagent finished")
   expect(lines.length).toBeGreaterThan(1)
   expect(lines.some((line) => line.includes("Inspect"))).toBe(true)
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })
 test("renders an expanded Edited diff without any added left rail", () => {
   const lines = nonEmptyLines(renderedText({ blocks: [editToolBlock], expandedRowKeys: ["tool:patch"] }))
   expect(lines[0]).toContain("Edited")
   expect(lines.length).toBeGreaterThan(1)
   expect(lines.slice(1).some((line) => line.includes("old") || line.includes("new"))).toBe(true)
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })
 test("renders an expanded Diff block without any added left rail", () => {
   const block = {
@@ -201,7 +201,7 @@ test("keeps the nested connector tree as the only vertical treatment in an expan
   const commandRow = lines.find((line) => line.includes("bun test"))!
   const outputRow = lines.find((line) => line.includes("passed"))!
   expect(outputRow.indexOf("passed")).toBe(commandRow.indexOf("bun test"))
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })
 test("keeps wrapped nested shell continuation connectors subtle", () => {
   const state = model({

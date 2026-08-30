@@ -69,7 +69,7 @@ describe("Workspace checkpoint vault", () => {
         const archive = yield* workspaceArchive
         const stored = yield* vault.storeWorkspaceSeed("seed-1", archive)
         expect(stored.objectKey).toMatch(/^workspace-seeds\/[a-f0-9]{32}\/source\.tar\.zst\.aes$/)
-        expect(new TextDecoder().decode(durable.get(stored.objectKey)!)).not.toContain("durable workspace state")
+        expect(new TextDecoder().decode(durable.get(stored.objectKey))).not.toContain("durable workspace state")
         expect((yield* vault.loadWorkspaceSeed("seed-1", stored)).bytes).toEqual(
           (yield* createArchiveFromEncoded(archive)).bytes,
         )
@@ -95,7 +95,7 @@ describe("Workspace checkpoint vault", () => {
         const archive = yield* workspaceArchive
         const stored = yield* vault.storeCheckpoint(scope, archive)
         expect(stored.objectKey).toMatch(/^owners\/[a-f0-9]{32}\/threads\/[a-f0-9]{32}\//)
-        expect(new TextDecoder().decode(durable.get(stored.objectKey)!)).not.toContain("durable workspace state")
+        expect(new TextDecoder().decode(durable.get(stored.objectKey))).not.toContain("durable workspace state")
         expect((yield* vault.loadCheckpoint(scope, stored)).bytes).toEqual(
           (yield* createArchiveFromEncoded(archive)).bytes,
         )
@@ -149,7 +149,7 @@ describe("Workspace checkpoint vault", () => {
           : Effect.sync(() => {
               const value = durable.get(objectKey)?.slice()
               if (value === undefined) return Option.none<Uint8Array>()
-              if (corruptRead) value[value.length - 1] = value[value.length - 1]! ^ 1
+              if (corruptRead) value.set([value.at(-1)! ^ 1], value.length - 1)
               return Option.some(value)
             }),
       remove: (objectKey) => Effect.sync(() => void durable.delete(objectKey)),

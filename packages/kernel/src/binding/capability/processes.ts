@@ -40,7 +40,7 @@ const StartInput = Schema.Struct({
 const StatusInput = Schema.Struct({ processId: Schema.String, waitMillis: Schema.optionalKey(StatusWaitMillis) })
 const StopInput = Schema.Struct({ processId: Schema.String })
 
-const run = (request: typeof CodingToolRuntime.Request.Type) =>
+const run = (request: CodingToolRuntime.Request) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const output = (result: CodingToolResult.Result) => {
@@ -56,14 +56,14 @@ const output = (result: CodingToolResult.Result) => {
   return value
 }
 
-const startRequest = (input: typeof StartInput.Type): typeof CodingToolRuntime.Request.Type => {
-  let request: typeof CodingToolRuntime.Request.Type = { _tag: "Bash", command: input.command }
+const startRequest = (input: typeof StartInput.Type): CodingToolRuntime.Request => {
+  let request: CodingToolRuntime.Request = { _tag: "Bash", command: input.command }
   if (input.workdir !== undefined) request = { ...request, workdir: input.workdir }
   if (input.timeoutMillis !== undefined) request = { ...request, timeoutMillis: input.timeoutMillis }
   return request
 }
 
-const statusRequest = (input: typeof StatusInput.Type): typeof CodingToolRuntime.Request.Type =>
+const statusRequest = (input: typeof StatusInput.Type): CodingToolRuntime.Request =>
   input.waitMillis === undefined
     ? { _tag: "ShellCommandStatus", processId: input.processId }
     : { _tag: "ShellCommandStatus", processId: input.processId, waitMillis: input.waitMillis }

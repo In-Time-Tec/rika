@@ -1,7 +1,6 @@
 import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
 import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
-import { Context, Effect, Function, Layer, Option, Ref, Scope } from "effect"
-import type { FileSystem, Path } from "effect"
+import { Context, Effect, Function, Layer, Option, Ref, Scope, type FileSystem, type Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type { BindingRequirements } from "./binding/modules"
 import * as KernelComposition from "./kernel-composition"

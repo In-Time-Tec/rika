@@ -1,9 +1,8 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { modelFailurePresentation } from "@rika/product/failure-policy"
 import { classifyFailureMessage, executionFailureDetail, providerFailureMessage } from "@rika/product/failure-message"
-import { type Node } from "./model"
-import { bounded } from "./values"
-import { toolTextLimit } from "./values"
+import type { Node } from "./model"
+import { bounded, toolTextLimit } from "./values"
 
 export interface DiagnosticProjection {
   readonly notice: (

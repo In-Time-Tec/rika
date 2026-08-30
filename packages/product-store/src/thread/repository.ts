@@ -314,7 +314,7 @@ export const layerForOwner = (ownerId: string) =>
             .pipe(Effect.mapError(repositoryError))
           return yield* Effect.forEach(rows, (row) =>
             Schema.decodeEffect(ThreadId)(row.threadId).pipe(
-              Effect.map((threadId) => ({ threadId, requestedAt: Number(row.requestedAt) })),
+              Effect.map((threadId) => ({ threadId, requestedAt: row.requestedAt })),
               Effect.mapError(repositoryError),
             ),
           )

@@ -103,8 +103,7 @@ export const animatedGlyphs: {
   return Array.from({ length: options.cells }, (_, index) => {
     if (compactFrom > filled && index === visibleFill) return meterGlyphs.vacuum
     if (index === filled - 1 && options.flashTicks !== undefined && options.flashTicks > 0) return meterGlyphs.flash
-    if (index === muncher)
-      return options.tick % 2 === 0 ? muncherGlyphs.open : muncherGlyphs.closed
+    if (index === muncher) return options.tick % 2 === 0 ? muncherGlyphs.open : muncherGlyphs.closed
     if (index < visibleFill) return meterGlyphs.fill
     return options.muncher === true ? meterGlyphs.pellet : meterGlyphs.track
   })

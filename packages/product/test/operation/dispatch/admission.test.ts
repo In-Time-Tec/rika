@@ -47,10 +47,10 @@ it.effect("fails operation startup when initial execution supervision fails", ()
         executionDependencies: undefined,
       } satisfies ProductOperationScheduleInput
       const outcome = yield* makeProductOperationSchedule(input).pipe(Effect.result)
-      expect(outcome).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "OperationError", message: expect.stringContaining("startup recovery failed") },
-      })
+      expect(outcome._tag).toBe("Failure")
+      if (outcome._tag === "Success") return
+      expect(outcome.failure._tag).toBe("OperationError")
+      expect(outcome.failure.message).toContain("startup recovery failed")
     }),
   ),
 )

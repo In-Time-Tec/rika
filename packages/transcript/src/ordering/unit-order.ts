@@ -45,17 +45,16 @@ const immutableOrder = (segments: ReadonlyArray<UnitOrderSegment>): UnitOrder =>
   return Object.freeze([Object.freeze({ ...first }), ...rest.map((segment) => Object.freeze({ ...segment }))])
 }
 
+const makeUnitOrder = (key: string, sequence: number, part = 0): UnitOrder => {
+  const segment: UnitOrderSegment = { sequence, part, key }
+  assertSegment(segment)
+  return immutableOrder([segment])
+}
+
 export const unitOrder: {
   (key: string, sequence: number, part?: number): UnitOrder
   (sequence: number, part?: number): (key: string) => UnitOrder
-} = Function.dual(
-  (args) => Schema.is(Schema.String)(args[0]),
-  (key: string, sequence: number, part = 0): UnitOrder => {
-    const segment = { sequence, part, key }
-    assertSegment(segment)
-    return immutableOrder([segment])
-  },
-)
+} = Function.dual((args) => Schema.is(Schema.String)(args[0]), makeUnitOrder)
 
 export const childOrder: {
   (parent: UnitOrder, subagentId: string, local: UnitOrder): UnitOrder

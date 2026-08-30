@@ -1,33 +1,22 @@
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Crypto, DateTime, Effect, Layer, Redacted, Schema } from "effect"
 import {
-  BetterAuthUserId,
-  ClientId,
   CommandId,
-  DeviceId,
   JsonObject,
   OrganizationId,
   RequestId,
-  Sequence,
   ThreadEventCursor,
   ThreadId,
   ThreadVersion,
   Timestamp,
 } from "@rika/product/hosted-model"
-import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { HostedPresence } from "@rika/product/hosted-presence"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import type { AuthorizationAction } from "@rika/product/hosted-authorization"
-import {
-  type ClientMessage,
-  ServerFrame,
-  type WorkspacePlacement,
-  protocolVersion,
-} from "@rika/product/client-protocol"
+import { type ClientMessage, ServerFrame, type WorkspacePlacement } from "@rika/product/client-protocol"
 import { ThreadProtocolStore, type ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
-import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
-import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
-import { type AuthenticatedPrincipal, HostedProduct, HostedProductError, type ThreadAuthority } from "../product"
+import { HostedThreadApplication } from "./application"
+import { HostedProduct, type ThreadAuthority } from "../product"
 import { HostedWorkspace } from "../environment/workspace"
 import {
   listenForThreadChanges,
@@ -35,58 +24,44 @@ import {
   type ThreadProtocolNotificationGeneration,
   type ThreadProtocolNotifications,
 } from "./notifications"
-import { HostedPreviewBus, type HostedPreviewBusService, type HostedPreviewSubscription } from "./previews"
+import { HostedPreviewBus, type HostedPreviewBusService } from "./previews"
+import { protocolConnectionState } from "./protocol-connection"
+import {
+  commandResult,
+  frame,
+  HostedThreadProtocol,
+  type HostedThreadConnection,
+  HostedThreadProtocolError,
+  type HostedThreadProtocolService,
+  type MutableCommandRejectedPayload,
+  productFailure,
+  storeFailure,
+  unavailable,
+  zeroCursor,
+} from "./protocol-contract"
+import { ticketOperations } from "./protocol-tickets"
 
-export const threadWebSocketAudience = "/api/v1/threads/socket"
-const ticketLifetimeMillis = 60_000
-const zeroCursor = ThreadEventCursor.make("0")
-const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const maximumAttachmentEvents = 10_000
-const maximumAttachmentBytes = 32 * 1024 * 1024
+export {
+  HostedThreadProtocol,
+  type HostedThreadConnection,
+  HostedThreadProtocolError,
+  type HostedThreadProtocolService,
+  threadWebSocketAudience,
+} from "./protocol-contract"
+
 const replayDistance = (cursor: string, afterCursor: string) => {
   const distance = BigInt(cursor) - BigInt(afterCursor)
   return distance <= 0 ? 0 : Number(distance > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : distance)
 }
 
-export class HostedThreadProtocolError extends Schema.TaggedError<HostedThreadProtocolError>()(
-  "HostedThreadProtocolError",
-  {
-    kind: Schema.Literals(["invalid", "forbidden", "not-found", "conflict", "stale-version", "unavailable"]),
-    message: Schema.String,
-  },
-) {}
+const authorizationAction = (command: ClientMessage["command"]): AuthorizationAction => {
+  if (command._tag === "InspectWorkspaceFile") return "workspace:file:view"
+  if (["EnsureRepositoryService", "StopRepositoryService", "OpenPortal"].includes(command._tag))
+    return "workspace:service:control"
+  if (command._tag === "AcknowledgeCursor") return "thread:view"
+  return command._tag === "UpdatePresence" ? "presence:update" : "thread:control"
+}
 
-const unavailable = (message = "Thread protocol is unavailable") =>
-  HostedThreadProtocolError.make({ kind: "unavailable", message })
-const productFailure = (error: HostedProductError) =>
-  HostedThreadProtocolError.make({
-    kind:
-      error.kind === "forbidden" || error.kind === "not-found" || error.kind === "conflict" || error.kind === "invalid"
-        ? error.kind
-        : "unavailable",
-    message: error.message,
-  })
-const storeFailure = (error: HostedPersistenceError) => {
-  let kind: HostedThreadProtocolError["kind"] = "unavailable"
-  if (error.reason === "invalid-authority") kind = "forbidden"
-  else if (error.reason === "not-found" || error.reason === "conflict" || error.reason === "stale-version")
-    kind = error.reason
-  return HostedThreadProtocolError.make({ kind, message: error.message })
-}
-const operationFailure = (error: HostedThreadApplicationError) => unavailable(error.message)
-const frame = (payload: ServerFrame["payload"]): ServerFrame => ({ protocolVersion, payload })
-type CommandRejectedPayload = Extract<ServerFrame["payload"], { readonly _tag: "CommandRejected" }>
-interface MutableCommandRejectedPayload {
-  _tag: CommandRejectedPayload["_tag"]
-  requestId: CommandRejectedPayload["requestId"]
-  commandId?: NonNullable<CommandRejectedPayload["commandId"]>
-  threadId?: NonNullable<CommandRejectedPayload["threadId"]>
-  reason: CommandRejectedPayload["reason"]
-  currentThreadVersion?: NonNullable<CommandRejectedPayload["currentThreadVersion"]>
-  currentCursor?: NonNullable<CommandRejectedPayload["currentCursor"]>
-  message: CommandRejectedPayload["message"]
-  details: CommandRejectedPayload["details"]
-}
 type CreateConnectionInput = Parameters<HostedProduct["Service"]["createConnection"]>[0]
 interface MutableCreateConnectionInput {
   principal: CreateConnectionInput["principal"]
@@ -98,74 +73,6 @@ interface MutableCreateConnectionInput {
   threadId: NonNullable<CreateConnectionInput["threadId"]>
   archiveThreadId?: NonNullable<CreateConnectionInput["archiveThreadId"]>
 }
-
-const commandResult = (command: ThreadProtocolCommand, requestId: RequestId): ServerFrame["payload"] => {
-  if (command.result?._tag === "Rejected") {
-    const reason = command.result.reason
-    return {
-      _tag: "CommandRejected",
-      requestId,
-      commandId: command.commandId,
-      threadId: command.threadId,
-      reason:
-        reason === "invalid" ||
-        reason === "forbidden" ||
-        reason === "not-found" ||
-        reason === "conflict" ||
-        reason === "stale-version"
-          ? reason
-          : "unavailable",
-      currentThreadVersion: command.threadVersion,
-      currentCursor: command.cursor ?? zeroCursor,
-      message: Option.getOrElse(
-        Schema.decodeUnknownOption(Schema.String)(command.result.message),
-        () => "Command failed",
-      ),
-      details: {},
-    }
-  }
-  let result: Extract<ServerFrame["payload"], { readonly _tag: "CommandAccepted" }>["result"] = { _tag: "Applied" }
-  if (command.result?._tag === "ThreadCreated")
-    result = { _tag: "ThreadCreated", threadId: ThreadId.make(String(command.result.threadId)) }
-  if (
-    command.result?._tag === "PromptAdmitted" &&
-    (command.result.status === "accepted" || command.result.status === "queued")
-  )
-    result = { _tag: "PromptAdmitted", status: command.result.status }
-  return {
-    _tag: "CommandAccepted",
-    requestId,
-    commandId: command.commandId,
-    threadId: command.threadId,
-    threadVersion: command.threadVersion,
-    cursor: command.cursor ?? zeroCursor,
-    result,
-  }
-}
-
-export interface HostedThreadConnection {
-  readonly receive: (message: ClientMessage) => Effect.Effect<ReadonlyArray<ServerFrame>, never>
-  readonly outbound: Effect.Effect<ReadonlyArray<ServerFrame>, HostedThreadProtocolError>
-  readonly detach: Effect.Effect<void>
-}
-
-export interface HostedThreadProtocolService {
-  readonly issueTicket: (principal: AuthenticatedPrincipal) => Effect.Effect<
-    {
-      readonly ticket: string
-      readonly expiresAt: Timestamp
-    },
-    HostedThreadProtocolError
-  >
-  readonly connect: (
-    ticket: string,
-    audience: string,
-  ) => Effect.Effect<HostedThreadConnection, HostedThreadProtocolError>
-}
-
-export class HostedThreadProtocol extends Context.Service<HostedThreadProtocol, HostedThreadProtocolService>()(
-  "@rika/api/hosted/thread/protocol/HostedThreadProtocol",
-) {}
 
 export const layerWithOptions = (
   options: {
@@ -194,50 +101,11 @@ export const layerWithOptions = (
       if (options.databaseUrl !== undefined)
         yield* listenForThreadChanges({ databaseUrl: options.databaseUrl, changes }).pipe(Effect.forkScoped)
 
-      const digest = Effect.fn("HostedThreadProtocol.digest")(function* (ticket: string) {
-        const bytes = yield* crypto
-          .digest("SHA-256", new TextEncoder().encode(ticket))
-          .pipe(Effect.mapError(() => unavailable()))
-        return Encoding.encodeHex(bytes)
-      })
-
-      const issueTicket: HostedThreadProtocolService["issueTicket"] = Effect.fn("HostedThreadProtocol.issueTicket")(
-        function* (principal) {
-          yield* product.activatePrincipal(principal).pipe(Effect.mapError(productFailure))
-          const issuedAtMillis = yield* Clock.currentTimeMillis
-          const issuedAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis))
-          const expiresAt = DateTime.formatIso(DateTime.makeUnsafe(issuedAtMillis + ticketLifetimeMillis))
-          const secret = Encoding.encodeBase64Url(
-            yield* crypto.randomBytes(32).pipe(Effect.mapError(() => unavailable("Ticket issuance failed"))),
-          )
-          const ticketId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(() => unavailable("Ticket issuance failed")))
-          yield* store
-            .issueTicket({
-              ticketId,
-              ticketDigest: yield* digest(secret),
-              userId: BetterAuthUserId.make(principal.userId),
-              clientId: ClientId.make(principal.clientId),
-              deviceId: DeviceId.make(principal.deviceId),
-              audience: threadWebSocketAudience,
-              issuedAt,
-              expiresAt,
-            })
-            .pipe(Effect.mapError(storeFailure))
-          return { ticket: secret, expiresAt }
-        },
-      )
+      const { issueTicket, redeemTicket } = ticketOperations({ product, store, crypto })
 
       const connect: HostedThreadProtocolService["connect"] = Effect.fn("HostedThreadProtocol.connect")(
         function* (ticket, audience) {
-          const connectedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const binding = yield* store
-            .redeemTicket({ ticketDigest: yield* digest(ticket), audience, redeemedAt: connectedAt })
-            .pipe(Effect.mapError(storeFailure))
-          const principal: AuthenticatedPrincipal = {
-            userId: binding.userId,
-            clientId: binding.clientId,
-            deviceId: binding.deviceId,
-          }
+          const { binding, principal } = yield* redeemTicket(ticket, audience)
           const pendingCommands = new Map<
             string,
             {
@@ -246,17 +114,16 @@ export const layerWithOptions = (
               readonly notificationGeneration: ThreadProtocolNotificationGeneration
             }
           >()
-          let attached:
-            | {
-                readonly threadId: ThreadId
-                readonly authority: ThreadAuthority
-                readonly cursor: ThreadEventCursor
-                readonly checkpointCursor: ThreadEventCursor
-                readonly knownHead: ThreadEventCursor
-                readonly notificationGeneration: ThreadProtocolNotificationGeneration
-                readonly previewSubscription: HostedPreviewSubscription
-              }
-            | undefined
+          const connection = protocolConnectionState({
+            principal,
+            product,
+            operations,
+            store,
+            presence,
+            changes,
+            previews,
+            workspacePlacement: options.workspacePlacement,
+          })
 
           const reject = Effect.fn("HostedThreadProtocol.reject")(function* (
             message: ClientMessage,
@@ -297,55 +164,80 @@ export const layerWithOptions = (
             return [frame(rejection)]
           })
 
-          const materializeSnapshot = Effect.fn("HostedThreadProtocol.materializeSnapshot")(function* (
-            authority: ThreadAuthority,
-            threadId: ThreadId,
-            afterCursor: ThreadEventCursor,
-            afterCheckpointCursor?: ThreadEventCursor,
+          const createThread = Effect.fn("HostedThreadProtocol.createThread")(function* (
+            message: ClientMessage & {
+              readonly command: Extract<ClientMessage["command"], { readonly _tag: "CreateThread" }>
+            },
+            receivedAt: string,
           ) {
-            const baseReplayInput = {
-              ownerId: authority.ownerId,
-              threadId,
-              actor: authority.actor,
-              afterCursor,
-              limit: 1_000,
+            const command = message.command
+            const owner =
+              command.owner.kind === "personal"
+                ? { _tag: "PersonalOwner" as const, userId: binding.userId }
+                : {
+                    _tag: "OrganizationOwner" as const,
+                    organizationId: OrganizationId.make(command.owner.organizationId),
+                  }
+            const createInput: MutableCreateConnectionInput = {
+              principal,
+              owner,
+              executorKind: command.executorKind,
+              threadId: command.commandId,
             }
-            const readReplay = (
-              afterCheckpointCursor === undefined
-                ? store.replay(baseReplayInput)
-                : store.replay({ ...baseReplayInput, afterCheckpointCursor })
-            ).pipe(Effect.mapError(storeFailure))
-            while (true) {
-              const replay = yield* readReplay
-              const directTail =
-                afterCursor !== zeroCursor &&
-                (afterCursor === replay.cursor ||
-                  replay.events[0]?.cursor === ThreadEventCursor.make((BigInt(afterCursor) + 1n).toString()))
-              if (replay.snapshot !== undefined || directTail) return replay
-              const currentSnapshot = yield* operations
-                .snapshot(authority.ownerId, ProductThreadId.make(threadId))
-                .pipe(Effect.mapError(operationFailure))
-              const materializedSnapshot =
-                options.workspacePlacement === undefined
-                  ? currentSnapshot
-                  : {
-                      ...currentSnapshot,
-                      workspace: yield* options.workspacePlacement(authority.ownerId, threadId),
-                    }
-              const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-              const saved = yield* store
-                .saveSnapshot({
-                  ownerId: authority.ownerId,
-                  threadId,
-                  threadVersion: replay.threadVersion,
-                  cursor: replay.cursor,
-                  snapshot: materializedSnapshot,
-                  createdAt,
-                })
-                .pipe(Effect.result)
-              if (saved._tag === "Success") return yield* readReplay
-              if (saved.failure.reason !== "conflict") return yield* storeFailure(saved.failure)
+            if (command.projectId !== undefined) createInput.projectId = command.projectId
+            if (command.runnerTarget !== undefined) createInput.runnerTarget = command.runnerTarget
+            if (command.archiveThreadId !== undefined) {
+              yield* product
+                .authorizeThread(principal, command.archiveThreadId, "thread:control")
+                .pipe(Effect.mapError(productFailure))
+              createInput.archiveThreadId = command.archiveThreadId
             }
+            if (command.workspaceSeedId !== undefined) createInput.workspaceSeedId = command.workspaceSeedId
+            const created = yield* product.createConnection(createInput).pipe(Effect.mapError(productFailure))
+            const threadId = ThreadId.make(created.threadId)
+            const authority = yield* product
+              .authorizeThread(principal, threadId, "thread:control")
+              .pipe(Effect.mapError(productFailure))
+            yield* store
+              .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
+              .pipe(Effect.mapError(storeFailure))
+            const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
+            const notificationGeneration = changes.generation(threadId)
+            const admission = yield* store
+              .admitCommand({
+                ownerId: authority.ownerId,
+                threadId,
+                commandId: command.commandId,
+                turnId: ProductTurnId.make(
+                  yield* crypto.randomUUIDv4.pipe(
+                    Effect.mapError(() => unavailable("Command identity allocation failed")),
+                  ),
+                ),
+                idempotencyKey: command.idempotencyKey,
+                expectedThreadVersion: command.expectedThreadVersion,
+                actor: authority.actor,
+                command: encoded,
+                admittedAt: receivedAt,
+              })
+              .pipe(Effect.mapError(storeFailure), (effect) =>
+                HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
+              )
+            if (admission.command.state === "completed")
+              return [frame(commandResult(admission.command, message.requestId))]
+            pendingCommands.set(String(admission.command.commandId), {
+              requestId: message.requestId,
+              command: admission.command,
+              notificationGeneration,
+            })
+            return [
+              frame({
+                _tag: "CommandAdmitted",
+                requestId: message.requestId,
+                commandId: admission.command.commandId,
+                threadId,
+                threadVersion: admission.command.threadVersion,
+              }),
+            ]
           })
 
           const receiveUnsafe = Effect.fn("HostedThreadProtocol.receive")(function* (
@@ -353,238 +245,14 @@ export const layerWithOptions = (
           ): Effect.fn.Return<ReadonlyArray<ServerFrame>, HostedThreadProtocolError> {
             const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
             const command = message.command
-            if (command._tag === "CreateThread") {
-              const owner =
-                command.owner.kind === "personal"
-                  ? { _tag: "PersonalOwner" as const, userId: binding.userId }
-                  : {
-                      _tag: "OrganizationOwner" as const,
-                      organizationId: OrganizationId.make(command.owner.organizationId),
-                    }
-              const createInput: MutableCreateConnectionInput = {
-                principal,
-                owner,
-                executorKind: command.executorKind,
-                threadId: command.commandId,
-              }
-              if (command.projectId !== undefined) createInput.projectId = command.projectId
-              if (command.runnerTarget !== undefined) createInput.runnerTarget = command.runnerTarget
-              if (command.archiveThreadId !== undefined) {
-                yield* product
-                  .authorizeThread(principal, command.archiveThreadId, "thread:control")
-                  .pipe(Effect.mapError(productFailure))
-                createInput.archiveThreadId = command.archiveThreadId
-              }
-              if (command.workspaceSeedId !== undefined) createInput.workspaceSeedId = command.workspaceSeedId
-              const created = yield* product.createConnection(createInput).pipe(Effect.mapError(productFailure))
-              const threadId = ThreadId.make(created.threadId)
-              const authority = yield* product
-                .authorizeThread(principal, threadId, "thread:control")
-                .pipe(Effect.mapError(productFailure))
-              yield* store
-                .initializeThread({ ownerId: authority.ownerId, threadId, actor: authority.actor })
-                .pipe(Effect.mapError(storeFailure))
-              const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
-              const notificationGeneration = changes.generation(threadId)
-              const admission = yield* store
-                .admitCommand({
-                  ownerId: authority.ownerId,
-                  threadId,
-                  commandId: command.commandId,
-                  turnId: ProductTurnId.make(
-                    yield* crypto.randomUUIDv4.pipe(
-                      Effect.mapError(() => unavailable("Command identity allocation failed")),
-                    ),
-                  ),
-                  idempotencyKey: command.idempotencyKey,
-                  expectedThreadVersion: command.expectedThreadVersion,
-                  actor: authority.actor,
-                  command: encoded,
-                  admittedAt: receivedAt,
-                })
-                .pipe(Effect.mapError(storeFailure), (effect) =>
-                  HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
-                )
-              if (admission.command.state === "completed")
-                return [frame(commandResult(admission.command, message.requestId))]
-              pendingCommands.set(String(admission.command.commandId), {
-                requestId: message.requestId,
-                command: admission.command,
-                notificationGeneration,
-              })
-              return [
-                frame({
-                  _tag: "CommandAdmitted",
-                  requestId: message.requestId,
-                  commandId: admission.command.commandId,
-                  threadId,
-                  threadVersion: admission.command.threadVersion,
-                }),
-              ]
-            }
+            if (command._tag === "CreateThread") return yield* createThread({ ...message, command }, receivedAt)
 
-            if (command._tag === "AttachThread") {
-              const authority = yield* product
-                .authorizeThread(principal, command.threadId, "thread:view")
-                .pipe(Effect.mapError(productFailure))
-              const notificationGeneration = changes.generation(command.threadId)
-              yield* store
-                .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
-                .pipe(Effect.mapError(storeFailure))
-              const replayCorrelation = { ownerId: authority.ownerId, threadId: command.threadId }
-              let replay = yield* materializeSnapshot(
-                authority,
-                command.threadId,
-                command.afterCursor,
-                command.afterCheckpointCursor,
-              )
-              const replayLag = replayDistance(replay.cursor, command.afterCursor)
-              yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
-              if (replayLag >= HostedObservability.replayLagAlertEvents)
-                yield* HostedObservability.health("replay_lag", replayCorrelation, {
-                  value: replayLag,
-                  threshold: HostedObservability.replayLagAlertEvents,
-                })
-              const replaySnapshot = replay.snapshot
-              const replayEvents = [...replay.events]
-              const baseCursor = replaySnapshot?.cursor ?? command.afterCursor
-              let representedCursor = replayEvents.at(-1)?.cursor ?? baseCursor
-              while (BigInt(representedCursor) < BigInt(replay.cursor)) {
-                const page = yield* store
-                  .replay({
-                    ownerId: authority.ownerId,
-                    threadId: command.threadId,
-                    actor: authority.actor,
-                    afterCursor: representedCursor,
-                    throughCursor: replay.cursor,
-                    includeSnapshot: false,
-                    limit: 1_000,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-                if (page.events.length === 0)
-                  return yield* unavailable("Thread replay does not continuously represent its cursor")
-                replayEvents.push(...page.events)
-                if (replayEvents.length > maximumAttachmentEvents)
-                  return yield* unavailable("Thread replay exceeds the attachment event limit")
-                representedCursor = page.events.at(-1)!.cursor
-              }
-              let expectedCursor = BigInt(baseCursor) + 1n
-              for (const event of replayEvents) {
-                if (BigInt(event.cursor) !== expectedCursor)
-                  return yield* unavailable(
-                    `Thread replay contains cursor ${event.cursor}; expected ${expectedCursor.toString()}`,
-                  )
-                expectedCursor += 1n
-              }
-              if (representedCursor !== replay.cursor)
-                return yield* unavailable("Thread replay terminal cursor is not represented")
-              if (replaySnapshot === undefined && command.afterCursor === zeroCursor)
-                return yield* unavailable("Initial Thread replay has no durable checkpoint")
-              const checkpointSnapshot =
-                replaySnapshot === undefined || options.workspacePlacement === undefined
-                  ? replaySnapshot?.snapshot
-                  : {
-                      ...replaySnapshot.snapshot,
-                      workspace: yield* options.workspacePlacement(authority.ownerId, command.threadId),
-                    }
-              const presenceNow = Timestamp.make(receivedAt)
-              const presenceExpiresAt = Timestamp.make(
-                DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 })),
-              )
-              const participants = yield* presence
-                .upsert({
-                  ownerId: authority.ownerId,
-                  threadId: command.threadId,
-                  actor: authority.actor,
-                  status: "viewing",
-                  now: presenceNow,
-                  expiresAt: presenceExpiresAt,
-                })
-                .pipe(
-                  Effect.andThen(
-                    presence.list({
-                      ownerId: authority.ownerId,
-                      threadId: command.threadId,
-                      actor: authority.actor,
-                      now: presenceNow,
-                    }),
-                  ),
-                  Effect.orElseSucceed(() => []),
-                )
-              const attachmentPayload = {
-                _tag: "ThreadAttached",
-                requestId: message.requestId,
-                threadId: command.threadId,
-                baseCursor,
-                threadVersion: replay.threadVersion,
-                cursor: representedCursor,
-                events: replayEvents.map((event) => ({
-                  threadId: event.threadId,
-                  sequence: Sequence.make(event.sequence),
-                  cursor: event.cursor,
-                  threadVersion: event.threadVersion,
-                  event: event.event,
-                  createdAt: event.createdAt,
-                })),
-                participants: participants.map(({ actor, status }) => ({ actor, status })),
-              } satisfies Extract<ServerFrame["payload"], { readonly _tag: "ThreadAttached" }>
-              if (replaySnapshot !== undefined && checkpointSnapshot !== undefined)
-                Object.assign(attachmentPayload, {
-                  checkpoint: {
-                    threadVersion: replaySnapshot.threadVersion,
-                    cursor: replaySnapshot.cursor,
-                    snapshot: checkpointSnapshot,
-                  },
-                })
-              const attachment = frame(attachmentPayload)
-              const encodedAttachment = encodeUnknownJson(attachment)
-              if (new TextEncoder().encode(encodedAttachment).byteLength > maximumAttachmentBytes)
-                return yield* unavailable("Thread replay exceeds the attachment byte limit")
-              const previewSubscription = yield* previews.subscribe(command.threadId)
-              if (attached !== undefined) yield* attached.previewSubscription.close
-              attached = {
-                threadId: command.threadId,
-                authority,
-                cursor: representedCursor,
-                checkpointCursor: replaySnapshot?.cursor ?? command.afterCheckpointCursor ?? zeroCursor,
-                knownHead: representedCursor,
-                notificationGeneration,
-                previewSubscription,
-              }
-              return [attachment]
-            }
+            if (command._tag === "AttachThread") return yield* connection.attach(command, message.requestId, receivedAt)
 
-            if (command._tag === "Detach") {
-              if (attached !== undefined) {
-                const now = Timestamp.make(receivedAt)
-                yield* presence
-                  .upsert({
-                    ownerId: attached.authority.ownerId,
-                    threadId: attached.threadId,
-                    actor: attached.authority.actor,
-                    status: "away",
-                    now,
-                    expiresAt: now,
-                  })
-                  .pipe(Effect.ignore)
-                yield* attached.previewSubscription.close
-              }
-              attached = undefined
-              return []
-            }
+            if (command._tag === "Detach") return yield* connection.detach(receivedAt)
             const threadId = command.threadId
-            let requiredAction: AuthorizationAction = "thread:control"
-            if (command._tag === "InspectWorkspaceFile") requiredAction = "workspace:file:view"
-            if (
-              command._tag === "EnsureRepositoryService" ||
-              command._tag === "StopRepositoryService" ||
-              command._tag === "OpenPortal"
-            )
-              requiredAction = "workspace:service:control"
-            if (command._tag === "AcknowledgeCursor") requiredAction = "thread:view"
-            if (command._tag === "UpdatePresence") requiredAction = "presence:update"
             const authority = yield* product
-              .authorizeThread(principal, threadId, requiredAction)
+              .authorizeThread(principal, threadId, authorizationAction(command))
               .pipe(Effect.mapError(productFailure))
 
             if (command._tag === "UpdatePresence") {
@@ -759,30 +427,21 @@ export const layerWithOptions = (
           })
 
           const durableReady = Effect.suspend(() => {
-            const current = attached
-            const waits = new Array<Effect.Effect<void>>()
-            if (current !== undefined)
-              waits.push(
-                BigInt(current.cursor) < BigInt(current.knownHead)
-                  ? Effect.void
-                  : changes.wait(current.threadId, current.notificationGeneration).pipe(Effect.asVoid),
-              )
-            const waitingThreads = new Set(current === undefined ? [] : [String(current.threadId)])
+            const waits = new Array<Effect.Effect<void>>(connection.ready)
+            const waitingThreads = new Set<string>()
             for (const entry of pendingCommands.values()) {
               const threadId = String(entry.command.threadId)
               if (waitingThreads.has(threadId)) continue
               waitingThreads.add(threadId)
               waits.push(changes.wait(entry.command.threadId, entry.notificationGeneration).pipe(Effect.asVoid))
             }
-            if (waits.length === 0) return Effect.never
             return waits.slice(1).reduce((left, right) => Effect.raceFirst(left, right), waits[0]!)
           })
 
-          const drainDurable: HostedThreadConnection["outbound"] = Effect.suspend(() => {
-            const current = attached
-            return Effect.gen(function* () {
+          const drainDurable: HostedThreadConnection["outbound"] = Effect.suspend(() =>
+            Effect.gen(function* () {
               const commandFrames = new Array<ServerFrame>()
-              for (const entry of [...pendingCommands.values()]) {
+              for (const entry of pendingCommands.values()) {
                 const notificationGeneration = changes.generation(entry.command.threadId)
                 const admission = {
                   ownerId: entry.command.ownerId,
@@ -807,120 +466,11 @@ export const layerWithOptions = (
                   })
                 }
               }
-              if (current === undefined || attached !== current) return commandFrames
-              const notificationGeneration = changes.generation(current.threadId)
-              let replay = yield* store
-                .replay({
-                  ownerId: current.authority.ownerId,
-                  threadId: current.threadId,
-                  actor: current.authority.actor,
-                  afterCursor: current.cursor,
-                  afterCheckpointCursor: current.checkpointCursor,
-                  limit: 1_000,
-                })
-                .pipe(Effect.mapError(storeFailure))
-              let expectedCursor = BigInt(current.cursor) + 1n
-              let reset =
-                (replay.snapshot !== undefined && BigInt(replay.snapshot.cursor) > BigInt(current.checkpointCursor)) ||
-                (replay.events.length === 0 && BigInt(replay.cursor) > BigInt(current.cursor))
-              for (const event of replay.events) {
-                if (BigInt(event.cursor) !== expectedCursor) reset = true
-                expectedCursor = BigInt(event.cursor) + 1n
-              }
-              if (reset) {
-                replay = yield* store
-                  .replay({
-                    ownerId: current.authority.ownerId,
-                    threadId: current.threadId,
-                    actor: current.authority.actor,
-                    afterCursor: current.cursor,
-                    afterCheckpointCursor: current.checkpointCursor,
-                    includeSnapshot: true,
-                    limit: 1_000,
-                  })
-                  .pipe(Effect.mapError(storeFailure))
-                if (replay.snapshot === undefined || BigInt(replay.snapshot.cursor) <= BigInt(current.checkpointCursor))
-                  return yield* unavailable("Thread replay gap has no newer durable snapshot")
-                expectedCursor = BigInt(replay.snapshot.cursor) + 1n
-                for (const event of replay.events) {
-                  if (BigInt(event.cursor) !== expectedCursor)
-                    return yield* unavailable("Thread replay remains discontinuous after its durable snapshot")
-                  expectedCursor += 1n
-                }
-              }
-              const cursor = replay.events.at(-1)?.cursor ?? replay.snapshot?.cursor ?? current.cursor
-              const snapshot = reset ? replay.snapshot : undefined
-              const projectedSnapshot =
-                snapshot === undefined || options.workspacePlacement === undefined
-                  ? snapshot?.snapshot
-                  : {
-                      ...snapshot.snapshot,
-                      workspace: yield* options.workspacePlacement(current.authority.ownerId, current.threadId),
-                    }
-              if (attached !== current) return commandFrames
-              attached = {
-                ...current,
-                cursor,
-                checkpointCursor: snapshot?.cursor ?? current.checkpointCursor,
-                knownHead: replay.cursor,
-                notificationGeneration,
-                previewSubscription: current.previewSubscription,
-              }
-              const frames =
-                reset && projectedSnapshot !== undefined
-                  ? [
-                      frame({
-                        _tag: "ThreadSnapshot",
-                        threadId: current.threadId,
-                        threadVersion: snapshot!.threadVersion,
-                        cursor: snapshot!.cursor,
-                        snapshot: projectedSnapshot,
-                      }),
-                    ]
-                  : []
-              frames.push(
-                ...replay.events.map((event) =>
-                  frame({
-                    _tag: "ThreadEvent",
-                    event: {
-                      threadId: event.threadId,
-                      sequence: Sequence.make(event.sequence),
-                      cursor: event.cursor,
-                      threadVersion: event.threadVersion,
-                      event: event.event,
-                      createdAt: event.createdAt,
-                    },
-                  }),
-                ),
-              )
-              return [...commandFrames, ...frames]
-            })
-          })
+              return [...commandFrames, ...(yield* connection.drain)]
+            }),
+          )
 
-          const durableOutbound: HostedThreadConnection["outbound"] = durableReady.pipe(Effect.andThen(drainDurable))
-
-          const outbound: HostedThreadConnection["outbound"] = Effect.suspend(() => {
-            const current = attached
-            if (current === undefined) return durableOutbound
-            return Effect.raceFirst(durableReady.pipe(Effect.as(undefined)), current.previewSubscription.take).pipe(
-              Effect.flatMap((delivery) => {
-                if (delivery === undefined) return drainDurable
-                if (attached !== current) return Effect.succeed([])
-                return Effect.succeed([
-                  frame(
-                    delivery._tag === "Reset"
-                      ? { _tag: "ThreadPreviewReset", threadId: current.threadId }
-                      : {
-                          _tag: "ThreadPreview",
-                          threadId: delivery.value.threadId,
-                          turnId: delivery.value.turnId,
-                          preview: delivery.value.preview,
-                        },
-                  ),
-                ])
-              }),
-            )
-          })
+          const outbound = connection.outbound(durableReady, drainDurable)
 
           return {
             receive: (message) =>
@@ -929,11 +479,7 @@ export const layerWithOptions = (
                 Effect.orDie,
               ),
             outbound,
-            detach: Effect.suspend(() => {
-              const current = attached
-              attached = undefined
-              return current?.previewSubscription.close ?? Effect.void
-            }),
+            detach: connection.close,
           }
         },
       )

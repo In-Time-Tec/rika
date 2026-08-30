@@ -84,28 +84,29 @@ const hostCallLabel = (operation: string, inputSummary: string): string => {
   return input._tag === "Some" ? `${action} ${input.value.path}` : action
 }
 
-const renderCellBodyImpl = (
-  block: Extract<TranscriptBlock, { _tag: "Cell" }>,
+type CellBlock = Extract<TranscriptBlock, { _tag: "Cell" }>
+
+const cellStatusIcon = (status: CellBlock["status"], spinnerFrame: string): string => {
+  if (status === "running") return spinnerFrame
+  if (status === "complete") return "✓"
+  if (status === "cancelled") return "⊘"
+  if (status === "unknown") return "?"
+  return "✕"
+}
+
+const renderCellHeader = (
+  block: CellBlock,
   selected: boolean,
-  expanded: boolean,
   width: number,
   spinnerFrame: string,
   append: Append,
-  context?: CellRenderContext,
 ): void => {
-  const running = block.status === "running"
-  let icon = "✕"
-  if (running) icon = spinnerFrame
-  else if (block.status === "complete") icon = "✓"
-  else if (block.status === "cancelled") icon = "⊘"
-  else if (block.status === "unknown") icon = "?"
-  const header: Array<TextChunk> = [fg(cellStatusColor(block.status))(icon)]
+  const header: Array<TextChunk> = [fg(cellStatusColor(block.status))(cellStatusIcon(block.status, spinnerFrame))]
   if (block.visual === "shell") header.push(fg(colors.subtle)(" $"))
   for (const chunk of header) append(selected ? bold(chunk) : chunk)
   const headerWidth = header.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-  const source = highlightLines(block.source.text, "typescript")
   let firstRow = true
-  for (const line of source) {
+  for (const line of highlightLines(block.source.text, "typescript")) {
     const rowWidth = firstRow ? Math.max(1, width - headerWidth - 1) : Math.max(1, width - 2)
     for (const row of wrapStyledLine(line.map(toOpenChunk), rowWidth)) {
       append(fg(colors.text)(firstRow ? " " : "\n  "))
@@ -115,33 +116,47 @@ const renderCellBodyImpl = (
   }
   if (block.calls.length > 0)
     append(dim(fg(colors.subtle)(`\n  ${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)))
-  context?.finishHeader?.()
-  if (!expanded) return
+}
+
+const renderCellOutputs = (block: CellBlock, width: number, append: Append): void => {
   if (block.output.stdout.length > 0)
     append(dim(fg(colors.text)(`\n  stdout\n${wrapBodyText(block.output.stdout, width, "    ")}`)))
   if (block.output.stderr.length > 0)
     append(dim(fg(colors.red)(`\n  stderr\n${wrapBodyText(block.output.stderr, width, "    ")}`)))
   if (block.result !== undefined)
     append(fg(colors.text)(`\n  result\n${wrapBodyText(formatCellResult(block.result), width, "    ")}`))
-  if (block.error !== undefined) {
-    append(fg(colors.red)(`\n  error\n${wrapBodyText(`${block.error.name}: ${block.error.message}`, width, "    ")}`))
-    if (block.error.stack !== undefined && block.error.stack.length > 0) {
-      const id = `cell-stack:${block.id}`
-      const start = context?.line() ?? 0
-      const shown = context?.rowExpanded(id) ?? false
-      append(dim(fg(colors.subtle)("\n    stack")))
-      const headerEnd = context?.line() ?? start
-      if (shown) append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "      ")}`)))
-      context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
-    }
-  }
+}
+
+const renderCellError = (block: CellBlock, width: number, append: Append, context?: CellRenderContext): void => {
+  if (block.error === undefined) return
+  append(fg(colors.red)(`\n  error\n${wrapBodyText(`${block.error.name}: ${block.error.message}`, width, "    ")}`))
+  if (block.error.stack === undefined || block.error.stack.length === 0) return
+  const id = `cell-stack:${block.id}`
+  const start = context?.line() ?? 0
+  const shown = context?.rowExpanded(id) ?? false
+  append(dim(fg(colors.subtle)("\n    stack")))
+  const headerEnd = context?.line() ?? start
+  if (shown) append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "      ")}`)))
+  context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
+}
+
+const cellCallIcon = (status: CellBlock["calls"][number]["status"], spinnerFrame: string): string => {
+  if (status === "started") return spinnerFrame
+  return status === "failed" ? "✕" : "✓"
+}
+
+const renderCellCalls = (
+  block: CellBlock,
+  width: number,
+  spinnerFrame: string,
+  append: Append,
+  context?: CellRenderContext,
+): void => {
   for (const call of block.calls) {
     const id = `cell-call:${block.id}:${call.id}`
     const start = context?.line() ?? 0
     const shown = context?.rowExpanded(id) ?? false
-    let callIcon = "✓"
-    if (call.status === "started") callIcon = spinnerFrame
-    else if (call.status === "failed") callIcon = "✕"
+    const callIcon = cellCallIcon(call.status, spinnerFrame)
     append(
       fg(call.status === "failed" ? colors.red : colors.text)(
         `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)}`,
@@ -154,6 +169,23 @@ const renderCellBodyImpl = (
     }
     context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
   }
+}
+
+const renderCellBodyImpl = (
+  block: CellBlock,
+  selected: boolean,
+  expanded: boolean,
+  width: number,
+  spinnerFrame: string,
+  append: Append,
+  context?: CellRenderContext,
+): void => {
+  renderCellHeader(block, selected, width, spinnerFrame, append)
+  context?.finishHeader?.()
+  if (!expanded) return
+  renderCellOutputs(block, width, append)
+  renderCellError(block, width, append, context)
+  renderCellCalls(block, width, spinnerFrame, append, context)
   for (const notice of block.notices) append(dim(fg(colors.amber)(`\n${wrapBodyText(notice.detail, width, "  ")}`)))
 }
 

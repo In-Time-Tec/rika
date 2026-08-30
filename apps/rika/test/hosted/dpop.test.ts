@@ -8,6 +8,12 @@ const decoded = (value: string) =>
     Buffer.from(value, "base64url").toString("utf8"),
   )
 
+const decodedClaims = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({ htm: Schema.String, htu: Schema.String, ath: Schema.String, jti: Schema.String }),
+  ),
+)
+
 it.effect("generates P-256 keys, RFC thumbprints, and access-bound DPoP proofs", () =>
   Effect.gen(function* () {
     const privateJwk = yield* generate()
@@ -24,12 +30,11 @@ it.effect("generates P-256 keys, RFC thumbprints, and access-bound DPoP proofs",
     })
     const [header, payload, signature] = value.split(".")
     expect(decoded(header!)).toMatchObject({ typ: "dpop+jwt", alg: "ES256", jwk: publicKey })
-    expect(decoded(payload!)).toMatchObject({
-      htm: "POST",
-      htu: "https://hosted.example.test/api/v1/connections",
-      ath: expect.any(String),
-      jti: expect.any(String),
-    })
+    const claims = decodedClaims(Buffer.from(payload!, "base64url").toString("utf8"))
+    expect(claims.htm).toBe("POST")
+    expect(claims.htu).toBe("https://hosted.example.test/api/v1/connections")
+    expect(claims.ath.length).toBeGreaterThan(0)
+    expect(claims.jti).toBe("proof-id")
     expect(Buffer.from(signature!, "base64url")).toHaveLength(64)
   }),
 )

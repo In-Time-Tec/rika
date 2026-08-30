@@ -29,54 +29,51 @@ const isTableToken = (token: Token): token is Tokens.Table =>
   Predicate.hasProperty(token, "rows") &&
   Array.isArray(token.rows)
 
+const isTextToken = (token: Token): token is Tokens.Text =>
+  token.type === "text" && Predicate.hasProperty(token, "text") && Predicate.isString(token.text)
+
+const isCodeToken = (token: Token): token is Tokens.Code =>
+  token.type === "code" && Predicate.hasProperty(token, "text") && Predicate.isString(token.text)
+
 const trailingBlankLines = (raw: string): number => {
   const match = /\n+$/.exec(raw)
   return match === null ? 0 : Math.max(0, match[0].length - 1)
 }
 
-const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<TerminalTextChunk> => {
-  const chunks: Array<TerminalTextChunk> = []
-  for (const token of tokens) {
-    switch (token.type) {
-      case "text": {
-        const text = token
-        if (text.tokens !== undefined && text.tokens.length > 0) chunks.push(...inlineChunks(text.tokens, plain))
-        else chunks.push(fg(colors.text)(text.text))
-        break
-      }
-      case "escape":
-        chunks.push(fg(colors.text)(token.text))
-        break
-      case "strong":
-        chunks.push(...inlineChunks(token.tokens ?? [], plain).map((chunk) => bold(chunk)))
-        break
-      case "em":
-        chunks.push(...inlineChunks(token.tokens ?? [], plain).map((chunk) => italic(chunk)))
-        break
-      case "del":
-        chunks.push(...inlineChunks(token.tokens ?? [], plain).map((chunk) => strikethrough(chunk)))
-        break
-      case "codespan":
-        chunks.push(bold(fg(colors.amber)(token.text)))
-        break
-      case "link": {
-        const linked = token
-        if (plain) chunks.push(fg(colors.text)(`${linked.text} <${linked.href}>`))
-        else chunks.push(link(linked.href)(underline(fg(colors.blue)(linked.text))))
-        break
-      }
-      case "image":
-        chunks.push(italic(fg(colors.blue)(`[Image: ${token.text}]`)))
-        break
-      case "br":
-        chunks.push(fg(colors.text)("\n"))
-        break
-      default:
-        chunks.push(fg(colors.text)(token.raw))
-    }
+const textTokenChunks = (token: Tokens.Text, plain: boolean): Array<TerminalTextChunk> =>
+  token.tokens !== undefined && token.tokens.length > 0
+    ? inlineChunks(token.tokens, plain)
+    : [fg(colors.text)(token.text)]
+
+const inlineTokenChunks = (token: Token, plain: boolean): Array<TerminalTextChunk> => {
+  switch (token.type) {
+    case "text":
+      return isTextToken(token) ? textTokenChunks(token, plain) : [fg(colors.text)(token.raw)]
+    case "escape":
+      return [fg(colors.text)(String(token.text))]
+    case "strong":
+      return inlineChunks(token.tokens ?? [], plain).map((chunk) => bold(chunk))
+    case "em":
+      return inlineChunks(token.tokens ?? [], plain).map((chunk) => italic(chunk))
+    case "del":
+      return inlineChunks(token.tokens ?? [], plain).map((chunk) => strikethrough(chunk))
+    case "codespan":
+      return [bold(fg(colors.amber)(String(token.text)))]
+    case "link":
+      return plain
+        ? [fg(colors.text)(`${String(token.text)} <${String(token.href)}>`)]
+        : [link(String(token.href))(underline(fg(colors.blue)(String(token.text))))]
+    case "image":
+      return [italic(fg(colors.blue)(`[Image: ${token.text}]`))]
+    case "br":
+      return [fg(colors.text)("\n")]
+    default:
+      return [fg(colors.text)(token.raw)]
   }
-  return chunks
 }
+
+const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<TerminalTextChunk> =>
+  tokens.flatMap((token) => inlineTokenChunks(token, plain))
 
 const headingChunks = (heading: Tokens.Heading, plain: boolean): Array<TerminalTextChunk> =>
   inlineChunks(heading.tokens, plain).map((chunk) => {
@@ -109,7 +106,7 @@ const distribute = (amount: number, weights: ReadonlyArray<number>): Array<numbe
     .toSorted((left, right) => right.fraction - left.fraction || left.position - right.position)
     .map(({ position }) => position)) {
     if (remaining === 0) break
-    result[target] = result[target]! + 1
+    result[target]! += 1
     remaining -= 1
   }
   return result
@@ -246,64 +243,71 @@ const listLines = (list: Tokens.List, depth: number, plain: boolean, width: numb
   return lines
 }
 
+const rawBlockLines = (token: Token): Lines => splitChunks([fg(colors.text)(token.raw.replace(/\n+$/u, ""))])
+
+const codeBlockLines = (token: Tokens.Code, width: number): Lines => {
+  const lines: Lines = []
+  const indent = " ".repeat(Math.min(4, Math.max(0, width - 1)))
+  const contentWidth = Math.max(1, width - stringWidth(indent))
+  const language = token.lang?.split(/\s/)[0]
+  for (const line of highlightLines(token.text, language)) {
+    if (line.length === 0) lines.push([])
+    else
+      for (const wrapped of hardWrapChunkLine(line, contentWidth)) {
+        lines.push([fg(colors.text)(indent), ...wrapped])
+      }
+  }
+  return lines
+}
+
+const textBlockLines = (token: Token, plain: boolean, width: number): Lines => {
+  if (!isTextToken(token)) return rawBlockLines(token)
+  return token.tokens !== undefined && token.tokens.length > 0
+    ? wrapChunks(inlineChunks(token.tokens, plain), width)
+    : wrapChunks([fg(colors.text)(token.text)], width)
+}
+
+const structuredBlockLines = (token: Token, depth: number, plain: boolean, width: number): Lines => {
+  if (token.type === "heading" && isHeadingToken(token)) return wrapChunks(headingChunks(token, plain), width)
+  if (token.type === "list" && isListToken(token)) return listLines(token, depth, plain, width)
+  if (token.type === "table" && isTableToken(token)) return tableLines(token, plain, width)
+  return rawBlockLines(token)
+}
+
+const blockTokenLines = (token: Token, depth: number, plain: boolean, width: number): Lines => {
+  switch (token.type) {
+    case "space": {
+      const blanks = Math.max(0, (token.raw.match(/\n/g)?.length ?? 0) - 1)
+      return Array.from({ length: blanks }, () => [])
+    }
+    case "heading":
+      return structuredBlockLines(token, depth, plain, width)
+    case "paragraph":
+      return wrapChunks(inlineChunks(token.tokens ?? [], plain), width)
+    case "text":
+      return textBlockLines(token, plain, width)
+    case "code":
+      return isCodeToken(token) ? codeBlockLines(token, width) : rawBlockLines(token)
+    case "blockquote": {
+      return blockLines(token.tokens ?? [], depth, plain, Math.max(1, width - 2)).map((line) => [
+        dim(fg(colors.text)("│ ")),
+        ...line,
+      ])
+    }
+    case "list":
+      return structuredBlockLines(token, depth, plain, width)
+    case "table":
+      return structuredBlockLines(token, depth, plain, width)
+    default:
+      return rawBlockLines(token)
+  }
+}
+
 const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean, width: number): Lines => {
   const lines: Lines = []
   tokens.forEach((token) => {
-    switch (token.type) {
-      case "space": {
-        const blanks = Math.max(0, (token.raw.match(/\n/g)?.length ?? 0) - 1)
-        for (let index = 0; index < blanks; index += 1) lines.push([])
-        return
-      }
-      case "heading": {
-        if (isHeadingToken(token)) lines.push(...wrapChunks(headingChunks(token, plain), width))
-        else lines.push(...splitChunks([fg(colors.text)(token.raw.replace(/\n+$/u, ""))]))
-        break
-      }
-      case "paragraph":
-        lines.push(...wrapChunks(inlineChunks(token.tokens ?? [], plain), width))
-        break
-      case "text": {
-        const text = token
-        if (text.tokens !== undefined && text.tokens.length > 0)
-          lines.push(...wrapChunks(inlineChunks(text.tokens, plain), width))
-        else lines.push(...wrapChunks([fg(colors.text)(text.text)], width))
-        break
-      }
-      case "code": {
-        const code = token
-        const indent = " ".repeat(Math.min(4, Math.max(0, width - 1)))
-        const contentWidth = Math.max(1, width - stringWidth(indent))
-        for (const line of highlightLines(code.text, code.lang?.split(/\s/)[0])) {
-          if (line.length === 0) lines.push([])
-          else
-            for (const wrapped of hardWrapChunkLine(line, contentWidth)) {
-              lines.push([fg(colors.text)(indent), ...wrapped])
-            }
-        }
-        break
-      }
-      case "blockquote": {
-        const quote = token
-        for (const line of blockLines(quote.tokens ?? [], depth, plain, Math.max(1, width - 2))) {
-          lines.push([dim(fg(colors.text)("│ ")), ...line])
-        }
-        break
-      }
-      case "list":
-        if (isListToken(token)) lines.push(...listLines(token, depth, plain, width))
-        else lines.push(...splitChunks([fg(colors.text)(token.raw.replace(/\n+$/u, ""))]))
-        break
-      case "table":
-        if (isTableToken(token)) lines.push(...tableLines(token, plain, width))
-        else lines.push(...splitChunks([fg(colors.text)(token.raw.replace(/\n+$/u, ""))]))
-        break
-      case "hr":
-      case "html":
-      default:
-        lines.push(...splitChunks([fg(colors.text)(token.raw.replace(/\n+$/, ""))]))
-        break
-    }
+    lines.push(...blockTokenLines(token, depth, plain, width))
+    if (token.type === "space") return
     const blanks = trailingBlankLines(token.raw)
     for (let index = 0; index < blanks; index += 1) lines.push([])
   })
@@ -345,7 +349,7 @@ export const renderMarkdown: {
   (width?: number): (source: string) => string
 } = Function.dual(
   (args) => Predicate.isString(args[0]),
-  (source: string, width = 80): string =>
+  (source: string, width: number = 80): string =>
     renderLines(source, true, width)
       .map((line) => line.map((chunk) => chunk.text).join(""))
       .join("\n"),
@@ -356,7 +360,7 @@ export const renderMarkdownLines: {
   (width?: number): (source: string) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
 } = Function.dual(
   (args) => Predicate.isString(args[0]),
-  (source: string, width = 80): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
+  (source: string, width: number = 80): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const bounded = Math.max(1, Math.floor(width))
     return renderLines(source, false, bounded).flatMap((line) => {
       if (line.length === 0) return [[]]
@@ -371,7 +375,7 @@ export const renderMarkdownStyled: {
   (width?: number): (source: string) => TerminalStyledText
 } = Function.dual(
   (args) => Predicate.isString(args[0]),
-  (source: string, width = 80): TerminalStyledText => {
+  (source: string, width: number = 80): TerminalStyledText => {
     const chunks: Array<TerminalTextChunk> = []
     renderLines(source, false, width).forEach((line, index) => {
       if (index > 0) chunks.push(fg(colors.text)("\n"))

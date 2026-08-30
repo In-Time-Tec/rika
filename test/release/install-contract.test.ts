@@ -24,13 +24,13 @@ describe("install contract", () => {
   test("install.sh validates the kernel-capable archive inventory", () => {
     expect(installer).toContain("verify_archive_inventory")
     expect(installer).toContain('"${archive_root}/INSTALL"')
-    for (const required of packageBinEntries) expect(installer).toContain(`"${"${archive_root}"}/bin/${required}"`)
+    for (const required of packageBinEntries) expect(installer).toContain('"${archive_root}/bin/' + required + '"')
     for (const forbidden of [".rika-interactive", ".rika-performance"]) expect(installer).not.toContain(forbidden)
   })
 
   test("install.sh verifies a checksum before publishing the install", () => {
     const verifyAt = installer.indexOf("verify_checksum ")
-    const publishAt = installer.indexOf(`mv "${"${staging}"}/${"${archive_root}"}"`)
+    const publishAt = installer.indexOf(`mv "\${staging}/\${archive_root}"`)
     expect(verifyAt).toBeGreaterThan(0)
     expect(publishAt).toBeGreaterThan(verifyAt)
   })
@@ -64,7 +64,7 @@ describe("install contract", () => {
     for (const target of targetNames) {
       expect(ReleaseUpdate.archiveFileName("1.2.3", target)).toBe(archiveName("1.2.3", target))
       expect(ReleaseUpdate.archiveRootName("1.2.3", target)).toBe(archiveRoot("1.2.3", target))
-      expect(installer).toContain(`${ReleaseInstall.releaseRepository}`)
+      expect(installer).toContain(ReleaseInstall.releaseRepository)
     }
   })
 
@@ -77,9 +77,9 @@ describe("install contract", () => {
 
   test("the npm launcher declares one optional dependency per target", () => {
     const manifest = launcherManifest("1.2.3")
-    expect(Object.keys(manifest.optionalDependencies).toSorted()).toEqual(
-      targetNames.map(platformPackageName).toSorted(),
-    )
+    const dependencyNames = new Set(Object.keys(manifest.optionalDependencies))
+    const expectedNames = new Set(targetNames.map((target) => platformPackageName(target)))
+    expect(dependencyNames).toEqual(expectedNames)
     for (const version of Object.values(manifest.optionalDependencies)) expect(version).toBe("1.2.3")
     expect(manifest.bin.rika).toBe("bin/rika.js")
   })

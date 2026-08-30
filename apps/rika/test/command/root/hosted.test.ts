@@ -93,9 +93,8 @@ it.effect("routes hosted execution without calling the local server operation", 
         { _tag: "Credential", action: "revoke", provider: "openrouter" },
       ])
       expect(
-        (yield* Effect.exit(
-          invoke(["thread", "recovery", "accept", "thread-1", "run-1", "operation-1", "not-json"]),
-        ))._tag,
+        (yield* Effect.exit(invoke(["thread", "recovery", "accept", "thread-1", "run-1", "operation-1", "not-json"])))
+          ._tag,
       ).toBe("Failure")
       expect((yield* Effect.exit(invoke(["credential", "list", "--scope", "user"])))._tag).toBe("Failure")
       expect(yield* Ref.get(productCalls)).toEqual([])

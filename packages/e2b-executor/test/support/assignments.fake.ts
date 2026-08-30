@@ -13,6 +13,7 @@ import {
   type AssignmentsService,
   type Fence,
 } from "@rika/product/executor-assignments"
+import { orphanAuthorityFake } from "./orphan-authority.fake"
 
 interface AssignmentCredentials {
   readonly bootstrap?: Redacted.Redacted<string>
@@ -139,43 +140,6 @@ const make = Effect.gen(function* () {
       return fail("invalid-authority", "Replacement placement must preserve the Runner authority")
     return undefined
   }
-  const orphanAuthority = (
-    current: State,
-    input: { readonly providerInstanceId: string; readonly assignmentId?: string; readonly generation?: string },
-    now: string,
-  ) => {
-    const bound = [...current.assignments.values()].find((assignment) => {
-      const lifecycle = assignment.lifecycle
-      return (
-        (lifecycle._tag === "Provisioning" ||
-          lifecycle._tag === "AwaitingBootstrap" ||
-          lifecycle._tag === "Active" ||
-          lifecycle._tag === "Paused") &&
-        lifecycle.providerInstanceId === input.providerInstanceId
-      )
-    })
-    const identified =
-      input.assignmentId === undefined || input.generation === undefined
-        ? undefined
-        : current.assignments.get(input.assignmentId)
-    const matched = identified?.generation === input.generation ? identified : undefined
-    const assignment = bound ?? matched
-    if (assignment === undefined)
-      return identified === undefined ? ({ status: "preserved" } as const) : ({ status: "candidate" } as const)
-    const lifecycle = assignment.lifecycle
-    if (lifecycle._tag === "Active" || lifecycle._tag === "Paused")
-      return bound === undefined ? ({ status: "candidate" } as const) : ({ status: "preserved" } as const)
-    if (lifecycle._tag === "Terminated") return { status: "candidate" } as const
-    if (
-      (lifecycle._tag === "Provisioning" || lifecycle._tag === "AwaitingBootstrap") &&
-      lifecycle.bootstrapExpiresAt > now
-    )
-      return lifecycle.providerInstanceId === null || bound !== undefined
-        ? ({ status: "preserved" } as const)
-        : ({ status: "candidate" } as const)
-    return { status: "candidate", retire: assignment } as const
-  }
-
   return ExecutorAssignments.of({
     create: (input) =>
       mutation((current, now) => {
@@ -228,11 +192,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const current = yield* Ref.get(state)
         const now = timestamp(yield* Clock.currentTimeMillis)
-        return orphanAuthority(current, input, now).status
+        return orphanAuthorityFake.inspect(current, input, now).status
       }),
     claimOrphan: (input) =>
       mutation((current, now) => {
-        const authority = orphanAuthority(current, input, now)
+        const authority = orphanAuthorityFake.inspect(current, input, now)
         if (authority.status === "preserved") return succeed("preserved" as const, current)
         if (!("retire" in authority)) return succeed("claimed" as const, current)
         const next = revised(authority.retire, now, {

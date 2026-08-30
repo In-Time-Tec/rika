@@ -10,15 +10,11 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import { Function, Effect, Cause, Clock, type Exit, Context, Layer, Ref } from "effect"
-import { type InteractiveEvent } from "./session-event"
+import type { InteractiveEvent } from "./session-event"
 import { operationError, OperationError, failureKind } from "../error"
 import { clampThreadTitle } from "../../thread/query/title-policy"
 import { recordedShellProjection, settleRecordedShellProjection } from "@rika/transcript/recorded-shell-presentation"
-import {
-  type InteractiveExecutionContext,
-  type InteractiveSessionInput,
-  type InteractiveRuntimeContext,
-} from "./session"
+import type { InteractiveExecutionContext, InteractiveSessionInput, InteractiveRuntimeContext } from "./session"
 import * as OperationFailure from "../failure"
 
 export const executionStartFailureMessage =

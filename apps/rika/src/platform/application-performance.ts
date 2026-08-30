@@ -4,7 +4,7 @@ import {
   type PerformancePhase,
 } from "@rika/terminal/terminal-performance-evaluation"
 import { DateTime, Effect } from "effect"
-import { type ProcessIdentity, type ProcessObservation } from "./performance"
+import type { ProcessIdentity, ProcessObservation } from "./performance"
 import { observeProcesses } from "./process-table"
 
 const monotonicMilliseconds = () => Number(process.hrtime.bigint()) / 1_000_000

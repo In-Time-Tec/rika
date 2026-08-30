@@ -69,7 +69,7 @@ export const trimTranscriptTimeline: {
     if (index === undefined) {
       index = blocks.length
       blockIndices.set(item.index, index)
-      blocks.push(model.blocks[item.index]!)
+      blocks.push(model.blocks[item.index])
     }
     remapped.push({ ...item, index })
   }

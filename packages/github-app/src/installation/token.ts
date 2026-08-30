@@ -65,10 +65,10 @@ const failure = (reason: InstallationTokenError["reason"], operation: string, me
 }
 
 const canonicalPermissions = (permissions: GitHub.Permissions) =>
-  Object.entries(permissions).sort(([left], [right]) => left.localeCompare(right))
+  Object.entries(permissions).toSorted(([left], [right]) => left.localeCompare(right))
 
 const canonicalRepositoryIds = (repositoryIds: ReadonlyArray<number>) =>
-  [...new Set(repositoryIds)].sort((a, b) => a - b)
+  [...new Set(repositoryIds)].toSorted((a, b) => a - b)
 
 const cacheKey = (request: RepositoryTokenRequest) =>
   JSON.stringify([
@@ -89,7 +89,7 @@ const verifyScope = (
 ): Effect.Effect<void, InstallationTokenError> =>
   Effect.gen(function* () {
     const requestedIds = canonicalRepositoryIds(request.repositoryIds)
-    const returnedIds = response.repositories?.map((repository) => repository.id).sort((a, b) => a - b)
+    const returnedIds = response.repositories?.map((repository) => repository.id).toSorted((a, b) => a - b)
     if (
       returnedIds === undefined ||
       returnedIds.length !== requestedIds.length ||

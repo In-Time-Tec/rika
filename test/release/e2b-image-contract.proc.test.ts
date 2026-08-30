@@ -35,12 +35,12 @@ const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>)
     ),
   )
 
-const run = Effect.fn("e2bImageContract.run")(function* (parts: ReadonlyArray<string>, timeout = 30_000) {
+const run = Effect.fn("e2bImageContract.run")(function* (parts: ReadonlyArray<string>, timeout: number = 30_000) {
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const child = yield* spawner.spawn(
-        ChildProcess.make(parts[0]!, parts.slice(1), {
+        ChildProcess.make(parts[0], parts.slice(1), {
           cwd: root.pathname,
           detached: false,
           forceKillAfter: "5 seconds",

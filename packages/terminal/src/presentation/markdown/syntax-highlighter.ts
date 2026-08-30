@@ -28,37 +28,28 @@ const roleColors = {
 
 type Role = keyof typeof roleColors | "plain"
 
-const tokenRole = (type: string): Role => {
-  switch (type) {
-    case "keyword":
-    case "boolean":
-    case "important":
-      return "keyword"
-    case "string":
-    case "char":
-    case "template-string":
-    case "attr-value":
-    case "regex":
-    case "inserted":
-      return "string"
-    case "number":
-      return "number"
-    case "comment":
-    case "prolog":
-    case "doctype":
-    case "cdata":
-    case "deleted":
-      return "comment"
-    case "function":
-      return "function"
-    case "class-name":
-    case "builtin":
-    case "type":
-      return "type"
-    default:
-      return "plain"
-  }
-}
+const tokenRoles = new Map<string, Role>([
+  ["keyword", "keyword"],
+  ["boolean", "keyword"],
+  ["important", "keyword"],
+  ["string", "string"],
+  ["char", "string"],
+  ["template-string", "string"],
+  ["attr-value", "string"],
+  ["regex", "string"],
+  ["inserted", "string"],
+  ["number", "number"],
+  ["comment", "comment"],
+  ["prolog", "comment"],
+  ["doctype", "comment"],
+  ["cdata", "comment"],
+  ["deleted", "comment"],
+  ["function", "function"],
+  ["class-name", "type"],
+  ["builtin", "type"],
+  ["type", "type"],
+])
+const tokenRole = (type: string): Role => tokenRoles.get(type) ?? "plain"
 
 type Run = { readonly text: string; readonly role: Role }
 const isString = Schema.is(Schema.String)
@@ -172,145 +163,173 @@ const scanShellWord = (command: string, start: number): string => {
   return command.slice(start, index)
 }
 
+interface ShellScanState {
+  index: number
+  commandPosition: boolean
+}
+
+const scanShellSpecial = (
+  command: string,
+  state: ShellScanState,
+  runs: Array<ShellRun>,
+  pendingHeredocs: Array<{ readonly tag: string; readonly stripTabs: boolean }>,
+): boolean => {
+  const push = (text: string, kind: ShellKind) => {
+    if (text.length > 0) runs.push({ text, kind })
+  }
+  const current = command[state.index]!
+  const scanWhitespace = (): boolean => {
+    if (current !== " " && current !== "\t") return false
+    let stop = state.index
+    while (stop < command.length && (command[stop] === " " || command[stop] === "\t")) stop += 1
+    push(command.slice(state.index, stop), "plain")
+    state.index = stop
+    return true
+  }
+  const scanQuoted = (): boolean => {
+    if (current !== "'" && current !== '"') return false
+    const fromAssignment = runs[runs.length - 1]?.kind === "assignment"
+    let stop = state.index + 1
+    while (stop < command.length && command[stop] !== current) {
+      if (current === '"' && command[stop] === "\\") stop += 1
+      stop += 1
+    }
+    stop = Math.min(stop + 1, command.length)
+    push(command.slice(state.index, stop), "string")
+    state.index = stop
+    if (!fromAssignment) state.commandPosition = false
+    return true
+  }
+  const scanHeredoc = (): boolean => {
+    if (!command.startsWith("<<", state.index) || command.startsWith("<<<", state.index)) return false
+    const heredoc = shellHeredocPattern.exec(command.slice(state.index))
+    if (heredoc === null) return false
+    const stripTabs = command[state.index + 2] === "-"
+    const opLength = stripTabs ? 3 : 2
+    push(command.slice(state.index, state.index + opLength), "operator")
+    push(heredoc[0].slice(opLength), "heredoc")
+    pendingHeredocs.push({ tag: heredoc[1] ?? heredoc[2] ?? heredoc[3]!, stripTabs })
+    state.index += heredoc[0].length
+    state.commandPosition = false
+    return true
+  }
+  if (scanWhitespace()) return true
+  if (current === "\\" && command[state.index + 1] === "\n") {
+    push("\\", "continuation")
+    state.index += 1
+    return true
+  }
+  if (current === "#") {
+    const newline = command.indexOf("\n", state.index)
+    const stop = newline === -1 ? command.length : newline
+    push(command.slice(state.index, stop), "comment")
+    state.index = stop
+    return true
+  }
+  return scanQuoted() || scanHeredoc()
+}
+
+const scanShellOperator = (command: string, state: ShellScanState, runs: Array<ShellRun>): boolean => {
+  const push = (text: string) => runs.push({ text, kind: "operator" })
+  const current = command[state.index]!
+  const control = ["&&", "||", ";;"].find((operator) => command.startsWith(operator, state.index))
+  if (control !== undefined) {
+    push(control)
+    state.index += control.length
+    state.commandPosition = true
+    return true
+  }
+  const redirect = shellRedirectPattern.exec(command.slice(state.index))
+  if (redirect !== null) {
+    push(redirect[0])
+    state.index += redirect[0].length
+    return true
+  }
+  if (current === "$" && command[state.index + 1] === "(") {
+    push("$(")
+    state.index += 2
+    state.commandPosition = true
+    return true
+  }
+  if (current === "|" || current === ";" || current === "&" || current === "(" || current === "`") {
+    push(current)
+    state.index += 1
+    state.commandPosition = true
+    return true
+  }
+  if (current !== ")") return false
+  push(current)
+  state.index += 1
+  return true
+}
+
+const scanShellCommandWord = (command: string, state: ShellScanState, runs: Array<ShellRun>): void => {
+  const push = (text: string, kind: ShellKind) => {
+    if (text.length > 0) runs.push({ text, kind })
+  }
+  const current = command[state.index]!
+  const word = scanShellWord(command, state.index)
+  if (word.length === 0) {
+    push(current, "plain")
+    state.index += 1
+    return
+  }
+  state.index += word.length
+  const assignment = state.commandPosition ? shellAssignmentPattern.exec(word) : null
+  if (assignment !== null) {
+    push(assignment[1]!, "assignment")
+    push(assignment[2]!, "plain")
+    return
+  }
+  if (word.startsWith("-")) {
+    const split = word.indexOf("=")
+    if (split === -1) push(word, "flag")
+    else {
+      push(word.slice(0, split + 1), "flag")
+      push(word.slice(split + 1), "plain")
+    }
+    state.commandPosition = false
+    return
+  }
+  push(word, state.commandPosition ? "command" : "plain")
+  state.commandPosition = false
+}
+
 const scanShellCommand = (command: string): ReadonlyArray<ShellRun> => {
   const runs: Array<ShellRun> = []
   const push = (text: string, kind: ShellKind) => {
     if (text.length > 0) runs.push({ text, kind })
   }
   const pendingHeredocs: Array<{ readonly tag: string; readonly stripTabs: boolean }> = []
-  let index = 0
-  let commandPosition = true
+  const state: ShellScanState = { index: 0, commandPosition: true }
   const consumeHeredocBodies = () => {
-    while (pendingHeredocs.length > 0 && index < command.length) {
+    while (pendingHeredocs.length > 0 && state.index < command.length) {
       const heredoc = pendingHeredocs[0]!
-      const newline = command.indexOf("\n", index)
+      const newline = command.indexOf("\n", state.index)
       const stop = newline === -1 ? command.length : newline
-      const lineText = command.slice(index, stop)
+      const lineText = command.slice(state.index, stop)
       push(lineText, "heredoc")
-      index = stop
+      state.index = stop
       if (newline !== -1) {
         push("\n", "plain")
-        index = newline + 1
+        state.index = newline + 1
       }
       const terminator = heredoc.stripTabs ? lineText.replace(/^\t+/, "") : lineText
       if (terminator === heredoc.tag) pendingHeredocs.shift()
     }
   }
-  while (index < command.length) {
-    const current = command[index]!
+  while (state.index < command.length) {
+    const current = command[state.index]!
     if (current === "\n") {
       push("\n", "plain")
-      index += 1
-      commandPosition = true
+      state.index += 1
+      state.commandPosition = true
       consumeHeredocBodies()
       continue
     }
-    if (current === " " || current === "\t") {
-      let stop = index
-      while (stop < command.length && (command[stop] === " " || command[stop] === "\t")) stop += 1
-      push(command.slice(index, stop), "plain")
-      index = stop
-      continue
-    }
-    if (current === "\\" && command[index + 1] === "\n") {
-      push("\\", "continuation")
-      index += 1
-      continue
-    }
-    if (current === "#") {
-      const newline = command.indexOf("\n", index)
-      const stop = newline === -1 ? command.length : newline
-      push(command.slice(index, stop), "comment")
-      index = stop
-      continue
-    }
-    if (current === "'" || current === '"') {
-      const fromAssignment = runs[runs.length - 1]?.kind === "assignment"
-      let stop = index + 1
-      while (stop < command.length && command[stop] !== current) {
-        if (current === '"' && command[stop] === "\\") stop += 1
-        stop += 1
-      }
-      stop = Math.min(stop + 1, command.length)
-      push(command.slice(index, stop), "string")
-      index = stop
-      if (!fromAssignment) commandPosition = false
-      continue
-    }
-    if (command.startsWith("<<", index) && !command.startsWith("<<<", index)) {
-      const heredoc = shellHeredocPattern.exec(command.slice(index))
-      if (heredoc !== null) {
-        const stripTabs = command[index + 2] === "-"
-        const opLength = stripTabs ? 3 : 2
-        push(command.slice(index, index + opLength), "operator")
-        push(heredoc[0].slice(opLength), "heredoc")
-        pendingHeredocs.push({ tag: heredoc[1] ?? heredoc[2] ?? heredoc[3]!, stripTabs })
-        index += heredoc[0].length
-        commandPosition = false
-        continue
-      }
-    }
-    const control = ["&&", "||", ";;"].find((op) => command.startsWith(op, index))
-    if (control !== undefined) {
-      push(control, "operator")
-      index += control.length
-      commandPosition = true
-      continue
-    }
-    const redirect = shellRedirectPattern.exec(command.slice(index))
-    if (redirect !== null) {
-      push(redirect[0], "operator")
-      index += redirect[0].length
-      continue
-    }
-    if (current === "$" && command[index + 1] === "(") {
-      push("$(", "operator")
-      index += 2
-      commandPosition = true
-      continue
-    }
-    if (current === "|" || current === ";" || current === "&" || current === "(" || current === "`") {
-      push(current, "operator")
-      index += 1
-      commandPosition = true
-      continue
-    }
-    if (current === ")") {
-      push(current, "operator")
-      index += 1
-      continue
-    }
-    const word = scanShellWord(command, index)
-    if (word.length === 0) {
-      push(current, "plain")
-      index += 1
-      continue
-    }
-    index += word.length
-    if (commandPosition) {
-      const assignment = shellAssignmentPattern.exec(word)
-      if (assignment !== null) {
-        push(assignment[1]!, "assignment")
-        push(assignment[2]!, "plain")
-        continue
-      }
-    }
-    if (word.startsWith("-")) {
-      const split = word.indexOf("=")
-      if (split === -1) push(word, "flag")
-      else {
-        push(word.slice(0, split + 1), "flag")
-        push(word.slice(split + 1), "plain")
-      }
-      commandPosition = false
-      continue
-    }
-    if (commandPosition) {
-      push(word, "command")
-      commandPosition = false
-      continue
-    }
-    push(word, "plain")
+    if (scanShellSpecial(command, state, runs, pendingHeredocs)) continue
+    if (scanShellOperator(command, state, runs)) continue
+    scanShellCommandWord(command, state, runs)
   }
   return runs
 }

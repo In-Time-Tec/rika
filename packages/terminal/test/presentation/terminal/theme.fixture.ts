@@ -1,9 +1,9 @@
 import { vi } from "vitest"
 import { Function, Effect } from "effect"
 import { create } from "../../../src/opentui/surface/service"
-import { type Handlers } from "../../../src/opentui/surface/state"
+import type { Handlers } from "../../../src/opentui/surface/state"
 import { initial, type Model } from "../../../src/state/model"
-import { type ThreadItem } from "../../../src/state/thread/model"
+import type { ThreadItem } from "../../../src/state/thread/model"
 
 const shellImpl = (id: string, command: string, output: string) => ({
   _tag: "ToolCall" as const,
@@ -12,7 +12,12 @@ const shellImpl = (id: string, command: string, output: string) => ({
   input: JSON.stringify({ command }),
   result: { text: output },
   status: "complete" as const,
-  presentation: { family: "shell" as const, action: "command", activeLabel: "Running", completeLabel: "Ran" },
+  presentation: {
+    family: "shell" as const,
+    action: "command",
+    activeLabel: "Running",
+    completeLabel: "Ran",
+  },
   detail: command,
   files: [],
 })
@@ -82,7 +87,10 @@ export const _handlers = (): Handlers => ({ key: vi.fn(), resize: vi.fn() })
 
 export const _nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
 
-export const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
+export const model = (changes: Partial<Model> = {}): Model => ({
+  ...initial("/workspace", "medium"),
+  ...changes,
+})
 
 export const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/workspace",

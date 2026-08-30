@@ -25,7 +25,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
     const runtime = yield* RuntimeTools.Service
     return {
       grep: ({ pattern, regex, path }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Grep" }> = {
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "Grep" }> = {
           _tag: "Grep",
           pattern,
           regex,
@@ -34,7 +34,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
         return runtime.run(request)
       },
       list: ({ path, depth }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "List" }> = { _tag: "List" }
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "List" }> = { _tag: "List" }
         if (path !== undefined) request = { ...request, path }
         if (depth !== undefined) request = { ...request, depth }
         return runtime.run(request)
@@ -43,7 +43,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
         runtime.run(read_range === undefined ? { _tag: "Read", path } : { _tag: "Read", path, readRange: read_range }),
       write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
       edit: ({ path, old_str, new_str, replace_all }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Edit" }> = {
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "Edit" }> = {
           _tag: "Edit",
           path,
           oldStr: old_str,
@@ -53,7 +53,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
         return runtime.run(request)
       },
       bash: ({ command, workdir, timeout_ms }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "Bash" }> = {
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "Bash" }> = {
           _tag: "Bash",
           command,
         }
@@ -68,7 +68,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
             : { _tag: "ShellCommandStatus", processId, waitMillis },
         ),
       web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "WebSearch" }> = {
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "WebSearch" }> = {
           _tag: "WebSearch",
           objective,
           searchQueries,
@@ -79,7 +79,7 @@ export const handlerLayer = RuntimeTools.toolkit.toLayer(
         return runtime.run(request)
       },
       read_web_page: ({ url, objective, fullContent, forceRefetch }) => {
-        let request: Extract<typeof RuntimeTools.Request.Type, { readonly _tag: "ReadWebPage" }> = {
+        let request: Extract<RuntimeTools.Request, { readonly _tag: "ReadWebPage" }> = {
           _tag: "ReadWebPage",
           url,
         }
@@ -210,60 +210,116 @@ const agentPhrase = ({ name, status }: CatalogAgentPhrase): string => {
   return `${agentDisplay(name)} ${status}`
 }
 
-const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
-  const name = rawName.toLowerCase()
-  const defined = get(name)?.presentation
-  if (defined !== undefined) return defined
-  if (name === "read" || name === "view_file" || name === "get_diagnostics")
-    return { family: "explore", action: "read", activeLabel: "Exploring", completeLabel: "Explored", counter: "file" }
-  if (name === "grep" || name === "glob" || name === "ripgrep")
-    return {
+interface PresentationFallback {
+  readonly matches: (name: string) => boolean
+  readonly presentation: (name: string) => ToolPolicy.Presentation
+}
+
+const named =
+  (...names: ReadonlyArray<string>) =>
+  (name: string) =>
+    names.includes(name)
+const fixed = (presentation: ToolPolicy.Presentation) => () => presentation
+const presentationFallbacks: ReadonlyArray<PresentationFallback> = [
+  {
+    matches: named("read", "view_file", "get_diagnostics"),
+    presentation: fixed({
+      family: "explore",
+      action: "read",
+      activeLabel: "Exploring",
+      completeLabel: "Explored",
+      counter: "file",
+    }),
+  },
+  {
+    matches: named("grep", "glob", "ripgrep"),
+    presentation: (name) => ({
       family: "explore",
       action: name === "glob" ? "search" : "grep",
       activeLabel: "Exploring",
       completeLabel: "Explored",
       counter: "search",
-    }
-  if (name === "bash" || name === "shell_command" || name === "run_terminal_command")
-    return { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" }
-  if (name === "write_file")
-    return { family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" }
-  if (name === "finder" || name === "search" || name.includes("codebase"))
-    return agentPresentation("finder", "Searching codebase", "Searched codebase")
-  if (name === "skill")
-    return { family: "explore", action: "skill", activeLabel: "Exploring", completeLabel: "Explored", counter: "skill" }
-  if (name === "list_agent_modes")
-    return {
+    }),
+  },
+  {
+    matches: named("bash", "shell_command", "run_terminal_command"),
+    presentation: fixed({ family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" }),
+  },
+  {
+    matches: named("write_file"),
+    presentation: fixed({ family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" }),
+  },
+  {
+    matches: (name) => name === "finder" || name === "search" || name.includes("codebase"),
+    presentation: fixed(agentPresentation("finder", "Searching codebase", "Searched codebase")),
+  },
+  {
+    matches: named("skill"),
+    presentation: fixed({
+      family: "explore",
+      action: "skill",
+      activeLabel: "Exploring",
+      completeLabel: "Explored",
+      counter: "skill",
+    }),
+  },
+  {
+    matches: named("list_agent_modes"),
+    presentation: fixed({
       family: "direct",
       action: "agent-modes",
       activeLabel: "Checking available agent modes",
       completeLabel: "Checked available agent modes",
-    }
-  if (name === "load_plugin")
-    return { family: "direct", action: "load-plugin", activeLabel: "Loading plugin", completeLabel: "Loaded plugin" }
-  if (name === "archive_current_thread")
-    return {
+    }),
+  },
+  {
+    matches: named("load_plugin"),
+    presentation: fixed({
+      family: "direct",
+      action: "load-plugin",
+      activeLabel: "Loading plugin",
+      completeLabel: "Loaded plugin",
+    }),
+  },
+  {
+    matches: named("archive_current_thread"),
+    presentation: fixed({
       family: "direct",
       action: "archive-thread",
       activeLabel: "Archiving this thread",
       completeLabel: "Archived this thread",
-    }
-  if (name === "send_message_to_thread")
-    return {
+    }),
+  },
+  {
+    matches: named("send_message_to_thread"),
+    presentation: fixed({
       family: "direct",
       action: "message-thread",
       activeLabel: "Sending message to thread",
       completeLabel: "Sent message to thread",
-    }
-  if (name === "send_message_to_puck")
-    return {
+    }),
+  },
+  {
+    matches: named("send_message_to_puck"),
+    presentation: fixed({
       family: "direct",
       action: "message-puck",
       activeLabel: "Sending message to Puck",
       completeLabel: "Sent message to Puck",
-    }
-  if (name === "slack_read" || name === "slack_write")
-    return { family: "direct", action: name, activeLabel: "Slack", completeLabel: "Slack" }
+    }),
+  },
+  {
+    matches: named("slack_read", "slack_write"),
+    presentation: (name) => ({ family: "direct", action: name, activeLabel: "Slack", completeLabel: "Slack" }),
+  },
+]
+
+const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
+  const name = rawName.toLowerCase()
+  const defined = get(name)?.presentation
+  if (defined !== undefined) return defined
+  const fallback = presentationFallbacks.find((candidate) => candidate.matches(name))
+  if (fallback !== undefined) return fallback.presentation(name)
   return { family: "generic", action: "tool", activeLabel: "Running tool", completeLabel: "Ran tool" }
 }
 

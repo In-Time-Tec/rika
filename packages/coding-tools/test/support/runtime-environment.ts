@@ -115,14 +115,14 @@ const make = (
       const executed = command.command === "/bin/bash" ? command.args[1] : command.command
       if (executed === "never-spawn") return Effect.never
       if (executed === "fail-spawn") return Effect.fail(platformError("spawn", executed))
-      if (executed === "large")
-        return Effect.succeed(processHandle({ stdout: "x".repeat(40_001), stderr: "", exitCode: 0 }))
-      if (executed === "exact-limit")
-        return Effect.succeed(processHandle({ stdout: "x".repeat(16_384), stderr: "", exitCode: 0 }))
-      if (executed === "multibyte-limit")
-        return Effect.succeed(processHandle({ stdout: `${"日".repeat(6_000)}TAIL`, stderr: "", exitCode: 0 }))
-      if (executed === "unicode-boundary")
-        return Effect.succeed(processHandle({ stdout: `${"x".repeat(39_999)}🙂`, stderr: "", exitCode: 0 }))
+      const fixtureOutput = {
+        large: "x".repeat(40_001),
+        "exact-limit": "x".repeat(16_384),
+        "multibyte-limit": `${"日".repeat(6_000)}TAIL`,
+        "unicode-boundary": `${"x".repeat(39_999)}🙂`,
+      } satisfies Readonly<Record<string, string>>
+      const output = Object.entries(fixtureOutput).find(([name]) => name === executed)?.[1]
+      if (output !== undefined) return Effect.succeed(processHandle({ stdout: output, stderr: "", exitCode: 0 }))
       if (executed === "running") {
         const handle = processHandle({ stdout: "x".repeat(40_001), stderr: "error", exitCode: 0 }, () =>
           killed.push(executed),

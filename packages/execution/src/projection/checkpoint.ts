@@ -1,8 +1,8 @@
 import * as Projection from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { Function, Schema } from "effect"
-import { type Card, type Node } from "./model"
-import { type AuthorizationState, type PersistedProjector, type ProjectorCore } from "./persistence"
+import type { Card, Node } from "./model"
+import type { AuthorizationState, PersistedProjector, ProjectorCore } from "./persistence"
 import type { ProjectorRecoveryIndex } from "./tree/projector-recovery"
 import type { UsageAccounting } from "./usage"
 
@@ -176,6 +176,51 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
     return JSON.stringify(persisted)
   }
 
+  const restoreNodes = (persistedNodes: ReadonlyArray<typeof NodeSchema.Type>): void => {
+    nodes.clear()
+    for (const persisted of persistedNodes) {
+      const node: Node = {
+        rawRunId: persisted.rawRunId,
+        publicId: persisted.publicId,
+        hidden: persisted.hidden,
+        tools: new Map(persisted.tools),
+        cells: new Map(persisted.cells),
+        phase: persisted.phase,
+        status: persisted.status,
+        lifecycle: persisted.lifecycle,
+        started: persisted.started,
+      }
+      if (persisted.parentRawRunId !== undefined) Object.assign(node, { parentRawRunId: persisted.parentRawRunId })
+      if (persisted.parentUnitKey !== undefined) Object.assign(node, { parentUnitKey: persisted.parentUnitKey })
+      if (persisted.parentBlockId !== undefined) Object.assign(node, { parentBlockId: persisted.parentBlockId })
+      if (persisted.attempt !== undefined) Object.assign(node, { attempt: persisted.attempt })
+      nodes.set(node.rawRunId, node)
+      recovery.nodeChanged(node)
+      for (const tool of node.tools.values()) recovery.toolChanged(node, tool, true)
+      for (const cell of node.cells.values()) recovery.cellChanged(node, cell, true)
+    }
+  }
+
+  const restoreCards = (persistedCards: ReadonlyArray<typeof CardSchema.Type>): void => {
+    cardsByInvocation.clear()
+    cardsByChild.clear()
+    for (const persisted of persistedCards) {
+      const candidate = units.get(persisted.unitKey)
+      const block =
+        candidate?.content._tag === "Block" && candidate.content.block._tag === "SubagentCard"
+          ? candidate.content.block
+          : undefined
+      const card: Card = {
+        ...persisted,
+        prompt: block?.prompt ?? "",
+        promptTruncated: block?.promptTruncated ?? persisted.promptTruncated,
+      }
+      cardsByInvocation.set(`${card.parentRawRunId}\u0000${card.rawInvocationId}`, card)
+      if (card.rawChildRunId !== undefined) cardsByChild.set(card.rawChildRunId, card)
+      recovery.cardChanged(card)
+    }
+  }
+
   const restore = (resumeCheckpoint: Projection.Checkpoint): void => {
     const parsed = Schema.decodeSync(Schema.fromJsonString(PersistedProjectorSchema))(resumeCheckpoint.state)
     if (
@@ -211,47 +256,8 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       if (value.turnId !== turnId) throw new TypeError("Invalid projector baseline unit")
       units.set(value.key, value)
     }
-    nodes.clear()
-    for (const persisted of parsed.nodes) {
-      const node = Object.assign(
-        {
-          rawRunId: persisted.rawRunId,
-          publicId: persisted.publicId,
-          hidden: persisted.hidden,
-          tools: new Map(persisted.tools),
-          cells: new Map(persisted.cells),
-          phase: persisted.phase,
-          status: persisted.status,
-          lifecycle: persisted.lifecycle,
-          started: persisted.started,
-        },
-        persisted.parentRawRunId === undefined ? undefined : { parentRawRunId: persisted.parentRawRunId },
-        persisted.parentUnitKey === undefined ? undefined : { parentUnitKey: persisted.parentUnitKey },
-        persisted.parentBlockId === undefined ? undefined : { parentBlockId: persisted.parentBlockId },
-        persisted.attempt === undefined ? undefined : { attempt: persisted.attempt },
-      ) satisfies Node
-      nodes.set(node.rawRunId, node)
-      recovery.nodeChanged(node)
-      for (const tool of node.tools.values()) recovery.toolChanged(node, tool, true)
-      for (const cell of node.cells.values()) recovery.cellChanged(node, cell, true)
-    }
-    cardsByInvocation.clear()
-    cardsByChild.clear()
-    for (const persisted of parsed.cards) {
-      const candidate = units.get(persisted.unitKey)
-      const block =
-        candidate?.content._tag === "Block" && candidate.content.block._tag === "SubagentCard"
-          ? candidate.content.block
-          : undefined
-      const card: Card = {
-        ...persisted,
-        prompt: block?.prompt ?? "",
-        promptTruncated: block?.promptTruncated ?? persisted.promptTruncated,
-      }
-      cardsByInvocation.set(`${card.parentRawRunId}\u0000${card.rawInvocationId}`, card)
-      if (card.rawChildRunId !== undefined) cardsByChild.set(card.rawChildRunId, card)
-      recovery.cardChanged(card)
-    }
+    restoreNodes(parsed.nodes)
+    restoreCards(parsed.cards)
     authorizations.clear()
     for (const [key, value] of parsed.authorizations) {
       authorizations.set(key, value)

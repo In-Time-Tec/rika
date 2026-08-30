@@ -1,209 +1,28 @@
-import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect"
-import { AuthorizationPolicy, type AuthorizationAction } from "@rika/product/hosted-authorization"
+import { Clock, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect"
+import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import {
-  BetterAuthMemberId,
-  BetterAuthUserId,
-  ClientId,
-  CommandId,
-  DeviceId,
-  type ActorAttribution,
-  type HostedOwner,
-  IdempotencyKey,
-  JsonObject,
-  OrganizationId,
-  OwnerId,
-  ThreadId,
-} from "@rika/product/hosted-model"
-import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
+import { BetterAuthUserId, CommandId, IdempotencyKey, JsonObject, ThreadId } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
-import type { PromptPart } from "@rika/product/execution-request"
 import { TurnId } from "@rika/product/turn-record"
-import type { RunnerProfile, RunnerTarget, RemoteThreadCreationPreference } from "@rika/product/runner-registration"
 import { layer as postgresLayer } from "@rika/product-store/layer"
-import { ProductRepository, ProductRepositoryError } from "@rika/product-store/product-repository"
-import { RunnerRegistrations, RunnerRegistrationsError } from "@rika/product-store/runner-registrations"
+import { ProductRepository } from "@rika/product-store/product-repository"
+import { RunnerRegistrations } from "@rika/product-store/runner-registrations"
+import { HostedModelRegistry, testLayer as hostedModelRegistryTestLayer } from "./environment/model-registry"
+import { hostedProductAuthorityOperations } from "./product/authority"
+import { hostedProductConnectionOperation } from "./product/connection"
 import {
-  HostedModelRegistry,
-  HostedModelRegistryError,
-  testLayer as hostedModelRegistryTestLayer,
-} from "./environment/model-registry"
+  HostedProduct,
+  HostedProductError,
+  type HostedProductService,
+  modelFailure,
+  repositoryFailure,
+  storeFailure,
+  unavailable,
+} from "./product/contract"
 import { HostedRepositories, unavailableLayer as hostedRepositoriesUnavailableLayer } from "./repositories"
 
-export interface AuthenticatedPrincipal {
-  readonly userId: string
-  readonly deviceId: string
-  readonly clientId: string
-  readonly dpopJkt?: string
-}
-
-export type OwnerSelection = HostedOwner
-
-export interface ProjectContext {
-  readonly id: string
-  readonly ownerId: string
-  readonly owner: HostedOwner
-  readonly name: string
-  readonly role: "viewer" | "controller" | "operator" | "owner"
-}
-
-export type AdmittedRun =
-  | {
-      readonly _tag: "Admitted"
-      readonly commandId: string
-      readonly turnId: string
-      readonly status: "accepted" | "queued"
-    }
-  | { readonly _tag: "Cancelled"; readonly commandId: string }
-
-export interface ThreadAuthority {
-  readonly ownerId: OwnerId
-  readonly actor: ActorAttribution
-}
-
-export interface OwnerAuthority {
-  readonly ownerId: OwnerId
-}
-
-export interface ThreadExecutionContext {
-  readonly workspaceId: string
-  readonly repository: JsonObject | null
-  readonly branch: string | null
-  readonly executor: JsonObject
-}
-
-export class HostedProductError extends Schema.TaggedError<HostedProductError>()("HostedProductError", {
-  kind: Schema.optionalKey(Schema.Literals(["conflict", "not-found", "forbidden", "invalid", "unavailable"])),
-  message: Schema.String,
-}) {}
-
-const unavailable = () => HostedProductError.make({ kind: "unavailable", message: "Rika service is unavailable" })
-
-const forbidden = (message = "Resource is unavailable") => HostedProductError.make({ kind: "forbidden", message })
-
-type ProductOperationError = HostedProductError | HostedPersistenceError | { readonly _tag: string }
-
-const storeFailure = (error: ProductOperationError) => {
-  if (Schema.is(HostedProductError)(error)) return error
-  if (!Schema.is(HostedPersistenceError)(error)) return unavailable()
-  let kind: NonNullable<HostedProductError["kind"]> = "unavailable"
-  if (error.reason === "conflict" || error.reason === "stale-fence") kind = "conflict"
-  else if (error.reason === "not-found") kind = "not-found"
-  else if (error.reason === "invalid-authority") kind = "forbidden"
-  return HostedProductError.make({ kind, message: "Rika operation was rejected" })
-}
-
-const modelFailure = (error: HostedModelRegistryError) =>
-  HostedProductError.make({
-    kind: error.kind === "unavailable" ? "unavailable" : "invalid",
-    message: error.message,
-  })
-
-const repositoryFailure = (error: ProductRepositoryError | RunnerRegistrationsError) =>
-  Schema.is(ProductRepositoryError)(error)
-    ? HostedProductError.make({ kind: error.kind, message: error.message })
-    : unavailable()
-
-export interface HostedProductService {
-  readonly ready: Effect.Effect<void, HostedProductError>
-  readonly projects: (
-    principal: AuthenticatedPrincipal,
-  ) => Effect.Effect<ReadonlyArray<ProjectContext>, HostedProductError>
-  readonly createProject: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly owner: OwnerSelection
-    readonly name: string
-  }) => Effect.Effect<ProjectContext, HostedProductError>
-  readonly createConnection: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly owner: OwnerSelection
-    readonly projectId?: string
-    readonly executorKind: "runner" | "orb"
-    readonly runnerTarget?: RunnerTarget
-    readonly workspaceSeedId?: string
-    readonly threadId?: string
-    readonly archiveThreadId?: string
-  }) => Effect.Effect<{ readonly threadId: string }, HostedProductError>
-  readonly registerRunner: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly checkoutFingerprint: string
-    readonly registration: RunnerProfile
-  }) => Effect.Effect<void, HostedProductError>
-  readonly setRemoteThreadCreation: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly checkoutFingerprint: string
-    readonly preference: RemoteThreadCreationPreference
-  }) => Effect.Effect<void, HostedProductError>
-  readonly pollRunner: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly checkoutFingerprint: string
-    readonly supervisorId: string
-    readonly activeAssignmentIds: ReadonlyArray<string>
-  }) => Effect.Effect<
-    {
-      readonly claimed: boolean
-      readonly assignment?: {
-        readonly assignmentId: string
-        readonly threadId: string
-        readonly workspaceId: string
-        readonly resume: boolean
-        readonly leaseExpiresAt: number | null
-      }
-    },
-    HostedProductError
-  >
-  readonly admitRun: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly threadId: string
-    readonly operationKey: string
-    readonly prompt: string
-    readonly promptParts?: ReadonlyArray<PromptPart>
-    readonly mode?: string
-  }) => Effect.Effect<AdmittedRun, HostedProductError>
-  readonly admitAuthorizedRun: (input: {
-    readonly authority: ThreadAuthority
-    readonly threadId: string
-    readonly operationKey: string
-    readonly turnId: string
-    readonly claimToken?: string
-    readonly submissionId?: string
-    readonly prompt: string
-    readonly promptParts?: ReadonlyArray<PromptPart>
-    readonly mode?: string
-  }) => Effect.Effect<AdmittedRun, HostedProductError>
-  readonly cancelRunAdmission: (input: {
-    readonly principal: AuthenticatedPrincipal
-    readonly threadId: string
-    readonly cancelCommandId: string
-    readonly targetCommandId: string
-  }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
-  readonly cancelAuthorizedRunAdmission: (input: {
-    readonly authority: ThreadAuthority
-    readonly threadId: string
-    readonly cancelCommandId: string
-    readonly targetCommandId: string
-    readonly claimToken?: string
-  }) => Effect.Effect<{ readonly turnId?: string }, HostedProductError>
-  readonly authorizeOwner: (
-    principal: AuthenticatedPrincipal,
-    owner: OwnerSelection,
-  ) => Effect.Effect<OwnerAuthority, HostedProductError>
-  readonly authorizeThread: (
-    principal: AuthenticatedPrincipal,
-    threadId: string,
-    action: AuthorizationAction,
-  ) => Effect.Effect<ThreadAuthority, HostedProductError>
-  readonly threadExecutionContext: (
-    ownerId: OwnerId,
-    threadId: ThreadId,
-  ) => Effect.Effect<ThreadExecutionContext, HostedProductError>
-  readonly activatePrincipal: (principal: AuthenticatedPrincipal) => Effect.Effect<void, HostedProductError>
-}
-
-export class HostedProduct extends Context.Service<HostedProduct, HostedProductService>()(
-  "@rika/api/hosted/product/HostedProduct",
-) {}
+export * from "./product/contract"
 
 export const layer = (options: {
   readonly orb?: {
@@ -224,216 +43,27 @@ export const layer = (options: {
       const crypto = yield* Crypto.Crypto
       const modelRegistry = yield* HostedModelRegistry
       const repositories = yield* HostedRepositories
+      const {
+        activateClient,
+        resolveOwner,
+        projects,
+        createProject,
+        authorizeOwner,
+        authorizeThread,
+        activatePrincipal,
+      } = hostedProductAuthorityOperations({ clientAuthority, repository, policy, crypto })
 
-      const activateClient = Effect.fn("HostedProduct.activateClient")(function* (
-        principal: AuthenticatedPrincipal,
-        userId: BetterAuthUserId,
-      ) {
-        const currentTime = yield* Clock.currentTimeMillis
-        const now = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
-        const deviceId = DeviceId.make(principal.deviceId)
-        yield* clientAuthority.registerDevice({
-          id: deviceId,
-          userId,
-          displayName: "Rika CLI",
-          publicKeyFingerprint: principal.dpopJkt ?? principal.clientId,
-          now,
-        })
-        yield* clientAuthority.authenticateClient({
-          id: ClientId.make(principal.clientId),
-          userId,
-          deviceId,
-          now,
-          expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
-        })
-        return deviceId
-      })
-
-      const resolveOwner = Effect.fn("HostedProduct.resolveOwner")(function* (
-        principal: AuthenticatedPrincipal,
-        selection: OwnerSelection,
-      ) {
-        return yield* repository
-          .resolveOwner({
-            userId: principal.userId,
-            selection,
-            proposedOwnerId: yield* crypto.randomUUIDv4.pipe(Effect.mapError(unavailable)),
-            now: DateTime.toDate(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
-          })
-          .pipe(Effect.mapError(repositoryFailure))
-      })
-
-      const projects: HostedProductService["projects"] = Effect.fn("HostedProduct.projects")(function* (principal) {
-        const personal = yield* resolveOwner(principal, {
-          _tag: "PersonalOwner",
-          userId: BetterAuthUserId.make(principal.userId),
-        })
-        const organizationIds = yield* repository
-          .organizationIds(principal.userId)
-          .pipe(Effect.mapError(repositoryFailure))
-        for (const organizationId of organizationIds)
-          yield* resolveOwner(principal, {
-            _tag: "OrganizationOwner",
-            organizationId: OrganizationId.make(organizationId),
-          })
-        return yield* repository
-          .projects({ userId: principal.userId, personalOwnerId: personal.ownerId })
-          .pipe(Effect.mapError(repositoryFailure))
-      })
-
-      const createProject: HostedProductService["createProject"] = Effect.fn("HostedProduct.createProject")(function* (
-        input,
-      ) {
-        const name = input.name.trim()
-        if (name.length === 0 || name.length > 128)
-          return yield* HostedProductError.make({
-            kind: "invalid",
-            message: "Project name must contain between 1 and 128 characters",
-          })
-        const authority = yield* resolveOwner(input.principal, input.owner)
-        return yield* repository
-          .createProject({
-            id: yield* crypto.randomUUIDv4,
-            authority,
-            name,
-            now: DateTime.toDate(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
-          })
-          .pipe(Effect.mapError(repositoryFailure))
-      }, Effect.mapError(storeFailure))
-
-      const createConnection: HostedProductService["createConnection"] = Effect.fn("HostedProduct.createConnection")(
-        function* (input) {
-          const authority = yield* resolveOwner(input.principal, input.owner)
-          const selected =
-            input.projectId === undefined
-              ? undefined
-              : yield* repository
-                  .projectAccess({ authority, projectId: input.projectId })
-                  .pipe(Effect.mapError(repositoryFailure))
-          if (input.projectId !== undefined && selected === undefined)
-            return yield* HostedProductError.make({ kind: "not-found", message: "Project is unavailable" })
-          if (input.owner._tag === "OrganizationOwner" && selected !== undefined) {
-            if (authority.membershipId === undefined) return yield* forbidden()
-            yield* policy
-              .authorize("project:update", {
-                memberId: BetterAuthMemberId.make(authority.membershipId),
-                projectRole: selected.role,
-              })
-              .pipe(Effect.mapError(() => forbidden()))
-          }
-          if ((input.executorKind === "runner") !== (input.runnerTarget !== undefined))
-            return yield* HostedProductError.make({
-              kind: "invalid",
-              message: "Runner target is required only for Runner execution",
-            })
-          const threadId = input.threadId ?? (yield* crypto.randomUUIDv4)
-          const existingInput = {
-            authority,
-            projectId: input.projectId ?? null,
-            executorKind: input.executorKind,
-            threadId,
-          }
-          if (input.runnerTarget !== undefined) Object.assign(existingInput, { runnerTarget: input.runnerTarget })
-          if (input.archiveThreadId !== undefined)
-            Object.assign(existingInput, { archiveThreadId: input.archiveThreadId })
-          if (input.workspaceSeedId !== undefined)
-            Object.assign(existingInput, { workspaceSeedId: input.workspaceSeedId })
-          const existing = yield* repository.existingConnection(existingInput).pipe(Effect.mapError(repositoryFailure))
-          if (existing?._tag === "Incompatible")
-            return yield* HostedProductError.make({
-              kind: "conflict",
-              message: "Thread identity was reused with incompatible input",
-            })
-          if (existing?._tag === "Existing") return { threadId: existing.threadId }
-          const orb = input.executorKind === "orb" ? options.orb : undefined
-          if (input.executorKind === "orb" && orb === undefined)
-            return yield* HostedProductError.make({ kind: "unavailable", message: "Orb execution is not configured" })
-          const checkout =
-            input.executorKind === "orb" && input.projectId !== undefined
-              ? yield* repositories.resolve({ ownerId: authority.ownerId, projectId: input.projectId })
-              : null
-          const currentTime = yield* Clock.currentTimeMillis
-          const deviceId = yield* activateClient(input.principal, BetterAuthUserId.make(authority.userId))
-          const timestamp = DateTime.formatIso(DateTime.makeUnsafe(currentTime))
-          let actor: ActorAttribution | undefined
-          if (authority.owner._tag === "PersonalOwner") {
-            actor = {
-              _tag: "PersonalActor" as const,
-              owner: authority.owner,
-              userId: BetterAuthUserId.make(authority.userId),
-              clientId: ClientId.make(input.principal.clientId),
-              deviceId,
-            }
-          } else if (authority.membershipId !== undefined) {
-            actor = {
-              _tag: "OrganizationActor" as const,
-              owner: authority.owner,
-              userId: BetterAuthUserId.make(authority.userId),
-              membershipId: BetterAuthMemberId.make(authority.membershipId),
-              clientId: ClientId.make(input.principal.clientId),
-              deviceId,
-            }
-          }
-          if (actor === undefined) return yield* forbidden()
-          yield* clientAuthority.grantClientAuthority({
-            ownerId: OwnerId.make(authority.ownerId),
-            actor,
-            now: timestamp,
-            expiresAt: DateTime.formatIso(DateTime.makeUnsafe(currentTime + 5 * 60 * 1000)),
-          })
-          const fallbackWorkspaceId =
-            input.threadId === undefined ? yield* crypto.randomUUIDv4 : `${input.threadId}-workspace`
-          let placement: JsonObject | undefined
-          if (orb === undefined && input.runnerTarget !== undefined) {
-            placement = {
-              _tag: "RunnerPlacement" as const,
-              deviceId: input.runnerTarget.deviceId,
-              checkoutFingerprint: input.runnerTarget.checkoutFingerprint,
-              requestingDeviceId: String(deviceId),
-            }
-          } else if (orb !== undefined) {
-            placement = {
-              _tag: "OrbPlacement" as const,
-              templateBuildId: orb.templateBuildId,
-              providerScope: orb.providerScope,
-            }
-          }
-          if (placement === undefined) return yield* unavailable()
-          const connectionInput = {
-            authority,
-            projectId: input.projectId ?? null,
-            executorKind: input.executorKind,
-            requestingDeviceId: input.principal.deviceId,
-            requestingClientId: input.principal.clientId,
-            threadId,
-            workspaceId: fallbackWorkspaceId,
-            assignmentId: yield* crypto.randomUUIDv4,
-            placement,
-            checkout,
-            now: DateTime.toDate(DateTime.makeUnsafe(currentTime)),
-            nowMillis: currentTime,
-          }
-          if (input.runnerTarget !== undefined) Object.assign(connectionInput, { runnerTarget: input.runnerTarget })
-          if (input.archiveThreadId !== undefined)
-            Object.assign(connectionInput, { archiveThreadId: input.archiveThreadId })
-          if (input.workspaceSeedId !== undefined)
-            Object.assign(connectionInput, { workspaceSeedId: input.workspaceSeedId })
-          const result = yield* repository.createConnection(connectionInput).pipe(Effect.mapError(repositoryFailure))
-          if (result._tag === "Incompatible")
-            return yield* HostedProductError.make({
-              kind: "conflict",
-              message: "Thread identity was reused with incompatible input",
-            })
-          if (result._tag === "RunnerMissing")
-            return yield* HostedProductError.make({ kind: "not-found", message: "Runner is unavailable" })
-          if (result._tag === "RunnerAuthorityMismatch")
-            return yield* forbidden("Runner authority does not match the Thread")
-          if (result._tag === "RunnerRemoteDenied")
-            return yield* forbidden("Remote Thread creation is denied by the Runner")
-          return { threadId: result.threadId }
-        },
-        Effect.mapError(storeFailure),
-      )
+      const connectionDependencies = {
+        clientAuthority,
+        repository,
+        repositories,
+        policy,
+        crypto,
+        activateClient,
+        resolveOwner,
+      }
+      if (options.orb !== undefined) Object.assign(connectionDependencies, { orb: options.orb })
+      const createConnection = hostedProductConnectionOperation(connectionDependencies)
 
       const registerRunner: HostedProductService["registerRunner"] = Effect.fn("HostedProduct.registerRunner")(
         function* (input) {
@@ -474,79 +104,6 @@ export const layer = (options: {
           .pipe(Effect.mapError(repositoryFailure))
       }, Effect.mapError(storeFailure))
 
-      const authorizeOwner: HostedProductService["authorizeOwner"] = Effect.fn("HostedProduct.authorizeOwner")(
-        function* (principal, owner) {
-          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
-          const authority = yield* resolveOwner(principal, owner)
-          return { ownerId: OwnerId.make(authority.ownerId) }
-        },
-        Effect.mapError(storeFailure),
-      )
-
-      const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
-        function* (principal, threadId, action) {
-          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
-          const resolved = yield* repository
-            .threadAuthority(principal.userId, threadId)
-            .pipe(Effect.mapError(repositoryFailure))
-          if (resolved === undefined)
-            return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
-          const userId = BetterAuthUserId.make(principal.userId)
-          if (resolved.kind === "personal" && resolved.userId !== principal.userId) return yield* forbidden()
-          if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
-          if (resolved.kind === "organization") {
-            const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
-            const authorization = {
-              memberId: membershipId,
-              executorKind: resolved.executorKind,
-              inheritProjectGrants: resolved.inheritProjectGrants,
-            }
-            if (resolved.createdByUserId === principal.userId)
-              Object.assign(authorization, { threadCreatorMemberId: membershipId })
-            if (resolved.threadRole !== null) Object.assign(authorization, { threadRole: resolved.threadRole })
-            if (resolved.projectRole !== null) Object.assign(authorization, { projectRole: resolved.projectRole })
-            yield* policy.authorize(action, authorization).pipe(Effect.mapError(() => forbidden()))
-          }
-          const owner =
-            resolved.kind === "personal"
-              ? ({ _tag: "PersonalOwner", userId } as const)
-              : ({ _tag: "OrganizationOwner", organizationId: OrganizationId.make(resolved.organizationId!) } as const)
-          const actor =
-            owner._tag === "PersonalOwner"
-              ? ({
-                  _tag: "PersonalActor",
-                  owner,
-                  userId,
-                  clientId: ClientId.make(principal.clientId),
-                  deviceId: DeviceId.make(principal.deviceId),
-                } as const)
-              : ({
-                  _tag: "OrganizationActor",
-                  owner,
-                  userId,
-                  membershipId: BetterAuthMemberId.make(resolved.membershipId!),
-                  clientId: ClientId.make(principal.clientId),
-                  deviceId: DeviceId.make(principal.deviceId),
-                } as const)
-          const nowMillis = yield* Clock.currentTimeMillis
-          yield* clientAuthority.grantClientAuthority({
-            ownerId: OwnerId.make(resolved.ownerId),
-            actor,
-            now: DateTime.formatIso(DateTime.makeUnsafe(nowMillis)),
-            expiresAt: DateTime.formatIso(DateTime.makeUnsafe(nowMillis + 5 * 60 * 1000)),
-          })
-          yield* clientAuthority.authorizeThread({
-            ownerId: OwnerId.make(resolved.ownerId),
-            threadId: ThreadId.make(threadId),
-            actor,
-            action,
-            at: DateTime.formatIso(DateTime.makeUnsafe(nowMillis)),
-          })
-          return { ownerId: OwnerId.make(resolved.ownerId), actor }
-        },
-        Effect.mapError(storeFailure),
-      )
-
       const threadExecutionContext: HostedProductService["threadExecutionContext"] = Effect.fn(
         "HostedProduct.threadExecutionContext",
       )(function* (ownerId, threadId) {
@@ -577,13 +134,6 @@ export const layer = (options: {
           },
         }
       }, Effect.mapError(storeFailure))
-
-      const activatePrincipal: HostedProductService["activatePrincipal"] = Effect.fn("HostedProduct.activatePrincipal")(
-        function* (principal) {
-          yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
-        },
-        Effect.mapError(storeFailure),
-      )
 
       const admitAuthorizedRun: HostedProductService["admitAuthorizedRun"] = Effect.fn(
         "HostedProduct.admitAuthorizedRun",

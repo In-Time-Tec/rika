@@ -1,5 +1,4 @@
-import { KernelStateStore } from "tenetkit/repl"
-import type { Cell } from "tenetkit/repl"
+import { KernelStateStore, type Cell } from "tenetkit/repl"
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
 
 const DIRECTORY_MODE = 0o700

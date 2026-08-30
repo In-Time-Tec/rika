@@ -1,6 +1,3 @@
-import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import type * as Turn from "@rika/product/turn-record"
-
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
@@ -8,7 +5,6 @@ import * as ExecutionProjection from "../../../execution/projection/contract"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
-import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import { OperationError, operationError } from "../../error"
 import { Effect, Clock, Fiber, Ref } from "effect"
 import {
@@ -18,22 +14,11 @@ import {
   transcriptPageEncoder,
 } from "../../../thread/transcript/bounds"
 import * as InteractiveSelection from "./selection"
-import { type InteractiveEvent } from "../session-event"
-import { type InteractiveRuntimeContext } from "../session"
+import type { InteractiveEvent } from "../session-event"
+import type { InteractiveRuntimeContext } from "../session"
 import { queueItem } from "../turn/queue"
 
 type SelectionEpochState = InteractiveSelection.SelectionEpochState
-
-export const promptUnit = (turn: Pick<Turn.Turn, "id" | "prompt">): TranscriptUnit.Unit => {
-  const key = identityKey("turn", turn.id, "user")
-  return {
-    key,
-    turnId: String(turn.id),
-    order: [{ sequence: -1, part: 0, key }],
-    revision: 0,
-    content: { _tag: "Entry", role: "user", text: turn.prompt },
-  }
-}
 
 export const boundedTranscriptPage = (input: {
   readonly entries: ReadonlyArray<TranscriptPage.Entry>
@@ -84,6 +69,10 @@ export const initialTranscriptWindow = (input: {
 
 export interface InteractiveTranscriptLifecycleInput extends InteractiveRuntimeContext {
   loadTranscriptPage: InteractiveTranscriptPageLoader
+}
+
+interface InteractiveTranscriptPageOwner {
+  load?: InteractiveTranscriptPageLoader
 }
 
 export const makeInteractiveTranscriptLifecycle = (input: InteractiveTranscriptLifecycleInput) => {
@@ -343,17 +332,18 @@ export const makeInteractiveTranscriptPage = (input: InteractiveTranscriptPageIn
 }
 
 export const makeInteractiveTranscript = (input: InteractiveRuntimeContext) => {
-  let loadTranscriptPage: InteractiveTranscriptPageLoader
+  const pageLoader: InteractiveTranscriptPageOwner = {}
   const lifecycleInput: InteractiveTranscriptLifecycleInput = {
     ...input,
-    loadTranscriptPage: (state, dispatch) => loadTranscriptPage(state, dispatch),
+    loadTranscriptPage: (state, dispatch) => pageLoader.load!(state, dispatch),
   }
   const lifecycle = makeInteractiveTranscriptLifecycle(lifecycleInput)
   const loadInitialTranscriptWindow = makeInitialTranscriptWindow(input)
-  loadTranscriptPage = makeInteractiveTranscriptPage({
+  const loadTranscriptPage = makeInteractiveTranscriptPage({
     ...input,
     ...lifecycle,
     initialTranscriptWindow: loadInitialTranscriptWindow,
   })
+  pageLoader.load = loadTranscriptPage
   return { initialTranscriptWindow: loadInitialTranscriptWindow, loadTranscriptPage, ...lifecycle }
 }

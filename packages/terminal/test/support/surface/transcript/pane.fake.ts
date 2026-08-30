@@ -1,7 +1,7 @@
 import { Function, Data, Effect, Match } from "effect"
 
 import { initial, type Model } from "../../../../src/state/model"
-import { type ThreadItem } from "../../../../src/state/thread/model"
+import type { ThreadItem } from "../../../../src/state/thread/model"
 import type { TranscriptBlock } from "../../../../src/state/transcript/model"
 import { update } from "../../../../src/state/reducer/model"
 
@@ -100,7 +100,13 @@ export const _giantSubagentModel = (childCount: number): Model => {
   const items = blocks.map((block, index) =>
     index === 0
       ? { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1" }
-      : { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1", parentId: "root-tool" },
+      : {
+          _tag: "Block" as const,
+          index,
+          id: `block-${block.id}`,
+          turnId: "turn-1",
+          parentId: "root-tool",
+        },
   )
   return {
     ...initial("/work", "high"),
@@ -158,7 +164,13 @@ const _collapsedSubagentModelImpl = (answerCount: number, childCount: number): M
     ...blocks.map((block, index) =>
       index === 0
         ? { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1" }
-        : { _tag: "Block" as const, index, id: `block-${block.id}`, turnId: "turn-1", parentId: "root-tool" },
+        : {
+            _tag: "Block" as const,
+            index,
+            id: `block-${block.id}`,
+            turnId: "turn-1",
+            parentId: "root-tool",
+          },
     ),
   ]
   return {

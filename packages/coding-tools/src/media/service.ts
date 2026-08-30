@@ -30,18 +30,36 @@ export class Service extends Context.Service<Service, Interface>()("@rika/coding
 const maximumSize = 25 * 1024 * 1024
 const ascii = (bytes: Uint8Array, start: number, length: number) =>
   new TextDecoder().decode(bytes.slice(start, start + length))
+const signatures: ReadonlyArray<{
+  readonly matches: (bytes: Uint8Array) => boolean
+  readonly mimeType: string
+  readonly kind: MediaKind
+}> = [
+  { matches: (bytes) => bytes[0] === 0x89 && ascii(bytes, 1, 3) === "PNG", mimeType: "image/png", kind: "image" },
+  { matches: (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8, mimeType: "image/jpeg", kind: "image" },
+  { matches: (bytes) => ascii(bytes, 0, 3) === "GIF", mimeType: "image/gif", kind: "image" },
+  {
+    matches: (bytes) => ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP",
+    mimeType: "image/webp",
+    kind: "image",
+  },
+  { matches: (bytes) => ascii(bytes, 0, 5) === "%PDF-", mimeType: "application/pdf", kind: "pdf" },
+  {
+    matches: (bytes) => ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0),
+    mimeType: "audio/mpeg",
+    kind: "audio",
+  },
+  { matches: (bytes) => ascii(bytes, 4, 4) === "ftyp", mimeType: "video/mp4", kind: "video" },
+  { matches: (bytes) => ascii(bytes, 0, 4) === "OggS", mimeType: "audio/ogg", kind: "audio" },
+  {
+    matches: (bytes) => ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE",
+    mimeType: "audio/wav",
+    kind: "audio",
+  },
+]
 const classify = (bytes: Uint8Array): { readonly mimeType: string; readonly kind: MediaKind } | undefined => {
-  if (bytes[0] === 0x89 && ascii(bytes, 1, 3) === "PNG") return { mimeType: "image/png", kind: "image" }
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return { mimeType: "image/jpeg", kind: "image" }
-  if (ascii(bytes, 0, 3) === "GIF") return { mimeType: "image/gif", kind: "image" }
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP") return { mimeType: "image/webp", kind: "image" }
-  if (ascii(bytes, 0, 5) === "%PDF-") return { mimeType: "application/pdf", kind: "pdf" }
-  if (ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0))
-    return { mimeType: "audio/mpeg", kind: "audio" }
-  if (ascii(bytes, 4, 4) === "ftyp") return { mimeType: "video/mp4", kind: "video" }
-  if (ascii(bytes, 0, 4) === "OggS") return { mimeType: "audio/ogg", kind: "audio" }
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") return { mimeType: "audio/wav", kind: "audio" }
-  return undefined
+  const signature = signatures.find((candidate) => candidate.matches(bytes))
+  return signature === undefined ? undefined : { mimeType: signature.mimeType, kind: signature.kind }
 }
 const dimensions = (bytes: Uint8Array, mimeType: string) => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)

@@ -58,25 +58,15 @@ const reduceWheelSettleFired = (
   return { viewport: settled, effects: [{ _tag: "ReportSettled" }] }
 }
 
-export const reduceViewport: {
-  (event: ViewportEvent): (viewport: TranscriptViewport) => ViewportDecision
-  (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision
-} = Function.dual(2, (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision => {
+const reduceViewportCommand = (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision | undefined => {
   switch (event._tag) {
-    case "WheelObserved":
-      return reduceWheelObserved(viewport, event)
-    case "WheelSettleFired":
-      return reduceWheelSettleFired(viewport, event)
     case "WheelCancelled":
       return viewport.wheel._tag === "Idle"
         ? { viewport, effects: [] }
         : { viewport: { ...viewport, wheel: wheelIdle }, effects: [] }
     case "DetachCommanded":
       if (isAnchored(viewport.mode) || event.anchor === undefined) return { viewport, effects: [] }
-      return {
-        viewport: { ...viewport, mode: anchored(event.anchor) },
-        effects: [],
-      }
+      return { viewport: { ...viewport, mode: anchored(event.anchor) }, effects: [] }
     case "AnchorRebased":
       return isAnchored(viewport.mode)
         ? { viewport: { ...viewport, mode: anchored(event.anchor) }, effects: [] }
@@ -94,9 +84,22 @@ export const reduceViewport: {
     case "BottomSettled":
       return isFollowing(viewport.mode)
         ? { viewport, effects: [] }
-        : {
-            viewport: { ...viewport, mode: following },
-            effects: [{ _tag: "NotifyFollowed" }],
-          }
+        : { viewport: { ...viewport, mode: following }, effects: [{ _tag: "NotifyFollowed" }] }
+    default:
+      return undefined
+  }
+}
+
+export const reduceViewport: {
+  (event: ViewportEvent): (viewport: TranscriptViewport) => ViewportDecision
+  (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision
+} = Function.dual(2, (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision => {
+  switch (event._tag) {
+    case "WheelObserved":
+      return reduceWheelObserved(viewport, event)
+    case "WheelSettleFired":
+      return reduceWheelSettleFired(viewport, event)
+    default:
+      return reduceViewportCommand(viewport, event)!
   }
 })

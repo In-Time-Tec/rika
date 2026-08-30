@@ -15,7 +15,7 @@ it.layer(BunServices.layer)((test) => {
 
         const fileSystem = yield* FileSystem.FileSystem
         const sql = yield* fileSystem.readFileString(migration === undefined ? "" : fileURLToPath(migration.url))
-        const tables = [...sql.matchAll(/CREATE TABLE "([^"]+)"/g)].map((match) => match[1]).sort()
+        const tables = [...sql.matchAll(/CREATE TABLE "([^"]+)"/g)].map((match) => match[1]).toSorted()
         expect(tables).toEqual(
           [
             "account",
@@ -34,7 +34,7 @@ it.layer(BunServices.layer)((test) => {
             "session",
             "user",
             "verification",
-          ].sort(),
+          ].toSorted(),
         )
         expect(sql).toContain('"dpop_bound_access_tokens" boolean')
         expect(sql).toContain('"confirmation" jsonb')

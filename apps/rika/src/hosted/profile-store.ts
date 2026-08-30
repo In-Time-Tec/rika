@@ -46,9 +46,7 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
         )
       })
       const load = Effect.gen(function* () {
-        if (
-          !(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Profile could not be read"))))
-        )
+        if (!(yield* fileSystem.exists(target).pipe(Effect.mapError(() => failure("Profile could not be read")))))
           return Option.none<Profile>()
         const text = yield* fileSystem
           .readFileString(target)

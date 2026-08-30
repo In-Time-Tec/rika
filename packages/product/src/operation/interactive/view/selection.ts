@@ -8,11 +8,11 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import { Function, Effect, Ref, Cause, Semaphore } from "effect"
-import { type InteractiveEvent } from "../session-event"
+import type { InteractiveEvent } from "../session-event"
 import { queueItem } from "../turn/queue"
 import { OperationError, operationError } from "../../error"
-import { promptUnit } from "./transcript-window"
-import { type InteractiveSession, type InteractiveSessionSelectionInput } from "../session"
+import { promptUnit } from "./prompt-unit"
+import type { InteractiveSession, InteractiveSessionSelectionInput } from "../session"
 
 export type SelectionEpochState = {
   readonly epoch: number

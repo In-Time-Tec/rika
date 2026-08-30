@@ -34,7 +34,7 @@ test("packages nothing until CI is green for the commit being published", () => 
   expect(jobs.verify?.permissions).toEqual({ contents: "read", actions: "write" })
   const gate = commands("verify")
   const required = (steps("verify")[0]?.env ?? {}).REQUIRED_JOBS
-  expect((required ?? "").split(" ").toSorted()).toEqual(["proc", "quality", "tui"])
+  expect(new Set((required ?? "").split(" "))).toEqual(new Set(["proc", "quality", "tui"]))
   expect(gate).toContain("actions/workflows/ci.yml/runs?head_sha=$COMMIT")
   expect(gate).toContain("No ci run exists for $COMMIT")
 })

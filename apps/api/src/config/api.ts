@@ -38,6 +38,46 @@ interface LoadedApiConfig {
   providerCredentialKey: Redacted.Redacted<string>
 }
 
+const loadGithub = (environment: RuntimeEnvironment, production: boolean) => {
+  const appIdValue = environment.GITHUB_APP_ID?.trim()
+  const privateKey = environment.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n").trim()
+  const hasAppId = appIdValue !== undefined && appIdValue.length > 0
+  const hasPrivateKey = privateKey !== undefined && privateKey.length > 0
+  if (hasAppId !== hasPrivateKey || (production && !hasAppId))
+    return Effect.fail(
+      ApiConfigError.make({
+        dependency: "github-app",
+        message: production
+          ? "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required"
+          : "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be configured together",
+      }),
+    )
+  const appId = Number(appIdValue)
+  if (hasAppId && (!Number.isSafeInteger(appId) || appId <= 0))
+    return Effect.fail(
+      ApiConfigError.make({ dependency: "github-app", message: "GITHUB_APP_ID must be a positive integer" }),
+    )
+  return Effect.succeed(
+    hasAppId && privateKey !== undefined ? { appId, privateKey: Redacted.make(privateKey) } : undefined,
+  )
+}
+
+const loadProviderCredentialKey = (environment: RuntimeEnvironment) => {
+  const encoded = environment.RIKA_PROVIDER_CREDENTIAL_KEY
+  const valid =
+    encoded !== undefined &&
+    /^[A-Za-z0-9+/]{43}=$/.test(encoded) &&
+    Buffer.from(encoded, "base64").toString("base64") === encoded
+  return valid
+    ? Effect.succeed(Redacted.make(encoded))
+    : Effect.fail(
+        ApiConfigError.make({
+          dependency: "model-provider",
+          message: "RIKA_PROVIDER_CREDENTIAL_KEY must be a base64-encoded 32-byte key",
+        }),
+      )
+}
+
 export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: RuntimeEnvironment) {
   const environment = yield* Effect.try({
     try: () => runtimeEnvironment(input),
@@ -51,41 +91,16 @@ export const loadApiConfig = Effect.fn("ApiConfig.load")(function* (input: Runti
     !identity.production && configuredExecutorVariables.length === 0
       ? undefined
       : yield* loadExecutorConfig(environment).pipe(Effect.mapError((error) => failure("executor-provider", error)))
-  const githubAppIdValue = environment.GITHUB_APP_ID?.trim()
-  const githubPrivateKey = environment.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n").trim()
-  const hasGithubAppId = githubAppIdValue !== undefined && githubAppIdValue.length > 0
-  const hasGithubPrivateKey = githubPrivateKey !== undefined && githubPrivateKey.length > 0
-  if (hasGithubAppId !== hasGithubPrivateKey || (identity.production && !hasGithubAppId)) {
-    return yield* ApiConfigError.make({
-      dependency: "github-app",
-      message: identity.production
-        ? "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required"
-        : "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be configured together",
-    })
-  }
-  const githubAppId = Number(githubAppIdValue)
-  if (hasGithubAppId && (!Number.isSafeInteger(githubAppId) || githubAppId <= 0))
-    return yield* ApiConfigError.make({ dependency: "github-app", message: "GITHUB_APP_ID must be a positive integer" })
-  const encodedCredentialKey = environment.RIKA_PROVIDER_CREDENTIAL_KEY
-  if (
-    encodedCredentialKey === undefined ||
-    !/^[A-Za-z0-9+/]{43}=$/.test(encodedCredentialKey) ||
-    Buffer.from(encodedCredentialKey, "base64").toString("base64") !== encodedCredentialKey
-  ) {
-    return yield* ApiConfigError.make({
-      dependency: "model-provider",
-      message: "RIKA_PROVIDER_CREDENTIAL_KEY must be a base64-encoded 32-byte key",
-    })
-  }
+  const github = yield* loadGithub(environment, identity.production)
+  const providerCredentialKey = yield* loadProviderCredentialKey(environment)
   const result: LoadedApiConfig = {
     environment,
     identity,
     developmentSeedEnabled: !identity.production && environment.RIKA_DEV_SEED?.trim() === "1",
-    providerCredentialKey: Redacted.make(encodedCredentialKey),
+    providerCredentialKey,
   }
   if (executor !== undefined) result.executor = executor
-  if (hasGithubAppId && githubPrivateKey !== undefined)
-    result.github = { appId: githubAppId, privateKey: Redacted.make(githubPrivateKey) }
+  if (github !== undefined) result.github = github
   if (!identity.production) result.developmentModel = environment.RIKA_DEV_MODEL?.trim() || "minimax/minimax-m2.7:free"
   return result
 })

@@ -25,7 +25,7 @@ export const renderToolSummary: {
           ]
     const lines = wrapStyledChunks(chunks, options.width ?? Number.MAX_SAFE_INTEGER)
     if (leading.length > 0 && lines[0]?.[0] !== undefined)
-      lines[0]![0] = { ...lines[0]![0]!, text: leading + lines[0]![0]!.text }
+      lines[0][0] = { ...lines[0][0], text: leading + lines[0][0].text }
     return lines
   },
 )

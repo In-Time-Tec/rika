@@ -27,7 +27,7 @@ export interface CellOutcome {
 export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
   const message = optionalString(failure.message)
   switch (failure._tag) {
-    case cellExecutionFailedTag:
+    case cellExecutionFailedTag: {
       const stack = filteredStack(optionalString(failure.stack))
       let cellError: NonNullable<Cell["error"]> = {
         name: failure.name,
@@ -38,6 +38,7 @@ export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
         status: "failed",
         error: cellError,
       }
+    }
     case kernelUnavailableTag:
       return {
         status: "failed",

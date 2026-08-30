@@ -1,28 +1,14 @@
-import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
-import type { Unit } from "@rika/transcript/transcript-unit"
-import { Effect, FileSystem, Path, Schema } from "effect"
-import { Surface } from "../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../src/state/model"
 import { ready } from "../../../src/state/loadable"
 import { replaceQueue } from "../../../src/state/queue/model"
 import { update } from "../../../src/state/reducer/model"
-import { type ThreadItem } from "../../../src/state/thread/model"
-import { type TranscriptBlock } from "../../../src/state/transcript/model"
+import type { TranscriptBlock } from "../../../src/state/transcript/model"
+import { thread, threadBrowser } from "./thread-browser.fixture"
 
-export const visualMetadata = {
-  schema: 2,
-  terminal: { columns: 80, rows: 24, emulator: "OpenTUI test renderer", font: "cell-grid" },
-  theme: { name: "Rika dark", background: "inherited", foreground: "#c9d1d9", surface: "#161b22" },
-  native: { opentui: "0.4.3", bun: "1.3.14" },
-  masks: [],
-  thresholds: { characterDifferences: 0, pixelChannelDelta: 0, differingPixelRatio: 0 },
-  pixelModel:
-    "deterministic cell raster from OpenTUI captured spans; character cells use foreground and blank cells use background",
-  styleModel: "OpenTUI spans serialized as text, RGBA foreground/background, attributes, and cell width",
-} as const
-
-const block = (value: TranscriptBlock): Model => ({ ...initial("/workspace", "high"), blocks: [value] })
+const block = (value: TranscriptBlock): Model => ({
+  ...initial("/workspace", "high"),
+  blocks: [value],
+})
 const tool = (
   id: string,
   name: string,
@@ -53,64 +39,6 @@ const tool = (
   return { ...value, result: { text: output } }
 }
 const base = (): Model => initial("/workspace", "high")
-const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
-  workspace: "/workspace",
-  pinned: false,
-  archived: false,
-  status: "idle",
-  unread: false,
-  lastActivityAt: 0,
-  ...input,
-})
-const previewUnits = (turnId: string, prompt: string, answers: ReadonlyArray<string>): ReadonlyArray<Unit> => [
-  {
-    key: `turn:${turnId}:user`,
-    turnId,
-    order: TranscriptUnitOrder.unitOrder(`turn:${turnId}:user`, 0),
-    revision: 0,
-    content: { _tag: "Entry", role: "user", text: prompt },
-  },
-  ...answers.map(
-    (text, index): Unit => ({
-      key: `assistant:${turnId}:${index}`,
-      turnId,
-      order: TranscriptUnitOrder.unitOrder(`assistant:${turnId}:${index}`, index + 1),
-      revision: index + 1,
-      content: { _tag: "Entry", role: "assistant", text },
-    }),
-  ),
-]
-
-const threadBrowser = (): Model => ({
-  ...base(),
-  currentThreadId: "thread-1",
-  threadSwitcher: { open: true, query: "", selected: 0, kind: "switch" },
-  threads: [
-    thread({
-      id: "thread-1",
-      title: "Rika performance and reliability",
-      unread: true,
-      editTotals: { added: 428, modified: 56, removed: 59 },
-    }),
-    thread({
-      id: "thread-2",
-      title: "Push all local changes to main",
-      status: "running",
-      editTotals: { added: 558, modified: 68, removed: 68 },
-    }),
-    thread({ id: "thread-3", title: "TUI performance and bug audit", unread: true }),
-  ],
-  threadPreview: {
-    _tag: "Ready",
-    value: {
-      threadId: "thread-1",
-      requestId: 1,
-      units: previewUnits("preview", "Finish the thread UI parity work.", [
-        "Merged all work into main and verified the affected paths.",
-      ]),
-    },
-  },
-})
 
 export const scenarios = (): ReadonlyArray<readonly [string, Model, number, number]> => {
   const reasoning = block({ _tag: "Reasoning", text: "Inspecting stable inputs" })
@@ -119,7 +47,11 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ["prompt", { ...base(), input: "Explain this repository", cursor: 23 }, 80, 24],
     [
       "streaming",
-      { ...base(), busy: true, entries: [{ role: "assistant", text: "Streaming deterministic text…" }] },
+      {
+        ...base(),
+        busy: true,
+        entries: [{ role: "assistant", text: "Streaming deterministic text…" }],
+      },
       80,
       24,
     ],
@@ -151,7 +83,10 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ],
     [
       "diff",
-      { ...block({ _tag: "Diff", path: "src/main.ts", patch: "-old\n+new" }), expandedRowKeys: ["block:Diff:0"] },
+      {
+        ...block({ _tag: "Diff", path: "src/main.ts", patch: "-old\n+new" }),
+        expandedRowKeys: ["block:Diff:0"],
+      },
       80,
       24,
     ],
@@ -191,7 +126,12 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         name: "edit",
         input: JSON.stringify({ path: "src/main.ts", old_str: "old", new_str: "new" }),
         status: "running",
-        presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+        presentation: {
+          family: "edit",
+          action: "edit",
+          activeLabel: "Editing",
+          completeLabel: "Edited",
+        },
         detail: "src/main.ts",
         files: [
           {
@@ -243,7 +183,12 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ],
     [
       "meter-scanner",
-      { ...base(), currentThreadId: "context-thread", busy: true, contextUsage: { _tag: "Loading" } },
+      {
+        ...base(),
+        currentThreadId: "context-thread",
+        busy: true,
+        contextUsage: { _tag: "Loading" },
+      },
       80,
       24,
     ],
@@ -377,7 +322,10 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ["shortcuts", { ...base(), shortcutsOpen: true }, 80, 24],
     [
       "file-picker",
-      { ...base(), filePicker: { open: true, query: "src", selected: 0, items: ready(["src/main.ts"]) } },
+      {
+        ...base(),
+        filePicker: { open: true, query: "src", selected: 0, items: ready(["src/main.ts"]) },
+      },
       80,
       24,
     ],
@@ -469,7 +417,12 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       "runner-placement",
       {
         ...base(),
-        connection: { connectivity: "connected", target: "runner", activity: "executor-waiting", participants: 1 },
+        connection: {
+          connectivity: "connected",
+          target: "runner",
+          activity: "executor-waiting",
+          participants: 1,
+        },
       },
       80,
       24,
@@ -502,7 +455,12 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       "narrow-runner-placement",
       {
         ...base(),
-        connection: { connectivity: "connected", target: "runner", activity: "executor-waiting", participants: 1 },
+        connection: {
+          connectivity: "connected",
+          target: "runner",
+          activity: "executor-waiting",
+          participants: 1,
+        },
       },
       32,
       12,
@@ -531,87 +489,3 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ],
   ]
 }
-
-type Captured = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
-
-const channel = (value: number): number => Math.round(value <= 1 ? value * 255 : value)
-const stableFrame = (frame: string): string => frame.replaceAll(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, "⠿")
-const prettyJson = (value: Schema.Json | Captured): string => JSON.stringify(value, undefined, 2)
-
-const screenshot = (capture: Captured, width: number, height: number): string => {
-  const pixels: Array<string> = []
-  for (let y = 0; y < height; y += 1) {
-    const cells = (capture.lines[y]?.spans ?? []).flatMap((span) =>
-      Array.from(span.text).map((character) => ({ character, span })),
-    )
-    for (let x = 0; x < width; x += 1) {
-      const cell = cells[x]
-      const color = cell?.character === " " ? cell.span.bg : cell?.span.fg
-      pixels.push(color !== undefined ? `${channel(color.r)} ${channel(color.g)} ${channel(color.b)}` : "0 0 0")
-    }
-  }
-  return `P3\n${width} ${height}\n255\n${pixels.join("\n")}\n`
-}
-
-export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (directory: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  yield* fileSystem.makeDirectory(directory, { recursive: true })
-  yield* fileSystem.writeFileString(path.join(directory, "metadata.json"), `${prettyJson(visualMetadata)}\n`)
-  /** Independent renderers let scenarios render concurrently without sharing frame state. */
-  const all = scenarios()
-  const lanes = Math.min(4, all.length)
-  yield* Effect.forEach(
-    Array.from({ length: lanes }, (_, lane) => lane),
-    (lane) =>
-      Effect.gen(function* () {
-        const setup = yield* Effect.acquireRelease(
-          Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
-          (value) => Effect.sync(() => value.renderer.destroy()),
-        )
-        for (const [name, source, width, height] of all.filter((_, index) => index % lanes === lane)) {
-          const rootBefore = new Set(setup.renderer.root.getChildren())
-          const selectionListenersBefore = setup.renderer.listenerCount("selection")
-          const clock = new ManualClock()
-          const surface = new Surface(
-            setup.renderer,
-            { key: () => undefined, resize: () => undefined },
-            {
-              animate: false,
-              clock,
-            },
-          )
-          let cleanupError: Error | undefined
-          try {
-            setup.resize(width, height)
-            surface.update({ ...source, width, height })
-            yield* Effect.tryPromise(() => setup.flush())
-            yield* Effect.tryPromise(() => setup.renderOnce())
-            const frame = stableFrame(setup.captureCharFrame())
-            const styles = setup.captureSpans()
-            yield* Effect.all(
-              [
-                fileSystem.writeFileString(
-                  path.join(directory, `${name}.frame.txt`),
-                  `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
-                ),
-                fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
-                fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
-              ],
-              { concurrency: 3 },
-            )
-          } finally {
-            surface.destroy()
-            const retainedRoots = setup.renderer.root.getChildren().filter((child) => !rootBefore.has(child))
-            if (retainedRoots.length > 0)
-              cleanupError = new Error(`${name} retained ${retainedRoots.length} root renderables`)
-            const retainedSelectionListeners = setup.renderer.listenerCount("selection") - selectionListenersBefore
-            if (retainedSelectionListeners !== 0)
-              cleanupError = new Error(`${name} retained ${retainedSelectionListeners} selection listeners`)
-          }
-          if (cleanupError !== undefined) throw cleanupError
-        }
-      }),
-    { concurrency: lanes },
-  )
-})

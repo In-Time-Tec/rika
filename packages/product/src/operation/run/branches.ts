@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Console, Context, Effect, Function, Layer, type FileSystem, type Path } from "effect"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
@@ -8,14 +8,12 @@ import * as NoninteractiveOperation from "../dispatch/noninteractive"
 import * as ExtensionOperations from "../contract/extension"
 import * as ConfigurationOperation from "./configuration"
 import * as ThreadOperation from "../dispatch/thread"
-import { Console, Context, Effect, Layer } from "effect"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Input, OperationUnavailable } from "../contract/product"
 import type { InteractiveSession } from "../interactive/session"
 import { OperationError } from "../error"
 import type { ProductOperationRuntimeState } from "../runtime/state"
 import type { ProductLayerOptions } from "../foundation/options"
-import type { FileSystem, Path } from "effect"
 
 export interface ProductOperationRunFactory extends ProductOperationRuntimeState {
   readonly options: ProductLayerOptions<Error, Error, Error, Error, Error>

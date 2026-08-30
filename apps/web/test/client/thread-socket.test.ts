@@ -1,197 +1,13 @@
 // @vitest-environment happy-dom
 
-import { afterEach, beforeEach, vi } from "vitest"
+import { vi } from "vitest"
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result, Schema } from "effect"
-import * as Socket from "effect/unstable/socket/Socket"
-import * as ExecutionProjection from "@rika/product/execution-projection"
-import { ClientMessage, protocolVersion, ServerFrame } from "@rika/product/client-protocol"
-import { connectThread as connectThreadEffect, frameEventName, sendPrompt } from "../../src/client/thread-socket"
+import { ClientMessage, protocolVersion } from "@rika/product/client-protocol"
+import { frameEventName, sendPrompt } from "../../src/client/thread-socket"
+import { type ObservedFrame, socketFixture, TestWebSocket } from "./thread-socket.fixture"
 
-declare global {
-  interface WindowEventMap {
-    readonly "rika:thread-frame": CustomEvent<ServerFrame>
-  }
-}
-
-interface ServerFrameInput {
-  readonly protocolVersion: number
-  readonly payload: object
-}
-
-class TestWebSocket extends EventTarget implements WebSocket {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSING = 2
-  static readonly CLOSED = 3
-  static instances: Array<TestWebSocket> = []
-
-  readonly sent: Array<ClientMessage> = []
-  readonly binaryType: BinaryType = "blob"
-  readonly bufferedAmount = 0
-  readonly extensions = ""
-  readonly protocol = ""
-  readonly CONNECTING = TestWebSocket.CONNECTING
-  readonly OPEN = TestWebSocket.OPEN
-  readonly CLOSING = TestWebSocket.CLOSING
-  readonly CLOSED = TestWebSocket.CLOSED
-  onclose: WebSocket["onclose"] = null
-  onerror: WebSocket["onerror"] = null
-  onmessage: WebSocket["onmessage"] = null
-  onopen: WebSocket["onopen"] = null
-  readyState: WebSocket["readyState"] = TestWebSocket.CONNECTING
-  closeCode: number | undefined
-  closeReason: string | undefined
-
-  constructor(
-    readonly url: string,
-    readonly protocols: string | ReadonlyArray<string>,
-  ) {
-    super()
-    TestWebSocket.instances.push(this)
-  }
-
-  send(value: string | ArrayBufferLike | Blob | ArrayBufferView) {
-    const json = Schema.decodeUnknownSync(Schema.String)(value)
-    this.sent.push(Schema.decodeSync(Schema.fromJsonString(ClientMessage))(json))
-  }
-
-  close(code?: number, reason?: string) {
-    if (this.readyState === TestWebSocket.CLOSED) return
-    this.closeCode = code
-    this.closeReason = reason
-    this.readyState = TestWebSocket.CLOSED
-    this.dispatchEvent(new Event("close"))
-  }
-
-  receive(frame: ServerFrameInput) {
-    this.dispatchEvent(
-      new MessageEvent("message", { data: JSON.stringify(Schema.decodeUnknownSync(ServerFrame)(frame)) }),
-    )
-  }
-
-  receiveRaw(data: string) {
-    this.dispatchEvent(new MessageEvent("message", { data }))
-  }
-}
-
-const snapshot = (threadId: string) => ({
-  executorKind: "runner",
-  view: {
-    thread: {
-      id: threadId,
-      workspace: "workspace-1",
-      title: "Thread",
-      labels: [],
-      pinned: false,
-      archived: false,
-      lineage: { _tag: "Original" },
-      createdAt: 1,
-      updatedAt: 1,
-    },
-    revision: 0,
-    source: { projectionVersion: ExecutionProjection.projectionVersion },
-    turns: [],
-    pending: [],
-    hasOlder: false,
-    hasNewer: false,
-    usage: { state: ExecutionProjection.emptyUsageState() },
-  },
-  pendingAuthorizations: [],
-})
-
-const attach = (
-  connection: TestWebSocket,
-  requestedThreadId: string,
-  snapshotThreadId = requestedThreadId,
-  cursor = "0",
-  threadVersion = "1",
-) => {
-  const request = Schema.decodeUnknownSync(ClientMessage)(connection.sent[0])
-  connection.receive({
-    protocolVersion,
-    payload: {
-      _tag: "ThreadAttached",
-      requestId: request.requestId,
-      threadId: requestedThreadId,
-      baseCursor: cursor,
-      threadVersion,
-      cursor,
-      checkpoint: {
-        threadVersion,
-        cursor,
-        snapshot: snapshot(snapshotThreadId),
-      },
-      events: [],
-      participants: [],
-    },
-  })
-}
-
-const threadEvent = (threadId: string, cursor: string, threadVersion: string) => ({
-  protocolVersion,
-  payload: {
-    _tag: "ThreadEvent",
-    event: {
-      threadId,
-      sequence: cursor,
-      cursor,
-      threadVersion,
-      createdAt: "2026-08-21T00:00:00.000Z",
-      event: { _tag: "ThreadViewSnapshot", snapshot: snapshot(threadId).view },
-    },
-  },
-})
-
-const nextConnection = (index: number) =>
-  Effect.gen(function* () {
-    while (TestWebSocket.instances[index] === undefined) yield* Effect.yieldNow
-    const connection = TestWebSocket.instances[index]!
-    if (connection.readyState === TestWebSocket.CONNECTING) {
-      connection.readyState = TestWebSocket.OPEN
-      connection.dispatchEvent(new Event("open"))
-    }
-    while (connection.sent.length === 0) yield* Effect.yieldNow
-    return connection
-  })
-
-const connectThread = (threadId: string) =>
-  connectThreadEffect(threadId).pipe(
-    Effect.provideService(
-      Socket.WebSocketConstructor,
-      (url, protocols) =>
-        new TestWebSocket(
-          String(url),
-          Schema.decodeSync(Schema.Union([Schema.String, Schema.Array(Schema.String)]))(protocols ?? []),
-        ),
-    ),
-  )
-
-beforeEach(() => {
-  TestWebSocket.instances = []
-  vi.stubGlobal("WebSocket", TestWebSocket)
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(() =>
-      Effect.runPromise(
-        Effect.succeed(
-          new Response(
-            JSON.stringify({
-              ticket: "ticket",
-              websocketUrl: "ws://thread.test",
-              protocol: "rika.thread.v1",
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        ),
-      ),
-    ),
-  )
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
+const { attach, connectThread, nextConnection, snapshot, threadEvent } = socketFixture
 
 it.effect("acknowledges every committed attachment, event, and snapshot cursor", () =>
   Effect.gen(function* () {
@@ -225,8 +41,8 @@ it.effect("acknowledges every committed attachment, event, and snapshot cursor",
 
 it.effect("keeps A active while B attaches, then makes late A frames and close inert after the atomic swap", () =>
   Effect.gen(function* () {
-    const frames: Array<unknown> = []
-    const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
+    const frames: Array<ObservedFrame> = []
+    const receive = (event: CustomEvent<ObservedFrame>) => frames.push(event.detail)
     window.addEventListener(frameEventName, receive)
     try {
       const connectingA = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -373,8 +189,8 @@ it.effect(
   "recovers an unexpectedly closed selected Thread from its committed cursor and applies contiguous replay once",
   () =>
     Effect.gen(function* () {
-      const frames: Array<any> = []
-      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
+      const frames: Array<ObservedFrame> = []
+      const receive = (event: CustomEvent<ObservedFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-recovery")))
@@ -407,7 +223,7 @@ it.effect(
         replacement.receive(threadEvent("thread-recovery", "7", "7"))
         replacement.receive(threadEvent("thread-recovery", "8", "8"))
         expect(
-          frames.filter((frame) => frame.payload?._tag === "ThreadEvent").map((frame) => frame.payload.event.cursor),
+          frames.flatMap((frame) => (frame.payload._tag === "ThreadEvent" ? [frame.payload.event.cursor] : [])),
         ).toEqual(["5", "8"])
       } finally {
         window.removeEventListener(frameEventName, receive)
@@ -419,8 +235,8 @@ it.effect(
   "recovers a semantically quarantined selected Thread from its committed cursor without changing its identity",
   () =>
     Effect.gen(function* () {
-      const frames: Array<any> = []
-      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
+      const frames: Array<ObservedFrame> = []
+      const receive = (event: CustomEvent<ObservedFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -457,7 +273,7 @@ it.effect(
         replacement.receive(threadEvent("thread-a", "6", "6"))
         replacement.receive(threadEvent("thread-a", "7", "7"))
         expect(
-          frames.filter((frame) => frame.payload?._tag === "ThreadEvent").map((frame) => frame.payload.event.cursor),
+          frames.flatMap((frame) => (frame.payload._tag === "ThreadEvent" ? [frame.payload.event.cursor] : [])),
         ).toEqual(["7"])
         yield* sendPrompt({ threadId: "thread-a", threadVersion: "7", text: "still A" })
         expect(replacement.sent.at(-1)).toMatchObject({ command: { _tag: "SubmitPrompt", threadId: "thread-a" } })
@@ -471,8 +287,8 @@ it.effect(
   "recovers selected A after malformed bytes while rejecting a malformed candidate B without disturbing A",
   () =>
     Effect.gen(function* () {
-      const frames: Array<any> = []
-      const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
+      const frames: Array<ObservedFrame> = []
+      const receive = (event: CustomEvent<ObservedFrame>) => frames.push(event.detail)
       window.addEventListener(frameEventName, receive)
       try {
         const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
@@ -541,8 +357,8 @@ it.effect("preserves selected identity after failed automatic recovery and allow
 
 it.effect("quarantines semantic view gaps and nested foreign snapshot identities before emitting them", () =>
   Effect.gen(function* () {
-    const frames: Array<unknown> = []
-    const receive = (event: CustomEvent<ServerFrame>) => frames.push(event.detail)
+    const frames: Array<ObservedFrame> = []
+    const receive = (event: CustomEvent<ObservedFrame>) => frames.push(event.detail)
     window.addEventListener(frameEventName, receive)
     try {
       const connectingView = yield* Effect.forkChild(Effect.result(connectThread("thread-view")))
@@ -575,7 +391,7 @@ it.effect("quarantines semantic view gaps and nested foreign snapshot identities
         },
       })
       expect(viewSocket.readyState).toBe(TestWebSocket.CLOSED)
-      expect(frames.filter((frame: any) => frame.payload?._tag === "ThreadEvent")).toEqual([])
+      expect(frames.filter((frame) => frame.payload._tag === "ThreadEvent")).toEqual([])
       const viewReplacement = yield* nextConnection(1)
       attach(viewReplacement, "thread-view")
       yield* Effect.tryPromise(() => vi.waitFor(() => expect(viewReplacement.readyState).toBe(TestWebSocket.OPEN)))
@@ -596,7 +412,7 @@ it.effect("quarantines semantic view gaps and nested foreign snapshot identities
         },
       })
       expect(snapshotSocket.readyState).toBe(TestWebSocket.CLOSED)
-      expect(frames.filter((frame: any) => frame.payload?._tag === "ThreadSnapshot")).toEqual([])
+      expect(frames.filter((frame) => frame.payload._tag === "ThreadSnapshot")).toEqual([])
     } finally {
       window.removeEventListener(frameEventName, receive)
     }

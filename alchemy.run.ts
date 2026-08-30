@@ -11,7 +11,7 @@ const securedAlchemyState = Bun.spawnSync(["chmod", "-R", "go-rwx", ".alchemy"],
   stdout: "ignore",
   stderr: "ignore",
 })
-if (Number(securedAlchemyState.exitCode) !== 0 && (await Bun.file(".alchemy").exists()) === true)
+if (securedAlchemyState.exitCode !== 0 && (await Bun.file(".alchemy").exists()) === true)
   throw new Error("Alchemy state permissions could not be secured")
 
 const publicPort = Number(Bun.env.PORT ?? "3000")

@@ -9,7 +9,6 @@ import type { Projection } from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product/transcript-repository"
 import { Context, Deferred, Effect, Layer, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import {
@@ -66,7 +65,7 @@ it.effect("projects durable changes and publishes transient previews for a recov
         setStatus: () => Effect.die("projection worker settled the Turn"),
       })
       const transcripts = TranscriptRepository.Service.of({
-        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
+        ...Context.get(yield* Layer.build(TranscriptRepository.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.succeed(projection),
         commitProjection: (_turn: Turn.AgentExecutionTurn, change: ExecutionProjection.Change, withinTransaction) =>
@@ -184,7 +183,7 @@ it.effect("replays an existing transcript when its projection version is stale",
         state: state("completed"),
         projectionVersion: ExecutionProjection.projectionVersion - 1,
       }
-      const memory = yield* TranscriptStore.makeMemory({ initial: [stale], turns })
+      const memory = yield* TranscriptRepository.makeMemory({ initial: [stale], turns })
       const projected = yield* Deferred.make<void>()
       const transcripts = TranscriptRepository.Service.of({
         ...memory,
@@ -246,7 +245,7 @@ it.effect("does not reset active projection age when a duplicate candidate is re
         get: () => Deferred.succeed(started, undefined).pipe(Effect.as(turn)),
       })
       const transcripts = TranscriptRepository.Service.of({
-        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
+        ...Context.get(yield* Layer.build(TranscriptRepository.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.succeed([{ threadId, turnId, createdAt: turn.createdAt }]),
         get: () => Effect.as(Effect.void, undefined),
       })
@@ -300,7 +299,7 @@ it.effect("does not cancel or settle execution when projection is silent", () =>
           Ref.update(events, (current) => [...current, `settled:${id}`]).pipe(Effect.as(turnFor(id))),
       })
       const transcriptRepository = Context.get(
-        yield* Layer.build(TranscriptStore.memoryLayer()),
+        yield* Layer.build(TranscriptRepository.memoryLayer()),
         TranscriptRepository.Service,
       )
       const transcripts = TranscriptRepository.Service.of({
@@ -388,7 +387,7 @@ it.effect("rejects a stale projection worker when listing blocks after a success
       const lists = yield* Ref.make(0)
       const blocked = yield* Deferred.make<ReadonlyArray<TranscriptRepository.ProjectionRecoveryCandidate>>()
       const transcripts = TranscriptRepository.Service.of({
-        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
+        ...Context.get(yield* Layer.build(TranscriptRepository.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () =>
           Ref.getAndUpdate(lists, (count) => count + 1).pipe(
             Effect.flatMap((count) => (count === 0 ? Effect.succeed([]) : Deferred.await(blocked))),
@@ -417,7 +416,7 @@ it.effect("rejects the current projection list failure immediately", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const transcripts = TranscriptRepository.Service.of({
-        ...Context.get(yield* Layer.build(TranscriptStore.memoryLayer()), TranscriptRepository.Service),
+        ...Context.get(yield* Layer.build(TranscriptRepository.memoryLayer()), TranscriptRepository.Service),
         listProjectionRecoveryCandidates: () => Effect.die("list unavailable"),
       })
       const context = yield* Layer.build(

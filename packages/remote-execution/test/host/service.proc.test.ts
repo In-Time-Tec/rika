@@ -274,7 +274,7 @@ try {
 }
 `
 
-describe.sequential("executor host process", () => {
+describe("executor host process", { concurrent: false }, () => {
   it.effect("restores durable operation receipts after host replacement", () =>
     Effect.scoped(
       Effect.flatMap(Layer.build(BunServices.layer), (context) =>
@@ -326,34 +326,58 @@ describe.sequential("executor host process", () => {
             env: { E2B_SANDBOX_ID: "sandbox-1" },
           }),
         )
-        yield* Effect.sync(() => {
-          const decoded = decodeProof(stdout)
-          expect(decoded).toEqual({
-            malformedStatus: 400,
-            invalidStatus: 400,
-            acceptedCount: 1,
-            loser: expect.stringMatching(/^(listener-closed|not-found)$/),
-            body: "accepted",
-            credential: expect.stringMatching(/^bootstrap-[ab]$/),
-            identity: {
-              target: "orb",
-              ownerId: "owner-1",
-              threadId: "thread-1",
-              assignmentId: "assignment-1",
-              assignmentGeneration: 1,
-              instanceId: expect.any(String),
-              executorId: "assignment-1:g1",
-              templateBuildId: "build-1",
-              apiUrl: "wss://api.example.test/api/v1/executors",
-              workspaceId: "workspace-1",
-              repository: null,
-              lifecycle: "fresh",
-              environmentDigest: `sha256:${"a".repeat(64)}`,
-              setupCache: false,
-              stateDirectory: "/var/lib/rika-executor",
-            },
-            restore: null,
-          })
+        const decoded = decodeProof(stdout)
+        const proof = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            malformedStatus: Schema.Finite,
+            invalidStatus: Schema.Finite,
+            acceptedCount: Schema.Finite,
+            loser: Schema.String,
+            body: Schema.String,
+            credential: Schema.String,
+            identity: Schema.Struct({
+              target: Schema.String,
+              ownerId: Schema.String,
+              threadId: Schema.String,
+              assignmentId: Schema.String,
+              assignmentGeneration: Schema.Finite,
+              instanceId: Schema.String,
+              executorId: Schema.String,
+              templateBuildId: Schema.String,
+              apiUrl: Schema.String,
+              workspaceId: Schema.String,
+              repository: Schema.Null,
+              lifecycle: Schema.String,
+              environmentDigest: Schema.String,
+              setupCache: Schema.Boolean,
+              stateDirectory: Schema.String,
+            }),
+            restore: Schema.Null,
+          }),
+        )(decoded)
+        expect(proof.malformedStatus).toBe(400)
+        expect(proof.invalidStatus).toBe(400)
+        expect(proof.acceptedCount).toBe(1)
+        expect(proof.loser).toMatch(/^(listener-closed|not-found)$/)
+        expect(proof.body).toBe("accepted")
+        expect(proof.credential).toMatch(/^bootstrap-[ab]$/)
+        expect(proof.identity.instanceId.length).toBeGreaterThan(0)
+        const { instanceId: _, ...identity } = proof.identity
+        expect(identity).toEqual({
+          target: "orb",
+          ownerId: "owner-1",
+          threadId: "thread-1",
+          assignmentId: "assignment-1",
+          assignmentGeneration: 1,
+          executorId: "assignment-1:g1",
+          templateBuildId: "build-1",
+          apiUrl: "wss://api.example.test/api/v1/executors",
+          workspaceId: "workspace-1",
+          repository: null,
+          lifecycle: "fresh",
+          environmentDigest: `sha256:${"a".repeat(64)}`,
+          setupCache: false,
+          stateDirectory: "/var/lib/rika-executor",
         })
       }).pipe(Effect.timeout("10 seconds"), provideLayer(BunServices.layer)),
     ),
@@ -388,28 +412,43 @@ describe.sequential("executor host process", () => {
               cwd: packageRoot,
             }),
           )
-          yield* Effect.sync(() => {
-            expect(decodeProof(stdout)).toMatchObject({
-              status: 202,
-              frame: {
-                _tag: "ExecutorHello",
-                hello: {
-                  fence: {
-                    target: "orb",
-                    assignmentId: "assignment-from-bootstrap",
-                    assignmentGeneration: 7,
-                    instanceId: expect.any(String),
-                    executorId: expect.stringMatching(/^executor-from-bootstrap:/),
-                  },
-                  templateBuildId: "build-from-bootstrap",
-                  bootstrapToken: "one-time-bootstrap",
-                },
-              },
-              heartbeat: {
-                _tag: "ExecutorHeartbeat",
-                heartbeat: { cursor: { sequence: 0, value: "" } },
-              },
-            })
+          const proof = yield* Schema.decodeUnknownEffect(
+            Schema.Struct({
+              status: Schema.Finite,
+              frame: Schema.Struct({
+                _tag: Schema.String,
+                hello: Schema.Struct({
+                  fence: Schema.Struct({
+                    target: Schema.String,
+                    assignmentId: Schema.String,
+                    assignmentGeneration: Schema.Finite,
+                    instanceId: Schema.String,
+                    executorId: Schema.String,
+                  }),
+                  templateBuildId: Schema.String,
+                  bootstrapToken: Schema.String,
+                }),
+              }),
+              heartbeat: Schema.Struct({
+                _tag: Schema.String,
+                heartbeat: Schema.Struct({
+                  cursor: Schema.Struct({ sequence: Schema.Finite, value: Schema.String }),
+                }),
+              }),
+            }),
+          )(decodeProof(stdout))
+          expect(proof.status).toBe(202)
+          expect(proof.frame._tag).toBe("ExecutorHello")
+          expect(proof.frame.hello.fence.target).toBe("orb")
+          expect(proof.frame.hello.fence.assignmentId).toBe("assignment-from-bootstrap")
+          expect(proof.frame.hello.fence.assignmentGeneration).toBe(7)
+          expect(proof.frame.hello.fence.instanceId.length).toBeGreaterThan(0)
+          expect(proof.frame.hello.fence.executorId).toMatch(/^executor-from-bootstrap:/)
+          expect(proof.frame.hello.templateBuildId).toBe("build-from-bootstrap")
+          expect(proof.frame.hello.bootstrapToken).toBe("one-time-bootstrap")
+          expect(proof.heartbeat).toEqual({
+            _tag: "ExecutorHeartbeat",
+            heartbeat: { cursor: { sequence: 0, value: "" } },
           })
         }).pipe(Effect.timeout("15 seconds"), provideLayer(BunServices.layer)),
       ),

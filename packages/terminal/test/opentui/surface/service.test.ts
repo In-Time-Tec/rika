@@ -11,9 +11,6 @@ const opentui = {
   get renderer() {
     return activeSetup.renderer
   },
-  get frameHandlers() {
-    return activeSetup.renderer.listeners("frame")
-  },
   get keyHandlers() {
     return { size: activeSetup.renderer.keyInput.listenerCount("keypress") }
   },
@@ -32,7 +29,10 @@ const createScoped = (callbacks: Parameters<typeof create>[0]) =>
   Effect.acquireRelease(
     Effect.gen(function* () {
       activeSetup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 }))
-      return yield* create({ ...callbacks, makeRenderer: () => Effect.succeed(activeSetup.renderer) })
+      return yield* create({
+        ...callbacks,
+        makeRenderer: () => Effect.succeed(activeSetup.renderer),
+      })
     }),
     (created) => Effect.sync(created.releaseTerminal),
   )
@@ -109,7 +109,7 @@ it.effect("ignores a queued loader tick after destroy", () =>
     const phase = surface.animationDiagnostics().loaderPhase
 
     surface.destroy()
-    for (const frame of opentui.frameHandlers) frame({ deltaTime: 16 })
+    opentui.renderer.emit("frame", { deltaTime: 16 })
 
     expect(surface.animationDiagnostics().loaderPhase).toBe(phase)
   }),

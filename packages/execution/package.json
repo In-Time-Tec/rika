@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/runtime.ts",
-    "./route": "./src/route.ts",
+    ".": "./src/engine/runtime.ts",
+    "./route": "./src/routing/route.ts",
     "./postgres": "./src/postgres.ts",
     "./remote-cells": "./src/remote-cells.ts",
     "./scripted-model": "./src/scripted-model.ts",

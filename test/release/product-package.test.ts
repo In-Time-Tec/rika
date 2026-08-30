@@ -237,7 +237,7 @@ it.effect("every frozen export target resolves to a source file", () =>
           const target = manifest.exports[`./${name}`]
           expect(target, `${packageName}/${name} is missing an exports entry`).toBeDefined()
           expect(
-            yield* fileSystem.exists(path.resolve("packages", packagePath, target!)),
+            yield* fileSystem.exists(path.resolve("packages", packagePath, target)),
             `${packageName}/${name} points at a missing file`,
           ).toBe(true)
         }
@@ -258,7 +258,9 @@ for (const [packageName, names] of Object.entries(expected)) {
           const manifest = yield* Schema.decodeEffect(PackageManifestJson)(
             yield* fileSystem.readFileString(path.resolve("packages", packagePath, "package.json")),
           )
-          expect(Object.keys(manifest.exports).toSorted()).toEqual(names.map((name) => `./${name}`).toSorted())
+          const exportNames = new Set(Object.keys(manifest.exports))
+          const expectedNames = new Set(names.map((name) => `./${name}`))
+          expect(exportNames).toEqual(expectedNames)
           expect(Object.keys(manifest.exports)).not.toContain(".")
         }),
       ),

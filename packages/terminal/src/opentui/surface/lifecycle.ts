@@ -10,6 +10,17 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.renderer.once(CliRenderEvents.FRAME, listener)
   }
 
+  private updateAnimations(model: Model): void {
+    const enabled = this.options.animate !== false
+    if (enabled && animationActive(model)) this.loaderController.start(spinnerInterval, () => this.tickLoader())
+    else this.loaderController.stop()
+    if (enabled && welcomeAnimationActive(model))
+      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
+    else this.welcomeController.stop()
+    if (enabled && goalAnimationActive(model)) this.goalController.start(spinnerInterval, () => this.tickGoal())
+    else this.goalController.stop()
+  }
+
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousModel = this.model
     if (model.busy && previousModel?.busy !== true) this.publishWorkingFrame(idleSpinnerFrame)
@@ -25,17 +36,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       transcriptLayout.sidebarVisible,
       transcriptLayout.threadSidebarVisible,
     )
-    const loaderActive = animationActive(model)
-    if (this.options.animate !== false && loaderActive) {
-      this.loaderController.start(spinnerInterval, () => this.tickLoader())
-    } else if (this.options.animate === false || !loaderActive) this.loaderController.stop()
-    const welcomeActive = welcomeAnimationActive(model)
-    if (this.options.animate !== false && welcomeActive) {
-      this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
-    } else if (this.options.animate === false || !welcomeActive) this.welcomeController.stop()
-    const goalActive = goalAnimationActive(model)
-    if (this.options.animate !== false && goalActive) this.goalController.start(spinnerInterval, () => this.tickGoal())
-    else if (this.options.animate === false || !goalActive) this.goalController.stop()
+    this.updateAnimations(model)
     this.updateOverlay(
       model,
       transcriptLayout.contentLeft,

@@ -36,6 +36,64 @@ const loginOpenAiAccount = (deviceCode: boolean) =>
     yield* HostedAccount.putOpenAiAccount(credential)
   })
 
+const authOperation = (input: Extract<Input, { readonly _tag: "Auth" }>) => {
+  if (input.action === "login") return HostedAccount.login(input)
+  if (input.action === "status") return HostedAccount.status(input.json)
+  if (input.action === "logout") return input.all === true ? HostedAccount.logoutAll() : HostedAccount.logout()
+  if (input.action === "devices") return HostedAccount.devices()
+  return HostedAccount.revokeDevice(input.device)
+}
+
+const organizationOperation = (input: Extract<Input, { readonly _tag: "Organization" }>) => {
+  if (input.action === "list") return HostedAccount.listOrganizations()
+  if (input.action === "personal") return HostedAccount.usePersonalOwner()
+  if (input.action === "use") return HostedAccount.useOrganization(input.organization)
+  return HostedAccount.invite(input.email)
+}
+
+const projectOperation = (input: Extract<Input, { readonly _tag: "Project" }>) => {
+  if (input.action === "list") return HostedAccount.listProjects()
+  if (input.action === "create") return HostedAccount.createProject(input.name)
+  return HostedAccount.useProject(input.project)
+}
+
+const credentialOperation = (input: Extract<Input, { readonly _tag: "Credential" }>) => {
+  if (input.action === "put") return HostedAccount.putProviderCredential(input.provider, input.apiKey)
+  if (input.action === "list") return HostedAccount.listProviderCredentials(input.provider)
+  return HostedAccount.revokeProviderCredential(input.provider)
+}
+
+const providerOperation = (input: Extract<Input, { readonly _tag: "Provider" }>) => {
+  if (input.action === "login") return loginOpenAiAccount(input.deviceCode)
+  if (input.action === "status") return HostedAccount.getOpenAiAccount()
+  return HostedAccount.revokeOpenAiAccount()
+}
+
+const secretOperation = (input: Extract<Input, { readonly _tag: "Secret" }>) =>
+  input.action === "put"
+    ? HostedAccount.putSecret(
+        input.name,
+        input.value,
+        input.scope,
+        input.phase === undefined ? ["setup", "runtime"] : [input.phase],
+      )
+    : HostedAccount.revokeSecret(input.name, input.scope)
+
+const recoveryOperation = (input: Extract<Input, { readonly _tag: "ThreadRecovery" }>) => {
+  if (input.action === "inspect") return HostedAccount.inspectRecovery(input.threadId, input.runId)
+  if (input.action === "retry")
+    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, { action: "retry" })
+  if (input.action === "accept")
+    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
+      action: "accept",
+      value: input.value,
+    })
+  return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
+    action: "abort",
+    reason: input.reason,
+  })
+}
+
 const operation = (
   input: Input,
 ): Effect.Effect<
@@ -51,64 +109,19 @@ const operation = (
   | ProfileStore
   | ThreadClient
 > => {
-  if (input._tag === "Auth") {
-    if (input.action === "login") return HostedAccount.login(input)
-    if (input.action === "status") return HostedAccount.status(input.json)
-    if (input.action === "logout") return input.all === true ? HostedAccount.logoutAll() : HostedAccount.logout()
-    if (input.action === "devices") return HostedAccount.devices()
-    return HostedAccount.revokeDevice(input.device)
-  }
-  if (input._tag === "Organization") {
-    if (input.action === "list") return HostedAccount.listOrganizations()
-    if (input.action === "personal") return HostedAccount.usePersonalOwner()
-    if (input.action === "use") return HostedAccount.useOrganization(input.organization)
-    return HostedAccount.invite(input.email)
-  }
-  if (input._tag === "Project") {
-    if (input.action === "list") return HostedAccount.listProjects()
-    if (input.action === "create") return HostedAccount.createProject(input.name)
-    return HostedAccount.useProject(input.project)
-  }
+  if (input._tag === "Auth") return authOperation(input)
+  if (input._tag === "Organization") return organizationOperation(input)
+  if (input._tag === "Project") return projectOperation(input)
   if (input._tag === "RemoteRun") return HostedAccount.runThread(input.threadId, input.request)
-  if (input._tag === "Credential") {
-    if (input.action === "put") return HostedAccount.putProviderCredential(input.provider, input.apiKey)
-    if (input.action === "list") return HostedAccount.listProviderCredentials(input.provider)
-    return HostedAccount.revokeProviderCredential(input.provider)
-  }
-  if (input._tag === "Provider") {
-    if (input.action === "login") return loginOpenAiAccount(input.deviceCode)
-    if (input.action === "status") return HostedAccount.getOpenAiAccount()
-    return HostedAccount.revokeOpenAiAccount()
-  }
-  if (input._tag === "Secret") {
-    if (input.action === "put")
-      return HostedAccount.putSecret(
-        input.name,
-        input.value,
-        input.scope,
-        input.phase === undefined ? ["setup", "runtime"] : [input.phase],
-      )
-    return HostedAccount.revokeSecret(input.name, input.scope)
-  }
+  if (input._tag === "Credential") return credentialOperation(input)
+  if (input._tag === "Provider") return providerOperation(input)
+  if (input._tag === "Secret") return secretOperation(input)
   if (input._tag === "ThreadService") {
     if (input.action === "ensure") return HostedAccount.ensureRepositoryService(input.threadId, input.service)
     return HostedAccount.stopRepositoryService(input.threadId, input.serviceId)
   }
   if (input._tag === "ThreadPortal") return HostedAccount.openThreadPortal(input.threadId, input.port)
-  if (input._tag === "ThreadRecovery") {
-    if (input.action === "inspect") return HostedAccount.inspectRecovery(input.threadId, input.runId)
-    if (input.action === "retry")
-      return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, { action: "retry" })
-    if (input.action === "accept")
-      return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
-        action: "accept",
-        value: input.value,
-      })
-    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
-      action: "abort",
-      reason: input.reason,
-    })
-  }
+  if (input._tag === "ThreadRecovery") return recoveryOperation(input)
   if (input._tag === "ThreadSync") return HostedAccount.syncRepository(input)
   return HostedAccount.createRemoteThread()
 }

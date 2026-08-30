@@ -1,7 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Layer } from "effect"
 import { TypeOverrides, types } from "pg"
-import { layer as assignmentLayer } from "./assignments"
+import { layer as assignmentLayer } from "./assignment-store/assignments"
 import { layer as clientAuthorityLayer } from "./client-authority"
 import { layer as threadEventStoreLayer } from "./thread-event-store"
 import { layer as environmentLayer } from "./environment-store"

@@ -1,3 +1,5 @@
+import "./support/root-fragments/postgres-driver-conformance.fixture"
+import "./support/root-fragments/postgres-inspection.fixture"
 import { expect, it } from "@effect/vitest"
 import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -56,17 +58,11 @@ it.effect("emits persisted Thread, Turn, and Run correlation when a Run claim is
   return Postgres.observeClaim(claim).pipe(
     Effect.andThen(
       Effect.sync(() => {
-        expect(logs).toContainEqual(
-          expect.objectContaining({
-            message: "hosted.run_claim.success",
-            annotations: expect.objectContaining({
-              "rika.thread.id": "thread-claim-01",
-              "rika.turn.id": "turn-claim-01",
-              "rika.run.id": "run-claim-01",
-              "rika.hosted.stage": "run_claim",
-            }),
-          }),
-        )
+        const success = logs.find(({ message }) => message === "hosted.run_claim.success")
+        expect(success?.annotations["rika.thread.id"]).toBe("thread-claim-01")
+        expect(success?.annotations["rika.turn.id"]).toBe("turn-claim-01")
+        expect(success?.annotations["rika.run.id"]).toBe("run-claim-01")
+        expect(success?.annotations["rika.hosted.stage"]).toBe("run_claim")
       }),
     ),
     Effect.provideService(Logger.CurrentLoggers, new Set([logger])),

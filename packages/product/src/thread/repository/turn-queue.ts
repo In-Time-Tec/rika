@@ -1,6 +1,5 @@
-import type { AgentExecutionTurn } from "../turn/record"
+import type { AgentExecutionTurn, TurnId } from "../turn/record"
 import type { ThreadId } from "../model/record"
-import type { TurnId } from "../turn/record"
 
 export interface QueueSnapshot {
   readonly threadId: ThreadId

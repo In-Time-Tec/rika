@@ -87,13 +87,11 @@ it.effect("fails recovered account routes through the typed registration channel
       Effect.exit,
     )
     expect(Exit.isFailure(failed)).toBe(true)
-    if (Exit.isFailure(failed))
-      expect(failed.cause.reasons.find((reason) => reason._tag === "Fail")).toMatchObject({
-        error: {
-          _tag: "tenetkit/runtime/ExecutableRegistrationInvalid",
-          message: expect.stringContaining("authentication is unavailable"),
-        },
-      })
+    if (Exit.isFailure(failed)) {
+      const reason = failed.cause.reasons.find((candidate) => candidate._tag === "Fail")
+      expect(reason?._tag).toBe("Fail")
+      if (reason?._tag === "Fail") expect(reason.error.message).toContain("authentication is unavailable")
+    }
   }),
 )
 

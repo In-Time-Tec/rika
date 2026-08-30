@@ -43,7 +43,7 @@ const progress = (id: string, data: ToolProgressData) => {
     _tag: "ToolProgress",
     turn: 0,
     toolCallId: id,
-    message: String(data._tag),
+    message: "Cell progress",
     data,
   }
   return treeEvent("raw-root-run", event)
@@ -244,10 +244,11 @@ describe("TenetKit cell projection", () => {
       ),
     )
     expect(cellOf(change)).toMatchObject({ status: "unknown" })
-    expect(block(change, "Error")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ title: "Cell outcome unknown" }),
-    })
+    const diagnostic = block(change, "Error")
+    expect(diagnostic?._tag).toBe("Block")
+    if (diagnostic?._tag === "Block" && diagnostic.block._tag === "Error") {
+      expect(diagnostic.block.title).toBe("Cell outcome unknown")
+    }
   })
 
   it("reports an unavailable kernel as a failed cell with a diagnostic block", () => {
@@ -268,10 +269,11 @@ describe("TenetKit cell projection", () => {
       ),
     )
     expect(cellOf(change)).toMatchObject({ status: "failed" })
-    expect(block(change, "Error")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ title: "Kernel unavailable" }),
-    })
+    const diagnostic = block(change, "Error")
+    expect(diagnostic?._tag).toBe("Block")
+    if (diagnostic?._tag === "Block" && diagnostic.block._tag === "Error") {
+      expect(diagnostic.block.title).toBe("Kernel unavailable")
+    }
   })
 
   it("records restore, loss, and restart notices on the observing cell", () => {
@@ -314,10 +316,11 @@ describe("TenetKit cell projection", () => {
       { kind: "restarted", detail: "Kernel restarted (crashed) at epoch 2." },
     ])
     expect(cellOf(change)?.epoch).toBe(2)
-    expect(block(change, "Notification")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ title: "Kernel restarted" }),
-    })
+    const notification = block(change, "Notification")
+    expect(notification?._tag).toBe("Block")
+    if (notification?._tag === "Block" && notification.block._tag === "Notification") {
+      expect(notification.block.title).toBe("Kernel restarted")
+    }
   })
 
   it("does not surface kernel starting or ready as cell notices", () => {

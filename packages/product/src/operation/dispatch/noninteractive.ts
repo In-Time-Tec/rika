@@ -26,23 +26,20 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     const threads = yield* ThreadRepository.Service
     const turns = yield* TurnRepository.Service
     const now = yield* Clock.currentTimeMillis
-    const thread =
-      input.threadId === undefined
-        ? yield* threads.create({
-            id: yield* dependencies.makeThreadId,
-            workspace: input.workspace ?? dependencies.defaultWorkspace,
-            title: clampThreadTitle(input.prompt.join(" ")) || "New thread",
-            now,
-          })
-        : yield* threads
-            .get(Thread.ThreadId.make(input.threadId))
-            .pipe(
-              Effect.flatMap((existingThread) =>
-                existingThread === undefined
-                  ? dependencies.operationError(`Thread ${input.threadId} does not exist`)
-                  : Effect.succeed(existingThread),
-              ),
-            )
+    const resolveThread = Effect.gen(function* () {
+      if (input.threadId === undefined)
+        return yield* threads.create({
+          id: yield* dependencies.makeThreadId,
+          workspace: input.workspace ?? dependencies.defaultWorkspace,
+          title: clampThreadTitle(input.prompt.join(" ")) || "New thread",
+          now,
+        })
+      const existing = yield* threads.get(Thread.ThreadId.make(input.threadId))
+      return existing === undefined
+        ? yield* dependencies.operationError(`Thread ${input.threadId} does not exist`)
+        : existing
+    })
+    const thread = yield* resolveThread
     const runTurn = Effect.fn("ProductOperation.runTurn")(function* (
       turn: AgentExecutionTurn,
       preparedInput?: PreparedExecutionTurn,

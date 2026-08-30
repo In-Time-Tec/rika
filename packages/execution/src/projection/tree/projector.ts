@@ -2,7 +2,6 @@ import type { Run, RunEvent } from "tenetkit/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { completeTool } from "../tool/state"
 import * as Authorization from "../authorization"
 import * as Cell from "../cell/state"
 import * as Diagnostic from "../diagnostic"
@@ -13,17 +12,20 @@ import * as Steering from "../steering"
 import * as ToolUnit from "../tool/unit"
 import * as Checkpoint from "../checkpoint"
 import * as Usage from "../usage"
-import { type Card, type Node, type Projector } from "../model"
-import { type AuthorizationState, type ModelCallState, type ProjectorCore } from "../persistence"
-import { boundedInsert, subagentCardStatus } from "./nodes"
+import type { Card, Node, Projector } from "../model"
+import type { AuthorizationState, ProjectorCore } from "../persistence"
 import * as ProjectorRecovery from "./projector-recovery"
 import type { CheckpointInstrumentation } from "./projector-recovery"
-import { optionalString, record, string } from "../values"
 import { projectorNames, textLimit } from "../values"
+import type { ProjectorEventContext, ProjectorEventHandler } from "./projector-event-context"
+import { RunLifecycleEvents } from "./projector-run-events"
+import { ToolCellSubagentEvents } from "./projector-tool-events"
+import { ModelUsageCompactionEvents } from "./projector-model-events"
+import { SteeringNoopEvents } from "./projector-steering-events"
+import { ProjectorSnapshot } from "./projector-snapshot"
 
-import { scopedId } from "../decoding"
-import { encoded, providerCostNanoUsd, token } from "../decoding"
-import { Effect, Option, Schema } from "effect"
+import { providerCostNanoUsd, scopedId, token } from "../decoding"
+import { Effect, Option } from "effect"
 import { format } from "prettier"
 
 export type { Projector }
@@ -40,8 +42,7 @@ const make = (
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
   const usage = Usage.makeUsageAccounting(pricing)
-  const { attemptStarts, modelCalls, observeLifecycleAt, activate, deactivate, recordAttempt, settleOpenAttempts } =
-    usage
+  const { deactivate, recordAttempt, settleOpenAttempts } = usage
   const core: ProjectorCore = {
     revision: 0,
     checkpoint: undefined,
@@ -284,318 +285,39 @@ const make = (
     }
   }
 
-  const applyRunEvent = (treeEvent: SemanticTreeEvent) => {
-    const event = treeEvent.event
+  const eventContext: ProjectorEventContext = {
+    core,
+    units,
+    nodes,
+    cardsByInvocation,
+    cardsByChild,
+    formattedCellSources,
+    usage,
+    recovery,
+    semanticResponse,
+    steering,
+    localId,
+    put,
+    remove,
+    unit,
+    settleNode,
+    authorization: { putAuthorization, resolveAuthorization, settleAuthorizations },
+    cells: { openCell, progressCell, completeCell },
+    diagnostics: { notice, error, modelFailureError, executionFailureError },
+    subagents: { cardFor, updateCard, groupCards, bindChild },
+    tools: { toolState, putTool, updateTool },
+  }
+  const eventHandlers: ReadonlyArray<ProjectorEventHandler> = [
+    RunLifecycleEvents.handle,
+    ToolCellSubagentEvents.handle,
+    ModelUsageCompactionEvents.handle,
+    SteeringNoopEvents.handle,
+  ]
+
+  const applyRunEvent = (treeEvent: SemanticTreeEvent): void => {
     const node = nodeFor(treeEvent)
-    switch (event._tag) {
-      case "RunAccepted":
-        observeLifecycleAt(event)
-        if (node.lifecycle === "unknown") node.lifecycle = "accepted"
-        return
-      case "RunAttemptStarted":
-        if (node.attempt !== undefined && event.attempt < node.attempt)
-          throw new TypeError(`TenetKit Run ${node.rawRunId} attempt regressed`)
-        if (node.attempt === event.attempt) {
-          observeLifecycleAt(event)
-          return
-        }
-        node.started = true
-        node.attempt = event.attempt
-        if (node.lifecycle === "active") observeLifecycleAt(event)
-        else activate(node, event)
-        const activeCard = cardsByChild.get(node.rawRunId)
-        if (activeCard !== undefined) updateCard(activeCard, "running")
-        return
-      case "TurnStarted":
-        node.phase += 1
-        return
-      case "ModelResponseCommitted":
-      case "ModelResponseInterrupted":
-        return semanticResponse.apply(node, event)
-      case "ToolExecutionStarted":
-        if (event.call.name === Cell.cellToolName)
-          return openCell(node, event.call.id, string(record(event.call.params).code, ""))
-        if (event.call.name === projectorNames.runChild) {
-          const input = record(event.call.params)
-          cardFor(
-            node,
-            event.call.id,
-            string(input.selection, "Subagent"),
-            optionalString(input.prompt),
-            optionalString(input.label) || undefined,
-          )
-          return remove(toolState(node, event.call.id).key)
-        }
-        if (event.call.name === projectorNames.runChildGroup) {
-          const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
-          if (Option.isSome(params)) groupCards(node, event.call.id, params.value)
-          return remove(toolState(node, event.call.id).key)
-        }
-        return putTool(node, event.call.id, event.call.name, encoded(event.call.params))
-      case "ToolProgress":
-        if (node.cells.has(event.toolCallId)) return progressCell(node, event.toolCallId, event.data)
-        return updateTool(node, event.toolCallId, (tool) => {
-          if (event.message === undefined) return tool
-          return {
-            ...tool,
-            result: `${Schema.is(Schema.String)(tool.result) ? `${tool.result}\n` : ""}${event.message}`,
-          }
-        })
-      case "ToolExecutionCompleted": {
-        if (event.call.name === Cell.cellToolName) {
-          const key = `${treeEvent.runId}\u0000${event.call.id}`
-          const formatted = formattedCellSources.get(key)
-          if (formatted !== undefined) {
-            formattedCellSources.delete(key)
-            openCell(node, event.call.id, formatted)
-          }
-          return completeCell(node, event.call.id, event.result.result, event.result.isFailure)
-        }
-        if (event.call.name === projectorNames.runChild) {
-          const card = cardsByInvocation.get(`${node.rawRunId}\u0000${event.call.id}`)
-          const result = record(event.result.result)
-          if (card !== undefined && optionalString(result._tag) !== "Succeeded")
-            updateCard(
-              card,
-              optionalString(result._tag) === "Cancelled" ? "cancelled" : "failed",
-              optionalString(result.message ?? result.reason),
-            )
-          return
-        }
-        if (event.call.name === projectorNames.runChildGroup) {
-          if (event.result.isFailure) {
-            const result = record(event.result.result)
-            const detail = optionalString(result.message)
-            const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
-            if (Option.isSome(params))
-              for (const card of groupCards(node, event.call.id, params.value))
-                if (card.rawChildRunId === undefined) updateCard(card, "failed", detail)
-          }
-          return
-        }
-        return updateTool(node, event.call.id, (tool) =>
-          completeTool(tool, event.result.result, event.result.isFailure),
-        )
-      }
-      case "ApprovalRequested":
-        putAuthorization(node, event.request.approvalId, event.request)
-        return
-      case "SteeringAccepted":
-        return steering.accept(treeEvent.runId, event)
-      case "SteeringConsumed":
-        return steering.consume(treeEvent.runId, event, node)
-      case "SteeringDiscarded":
-        return steering.discard(treeEvent.runId, event)
-      case "SteeringDrained":
-        if (event.queue === "steering") core.steeringMessages += event.count
-        else core.followUpMessages += event.count
-        return
-      case "TurnCompleted":
-      case "StructuredOutput":
-      case "HandoffRequested":
-      case "HandoffCompleted":
-      case "HandoffRejected":
-        return
-      case "ModelCallStarted": {
-        const key = `${node.rawRunId}\u0000${event.modelCallId}`
-        const rootConversation = node.parentRawRunId === undefined && !node.hidden && event.purpose === "conversation"
-        const existing = modelCalls.get(key)
-        if (existing !== undefined) {
-          if (existing.purpose !== event.purpose)
-            throw new TypeError(`Conflicting TenetKit model call: ${event.modelCallId}`)
-          return
-        }
-        const value: ModelCallState = rootConversation
-          ? { purpose: event.purpose, requestOrdinal: usage.requestOrdinal() + 1 }
-          : { purpose: event.purpose }
-        if (boundedInsert(modelCalls, key, value, Projection.limits.modelCalls, "model calls") && rootConversation)
-          usage.awaitContext(usage.nextRequestOrdinal())
-        return
-      }
-      case "ModelAttemptFirstOutput":
-        return
-      case "ModelCallCompleted": {
-        const key = `${node.rawRunId}\u0000${event.modelCallId}`
-        const call = modelCalls.get(key)
-        if (call?.requestOrdinal === usage.pendingContextOrdinal()) usage.awaitContext(undefined)
-        modelCalls.delete(key)
-        return
-      }
-      case "ModelAttemptStarted": {
-        const key = localId("usage", node.publicId, event.modelAttemptId)
-        boundedInsert(
-          attemptStarts,
-          key,
-          { startedAt: event.startedAt, modelCallId: event.modelCallId, rawRunId: node.rawRunId },
-          Projection.limits.inFlightAttempts,
-          "in-flight attempts",
-        )
-        return
-      }
-      case "ModelAttemptCompleted": {
-        const key = localId("usage", node.publicId, event.modelAttemptId)
-        recordAttempt({
-          key,
-          node,
-          modelCallId: event.modelCallId,
-          inputTotal: token(event.usage.inputTokens.total),
-          inputUncached: token(event.usage.inputTokens.uncached),
-          inputCacheRead: token(event.usage.inputTokens.cacheRead),
-          inputCacheWrite: token(event.usage.inputTokens.cacheWrite),
-          outputTotal: token(event.usage.outputTokens.total),
-          outputText: token(event.usage.outputTokens.text),
-          outputReasoning: token(event.usage.outputTokens.reasoning),
-          costNanoUsd: providerCostNanoUsd(event),
-        })
-        attemptStarts.delete(key)
-        return
-      }
-      case "ModelAttemptFailed": {
-        const key = localId("usage", node.publicId, event.modelAttemptId)
-        recordAttempt({
-          key,
-          node,
-          modelCallId: event.modelCallId,
-          inputTotal: token(event.providerUsage?.inputTokens),
-          outputTotal: token(event.providerUsage?.outputTokens),
-          failedProviderTotal: token(event.providerUsage?.totalTokens),
-          costNanoUsd: providerCostNanoUsd(event),
-        })
-        attemptStarts.delete(key)
-        return
-      }
-      case "ModelRetryScheduled":
-      case "ModelFallbackScheduled":
-        // Retry activity belongs to the single turn-retry status surface; per-attempt
-        // notices would make the transcript itself a retry mechanism.
-        return
-      case "ModelCallFailed": {
-        const key = `${node.rawRunId}\u0000${event.modelCallId}`
-        const call = modelCalls.get(key)
-        if (call?.requestOrdinal === usage.pendingContextOrdinal()) usage.awaitContext(undefined)
-        modelCalls.delete(key)
-        return modelFailureError(node, event.modelCallId, event.category, event.classification)
-      }
-      case "CompactionStarted": {
-        const key = localId("compaction", node.publicId, event.compactionId)
-        put(unit(node, key, { _tag: "Block", block: { _tag: "Compaction", summary: "", status: "running" } }))
-        recovery.compactionChanged(key, true)
-        return
-      }
-      case "CompactionSkipped":
-      case "CompactionApplied": {
-        const key = localId("compaction", node.publicId, event.compactionId)
-        const current = units.get(key)
-        const previous =
-          current?.content._tag === "Block" && current.content.block._tag === "Compaction"
-            ? current.content.block
-            : undefined
-        const block: Extract<Unit["content"], { readonly _tag: "Block" }>["block"] =
-          event._tag === "CompactionApplied"
-            ? {
-                _tag: "Compaction",
-                checkpoint: event.checkpointId,
-                status: "complete",
-                summary: previous?.summary ?? "",
-              }
-            : { _tag: "Compaction", status: "complete", summary: previous?.summary ?? "" }
-        put(unit(node, key, { _tag: "Block", block }))
-        recovery.compactionChanged(key, false)
-        return
-      }
-      case "CompactionFailed": {
-        const key = localId("compaction", node.publicId, event.compactionId)
-        put(unit(node, key, { _tag: "Block", block: { _tag: "Compaction", summary: "", status: "failed" } }))
-        recovery.compactionChanged(key, false)
-        return
-      }
-      case "RunWaiting":
-        deactivate(node, event, "waiting")
-        node.status = "waiting"
-        if (node.parentRawRunId === undefined) core.rootStatus = "waiting"
-        if (event.wait.reason._tag === "Approval") putAuthorization(node, event.wait.waitId, event.wait.reason.request)
-        return
-      case "RunResumed":
-        if (node.started) activate(node, event)
-        else {
-          observeLifecycleAt(event)
-          node.lifecycle = "unknown"
-        }
-        node.status = "running"
-        if (node.parentRawRunId === undefined) core.rootStatus = "running"
-        if (event.resolution._tag === "Approved") resolveAuthorization(node, event.waitId, "approved")
-        if (event.resolution._tag === "Denied") resolveAuthorization(node, event.waitId, "denied")
-        return
-      case "OperationUnknown":
-        if (core.rootStatus === "cancelling") return
-        // A replayPolicy:"never" operation interrupted mid-flight parks the Run in needs-resolution
-        // until it is resolved. The Run is waiting, not working, so stop accruing active time.
-        if (node.lifecycle === "active") deactivate(node, event, "waiting")
-        node.status = "waiting"
-        if (node.parentRawRunId === undefined) core.rootStatus = "waiting"
-        return error(
-          node,
-          "operation",
-          "Execution needs resolution",
-          `Unknown operation ${event.operationId} in Run ${node.rawRunId}. Inspect it with rika thread recovery inspect <thread-id> ${node.rawRunId}.`,
-          event.operationId,
-        )
-      case "ChildLinked":
-        return bindChild(node, event.childRunId, event)
-      case "ChildSettled": {
-        const card = cardsByChild.get(event.childRunId)
-        if (card !== undefined) {
-          const child = nodes.get(event.childRunId)
-          if (child !== undefined) updateCard(card, subagentCardStatus(child.status))
-        }
-        return
-      }
-      case "FanOutAdmitted":
-        return
-      case "FanOutJoined":
-        return
-      case "RunCompleted":
-        deactivate(node, event, "terminal")
-        settleOpenAttempts(node)
-        if (node.hidden) {
-          node.status = "completed"
-          if ("text" in event.result) core.title = { text: event.result.text }
-          return
-        }
-        return settleNode(node, "completed", event)
-      case "RunFailed":
-        deactivate(node, event, "terminal")
-        settleOpenAttempts(node)
-        settleAuthorizations(node, "expired")
-        if (node.hidden) {
-          node.status = "failed"
-          return
-        }
-        const failure: Parameters<typeof executionFailureError>[2] =
-          event.error.message.length === 0 ? { status: "failed" } : { reason: event.error.message, status: "failed" }
-        executionFailureError(node, event.error.message, failure)
-        return settleNode(node, "failed", event, event.error.message)
-      case "RunCancellationRequested": {
-        const card = cardsByChild.get(node.rawRunId)
-        if (card !== undefined) updateCard(card, "cancelling")
-        if (node.parentRawRunId === undefined) core.rootStatus = "cancelling"
-        return
-      }
-      case "RunCancelled":
-        deactivate(node, event, "terminal")
-        settleOpenAttempts(node)
-        settleAuthorizations(node, "cancelled")
-        if (node.hidden) {
-          node.status = "cancelled"
-          return
-        }
-        return settleNode(node, "cancelled", event, event.reason)
-      case "ProgramLog":
-        if (event.level === "debug" || event.level === "info") return
-        return event.level === "error"
-          ? error(node, "program-log", event.operation, event.message, event.eventId)
-          : notice(node, "program-log", event.operation, event.message, event.eventId)
-    }
+    if (eventHandlers.some((handler) => handler(eventContext, treeEvent, node))) return
+    throw new TypeError(`Unsupported TenetKit Run event: ${treeEvent.event._tag}`)
   }
 
   const { serialize, restore } = Checkpoint.makeProjectorCheckpointCodec({
@@ -743,29 +465,7 @@ const make = (
   }
 
   return {
-    snapshot: () => {
-      const materialized = [...units.values()].toSorted((left, right) =>
-        UnitOrder.compareUnitOrder(left.order, right.order),
-      )
-      const snapshot: Projection.Snapshot =
-        core.checkpoint === undefined
-          ? {
-              _tag: "ProjectionSnapshot",
-              revision: core.revision,
-              units: materialized.slice(-Projection.limits.snapshotUnits),
-              hasOlder: core.historyOmitted || materialized.length > Projection.limits.snapshotUnits,
-              state: projectionState(),
-            }
-          : {
-              _tag: "ProjectionSnapshot",
-              checkpoint: core.checkpoint,
-              hasOlder: core.historyOmitted || materialized.length > Projection.limits.snapshotUnits,
-              revision: core.revision,
-              state: projectionState(),
-              units: materialized.slice(-Projection.limits.snapshotUnits),
-            }
-      return snapshot
-    },
+    snapshot: () => ProjectorSnapshot.snapshot(units, core, projectionState),
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
     formatCellSource: Effect.fn("TreeProjector.formatCellSource")(function* (

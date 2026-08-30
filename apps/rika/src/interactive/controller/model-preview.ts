@@ -61,20 +61,33 @@ const appendChanges = (
 ):
   | Pick<RunOverlay, "reasoning" | "text" | "reasoningLength" | "textLength" | "reasoningBytes" | "textBytes">
   | undefined => {
+  let nextReasoning = reasoning
+  let nextText = text
+  let nextReasoningLength = reasoningLength
+  let nextTextLength = textLength
+  let nextReasoningBytes = reasoningBytes
+  let nextTextBytes = textBytes
   for (const change of changes) {
-    const offset = change.channel === "reasoning" ? reasoningLength : textLength
+    const offset = change.channel === "reasoning" ? nextReasoningLength : nextTextLength
     if (change.offset !== offset) return undefined
     if (change.channel === "reasoning") {
-      reasoningBytes += appendedUtf8Bytes(reasoning, change.delta)
-      reasoning += change.delta
-      reasoningLength += change.delta.length
+      nextReasoningBytes += appendedUtf8Bytes(nextReasoning, change.delta)
+      nextReasoning += change.delta
+      nextReasoningLength += change.delta.length
     } else {
-      textBytes += appendedUtf8Bytes(text, change.delta)
-      text += change.delta
-      textLength += change.delta.length
+      nextTextBytes += appendedUtf8Bytes(nextText, change.delta)
+      nextText += change.delta
+      nextTextLength += change.delta.length
     }
   }
-  return { reasoning, text, reasoningLength, textLength, reasoningBytes, textBytes }
+  return {
+    reasoning: nextReasoning,
+    text: nextText,
+    reasoningLength: nextReasoningLength,
+    textLength: nextTextLength,
+    reasoningBytes: nextReasoningBytes,
+    textBytes: nextTextBytes,
+  }
 }
 
 const cleared = {
@@ -94,74 +107,89 @@ const retire = (current: RunOverlay): ReadonlyArray<string> =>
         retiredIdentityCapacity,
       )
 
+const clearRun = (
+  current: RunOverlay | undefined,
+  incoming: Extract<ExecutionGateway.ModelPreviewEvent, { readonly _tag: "ModelPreviewCleared" }>,
+): RunOverlay | undefined => {
+  if (incoming.generation === 0) {
+    if (
+      current === undefined ||
+      current.preview === undefined ||
+      current.preview.attemptFence > incoming.attemptFence ||
+      current.incomplete
+    )
+      return current
+    return { ...current, ...cleared, incomplete: true }
+  }
+  const clearFence = Math.max(current?.clearFence ?? Number.NEGATIVE_INFINITY, incoming.attemptFence)
+  if (current === undefined)
+    return {
+      preview: undefined,
+      identity: undefined,
+      ...cleared,
+      sequence: -1,
+      incomplete: true,
+      retiredIdentities: [],
+      clearFence,
+    }
+  const invalidatesCurrent = current.preview !== undefined && current.preview.attemptFence <= incoming.attemptFence
+  if (!invalidatesCurrent) return clearFence === current.clearFence ? current : { ...current, clearFence }
+  if (current.incomplete && clearFence === current.clearFence) return current
+  return {
+    ...current,
+    ...cleared,
+    incomplete: true,
+    clearFence,
+  }
+}
+
+const initializeRun = (
+  current: RunOverlay | undefined,
+  preview: ExecutionGateway.ModelPreviewFrame,
+  nextIdentity: string,
+): RunOverlay => {
+  const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
+  return {
+    preview,
+    identity: nextIdentity,
+    ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
+    sequence: preview.sequence,
+    incomplete: preview.sequence !== 0 || appended === undefined,
+    retiredIdentities: current?.retiredIdentities ?? [],
+    clearFence: current?.clearFence,
+  }
+}
+
+const appendFrame = (current: RunOverlay, preview: ExecutionGateway.ModelPreviewFrame): RunOverlay => {
+  if (preview.sequence !== current.sequence + 1)
+    return { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
+  const appended = appendChanges(
+    current.reasoning,
+    current.text,
+    current.reasoningLength,
+    current.textLength,
+    current.reasoningBytes,
+    current.textBytes,
+    preview.changes,
+  )
+  return appended === undefined
+    ? { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
+    : { ...current, preview, ...appended, sequence: preview.sequence }
+}
+
 const replaceRun = (
   current: RunOverlay | undefined,
   incoming: ExecutionGateway.ModelPreviewEvent,
 ): RunOverlay | undefined => {
-  if (incoming._tag === "ModelPreviewCleared") {
-    if (incoming.generation === 0) {
-      if (
-        current === undefined ||
-        current.preview === undefined ||
-        current.preview.attemptFence > incoming.attemptFence ||
-        current.incomplete
-      )
-        return current
-      return { ...current, ...cleared, incomplete: true }
-    }
-    const clearFence = Math.max(current?.clearFence ?? Number.NEGATIVE_INFINITY, incoming.attemptFence)
-    if (current === undefined)
-      return {
-        preview: undefined,
-        identity: undefined,
-        ...cleared,
-        sequence: -1,
-        incomplete: true,
-        retiredIdentities: [],
-        clearFence,
-      }
-    const invalidatesCurrent = current.preview !== undefined && current.preview.attemptFence <= incoming.attemptFence
-    if (!invalidatesCurrent) return clearFence === current.clearFence ? current : { ...current, clearFence }
-    if (current.incomplete && clearFence === current.clearFence) return current
-    return {
-      ...current,
-      ...cleared,
-      incomplete: true,
-      clearFence,
-    }
-  }
+  if (incoming._tag === "ModelPreviewCleared") return clearRun(current, incoming)
   const preview = incoming
   const nextIdentity = identity(preview)
   if ((current?.clearFence ?? Number.NEGATIVE_INFINITY) >= preview.attemptFence) return current
-  if (current === undefined || current.preview === undefined) {
-    const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
-    return {
-      preview,
-      identity: nextIdentity,
-      ...(preview.sequence === 0 && appended !== undefined ? appended : cleared),
-      sequence: preview.sequence,
-      incomplete: preview.sequence !== 0 || appended === undefined,
-      retiredIdentities: current?.retiredIdentities ?? [],
-      clearFence: current?.clearFence,
-    }
-  }
+  if (current === undefined || current.preview === undefined) return initializeRun(current, preview, nextIdentity)
   if (current.retiredIdentities.includes(nextIdentity)) return current
   if (current.identity === nextIdentity) {
     if (preview.sequence <= current.sequence || current.incomplete) return current
-    if (preview.sequence !== current.sequence + 1)
-      return { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
-    const appended = appendChanges(
-      current.reasoning,
-      current.text,
-      current.reasoningLength,
-      current.textLength,
-      current.reasoningBytes,
-      current.textBytes,
-      preview.changes,
-    )
-    return appended === undefined
-      ? { ...current, preview, ...cleared, sequence: preview.sequence, incomplete: true }
-      : { ...current, preview, ...appended, sequence: preview.sequence }
+    return appendFrame(current, preview)
   }
   if (preview.attemptFence < current.preview.attemptFence) return current
   const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)

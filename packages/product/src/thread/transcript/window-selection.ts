@@ -68,27 +68,9 @@ export const selectTranscriptWindow = <A>(input: {
   const maximum = Math.max(0, Math.floor(input.maximum))
   const units = input.values.map(input.unit)
   const parents = parentIndexes(units)
-  const selected = new Set<number>()
-  for (const [index, value] of input.values.entries()) {
-    if (input.retain?.(value) !== true) continue
-    const lineage = missingLineage(index, units, parents, selected)
-    if (lineage !== undefined) for (const ancestor of lineage) selected.add(ancestor)
-  }
+  const selected = retainedIndexes(input.values, input.retain, units, parents)
   if (maximum > 0) {
-    let budget = maximum
-    const preferred =
-      input.focus === "newest"
-        ? Array.from({ length: units.length }, (_, index) => units.length - index - 1)
-        : Array.from({ length: units.length }, (_, index) => index)
-    const considered = new Set<number>()
-    for (const index of preferred) {
-      if (considered.has(index) || selected.has(index)) continue
-      considered.add(index)
-      const lineage = missingLineage(index, units, parents, selected)
-      if (lineage === undefined || lineage.length > budget) continue
-      for (const ancestor of lineage) selected.add(ancestor)
-      budget -= lineage.length
-    }
+    selectWithinBudget(units, parents, selected, input.focus, maximum)
   }
   const values = input.values.filter((_, index) => selected.has(index))
   let contiguousFirst = units.length
@@ -117,5 +99,40 @@ export const selectTranscriptWindow = <A>(input: {
     truncated: selected.size < units.length,
     contiguousStart,
     contiguousEnd,
+  }
+}
+
+const retainedIndexes = <A>(
+  values: ReadonlyArray<A>,
+  retain: ((value: A) => boolean) | undefined,
+  units: ReadonlyArray<Unit>,
+  parents: Map<string, number>,
+) => {
+  const selected = new Set<number>()
+  for (const [index, value] of values.entries()) {
+    if (retain?.(value) !== true) continue
+    const lineage = missingLineage(index, units, parents, selected)
+    if (lineage !== undefined) for (const ancestor of lineage) selected.add(ancestor)
+  }
+  return selected
+}
+
+const selectWithinBudget = (
+  units: ReadonlyArray<Unit>,
+  parents: Map<string, number>,
+  selected: Set<number>,
+  focus: TranscriptWindowFocus,
+  maximum: number,
+) => {
+  let budget = maximum
+  const preferred = Array.from({ length: units.length }, (_, index) =>
+    focus === "newest" ? units.length - index - 1 : index,
+  )
+  for (const index of preferred) {
+    if (selected.has(index)) continue
+    const lineage = missingLineage(index, units, parents, selected)
+    if (lineage === undefined || lineage.length > budget) continue
+    for (const ancestor of lineage) selected.add(ancestor)
+    budget -= lineage.length
   }
 }

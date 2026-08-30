@@ -12,13 +12,20 @@ import * as TurnQueuePromotion from "../../../thread/repository/turn-queue"
 import type * as RootTurnOwner from "../../../thread/queue/root-owner"
 import { OperationError, operationError, operationFailureDetail } from "../../error"
 import { Context, Effect, Ref, Clock, Duration } from "effect"
-import { type QueueItem, type InteractiveEvent } from "../session-event"
-import { type InteractiveRuntimeContext, type PreparedTurn } from "../session"
+import type { QueueItem, InteractiveEvent } from "../session-event"
+import type { InteractiveRuntimeContext, PreparedTurn } from "../session"
 import { isReviewRouteMode, reviewIntent } from "../../review/policy"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurnsError } from "../../../thread/queue/pending-policy"
 import { turnFailure } from "../../failure-message"
 import * as OperationFailure from "../../failure"
 import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../../retry-policy"
+
+const hasDurableExecution = (turn: Turn.Turn | undefined): boolean =>
+  turn?._tag === "AgentExecution" && turn.executionLink !== undefined
+const shouldAutomaticallyRetry = (retryable: boolean): boolean =>
+  shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt: 1 })
+const isSettled = (status: ExecutionStatus.Status): boolean =>
+  status !== "running" && status !== "waiting" && status !== "cancelling"
 
 export const queueItem = (turn: Turn.AgentExecutionTurn): QueueItem => {
   const attachments = turn.promptParts
@@ -419,7 +426,7 @@ export const promotePendingTurns = (input: {
         )
         if (outcome._tag === "Failure") {
           const current = yield* input.turns.get(promoted.id)
-          if (current?._tag === "AgentExecution" && current.executionLink !== undefined) return false
+          if (hasDurableExecution(current)) return false
           if (current?.status === "running")
             yield* input.setTurnStatus(promoted.id, "failed", yield* Clock.currentTimeMillis)
           else {
@@ -444,7 +451,7 @@ export const promotePendingTurns = (input: {
         if (result.status === "failed") {
           const failure = turnFailure(result.units)
           const retryable = failure?.retryable ?? false
-          if (shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt: 1 })) {
+          if (shouldAutomaticallyRetry(retryable)) {
             const next = yield* retryTurn({
               turn: promoted,
               attempt: 1,
@@ -454,7 +461,7 @@ export const promotePendingTurns = (input: {
             if (next !== undefined) yield* runRetryAttempt(next, 2, promoted.id)
           }
         }
-        return result.status !== "running" && result.status !== "waiting" && result.status !== "cancelling"
+        return isSettled(result.status)
       })
     while (true) {
       if (staleRefused || (yield* input.turns.readQueue(input.thread.id)).queuedCount === 0) break

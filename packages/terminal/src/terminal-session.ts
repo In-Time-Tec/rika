@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Match } from "effect"
 import * as Composer from "./state/composer/model"
 import * as ComposerPaste from "./state/composer/paste"
 import type { Mode } from "./state/model"
@@ -69,50 +69,65 @@ export const expandPastedText = ComposerPaste.expandPastedText
 export const execute: {
   (action: Action): (adapter: Adapter) => boolean
   (adapter: Adapter, action: Action): boolean
-} = Function.dual(2, (adapter: Adapter, action: Action): boolean => {
-  switch (action._tag) {
-    case "Submit":
-      adapter.submit(action.prompt, action.parts, action.mode, action.tuning, action.submissionId)
-      return true
-    case "EditQueued":
-      adapter.editQueued?.(action.id, action.prompt)
-      return adapter.editQueued !== undefined
-    case "Dequeue":
-      adapter.dequeue?.(action.id)
-      return adapter.dequeue !== undefined
-    case "SteerQueued":
-      adapter.steerQueued?.(action.id, action.prompt, action.requestId)
-      return adapter.steerQueued !== undefined
-    case "Steer":
-      adapter.steer?.(action.prompt, action.requestId, action.turnId)
-      return adapter.steer !== undefined
-    case "ApproveAuthorization":
-      adapter.approveAuthorization?.(action.turnId, action.authorizationId)
-      return adapter.approveAuthorization !== undefined
-    case "DenyAuthorization":
-      adapter.denyAuthorization?.(action.turnId, action.authorizationId)
-      return adapter.denyAuthorization !== undefined
-    case "InterruptAndSend":
-      adapter.interruptAndSend?.(action.prompt)
-      return adapter.interruptAndSend !== undefined
-    case "Cancel": {
-      const target: CancelTarget = {}
-      if (action.submissionId !== undefined) target.submissionId = action.submissionId
-      if (action.threadId !== undefined) target.threadId = action.threadId
-      adapter.cancel?.(target)
-      return adapter.cancel !== undefined
-    }
-    case "Quit":
-      adapter.quit()
-      return true
-    case "NewThread":
-      adapter.newThread?.()
-      return adapter.newThread !== undefined
-    case "NewOrbThread":
-      adapter.newOrbThread?.()
-      return adapter.newOrbThread !== undefined
-    case "SelectThread":
-      adapter.selectThread?.(action.id)
-      return adapter.selectThread !== undefined
-  }
-})
+} = Function.dual(2, (adapter: Adapter, input: Action): boolean =>
+  Match.value(input).pipe(
+    Match.tags({
+      Submit: (action) => {
+        adapter.submit(action.prompt, action.parts, action.mode, action.tuning, action.submissionId)
+        return true
+      },
+      EditQueued: (action) => {
+        adapter.editQueued?.(action.id, action.prompt)
+        return adapter.editQueued !== undefined
+      },
+      Dequeue: (action) => {
+        adapter.dequeue?.(action.id)
+        return adapter.dequeue !== undefined
+      },
+      SteerQueued: (action) => {
+        adapter.steerQueued?.(action.id, action.prompt, action.requestId)
+        return adapter.steerQueued !== undefined
+      },
+      Steer: (action) => {
+        adapter.steer?.(action.prompt, action.requestId, action.turnId)
+        return adapter.steer !== undefined
+      },
+      ApproveAuthorization: (action) => {
+        adapter.approveAuthorization?.(action.turnId, action.authorizationId)
+        return adapter.approveAuthorization !== undefined
+      },
+      DenyAuthorization: (action) => {
+        adapter.denyAuthorization?.(action.turnId, action.authorizationId)
+        return adapter.denyAuthorization !== undefined
+      },
+      InterruptAndSend: (action) => {
+        adapter.interruptAndSend?.(action.prompt)
+        return adapter.interruptAndSend !== undefined
+      },
+      Cancel: (action) => {
+        const target: CancelTarget = {}
+        if (action.submissionId !== undefined) target.submissionId = action.submissionId
+        if (action.threadId !== undefined) target.threadId = action.threadId
+        adapter.cancel?.(target)
+        return adapter.cancel !== undefined
+      },
+      Quit: () => {
+        adapter.quit()
+        return true
+      },
+      NewThread: () => {
+        adapter.newThread?.()
+        return adapter.newThread !== undefined
+      },
+      NewOrbThread: () => {
+        adapter.newOrbThread?.()
+        return adapter.newOrbThread !== undefined
+      },
+      SelectThread: (action) => {
+        adapter.selectThread?.(action.id)
+        return adapter.selectThread !== undefined
+      },
+    }),
+    Match.exhaustive,
+  ),
+)

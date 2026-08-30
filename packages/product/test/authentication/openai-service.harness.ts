@@ -1,9 +1,10 @@
 import { Effect, Function, Layer, Option, Semaphore } from "effect"
+import { CredentialDisk } from "@rika/product/openai-auth-contract"
 import { deterministicCrypto } from "./openai-flow.fixture"
 import { Host, Http, Presenter, Store } from "./openai-service.fixture"
 import { layer } from "./openai-service.fake"
 
-type Disk = import("../../src/authentication/openai-contract").CredentialDisk.Type
+type Disk = typeof CredentialDisk.Type
 
 export const memoryStore = (initial: Option.Option<Disk> = Option.none()) => {
   let value = initial

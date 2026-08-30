@@ -30,44 +30,70 @@ export interface ResolvedModelRoute {
 const own = <A>(record: Readonly<Record<string, A>>, key: string): A | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined
 
+const requireValue = <A>(value: A | undefined, owner: string, message: string): A => {
+  if (value === undefined) throw ModelRouteError.make({ mode: owner, message })
+  return value
+}
+
+const presetFor = (connection: ModelRoute.ProviderConnection) =>
+  connection.protocol === "anthropic" || connection.protocol === "amazon-bedrock" ? presets.claude : presets.openai
+
+const routeVariants = (
+  alias: ModelRoute.ModelAlias | undefined,
+  route: ModelRoute.RoleRoute,
+  connection: ModelRoute.ProviderConnection,
+) =>
+  alias?.variants[route.effort] ?? {
+    normal: { options: {} },
+    fast: connection.protocol === "openai-responses" ? { options: { service_tier: "priority" } } : undefined,
+  }
+
+const routeAlias = (settings: ConfigurationSettings, route: ModelRoute.RoleRoute, owner: string) => {
+  if (!("alias" in route)) return {}
+  return {
+    aliasName: route.alias,
+    alias: requireValue(
+      own(settings.models, route.alias),
+      owner,
+      `${owner} references missing model alias ${route.alias}`,
+    ),
+  }
+}
+
+const selectedVariant = (
+  alias: ModelRoute.ModelAlias | undefined,
+  route: ModelRoute.RoleRoute,
+  connection: ModelRoute.ProviderConnection,
+  owner: string,
+) => {
+  const variants = routeVariants(alias, route, connection)
+  const variant = route.fast === true ? (variants.fast ?? variants.normal) : variants.normal
+  return {
+    variant: requireValue(variant, owner, `${owner} requests unavailable ${route.effort} variant`),
+    fast: route.fast === true && variants.fast !== undefined,
+  }
+}
+
 const resolveRoute = (
   settings: ConfigurationSettings,
   route: ModelRoute.RoleRoute,
   owner: string,
 ): ResolvedModelRoute => {
-  const aliasName = "alias" in route ? route.alias : undefined
-  const alias = aliasName === undefined ? undefined : own(settings.models, aliasName)
-  if (aliasName !== undefined && alias === undefined)
-    throw ModelRouteError.make({ mode: owner, message: `${owner} references missing model alias ${aliasName}` })
-  const providerId = alias?.provider ?? ("provider" in route ? route.provider : undefined)
-  if (providerId === undefined) throw ModelRouteError.make({ mode: owner, message: `${owner} has no provider` })
-  const providerConnection = settings.providers[providerId]
-  if (providerConnection === undefined)
-    throw ModelRouteError.make({
-      mode: owner,
-      message: `${owner} references missing provider ${providerId}`,
-    })
-  const preset =
-    providerConnection.protocol === "anthropic" || providerConnection.protocol === "amazon-bedrock"
-      ? presets.claude
-      : presets.openai
+  const { aliasName, alias } = routeAlias(settings, route, owner)
+  const providerId = requireValue(
+    alias?.provider ?? ("provider" in route ? route.provider : undefined),
+    owner,
+    `${owner} has no provider`,
+  )
+  const providerConnection = requireValue(
+    settings.providers[providerId],
+    owner,
+    `${owner} references missing provider ${providerId}`,
+  )
+  const preset = presetFor(providerConnection)
   const candidates = alias?.candidates ?? ("model" in route ? [route.model] : [])
-  const model = candidates[0]
-  if (model === undefined)
-    throw ModelRouteError.make({
-      mode: owner,
-      message: `${owner} has no provider candidates`,
-    })
-  const variants = alias?.variants[route.effort] ?? {
-    normal: { options: {} },
-    fast: providerConnection.protocol === "openai-responses" ? { options: { service_tier: "priority" } } : undefined,
-  }
-  const variant = route.fast === true ? (variants?.fast ?? variants?.normal) : variants?.normal
-  if (variant === undefined)
-    throw ModelRouteError.make({
-      mode: owner,
-      message: `${owner} requests unavailable ${route.effort} variant`,
-    })
+  const model = requireValue(candidates[0], owner, `${owner} has no provider candidates`)
+  const { variant, fast } = selectedVariant(alias, route, providerConnection, owner)
   const limits = alias?.limits ?? preset.limits
   const contextWindow =
     ("contextWindow" in limits ? limits.contextWindow : undefined) ?? limits.maxInputTokens + limits.maxOutputTokens
@@ -75,7 +101,7 @@ const resolveRoute = (
     selection: aliasName ?? model,
     displayName: alias?.displayName ?? model,
     effort: route.effort,
-    fast: route.fast === true && variants?.fast !== undefined,
+    fast,
     providerId,
     providerConnection,
     candidates,

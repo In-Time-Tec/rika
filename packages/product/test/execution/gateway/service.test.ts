@@ -25,7 +25,11 @@ it.effect("passes one opaque execution link through all gateway operations", () 
   Effect.gen(function* () {
     const observed = new Array<unknown>()
     const gateway = ExecutionGateway.Service.of({
-      startTurn: (input) => Effect.sync(() => (observed.push(["start", input.turnId]), link)),
+      startTurn: (input) =>
+        Effect.sync(() => {
+          observed.push(["start", input.turnId])
+          return link
+        }),
       watchTurn: (received, cursor) => {
         observed.push(["watch", received, cursor])
         return Stream.empty
@@ -39,7 +43,10 @@ it.effect("passes one opaque execution link through all gateway operations", () 
       approveTurn: (received, input) => Effect.sync(() => void observed.push(["approve", received, input])),
       denyTurn: (received, input) => Effect.sync(() => void observed.push(["deny", received, input])),
       inspectTurn: (received) =>
-        Effect.sync(() => (observed.push(["inspect", received]), { status: "running", cursor: "opaque-cursor" })),
+        Effect.sync(() => {
+          observed.push(["inspect", received])
+          return { status: "running", cursor: "opaque-cursor" }
+        }),
     })
     const started = yield* gateway.startTurn({
       threadId: "thread-1",

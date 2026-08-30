@@ -22,11 +22,15 @@ import { installClientSigintHandler, run } from "./client/process"
 
 const exitProcess = process.exit
 
+interface RootFiberOwner {
+  fiber: ReturnType<typeof Effect.runFork> | undefined
+}
+
 const startClient = () => {
   let interruptedBySigint = false
-  let rootFiber: ReturnType<typeof Effect.runFork> | undefined
+  const root: RootFiberOwner = { fiber: undefined }
   const removeSigintHandler = installClientSigintHandler({
-    rootFiber: () => rootFiber,
+    rootFiber: () => root.fiber,
     onSignal: () => {
       interruptedBySigint = true
     },
@@ -36,7 +40,8 @@ const startClient = () => {
   const logging = Logging.layer({ dataRoot: `${home}/.config/rika`, role: "client", version }).pipe(
     Layer.provide(BunServices.layer),
   )
-  rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(platform, logging))))
+  const rootFiber = Effect.runFork(run().pipe(provideLayerScoped(Layer.merge(platform, logging))))
+  root.fiber = rootFiber
   if (interruptedBySigint) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
     removeSigintHandler()

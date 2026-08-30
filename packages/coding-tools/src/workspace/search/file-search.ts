@@ -4,9 +4,12 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import { containedRelativePath } from "../../policy/workspace-boundary"
 import { RuntimeFilesystem } from "../../runtime/filesystem"
 
-import type { GlobOptions, SearchOptions, GrepOptions, PathItem, SearchResult } from "./options"
+import type { GlobOptions, SearchOptions, GrepOptions, SearchResult } from "./options"
 import type { GrepMatch, GrepResult } from "./results"
 import { Operation } from "./operation"
+import { Ranking } from "./ranking"
+
+const { fuzzyScore, globExpression, paginatePaths, pathItem } = Ranking
 
 export class WorkspaceIndexError extends Schema.TaggedError<WorkspaceIndexError>()("WorkspaceIndexError", {
   operation: Operation,
@@ -73,40 +76,6 @@ const ignoreArgs = ignoreGlobs.flatMap((pattern) => ["--glob", pattern])
 const missingRipgrep = (error: WorkspaceIndexError): boolean =>
   error.message.startsWith("ripgrep (rg) is not installed or not on PATH:")
 
-const globExpression = (pattern: string): RegExp => {
-  let expression = "^"
-  for (let index = 0; index < pattern.length; index += 1) {
-    const character = pattern[index]!
-    if (character === "*") {
-      if (pattern[index + 1] !== "*") {
-        expression += "[^/]*"
-        continue
-      }
-      index += 1
-      if (pattern[index + 1] === "/") {
-        index += 1
-        expression += "(?:.*/)?"
-      } else expression += ".*"
-      continue
-    }
-    if (character === "?") {
-      expression += "[^/]"
-      continue
-    }
-    if (character === "[") {
-      const closing = pattern.indexOf("]", index + 1)
-      if (closing >= 0) {
-        const content = pattern.slice(index + 1, closing)
-        expression += `[${content.startsWith("!") ? `^${content.slice(1)}` : content}]`
-        index = closing
-        continue
-      }
-    }
-    expression += /[\^$.*+?()[\]{}|]/.test(character) ? `\\${character}` : character
-  }
-  return new RegExp(`${expression}$`)
-}
-
 const fallbackFiles = (
   operation: Operation,
   root: string,
@@ -152,47 +121,6 @@ const fallbackFiles = (
     yield* walk(root)
     return files
   })
-
-const pathItem = (relativePath: string): PathItem => ({
-  relativePath,
-  fileName: relativePath.includes("/") ? relativePath.slice(relativePath.lastIndexOf("/") + 1) : relativePath,
-})
-
-const levenshtein = (left: string, right: string): number => {
-  if (left === right) return 0
-  if (left.length === 0) return right.length
-  if (right.length === 0) return left.length
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
-  const current = Array.from({ length: right.length + 1 }, () => 0)
-  for (let i = 0; i < left.length; i += 1) {
-    current[0] = i + 1
-    for (let j = 0; j < right.length; j += 1) {
-      const cost = left[i] === right[j] ? 0 : 1
-      current[j + 1] = Math.min(current[j]! + 1, previous[j + 1]! + 1, previous[j]! + cost)
-    }
-    for (let j = 0; j <= right.length; j += 1) previous[j] = current[j]!
-  }
-  return previous[right.length]!
-}
-
-const fuzzyScore = (query: string, relativePath: string): number => {
-  const normalizedQuery = query.toLowerCase()
-  const normalizedPath = relativePath.toLowerCase()
-  const fileName = pathItem(normalizedPath).fileName
-  if (normalizedPath === normalizedQuery) return 1_000
-  if (fileName === normalizedQuery) return 950
-  if (normalizedPath.endsWith(normalizedQuery)) return 900
-  if (fileName.includes(normalizedQuery)) return 850 - (fileName.length - normalizedQuery.length)
-  if (normalizedPath.includes(normalizedQuery)) return 700 - (normalizedPath.length - normalizedQuery.length)
-  const pathDistance = levenshtein(normalizedQuery, normalizedPath)
-  const nameDistance = levenshtein(normalizedQuery, fileName)
-  const basenameQuery = pathItem(normalizedQuery).fileName
-  const basenameDistance = levenshtein(basenameQuery, fileName)
-  const distance = Math.min(pathDistance, nameDistance, basenameDistance)
-  const limit = Math.max(basenameQuery.length, fileName.length, 1)
-  if (distance > Math.ceil(limit * 0.5)) return Number.NEGATIVE_INFINITY
-  return 500 - distance * 40 - Math.abs(fileName.length - basenameQuery.length)
-}
 
 const emptySearch = (totalFiles: number): SearchResult => ({
   items: [],
@@ -322,6 +250,46 @@ const filterContained = (
     return kept
   })
 
+interface GrepCollection {
+  readonly items: Array<GrepMatch>
+  filesSearched: number
+  totalMatched: number
+  outputBytes: number
+  keptBytes: number
+}
+
+const compileExpression = (query: string, mode: GrepOptions["mode"]): Effect.Effect<RegExp | undefined, string> =>
+  mode === "regex"
+    ? Effect.try({ try: () => new RegExp(query), catch: (cause) => String(cause) })
+    : Effect.as(Effect.void, undefined)
+
+const collectFileMatches = (
+  collection: GrepCollection,
+  relativePath: string,
+  content: string,
+  query: string,
+  regularExpression: RegExp | undefined,
+  pageSize: number,
+  maximum: number,
+) => {
+  if (content.includes("\0")) return
+  let matchesInFile = 0
+  for (const [lineIndex, rawLine] of content.split("\n").entries()) {
+    const lineContent = rawLine.replace(/\r$/, "")
+    if (!(regularExpression === undefined ? lineContent.includes(query) : regularExpression.test(lineContent))) continue
+    matchesInFile += 1
+    collection.totalMatched += 1
+    const match = { relativePath, lineNumber: lineIndex + 1, lineContent }
+    const renderedBytes = RuntimeFilesystem.byteLength(`${relativePath}:${lineIndex + 1}:${lineContent}\n`)
+    collection.outputBytes += renderedBytes
+    if (collection.items.length < pageSize && collection.keptBytes + renderedBytes <= 40_000) {
+      collection.items.push(match)
+      collection.keptBytes += renderedBytes
+    }
+    if (matchesInFile >= maximum) break
+  }
+}
+
 const fallbackGrep = (
   root: string,
   fileSystem: FileSystem.FileSystem,
@@ -331,17 +299,9 @@ const fallbackGrep = (
 ): Effect.Effect<GrepResult, WorkspaceIndexError> =>
   Effect.gen(function* () {
     const mode = options?.mode ?? "plain"
-    let regularExpression: RegExp | undefined
-    if (mode === "regex") {
-      const compiled = yield* Effect.result(
-        Effect.try({
-          try: () => new RegExp(query),
-          catch: (cause) => String(cause),
-        }),
-      )
-      if (compiled._tag === "Failure") return emptyGrep(0, compiled.failure)
-      regularExpression = compiled.success
-    }
+    const compiled = yield* Effect.result(compileExpression(query, mode))
+    if (compiled._tag === "Failure") return emptyGrep(0, compiled.failure)
+    const regularExpression = compiled.success
     const pageSize = Math.max(1, options?.pageSize ?? 1_000)
     const maxMatchesPerFile = Math.max(1, options?.maxMatchesPerFile ?? 1_000)
     const listed = yield* fallbackFiles("grep", root, fileSystem, path)
@@ -350,38 +310,14 @@ const fallbackGrep = (
       options?.include === undefined || options.include.length === 0
         ? contained
         : contained.filter((relativePath) => globExpression(options.include!).test(relativePath))
-    const items: Array<GrepMatch> = []
-    let filesSearched = 0
-    let totalMatched = 0
-    let outputBytes = 0
-    let keptBytes = 0
+    const collection: GrepCollection = { items: [], filesSearched: 0, totalMatched: 0, outputBytes: 0, keptBytes: 0 }
     const search = Effect.gen(function* () {
       for (const relativePath of included) {
         const content = yield* fileSystem
           .readFileString(path.join(root, relativePath))
           .pipe(Effect.mapError((cause) => indexError("grep", cause)))
-        filesSearched += 1
-        if (content.includes("\0")) continue
-        let matchesInFile = 0
-        const lines = content.split("\n")
-        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-          const lineContent = lines[lineIndex]!.replace(/\r$/, "")
-          const matched =
-            regularExpression === undefined ? lineContent.includes(query) : regularExpression.test(lineContent)
-          if (!matched) continue
-          matchesInFile += 1
-          totalMatched += 1
-          const match = { relativePath, lineNumber: lineIndex + 1, lineContent }
-          const renderedBytes = RuntimeFilesystem.byteLength(
-            `${match.relativePath}:${match.lineNumber}:${match.lineContent}\n`,
-          )
-          outputBytes += renderedBytes
-          if (items.length < pageSize && keptBytes + renderedBytes <= 40_000) {
-            items.push(match)
-            keptBytes += renderedBytes
-          }
-          if (matchesInFile >= maxMatchesPerFile) break
-        }
+        collection.filesSearched += 1
+        collectFileMatches(collection, relativePath, content, query, regularExpression, pageSize, maxMatchesPerFile)
       }
     })
     let deadlineReached = false
@@ -394,30 +330,99 @@ const fallbackGrep = (
       deadlineReached?: boolean
       outputTruncation?: { keptBytes: number; totalBytes: number }
     } = {
-      items,
-      totalMatched,
-      totalFilesSearched: filesSearched,
+      items: collection.items,
+      totalMatched: collection.totalMatched,
+      totalFilesSearched: collection.filesSearched,
       totalFiles: contained.length,
       filteredFileCount: included.length,
       nextCursor: null,
     }
     if (deadlineReached) result.deadlineReached = true
-    if (outputBytes > keptBytes) result.outputTruncation = { keptBytes, totalBytes: outputBytes }
+    if (collection.outputBytes > collection.keptBytes)
+      result.outputTruncation = { keptBytes: collection.keptBytes, totalBytes: collection.outputBytes }
     return result
   })
 
-const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
-  const pageSize = Math.max(1, options?.pageSize ?? 50)
-  const pageIndex = options !== undefined && "pageIndex" in options ? Math.max(0, options.pageIndex ?? 0) : 0
-  const start = pageIndex * pageSize
-  const page = relativePaths.slice(start, start + pageSize)
-  const items = page.map(pathItem)
-  return {
-    items,
-    scores: items.map(() => 1),
-    totalMatched: relativePaths.length,
-    totalFiles: relativePaths.length,
+const grepArgs = (query: string, options?: GrepOptions): ReadonlyArray<string> => {
+  const args = [
+    "--color",
+    "never",
+    "--no-heading",
+    "--line-number",
+    "--max-count",
+    String(Math.max(1, options?.maxMatchesPerFile ?? 1_000)),
+    ...ignoreArgs,
+  ]
+  if (options?.include !== undefined && options.include.length > 0) args.push("--glob", options.include)
+  if ((options?.mode ?? "plain") === "plain") args.push("--fixed-strings")
+  args.push("--", query)
+  return args
+}
+
+const parseGrepMatches = (stdout: string, pageSize: number): ReadonlyArray<GrepMatch> => {
+  const parsed: Array<GrepMatch> = []
+  for (const line of stdout.split("\n")) {
+    const first = line.indexOf(":")
+    const second = first < 0 ? -1 : line.indexOf(":", first + 1)
+    if (line.length === 0 || first < 0 || second < 0) continue
+    const lineNumber = Number(line.slice(first + 1, second))
+    if (!Number.isInteger(lineNumber) || lineNumber < 1) continue
+    parsed.push({ relativePath: line.slice(0, first), lineNumber, lineContent: line.slice(second + 1) })
+    if (parsed.length >= pageSize) break
   }
+  return parsed
+}
+
+const rgResultError = (
+  result: { readonly code: number; readonly stderr: string },
+  mode: GrepOptions["mode"],
+): WorkspaceIndexError | GrepResult | undefined => {
+  if (result.code !== 2 && result.code <= 2) return undefined
+  const message = result.stderr.trim()
+  if (result.code === 2 && mode === "regex" && /regex parse error|error parsing regex|invalid regex/i.test(message))
+    return emptyGrep(0, message || "invalid regular expression")
+  return indexError("grep", message || `rg exited with code ${result.code}`)
+}
+
+const keepContainedMatches = (
+  root: string,
+  path: Path.Path,
+  fileSystem: FileSystem.FileSystem,
+  matches: ReadonlyArray<GrepMatch>,
+) =>
+  Effect.gen(function* () {
+    const items: Array<GrepMatch> = []
+    for (const match of matches) {
+      const contained = yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
+        Effect.mapError((cause) => indexError("grep", cause)),
+      )
+      if (contained) items.push(match)
+    }
+    return items
+  })
+
+const hasCursor = (options?: GrepOptions) => options?.cursor != null && options.cursor.length > 0
+
+const completeGrepOutput = (stdout: string, incomplete: boolean) =>
+  incomplete && !stdout.endsWith("\n") ? stdout.slice(0, stdout.lastIndexOf("\n") + 1) : stdout
+
+const makeGrepResult = (
+  items: ReadonlyArray<GrepMatch>,
+  execution: { readonly stdout: string; readonly stdoutBytes: number; readonly deadlineReached: boolean },
+): GrepResult => {
+  const result: GrepResult = {
+    items,
+    totalMatched: items.length,
+    totalFilesSearched: items.length,
+    totalFiles: items.length,
+    filteredFileCount: items.length,
+    nextCursor: null,
+  }
+  if (execution.deadlineReached) Object.assign(result, { deadlineReached: true })
+  const keptBytes = RuntimeFilesystem.byteLength(execution.stdout)
+  if (execution.stdoutBytes > keptBytes)
+    Object.assign(result, { outputTruncation: { keptBytes, totalBytes: execution.stdoutBytes } })
+  return result
 }
 
 const makeService = (workspace: string) =>
@@ -456,82 +461,25 @@ const makeService = (workspace: string) =>
         }),
       grep: (query, options) =>
         Effect.gen(function* () {
-          if (options?.cursor !== undefined && options.cursor !== null && options.cursor.length > 0) return emptyGrep(0)
+          if (hasCursor(options)) return emptyGrep(0)
           const pageSize = Math.max(1, options?.pageSize ?? 1_000)
-          const maxMatchesPerFile = Math.max(1, options?.maxMatchesPerFile ?? 1_000)
           const mode = options?.mode ?? "plain"
-          const args = [
-            "--color",
-            "never",
-            "--no-heading",
-            "--line-number",
-            "--max-count",
-            String(maxMatchesPerFile),
-            ...ignoreArgs,
-          ]
-          if (options?.include !== undefined && options.include.length > 0) args.push("--glob", options.include)
-          if (mode === "plain") args.push("--fixed-strings")
-          args.push("--", query)
-          const attempted = yield* Effect.result(runRg(spawner, "grep", root, args, options?.deadlineMillis))
+          const attempted = yield* Effect.result(
+            runRg(spawner, "grep", root, grepArgs(query, options), options?.deadlineMillis),
+          )
           if (attempted._tag === "Failure") {
             if (missingRipgrep(attempted.failure)) return yield* fallbackGrep(root, fileSystem, path, query, options)
             return yield* attempted.failure
           }
           const result = attempted.success
-          if (result.code === 2) {
-            const message = result.stderr.trim()
-            if (mode === "regex" && /regex parse error|error parsing regex|invalid regex/i.test(message))
-              return emptyGrep(0, message || "invalid regular expression")
-            return yield* indexError("grep", message || `rg exited with code ${result.code}`)
-          }
-          if (result.code > 2)
-            return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
-          const parsed: Array<GrepMatch> = []
-          const lines = result.stdout.split("\n")
+          const failure = rgResultError(result, mode)
+          if (Schema.is(WorkspaceIndexError)(failure)) return yield* failure
+          if (failure !== undefined) return failure
           const outputTruncated = result.stdoutBytes > RuntimeFilesystem.byteLength(result.stdout)
-          if ((result.deadlineReached || outputTruncated) && !result.stdout.endsWith("\n")) lines.pop()
-          for (const line of lines) {
-            if (line.length === 0) continue
-            const first = line.indexOf(":")
-            const second = first < 0 ? -1 : line.indexOf(":", first + 1)
-            if (first < 0 || second < 0) continue
-            const relativePath = line.slice(0, first)
-            const lineNumber = Number(line.slice(first + 1, second))
-            if (!Number.isInteger(lineNumber) || lineNumber < 1) continue
-            parsed.push({
-              relativePath,
-              lineNumber,
-              lineContent: line.slice(second + 1),
-            })
-            if (parsed.length >= pageSize) break
-          }
-          const items: Array<GrepMatch> = []
-          for (const match of parsed) {
-            if (
-              yield* containedRelativePath(root, match.relativePath, path, fileSystem).pipe(
-                Effect.mapError((cause) => indexError("grep", cause)),
-              )
-            )
-              items.push(match)
-          }
-          const grepResult: GrepResult & {
-            deadlineReached?: boolean
-            outputTruncation?: { keptBytes: number; totalBytes: number }
-          } = {
-            items,
-            totalMatched: items.length,
-            totalFilesSearched: items.length,
-            totalFiles: items.length,
-            filteredFileCount: items.length,
-            nextCursor: null,
-          }
-          if (result.deadlineReached) grepResult.deadlineReached = true
-          if (outputTruncated)
-            grepResult.outputTruncation = {
-              keptBytes: RuntimeFilesystem.byteLength(result.stdout),
-              totalBytes: result.stdoutBytes,
-            }
-          return grepResult
+          const completeOutput = completeGrepOutput(result.stdout, result.deadlineReached || outputTruncated)
+          const parsed = parseGrepMatches(completeOutput, pageSize)
+          const items = yield* keepContainedMatches(root, path, fileSystem, parsed)
+          return makeGrepResult(items, result)
         }),
     }
     return interface_

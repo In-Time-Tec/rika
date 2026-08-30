@@ -193,7 +193,7 @@ export const layerForOwner = (ownerId: string) =>
                 lastEventAt: values.lastEventAt,
                 updatedAt: values.updatedAt,
               },
-              where: sql`excluded.updated_at >= ${rikaThreadTurnActivity.updatedAt}`,
+              setWhere: sql`excluded.updated_at >= ${rikaThreadTurnActivity.updatedAt}`,
             })
             .pipe(Effect.mapError(repositoryError))
         }),

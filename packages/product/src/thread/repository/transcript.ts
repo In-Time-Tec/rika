@@ -1,37 +1,11 @@
-import { Context, Effect, Layer, Schema } from "effect"
-import { ThreadId } from "@rika/product/thread-record"
-import { TurnId } from "@rika/product/turn-record"
-import type { AgentExecutionTurn, Turn } from "@rika/product/turn-record"
-import type { Page, Projection, UsageSummary } from "@rika/product/transcript-page"
-import type { PageOptions, ProjectionRecoveryCandidate } from "./transcript-options"
-import type { Unit } from "@rika/transcript/transcript-unit"
+import { Effect, Layer } from "effect"
+import type { Projection } from "@rika/product/transcript-page"
 import * as ExecutionProjection from "../../execution/projection/contract"
+import { Service } from "./transcript-memory/contract"
 
 export type { ProjectionRecoveryCandidate } from "./transcript-options"
-
-export class RepositoryError extends Schema.TaggedError<RepositoryError>()("TranscriptRepositoryError", {
-  message: Schema.String,
-}) {}
-export type WriteResult = "committed" | "stale"
-
-export interface Interface {
-  readonly get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>
-  readonly listProjectionRecoveryCandidates: (
-    projectionVersion: number,
-  ) => Effect.Effect<ReadonlyArray<ProjectionRecoveryCandidate>, RepositoryError>
-  readonly commitProjection: (
-    turn: AgentExecutionTurn,
-    change: ExecutionProjection.Change,
-    withinTransaction?: Effect.Effect<void, RepositoryError>,
-  ) => Effect.Effect<WriteResult, RepositoryError>
-  readonly replaceUnits: (turn: Turn, units: ReadonlyArray<Unit>) => Effect.Effect<Projection, RepositoryError>
-  readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<Page, RepositoryError>
-  readonly usage: (threadId: ThreadId) => Effect.Effect<UsageSummary, RepositoryError>
-}
-
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread/repository/transcript/Service",
-) {}
+export type { Interface, WriteResult } from "./transcript-memory/contract"
+export { RepositoryError, Service } from "./transcript-memory/contract"
 
 export const productMemoryLayerWithTurns = Layer.succeed(
   Service,

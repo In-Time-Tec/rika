@@ -1,6 +1,6 @@
 import { Effect } from "effect"
-import { configure as configureRoute, type ConfigureOptions } from "../../src/route"
-import { layerMemory, remoteCells, type MemoryOptions } from "../../src/runtime"
+import { configure as configureRoute, type ConfigureOptions } from "../../src/routing/route"
+import { layerMemory, remoteCells, type MemoryOptions } from "../../src/engine/runtime"
 import * as RemoteCells from "../../src/remote-cells"
 
 export const remoteCell = remoteCells({

@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { Turn, TurnId } from "../turn/record"
 
 export const PageCursor = Schema.Struct({ createdAt: Schema.Finite, id: TurnId })
-export interface PageCursor extends Schema.Schema.Type<typeof PageCursor> {}
+export type PageCursor = typeof PageCursor.Type
 
 export interface PageOptions {
   readonly before?: PageCursor | undefined

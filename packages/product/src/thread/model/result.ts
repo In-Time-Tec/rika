@@ -14,7 +14,7 @@ export const ExecutionAttachment = Schema.Struct({
   parentId: Schema.String,
   parentOrderKey: Schema.String,
 })
-export interface ExecutionAttachment extends Schema.Schema.Type<typeof ExecutionAttachment> {}
+export type ExecutionAttachment = typeof ExecutionAttachment.Type
 
 type RecordedShellTurn = Extract<Turn, { readonly _tag: "RecordedShell" }>
 export type RunningRecordedShellTurn = Extract<RecordedShellTurnModel, { readonly status: "running" }>

@@ -5,7 +5,7 @@ import type { Model } from "../model"
 import { idle, loading, ready } from "../loadable"
 import { runningToolsActivity, streamActivity, type Activity } from "../activity/model"
 import { filteredFiles, filteredThreads, selectedThreadMetadata, renameThread } from "../thread/navigation"
-import { context } from "./model"
+import { composerEdit } from "../composer/edit"
 
 const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
 const ThreadItemSchema = Schema.Struct({
@@ -36,13 +36,10 @@ const decodeTranscriptItem = Schema.decodeUnknownOption(
     }),
   ]),
 )
+type ReplayedEvent = Extract<Message, { readonly _tag: "EventReplayed" }>["event"]
 
-const reduceDataImpl = (
-  model: Model,
-  message: Message,
-  _reduce: (model: Model, message: Message) => Model,
-): Model | undefined => {
-  const { continueShortcutsAfterEdit, insertPaste, insertImage, removeImage, expandPastedTextAttachment } = context
+const reduceComposerData = (model: Model, message: Message): Model | undefined => {
+  const { continueShortcutsAfterEdit, expandPastedTextAttachment, insertImage, insertPaste, removeImage } = composerEdit
   switch (message._tag) {
     case "Pasted": {
       const next = insertPaste(model, message.text)
@@ -54,6 +51,12 @@ const reduceDataImpl = (
       return removeImage(model, message.path)
     case "PastedTextExpanded":
       return expandPastedTextAttachment(model, message.token)
+  }
+  return undefined
+}
+
+const reduceThreadReplacement = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "ThreadsReplaced": {
       const selectedThread = Schema.decodeUnknownOption(ThreadItemSchema)(model.threads[model.threadSidebar.selected])
       const selectedId = Option.getOrUndefined(selectedThread)?.id
@@ -94,6 +97,12 @@ const reduceDataImpl = (
           model.threadSwitcher.open && browserThread?.id !== previewThreadId ? { _tag: "Idle" } : model.threadPreview,
       }
     }
+  }
+  return undefined
+}
+
+const reduceThreadSelection = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "ThreadActivated":
       return {
         ...model,
@@ -110,6 +119,35 @@ const reduceDataImpl = (
           message.title,
         ),
       }
+    case "ThreadSidebarSelectionMoved": {
+      const selected = Math.max(0, Math.min(model.threads.length - 1, model.threadSidebar.selected + message.offset))
+      let scrollTop = model.threadSidebar.scrollTop
+      if (selected < model.threadSidebar.scrollTop) scrollTop = selected
+      else if (selected >= model.threadSidebar.scrollTop + model.height) scrollTop = selected - model.height + 1
+      return { ...model, threadSidebar: { ...model.threadSidebar, selected, scrollTop } }
+    }
+    case "ThreadSidebarSelectionConfirmed": {
+      const index = message.index ?? model.threadSidebar.selected
+      const thread = Schema.decodeUnknownOption(Schema.Struct({ id: Schema.String }))(model.threads[index])
+      const selectedThread = Option.getOrUndefined(thread)
+      return selectedThread === undefined
+        ? model
+        : {
+            ...model,
+            threadSidebar: { ...model.threadSidebar, selected: index },
+            pendingAction:
+              selectedThread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: selectedThread.id },
+          }
+    }
+  }
+  return undefined
+}
+
+const reduceThreadData = (model: Model, message: Message): Model | undefined =>
+  reduceThreadReplacement(model, message) ?? reduceThreadSelection(model, message)
+
+const reduceWorkspaceData = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "FilesRequested":
       return model.filePicker.items._tag === "Ready"
         ? model
@@ -135,105 +173,122 @@ const reduceDataImpl = (
       return { ...model, goal: message.goal }
     case "WorkspaceFilesToggled":
       return { ...model, workspaceFilesOpen: !model.workspaceFilesOpen, changedFilesOpen: false }
-    case "ThreadSidebarSelectionMoved": {
-      const selected = Math.max(0, Math.min(model.threads.length - 1, model.threadSidebar.selected + message.offset))
-      let scrollTop = model.threadSidebar.scrollTop
-      if (selected < model.threadSidebar.scrollTop) scrollTop = selected
-      else if (selected >= model.threadSidebar.scrollTop + model.height) scrollTop = selected - model.height + 1
-      return { ...model, threadSidebar: { ...model.threadSidebar, selected, scrollTop } }
-    }
-    case "ThreadSidebarSelectionConfirmed": {
-      const index = message.index ?? model.threadSidebar.selected
-      const thread = Schema.decodeUnknownOption(Schema.Struct({ id: Schema.String }))(model.threads[index])
-      const selectedThread = Option.getOrUndefined(thread)
-      return selectedThread === undefined
-        ? model
-        : {
-            ...model,
-            threadSidebar: { ...model.threadSidebar, selected: index },
-            pendingAction:
-              selectedThread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: selectedThread.id },
-          }
-    }
-    case "EventReplayed":
-      if (model.seenEventIds.includes(message.event.id)) return model
-      {
-        const incoming = message.event.block
-        const blocks = model.blocks.map((block) => decodeTranscriptBlock(block))
-        const items = [...model.items]
-        const lastItem = Option.getOrUndefined(decodeTranscriptItem(items.at(-1)))
-        const last = lastItem?._tag === "Block" ? blocks[lastItem.index] : undefined
-        if (
-          incoming._tag === "Reasoning" &&
-          last?._tag === "Reasoning" &&
-          lastItem?._tag === "Block" &&
-          lastItem.turnId === message.event.turnId
-        )
-          blocks[lastItem.index] = { ...last, text: last.text + incoming.text }
-        else if (incoming._tag === "ToolResult") {
-          const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
-          if (index >= 0) {
-            const requested = blocks[index]
-            if (requested?._tag !== "ToolCall") return model
-            blocks[index] = {
-              ...requested,
-              result: incoming.output,
-              status: incoming.failed ? "failed" : "complete",
-            }
-          } else {
-            items.push({
-              _tag: "Block",
-              index: blocks.length,
-              id: message.event.id,
-              turnId: message.event.turnId,
-            })
-            blocks.push(incoming)
-          }
-        } else if (incoming._tag === "ToolCall") {
-          const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
-          if (index >= 0) blocks[index] = incoming
-          else {
-            items.push({
-              _tag: "Block",
-              index: blocks.length,
-              id: message.event.id,
-              turnId: message.event.turnId,
-            })
-            blocks.push(incoming)
-          }
-        } else {
-          items.push({
-            _tag: "Block",
-            index: blocks.length,
-            id: message.event.id,
-            turnId: message.event.turnId,
-          })
-          blocks.push(incoming)
-        }
-        const activityForIncomingBlock = (): Activity => {
-          if (incoming._tag === "ToolCall" || incoming._tag === "Cell")
-            return runningToolsActivity({ ...model, blocks, items })
-          if (incoming._tag === "ToolResult") return { _tag: "Waiting" }
-          if (incoming._tag === "Compaction") {
-            return incoming.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
-          }
-          if (incoming._tag === "Reasoning") {
-            return streamActivity(model.activity, "Thinking", incoming.text, undefined)
-          }
-          return model.activity ?? { _tag: "Waiting" }
-        }
-        const replayed = {
-          ...model,
-          blocks,
-          items,
-          seenEventIds: [...model.seenEventIds, message.event.id],
-          eventCursor: message.event.cursor,
-        }
-        return model.busy ? { ...replayed, activity: activityForIncomingBlock() } : replayed
-      }
   }
   return undefined
 }
+
+const replayedItem = (event: ReplayedEvent, index: number): Model["items"][number] => ({
+  _tag: "Block",
+  index,
+  id: event.id,
+  turnId: event.turnId,
+})
+
+const appendReplayedBlock = (
+  blocks: ReadonlyArray<TranscriptPresentationModel.Block>,
+  items: ReadonlyArray<Model["items"][number]>,
+  event: ReplayedEvent,
+) => ({
+  blocks: [...blocks, event.block],
+  items: [...items, replayedItem(event, blocks.length)],
+})
+
+const replayToolResult = (
+  blocks: ReadonlyArray<TranscriptPresentationModel.Block>,
+  items: ReadonlyArray<Model["items"][number]>,
+  event: ReplayedEvent,
+) => {
+  if (event.block._tag !== "ToolResult") return undefined
+  const incoming = event.block
+  const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
+  if (index < 0) return appendReplayedBlock(blocks, items, event)
+  const requested = blocks[index]
+  if (requested?._tag !== "ToolCall") return undefined
+  const updated = [...blocks]
+  updated[index] = {
+    ...requested,
+    result: incoming.output,
+    status: incoming.failed ? "failed" : "complete",
+  }
+  return { blocks: updated, items }
+}
+
+const replayToolCall = (
+  blocks: ReadonlyArray<TranscriptPresentationModel.Block>,
+  items: ReadonlyArray<Model["items"][number]>,
+  event: ReplayedEvent,
+) => {
+  if (event.block._tag !== "ToolCall") return undefined
+  const incoming = event.block
+  const index = blocks.findIndex((candidate) => candidate._tag === "ToolCall" && candidate.id === incoming.id)
+  if (index < 0) return appendReplayedBlock(blocks, items, event)
+  const updated = [...blocks]
+  updated[index] = incoming
+  return { blocks: updated, items }
+}
+
+const replayTranscriptEvent = (model: Model, event: ReplayedEvent) => {
+  const blocks = model.blocks.map((block) => decodeTranscriptBlock(block))
+  const items = [...model.items]
+  const lastItem = Option.getOrUndefined(decodeTranscriptItem(items.at(-1)))
+  const last = lastItem?._tag === "Block" ? blocks[lastItem.index] : undefined
+  if (
+    event.block._tag === "Reasoning" &&
+    last?._tag === "Reasoning" &&
+    lastItem?._tag === "Block" &&
+    lastItem.turnId === event.turnId
+  ) {
+    blocks[lastItem.index] = { ...last, text: last.text + event.block.text }
+    return { blocks, items }
+  }
+  if (event.block._tag === "ToolResult") return replayToolResult(blocks, items, event)
+  if (event.block._tag === "ToolCall") return replayToolCall(blocks, items, event)
+  return appendReplayedBlock(blocks, items, event)
+}
+
+const replayedActivity = (
+  model: Model,
+  blocks: ReadonlyArray<TranscriptPresentationModel.Block>,
+  items: ReadonlyArray<Model["items"][number]>,
+  incoming: TranscriptPresentationModel.Block,
+): Activity => {
+  if (incoming._tag === "ToolCall" || incoming._tag === "Cell") return runningToolsActivity({ ...model, blocks, items })
+  if (incoming._tag === "ToolResult") return { _tag: "Waiting" }
+  if (incoming._tag === "Compaction")
+    return incoming.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
+  if (incoming._tag === "Reasoning") return streamActivity(model.activity, "Thinking", incoming.text, undefined)
+  return model.activity ?? { _tag: "Waiting" }
+}
+
+const reduceReplayedEvent = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
+    case "EventReplayed": {
+      if (model.seenEventIds.includes(message.event.id)) return model
+      const transcript = replayTranscriptEvent(model, message.event)
+      if (transcript === undefined) return model
+      const replayed = {
+        ...model,
+        ...transcript,
+        seenEventIds: [...model.seenEventIds, message.event.id],
+        eventCursor: message.event.cursor,
+      }
+      return model.busy
+        ? { ...replayed, activity: replayedActivity(model, transcript.blocks, transcript.items, message.event.block) }
+        : replayed
+    }
+  }
+  return undefined
+}
+
+const reduceDataImpl = (
+  model: Model,
+  message: Message,
+  _reduce: (model: Model, message: Message) => Model,
+): Model | undefined =>
+  reduceComposerData(model, message) ??
+  reduceThreadData(model, message) ??
+  reduceWorkspaceData(model, message) ??
+  reduceReplayedEvent(model, message)
 
 export const reduceData: {
   (

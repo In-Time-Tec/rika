@@ -85,7 +85,7 @@ test(
         // the sequence is not.
         // Concurrently admitted children land in whichever order their Runs reach the projector, so
         // the pairing of a card to its own prompt is the property, not the sequence.
-        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).sort()).toEqual([
+        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).toSorted()).toEqual([
           "Oracle:READER_CHILD_PROMPT",
           "Task:WORKER_CHILD_PROMPT",
         ])

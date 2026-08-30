@@ -22,6 +22,74 @@ const cached = (model: Model): string => {
   return `${Math.round((context.inputCacheRead / context.inputTotal) * 100)}%`
 }
 
+type DetailLine = (text?: string, style?: (value: string) => TextChunk) => void
+
+const emptyReason = (model: Model): string | undefined => {
+  if (model.contextUsage?._tag === "NotStarted") return "No usage recorded yet"
+  if (model.contextUsage?._tag === "Unavailable") return "Context usage is not reported by this model"
+  return undefined
+}
+
+const renderMeter = (
+  chunks: Array<TextChunk>,
+  line: DetailLine,
+  model: Model,
+  selectedContext: ContextMeter.Reading | undefined,
+  cells: number,
+): void => {
+  if (selectedContext === undefined) {
+    line(
+      (model.busy
+        ? ContextMeter.loadingMeter(model.animationTick, { cells })
+        : Array(cells).fill(meterGlyphs.track)
+      ).join(""),
+      (value) => fg(modeColor(model.mode))(value),
+    )
+    return
+  }
+  const meter = ContextMeter.meter(selectedContext, { cells })
+  const baseAnimation = {
+    cells,
+    tick: model.contextAnimation.compactTick ?? model.contextAnimation.munchTick,
+    muncher: true,
+    flashTicks: model.contextAnimation.flashTicks,
+  }
+  const animation: ContextMeter.AnimatedMeterOptions =
+    model.contextAnimation.compactFromPercent === undefined
+      ? baseAnimation
+      : { ...baseAnimation, compactFromPercent: model.contextAnimation.compactFromPercent }
+  const glyphs = ContextMeter.animatedGlyphs(selectedContext, animation)
+  if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
+  chunks.push(fg(modeColor(model.mode))(glyphs.join("")), bold(fg(modeColor(model.mode))(` ${meter.percent}%`)))
+}
+
+const renderDetailRows = (
+  line: DetailLine,
+  compact: boolean,
+  width: number,
+  values: { readonly used: string; readonly available: string; readonly usable: string; readonly full: string },
+  model: Model,
+  now: number,
+): void => {
+  if (!compact) line("")
+  line(compact ? `Used       ${values.used}` : `Used        ${values.used}`)
+  line(compact ? `Available  ${values.available}` : `Available   ${values.available}`)
+  if (!compact) line("")
+  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  if (!compact) line("")
+  line(`Usable     ${values.usable}`)
+  line(`Full       ${values.full}`)
+  if (!compact) line("")
+  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
+  if (!compact) line("")
+  line(`Cost       ${cost(model)}`)
+  line(`Cached     ${cached(model)}`)
+  line(`Active     ${time(model, now)}`)
+  if (!compact) line("")
+  const reason = emptyReason(model)
+  if (!compact && reason !== undefined) line(reason, (value) => dim(fg(colors.text)(value)))
+}
+
 const contextDetailsImpl = (model: Model, width: number, height: number, now: number): StyledText => {
   const chunks: Array<TextChunk> = []
   const line = (text = "", style: (value: string) => TextChunk = fg(colors.text)) => {
@@ -34,9 +102,6 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const usable = selectedContext === undefined ? undefined : ContextMeter.usableTokens(selectedContext)
   const placeholder = context?._tag === "Loading" ? "····" : "—"
   const usageUnavailable = context?._tag === "Unavailable"
-  let emptyReason: string | undefined
-  if (context?._tag === "NotStarted") emptyReason = "No usage recorded yet"
-  else if (context?._tag === "Unavailable") emptyReason = "Context usage is not reported by this model"
   const used =
     selectedContext === undefined || usageUnavailable ? placeholder : formatContextTokens(selectedContext.inputTokens)
   const available =
@@ -46,48 +111,10 @@ const contextDetailsImpl = (model: Model, width: number, height: number, now: nu
   const full = selectedContext === undefined ? placeholder : formatContextTokens(selectedContext.contextWindow)
   const usableText = usable === undefined ? placeholder : formatContextTokens(usable)
   const cells = Math.max(4, Math.min(width < 40 ? 12 : 20, width - 5))
-  const meter = selectedContext === undefined ? undefined : ContextMeter.meter(selectedContext, { cells })
 
   if (!compact) line("")
-  if (meter === undefined)
-    line(
-      (model.busy
-        ? ContextMeter.loadingMeter(model.animationTick, { cells })
-        : Array(cells).fill(meterGlyphs.track)
-      ).join(""),
-      (value) => fg(modeColor(model.mode))(value),
-    )
-  else if (selectedContext !== undefined) {
-    const baseAnimation = {
-      cells,
-      tick: model.contextAnimation.compactTick ?? model.contextAnimation.munchTick,
-      muncher: true,
-      flashTicks: model.contextAnimation.flashTicks,
-    }
-    const animation: ContextMeter.AnimatedMeterOptions =
-      model.contextAnimation.compactFromPercent === undefined
-        ? baseAnimation
-        : { ...baseAnimation, compactFromPercent: model.contextAnimation.compactFromPercent }
-    const glyphs = ContextMeter.animatedGlyphs(selectedContext, animation)
-    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
-    chunks.push(fg(modeColor(model.mode))(glyphs.join("")), bold(fg(modeColor(model.mode))(` ${meter.percent}%`)))
-  }
-  if (!compact) line("")
-  line(compact ? `Used       ${used}` : `Used        ${used}`)
-  line(compact ? `Available  ${available}` : `Available   ${available}`)
-  if (!compact) line("")
-  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
-  if (!compact) line("")
-  line(`Usable     ${usableText}`)
-  line(`Full       ${full}`)
-  if (!compact) line("")
-  line(" ".repeat(width), (value) => dim(fg(colors.text)(value)))
-  if (!compact) line("")
-  line(`Cost       ${cost(model)}`)
-  line(`Cached     ${cached(model)}`)
-  line(`Active     ${time(model, now)}`)
-  if (!compact) line("")
-  if (!compact && emptyReason !== undefined) line(emptyReason, (value) => dim(fg(colors.text)(value)))
+  renderMeter(chunks, line, model, selectedContext, cells)
+  renderDetailRows(line, compact, width, { used, available, usable: usableText, full }, model, now)
   return new StyledText(chunks)
 }
 

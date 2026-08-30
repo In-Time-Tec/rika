@@ -145,7 +145,6 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     inventory: [],
   }
   const checkpointInspections: Array<string> = []
-  let layer: Harness["layer"]
   const harness: Harness = {
     provider,
     checkpointInspections,
@@ -158,7 +157,7 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     assignmentReadFailures: 0,
     checkoutRequests: [],
     get layer() {
-      return layer
+      return Layer.mergeAll(controller, assignments, vault)
     },
   }
   const broker = Layer.succeed(
@@ -316,7 +315,6 @@ export const makeHarness = (overrides: Partial<Options> = {}): Harness => {
     controlEgress: ["api.example.test"],
     ...overrides,
   }).pipe(Layer.provide(dependencies), Layer.provide(assignments))
-  layer = Layer.mergeAll(controller, assignments, vault)
   return harness
 }
 

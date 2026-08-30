@@ -1,7 +1,12 @@
+import "./card-lifecycle.fixture"
 import { describe, expect, it } from "@effect/vitest"
 import { Prompt, Response } from "tenetkit"
+import type { Unit } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+
+const subagentCard = (unit: Unit | undefined) =>
+  unit?.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block : undefined
 
 describe("TenetKit subagent card projection", () => {
   it("shows a run_child prompt immediately, nests child output, and treats completion as settlement only", () => {
@@ -21,14 +26,10 @@ describe("TenetKit subagent card projection", () => {
     const cardUnit = requested.upsert.find(
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
     )
-    expect(cardUnit?.content).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({
-        _tag: "SubagentCard",
-        name: "Surgeon",
-        prompt: "Fix the projection defect",
-        status: "queued",
-      }),
+    expect(subagentCard(cardUnit)).toMatchObject({
+      name: "Surgeon",
+      prompt: "Fix the projection defect",
+      status: "queued",
     })
     expect(JSON.stringify(cardUnit)).not.toContain("raw-root-run")
     const linked = projector.apply(
@@ -43,11 +44,10 @@ describe("TenetKit subagent card projection", () => {
       }),
     )
     expect(block(linked, "SubagentCard")).toBeUndefined()
-    expect(
-      projector
-        .snapshot()
-        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")?.content,
-    ).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "queued" }) })
+    const queued = projector
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(subagentCard(queued)?.status).toBe("queued")
     const started = projector.apply(
       treeEvent(
         "raw-child-run",
@@ -55,10 +55,10 @@ describe("TenetKit subagent card projection", () => {
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
     )
-    expect(block(started, "SubagentCard")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ status: "running" }),
-    })
+    const startedCard = block(started, "SubagentCard")
+    expect(
+      startedCard?._tag === "Block" && startedCard.block._tag === "SubagentCard" ? startedCard.block.status : undefined,
+    ).toBe("running")
     projector.apply(
       treeEvent(
         "raw-child-run",
@@ -98,10 +98,12 @@ describe("TenetKit subagent card projection", () => {
     expect(
       completed.upsert.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant"),
     ).toHaveLength(0)
-    expect(block(completed, "SubagentCard")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ status: "complete", summary: "" }),
-    })
+    const completedCard = block(completed, "SubagentCard")
+    expect(
+      completedCard?._tag === "Block" && completedCard.block._tag === "SubagentCard"
+        ? [completedCard.block.status, completedCard.block.summary]
+        : undefined,
+    ).toEqual(["complete", ""])
     const snapshot = projector.snapshot()
     expect(
       snapshot.units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant"),
@@ -168,10 +170,12 @@ describe("TenetKit subagent card projection", () => {
         readiness: "ready",
       }),
     )
-    expect(block(linked, "SubagentCard")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ name: "Review", prompt: "Review correctness", status: "queued" }),
-    })
+    const linkedCard = block(linked, "SubagentCard")
+    expect(
+      linkedCard?._tag === "Block" && linkedCard.block._tag === "SubagentCard"
+        ? [linkedCard.block.name, linkedCard.block.prompt, linkedCard.block.status]
+        : undefined,
+    ).toEqual(["Review", "Review correctness", "queued"])
   })
 
   it("materializes four distinctly labelled group members without exposing group plumbing", () => {
@@ -402,182 +406,5 @@ describe("TenetKit subagent card projection", () => {
         ? direct.content.block.id
         : undefined,
     )
-  })
-
-  it("attributes a child unit to its subagent card when the child streams before ChildLinked", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-early", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      modelResponse("raw-root-run", {
-        type: "tool-call",
-        id: "provider-call-1",
-        name: "run_child",
-        params: { selection: "Surgeon", prompt: "Fix the projection defect" },
-        providerExecuted: false,
-        metadata: {},
-      }),
-    )
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        { _tag: "TurnStarted", turn: 0 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    projector.apply(
-      modelResponse(
-        "raw-child-run",
-        { type: "text", text: "child report", metadata: {} },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const card = projector
-      .snapshot()
-      .units.find((value) => value.content._tag === "Block" && value.content.block._tag === "SubagentCard")
-    const before = projector
-      .snapshot()
-      .units.find((value) => value.content._tag === "Entry" && value.content.text.includes("child report"))
-    expect(before?.parentId).toBeUndefined()
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ChildLinked",
-        childRunId: "raw-child-run",
-        invocationId: "provider-call-1",
-        selection: "Surgeon",
-        prompt: Prompt.make("Fix the projection defect"),
-        childDepth: 1,
-        readiness: "ready",
-      }),
-    )
-    const repaired = projector
-      .snapshot()
-      .units.find((value) => value.content._tag === "Entry" && value.content.text.includes("child report"))
-    const blockId =
-      card?.content._tag === "Block" && "id" in card.content.block ? String(card.content.block.id) : undefined
-    expect(blockId).toBeDefined()
-    expect(repaired?.parentId).toBe(blockId)
-  })
-
-  it("keeps the child-to-card link across a checkpoint taken after the subagent settled", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-resume", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      modelResponse("raw-root-run", {
-        type: "tool-call",
-        id: "provider-call-1",
-        name: "run_child",
-        params: { selection: "Surgeon", prompt: "Fix the projection defect" },
-        providerExecuted: false,
-        metadata: {},
-      }),
-    )
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ChildLinked",
-        childRunId: "raw-child-run",
-        invocationId: "provider-call-1",
-        selection: "Surgeon",
-        prompt: Prompt.make("Fix the projection defect"),
-        childDepth: 1,
-        readiness: "ready",
-      }),
-    )
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        { _tag: "TurnStarted", turn: 0 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const active = projector.snapshot()
-    const resumedActive = TreeProjector.make("turn-resume", "delegate this", active.checkpoint, active.units)
-    expect(resumedActive.previewRunIds()).toEqual(["raw-child-run"])
-    expect(resumedActive.previewParentId("raw-child-run")).toBeDefined()
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        {
-          _tag: "RunCompleted",
-          result: { text: "", turns: 0, session: { sessionId: "raw-child-run:session", leafId: null } },
-        },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const settled = projector.snapshot()
-    const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
-    expect(resumed.previewRunIds()).toEqual([])
-    expect(resumed.previewParentId("raw-child-run")).toBeDefined()
-    resumed.apply(
-      modelResponse(
-        "raw-child-run",
-        { type: "text", text: "late child report", metadata: {} },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const late = resumed
-      .snapshot()
-      .units.find((value) => value.content._tag === "Entry" && value.content.text.includes("late child report"))
-    expect(late?.parentId).toBeDefined()
-  })
-
-  it("cancels descendant cards when the parent run settles cancelled, across resume", () => {
-    resetEventPosition()
-    const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      modelResponse("raw-root-run", {
-        type: "tool-call",
-        id: "provider-call-1",
-        name: "run_child",
-        params: { selection: "Task", prompt: "Inspect the tree" },
-        providerExecuted: false,
-        metadata: {},
-      }),
-    )
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ChildLinked",
-        childRunId: "raw-child-run",
-        invocationId: "provider-call-1",
-        selection: "Task",
-        prompt: Prompt.make("Inspect the tree"),
-        childDepth: 1,
-        readiness: "ready",
-      }),
-    )
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        { _tag: "RunAttemptStarted", attempt: 1 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        { _tag: "TurnStarted", turn: 0 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const running = projector
-      .snapshot()
-      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
-    expect(running?.content).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "running" }) })
-
-    const cancelled = projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
-    expect(block(cancelled, "SubagentCard")).toEqual({
-      _tag: "Block",
-      block: expect.objectContaining({ status: "cancelled" }),
-    })
-
-    const settled = projector.snapshot()
-    const resumed = TreeProjector.make("turn-parent-cancel", "delegate this", settled.checkpoint, settled.units)
-    const restored = resumed
-      .snapshot()
-      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
-    expect(restored?.content).toEqual({ _tag: "Block", block: expect.objectContaining({ status: "cancelled" }) })
   })
 })

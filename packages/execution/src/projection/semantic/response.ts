@@ -1,13 +1,11 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { cellToolName } from "../cell/state"
 import type { SemanticModelResponseEvent } from "./event"
-import type { Node } from "../model"
+import type { Card, Node } from "../model"
 import { encoded } from "../decoding"
-import { optionalString, record, string } from "../values"
-import { projectorNames } from "../values"
+import { optionalString, projectorNames, record, string } from "../values"
 import { Option, Schema } from "effect"
 import { SubagentGroupParams, type SubagentGroupParams as SubagentGroupInput } from "../subagent/card"
-import type { Card } from "../model"
 
 export interface SemanticResponseProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
@@ -44,6 +42,30 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
     )
   }
 
+  const putToolCall = (
+    node: Node,
+    part: Extract<SemanticModelResponseEvent["response"]["content"][number], { type: "tool-call" }>,
+  ) => {
+    if (part.name === cellToolName) return input.openCell(node, part.id, string(record(part.params).code, ""))
+    if (part.name === projectorNames.runChild) {
+      const toolInput = record(part.params)
+      input.cardFor(
+        node,
+        part.id,
+        string(toolInput.selection, "Subagent"),
+        optionalString(toolInput.prompt),
+        optionalString(toolInput.label) || undefined,
+      )
+      return input.removeTool(node, part.id)
+    }
+    if (part.name === projectorNames.runChildGroup) {
+      const params = Schema.decodeUnknownOption(SubagentGroupParams)(part.params)
+      if (Option.isSome(params)) input.groupCards(node, part.id, params.value)
+      return input.removeTool(node, part.id)
+    }
+    input.putTool(node, part.id, part.name, encoded(part.params))
+  }
+
   const apply = (node: Node, event: SemanticModelResponseEvent) => {
     input.beginOrderedResponse()
     try {
@@ -56,22 +78,7 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
             putCompletedText(node, event, contentIndex, "reasoning", part.text)
             break
           case "tool-call":
-            if (part.name === cellToolName) input.openCell(node, part.id, string(record(part.params).code, ""))
-            else if (part.name === projectorNames.runChild) {
-              const toolInput = record(part.params)
-              input.cardFor(
-                node,
-                part.id,
-                string(toolInput.selection, "Subagent"),
-                optionalString(toolInput.prompt),
-                optionalString(toolInput.label) || undefined,
-              )
-              input.removeTool(node, part.id)
-            } else if (part.name === projectorNames.runChildGroup) {
-              const params = Schema.decodeUnknownOption(SubagentGroupParams)(part.params)
-              if (Option.isSome(params)) input.groupCards(node, part.id, params.value)
-              input.removeTool(node, part.id)
-            } else input.putTool(node, part.id, part.name, encoded(part.params))
+            putToolCall(node, part)
             break
           case "file":
             input.notice(

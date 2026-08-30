@@ -17,6 +17,30 @@ type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
   readonly rememberMode?: (mode: string) => Effect.Effect<void, never, BunServices.BunServices>
 }
 
+type InputKey = Parameters<NonNullable<Parameters<typeof createTui>[0]["key"]>>[0]
+type SubmitParts = Extract<Action, { readonly _tag: "Submit" }>["parts"]
+
+const isCtrlKey = (key: InputKey, name: string): boolean => key.ctrl && key.name === name
+
+const isPlainReturn = (key: InputKey): boolean => key.name === "return" && !key.shift && !key.ctrl
+
+const requestsSteering = (key: InputKey, model: InputContext["loop"]["model"]): boolean =>
+  (isCtrlKey(key, "s") && model.busy && model.input.length > 0) ||
+  (key.name === "return" &&
+    model.activeTurnId !== undefined &&
+    model.input.length === 0 &&
+    model.queueSelection !== undefined)
+
+const previewThreadId = (model: InputContext["loop"]["model"]): string | undefined =>
+  model.threadSwitcher.open ? selectedThreadMetadata(model)?.id : undefined
+
+const changedFilesOpened = (wasOpen: boolean, isOpen: boolean): boolean => !wasOpen && isOpen
+
+const previewSelectionChanged = (before: string | undefined, after: string | undefined): after is string =>
+  after !== undefined && after !== before
+
+const hasSubmittedPrompt = (prompt: string | undefined): prompt is string => prompt !== undefined && prompt.length > 0
+
 export const createInputHandlers = (context: InputContext): Parameters<typeof createTui>[0] => {
   let previewRequestId = 0
   const {
@@ -44,6 +68,149 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
   const rememberCommittedMode = (previous: string | undefined) => {
     const committed = loop.model.rememberedMode
     if (committed !== undefined && committed !== previous && rememberMode !== undefined) run(rememberMode(committed))
+  }
+  const handleCtrlC = (key: InputKey): boolean => {
+    if (!isCtrlKey(key, "c")) return false
+    const cancellable = loop.model.busy || loop.model.submittedDrafts.some((draft) => draft.turnId === undefined)
+    if (cancellable && loop.model.cancelPending) {
+      close()
+      return true
+    }
+    if (cancellable) return false
+    if (loop.ctrlCMenuVisible) {
+      showCtrlCMenu(false)
+      close()
+      return true
+    }
+    showCtrlCMenu(true)
+    return true
+  }
+  const handleCtrlCMenu = (key: InputKey): boolean => {
+    if (!loop.ctrlCMenuVisible) return false
+    if (key.name === "escape") {
+      showCtrlCMenu(false)
+      return true
+    }
+    if (isCtrlKey(key, "n")) {
+      showCtrlCMenu(false)
+      startSelection(
+        () =>
+          session.archiveAndNewThread.pipe(
+            Effect.tapError((failure) =>
+              Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
+            ),
+          ),
+        true,
+      )
+      return true
+    }
+    if (isCtrlKey(key, "e")) {
+      showCtrlCMenu(false)
+      run(
+        session.archiveThread.pipe(
+          Effect.tap(() => Effect.sync(close)),
+          Effect.tapError((failure) => Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75"))),
+        ),
+      )
+    }
+    return true
+  }
+  const prepareSubmission = (submitting: boolean) => {
+    const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
+    if (submission !== undefined) loop.submissionSequence = submission.sequence
+    const prompt = submitting ? loop.model.input : undefined
+    return {
+      submissionId: submission?.id,
+      parts: prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText),
+      submittedPrompt: prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText),
+    }
+  }
+  const applyKeyTransition = (key: InputKey) => {
+    const wasChangedFilesOpen = loop.model.changedFilesOpen
+    const beforePreviewId = previewThreadId(loop.model)
+    const submitting = isPlainReturn(key) && !loop.model.threadLoading && canSubmit(loop.model)
+    if (isPlainReturn(key) && loop.model.threadLoading)
+      loop.renderer?.surface.showToast("Thread is still loading; your draft is preserved")
+    const submission = prepareSubmission(submitting)
+    const steeringRequestId = requestsSteering(key, loop.model) ? nextSteeringRequestId() : undefined
+    const previousRememberedMode = loop.model.rememberedMode
+    loop.model = update(
+      loop.model,
+      steeringRequestId === undefined ? { _tag: "KeyPressed", key } : { _tag: "KeyPressed", key, steeringRequestId },
+    )
+    rememberCommittedMode(previousRememberedMode)
+    if (submitting)
+      loop.model = update(
+        loop.model,
+        submission.submissionId === undefined
+          ? { _tag: "Submitted" }
+          : { _tag: "Submitted", submissionId: submission.submissionId },
+      )
+    if (changedFilesOpened(wasChangedFilesOpen, loop.model.changedFilesOpen))
+      loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
+    return { wasChangedFilesOpen, beforePreviewId, ...submission }
+  }
+  const requestThreadPreview = (beforePreviewId: string | undefined): string | undefined => {
+    const afterPreviewId = previewThreadId(loop.model)
+    const previewChanged = previewSelectionChanged(beforePreviewId, afterPreviewId)
+    if (previewChanged) {
+      previewRequestId += 1
+      loop.model = update(loop.model, {
+        _tag: "ThreadPreviewRequested",
+        threadId: afterPreviewId,
+        requestId: previewRequestId,
+      })
+    }
+    return previewChanged ? afterPreviewId : undefined
+  }
+  const runKeyEffects = (
+    wasChangedFilesOpen: boolean,
+    previewId: string | undefined,
+    submittedPrompt: string | undefined,
+    parts: SubmitParts | undefined,
+    submissionId: string | undefined,
+  ) => {
+    loop.renderer?.surface.update(loop.model)
+    if (changedFilesOpened(wasChangedFilesOpen, loop.model.changedFilesOpen)) run(loadChangedFiles)
+    if (previewId !== undefined) {
+      const requestId = previewRequestId
+      previewTimer(
+        Effect.sleep("120 millis").pipe(Effect.andThen(session.previewThread(previewId, requestId)), recoverSession),
+      )
+    }
+    if (hasSubmittedPrompt(submittedPrompt) && parts !== undefined) {
+      loop.submittedSinceIdle = true
+      const action = {
+        _tag: "Submit",
+        prompt: submittedPrompt,
+        parts,
+        mode: loop.model.mode,
+        tuning: { fastMode: loop.model.fastMode },
+      } satisfies Action
+      execute(adapter, submissionId === undefined ? action : { ...action, submissionId })
+    }
+    if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
+      loop.submittedSinceIdle = false
+    if (loop.model.pendingAction !== undefined) consumePendingAction()
+  }
+  const handleKey = (key: InputKey) => {
+    const cancellable = loop.model.busy || loop.model.submittedDrafts.some((draft) => draft.turnId === undefined)
+    if (handleCtrlC(key)) return
+    if (cancellable && loop.ctrlCMenuVisible) showCtrlCMenu(false)
+    if (handleCtrlCMenu(key)) return
+    if (isCtrlKey(key, "g")) {
+      run(editComposer)
+      return
+    }
+    const transition = applyKeyTransition(key)
+    const previewId = requestThreadPreview(transition.beforePreviewId)
+    runKeyEffects(
+      transition.wasChangedFilesOpen,
+      previewId,
+      transition.submittedPrompt,
+      transition.parts,
+      transition.submissionId,
+    )
   }
   return {
     workingFrame: (frame) => {
@@ -140,125 +307,7 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
       loop.model = update(loop.model, { _tag: "AnimationTicked" })
       render()
     },
-    key: (key) => {
-      const cancellable = loop.model.busy || loop.model.submittedDrafts.some((draft) => draft.turnId === undefined)
-      if (key.ctrl && key.name === "c" && cancellable && loop.model.cancelPending) {
-        close()
-        return
-      }
-      if (cancellable && loop.ctrlCMenuVisible) showCtrlCMenu(false)
-      if (key.ctrl && key.name === "c" && !cancellable) {
-        if (loop.ctrlCMenuVisible) {
-          showCtrlCMenu(false)
-          close()
-          return
-        }
-        showCtrlCMenu(true)
-        return
-      }
-      if (loop.ctrlCMenuVisible) {
-        if (key.name === "escape") {
-          showCtrlCMenu(false)
-          return
-        }
-        if (key.ctrl && key.name === "n") {
-          showCtrlCMenu(false)
-          startSelection(
-            () =>
-              session.archiveAndNewThread.pipe(
-                Effect.tapError((failure) =>
-                  Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
-                ),
-              ),
-            true,
-          )
-          return
-        }
-        if (key.ctrl && key.name === "e") {
-          showCtrlCMenu(false)
-          run(
-            session.archiveThread.pipe(
-              Effect.tap(() => Effect.sync(close)),
-              Effect.tapError((failure) =>
-                Effect.sync(() => loop.renderer?.surface.showToast(failure.message, "#e06c75")),
-              ),
-            ),
-          )
-        }
-        return
-      }
-      if (key.ctrl && key.name === "g") {
-        run(editComposer)
-        return
-      }
-      const wasChangedFilesOpen = loop.model.changedFilesOpen
-      const beforePreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
-      const submitting =
-        key.name === "return" && !key.shift && !key.ctrl && !loop.model.threadLoading && canSubmit(loop.model)
-      if (key.name === "return" && !key.shift && !key.ctrl && loop.model.threadLoading)
-        loop.renderer?.surface.showToast("Thread is still loading; your draft is preserved")
-      const submission = submitting ? nextSubmissionId(loop.submissionSequence) : undefined
-      if (submission !== undefined) loop.submissionSequence = submission.sequence
-      const submissionId = submission?.id
-      const prompt = submitting ? loop.model.input : undefined
-      const parts = prompt === undefined ? undefined : promptParts(prompt, loop.model.pastedText)
-      const submittedPrompt = prompt === undefined ? undefined : expandPastedText(prompt, loop.model.pastedText)
-      const steeringRequestId =
-        (key.ctrl && key.name === "s" && loop.model.busy && loop.model.input.length > 0) ||
-        (key.name === "return" &&
-          loop.model.activeTurnId !== undefined &&
-          loop.model.input.length === 0 &&
-          loop.model.queueSelection !== undefined)
-          ? nextSteeringRequestId()
-          : undefined
-      const previousRememberedMode = loop.model.rememberedMode
-      loop.model = update(
-        loop.model,
-        steeringRequestId === undefined ? { _tag: "KeyPressed", key } : { _tag: "KeyPressed", key, steeringRequestId },
-      )
-      rememberCommittedMode(previousRememberedMode)
-      if (submitting)
-        loop.model = update(
-          loop.model,
-          submissionId === undefined ? { _tag: "Submitted" } : { _tag: "Submitted", submissionId },
-        )
-      if (!wasChangedFilesOpen && loop.model.changedFilesOpen)
-        loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
-      const afterPreviewId = loop.model.threadSwitcher.open ? selectedThreadMetadata(loop.model)?.id : undefined
-      if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
-        previewRequestId += 1
-        loop.model = update(loop.model, {
-          _tag: "ThreadPreviewRequested",
-          threadId: afterPreviewId,
-          requestId: previewRequestId,
-        })
-      }
-      loop.renderer?.surface.update(loop.model)
-      if (!wasChangedFilesOpen && loop.model.changedFilesOpen) run(loadChangedFiles)
-      if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
-        const requestId = previewRequestId
-        previewTimer(
-          Effect.sleep("120 millis").pipe(
-            Effect.andThen(session.previewThread(afterPreviewId, requestId)),
-            recoverSession,
-          ),
-        )
-      }
-      if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined) {
-        loop.submittedSinceIdle = true
-        const action = {
-          _tag: "Submit",
-          prompt: submittedPrompt,
-          parts,
-          mode: loop.model.mode,
-          tuning: { fastMode: loop.model.fastMode },
-        } satisfies Action
-        execute(adapter, submissionId === undefined ? action : { ...action, submissionId })
-      }
-      if (!loop.model.busy && loop.model.activeTurnId === undefined && loop.model.activity === undefined)
-        loop.submittedSinceIdle = false
-      if (loop.model.pendingAction !== undefined) consumePendingAction()
-    },
+    key: handleKey,
     resize: (width, height) => {
       loop.model = update(loop.model, { _tag: "Resized", width, height })
       loop.renderer?.surface.update(loop.model)

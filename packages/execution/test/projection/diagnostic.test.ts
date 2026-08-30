@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Inspectable, Logger, Metric } from "effect"
 import { ExecutableManifest, RunEvent, RunTree } from "tenetkit/runtime"
-import { makeHostedModelObserver, makeModelTerminalTelemetry } from "../../src/runtime"
+import { makeHostedModelObserver, makeModelTerminalTelemetry } from "../../src/engine/runtime"
 import type { SemanticTreeEvent } from "../../src/projection/semantic/event"
 
 const correlation = {
@@ -177,7 +177,7 @@ describe("runtime model terminal telemetry", () => {
       syntheticStart: false,
       usage: { inputTokens: 0, outputTokens: 6 },
     })
-    expect(Object.keys(observation ?? {}).sort()).toEqual([
+    expect(Object.keys(observation ?? {}).toSorted()).toEqual([
       "durationMillis",
       "modelAttemptId",
       "outcome",

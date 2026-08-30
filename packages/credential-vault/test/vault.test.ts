@@ -404,13 +404,9 @@ describe("credential vault", () => {
           return yield* vault.encrypt({ binding: userBinding, plaintext: source, createdAt: 1_000 })
         }),
       )
-      const rendered = [
-        String(source),
-        json,
-        Inspectable.toStringUnknown(source),
-        Inspectable.toStringUnknown(exit),
-        ...logs,
-      ].join("\n")
+      const rendered = [json, Inspectable.toStringUnknown(source), Inspectable.toStringUnknown(exit), ...logs].join(
+        "\n",
+      )
       expect(rendered).toContain("<redacted:credential-plaintext>")
       expect(rendered).not.toContain(secret)
       expect(Inspectable.toStringUnknown(exit)).toContain("CredentialKmsFailure")

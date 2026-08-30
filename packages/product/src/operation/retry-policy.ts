@@ -18,7 +18,7 @@ export const turnRetryDelay = (input: {
   const retryAfterMillis = input.retryAfterMillis
   if (retryAfterMillis !== undefined && Number.isFinite(retryAfterMillis) && retryAfterMillis > 0)
     return Duration.millis(Math.min(retryAfterMillis, turnRetryMaxDelayMillis))
-  const exponential = turnRetryInitialDelayMillis * Math.pow(turnRetryBackoffFactor, input.attempt - 1)
+  const exponential = turnRetryInitialDelayMillis * turnRetryBackoffFactor ** (input.attempt - 1)
   return Duration.millis(Math.min(exponential, turnRetryMaxDelayMillis))
 }
 

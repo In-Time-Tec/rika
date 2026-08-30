@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { identityMigrations, identityUser, runMigration } from "@rika/identity"
+import { identityUser } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import {
   rikaHostedExecutorAssignments,
@@ -11,16 +11,13 @@ import {
   rikaThreads,
   rikaWorkspaces,
 } from "@rika/product-store/database-schema"
-import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { FileSystem, Config, Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
-import { Prompt } from "effect/unstable/ai"
+import { Context, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { and, asc, eq, ne } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
-import { Address, ExecutableManifest, ExecutableResolver, Message } from "tenetkit/runtime"
-import { SqlCodecs } from "tenetkit/runtime/driver/sql"
+import { ExecutableResolver } from "tenetkit/runtime"
 import { HostedRecovery, layer as hostedRecoveryLayer } from "../../../src/hosted/execution/recovery"
 import {
   runOperations as tenetkitRunOperations,
@@ -28,33 +25,8 @@ import {
 } from "../../../src/hosted/execution/tenetkit-schema"
 import { live as livePlatform } from "../../support/live-platform"
 
-const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
-const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }
-const executable = ExecutableManifest.makeTest("recovery", "test")
-const executableRef = SqlCodecs.encodeExecutableRef(executable.ref)
-const executableManifest = SqlCodecs.encodeExecutableManifest(executable.manifest)
-const storedMessage = (suffix: string) =>
-  SqlCodecs.encodeMessage(
-    Message.make({
-      id: `message-${suffix}`,
-      to: Address.make("agent:recovery"),
-      sessionId: `session-${suffix}`,
-      prompt: Prompt.make("recover"),
-      idempotencyKey: `run-${suffix}`,
-      correlationId: `run-${suffix}`,
-    }),
-  )
-
-const migrate = (url: string, pool: Pool) =>
-  Effect.gen(function* () {
-    for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
-        fileSystem.readFileString(migration.url.pathname),
-      )
-      yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
-    }
-    yield* ExecutionPostgres.applySchema({ url, source: "hosted-recovery-live" })
-  })
+import { recoveryFixture } from "./recovery.fixture"
+const { databaseUrl, executableManifest, executableRef, migrate, principal, storedMessage } = recoveryFixture
 
 it.effect.skipIf(databaseUrl === "")(
   "persists deterministic inspect, retry, accept, and abort resolutions through the TenetKit contract",

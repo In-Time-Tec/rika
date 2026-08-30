@@ -319,7 +319,7 @@ describe("workspace binding", () => {
       let calls = 0
       const mounted = yield* registry({
         run: () => {
-          calls = calls + 1
+          calls += 1
           return result(`call ${calls}`)
         },
         nested: { run: (_request, effect) => Effect.flatMap(effect, () => effect) },

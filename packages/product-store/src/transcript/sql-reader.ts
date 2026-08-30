@@ -85,7 +85,7 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
   const rawRow = rows[0]
   if (rawRow === undefined) return undefined
   const row = yield* Schema.decodeEffect(ProjectionRow)(rawRow).pipe(Effect.mapError(error))
-  if (Number(row.projection_version) !== ExecutionProjection.projectionVersion) return undefined
+  if (row.projection_version !== ExecutionProjection.projectionVersion) return undefined
   const turn = yield* decode(row).pipe(Effect.mapError(error))
   const unitRows = yield* db
     .select({
@@ -132,10 +132,10 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
   const projection: Projection = {
     turn,
     units,
-    checkpointGeneration: Number(row.checkpoint_generation),
-    revision: Number(row.revision),
+    checkpointGeneration: row.checkpoint_generation,
+    revision: row.revision,
     state,
-    projectionVersion: Number(row.projection_version),
+    projectionVersion: row.projection_version,
   }
   if (projectorCheckpoint !== undefined) Object.assign(projection, { projectorCheckpoint })
   return projection

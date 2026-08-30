@@ -1,8 +1,8 @@
 import { Function } from "effect"
-import { type Key } from "../../../src/presentation/terminal/keymap"
-import { type Model } from "../../../src/state/model"
-import { type ThreadItem } from "../../../src/state/thread/model"
-import { type TranscriptBlock } from "../../../src/state/transcript/model"
+import type { Key } from "../../../src/presentation/terminal/keymap"
+import type { Model } from "../../../src/state/model"
+import type { ThreadItem } from "../../../src/state/thread/model"
+import type { TranscriptBlock } from "../../../src/state/transcript/model"
 
 export const key = (input: Partial<Key> & Pick<Key, "name">): Key => ({
   name: input.name,

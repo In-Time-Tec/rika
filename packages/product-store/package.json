@@ -6,7 +6,7 @@
   "type": "module",
   "exports": {
     "./database-schema": "./src/database/schema/product.ts",
-    "./assignments": "./src/hosted/assignments.ts",
+    "./assignments": "./src/hosted/assignment-store/assignments.ts",
     "./client-authority": "./src/hosted/client-authority.ts",
     "./thread-event-store": "./src/hosted/thread-event-store.ts",
     "./environment-store": "./src/hosted/environment-store.ts",

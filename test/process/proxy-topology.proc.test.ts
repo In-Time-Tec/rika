@@ -28,7 +28,7 @@ class WebSocketTimeout extends Schema.TaggedError<WebSocketTimeout>()("WebSocket
 const command = Effect.fn("ProxyTopology.command")(function* (
   executable: string,
   args: ReadonlyArray<string>,
-  timeout = 30_000,
+  timeout: number = 30_000,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const child = yield* spawner.spawn(ChildProcess.make(executable, args, { cwd: root, stdout: "pipe", stderr: "pipe" }))
@@ -47,7 +47,7 @@ const command = Effect.fn("ProxyTopology.command")(function* (
 const checkedCommand = Effect.fn("ProxyTopology.checkedCommand")(function* (
   executable: string,
   args: ReadonlyArray<string>,
-  timeout = 30_000,
+  timeout: number = 30_000,
 ) {
   const result = yield* command(executable, args, timeout)
   if (result.exitCode !== 0)
@@ -179,17 +179,10 @@ test.skipIf(containerCommand === undefined)(
         if (portServer.address._tag !== "TcpAddress") return yield* Effect.die("expected TCP server")
         const proxyPort = portServer.address.port
         yield* Scope.close(portScope, Exit.void)
-        let container: string | undefined
         yield* Effect.addFinalizer(() =>
-          Effect.gen(function* () {
-            if (container !== undefined)
-              yield* Effect.ignore(
-                command(containerCommand![0], [...containerCommand!.slice(1), "rm", "--force", container], 10_000),
-              )
-            yield* Effect.ignore(
-              command(containerCommand![0], [...containerCommand!.slice(1), "image", "rm", "--force", image], 30_000),
-            )
-          }),
+          Effect.ignore(
+            command(containerCommand![0], [...containerCommand!.slice(1), "image", "rm", "--force", image], 30_000),
+          ),
         )
         yield* checkedCommand(
           containerCommand![0],
@@ -215,8 +208,13 @@ test.skipIf(containerCommand === undefined)(
           `WEB_PORT=${webPort}`,
           image,
         ])
-        container = started.stdout.trim()
+        const container = started.stdout.trim()
         expect(container).not.toBe("")
+        yield* Effect.addFinalizer(() =>
+          Effect.ignore(
+            command(containerCommand![0], [...containerCommand!.slice(1), "rm", "--force", container], 10_000),
+          ),
+        )
         const base = `http://127.0.0.1:${proxyPort}`
         const client = yield* HttpClient.HttpClient
         const deadline = (yield* Clock.currentTimeMillis) + 20_000

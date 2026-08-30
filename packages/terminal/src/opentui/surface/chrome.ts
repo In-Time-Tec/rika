@@ -1,4 +1,4 @@
-import { type MouseEvent, type ColorInput } from "@opentui/core"
+import type { MouseEvent, ColorInput } from "@opentui/core"
 import type { Model } from "../../state/model"
 import type { ChangedFileRow } from "./transcript/types"
 import { SidebarController } from "./sidebar/controller"
@@ -110,10 +110,7 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
       if (current.contextDetailsOpen && current.usageTime?._tag === "Available") this.refreshContextDetails(current)
       this.transcriptPane.updateSpinner(glyph)
       if (current.threadSidebar.open)
-        this.sidebar.content = renderSidebar(
-          current,
-          spinnerFrames[this.loaderController.phase % spinnerFrames.length]!,
-        )
+        this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderController.phase % spinnerFrames.length])
     }
     this.renderer.requestRender()
   }

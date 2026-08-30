@@ -19,36 +19,46 @@ const ProcessRenderer = Schema.Struct({
 })
 
 const processRenderer = Schema.decodeUnknownOption(ProcessRenderer)
+const unmodified = (key: Key): boolean => !key.ctrl && !key.alt && !key.meta
+const transcriptNavigationKey = (key: Key): boolean =>
+  unmodified(key) && ["pageup", "pagedown", "home", "end"].includes(key.name)
+const pasteImage = (event: PasteEvent): { readonly bytes: Uint8Array; readonly mediaType?: string } | undefined => {
+  const mediaType = event.metadata?.mimeType?.toLowerCase()
+  if (event.metadata?.kind !== "binary" && mediaType?.startsWith("image/") !== true) return undefined
+  return mediaType === undefined ? { bytes: event.bytes } : { bytes: event.bytes, mediaType }
+}
 
 export abstract class SurfacePointer extends SurfaceState {
   private pointerStyle: "ns-resize" | "ew-resize" | "default" = "default"
   protected abstract sidebarController: SidebarController
   protected abstract refreshSidebarRows(model: Model): void
   protected abstract showToast(message: string, color?: ColorInput): void
+  private navigate(key: Key): boolean {
+    if (!transcriptNavigationKey(key)) return false
+    const target = this.model?.threadSwitcher.open === true ? this.threadBrowser : this.transcriptPane
+    switch (key.name) {
+      case "pageup":
+        target.pageUp()
+        return true
+      case "pagedown":
+        target.pageDown()
+        return true
+      case "home":
+        target.home()
+        return true
+      case "end":
+        target.end()
+        return true
+      default:
+        return false
+    }
+  }
   protected readonly onKey = (key: KeyEvent) => {
     const mapped = fromOpenTui(key)
     if (this.suppressMouseJunk(mapped)) return
-    if (
-      this.model?.contextDetailsOpen === true &&
-      !mapped.ctrl &&
-      !mapped.alt &&
-      !mapped.meta &&
-      (mapped.name === "pageup" || mapped.name === "pagedown" || mapped.name === "home" || mapped.name === "end")
-    )
-      return
-    if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pageup") {
-      if (this.model?.threadSwitcher.open === true) this.threadBrowser.pageUp()
-      else this.transcriptPane.pageUp()
-    } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pagedown") {
-      if (this.model?.threadSwitcher.open === true) this.threadBrowser.pageDown()
-      else this.transcriptPane.pageDown()
-    } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "home") {
-      if (this.model?.threadSwitcher.open === true) this.threadBrowser.home()
-      else this.transcriptPane.home()
-    } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "end") {
-      if (this.model?.threadSwitcher.open === true) this.threadBrowser.end()
-      else this.transcriptPane.end()
-    } else if (mapped.ctrl && mapped.name === "v" && this.handlers.pasteImage !== undefined) this.handlers.pasteImage()
+    if (this.model?.contextDetailsOpen === true && transcriptNavigationKey(mapped)) return
+    if (this.navigate(mapped)) return
+    if (mapped.ctrl && mapped.name === "v" && this.handlers.pasteImage !== undefined) this.handlers.pasteImage()
     else this.handlers.key(mapped)
   }
   protected readonly flushJunkBuffer = () => {
@@ -90,11 +100,9 @@ export abstract class SurfacePointer extends SurfaceState {
     return false
   }
   protected readonly onPaste = (event: PasteEvent) => {
-    const mediaType = event.metadata?.mimeType?.toLowerCase()
-    if (event.metadata?.kind === "binary" || mediaType?.startsWith("image/") === true) {
-      if (event.bytes.length > 0) {
-        this.handlers.pasteImage?.(mediaType === undefined ? { bytes: event.bytes } : { bytes: event.bytes, mediaType })
-      }
+    const image = pasteImage(event)
+    if (image !== undefined) {
+      if (event.bytes.length > 0) this.handlers.pasteImage?.(image)
       return
     }
     const text = stripAnsiSequences(decodePasteBytes(event.bytes))

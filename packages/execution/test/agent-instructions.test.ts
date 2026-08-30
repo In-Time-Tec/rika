@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agentInstructionsWith } from "../src/route"
+import { agentInstructionsWith } from "../src/routing/route"
 
 const surface = "//   rika.workspace -> read({ path })"
 

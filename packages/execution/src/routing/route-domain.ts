@@ -1,0 +1,326 @@
+import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "tenetkit"
+import { ModelRoute } from "tenetkit/ai"
+import { Errors, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
+import type { HarnessState } from "tenetkit/harness"
+import { CellTool, KernelPool, type KernelProfile } from "tenetkit/repl"
+import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
+import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
+import * as ExecutionPins from "@rika/kernel/execution-pins"
+import type * as OpenAiAuth from "@rika/product/openai-auth-service"
+import type { ProviderCredentialStoreService } from "@rika/product/provider-credential-store"
+import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
+import { Context, Effect, Function, Layer } from "effect"
+import { Tool, Toolkit } from "effect/unstable/ai"
+import { profileInstructions } from "../agent-instructions"
+import * as Models from "../models"
+import * as Registration from "../registration"
+import * as RemoteCells from "../remote-cells"
+
+type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
+type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
+
+export interface KernelOptions {
+  readonly runtimeVersion: string
+  readonly dataRoot: string
+  readonly limits?: KernelProfile.Limits
+  readonly trustMode?: KernelProfile.TrustMode
+}
+
+export type LocalCellServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
+
+export interface LocalCellRoute {
+  readonly _tag: "Local"
+  readonly services: Context.Context<LocalCellServices>
+}
+
+export interface RemoteCellRoute {
+  readonly _tag: "Remote"
+  readonly cells: Layer.Layer<RemoteCells.Service>
+  readonly admit: (input: {
+    readonly threadId: string
+    readonly turnId: string
+    readonly workspaceId: string
+  }) => Effect.Effect<void, RemoteCells.AdmissionFailure>
+}
+
+export type CellRoute = LocalCellRoute | RemoteCellRoute
+
+export interface LocalCellResolver {
+  readonly _tag: "Local"
+  readonly forWorkspace: (workspace: string) => Effect.Effect<Context.Context<LocalCellServices>>
+}
+
+export type CellResolver = LocalCellResolver | RemoteCellRoute
+
+export const resolveCellRoute: {
+  (workspace: string): (resolver: CellResolver) => Effect.Effect<CellRoute>
+  (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute>
+} = Function.dual(
+  2,
+  (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute> =>
+    resolver._tag === "Remote"
+      ? Effect.succeed(resolver)
+      : resolver.forWorkspace(workspace).pipe(Effect.map((services) => ({ _tag: "Local" as const, services }))),
+)
+
+export interface ConfigureOptions {
+  readonly executionRoute: RouteSnapshot
+  readonly workspace: string
+  readonly executionIdentity?: {
+    readonly threadId: string
+    readonly turnId: string
+  }
+  readonly kernel: KernelOptions
+  readonly cell?: CellRoute
+  readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
+  readonly harnessSnapshot?: HarnessState.HarnessState
+  readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
+  readonly credentialStore?: ProviderCredentialStoreService
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
+}
+
+export interface ConfiguredExecutable {
+  readonly executable: ExecutableManifest.PinnedExecutable
+  readonly titleExecutable: ExecutableManifest.PinnedExecutable
+  readonly registrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
+  readonly titleRegistrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
+  readonly resolverEntries: ReadonlyArray<ExecutableResolver.StaticAgentExecutable>
+  readonly profiles: Readonly<Record<string, AgentManifest.PinnedAgent>>
+  readonly kernelProfile: KernelProfile.KernelProfile
+}
+
+export interface ResolverOptions {
+  readonly kernel: KernelOptions
+  readonly cell?: CellResolver
+  readonly capabilities?: (workspace: string) => Effect.Effect<{
+    readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
+    readonly harnessSnapshot: HarnessState.HarnessState
+  }>
+  readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
+  readonly credentialStore?: ProviderCredentialStoreService
+  readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
+}
+
+type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
+
+/**
+ * Rika caps execution only by subagent depth and count, both carried by the tree policy. Every
+ * other dimension stays unlimited, so a long thread is never terminated by a run budget. A
+ * BudgetLimits with no dimension set is the exact way to express that: `remaining === undefined`
+ * short-circuits each charge. This is stated explicitly rather than by omitting the option, because
+ * an omitted budget is an absent opinion that a host is free to fill with a default ceiling.
+ */
+const unlimitedBudget = {} as const satisfies AgentManifest.AgentManifest["budget"]
+
+/**
+ * The exact values the Session's kernel is built from. The admitted profile pin is derived from
+ * these and from nothing else, so a pin can never describe a kernel the host did not run.
+ */
+export { profileInstructions }
+
+/**
+ * An agent that runs cells is told what its cell can reach. The Title agent carries no tool, so it
+ * keeps the one sentence it was given rather than a description of a surface it cannot use.
+ */
+/**
+ * What one Execution's harness adds to the prompt every agent in it reads. An absent harness adds
+ * nothing rather than an empty section, so a session with no refinements looks exactly as it did.
+ */
+const harnessSupplement = (
+  harness: HarnessState.HarnessState | undefined,
+  skills: ReadonlyArray<ExecutionPins.SkillPin>,
+): string =>
+  harness === undefined
+    ? ""
+    : HarnessPromptSections.block({
+        harness,
+        skillListings: skills.map((skill) => `- ${skill.name}`).join("\n"),
+        mcpServers: [],
+      })
+
+export const agentInstructionsWith: {
+  (own: string): (surface: string) => string
+  (surface: string, own: string): string
+} = Function.dual(2, (surface: string, own: string): string =>
+  own === profileInstructions.title ? own : [own, "", surface].join("\n"),
+)
+
+const applicationPin = (
+  route: RouteSnapshot,
+  workspace: string,
+  executionIdentity: ConfigureOptions["executionIdentity"],
+) => {
+  const payload = Object.assign(
+    { ...Registration.codecs.applicationContext.identity, route, workspace },
+    executionIdentity === undefined ? undefined : { executionIdentity },
+  )
+  return Pins.makeCapability(payload)
+}
+
+const modelRegistryPin = (route: ModelSnapshot) =>
+  Pins.makeCapability({
+    ...Registration.codecs.modelRegistryRoute.identity,
+    registrationIdentity: route.registrationIdentity,
+  })
+
+const modelPin = (route: ModelSnapshot) => Pins.makeModel({ ...Registration.codecs.modelRoute.identity, route })
+
+const compactionPin = (route: RouteSnapshot) =>
+  Pins.makeCapability({
+    ...Registration.codecs.compaction.identity,
+    intent: route.compaction,
+    limits: route.main.compaction,
+    summaryModel: route.compactionSummary.registrationIdentity,
+  })
+
+const toolPins = (toolkit: Toolkit.Any) =>
+  Object.values(toolkit.tools).map((tool) => {
+    const payload = Registration.toolPayload(tool)
+    return { name: payload.name, pin: Registration.toolPin(tool) }
+  })
+
+const agentEntry = (pinned: AgentManifest.PinnedAgent): ExecutableManifest.AgentEntry => ({
+  _tag: "Agent" as const,
+  pin: pinned.pin,
+  manifest: pinned.manifest,
+})
+
+const registrationsFrom = <E>(layer: Layer.Layer<ModelRegistry.ModelRegistry, E>) =>
+  Effect.scoped(
+    Layer.build(layer).pipe(
+      Effect.flatMap((context) =>
+        ModelRegistry.registrations().pipe(
+          Effect.provideService(ModelRegistry.ModelRegistry, Context.get(context, ModelRegistry.ModelRegistry)),
+        ),
+      ),
+    ),
+  )
+
+const routedModel = (
+  route: ModelSnapshot,
+  override: Layer.Layer<ModelRegistry.ModelRegistry> | undefined,
+  credentialStore: ConfigureOptions["credentialStore"],
+  openAiAccountAccess: ConfigureOptions["openAiAccountAccess"],
+): Effect.Effect<RoutedModel, ModelRoute.AvailabilitySemanticsMissing | Errors.ExecutableRegistrationInvalid> =>
+  Effect.gen(function* () {
+    const registrationFor = (candidate: ModelSnapshot["candidates"][number]) => {
+      const exact = available.find(
+        (entry) =>
+          entry.provider === candidate.providerConnection.provider &&
+          entry.model === candidate.model &&
+          entry.registrationKey === candidate.registrationIdentity,
+      )
+      const registration =
+        exact ??
+        (override === undefined
+          ? undefined
+          : available.find(
+              (entry) => entry.provider === candidate.providerConnection.provider && entry.model === candidate.model,
+            ))
+      if (registration === undefined)
+        throw new Error(`Missing model candidate registration ${candidate.registrationIdentity}`)
+      return registration.registrationKey === candidate.registrationIdentity
+        ? registration
+        : { ...registration, registrationKey: candidate.registrationIdentity }
+    }
+    const available =
+      override === undefined
+        ? yield* Effect.forEach(route.candidates, (candidate) =>
+            registrationsFrom(
+              Models.layer(
+                Object.assign(
+                  { candidate },
+                  credentialStore === undefined ? undefined : { credentialStore },
+                  openAiAccountAccess === undefined ? undefined : { openAiAccountAccess },
+                ),
+              ),
+            ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) }))),
+          ).pipe(Effect.map((groups) => groups.flat()))
+        : yield* registrationsFrom(override)
+    const [firstCandidate, ...remainingCandidates] = route.candidates
+    if (firstCandidate === undefined) throw new Error("Model route requires at least one candidate")
+    const candidates = [registrationFor(firstCandidate), ...remainingCandidates.map(registrationFor)] satisfies [
+      ModelRegistry.Registration,
+      ...Array<ModelRegistry.Registration>,
+    ]
+    const routed = yield* ModelRoute.make({ candidates })
+    return { ...routed, layer: ModelRegistry.layer([Effect.succeed(routed.registration)]) }
+  })
+
+type RoutedModel = ModelRoute.Route & { readonly layer: Layer.Layer<ModelRegistry.ModelRegistry> }
+
+interface AgentDefinition {
+  readonly agent: ResolvedAgent
+  readonly pinned: AgentManifest.PinnedAgent
+}
+
+type AgentEnvironment = Layer.Layer<ModelRegistry.ModelRegistry>
+
+const agentDefinition = (
+  route: ModelSnapshot,
+  routed: RoutedModel,
+  name: string,
+  agentInstructions: string,
+  supplementalInstructions: string | undefined,
+  tools: ReadonlyArray<Tool.Any>,
+  environment: AgentEnvironment,
+  children: AgentManifest.AgentManifest["children"],
+  applicationContextPin: ReturnType<typeof applicationPin>,
+  compaction: AgentManifest.CompactionIdentity | undefined,
+  kernelProfilePin: Pins.CapabilityPin | undefined,
+  capabilities: {
+    readonly skills: ReadonlyArray<AgentManifest.NamedCapability>
+    readonly services: ReadonlyArray<AgentManifest.NamedCapability>
+  },
+): AgentDefinition => {
+  const agentOptions = {
+    name: `rika-${name.toLowerCase()}`,
+    instructions: agentInstructions,
+    model: routed.selection,
+    toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
+    metadata: { productProfile: name },
+    budget: unlimitedBudget,
+  }
+  if (supplementalInstructions !== undefined) Object.assign(agentOptions, { supplemental: supplementalInstructions })
+  const agent = Agent.withTools(Agent.make(agentOptions), tools)
+  const policy = {
+    _tag: "Portable",
+    policy: agent.policy.snapshot!,
+  } satisfies AgentManifest.AgentManifest["policy"]
+  const manifestOptions = {
+    model: modelPin(route),
+    tools: toolPins(agent.toolkit),
+    skills: capabilities.skills,
+    services: [
+      { name: "model-registry", pin: modelRegistryPin(route) },
+      { name: "rika-application-context", pin: applicationContextPin },
+      ...(compaction === undefined ? [] : [{ name: "compaction", pin: compaction.service }]),
+      ...(kernelProfilePin === undefined ? [] : [{ name: "rika-kernel-profile", pin: kernelProfilePin }]),
+      ...capabilities.services,
+    ],
+    policy,
+    budget: unlimitedBudget,
+    children,
+  }
+  if (compaction !== undefined) Object.assign(manifestOptions, { compaction })
+  const pinned = AgentManifest.fromLiveAgent(agent, manifestOptions)
+  return { agent: Agent.close(agent, environment), pinned }
+}
+
+const rootChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+type ChildProfileName = (typeof rootChildNames)[number]
+
+export const routeDomain = {
+  agentDefinition,
+  agentEntry,
+  agentInstructionsWith,
+  applicationPin,
+  compactionPin,
+  harnessSupplement,
+  modelPin,
+  modelRegistryPin,
+  profileInstructions,
+  rootChildNames,
+  routedModel,
+}
+export type { AgentDefinition, AgentEnvironment, ChildProfileName, ModelSnapshot, RouteSnapshot }

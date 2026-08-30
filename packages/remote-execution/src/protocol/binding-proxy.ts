@@ -275,7 +275,9 @@ export const make: (options: {
         active,
         (current) => new Map(Array.from(current, ([key, cell]) => [key, { ...cell, access }] as const)),
       )
-      const calls = Array.from((yield* Ref.get(pending)).values()).sort((left, right) => left.ordinal - right.ordinal)
+      const calls = Array.from((yield* Ref.get(pending)).values()).toSorted(
+        (left, right) => left.ordinal - right.ordinal,
+      )
       yield* Effect.forEach(
         calls,
         (call) =>

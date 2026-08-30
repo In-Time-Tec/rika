@@ -314,7 +314,7 @@ it.layer(BunServices.layer)((test) => {
         )
         expect(refreshedPrincipal).toEqual(principal)
       } finally {
-        server.stop(true)
+        yield* Effect.tryPromise(() => server.stop(true))
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))
         yield* Effect.tryPromise(() => admin.end())

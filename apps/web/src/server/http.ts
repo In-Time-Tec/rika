@@ -106,15 +106,7 @@ const guarded = Effect.fn("WebHttp.guarded")(function* (
   return html(render(access.account), dependencies.production)
 })
 
-const route = Effect.fn("WebHttp.route")(function* (request: Request, dependencies: WebDependencies) {
-  const url = new URL(request.url)
-  const { pathname } = url
-  if (pathname === "/healthz")
-    return response('{"status":"ok"}', {
-      production: dependencies.production,
-      headers: new Headers({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }),
-    })
-  if (request.method !== "GET") return html("<h1>Not found</h1>", dependencies.production, 404)
+const asset = Effect.fn("WebHttp.asset")(function* (pathname: string, dependencies: WebDependencies) {
   if (pathname === "/assets/thread-client.css")
     return yield* clientAsset("thread-client.css", dependencies.production, dependencies.fileSystem)
   if (pathname === "/assets/thread-client.js")
@@ -132,30 +124,45 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
         "cache-control": "public, max-age=3600",
       }),
     })
+  return undefined
+})
+
+const publicPage = (url: URL, production: boolean): Response | undefined => {
+  const { pathname } = url
   const destination = safePath(url.searchParams.get("redirect"), url)
-  if (pathname === "/login") return html(loginPage(destination), dependencies.production)
-  if (pathname === "/signup") return html(signupPage(destination), dependencies.production)
+  if (pathname === "/login") return html(loginPage(destination), production)
+  if (pathname === "/signup") return html(signupPage(destination), production)
   if (pathname === "/verify-email") {
     const token = url.searchParams.get("token")
     const callbackURL = safePath(url.searchParams.get("callbackURL"), url, "/organizations/new")
     return token === null
-      ? html(verifyEmailPage(), dependencies.production)
+      ? html(verifyEmailPage(), production)
       : redirect(
           `/api/auth/verify-email?token=${encodeURIComponent(token)}&callbackURL=${encodeURIComponent(callbackURL)}`,
-          dependencies.production,
+          production,
         )
   }
-  if (pathname === "/forgot-password") return html(forgotPasswordPage(), dependencies.production)
+  if (pathname === "/forgot-password") return html(forgotPasswordPage(), production)
   if (pathname === "/reset-password")
     return html(
       resetPasswordPage({ token: url.searchParams.get("token") ?? "", error: url.searchParams.get("error") ?? "" }),
-      dependencies.production,
+      production,
     )
+  if (pathname === "/threads") return html(threadsPage(), production)
+  return undefined
+}
+
+const guardedPage = Effect.fn("WebHttp.guardedPage")(function* (
+  request: Request,
+  url: URL,
+  dependencies: WebDependencies,
+) {
+  const { pathname } = url
+  const destination = safePath(url.searchParams.get("redirect"), url)
   if (pathname === "/organizations/new")
     return yield* guarded(request, url, dependencies, () => newOrganizationPage(destination), false)
-  const invitation = /^\/invitations\/([^/]+)$/.exec(pathname)
-  if (invitation?.[1] !== undefined) {
-    const invitationId = invitation[1]
+  const invitationId = /^\/invitations\/([^/]+)$/.exec(pathname)?.[1]
+  if (invitationId !== undefined)
     return yield* guarded(
       request,
       url,
@@ -163,13 +170,10 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       () => invitationPage({ id: decodeURIComponent(invitationId), redirect: destination }),
       false,
     )
-  }
-  if (pathname === "/device") {
-    const userCode = url.searchParams.get("user_code") ?? ""
+  const userCode = url.searchParams.get("user_code") ?? ""
+  if (pathname === "/device")
     return yield* guarded(request, url, dependencies, () => devicePage({ userCode, redirect: destination }), true)
-  }
-  if (pathname === "/device/approve") {
-    const userCode = url.searchParams.get("user_code") ?? ""
+  if (pathname === "/device/approve")
     return yield* guarded(
       request,
       url,
@@ -177,7 +181,6 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       () => deviceApprovalPage({ userCode, redirect: destination }),
       true,
     )
-  }
   if (pathname === "/consent")
     return yield* guarded(
       request,
@@ -187,7 +190,24 @@ const route = Effect.fn("WebHttp.route")(function* (request: Request, dependenci
       true,
     )
   if (pathname === "/") return yield* guarded(request, url, dependencies, () => accountPage(), true)
-  if (pathname === "/threads") return html(threadsPage(), dependencies.production)
+  return undefined
+})
+
+const route = Effect.fn("WebHttp.route")(function* (request: Request, dependencies: WebDependencies) {
+  const url = new URL(request.url)
+  const { pathname } = url
+  if (pathname === "/healthz")
+    return response('{"status":"ok"}', {
+      production: dependencies.production,
+      headers: new Headers({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }),
+    })
+  if (request.method !== "GET") return html("<h1>Not found</h1>", dependencies.production, 404)
+  const assetResponse = yield* asset(pathname, dependencies)
+  if (assetResponse !== undefined) return assetResponse
+  const publicResponse = publicPage(url, dependencies.production)
+  if (publicResponse !== undefined) return publicResponse
+  const guardedResponse = yield* guardedPage(request, url, dependencies)
+  if (guardedResponse !== undefined) return guardedResponse
   return html("<h1>Not found</h1>", dependencies.production, 404)
 })
 

@@ -1,6 +1,6 @@
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
 import * as ToolBlock from "./state"
-import { type Node, type ToolState } from "../model"
+import type { Node, ToolState } from "../model"
 import { bounded, toolTextLimit } from "../values"
 
 export interface ToolUnitProjection {

@@ -1,6 +1,6 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import type { Projection, PageCursor, UsageSummary } from "@rika/product/transcript-page"
-import { Service, RepositoryError, type Interface } from "../transcript"
+import { Service, RepositoryError, type Interface } from "./contract"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import type { Unit } from "@rika/transcript/transcript-unit"
@@ -45,6 +45,31 @@ const materialize = (projection: Projection): Projection => ({
   ...clone(projection),
   units: projection.units.toSorted((a, b) => TranscriptOrdering.compareUnitOrder(a.order, b.order)),
 })
+
+const staleChange = (current: Projection | undefined, change: ExecutionProjection.Change): boolean => {
+  if (change._tag === "ProjectionPatch")
+    return (
+      current?.projectionVersion !== ExecutionProjection.projectionVersion || current.revision !== change.baseRevision
+    )
+  return (
+    current !== undefined &&
+    (current.projectionVersion > ExecutionProjection.projectionVersion ||
+      (current.projectionVersion === ExecutionProjection.projectionVersion && current.revision > change.revision))
+  )
+}
+
+const projectionUnits = (
+  current: Projection | undefined,
+  change: ExecutionProjection.Change,
+  upsert: ReadonlyArray<Unit>,
+): ReadonlyArray<Unit> => {
+  const replacing = current !== undefined && current.projectionVersion < ExecutionProjection.projectionVersion
+  const units = new Map((replacing ? [] : (current?.units ?? [])).map((unit) => [unit.key, unit]))
+  if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacing)) units.clear()
+  for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
+  for (const unit of upsert) units.set(unit.key, clone(unit))
+  return [...units.values()]
+}
 
 export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function* (
   initialOptions: {
@@ -137,33 +162,10 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
           const previous = yield* Ref.get(state)
           const result = yield* Ref.modify(state, (entries) => {
             const current = entries.get(turn.id)
-            if (
-              change._tag === "ProjectionPatch" &&
-              (current?.projectionVersion !== ExecutionProjection.projectionVersion ||
-                current.revision !== change.baseRevision)
-            )
-              return ["stale" as const, entries]
-            if (
-              change._tag === "ProjectionSnapshot" &&
-              current !== undefined &&
-              (current.projectionVersion > ExecutionProjection.projectionVersion ||
-                (current.projectionVersion === ExecutionProjection.projectionVersion &&
-                  current.revision > change.revision))
-            )
-              return ["stale" as const, entries]
-            const replacingOlderProjection =
-              change._tag === "ProjectionSnapshot" &&
-              current !== undefined &&
-              current.projectionVersion < ExecutionProjection.projectionVersion
-            const units = new Map(
-              (replacingOlderProjection ? [] : (current?.units ?? [])).map((unit) => [unit.key, unit]),
-            )
-            if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection)) units.clear()
-            for (const key of change._tag === "ProjectionPatch" ? change.remove : []) units.delete(key)
-            for (const unit of upsert) units.set(unit.key, clone(unit))
+            if (staleChange(current, change)) return ["stale" as const, entries]
             const candidateBase = {
               turn: clone(turn),
-              units: [...units.values()],
+              units: projectionUnits(current, change, upsert),
               checkpointGeneration: (current?.checkpointGeneration ?? -1) + 1,
               revision: change.revision,
               state: clone(change.state),

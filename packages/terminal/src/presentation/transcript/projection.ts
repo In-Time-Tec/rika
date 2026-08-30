@@ -1,13 +1,12 @@
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Block } from "@rika/transcript/transcript-presentation-model"
 import { UnitOrder, type Unit } from "@rika/transcript/transcript-unit"
-import { Schema } from "effect"
+import { Function, Schema } from "effect"
 export interface UnitDelta {
   readonly upsert: ReadonlyArray<Unit>
   readonly remove: ReadonlyArray<string>
 }
 import { outcomeShadow, updateExecutionOutcomes } from "./projection-outcomes"
-import { Function } from "effect"
 import type { Model } from "../../state/model"
 import type { TranscriptItem as TranscriptItemModel } from "../../state/transcript/model"
 
@@ -168,11 +167,39 @@ const insertionPosition = (
   return lastMatchingTurn < 0 ? items.length : lastMatchingTurn + 1
 }
 
+const parentIsCancelled = (blocks: ReadonlyArray<Block>, parentId: string | undefined): boolean =>
+  parentId !== undefined &&
+  blocks.some((block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled")
+
+const entryIsUnchanged = (
+  cancellationActive: boolean,
+  stored: Model["entries"][number] | undefined,
+  unit: Unit,
+): boolean =>
+  unit.content._tag === "Entry" &&
+  !cancellationActive &&
+  stored !== undefined &&
+  stored.role === unit.content.role &&
+  stored.text === unit.content.text &&
+  stored.turnId === unit.turnId
+
+const blockIsUnchanged = (cancellationActive: boolean, stored: Block | undefined, block: Block): boolean => {
+  const shadow = outcomeShadow.get(block)
+  return !cancellationActive && (stored === block || (shadow !== undefined && shadow.applied === stored))
+}
+
+const itemContextChanged = (
+  current: TranscriptItem,
+  nestedParentId: string | undefined,
+  rootTurnId: string | undefined,
+): boolean =>
+  (nestedParentId !== undefined && current.parentId !== nestedParentId) ||
+  (rootTurnId !== undefined && current.rootTurnId !== rootTurnId) ||
+  current.order === undefined
+
 const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: string, rootTurnId?: string): Model => {
   const modelBlocks = model.blocks.filter(isBlock)
-  const parentCancelled =
-    parentId !== undefined &&
-    modelBlocks.some((block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled")
+  const parentCancelled = parentIsCancelled(modelBlocks, parentId)
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
   const projectedModel = cancelParentRows(model, cancellation.parentIds)
@@ -229,7 +256,42 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     for (const [position, item] of items.entries()) if (item.id !== undefined) known.set(item.id, position)
     knownCloned = true
   }
-  for (const rawUnit of cancellation.units) {
+  const updateCurrentUnit = (
+    itemIndex: number,
+    current: TranscriptItem,
+    unit: Unit,
+    nestedParentId: string | undefined,
+  ) => {
+    if (unit.content._tag === "Entry" && current._tag === "Entry") {
+      const stored = entries[current.index]
+      if (!entryIsUnchanged(cancellationActive, stored, unit))
+        writeEntry(current.index, { ...unit.content, turnId: unit.turnId })
+    } else if (unit.content._tag === "Block" && current._tag === "Block") {
+      const stored = blocks[current.index]
+      if (!blockIsUnchanged(cancellationActive, stored, unit.content.block))
+        writeBlock(current.index, unit.content.block)
+    }
+    if (!itemContextChanged(current, nestedParentId, rootTurnId)) return
+    const updated: TranscriptItem = { ...current, order: current.order ?? unit.order }
+    const withParent: TranscriptItem = nestedParentId === undefined ? updated : { ...updated, parentId: nestedParentId }
+    writeItem(itemIndex, rootTurnId === undefined ? withParent : { ...withParent, rootTurnId })
+  }
+  const insertUnit = (unit: Unit, nestedParentId: string | undefined) => {
+    const itemPosition = insertionPosition(items, unit, rootTurnId)
+    const index = unit.content._tag === "Entry" ? entries.length : blocks.length
+    if (unit.content._tag === "Entry") writeEntry(index, { ...unit.content, turnId: unit.turnId })
+    else writeBlock(index, unit.content.block)
+    const item: TranscriptItem = {
+      _tag: unit.content._tag,
+      index,
+      id: unit.key,
+      turnId: unit.turnId,
+      order: unit.order,
+    }
+    const rooted = rootTurnId === undefined ? item : { ...item, rootTurnId }
+    insertItem(itemPosition, nestedParentId === undefined ? rooted : { ...rooted, parentId: nestedParentId })
+  }
+  const applyUnit = (rawUnit: Unit) => {
     const nestedParentId = parentId ?? rawUnit.parentId
     const unit =
       nestedParentId === undefined || rawUnit.parentId === nestedParentId
@@ -238,78 +300,33 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     const itemIndex = known.get(unit.key)
     const current = itemIndex === undefined ? undefined : items[itemIndex]
     if (current !== undefined) {
-      if (itemIndex === undefined) continue
-      if (unit.content._tag === "Entry" && current._tag === "Entry") {
-        const stored = entries[current.index]
-        const unchanged =
-          !cancellationActive &&
-          stored !== undefined &&
-          stored.role === unit.content.role &&
-          stored.text === unit.content.text &&
-          stored.turnId === unit.turnId
-        if (!unchanged) writeEntry(current.index, { ...unit.content, turnId: unit.turnId })
-      } else if (unit.content._tag === "Block" && current._tag === "Block") {
-        const stored = blocks[current.index]
-        const shadow = outcomeShadow.get(unit.content.block)
-        const unchanged =
-          !cancellationActive && (stored === unit.content.block || (shadow !== undefined && shadow.applied === stored))
-        if (!unchanged) writeBlock(current.index, unit.content.block)
-      }
-      if (
-        (nestedParentId !== undefined && current.parentId !== nestedParentId) ||
-        (rootTurnId !== undefined && current.rootTurnId !== rootTurnId) ||
-        current.order === undefined
-      ) {
-        const updated: TranscriptItem = { ...current, order: current.order ?? unit.order }
-        const withParent: TranscriptItem =
-          nestedParentId === undefined ? updated : { ...updated, parentId: nestedParentId }
-        writeItem(itemIndex, rootTurnId === undefined ? withParent : { ...withParent, rootTurnId })
-      }
-      continue
+      if (itemIndex === undefined) return
+      updateCurrentUnit(itemIndex, current, unit, nestedParentId)
+      return
     }
-    const itemPosition = insertionPosition(items, unit, rootTurnId)
-    if (unit.content._tag === "Entry") {
-      const entryIndex = entries.length
-      writeEntry(entryIndex, { ...unit.content, turnId: unit.turnId })
-      const item: TranscriptItem = {
-        _tag: "Entry",
-        index: entryIndex,
-        id: unit.key,
-        turnId: unit.turnId,
-        order: unit.order,
-      }
-      const rooted = rootTurnId === undefined ? item : { ...item, rootTurnId }
-      insertItem(itemPosition, nestedParentId === undefined ? rooted : { ...rooted, parentId: nestedParentId })
-    } else {
-      const blockIndex = blocks.length
-      writeBlock(blockIndex, unit.content.block)
-      const item: TranscriptItem = {
-        _tag: "Block",
-        index: blockIndex,
-        id: unit.key,
-        turnId: unit.turnId,
-        order: unit.order,
-      }
-      const rooted = rootTurnId === undefined ? item : { ...item, rootTurnId }
-      insertItem(itemPosition, nestedParentId === undefined ? rooted : { ...rooted, parentId: nestedParentId })
-    }
+    insertUnit(unit, nestedParentId)
   }
+  for (const unit of cancellation.units) applyUnit(unit)
   if (itemsCloned) knownIndexCache.set(items, known)
   const base =
     entriesCloned || blocksCloned || itemsCloned ? { ...projectedModel, entries, blocks, items } : projectedModel
   return updateExecutionOutcomes(base, units, [], writtenToolIds, parentId)
 }
 
-const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
-  if (keys.length === 0) return model
-  model = updateExecutionOutcomes(model, [], keys, new Set())
-  const removedKeys = new Set(keys)
+interface RemovedUnits {
+  readonly positions: ReadonlySet<number>
+  readonly entryIndexes: ReadonlySet<number>
+  readonly blockIndexes: ReadonlySet<number>
+  readonly rowKeys: ReadonlySet<string>
+}
+
+const removedUnits = (model: Model, keys: ReadonlyArray<string>): RemovedUnits => {
   const known = knownIndexesFor(model.items.filter(isTranscriptItem))
   const removedPositions = new Set<number>()
   const removedEntryIndexes = new Set<number>()
   const removedBlockIndexes = new Set<number>()
   const removedRowKeys = new Set<string>()
-  for (const key of removedKeys) {
+  for (const key of keys) {
     const position = known.get(key)
     if (position === undefined) continue
     const item = model.items[position]
@@ -326,21 +343,37 @@ const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
       if (block?._tag === "ToolCall") removedRowKeys.add(`tool:${block.id}`)
     }
   }
-  if (removedPositions.size === 0) return model
+  return {
+    positions: removedPositions,
+    entryIndexes: removedEntryIndexes,
+    blockIndexes: removedBlockIndexes,
+    rowKeys: removedRowKeys,
+  }
+}
+
+const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
+  if (keys.length === 0) return model
+  const updatedModel = updateExecutionOutcomes(model, [], keys, new Set())
+  const removed = removedUnits(updatedModel, keys)
+  const removedPositions = removed.positions
+  const removedEntryIndexes = removed.entryIndexes
+  const removedBlockIndexes = removed.blockIndexes
+  const removedRowKeys = removed.rowKeys
+  if (removedPositions.size === 0) return updatedModel
   const entryIndexes = new Map<number, number>()
-  const entries = model.entries.filter((_, index) => {
+  const entries = updatedModel.entries.filter((_, index) => {
     if (removedEntryIndexes.has(index)) return false
     entryIndexes.set(index, entryIndexes.size)
     return true
   })
   const blockIndexes = new Map<number, number>()
-  const blocks = model.blocks.filter((_, index) => {
+  const blocks = updatedModel.blocks.filter((_, index) => {
     if (removedBlockIndexes.has(index)) return false
     blockIndexes.set(index, blockIndexes.size)
     return true
   })
   const items: Array<TranscriptItem> = []
-  for (const [position, candidate] of model.items.entries()) {
+  for (const [position, candidate] of updatedModel.items.entries()) {
     if (!isTranscriptItem(candidate)) continue
     const item = candidate
     if (removedPositions.has(position)) continue
@@ -348,15 +381,15 @@ const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
     if (index === undefined) continue
     items.push(index === item.index ? item : { ...item, index })
   }
-  const expandedRowKeys = model.expandedRowKeys.filter((key) => !removedRowKeys.has(key))
+  const expandedRowKeys = updatedModel.expandedRowKeys.filter((key) => !removedRowKeys.has(key))
   const detailSelection =
-    model.detailSelection === undefined || !removedRowKeys.has(model.detailSelection)
-      ? model.detailSelection
+    updatedModel.detailSelection === undefined || !removedRowKeys.has(updatedModel.detailSelection)
+      ? updatedModel.detailSelection
       : undefined
   return {
-    ...model,
-    entries: removedEntryIndexes.size === 0 ? model.entries : entries,
-    blocks: removedBlockIndexes.size === 0 ? model.blocks : blocks,
+    ...updatedModel,
+    entries: removedEntryIndexes.size === 0 ? updatedModel.entries : entries,
+    blocks: removedBlockIndexes.size === 0 ? updatedModel.blocks : blocks,
     items,
     expandedRowKeys,
     detailSelection,

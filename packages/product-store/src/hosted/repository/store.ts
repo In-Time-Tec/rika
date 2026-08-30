@@ -8,11 +8,10 @@ import {
   rikaHostedGitIdentities,
   rikaHostedProjectRepositories,
   rikaHostedProjects,
-  rikaHostedRepositoryPublicationAudit,
   rikaHostedRepositoryPublications,
-  rikaHostedThreads,
   rikaHostedWorkspacePreparations,
 } from "../../database/schema/product"
+import { PublicationRows } from "./publication-rows"
 
 export type PublicationState = "approved" | "pushing" | "pushed" | "completed" | "failed" | "unknown"
 export type JsonObject = Readonly<Record<string, Schema.Json>>
@@ -141,67 +140,10 @@ const database =
   (message: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.mapError(() => failure("database", message)))
-const publicationFields = {
-  id: rikaHostedRepositoryPublications.id,
-  idempotencyKey: rikaHostedRepositoryPublications.idempotencyKey,
-  actor: sql<Schema.Json>`${rikaHostedRepositoryPublications.actor}`,
-  ownerId: rikaHostedRepositoryPublications.ownerId,
-  threadId: rikaHostedRepositoryPublications.threadId,
-  projectId: rikaHostedRepositoryPublications.projectId,
-  repositoryId: rikaHostedRepositoryPublications.repositoryId,
-  assignmentId: rikaHostedRepositoryPublications.assignmentId,
-  assignmentGeneration: sql<FencingGeneration>`${rikaHostedRepositoryPublications.assignmentGeneration}::text`,
-  leaseEpoch: sql<AssignmentLeaseEpoch>`${rikaHostedRepositoryPublications.leaseEpoch}::text`,
-  workspaceId: rikaHostedRepositoryPublications.workspaceId,
-  authorizationCheckpointId: rikaHostedRepositoryPublications.authorizationCheckpointId,
-  authorizationDigest: rikaHostedRepositoryPublications.authorizationDigest,
-  sourceBranch: rikaHostedRepositoryPublications.sourceBranch,
-  sourceRef: rikaHostedRepositoryPublications.sourceRef,
-  sourceCommitSha: rikaHostedRepositoryPublications.sourceCommitSha,
-  targetRef: rikaHostedRepositoryPublications.targetRef,
-  targetCommitSha: rikaHostedRepositoryPublications.targetCommitSha,
-  targetProtected: rikaHostedRepositoryPublications.targetProtected,
-  title: rikaHostedRepositoryPublications.pullRequestTitle,
-  body: rikaHostedRepositoryPublications.pullRequestBody,
-  state: rikaHostedRepositoryPublications.state,
-  pushResult: sql<object | null>`${rikaHostedRepositoryPublications.pushResult}`,
-  pullRequestResult: sql<object | null>`${rikaHostedRepositoryPublications.pullRequestResult}`,
-}
-const authority = (p: Publication) => ({
-  ownerId: p.ownerId,
-  threadId: p.threadId,
-  projectId: p.projectId,
-  repositoryId: p.repositoryId,
-  sourceBranch: p.sourceBranch,
-  sourceRef: p.sourceRef,
-  sourceCommitSha: p.sourceCommitSha,
-  targetRef: p.targetRef,
-  targetCommitSha: p.targetCommitSha,
-  targetProtected: p.targetProtected,
-})
-const fence = (p: Publication) => ({
-  assignmentId: p.assignmentId,
-  assignmentGeneration: p.assignmentGeneration,
-  leaseEpoch: p.leaseEpoch,
-  workspaceId: p.workspaceId,
-  authorizationCheckpointId: p.authorizationCheckpointId,
-  authorizationDigest: p.authorizationDigest,
-})
-const audit = (tx: PgDrizzle.EffectPgDatabase, p: Publication, action: string, result: JsonObject) =>
-  tx.insert(rikaHostedRepositoryPublicationAudit).values({
-    publicationId: p.id,
-    ownerId: p.ownerId,
-    threadId: p.threadId,
-    actor: p.actor,
-    action,
-    authority: authority(p),
-    fence: fence(p),
-    result,
-  })
-
 const make = Effect.gen(function* () {
   yield* PgClient.PgClient
   const db = yield* PgDrizzle.makeWithDefaults()
+  const publicationFields = PublicationRows.fields
   const loadBinding: RepositoryStoreService["loadBinding"] = (ownerId, projectId) =>
     db
       .select({
@@ -292,78 +234,7 @@ const make = Effect.gen(function* () {
         }),
       )
       .pipe(database("Could not persist the authorized Project repository"))
-  const findPublication: RepositoryStoreService["findPublication"] = (ownerId, threadId, idempotencyKey) =>
-    db
-      .select(publicationFields)
-      .from(rikaHostedRepositoryPublications)
-      .where(
-        and(
-          eq(rikaHostedRepositoryPublications.ownerId, ownerId),
-          eq(rikaHostedRepositoryPublications.threadId, threadId),
-          eq(rikaHostedRepositoryPublications.idempotencyKey, idempotencyKey),
-        ),
-      )
-      .pipe(
-        database("Could not inspect the publication approval"),
-        Effect.map((rows) => rows[0]),
-      )
-  const loadPublicationFence: RepositoryStoreService["loadPublicationFence"] = (ownerId, threadId) =>
-    db
-      .select({
-        projectId: rikaHostedThreads.projectId,
-        repositoryId: rikaHostedProjectRepositories.repositoryId,
-        checkoutProjectId: sql<string>`${rikaHostedExecutorAssignments.checkout} ->> 'projectId'`,
-        assignmentId: rikaHostedExecutorAssignments.id,
-        assignmentGeneration: sql<FencingGeneration>`${rikaHostedExecutorAssignments.generation}::text`,
-        leaseEpoch: sql<AssignmentLeaseEpoch>`${rikaHostedExecutorAssignments.leaseEpoch}::text`,
-        workspaceId: rikaHostedExecutorAssignments.workspaceId,
-      })
-      .from(rikaHostedThreads)
-      .innerJoin(
-        rikaHostedExecutorAssignments,
-        and(
-          eq(rikaHostedExecutorAssignments.threadId, rikaHostedThreads.id),
-          eq(rikaHostedExecutorAssignments.ownerId, rikaHostedThreads.ownerId),
-        ),
-      )
-      .innerJoin(
-        rikaHostedWorkspacePreparations,
-        and(
-          eq(rikaHostedWorkspacePreparations.assignmentId, rikaHostedExecutorAssignments.id),
-          eq(rikaHostedWorkspacePreparations.ownerId, rikaHostedExecutorAssignments.ownerId),
-          eq(rikaHostedWorkspacePreparations.generation, rikaHostedExecutorAssignments.generation),
-          eq(rikaHostedWorkspacePreparations.workspaceId, rikaHostedExecutorAssignments.workspaceId),
-          eq(rikaHostedWorkspacePreparations.leaseEpoch, rikaHostedExecutorAssignments.leaseEpoch),
-          eq(rikaHostedWorkspacePreparations.state, "ready"),
-        ),
-      )
-      .innerJoin(
-        rikaHostedProjectRepositories,
-        and(
-          eq(rikaHostedProjectRepositories.projectId, rikaHostedThreads.projectId),
-          eq(rikaHostedProjectRepositories.ownerId, rikaHostedThreads.ownerId),
-        ),
-      )
-      .where(
-        and(
-          eq(rikaHostedThreads.id, threadId),
-          eq(rikaHostedThreads.ownerId, ownerId),
-          eq(rikaHostedThreads.executorKind, "orb"),
-          eq(rikaHostedExecutorAssignments.lifecycle, "active"),
-          gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql`clock_timestamp()`),
-          sql`${rikaHostedExecutorAssignments.checkout} ->> 'ownerId' = ${rikaHostedThreads.ownerId}`,
-          sql`${rikaHostedExecutorAssignments.checkout} ->> 'repositoryId' = ${rikaHostedProjectRepositories.repositoryId}`,
-        ),
-      )
-      .pipe(
-        database("Could not load the publication fence"),
-        Effect.map((rows) => {
-          const row = rows[0]
-          return row === undefined || row.projectId === null || row.leaseEpoch === null
-            ? undefined
-            : { ...row, projectId: row.projectId, leaseEpoch: row.leaseEpoch }
-        }),
-      )
+  const { findPublication, loadPublicationFence } = PublicationRows.queries(db, failure)
   const createPublication: RepositoryStoreService["createPublication"] = (input) =>
     db
       .transaction((tx) =>
@@ -441,16 +312,7 @@ const make = Effect.gen(function* () {
           const created = rows[0]
           if (created === undefined)
             return yield* failure("stale-fence", "Publication assignment changed before approval")
-          yield* tx.insert(rikaHostedRepositoryPublicationAudit).values({
-            publicationId: created.id,
-            ownerId: created.ownerId,
-            threadId: created.threadId,
-            actor: created.actor,
-            action: "approved",
-            authority: input.authority,
-            fence: input.fence,
-            result: input.auditResult,
-          })
+          yield* PublicationRows.auditApproval(tx, created, input.authority, input.fence, input.auditResult)
           return created
         }),
       )
@@ -527,7 +389,7 @@ const make = Effect.gen(function* () {
           const p = rows[0]
           if (p === undefined)
             return yield* failure("authorization", "Branch push approval is stale or does not match this operation")
-          yield* audit(tx, p, "branch-push-credential-authorized", {
+          yield* PublicationRows.audit(tx, p, "branch-push-credential-authorized", {
             purpose: "branch-push",
             permissions: { contents: "write" },
           })
@@ -541,26 +403,7 @@ const make = Effect.gen(function* () {
             : failure("database", "Could not claim the branch push approval"),
         ),
       )
-  const failCredential: RepositoryStoreService["failCredential"] = (p) =>
-    db
-      .transaction((tx) =>
-        Effect.gen(function* () {
-          const rows = yield* tx
-            .update(rikaHostedRepositoryPublications)
-            .set({ state: "failed", updatedAt: sql`transaction_timestamp()` })
-            .where(
-              and(
-                eq(rikaHostedRepositoryPublications.id, p.id),
-                eq(rikaHostedRepositoryPublications.state, "pushing"),
-                eq(rikaHostedRepositoryPublications.authorizationDigest, p.authorizationDigest),
-              ),
-            )
-            .returning({ id: rikaHostedRepositoryPublications.id })
-          if (rows[0] !== undefined)
-            yield* audit(tx, p, "branch-push-credential-failed", { purpose: "branch-push", outcome: "failed" })
-        }),
-      )
-      .pipe(Effect.ignore)
+  const failCredential = PublicationRows.failCredential(db)
   const recordPush: RepositoryStoreService["recordPush"] = (p, result, state) =>
     db
       .transaction((tx) =>
@@ -591,7 +434,7 @@ const make = Effect.gen(function* () {
           let action = "branch-push-failed"
           if (state === "pushed") action = "branch-push-succeeded"
           if (state === "unknown") action = "branch-push-unknown"
-          yield* audit(tx, next, action, result)
+          yield* PublicationRows.audit(tx, next, action, result)
           return next
         }),
       )
@@ -625,7 +468,7 @@ const make = Effect.gen(function* () {
             .returning(publicationFields)
           const next = rows[0]
           if (next === undefined) return yield* failure("authorization", "Pull request result is stale")
-          yield* audit(tx, next, succeeded ? "pull-request-succeeded" : "pull-request-failed", result)
+          yield* PublicationRows.audit(tx, next, succeeded ? "pull-request-succeeded" : "pull-request-failed", result)
           return next
         }),
       )

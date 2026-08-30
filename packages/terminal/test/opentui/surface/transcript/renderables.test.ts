@@ -1,3 +1,4 @@
+import "./window-renderables.fixture"
 import { nonSpaceBounds } from "../../../support/surface/transcript/renderables.fixture"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
@@ -5,12 +6,7 @@ import { Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { tentativeTranscriptContainsMarkdown } from "../../../../src/opentui/surface/transcript/renderables"
-import {
-  boundedTranscriptModel,
-  maxBoundedTranscriptItems,
-  maxMountedTranscriptEntries,
-} from "../../../../src/opentui/rendering/transcript/window"
-import { maxMountedTranscriptRows } from "../../../../src/presentation/transcript/window"
+import { maxMountedTranscriptEntries } from "../../../../src/opentui/rendering/transcript/window"
 import { initial, type Model } from "../../../../src/state/model"
 import { loading, ready } from "../../../../src/state/loadable"
 import { replaceQueue } from "../../../../src/state/queue/model"
@@ -22,15 +18,16 @@ import {
   styledTextValue,
   _streamingShell,
   thread,
-  giantSubagentModel,
-  collapsedSubagentModel,
 } from "../../../support/surface/transcript/pane-geometry.fixture"
 
 test("keeps streamed prose incremental until Markdown syntax appears", () => {
   const prose = "Hello. How are you?\nThis stays incremental."
   expect(tentativeTranscriptContainsMarkdown({ text: prose, sourceLength: "Hello".length })).toBe(false)
   expect(
-    tentativeTranscriptContainsMarkdown({ text: `${prose}\n\n- This is Markdown`, sourceLength: prose.length }),
+    tentativeTranscriptContainsMarkdown({
+      text: `${prose}\n\n- This is Markdown`,
+      sourceLength: prose.length,
+    }),
   ).toBe(true)
 })
 
@@ -45,7 +42,10 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
           turnId: `turn-${index}`,
         }))
         const base: Model = { ...initial("/work", "high"), entries }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
@@ -92,7 +92,10 @@ for (const panel of ["changed", "workspace"] as const) {
                 filePicker: { ...initialModel.filePicker, items: ready(paths) },
               }),
         }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
@@ -173,7 +176,11 @@ for (const width of [80, 50] as const) {
           model = update(model, { _tag: "TurnStarted", turnId: "turn-retry", prompt: "retry" })
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
-          expect(model.entries.at(-1)).toEqual({ role: "user", text: "retry", turnId: "turn-retry" })
+          expect(model.entries.at(-1)).toEqual({
+            role: "user",
+            text: "retry",
+            turnId: "turn-retry",
+          })
           expect(setup.captureCharFrame()).toContain("┃ retry")
         } finally {
           surface.destroy()
@@ -191,7 +198,10 @@ for (const [width, height] of [
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           const state = { ...initial("/workspace", "high"), width, height }
           const capturePhases = Effect.fn("capturePhases")(function* (
@@ -227,7 +237,10 @@ for (const height of [13, 16, 19] as const) {
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width: 60, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update({ ...initial("/workspace", "high"), width: 60, height })
           yield* openTui(() => setup.renderOnce())
@@ -277,9 +290,17 @@ for (const [width, height] of [
           },
           [{ id: "tiny-queue", prompt: "queued 界🙂e\u0301".repeat(10) }],
         )
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         const bounded = (name: string, renderable: { x: number; y: number; width: number; height: number }) => {
-          const bounds = { x: renderable.x, y: renderable.y, width: renderable.width, height: renderable.height }
+          const bounds = {
+            x: renderable.x,
+            y: renderable.y,
+            width: renderable.width,
+            height: renderable.height,
+          }
           expect(renderable.x).toBeGreaterThanOrEqual(0)
           expect(renderable.y).toBeGreaterThanOrEqual(0)
           expect(renderable.x + renderable.width, `${name} horizontal ${JSON.stringify(bounds)}`).toBeLessThanOrEqual(
@@ -352,164 +373,3 @@ for (const [width, height] of [
       }),
     ))
 }
-for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
-  test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-        const entries = Array.from({ length: historySize }, (_, index) => ({
-          role: "assistant" as const,
-          text: `settled answer ${index}`,
-          turnId: `turn-${index}`,
-        }))
-        const base: Model = { ...initial("/work", "high"), entries }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        try {
-          surface.update(base)
-          yield* openTui(() => setup.flush())
-          const state = {
-            get transcriptChildren() {
-              return surface.transcriptDiagnostics().rows
-            },
-          }
-          const mounted = [...state.transcriptChildren]
-          for (let index = 0; index < 2; index += 1)
-            surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
-
-          expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
-          expect(state.transcriptChildren.every((child, index) => child === mounted[index])).toBe(true)
-        } finally {
-          surface.destroy()
-          setup.renderer.destroy()
-        }
-      }),
-    ))
-}
-test("moves the bounded transcript window to older mounted entries and keeps it while typing", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const historySize = maxMountedTranscriptEntries + 300
-      const entries = Array.from({ length: historySize }, (_, index) => ({
-        role: "assistant" as const,
-        text: `answer ${index}`,
-        turnId: `turn-${index}`,
-      }))
-      const items = entries.map((_, index) => ({
-        _tag: "Entry" as const,
-        index,
-        id: `answer-${index}`,
-        turnId: `turn-${index}`,
-      }))
-      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(base)
-        yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
-        yield* openTui(() => setup.flush())
-        surface.transcriptScroll.scrollTo(0)
-        setup.renderer.requestRender()
-        yield* openTui(() => setup.flush())
-        const firstBefore = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
-        setup.mockInput.pressKey("\x1b[5~")
-        yield* openTui(() => setup.flush())
-        const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
-        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
-        expect(firstBefore).toBe(300)
-        expect(firstAfter).toBeLessThan(300)
-        expect(firstAfter).toBeGreaterThan(200)
-        expect(surface.transcriptDiagnostics().rows.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
-        surface.update({ ...base, input: "next", cursor: 4 })
-        expect(surface.transcriptDiagnostics().windowEnd).toBe(historySize - 100)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-test("bounded transcript keeps visible entries when a collapsed subagent overflows the entry budget", () => {
-  const model = collapsedSubagentModel(30, maxMountedTranscriptEntries + 60)
-  const bounded = boundedTranscriptModel(model)
-  expect(bounded.items.length).toBeLessThanOrEqual(maxBoundedTranscriptItems)
-  expect(bounded.items.some((item) => item._tag === "Entry")).toBe(true)
-})
-test("keeps the older transcript visible while a collapsed subagent streams children", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(collapsedSubagentModel(30, 150))
-        yield* openTui(() => setup.flush())
-        expect(setup.captureCharFrame()).toContain("answer 29")
-
-        surface.update(collapsedSubagentModel(30, 260))
-        yield* openTui(() => setup.flush())
-        const frame = setup.captureCharFrame()
-        expect(frame).toContain("Subagent working")
-        expect(frame).toContain("answer 29")
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-test("keeps mounted renderables bounded inside one giant expanded subagent tree", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const model = giantSubagentModel(300)
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        surface.transcriptScrollbar.scrollPosition = Math.max(0, surface.transcriptScroll.scrollTop - 1)
-        yield* openTui(() => setup.flush())
-        const state = {
-          get transcriptChildren() {
-            return surface.transcriptDiagnostics().rows
-          },
-        }
-        expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
-        expect(state.transcriptChildren.length).toBeGreaterThan(0)
-        const frame = setup.captureCharFrame()
-        expect(frame).toContain("├ ✓ $ cmd-299")
-        expect(frame).not.toContain("cmd-100 ")
-        expect(boundedTranscriptModel(model).items.length).toBeLessThanOrEqual(maxMountedTranscriptEntries)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-test("keeps the bounded suffix of an oversized tool tree when a trailing message arrives", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const giant = { ...giantSubagentModel(300), scrollFollow: true }
-      const tail = { role: "assistant" as const, text: "TRAILING_MESSAGE", turnId: "turn-tail" }
-      const grown: Model = {
-        ...giant,
-        entries: [...giant.entries, tail],
-        items: [...giant.items, { _tag: "Entry", index: giant.entries.length, id: "tail-answer", turnId: "turn-tail" }],
-      }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(giant)
-        yield* openTui(() => setup.flush())
-        expect(setup.captureCharFrame()).toContain("cmd-299")
-
-        surface.update(grown)
-        yield* openTui(() => setup.flush())
-        const frame = setup.captureCharFrame()
-
-        expect(frame).toContain("TRAILING_MESSAGE")
-        expect(frame).toContain("cmd-299")
-        expect(boundedTranscriptModel(grown).items.some((item) => item._tag === "Block")).toBe(true)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))

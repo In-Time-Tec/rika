@@ -2,8 +2,7 @@ import { createHash } from "node:crypto"
 import { Context, Effect, FileSystem, Layer, Path, PlatformError } from "effect"
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as ContextFileSystem from "./file-system"
-import { Diagnostic, Source } from "./resolved"
-import type { Input, Result } from "./resolved"
+import { Diagnostic, Source, type Input, type Result } from "./resolved"
 export type { Input, Result } from "./resolved"
 const maximumReferenceFiles = 1_000
 export type GlobLookup = (
@@ -20,6 +19,32 @@ export class Service extends Context.Service<Service, Interface>()(
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex")
 const globPattern = (value: string) => value.includes("*")
+const targetDirectories = (
+  root: string,
+  targets: ReadonlyArray<string>,
+  path: Path.Path,
+  diagnostics: Array<Diagnostic>,
+  contained: (candidate: string) => boolean,
+): Set<string> => {
+  const directories = new Set([root])
+  for (const target of targets.map((candidate) => path.resolve(root, candidate))) {
+    if (!contained(target)) {
+      diagnostics.push({
+        _tag: "PathOutsideWorkspace",
+        path: target,
+        message: "Target path is outside the Workspace",
+      })
+      continue
+    }
+    let directory = path.dirname(target)
+    while (contained(directory)) {
+      directories.add(directory)
+      if (directory === root) break
+      directory = path.dirname(directory)
+    }
+  }
+  return directories
+}
 
 export const layer = (glob: GlobLookup) =>
   Layer.effect(
@@ -49,26 +74,7 @@ export const layer = (glob: GlobLookup) =>
           return resolved._tag === "Some" && contained(resolved.value)
         })
         const selected = new Map<string, "guidance" | "reference">()
-        const targets = [...(input.targetPaths ?? [])]
-          .map((target) => path.resolve(root, target))
-          .filter((target) => {
-            if (contained(target)) return true
-            diagnostics.push({
-              _tag: "PathOutsideWorkspace",
-              path: target,
-              message: "Target path is outside the Workspace",
-            })
-            return false
-          })
-        const directories = new Set([root])
-        for (const target of targets) {
-          let directory = path.dirname(target)
-          while (contained(directory)) {
-            directories.add(directory)
-            if (directory === root) break
-            directory = path.dirname(directory)
-          }
-        }
+        const directories = targetDirectories(root, input.targetPaths ?? [], path, diagnostics, contained)
         for (const directory of [...directories].toSorted((a, b) => a.length - b.length || a.localeCompare(b))) {
           for (const name of ["AGENTS.md", "AGENT.md", "CLAUDE.md"]) {
             const candidate = path.resolve(directory, name)

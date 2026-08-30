@@ -31,8 +31,8 @@ export class CompletionReporter implements Reporter {
     if (!this.active || this.ended) return
     failExit()
     const sink = Bun.stderr.writer()
-    sink.write(`${this.line("INCOMPLETE", { reason: "process-exit-before-onTestRunEnd" })}\n`)
-    sink.flush()
+    void sink.write(`${this.line("INCOMPLETE", { reason: "process-exit-before-onTestRunEnd" })}\n`)
+    void sink.flush()
   }
 
   onInit(vitest: Vitest): void {

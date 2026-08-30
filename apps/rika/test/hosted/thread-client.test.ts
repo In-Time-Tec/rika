@@ -382,10 +382,11 @@ it.effect("rejects a command response with another durable command identity", ()
           executorKind: "orb",
         }),
       )
-      expect(result).toMatchObject({
-        _tag: "Failure",
-        failure: { kind: "protocol", message: expect.stringContaining("command identity") },
-      })
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.kind).toBe("protocol")
+        expect(result.failure.message).toContain("command identity")
+      }
     }),
   ),
 )

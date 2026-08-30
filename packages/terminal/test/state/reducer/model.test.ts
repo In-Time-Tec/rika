@@ -25,7 +25,10 @@ test("keeps malformed thread titles on one styled picker row", () =>
         ],
         threadSwitcher: { ...base.threadSwitcher, open: true },
       }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+      })
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
@@ -52,8 +55,16 @@ test("keeps every overlay above the composer at 50x12", () =>
         threads: [thread({ id: "thread-2", title: "Release notes", workspace: "/two" })],
       })
       const base = model
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      const capture = Effect.fn("capture")(function* (next: Model, title: string, content: string, composerRow = 7) {
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+      })
+      const capture = Effect.fn("capture")(function* (
+        next: Model,
+        title: string,
+        content: string,
+        composerRow: number = 7,
+      ) {
         model = next
         surface.update(model)
         yield* openTui(() => setup.renderOnce())

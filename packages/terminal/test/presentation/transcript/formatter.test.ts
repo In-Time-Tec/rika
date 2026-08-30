@@ -5,7 +5,7 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
 import { applyRootUnits, applyTurnDelta } from "../../../src/presentation/transcript/formatter"
-import { type Model } from "../../../src/state/model"
+import type { Model } from "../../../src/state/model"
 
 import { Surface } from "../../../src/opentui/surface/service"
 import { maxMountedTranscriptEntries } from "../../../src/opentui/rendering/transcript/window"
@@ -34,7 +34,10 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
           turnId: `turn-${index}`,
         }))
         const base: Model = { ...initial("/work", "high"), entries }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
@@ -81,7 +84,10 @@ for (const panel of ["changed", "workspace"] as const) {
                 filePicker: { ...initialModel.filePicker, items: ready(paths) },
               }),
         }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
@@ -162,7 +168,11 @@ for (const width of [80, 50] as const) {
           model = update(model, { _tag: "TurnStarted", turnId: "turn-retry", prompt: "retry" })
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
-          expect(model.entries.at(-1)).toEqual({ role: "user", text: "retry", turnId: "turn-retry" })
+          expect(model.entries.at(-1)).toEqual({
+            role: "user",
+            text: "retry",
+            turnId: "turn-retry",
+          })
           expect(setup.captureCharFrame()).toContain("┃ retry")
         } finally {
           surface.destroy()
@@ -180,7 +190,10 @@ for (const [width, height] of [
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           const state = { ...initial("/workspace", "high"), width, height }
           const capturePhases = Effect.fn("capturePhases")(function* (
@@ -216,7 +229,10 @@ for (const height of [13, 16, 19] as const) {
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width: 60, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update({ ...initial("/workspace", "high"), width: 60, height })
           yield* openTui(() => setup.renderOnce())
@@ -266,9 +282,17 @@ for (const [width, height] of [
           },
           [{ id: "tiny-queue", prompt: "queued 界🙂e\u0301".repeat(10) }],
         )
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         const bounded = (name: string, renderable: { x: number; y: number; width: number; height: number }) => {
-          const bounds = { x: renderable.x, y: renderable.y, width: renderable.width, height: renderable.height }
+          const bounds = {
+            x: renderable.x,
+            y: renderable.y,
+            width: renderable.width,
+            height: renderable.height,
+          }
           expect(renderable.x).toBeGreaterThanOrEqual(0)
           expect(renderable.y).toBeGreaterThanOrEqual(0)
           expect(renderable.x + renderable.width, `${name} horizontal ${JSON.stringify(bounds)}`).toBeLessThanOrEqual(
@@ -372,7 +396,10 @@ test("updates an existing streaming transcript header when it becomes expandable
         const before = records().get("tool-child:streaming:header")!
         expect(before.selectable).toBe(true)
 
-        model = { ...model, blocks: [model.blocks[0]!, streamingShell("streaming", "late-output")] }
+        model = {
+          ...model,
+          blocks: [model.blocks[0]!, streamingShell("streaming", "late-output")],
+        }
         surface.update(model)
         yield* openTui(() => setup.flush())
         const after = records().get("tool-child:streaming:header")!
@@ -393,9 +420,16 @@ test("shows recorded shell output when the same transcript unit settles", () =>
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       const id = "recorded-shell-turn"
-      const running = TranscriptRecordedShell.recordedShellProjection({ id, command: "printf done", status: "running" })
+      const running = TranscriptRecordedShell.recordedShellProjection({
+        id,
+        command: "printf done",
+        status: "running",
+      })
       let model = applyRootUnits(initial("/work", "high"), id, running.units)
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+      })
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())

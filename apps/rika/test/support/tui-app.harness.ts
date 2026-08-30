@@ -1,7 +1,5 @@
 import * as InteractiveSession from "@rika/product/interactive-session"
 import * as ProductOperation from "@rika/product/product-operation"
-import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
-import * as TranscriptPage from "@rika/product/transcript-page"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { productLayer, Service } from "@rika/product/product-operation-service"
@@ -28,15 +26,8 @@ import {
 } from "effect"
 import { interactiveTui } from "../../src/interactive/process/lifecycle/loop"
 import * as TuiRepositories from "./tui-repositories.harness"
-import type { HistoricalTranscriptFixture, TuiAppQueue } from "./tui-repositories.harness"
-import type { Lane, LaneModels, Profile, ProviderHttpEnvelopeCounts } from "./tui-model.fixture"
 import { tuiToolRuntimeLayer } from "./tui-tool-runtime.harness"
-import {
-  backendLayer,
-  kernelPoolFor,
-  prepareTuiRuntimeState,
-  type RuntimeStatePreparation,
-} from "./tui-backend.harness"
+import { backendLayer, kernelPoolFor, prepareTuiRuntimeState } from "./tui-backend.harness"
 import * as TuiModel from "./tui-model.fixture"
 
 type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
@@ -49,98 +40,27 @@ type InteractiveConnectionState = InteractiveConnection["initialState"]
  */
 const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking"] as const
 
-type SessionEvent = Parameters<Parameters<InteractiveSession.InteractiveSession["events"]>[0]>[0]
-
-export interface TuiAppOptions {
-  readonly script?: Lane["steps"]
-  readonly initialPrompt?: ReadonlyArray<string>
-  readonly lanes?: ReadonlyArray<Lane>
-  readonly subagents?: ExecutionRouteSnapshot.ExecutionRouteSnapshot["subagents"]
-  readonly root?: string
-  readonly initialThreadId?: string
-  readonly initialThreadSelected?: boolean
-  readonly idStart?: number
-  readonly inspectTranscript?: boolean
-  readonly workspaceFiles?: Readonly<Record<string, string>>
-  readonly width?: number
-  readonly height?: number
-  readonly initialConnectionState?: InteractiveConnectionState
-  readonly holdSubmissionAdmission?: Deferred.Deferred<void>
-  readonly holdCancellation?: Deferred.Deferred<void>
-  readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
-  readonly duplicateInteractiveEvent?: (event: SessionEvent) => boolean
-  readonly submissionFailure?: (attempt: number) => string | undefined
-  readonly newOrbThreadFailure?: string
-  readonly historicalTranscriptFixture?: HistoricalTranscriptFixture
-  readonly prepareRuntimeState?: RuntimeStatePreparation
-  readonly modeConfiguration?: ModeConfiguration
-}
-
-export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
-
-export interface TuiApp {
-  readonly workspace: string
-  readonly type: (text: string) => ReturnType<typeof Effect.runPromise<void, never>>
-  readonly paste: (text: string) => void
-  readonly pressEnter: () => void
-  readonly pressEscape: () => void
-  readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
-  readonly pressKey: (key: string, modifiers?: { ctrl?: boolean; alt?: boolean; shift?: boolean }) => void
-  readonly pressPageUp: Effect.Effect<void>
-  readonly pressPageDown: Effect.Effect<void>
-  readonly clickText: (text: string) => Effect.Effect<void>
-  readonly clickComposer: Effect.Effect<void>
-  readonly submit: (prompt: string) => Effect.Effect<void>
-  readonly frame: () => string
-  readonly nextFrame: Effect.Effect<string>
-  readonly spans: () => CapturedSpans
-  readonly thread: (threadId: string) => Effect.Effect<Thread.Thread | undefined, ThreadRepository.RepositoryError>
-  readonly waitThread: (
-    threadId: string,
-    predicate: (thread: Thread.Thread) => boolean,
-    timeoutMillis?: number,
-  ) => Effect.Effect<Thread.Thread, ThreadRepository.RepositoryError>
-  readonly transcript: (
-    turnId: Turn.TurnId,
-  ) => Effect.Effect<TranscriptPage.Projection | undefined, TranscriptRepository.RepositoryError>
-  readonly queue: TuiAppQueue
-  readonly waitTranscript: (
-    turnId: Turn.TurnId,
-    predicate: (projection: TranscriptPage.Projection) => boolean,
-    timeoutMillis?: number,
-  ) => Effect.Effect<TranscriptPage.Projection, TranscriptRepository.RepositoryError>
-  readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
-  readonly waitFrameMatch: (predicate: (frame: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
-  readonly waitCost: Effect.Effect<string>
-  readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
-  readonly waitTerminalTitle: (predicate: (title: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
-  readonly settled: Effect.Effect<string>
-  readonly reload: Effect.Effect<void>
-  readonly waitModelRequests: (count: number) => Effect.Effect<void>
-  readonly waitSubmissionAdmissions: (count: number) => Effect.Effect<void>
-  readonly setConnectionState: (state: InteractiveConnectionState) => Effect.Effect<void>
-  readonly modelRequestCount: Effect.Effect<number>
-  readonly submissionAttempts: Effect.Effect<number>
-  readonly modelProviderHttpEnvelopeCounts: Effect.Effect<ProviderHttpEnvelopeCounts>
-  readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
-  readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>
-  readonly close: () => void
-  readonly done: Effect.Effect<void>
-  readonly quit: Effect.Effect<void>
-}
+export type { CapturedSpans, TuiApp, TuiAppOptions } from "./tui-app.capabilities"
+import type { TuiApp, TuiAppOptions } from "./tui-app.capabilities"
 
 export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
   Effect.runPromise(
     Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context)))),
   )
 
+const rootDirectory = (fileSystem: FileSystem.FileSystem, temporaryDirectory: string, root: string | undefined) =>
+  root === undefined
+    ? fileSystem.makeTempDirectoryScoped({ directory: temporaryDirectory, prefix: "rika-tui-app-" })
+    : Effect.succeed(root)
+
+const configuredModes = (configuration: ModeConfiguration | undefined) =>
+  configuration === undefined ? ["medium"] : Object.keys(configuration.routes)
+
 const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
-  const root =
-    options.root ??
-    (yield* fileSystem.makeTempDirectoryScoped({ directory: temporaryDirectory, prefix: "rika-tui-app-" }))
+  const root = yield* rootDirectory(fileSystem, temporaryDirectory, options.root)
   const workspace = path.join(root, "workspace")
   const resourceScope = yield* Scope.make()
   /**
@@ -386,7 +306,9 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const app: TuiApp = {
     workspace,
     type: (text) => setup.mockInput.typeText(text),
-    paste: (text) => setup.mockInput.pasteBracketedText(text),
+    paste: (text) => {
+      void setup.mockInput.pasteBracketedText(text)
+    },
     pressEnter: () => setup.mockInput.pressEnter(),
     pressEscape: () => setup.mockInput.pressEscape(),
     pressArrow: (direction) => setup.mockInput.pressArrow(direction),
@@ -481,7 +403,13 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     modelToolNamesFor: (profile) =>
       laneModels
         .requestsFor(profile)
-        .pipe(Effect.map((requests) => requests.map((request) => request.tools.map((tool) => tool.name).toSorted()))),
+        .pipe(
+          Effect.map((requests) =>
+            requests.map(
+              (request): ReadonlyArray<string> => request.tools.map((tool): string => String(tool.name)).toSorted(),
+            ),
+          ),
+        ),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {
@@ -492,8 +420,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),
   }
-  const readyModes =
-    options.modeConfiguration === undefined ? ["medium"] : Object.keys(options.modeConfiguration.routes)
+  const readyModes = configuredModes(options.modeConfiguration)
   yield* app.waitFrameMatch((captured) => readyModes.some((mode) => captured.includes(mode)))
   if (options.historicalTranscriptFixture !== undefined) {
     const current = session ?? (yield* Effect.die("TUI session is unavailable"))

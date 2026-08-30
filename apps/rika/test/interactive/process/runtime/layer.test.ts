@@ -45,7 +45,7 @@ const kernelOptions = (roots: { home: string; workspace: string; dataRoot: strin
 })
 
 const cellRequest = (code: string, sessionId: string): ToolExecutor.Request => {
-  const call = Response.makePart("tool-call", {
+  const call = Response.toolCallPart<string, unknown>({
     id: "call-1",
     name: CellTool.name,
     params: { code },

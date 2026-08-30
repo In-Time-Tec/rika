@@ -1,5 +1,6 @@
+import "./content-sidebar.fixture"
 import { nonSpaceBounds } from "./content.fixture"
-import { createTestRenderer, ManualClock } from "@opentui/core/testing"
+import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import stringWidth from "string-width"
@@ -30,7 +31,10 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
           turnId: `turn-${index}`,
         }))
         const base: Model = { ...initial("/work", "high"), entries }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update(base)
           yield* openTui(() => setup.flush())
@@ -79,7 +83,10 @@ for (const panel of ["changed", "workspace"] as const) {
                   filePicker: { ...initialModel.filePicker, items: ready(paths) },
                 }),
           }
-          const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+          const surface = new Surface(setup.renderer, {
+            key: () => undefined,
+            resize: () => undefined,
+          })
           try {
             surface.update(base)
             yield* openTui(() => setup.flush())
@@ -162,7 +169,11 @@ for (const width of [80, 50] as const) {
           model = update(model, { _tag: "TurnStarted", turnId: "turn-retry", prompt: "retry" })
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
-          expect(model.entries.at(-1)).toEqual({ role: "user", text: "retry", turnId: "turn-retry" })
+          expect(model.entries.at(-1)).toEqual({
+            role: "user",
+            text: "retry",
+            turnId: "turn-retry",
+          })
           expect(setup.captureCharFrame()).toContain("┃ retry")
         } finally {
           surface.destroy()
@@ -180,7 +191,10 @@ for (const [width, height] of [
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           const state = { ...initial("/workspace", "high"), width, height }
           const capturePhases = Effect.fn("capturePhases")(function* (
@@ -216,7 +230,10 @@ for (const height of [13, 16, 19] as const) {
     Effect.runPromise(
       Effect.gen(function* () {
         const setup = yield* openTui(() => createTestRenderer({ width: 60, height }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         try {
           surface.update({ ...initial("/workspace", "high"), width: 60, height })
           yield* openTui(() => setup.renderOnce())
@@ -266,9 +283,17 @@ for (const [width, height] of [
           },
           [{ id: "tiny-queue", prompt: "queued 界🙂e\u0301".repeat(10) }],
         )
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        const surface = new Surface(setup.renderer, {
+          key: () => undefined,
+          resize: () => undefined,
+        })
         const bounded = (name: string, renderable: { x: number; y: number; width: number; height: number }) => {
-          const bounds = { x: renderable.x, y: renderable.y, width: renderable.width, height: renderable.height }
+          const bounds = {
+            x: renderable.x,
+            y: renderable.y,
+            width: renderable.width,
+            height: renderable.height,
+          }
           expect(renderable.x).toBeGreaterThanOrEqual(0)
           expect(renderable.y).toBeGreaterThanOrEqual(0)
           expect(renderable.x + renderable.width, `${name} horizontal ${JSON.stringify(bounds)}`).toBeLessThanOrEqual(
@@ -341,169 +366,3 @@ for (const [width, height] of [
       }),
     ))
 }
-for (const panel of ["changed", "workspace"] as const) {
-  test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
-        const paths = Array.from(
-          { length: 10_000 },
-          (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
-        )
-        const initialModel = initial("/work", "high")
-        const base: Model = {
-          ...initialModel,
-          width: 120,
-          height: 40,
-          entries: [{ role: "assistant", text: "settled response" }],
-          ...(panel === "changed"
-            ? {
-                changedFilesOpen: true,
-                changedFiles: ready(paths.map((path) => ({ path, status: "M", added: 1, removed: 0 }))),
-              }
-            : {
-                workspaceFilesOpen: true,
-                filePicker: { ...initialModel.filePicker, items: ready(paths) },
-              }),
-        }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        try {
-          surface.update(base)
-          yield* openTui(() => setup.flush())
-          const state = {
-            get changedRows() {
-              return surface.sidebarRows()
-            },
-            get transcriptChildren() {
-              return surface.transcriptDiagnostics().rows
-            },
-          }
-          const sidebarRows = state.changedRows
-          expect(surface.changedFilesBox.scrollHeight).toBe(sidebarRows.length)
-          expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
-            surface.changedFilesBox.viewport.height + 1,
-          )
-          const transcriptChildren = [...state.transcriptChildren]
-          for (let index = 0; index < 20; index += 1)
-            surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
-
-          expect(state.changedRows).toBe(sidebarRows)
-          expect(state.transcriptChildren.every((child, index) => child === transcriptChildren[index])).toBe(true)
-        } finally {
-          surface.destroy()
-          setup.renderer.destroy()
-        }
-      }),
-    ))
-}
-test(
-  "rebuilds the large changed-files sidebar per set change, not per streaming frame",
-  () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
-        const paths = Array.from(
-          { length: 10_000 },
-          (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
-        )
-        const files = (revision: number) =>
-          ready(paths.map((path) => ({ path, status: "M", added: revision, removed: 0 })))
-        const base: Model = {
-          ...initial("/work", "high"),
-          width: 120,
-          height: 40,
-          changedFilesOpen: true,
-          changedFiles: files(1),
-        }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        try {
-          surface.update(base)
-          yield* openTui(() => setup.flush())
-          const state = {
-            get changedRows() {
-              return surface.sidebarRows()
-            },
-          }
-          const boundedWindow = () =>
-            expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
-              surface.changedFilesBox.viewport.height + 1,
-            )
-          boundedWindow()
-          let rebuilds = 0
-          let previousRows = state.changedRows
-          let model = base
-          for (let tick = 0; tick < 4; tick += 1) {
-            for (let frame = 0; frame < 5; frame += 1) {
-              model = Object.assign({}, model, {
-                entries: [{ role: "assistant", text: `streaming ${tick}:${frame}` }],
-              })
-              surface.update(model)
-              if (state.changedRows !== previousRows) {
-                rebuilds += 1
-                previousRows = state.changedRows
-              }
-            }
-            model = { ...model, changedFiles: files(tick + 2) }
-            surface.update(model)
-            if (state.changedRows !== previousRows) {
-              rebuilds += 1
-              previousRows = state.changedRows
-            }
-            boundedWindow()
-          }
-          expect(rebuilds).toBe(4)
-          expect(surface.changedFilesBox.scrollHeight).toBe(state.changedRows.length)
-        } finally {
-          surface.destroy()
-          setup.renderer.destroy()
-        }
-      }),
-    ),
-  30_000,
-)
-test("expands the queue box to fit a wrapped single-line queued prompt joined to the composer", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 40, height: 24 }))
-      let model: Model = { ...initial("/work", "high"), width: 40, height: 24 }
-      model = replaceQueue(model, [{ id: "q1", prompt: "x".repeat(120) }])
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(model)
-        yield* openTui(() => setup.flush())
-        expect(surface.queueBox.visible).toBe(true)
-        expect(surface.queueBox.height).toBeGreaterThanOrEqual(6)
-        expect(surface.queueRightJoint.top).toBe(model.height - surface.inputBox.height)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
-test("keeps the welcome orb moving without dispatching global ViewState ticks", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const clock = new ManualClock()
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24, clock }))
-      let globalTicks = 0
-      const surface = new Surface(
-        setup.renderer,
-        { key: () => undefined, resize: () => undefined, animationTick: () => (globalTicks += 1) },
-        { clock },
-      )
-      try {
-        surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
-        yield* openTui(() => setup.renderOnce())
-        const firstPhase = surface.animationDiagnostics().welcomePhase
-        clock.advance(100)
-        yield* openTui(() => setup.renderOnce())
-        expect(setup.captureCharFrame()).toContain("Welcome to Rika")
-        expect(surface.animationDiagnostics().welcomePhase).toBeGreaterThan(firstPhase)
-        expect(globalTicks).toBe(0)
-        expect(setup.renderer.isRunning).toBe(false)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))

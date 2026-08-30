@@ -71,7 +71,7 @@ describe("OpenAI credential state", () => {
       expect(refreshes).toBe(1)
       expect(new Set(values.map((value) => value.generation)).size).toBe(1)
       const current = yield* service.refreshRejected("stale-generation")
-      expect(current.generation).toBe(values[0]!.generation)
+      expect(current.generation).toBe(values[0].generation)
       expect(refreshes).toBe(1)
     }).pipe(provideLayer(dependencies(store.layer, http)))
   })

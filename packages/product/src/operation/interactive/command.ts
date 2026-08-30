@@ -5,7 +5,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { Effect, Function, Schema } from "effect"
 import { ModeId } from "@rika/configuration/behavior-mode"
 import { OperationUnavailable } from "../contract/product"
-import { type InteractiveSession } from "./session"
+import type { InteractiveSession } from "./session"
 
 const Mode = ModeId
 
@@ -107,6 +107,14 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, invocation: 
       return session.approveAuthorization(command.turnId, command.authorizationId, command.checkpoint)
     case "DenyAuthorization":
       return session.denyAuthorization(command.turnId, command.authorizationId, command.checkpoint)
+    default:
+      return executeSessionCommand(session, invocation)
+  }
+}
+
+const executeSessionCommand = (session: InteractiveSession, invocation: InteractiveInvocation) => {
+  const command = invocation.command
+  switch (command._tag) {
     case "InterruptAndSend":
       return session.interruptAndSend(command.prompt, command.targetTurnId, invocation.turnId)
     case "Cancel":
@@ -127,6 +135,8 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, invocation: 
       return session.previewThread(command.threadId, command.requestId)
     case "ReopenThread":
       return session.reopenThread
+    default:
+      return Effect.die(new Error("Command was dispatched to the wrong command group"))
   }
 }
 

@@ -26,7 +26,7 @@ const ReadPageInput = Schema.Struct({
   forceRefetch: Schema.optionalKey(Schema.Boolean),
 })
 
-const run = (request: typeof CodingToolRuntime.Request.Type) =>
+const run = (request: CodingToolRuntime.Request) =>
   Effect.flatMap(CodingToolRuntime.Service, (runtime) => runtime.run(request))
 
 const page = (result: CodingToolResult.Result) => ({ text: result.text, truncated: result.truncated })

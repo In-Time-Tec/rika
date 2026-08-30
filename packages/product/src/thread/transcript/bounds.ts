@@ -87,7 +87,7 @@ const boundTranscriptEntriesImpl = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,
   encodeJson: JsonEncoder,
 ): BoundedTranscriptEntries => {
-  let entries = sourceEntries
+  const entries = sourceEntries
   let boundedStart = entries.length
   let boundedBytes = 0
   while (boundedStart > 0) {

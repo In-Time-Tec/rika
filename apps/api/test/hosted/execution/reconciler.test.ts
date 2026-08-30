@@ -5,7 +5,6 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as TranscriptStore from "@rika/product/transcript-repository"
 import { Context, Deferred, Effect, Layer } from "effect"
 import {
   HostedExecutionReconciler,
@@ -44,7 +43,7 @@ it.effect("persists terminal execution state independently of transcript project
           }).pipe(Effect.tap((updated) => Deferred.succeed(settled, updated))),
       })
       const transcriptRepository = Context.get(
-        yield* Layer.build(TranscriptStore.memoryLayer()),
+        yield* Layer.build(TranscriptRepository.memoryLayer()),
         TranscriptRepository.Service,
       )
       const transcripts = TranscriptRepository.Service.of({

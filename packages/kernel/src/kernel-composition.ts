@@ -1,4 +1,4 @@
-import { KernelPool, KernelStateStore } from "tenetkit/repl"
+import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
 import { BunKernelPool, workerModule, workerSupportModules } from "tenetkit/repl/bun"
 
 /**
@@ -23,7 +23,6 @@ export const kernelBinaries = (input: {
         workerModule: input.join(input.executableDirectory, ".rika-kernel-worker.js"),
         runtimeCommand: input.join(input.executableDirectory, ".rika-kernel-runtime"),
       }
-import { HostBindingRegistry } from "tenetkit/repl"
 import { Duration, Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as KernelBootstrap from "./kernel-bootstrap"

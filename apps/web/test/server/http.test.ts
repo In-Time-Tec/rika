@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { type Account, type AccountAccess } from "../../src/account/gateway"
+import type { Account, AccountAccess } from "../../src/account/gateway"
 import { makeApiAccountGateway } from "../../src/account/api-gateway"
 import { handleRequest, type WebDependencies } from "../../src/server/http"
 
@@ -119,7 +119,7 @@ describe("web HTTP", () => {
       expect(result.status).toBe(200)
       expect(received?.cookie).toBe("session=secret")
       expect(received?.signal).toBe(input.signal)
-      expect(Object.keys(received ?? {}).sort()).toEqual(["cookie", "signal"])
+      expect(Object.keys(received ?? {}).toSorted()).toEqual(["cookie", "signal"])
     }),
   )
 

@@ -139,7 +139,7 @@ export const reconciliationCommand = (event: WebhookEvent): ReconciliationComman
               (repository) => repository.id,
             ),
           ),
-        ].sort((a, b) => a - b),
+        ].toSorted((a, b) => a - b),
         reason: event.payload.action === "added" ? "repositories_added" : "repositories_removed",
       }
     case "repository":

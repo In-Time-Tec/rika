@@ -7,10 +7,10 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import type * as RootTurnOwner from "../../../thread/queue/root-owner"
 import * as TurnQueuePromotion from "../../../thread/repository/turn-queue"
 import { Cause, Clock, Effect, Ref, Schema } from "effect"
-import { type InteractiveEvent } from "../session-event"
+import type { InteractiveEvent } from "../session-event"
 import { OperationError, operationError } from "../../error"
 import * as OperationFailure from "../../failure"
-import { type InteractiveSession, type InteractiveSessionControlsInput } from "../session"
+import type { InteractiveSession, InteractiveSessionControlsInput } from "../session"
 import { OperationUnavailable } from "../../contract/product"
 
 const routeEquivalent = Schema.toEquivalence(ExecutionRouteSnapshot)
@@ -246,25 +246,34 @@ export const makeInteractiveSessionControls = (
       }
     }
   })
+  const matchesInterruptedSubmission = (
+    existing: Turn.Turn,
+    source: Turn.AgentExecutionTurn,
+    prompt: string,
+  ): boolean =>
+    existing._tag === "AgentExecution" &&
+    existing.threadId === source.threadId &&
+    existing.prompt === prompt &&
+    routeEquivalent(existing.executionRoute, source.executionRoute)
+  const alreadyExecuting = (turn: Turn.Turn): boolean =>
+    terminal(turn.status) || turn.status === "running" || turn.status === "cancelling" || turn.status === "waiting"
+  const cancellableTarget = (turn: Turn.Turn | undefined): turn is Turn.AgentExecutionTurn =>
+    turn !== undefined && turn._tag === "AgentExecution" && !terminal(turn.status)
+  const interruptedTurn = (turns: TurnRepository.Interface, targetTurnId: string | undefined) =>
+    targetTurnId === undefined ? active : turns.get(Turn.TurnId.make(targetTurnId))
   const interruptAndSend = (prompt: string, targetTurnId?: string, turnId?: Turn.TurnId) =>
     safe(
       sessionDispatch,
       Effect.gen(function* () {
         const turns = yield* TurnRepository.Service
         const backend = yield* ExecutionGateway.Service
-        const turn = targetTurnId === undefined ? yield* active : yield* turns.get(Turn.TurnId.make(targetTurnId))
+        const turn = yield* interruptedTurn(turns, targetTurnId)
         if (turn === undefined || turn._tag !== "AgentExecution")
           return yield* operationError(`Interrupted Turn ${targetTurnId ?? "current"} is unavailable`)
         const thread = yield* threadForTurn(turn)
         const pendingId = turnId ?? (yield* options.makeTurnId)
         const existing = yield* turns.get(pendingId)
-        if (
-          existing !== undefined &&
-          (existing._tag !== "AgentExecution" ||
-            existing.threadId !== turn.threadId ||
-            existing.prompt !== prompt ||
-            !routeEquivalent(existing.executionRoute, turn.executionRoute))
-        )
+        if (existing !== undefined && !matchesInterruptedSubmission(existing, turn, prompt))
           return yield* operationError(`Turn ${pendingId} exists with a different interrupted submission`)
         const created =
           existing === undefined
@@ -279,13 +288,7 @@ export const makeInteractiveSessionControls = (
             : undefined
         const pending = existing ?? created!
         yield* ensureTurnSummary(pending)
-        if (
-          terminal(pending.status) ||
-          pending.status === "running" ||
-          pending.status === "cancelling" ||
-          pending.status === "waiting"
-        )
-          return
+        if (alreadyExecuting(pending)) return
         if (pending.status === "accepted") {
           const requeued = yield* turns.requeueAccepted(pending.id, pendingTurnCapacity, yield* Clock.currentTimeMillis)
           emit(sessionDispatch, queueMutationEvent(requeued.queue))
@@ -295,8 +298,7 @@ export const makeInteractiveSessionControls = (
         if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
         if (created?.queue !== undefined) emit(sessionDispatch, queueMutationEvent(created.queue))
         const target = yield* turns.get(turn.id)
-        if (target !== undefined && target._tag === "AgentExecution" && !terminal(target.status))
-          yield* cancelActiveTurn(target, turns, backend)
+        if (cancellableTarget(target)) yield* cancelActiveTurn(target, turns, backend)
         yield* drainQueued(thread, sessionDispatch)
       }),
     )

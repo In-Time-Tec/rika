@@ -10,11 +10,7 @@ import { composerHeightLimit, clampSidebarWidth } from "../layout/model"
 import { runningToolsActivity, type Activity } from "../activity/model"
 import { appendProvisionalUserEntry, reconcileUserEntry, settleProvisionalUserEntry } from "../submission"
 
-const reduceExecutionImpl = (
-  model: Model,
-  message: Message,
-  _reduce: (model: Model, message: Message) => Model,
-): Model | undefined => {
+const reduceLayoutExecution = (model: Model, message: Message): Model | undefined => {
   switch (message._tag) {
     case "Resized":
       return {
@@ -38,6 +34,12 @@ const reduceExecutionImpl = (
       return { ...model, scrollOffset: Math.max(0, message.offset), scrollFollow: false }
     case "ScrollFollowed":
       return { ...model, scrollOffset: 0, scrollFollow: true }
+  }
+  return undefined
+}
+
+const reduceSubmitted = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "Submitted": {
       if (model.input.length === 0) return model
       if (model.submittedDrafts.some((draft) => draft.turnId === undefined)) return model
@@ -68,6 +70,63 @@ const reduceExecutionImpl = (
         activity: { _tag: "Sending" as const },
       }
     }
+  }
+  return undefined
+}
+
+const admittedHistory = (
+  model: Model,
+  draft: Model["submittedDrafts"][number] | undefined,
+  prompt: string | undefined,
+) => {
+  if (draft === undefined || prompt === undefined) {
+    return {
+      history: model.history,
+      historyComposers: model.historyComposers,
+      historyDraft: model.historyDraft,
+      historyIndex: model.historyIndex,
+      historySearch: model.historySearch,
+    }
+  }
+  return {
+    history: [...model.history.filter((candidate) => candidate !== prompt), prompt],
+    historyComposers: [
+      ...model.historyComposers.filter(
+        (candidate) => expandPastedText(candidate.input, candidate.attachments) !== prompt,
+      ),
+      { input: draft.input, attachments: draft.attachments },
+    ],
+    historyDraft: undefined,
+    historyIndex: undefined,
+    historySearch: "",
+  }
+}
+
+const admittedQueueItem = (
+  item: QueueItem,
+  submissionId: string | undefined,
+  turnId: string,
+  status: "active" | "queued" | undefined,
+): ReadonlyArray<QueueItem> => {
+  if ((item.id !== submissionId && item.id !== turnId) || item.provisional !== true) return [item]
+  if (status === "queued") return [{ ...item, id: turnId }]
+  return []
+}
+
+const admittedQueue = (
+  model: Model,
+  submissionId: string | undefined,
+  turnId: string,
+  status: "active" | "queued" | undefined,
+  prompt: string | undefined,
+): ReadonlyArray<QueueItem> => {
+  const queue = model.queue.flatMap((item) => admittedQueueItem(item, submissionId, turnId, status))
+  if (status !== "queued" || queue.some((item) => item.id === turnId) || prompt === undefined) return queue
+  return [...queue, { id: turnId, prompt, provisional: true }]
+}
+
+const reduceSubmissionAdmitted = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "SubmissionAdmitted": {
       const draft = model.submittedDrafts.find(
         (candidate) =>
@@ -81,38 +140,8 @@ const reduceExecutionImpl = (
         message.submissionId === undefined
           ? { turnId: message.turnId }
           : { turnId: message.turnId, submissionId: message.submissionId }
-      const submittedHistory =
-        draft === undefined
-          ? {
-              history: model.history,
-              historyComposers: model.historyComposers,
-              historyDraft: model.historyDraft,
-              historyIndex: model.historyIndex,
-              historySearch: model.historySearch,
-            }
-          : {
-              history: [
-                ...model.history.filter((candidate) => candidate !== expandPastedText(draft.input, draft.attachments)),
-                expandPastedText(draft.input, draft.attachments),
-              ],
-              historyComposers: [
-                ...model.historyComposers.filter(
-                  (candidate) => expandPastedText(candidate.input, candidate.attachments) !== prompt,
-                ),
-                { input: draft.input, attachments: draft.attachments },
-              ],
-              historyDraft: undefined,
-              historyIndex: undefined,
-              historySearch: "",
-            }
-      const admitProvisional = (item: QueueItem): ReadonlyArray<QueueItem> => {
-        if ((item.id !== message.submissionId && item.id !== message.turnId) || item.provisional !== true) return [item]
-        if (message.status === "queued") return [{ ...item, id: message.turnId }]
-        return []
-      }
-      let queue = model.queue.flatMap(admitProvisional)
-      if (message.status === "queued" && !queue.some((item) => item.id === message.turnId) && prompt !== undefined)
-        queue = [...queue, { id: message.turnId, prompt, provisional: true }]
+      const submittedHistory = admittedHistory(model, draft, prompt)
+      const queue = admittedQueue(model, message.submissionId, message.turnId, message.status, prompt)
       const sendingActivity: Activity = { _tag: "Sending" }
       const laneModel =
         message.status === "queued"
@@ -136,6 +165,15 @@ const reduceExecutionImpl = (
         started: false,
       }).model
     }
+  }
+  return undefined
+}
+
+const reduceSubmissionExecution = (model: Model, message: Message): Model | undefined =>
+  reduceSubmitted(model, message) ?? reduceSubmissionAdmitted(model, message)
+
+const reduceSteeringFailure = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "SteeringFailed": {
       const index = model.steeringRequests.findIndex((row) => row.requestId === message.requestId)
       if (index < 0) return model
@@ -160,6 +198,12 @@ const reduceExecutionImpl = (
         blocks: [...model.blocks, { _tag: "Error", title: "Cancellation not completed", detail: message.message }],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
+  }
+  return undefined
+}
+
+const reduceCompaction = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "CompactionChanged": {
       const { compactionPending: _, ...contextAnimation } = model.contextAnimation
       const { compactionShimmer: _compactionShimmer, ...modelWithoutShimmer } = model
@@ -179,6 +223,15 @@ const reduceExecutionImpl = (
       }
       return model.busy ? { ...compacted, activity } : compacted
     }
+  }
+  return undefined
+}
+
+const reduceControlExecution = (model: Model, message: Message): Model | undefined =>
+  reduceSteeringFailure(model, message) ?? reduceCompaction(model, message)
+
+const reduceTurnExecution = (model: Model, message: Message): Model | undefined => {
+  switch (message._tag) {
     case "TurnStarted": {
       const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
       const boundModel = { ...model, submittedDrafts: boundDrafts }
@@ -242,6 +295,16 @@ const reduceExecutionImpl = (
   }
   return undefined
 }
+
+const reduceExecutionImpl = (
+  model: Model,
+  message: Message,
+  _reduce: (model: Model, message: Message) => Model,
+): Model | undefined =>
+  reduceLayoutExecution(model, message) ??
+  reduceSubmissionExecution(model, message) ??
+  reduceControlExecution(model, message) ??
+  reduceTurnExecution(model, message)
 
 export const reduceExecution: {
   (

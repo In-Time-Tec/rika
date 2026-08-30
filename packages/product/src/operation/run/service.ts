@@ -1,14 +1,13 @@
 import { Console, Context, Effect } from "effect"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as TurnRepository from "@rika/product/turn-repository"
-import { OperationUnavailable } from "../contract/product"
-import { Service } from "../contract/product-service"
+import { OperationUnavailable, type Input } from "../contract/product"
+import { Service } from "../contract/product-service-contract"
 import * as ProductOperationProgram from "./program"
 import type { ProductOperationRuntimeState } from "../runtime/state"
 import type { ProductOperationSchedule } from "./schedule"
 import type { ProductLayerOptions } from "../foundation/options"
 import type { ProductOperationRunFactory } from "./branches"
-import type { Input } from "../contract/product"
 import type { InteractiveEvent } from "../interactive/session-event"
 
 export interface ProductOperationServiceInput {

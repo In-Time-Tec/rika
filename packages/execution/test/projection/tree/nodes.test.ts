@@ -53,8 +53,7 @@ describe("TenetKit tree projector parent attribution", () => {
     const repaired = projector
       .snapshot()
       .units.find((value) => value.content._tag === "Entry" && value.content.text.includes("child report"))
-    const blockId =
-      card?.content._tag === "Block" && "id" in card.content.block ? String(card.content.block.id) : undefined
+    const blockId = card?.content._tag === "Block" && "id" in card.content.block ? card.content.block.id : undefined
     expect(blockId).toBeDefined()
     expect(repaired?.parentId).toBe(blockId)
   })

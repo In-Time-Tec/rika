@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import { presets } from "../model-routing/model-preset"
-import { isStreamingOnlyBaseUrl } from "../model-routing/model-route"
-import type { ModelRoute } from "../model-routing/model-route"
+import { isStreamingOnlyBaseUrl, type ModelRoute } from "../model-routing/model-route"
 import type { ConfigurationEnvironment, ConfigurationSettings } from "./model"
 import { settingsDefaults } from "./defaults"
 import { ConfigurationSettingsFileError } from "./decoder"
@@ -20,14 +19,12 @@ const aliasFromInput = (name: string, input: ModelAliasInput): ModelRoute.ModelA
       message: "Model limits are required.",
     })
   const efforts = input.efforts ?? preset?.variants(preset.efforts)
-  const variants: ModelRoute.ModelAlias["variants"] = Object.assign(
-    {},
-    efforts?.low === undefined ? undefined : { low: efforts.low },
-    efforts?.medium === undefined ? undefined : { medium: efforts.medium },
-    efforts?.high === undefined ? undefined : { high: efforts.high },
-    efforts?.xhigh === undefined ? undefined : { xhigh: efforts.xhigh },
-    efforts?.max === undefined ? undefined : { max: efforts.max },
-  )
+  const variants: { -readonly [K in ModelRoute.Effort]?: ModelRoute.ModelAlias["variants"][K] } = {}
+  if (efforts !== undefined)
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
+      const variant = efforts[effort]
+      if (variant !== undefined) variants[effort] = variant
+    }
   return {
     displayName: input.displayName ?? name,
     supportsMedia: input.supportsMedia ?? preset !== undefined,
@@ -60,6 +57,86 @@ const isBedrockOverride = (
 const isHttpOverride = (value: ModelRoute.ProviderOverride | undefined): value is ModelRoute.HttpProviderOverride =>
   value !== undefined && !isBedrockOverride(value)
 
+interface MutableBedrockConnection {
+  protocol: "amazon-bedrock"
+  authMode: "default" | "bearer"
+  region?: string
+  profile?: string
+  endpoint?: string
+  authRefresh?: ModelRoute.BedrockAuthRefresh
+}
+
+interface MutableHttpConnection {
+  protocol: ModelRoute.HttpProtocol
+  baseUrl: string
+  apiKeyEnv?: string
+  credentialIdentity?: string
+  streamingOnly?: boolean
+  promptCaching?: boolean
+}
+
+const defaultHttpProvider = (id: Exclude<ModelRoute.ProviderId, "bedrock">): ModelRoute.HttpProviderConnection => {
+  const connection = settingsDefaults.providers[id]
+  if (connection.protocol === "amazon-bedrock") throw new Error(`Provider ${id} is not HTTP`)
+  return connection
+}
+
+const httpProtocol = (
+  id: Exclude<ModelRoute.ProviderId, "bedrock">,
+  builtIn: ModelRoute.HttpProviderConnection,
+  input: ModelRoute.HttpProviderOverride,
+): ModelRoute.HttpProtocol => {
+  if (id !== "openai" || input.api === undefined) return builtIn.protocol
+  return input.api === "responses" ? "openai-responses" : "openai-chat-completions"
+}
+
+const inheritedStreamingOnly = (
+  input: ModelRoute.HttpProviderOverride | undefined,
+  builtIn: ModelRoute.HttpProviderConnection,
+  baseUrl: string,
+): boolean | undefined =>
+  input?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) || undefined)
+
+const bedrockProvider = (
+  globalOverride: ModelRoute.ProviderOverride | undefined,
+  workspaceOverride: ModelRoute.ProviderOverride | undefined,
+): ModelRoute.AmazonBedrockProviderConnection => {
+  const global = isBedrockOverride(globalOverride) ? globalOverride : undefined
+  const workspace = isBedrockOverride(workspaceOverride) ? workspaceOverride : undefined
+  const override = global === undefined && workspace === undefined ? undefined : { ...global, ...workspace }
+  const connection: MutableBedrockConnection = {
+    protocol: "amazon-bedrock",
+    authMode: override?.authMode === "bearer" ? "bearer" : "default",
+  }
+  if (override?.region !== undefined) connection.region = override.region
+  if (override?.profile !== undefined) connection.profile = override.profile
+  if (override?.endpoint !== undefined) connection.endpoint = override.endpoint
+  if (override?.authRefresh !== undefined) connection.authRefresh = override.authRefresh
+  return connection
+}
+
+const httpProvider = (
+  id: Exclude<ModelRoute.ProviderId, "bedrock">,
+  builtIn: ModelRoute.HttpProviderConnection,
+  override: ModelRoute.ProviderOverride | undefined,
+): ModelRoute.HttpProviderConnection => {
+  const input = isHttpOverride(override) ? override : undefined
+  const baseUrl = input?.baseUrl ?? builtIn.baseUrl
+  const streamingOnly = inheritedStreamingOnly(input, builtIn, baseUrl)
+  if (input === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
+  const connection: MutableHttpConnection = {
+    protocol: httpProtocol(id, builtIn, input),
+    baseUrl,
+  }
+  const credentialIdentity = input.credentialIdentity ?? builtIn.credentialIdentity
+  const promptCaching = input.promptCaching ?? builtIn.promptCaching
+  if (input.apiKeyEnv !== undefined) connection.apiKeyEnv = input.apiKeyEnv
+  if (credentialIdentity !== undefined) connection.credentialIdentity = credentialIdentity
+  if (streamingOnly !== undefined) connection.streamingOnly = streamingOnly
+  if (promptCaching !== undefined) connection.promptCaching = promptCaching
+  return connection
+}
+
 const roleRoute = (
   configured: ModelRoute.RoleRoute | undefined,
   override: RoleRouteInput | undefined,
@@ -69,13 +146,10 @@ const roleRoute = (
     if (configured !== undefined) return configured
     throw ConfigurationSettingsFileError.make({ path, message: "A route is required." })
   }
-  if ("alias" in override && override.alias !== undefined) {
-    const fast = override.fast ?? configured?.fast
-    const effort = override.effort ?? configured?.effort ?? "medium"
-    return fast === undefined ? { alias: override.alias, effort } : { alias: override.alias, effort, fast }
-  }
   const fast = override.fast ?? configured?.fast
   const effort = override.effort ?? configured?.effort ?? "medium"
+  if ("alias" in override && override.alias !== undefined)
+    return fast === undefined ? { alias: override.alias, effort } : { alias: override.alias, effort, fast }
   return fast === undefined
     ? { provider: override.provider, model: override.model, effort }
     : { provider: override.provider, model: override.model, effort, fast }
@@ -131,6 +205,42 @@ const assertRoutesReferenceKnownModels = (settings: ConfigurationSettings) => {
   }
 }
 
+const mergedModels = (
+  global: ConfigurationSettingsInput,
+  workspace: ConfigurationSettingsInput,
+): ConfigurationSettings["models"] => {
+  if (global.modelAliases === undefined && workspace.modelAliases === undefined) return settingsDefaults.models
+  const configured = Object.fromEntries(
+    Object.entries({ ...global.modelAliases, ...workspace.modelAliases }).map(([name, input]) => [
+      name,
+      aliasFromInput(name, input),
+    ]),
+  )
+  return Object.fromEntries(Object.entries({ ...settingsDefaults.models, ...configured }))
+}
+
+const mergedProviders = (
+  global: ConfigurationSettingsInput,
+  workspace: ConfigurationSettingsInput,
+): ConfigurationSettings["providers"] => ({
+  openai: httpProvider(
+    "openai",
+    defaultHttpProvider("openai"),
+    workspace.providers?.openai ?? global.providers?.openai,
+  ),
+  anthropic: httpProvider(
+    "anthropic",
+    defaultHttpProvider("anthropic"),
+    workspace.providers?.anthropic ?? global.providers?.anthropic,
+  ),
+  bedrock: bedrockProvider(global.providers?.bedrock, workspace.providers?.bedrock),
+  openrouter: httpProvider(
+    "openrouter",
+    defaultHttpProvider("openrouter"),
+    workspace.providers?.openrouter ?? global.providers?.openrouter,
+  ),
+})
+
 export const mergeConfigurationSettings = ({
   global,
   workspace,
@@ -139,71 +249,11 @@ export const mergeConfigurationSettings = ({
   readonly workspace: ConfigurationSettingsInput
 }): ConfigurationSettings => {
   const webSearchProviders = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
-  const provider = (id: ModelRoute.ProviderId): ModelRoute.ProviderConnection => {
-    const builtIn = settingsDefaults.providers[id]
-    const globalOverride = global.providers?.[id]
-    const workspaceOverride = workspace.providers?.[id]
-    const override = workspaceOverride ?? globalOverride
-    if (builtIn.protocol === "amazon-bedrock") {
-      const globalBedrock = isBedrockOverride(globalOverride) ? globalOverride : undefined
-      const workspaceBedrock = isBedrockOverride(workspaceOverride) ? workspaceOverride : undefined
-      const bedrock =
-        globalBedrock === undefined && workspaceBedrock === undefined
-          ? undefined
-          : { ...globalBedrock, ...workspaceBedrock }
-      const base: Pick<ModelRoute.AmazonBedrockProviderConnection, "protocol" | "authMode"> = {
-        protocol: "amazon-bedrock",
-        authMode: bedrock?.authMode === "bearer" ? "bearer" : "default",
-      }
-      return Object.assign(
-        base,
-        bedrock?.region === undefined ? undefined : { region: bedrock.region },
-        bedrock?.profile === undefined ? undefined : { profile: bedrock.profile },
-        bedrock?.endpoint === undefined ? undefined : { endpoint: bedrock.endpoint },
-        bedrock?.authRefresh === undefined ? undefined : { authRefresh: bedrock.authRefresh },
-      )
-    }
-    const httpOverride: ModelRoute.HttpProviderOverride | undefined = isHttpOverride(override) ? override : undefined
-    const baseUrl = httpOverride?.baseUrl ?? builtIn.baseUrl
-    const streamingOnly =
-      httpOverride?.streamingOnly ?? builtIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
-    const promptCaching = httpOverride?.promptCaching ?? builtIn.promptCaching
-    const credentialIdentity = httpOverride?.credentialIdentity ?? builtIn.credentialIdentity
-    let protocol: ModelRoute.HttpProtocol = builtIn.protocol
-    if (id === "openai" && httpOverride?.api !== undefined)
-      protocol = httpOverride.api === "responses" ? "openai-responses" : "openai-chat-completions"
-    if (httpOverride === undefined) return streamingOnly === undefined ? builtIn : { ...builtIn, streamingOnly }
-    return Object.assign(
-      { protocol, baseUrl },
-      httpOverride.apiKeyEnv === undefined ? undefined : { apiKeyEnv: httpOverride.apiKeyEnv },
-      credentialIdentity === undefined ? undefined : { credentialIdentity },
-      streamingOnly === undefined ? undefined : { streamingOnly },
-      promptCaching === undefined ? undefined : { promptCaching },
-    )
-  }
-  const models: ConfigurationSettings["models"] =
-    global.modelAliases === undefined && workspace.modelAliases === undefined
-      ? settingsDefaults.models
-      : Object.fromEntries(
-          Object.entries({
-            ...settingsDefaults.models,
-            ...Object.fromEntries(
-              Object.entries({ ...global.modelAliases, ...workspace.modelAliases }).map(([name, input]) => [
-                name,
-                aliasFromInput(name, input),
-              ]),
-            ),
-          }),
-        )
+  const models = mergedModels(global, workspace)
   const configuredModes = modes(global, workspace)
   const defaultMode = workspace.defaultMode ?? global.defaultMode ?? settingsDefaults.defaultMode
   const merged: ConfigurationSettings = {
-    providers: {
-      openai: provider("openai"),
-      anthropic: provider("anthropic"),
-      bedrock: provider("bedrock"),
-      openrouter: provider("openrouter"),
-    },
+    providers: mergedProviders(global, workspace),
     models,
     defaultMode,
     modes: configuredModes,

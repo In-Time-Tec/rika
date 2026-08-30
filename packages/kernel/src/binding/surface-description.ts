@@ -27,31 +27,42 @@ const BoundRepresentation = Schema.Struct({
   ),
 })
 
-const boundsOf = (ast: SchemaAST.AST): string | undefined => {
-  let minimum: number | undefined
-  let maximum: number | undefined
-  let length: number | undefined
-  for (const check of ast.checks ?? []) {
-    const decoded = Schema.decodeUnknownOption(BoundRepresentation)(check.annotations?.representation)
-    if (Option.isNone(decoded) || decoded.value.payload === null) continue
-    const { id: tag, payload } = decoded.value
-    if (tag === "effect/schema/isGreaterThan" && payload.exclusiveMinimum !== undefined)
-      minimum = payload.exclusiveMinimum + 1
-    if (tag === "effect/schema/isGreaterThanOrEqualTo" && payload.minimum !== undefined) minimum = payload.minimum
-    if (tag === "effect/schema/isLessThan" && payload.exclusiveMaximum !== undefined)
-      maximum = payload.exclusiveMaximum - 1
-    if (tag === "effect/schema/isLessThanOrEqualTo" && payload.maximum !== undefined) maximum = payload.maximum
-    if (tag === "effect/schema/isLengthBetween" && payload.minimum === payload.maximum && payload.minimum !== undefined)
-      length = payload.minimum
-  }
-  if (ast._tag === "Arrays")
-    return length === undefined
-      ? "[]"
-      : `[${Array.from({ length }, (_, index) => (index === 0 ? "start" : "end")).join(", ")}]`
+interface Bounds {
+  readonly minimum?: number
+  readonly maximum?: number
+  readonly length?: number
+}
+
+const boundsFrom = (check: SchemaAST.Check<never>): Bounds => {
+  const decoded = Schema.decodeUnknownOption(BoundRepresentation)(check.annotations?.representation)
+  if (Option.isNone(decoded) || decoded.value.payload === null) return {}
+  const { id: tag, payload } = decoded.value
+  if (tag === "effect/schema/isGreaterThan" && payload.exclusiveMinimum !== undefined)
+    return { minimum: payload.exclusiveMinimum + 1 }
+  if (tag === "effect/schema/isGreaterThanOrEqualTo" && payload.minimum !== undefined)
+    return { minimum: payload.minimum }
+  if (tag === "effect/schema/isLessThan" && payload.exclusiveMaximum !== undefined)
+    return { maximum: payload.exclusiveMaximum - 1 }
+  if (tag === "effect/schema/isLessThanOrEqualTo" && payload.maximum !== undefined) return { maximum: payload.maximum }
+  if (tag === "effect/schema/isLengthBetween" && payload.minimum === payload.maximum && payload.minimum !== undefined)
+    return { length: payload.minimum }
+  return {}
+}
+
+const describeBounds = ({ minimum, maximum }: Bounds): string | undefined => {
   if (minimum !== undefined && maximum !== undefined) return `${minimum}-${maximum}`
   if (maximum !== undefined) return `<=${maximum}`
   if (minimum !== undefined) return `>=${minimum}`
   return undefined
+}
+
+const boundsOf = (ast: SchemaAST.AST): string | undefined => {
+  const bounds = (ast.checks ?? []).reduce<Bounds>((current, check) => Object.assign(current, boundsFrom(check)), {})
+  if (ast._tag === "Arrays")
+    return bounds.length === undefined
+      ? "[]"
+      : `[${Array.from({ length: bounds.length }, (_, index) => (index === 0 ? "start" : "end")).join(", ")}]`
+  return describeBounds(bounds)
 }
 
 const objectFields = (ast: SchemaAST.AST): ReadonlyArray<SchemaAST.PropertySignature> | undefined =>

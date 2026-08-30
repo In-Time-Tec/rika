@@ -5,7 +5,7 @@ import { testing as imageSmoke } from "../../packages/e2b-executor/scripts/image
 
 const root = new URL("../..", import.meta.url)
 const image = new URL("../../infra/e2b/executor-v1/", import.meta.url)
-const text = Effect.fn(function* (path: string, base = image) {
+const text = Effect.fn(function* (path: string, base: URL = image) {
   const fileSystem = yield* FileSystem.FileSystem
   return yield* fileSystem.readFileString(new URL(path, base).pathname)
 })
@@ -272,6 +272,6 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
     expect(
       accepts({ ...valid, checks: checks.map((check, index) => (index === 0 ? { ...check, ok: false } : check)) }),
     ).toBe(false)
-    expect(accepts({ ...valid, checks: [...checks, checks[0]!] })).toBe(false)
+    expect(accepts({ ...valid, checks: [...checks, checks[0]] })).toBe(false)
   })
 })

@@ -1,9 +1,8 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import type { Block, Unit } from "@rika/product/execution-transcript-contract"
-import { type Card, type Node } from "../model"
-import { type ProjectorCore } from "../persistence"
-import { bounded } from "../values"
-import { projectorNames, toolTextLimit } from "../values"
+import type { Card, Node } from "../model"
+import type { ProjectorCore } from "../persistence"
+import { bounded, projectorNames, toolTextLimit } from "../values"
 import { promptText } from "../decoding"
 import type { RunEvent } from "tenetkit/runtime"
 import { Schema } from "effect"
@@ -63,6 +62,17 @@ export interface SubagentCardProjectionInput {
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
   readonly recoverCard: (card: Card) => void
   readonly recoverNode: (node: Node) => void
+}
+
+const invocationIdFor = (linked: {
+  readonly invocationId: string
+  readonly key?: string
+  readonly origin?: { readonly parentToolCallId?: string }
+}): string => {
+  const parentToolCallId = linked.origin?.parentToolCallId
+  return linked.key === undefined || parentToolCallId === undefined
+    ? (parentToolCallId ?? linked.invocationId)
+    : `${parentToolCallId}:${linked.key}`
 }
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
@@ -170,6 +180,23 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     return cards
   }
 
+  const fillPrompt = (card: Card, displayPrompt: string) => {
+    if (card.prompt.length > 0 || displayPrompt.length === 0) return
+    card.prompt = bounded(displayPrompt, toolTextLimit)
+    card.promptTruncated = displayPrompt.length > toolTextLimit
+    const candidate = units.get(card.unitKey)
+    if (candidate?.content._tag === "Block" && candidate.content.block._tag === "SubagentCard")
+      put({
+        ...candidate,
+        revision: core.revision,
+        content: {
+          _tag: "Block",
+          block: { ...candidate.content.block, prompt: card.prompt, promptTruncated: card.promptTruncated },
+        },
+      })
+    recoverCard(card)
+  }
+
   const bindChild = (
     parent: Node,
     childRawRunId: string,
@@ -182,30 +209,12 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
       readonly origin?: { readonly parentToolCallId?: string }
     },
   ) => {
-    const parentToolCallId = linked.origin?.parentToolCallId
-    const invocationId =
-      linked.key === undefined || parentToolCallId === undefined
-        ? (parentToolCallId ?? linked.invocationId)
-        : `${parentToolCallId}:${linked.key}`
+    const invocationId = invocationIdFor(linked)
     let card = cardsByInvocation.get(`${parent.rawRunId}\u0000${invocationId}`)
     const displayPrompt = promptText(linked.prompt)
     if (card === undefined && invocationId !== projectorNames.titleInvocationId)
       card = cardFor(parent, invocationId, linked.selection, displayPrompt, linked.label, linked.key)
-    if (card !== undefined && card.prompt.length === 0 && displayPrompt.length > 0) {
-      card.prompt = bounded(displayPrompt, toolTextLimit)
-      card.promptTruncated = displayPrompt.length > toolTextLimit
-      const candidate = units.get(card.unitKey)
-      if (candidate?.content._tag === "Block" && candidate.content.block._tag === "SubagentCard")
-        put({
-          ...candidate,
-          revision: core.revision,
-          content: {
-            _tag: "Block",
-            block: { ...candidate.content.block, prompt: card.prompt, promptTruncated: card.promptTruncated },
-          },
-        })
-      recoverCard(card)
-    }
+    if (card !== undefined) fillPrompt(card, displayPrompt)
     if (card === undefined || card.rawChildRunId !== undefined) return
     card.rawChildRunId = childRawRunId
     cardsByChild.set(childRawRunId, card)

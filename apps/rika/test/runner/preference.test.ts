@@ -20,7 +20,7 @@ it.effect("defaults to denied and scopes revocable admission to device plus chec
       expect(yield* store.get("device-a", "checkout-b")).toBe("denied")
       yield* store.set("device-a", "checkout-a", "denied")
       expect(yield* store.get("device-a", "checkout-a")).toBe("denied")
-      expect((yield* fileSystem.stat(path)).mode! & 0o077).toBe(0)
+      expect((yield* fileSystem.stat(path)).mode & 0o077).toBe(0)
     }),
   ),
 )

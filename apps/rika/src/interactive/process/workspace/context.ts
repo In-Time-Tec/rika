@@ -1,8 +1,7 @@
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Effect, FileSystem, Function, Option, Stream } from "effect"
+import { Effect, FileSystem, Function, Option, Schema, Stream } from "effect"
 import { workspaceDirectory, workspacePaths } from "@rika/configuration/configuration-paths"
 import { mkdir, rm, parseChangedFiles } from "./files"
-import { Schema } from "effect"
 
 class ExternalBoundaryError extends Schema.TaggedError<ExternalBoundaryError>()("ExternalBoundaryError", {
   operation: Schema.String,
@@ -126,23 +125,15 @@ const runClipboardPngExtractor: ClipboardPngExtractor = (script, path) =>
     ),
   )
 
+const hasBytes = (bytes: Uint8Array, expected: ReadonlyArray<number>) =>
+  bytes.length >= expected.length && expected.every((value, index) => bytes[index] === value)
+
 const pastedImageFormat = (bytes: Uint8Array, declaredMediaType?: string) => {
   const prefix = (start: number, end: number) => new TextDecoder().decode(bytes.subarray(start, end))
   let signature: { readonly mediaType: string; readonly extension: string } | undefined
-  if (
-    bytes.length >= 8 &&
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47 &&
-    bytes[4] === 0x0d &&
-    bytes[5] === 0x0a &&
-    bytes[6] === 0x1a &&
-    bytes[7] === 0x0a
-  )
+  if (hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
     signature = { mediaType: "image/png", extension: "png" }
-  else if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
-    signature = { mediaType: "image/jpeg", extension: "jpg" }
+  else if (hasBytes(bytes, [0xff, 0xd8, 0xff])) signature = { mediaType: "image/jpeg", extension: "jpg" }
   else if (bytes.length >= 6 && /^GIF8[79]a$/.test(prefix(0, 6)))
     signature = { mediaType: "image/gif", extension: "gif" }
   else if (bytes.length >= 12 && prefix(0, 4) === "RIFF" && prefix(8, 12) === "WEBP")

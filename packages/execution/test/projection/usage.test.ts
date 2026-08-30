@@ -84,17 +84,11 @@ describe("TenetKit tree projector usage accounting", () => {
         { parentRunId: "raw-root-run", invocationId: "rika.thread-title" },
       ),
     )
-    expect(usage.state.usage).toEqual(
-      expect.objectContaining({
-        tokens: expect.objectContaining({
-          total: 8,
-          input: expect.objectContaining({ total: 5 }),
-          output: expect.objectContaining({ total: 3 }),
-        }),
-        countedAttempts: 1,
-        unpricedAttempts: 1,
-      }),
-    )
+    expect(usage.state.usage.tokens?.total).toBe(8)
+    expect(usage.state.usage.tokens?.input.total).toBe(5)
+    expect(usage.state.usage.tokens?.output.total).toBe(3)
+    expect(usage.state.usage.countedAttempts).toBe(1)
+    expect(usage.state.usage.unpricedAttempts).toBe(1)
     expect(usage.upsert).toEqual([])
   })
 
@@ -121,20 +115,14 @@ describe("TenetKit tree projector usage accounting", () => {
       }),
     )
     const usage = projector.snapshot().state.usage
-    expect(usage).toEqual(
-      expect.objectContaining({
-        tokens: expect.objectContaining({
-          total: 8,
-          input: expect.objectContaining({ total: 5 }),
-          output: expect.objectContaining({ total: 3 }),
-        }),
-        pricedAttempts: 0,
-        unpricedAttempts: 0,
-        includedAttempts: 1,
-        countedAttempts: 1,
-        uncountedAttempts: 0,
-      }),
-    )
+    expect(usage.tokens?.total).toBe(8)
+    expect(usage.tokens?.input.total).toBe(5)
+    expect(usage.tokens?.output.total).toBe(3)
+    expect(usage.pricedAttempts).toBe(0)
+    expect(usage.unpricedAttempts).toBe(0)
+    expect(usage.includedAttempts).toBe(1)
+    expect(usage.countedAttempts).toBe(1)
+    expect(usage.uncountedAttempts).toBe(0)
     expect(usage).not.toHaveProperty("costNanoUsd")
   })
 

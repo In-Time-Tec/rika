@@ -1,6 +1,7 @@
-import rootConfig from "../../../vitest.config"
+import rootConfigPromise from "../../../vitest.config"
 import { defineConfig } from "vitest/config"
 
+const rootConfig = await rootConfigPromise
 const { projects: _projects, ...testConfig } = rootConfig.test ?? {}
 
 export default defineConfig({

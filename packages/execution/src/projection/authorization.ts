@@ -1,8 +1,8 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { RunEvent } from "tenetkit/runtime"
 import { Schema } from "effect"
-import { type Node } from "./model"
-import { type AuthorizationState, type ProjectorCore } from "./persistence"
+import type { Node } from "./model"
+import type { AuthorizationState, ProjectorCore } from "./persistence"
 import { bounded } from "./values"
 
 export interface AuthorizationProjection {

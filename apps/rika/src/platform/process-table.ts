@@ -99,6 +99,32 @@ export const processSubtreeRss: {
   (root: number): (rows: ReadonlyArray<PsRow>) => number
 } = Function.dual(2, processSubtreeRssImpl)
 
+type CpuSample = {
+  readonly value: number
+  readonly stable: boolean
+}
+
+const cpuSample = (
+  previousRows: ReadonlyArray<PsRow>,
+  currentRows: ReadonlyArray<PsRow>,
+  root: number,
+  baselinePids: ReadonlySet<number>,
+  elapsedSeconds: number,
+  processMatchesClient: (row: PsRow) => boolean,
+): CpuSample => {
+  const selected = (rows: ReadonlyArray<PsRow>) =>
+    descendants(rows, root)
+      .filter((row) => !baselinePids.has(row.pid))
+      .find(processMatchesClient)
+  const before = selected(previousRows)
+  const after = selected(currentRows)
+  const stable = before !== undefined && after !== undefined && before.pid === after.pid
+  const value = stable ? Math.max(0, ((after.cpuSeconds - before.cpuSeconds) / elapsedSeconds) * 100) : 0
+  return { value, stable }
+}
+
+const mean = (values: ReadonlyArray<number>) => values.reduce((total, value) => total + value, 0) / values.length
+
 export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses")(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -170,20 +196,19 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           yield* Effect.sleep("1 second")
           currentRows = yield* readProcessRows
           const elapsedSeconds = ((yield* Clock.currentTimeMillis) - sampleStartedAt) / 1000
-          const previousTree = descendants(previousRows, child.pid).filter((row) => !baselinePids.has(row.pid))
-          const currentTree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
-          let total = 0
-          const before = previousTree.find(processMatchesClient)
-          const after = currentTree.find(processMatchesClient)
+          const sampled = cpuSample(
+            previousRows,
+            currentRows,
+            child.pid,
+            baselinePids,
+            elapsedSeconds,
+            processMatchesClient,
+          )
+          const after = observedClientRow(currentRows, child.pid, runtime)
           if (after !== undefined) ownedPids.add(after.pid)
-          if (before?.pid !== after?.pid) stableProcess = false
-          const value =
-            before === undefined || after === undefined || before.pid !== after.pid
-              ? 0
-              : Math.max(0, ((after.cpuSeconds - before.cpuSeconds) / elapsedSeconds) * 100)
-          clientCpu.push(value)
-          total += value
-          totalCpu.push(total)
+          stableProcess = stableProcess && sampled.stable
+          clientCpu.push(sampled.value)
+          totalCpu.push(sampled.value)
           previousRows = currentRows
         }
         const tree = descendants(currentRows, child.pid).filter((row) => !baselinePids.has(row.pid))
@@ -194,7 +219,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
           executable: path.basename(runtime.evidencePath),
           runtimeKind: runtime.kind,
           rssMebibytes: processSubtreeRss(tree, row.pid) / 1024,
-          cpuPercent: clientCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
+          cpuPercent: mean(clientCpu),
         })
         const base = { descendantCount: tree.length - 1, executableBytes }
         if (clientRow === undefined)
@@ -213,7 +238,7 @@ export const observeProcesses = Effect.fn("PerformancePlatform.observeProcesses"
         if (!stableProcess) return measured
         return {
           ...measured,
-          idleCpuMeanPercent: totalCpu.reduce((total, value) => total + value, 0) / totalCpu.length,
+          idleCpuMeanPercent: mean(totalCpu),
           idleCpuPeakPercent: Math.max(...totalCpu),
         }
       }),

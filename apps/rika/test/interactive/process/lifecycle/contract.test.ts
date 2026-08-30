@@ -156,6 +156,23 @@ test("drives bypassed recorded and incognito shell commands through Operation an
     const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
     yield* Effect.addFinalizer(() => Effect.sync(() => surface.destroy()))
     const completedShells = yield* Queue.unbounded<string>()
+    const ignoredEvents = new Set<InteractiveEvent.InteractiveEvent["_tag"]>([
+      "QueueFull",
+      "ExecutionControlFailed",
+      "ExecutionControlled",
+      "ContextDiagnostics",
+      "ThreadsListed",
+      "ThreadTitled",
+      "ThreadPreviewLoaded",
+      "ThreadActivated",
+      "AssistantCompleted",
+      "ThreadPreviewFailed",
+      "TurnRetryScheduled",
+    ])
+    const isIgnoredEvent = (
+      event: InteractiveEvent.InteractiveEvent,
+    ): event is Exclude<InteractiveEvent.InteractiveEvent, Parameters<typeof TerminalReducer.update>[0]> =>
+      ignoredEvents.has(event._tag)
     const dispatch = (event: InteractiveEvent.InteractiveEvent) => {
       if (event._tag === "ShellCompleted") {
         if (event.incognito) model = TerminalReducer.update(model, { _tag: "AssistantCompleted", text: event.text })
@@ -170,20 +187,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       ) {
         controller = InteractiveController.update({ ...controller, model }, event).state
         model = controller.model
-      } else if (
-        event._tag !== "QueueFull" &&
-        event._tag !== "ExecutionControlFailed" &&
-        event._tag !== "ExecutionControlled" &&
-        event._tag !== "ContextDiagnostics" &&
-        event._tag !== "ThreadsListed" &&
-        event._tag !== "ThreadTitled" &&
-        event._tag !== "ThreadPreviewLoaded" &&
-        event._tag !== "ThreadActivated" &&
-        event._tag !== "AssistantCompleted" &&
-        event._tag !== "ThreadPreviewFailed" &&
-        event._tag !== "TurnRetryScheduled"
-      )
-        model = TerminalReducer.update(model, event)
+      } else if (!isIgnoredEvent(event)) model = TerminalReducer.update(model, event)
       surface.update(model)
     }
     yield* Effect.forkChild(session.events(dispatch))

@@ -46,11 +46,9 @@ test(
         expect(lines[archiveNewRow - 1]).toContain("╭─ Ctrl+C then ─")
         expect(archiveNewRow).toBeGreaterThan(lines.length / 2)
         expect(lines[archiveNewRow]!.indexOf("Ctrl+N Archive and new thread")).toBe(67)
-        expect(spansFor(app, "Ctrl+N")).toEqual([
-          expect.objectContaining({
-            attributes: expect.any(Number),
-          }),
-        ])
+        const ctrlNSpans = spansFor(app, "Ctrl+N")
+        expect(ctrlNSpans).toHaveLength(1)
+        expect(Number.isFinite(ctrlNSpans[0]?.attributes)).toBe(true)
         expect(spansFor(app, "Ctrl+N")[0]!.fg.toInts().join(",")).toBe(blue)
         expect(spansFor(app, "Ctrl+N")[0]!.attributes & TextAttributes.BOLD).toBe(TextAttributes.BOLD)
         expect(

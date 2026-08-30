@@ -106,7 +106,7 @@ export const turnFailure = (
   units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit>,
 ): { readonly message: string; readonly category: string; readonly retryable: boolean } | undefined => {
   const ordered = units.toSorted((left, right) => compareUnitOrder(left.order, right.order))
-  for (const unit of [...ordered].reverse()) {
+  for (const unit of [...ordered].toReversed()) {
     if (unit.content._tag !== "Block" || unit.content.block._tag !== "Error") continue
     const block = unit.content.block
     const message = block.detail.length > 0 ? block.detail : block.title

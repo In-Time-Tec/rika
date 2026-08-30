@@ -50,3 +50,16 @@ export const decodeTranscriptBlocks = (input: ReadonlyArray<unknown>): ReadonlyA
   Schema.decodeUnknownSync(TranscriptBlocks)(input)
 export const decodeTranscriptItems = (input: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItem> =>
   Schema.decodeUnknownSync(TranscriptItems)(input)
+
+export const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
+  blocks.map((block) => {
+    if (
+      (block._tag === "ToolCall" ||
+        block._tag === "SubagentCard" ||
+        block._tag === "Compaction" ||
+        block._tag === "Cell") &&
+      block.status === "running"
+    )
+      return { ...block, status: "cancelled" as const }
+    return block
+  })

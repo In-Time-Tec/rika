@@ -69,8 +69,9 @@ it.effect("does not replay a persisted queued-steering mutation", () =>
       const backend = ExecutionGateway.Service.of({})
       const rootTurnOwner = {
         ...(yield* RootTurnOwner.make(turns, transcripts, backend)),
-        prepareQueuedSteering: (_source, target, input) =>
-          Effect.succeed({
+        prepareQueuedSteering: (...args: Parameters<RootTurnOwner.Interface["prepareQueuedSteering"]>) => {
+          const [, target, input] = args
+          return Effect.succeed({
             admission: {
               target,
               input,
@@ -84,7 +85,8 @@ it.effect("does not replay a persisted queued-steering mutation", () =>
             },
             queue,
             queueChanged: false,
-          }),
+          })
+        },
       }
       const control = makeInteractiveControl({
         turns,
@@ -189,8 +191,9 @@ it.effect("admits a queued prompt longer than the composer convenience limit", (
     const backend = ExecutionGateway.Service.of({})
     const rootTurnOwner = {
       ...(yield* RootTurnOwner.make(turns, transcripts, backend)),
-      prepareQueuedSteering: (_source, target, steering) =>
+      prepareQueuedSteering: (...args: Parameters<RootTurnOwner.Interface["prepareQueuedSteering"]>) =>
         Effect.sync(() => {
+          const [, target, steering] = args
           prepared += 1
           return {
             admission: { target, input: steering, source: bigQueued, preparedAt: 1, outcome: { _tag: "Accepted" } },

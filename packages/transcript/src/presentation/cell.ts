@@ -8,7 +8,7 @@ const indent = (value: string, depth: number): string => value.replaceAll("\n", 
 const formatResult = (value: Schema.Json, depth: number): string => {
   if (value === null || Schema.is(Schema.Boolean)(value) || Schema.is(Schema.Finite)(value)) return String(value)
   if (Schema.is(Schema.String)(value)) return value.includes("\n") ? value : JSON.stringify(value)
-  if (Array.isArray(value)) {
+  if (Schema.is(Schema.Array(Schema.Json))(value)) {
     if (value.length === 0) return "[]"
     return `[\n${value.map((item) => `${"  ".repeat(depth + 1)}${indent(formatResult(item, depth + 1), depth + 1)}`).join(",\n")}\n${"  ".repeat(depth)}]`
   }

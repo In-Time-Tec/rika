@@ -1,20 +1,19 @@
-import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { ThreadId } from "@rika/product/hosted-model"
-import * as Turn from "@rika/product/turn-record"
-import { Context, Crypto, Data, Effect, Encoding, Layer, Queue, Redacted, Result, Schema } from "effect"
+import { Context, Crypto, Data, Effect, Encoding, Layer, Queue, Redacted, Schema } from "effect"
 import { Client, type Notification } from "pg"
+import {
+  HostedPreviewSchema,
+  PreviewFragment,
+  projectPreviewFragments,
+  type HostedPreview,
+  type PreviewFragment as PreviewFragmentType,
+} from "./preview-projection"
 
 const previewChannel = "rika_thread_previews"
 const subscriberCapacity = 64
 const publisherCapacity = 256
 const fragmentCharacters = 5_000
-const reassemblyCapacity = 256
-
-export interface HostedPreview {
-  readonly threadId: ThreadId
-  readonly turnId: Turn.TurnId
-  readonly preview: ExecutionGateway.ModelPreviewEvent
-}
+export type { HostedPreview } from "./preview-projection"
 
 export type HostedPreviewDelivery =
   | { readonly _tag: "Preview"; readonly value: HostedPreview }
@@ -96,23 +95,7 @@ export class HostedPreviewBus extends Context.Service<HostedPreviewBus, HostedPr
   static readonly memoryLayer = Layer.effect(this, makeHostedPreviewBus().pipe(Effect.map((value) => value.bus)))
 }
 
-const HostedPreviewSchema = Schema.Struct({
-  threadId: ThreadId,
-  turnId: Turn.TurnId,
-  preview: ExecutionGateway.ModelPreviewEvent,
-})
-
-const PreviewFragment = Schema.Struct({
-  source: Schema.String,
-  id: Schema.String,
-  threadId: ThreadId,
-  index: Schema.Int,
-  count: Schema.Int,
-  data: Schema.String,
-})
-type PreviewFragment = typeof PreviewFragment.Type
 const encodePreview = Schema.encodeSync(Schema.fromJsonString(HostedPreviewSchema))
-const decodePreview = Schema.decodeOption(Schema.fromJsonString(HostedPreviewSchema))
 const encodeFragment = Schema.encodeSync(Schema.fromJsonString(PreviewFragment))
 const decodeFragment = Schema.decodeOption(Schema.fromJsonString(PreviewFragment))
 
@@ -171,15 +154,10 @@ const publishOnce = (
     }),
   )
 
-interface Reassembly {
-  readonly fragment: PreviewFragment
-  readonly parts: Array<string | undefined>
-}
-
 const listenOnce = (
   databaseUrl: Redacted.Redacted<string>,
   source: string,
-  receive: (fragment: PreviewFragment) => void,
+  receive: (fragment: PreviewFragmentType) => void,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -242,59 +220,8 @@ export const postgresHostedPreviewBusLayer = (options: { readonly databaseUrl: R
       const source = yield* crypto.randomUUIDv4
       const outgoing = yield* Queue.sliding<HostedPreview>(publisherCapacity)
       const local = yield* makeHostedPreviewBus((preview) => void Queue.offerUnsafe(outgoing, preview))
-      const reassembly = new Map<string, Reassembly>()
-      const latest = new Map<string, string>()
       let sequence = 0
-      const streamFor = (fragment: PreviewFragment) => `${fragment.source}:${fragment.threadId}`
-      const discard = (id: string, fragment: PreviewFragment) => {
-        reassembly.delete(id)
-        const stream = streamFor(fragment)
-        if (latest.get(stream) === id) latest.delete(stream)
-      }
-      const receive = (fragment: PreviewFragment) => {
-        if (fragment.count < 1 || fragment.count > 16 || fragment.index < 0 || fragment.index >= fragment.count) return
-        const stream = streamFor(fragment)
-        if (!local.hasSubscribers(fragment.threadId)) {
-          const stale = latest.get(stream)
-          if (stale !== undefined) discard(stale, fragment)
-          return
-        }
-        const previous = latest.get(stream)
-        if (fragment.index === 0 && previous !== undefined && previous !== fragment.id) {
-          reassembly.delete(previous)
-          local.resetLocal(fragment.threadId)
-        }
-        latest.set(stream, fragment.id)
-        let current = reassembly.get(fragment.id)
-        if (current === undefined) {
-          if (reassembly.size >= reassemblyCapacity) {
-            const evictedKey = reassembly.keys().next().value!
-            const evicted = reassembly.get(evictedKey)
-            if (evicted !== undefined) {
-              local.resetLocal(evicted.fragment.threadId)
-              discard(evictedKey, evicted.fragment)
-            }
-          }
-          current = { fragment, parts: Array.from({ length: fragment.count }) }
-          reassembly.set(fragment.id, current)
-        }
-        if (current.fragment.count !== fragment.count || current.fragment.threadId !== fragment.threadId) {
-          discard(fragment.id, fragment)
-          local.resetLocal(fragment.threadId)
-          return
-        }
-        current.parts[fragment.index] = fragment.data
-        if (current.parts.some((part) => part === undefined)) return
-        discard(fragment.id, fragment)
-        const decoded = Result.getOrUndefined(Encoding.decodeBase64String(current.parts.join("")))
-        if (decoded === undefined) {
-          local.resetLocal(fragment.threadId)
-          return
-        }
-        const preview = decodePreview(decoded)
-        if (preview._tag === "Some" && preview.value.threadId === fragment.threadId) local.publishLocal(preview.value)
-        else local.resetLocal(fragment.threadId)
-      }
+      const receive = projectPreviewFragments(local)
       yield* reconnect(
         "hosted-preview-publisher.disconnected",
         publishOnce(options.databaseUrl, outgoing, source, () => (sequence += 1)),

@@ -424,13 +424,14 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         expect(parallelProgress._tag).toBe("Some")
         expect(cancellations).toContainEqual({ runId: "authorization-run", reason: "Cancelled by user" })
         expect(cancellations).toContainEqual({ runId: "parallel-run", reason: "Cancelled by user" })
-        expect(cancellation.events).toContainEqual({
-          _tag: "ExecutionControlFailed",
-          threadId: "read-only-thread",
-          turnId: "authorization-turn",
-          action: "cancel",
-          failure: expect.objectContaining({ message: "Cancellation backend unavailable" }),
-        })
+        const failed = cancellation.events.find((event) => event._tag === "ExecutionControlFailed")
+        expect(failed?._tag).toBe("ExecutionControlFailed")
+        if (failed?._tag === "ExecutionControlFailed") {
+          expect(failed.threadId).toBe("read-only-thread")
+          expect(failed.turnId).toBe("authorization-turn")
+          expect(failed.action).toBe("cancel")
+          expect(failed.failure.message).toBe("Cancellation backend unavailable")
+        }
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

@@ -1,5 +1,4 @@
-import * as ThreadToolkitsModule from "@rika/coding-tools/thread-tool-contract"
-import * as ThreadReadModule from "@rika/coding-tools/thread-tool-contract"
+import * as ThreadContractModule from "@rika/coding-tools/thread-tool-contract"
 import * as ThreadRepositoryModule from "@rika/product/thread-repository"
 import * as ThreadSearchRepositoryModule from "@rika/product-store/thread-search-index"
 import * as ThreadModule from "@rika/product/thread-record"
@@ -12,8 +11,8 @@ import * as TranscriptUnitModule from "@rika/transcript/transcript-unit"
 import { Effect, Layer } from "effect"
 
 export namespace Fixtures {
-  export import ThreadToolkits = ThreadToolkitsModule
-  export import ThreadRead = ThreadReadModule
+  export import ThreadToolkits = ThreadContractModule
+  export import ThreadRead = ThreadContractModule
   export import ThreadRepository = ThreadRepositoryModule
   export import ThreadSearchRepository = ThreadSearchRepositoryModule
   export import Thread = ThreadModule

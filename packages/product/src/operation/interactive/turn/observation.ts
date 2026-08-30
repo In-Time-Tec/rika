@@ -15,14 +15,14 @@ import * as ExecutionAuthorityReconciliation from "../../../execution/authority/
 import { Clock, Effect, Cause, Deferred, Duration, Fiber, PubSub, Schedule } from "effect"
 import { isTerminalStatus } from "../../../execution/session/status"
 import { OperationError, operationError } from "../../error"
-import { type InteractiveEvent } from "../session-event"
-import { type InteractiveOperationFeed } from "../view/feed"
+import type { InteractiveEvent } from "../session-event"
+import type { InteractiveOperationFeed } from "../view/feed"
 import * as OperationFailure from "../../failure"
-import { type SteeringAdmissionRejection } from "../../../thread/queue/root-owner"
-import {
-  type InteractiveExecutionContext,
-  type InteractiveExecutionContextServices,
-  type InteractiveSessionInput,
+import type { SteeringAdmissionRejection } from "../../../thread/queue/root-owner"
+import type {
+  InteractiveExecutionContext,
+  InteractiveExecutionContextServices,
+  InteractiveSessionInput,
 } from "../session"
 import type * as InteractiveSessionRuntime from "../session"
 import type { InteractiveSupervisionError } from "../session-contract"

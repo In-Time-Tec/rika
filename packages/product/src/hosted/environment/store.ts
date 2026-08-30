@@ -55,7 +55,7 @@ export interface PutSourceEnvironmentApprovalInput {
   readonly actorUserId: BetterAuthUserId
 }
 
-export interface RevokeSourceEnvironmentApprovalInput extends PutSourceEnvironmentApprovalInput {}
+export type RevokeSourceEnvironmentApprovalInput = PutSourceEnvironmentApprovalInput
 
 export interface PutPhaseEgressPolicyInput {
   readonly ownerId: OwnerId

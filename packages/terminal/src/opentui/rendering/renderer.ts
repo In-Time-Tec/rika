@@ -48,7 +48,8 @@ export const buildTranscript: {
   (spinnerFrame?: string): (model: Model) => TranscriptBuild
 } = Function.dual(
   (args) => !Schema.is(Schema.String)(args[0]),
-  (model: Model, spinnerFrame = idleSpinnerFrame): TranscriptBuild => {
+  (model: Model, frame: string = idleSpinnerFrame): TranscriptBuild => {
+    const spinnerFrame = frame
     const builder = transcriptUnitBuilder(model, spinnerFrame)
     const chunks: Array<TextChunk> = []
     const ranges: Array<UnitLineRange> = []

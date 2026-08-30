@@ -1,401 +1,35 @@
-import {
-  type ClientCommand,
-  type ClientMessage,
-  hostedThreadSnapshotMatches,
-  HostedThreadSnapshot,
-  interactiveEventThreadId,
-  type MutatingThreadCommand,
-  protocolVersion,
-  type ServerFrame,
-} from "@rika/product/client-protocol"
-import {
-  CommandId,
-  IdempotencyKey,
-  RequestId,
-  ThreadEventCursor,
-  ThreadId,
-  ThreadVersion,
-} from "@rika/product/hosted-model"
+import { hostedThreadSnapshotMatches } from "@rika/product/client-protocol"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import { OperationUnavailable } from "@rika/product/product-operation"
 import type * as InteractiveConnection from "@rika/product/interactive-connection"
-import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import type { ThreadSummary } from "@rika/product/thread-summary"
-import * as ThreadView from "@rika/product/thread-view"
-import * as Turn from "@rika/product/turn-record"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
-import { authenticated } from "./account"
 import { reconnectDelay, retryableConnectionFailure } from "./reconnect-policy"
-import { connect } from "./thread-client"
-import { Crypto, Deferred, Effect, Exit, Option, Queue, Schema, Semaphore, SubscriptionRef } from "effect"
+import {
+  physicalConnection as openPhysicalConnection,
+  type PendingAttachment,
+  type PhysicalConnection,
+} from "./interactive-session/connection"
+import { interactiveSessionCommands } from "./interactive-session/commands"
+import { interactivePreviewState, interactiveSessionEvents } from "./interactive-session/events"
+import { interactiveSessionInterface } from "./interactive-session/interface"
+import { InteractiveSessionState } from "./interactive-session/state"
+import { interactiveSessionStatus } from "./interactive-session/status"
+import {
+  AttachmentProjection,
+  type Attachment,
+  type PreparedAttachment,
+  type Projection,
+  type SelectionState,
+  type Snapshot,
+} from "./interactive-session/projection"
+import { Crypto, Deferred, Effect, Exit, Schema, Semaphore, SubscriptionRef } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 
-type Payload = ServerFrame["payload"]
-type Admitted = Extract<Payload, { readonly _tag: "CommandAdmitted" }>
-type Accepted = Extract<Payload, { readonly _tag: "CommandAccepted" }>
-type Rejected = Extract<Payload, { readonly _tag: "CommandRejected" }>
-type Snapshot = Extract<Payload, { readonly _tag: "ThreadSnapshot" }>
-type Attachment = Extract<Payload, { readonly _tag: "ThreadAttached" }>
-type Preview = Extract<Payload, { readonly _tag: "ThreadPreview" }>
-type SnapshotProjection = Pick<Snapshot, "threadId" | "threadVersion" | "cursor" | "snapshot">
-type CancellationTarget = Extract<MutatingThreadCommand, { readonly _tag: "Cancel" }>["target"]
-type Mutable<T> = { -readonly [P in keyof T]: T[P] }
-type SubmitPromptCommand = Mutable<Extract<ClientCommand, { readonly _tag: "SubmitPrompt" }>>
-type SubmitPromptAttachment = NonNullable<SubmitPromptCommand["attachments"]>[number]
-const encodeThreadView = Schema.encodeSync(Schema.fromJsonString(ThreadView.ThreadViewSnapshot))
-type CommandOutcome = Admitted | Accepted | Rejected
-
-const failure = (message: string) => HostedError.make({ kind: "network", message })
-const protocolFailure = (message: string) => HostedError.make({ kind: "protocol", message })
-type PreparedAttachment = {
-  readonly attachment: Attachment
-  readonly checkpoint: HostedThreadSnapshot | undefined
-  readonly baseCursor: bigint
-  readonly terminalCursor: bigint
-  readonly representedVersion: bigint
-  readonly view: ThreadView.ThreadViewSnapshot
-}
-type Projection = {
-  readonly threadId: string
-  readonly view: ThreadView.ThreadViewSnapshot
-  readonly authorizations: ReadonlyMap<string, HostedThreadSnapshot["pendingAuthorizations"][number]>
-  readonly target: "runner" | "orb"
-  readonly workspace: HostedThreadSnapshot["workspace"]
-  readonly activity: InteractiveConnection.Activity
-  readonly participants: number
-  readonly committedCursor: string
-  readonly checkpointCursor: string
-  readonly version: string
-  readonly representedVersion: string
-  readonly deliveredCursor: string
-  readonly deliveredFingerprint: string | undefined
-}
-type SelectionState =
-  | { readonly _tag: "Attached"; readonly projection: Projection }
-  | {
-      readonly _tag: "Loading"
-      readonly token: object
-      readonly threadId: string
-      readonly authority: Projection | undefined
-    }
-type AttachmentValidation =
-  | { readonly _tag: "Invalid"; readonly error: HostedError }
-  | { readonly _tag: "Valid"; readonly prepared: PreparedAttachment }
-
-const prepareAttachment = (attachment: Attachment, previous: Projection | undefined): AttachmentValidation => {
-  const threadId = String(attachment.threadId)
-  const checkpoint = attachment.checkpoint
-  if (checkpoint !== undefined && !hostedThreadSnapshotMatches(checkpoint.snapshot, threadId))
-    return { _tag: "Invalid", error: failure("Thread attachment checkpoint identity did not match its response") }
-  if (
-    attachment.events.some((event) => {
-      const eventThreadId = interactiveEventThreadId(event.event)
-      return String(event.threadId) !== threadId || (eventThreadId !== undefined && eventThreadId !== threadId)
-    })
-  )
-    return { _tag: "Invalid", error: failure("Thread attachment event identity did not match its response") }
-  const baseCursor = BigInt(attachment.baseCursor)
-  const terminalCursor = BigInt(attachment.cursor)
-  if (baseCursor > terminalCursor)
-    return { _tag: "Invalid", error: failure("Thread attachment base exceeded its terminal cursor") }
-  if (checkpoint === undefined && (previous?.threadId !== threadId || BigInt(previous.deliveredCursor) !== baseCursor))
-    return { _tag: "Invalid", error: failure("Thread attachment tail has no matching local checkpoint") }
-  if (checkpoint !== undefined && BigInt(checkpoint.cursor) !== baseCursor)
-    return { _tag: "Invalid", error: failure("Thread attachment checkpoint did not match its replay base") }
-  let expectedCursor = baseCursor + 1n
-  let representedVersion = BigInt(checkpoint?.threadVersion ?? previous!.representedVersion)
-  for (const event of attachment.events) {
-    if (BigInt(event.cursor) !== expectedCursor)
-      return { _tag: "Invalid", error: failure("Thread attachment replay was not contiguous") }
-    const eventVersion = BigInt(event.threadVersion)
-    if (eventVersion < representedVersion)
-      return { _tag: "Invalid", error: failure("Thread attachment version regressed") }
-    representedVersion = eventVersion
-    expectedCursor += 1n
-  }
-  if (expectedCursor - 1n !== terminalCursor)
-    return { _tag: "Invalid", error: failure("Thread attachment terminal cursor was not represented") }
-  if (representedVersion > BigInt(attachment.threadVersion))
-    return { _tag: "Invalid", error: failure("Thread attachment represented version exceeded its terminal version") }
-  let view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? previous!.view)
-  if (view._tag === "Failure") return { _tag: "Invalid", error: failure("Thread attachment checkpoint was invalid") }
-  for (const event of attachment.events) {
-    if (event.event._tag === "ThreadViewSnapshot") {
-      view = ThreadView.fromSnapshot(event.event.snapshot)
-      if (view._tag === "Failure")
-        return { _tag: "Invalid", error: failure("Thread attachment view snapshot was invalid") }
-    } else if (event.event._tag === "ThreadViewPatch") {
-      const applied = view.success.apply(event.event.patch)
-      if (applied._tag === "Failure")
-        return { _tag: "Invalid", error: failure("Thread attachment view patch was invalid") }
-    }
-  }
-  return {
-    _tag: "Valid",
-    prepared: {
-      attachment,
-      checkpoint: checkpoint?.snapshot,
-      baseCursor,
-      terminalCursor,
-      representedVersion,
-      view: view.success.snapshot(),
-    },
-  }
-}
-const ErrorMessage = Schema.Struct({ message: Schema.String })
-const unavailable = <E>(operation: string, error: E) => {
-  const parsed = Schema.decodeUnknownOption(ErrorMessage)(error)
-  return OperationUnavailable.make({
-    operation,
-    message: Option.isSome(parsed) ? parsed.value.message : String(error),
-  })
-}
-
-export const threadViewFromHostedSnapshot = (snapshot: HostedThreadSnapshot): ThreadView.ThreadViewSnapshot =>
-  snapshot.view
-
-const envelope = (requestId: string, command: ClientCommand): ClientMessage => ({
-  protocolVersion,
-  requestId: RequestId.make(requestId),
-  command,
-})
-
-interface PhysicalConnection {
-  readonly command: (
-    requestId: string,
-    command: ClientCommand,
-    completeOnAdmission: boolean,
-    onSending?: Effect.Effect<void>,
-    onRejected?: (outcome: Rejected) => Effect.Effect<void>,
-  ) => Effect.Effect<CommandOutcome, HostedError>
-  readonly acknowledge: (requestId: string, threadId: string, cursor: string) => Effect.Effect<void, HostedError>
-  readonly attach: (
-    threadId: string,
-    cursor: string,
-    checkpointCursor?: string,
-  ) => Effect.Effect<PendingAttachment, HostedError>
-  readonly invalidate: Effect.Effect<void>
-  readonly detach: Effect.Effect<void, HostedError>
-  readonly done: Effect.Effect<never, HostedError>
-}
-
-interface PendingAttachment {
-  readonly attachment: Attachment
-  readonly complete: Effect.Effect<void>
-  readonly fail: (error: HostedError) => Effect.Effect<void>
-}
-
-interface AttachmentWaiter {
-  readonly response: Deferred.Deferred<Attachment, HostedError>
-  readonly processed: Deferred.Deferred<void, HostedError>
-}
-
-interface CommandWaiter {
-  readonly outcomes: Queue.Queue<CommandOutcome>
-  readonly command: ClientCommand
-  readonly onRejected: (outcome: Rejected) => Effect.Effect<void>
-}
-
-interface PendingSubmission {
-  readonly commandId: Deferred.Deferred<string, OperationUnavailable>
-  sending: boolean
-}
-
-const makePhysicalConnection = Effect.fn("HostedInteractiveSession.physical")(function* (input: {
-  readonly profile: Profile
-  readonly threadId: () => string
-  readonly cursor: (threadId: string) => string
-  readonly checkpointCursor: (threadId: string) => string | undefined
-  readonly resolving: () => boolean
-  readonly opening: (connection: PhysicalConnection) => Effect.Effect<void>
-  readonly receive: (payload: Payload, connection: PhysicalConnection) => Effect.Effect<void, HostedError>
-  readonly attached: (attachment: Attachment, connection: PhysicalConnection) => Effect.Effect<void, HostedError>
-  readonly processed: (attachment: Attachment, connection: PhysicalConnection) => Effect.Effect<void>
-}) {
-  const http = yield* Http
-  const credentials = yield* CredentialStore
-  const crypto = yield* Crypto.Crypto
-  const randomId = crypto.randomUUIDv4.pipe(
-    Effect.mapError(() => failure("Thread request identifier could not be created")),
-  )
-  const ticket = yield* authenticated(input.profile, (session) =>
-    http.issueThreadTicket(input.profile.origin, session),
-  ).pipe(Effect.provideService(Http, http), Effect.provideService(CredentialStore, credentials))
-  const socket = yield* connect(ticket)
-  const outcomes = new Map<string, CommandWaiter>()
-  const attachments = new Map<string, AttachmentWaiter>()
-  const disconnected = yield* Deferred.make<never, HostedError>()
-  const failPending = (error: HostedError) =>
-    Effect.sync(() => {
-      for (const waiter of attachments.values()) {
-        Deferred.doneUnsafe(waiter.response, Effect.fail(error))
-        Deferred.doneUnsafe(waiter.processed, Effect.fail(error))
-      }
-      outcomes.clear()
-      attachments.clear()
-      Deferred.doneUnsafe(disconnected, Effect.fail(error))
-    })
-  let physical: PhysicalConnection
-  const command = (
-    requestId: string,
-    value: ClientCommand,
-    completeOnAdmission: boolean,
-    onSending = Effect.void,
-    onRejected: (outcome: Rejected) => Effect.Effect<void> = () => Effect.void,
-  ) =>
-    Effect.gen(function* () {
-      const waiter: CommandWaiter = {
-        outcomes: yield* Queue.bounded<CommandOutcome>(2),
-        command: value,
-        onRejected,
-      }
-      outcomes.set(requestId, waiter)
-      yield* Effect.uninterruptible(
-        onSending.pipe(
-          Effect.andThen(
-            socket
-              .send(envelope(requestId, value))
-              .pipe(Effect.onError(() => Effect.sync(() => outcomes.delete(requestId)))),
-          ),
-        ),
-      )
-      const next = Queue.take(waiter.outcomes).pipe(Effect.raceFirst(Deferred.await(disconnected)))
-      let outcome = yield* next
-      if (outcome._tag === "CommandAdmitted" && !completeOnAdmission) outcome = yield* next
-      return outcome
-    }).pipe(Effect.ensuring(Effect.sync(() => outcomes.delete(requestId))))
-  const attach = (threadId: string, cursor: string, checkpointCursor?: string) =>
-    Effect.gen(function* () {
-      const requestId = `attach:${threadId}:${yield* randomId}`
-      const waiter = {
-        response: yield* Deferred.make<Attachment, HostedError>(),
-        processed: yield* Deferred.make<void, HostedError>(),
-      }
-      attachments.set(requestId, waiter)
-      const attachCommand: Extract<ClientCommand, { readonly _tag: "AttachThread" }> = {
-        _tag: "AttachThread",
-        threadId: ThreadId.make(threadId),
-        afterCursor: ThreadEventCursor.make(cursor),
-      }
-      if (checkpointCursor !== undefined)
-        Object.assign(attachCommand, { afterCheckpointCursor: ThreadEventCursor.make(checkpointCursor) })
-      yield* socket
-        .send(envelope(requestId, attachCommand))
-        .pipe(Effect.onError(() => Effect.sync(() => attachments.delete(requestId))))
-      const attachment = yield* Deferred.await(waiter.response).pipe(
-        Effect.ensuring(Effect.sync(() => attachments.delete(requestId))),
-      )
-      if (String(attachment.threadId) !== threadId) {
-        const error = failure("Thread attachment response identity did not match its request")
-        yield* Deferred.fail(waiter.processed, error)
-        yield* failPending(error)
-        return yield* error
-      }
-      return {
-        attachment,
-        complete: Deferred.succeed(waiter.processed, undefined).pipe(Effect.asVoid),
-        fail: (error: HostedError) => Deferred.fail(waiter.processed, error).pipe(Effect.asVoid),
-      }
-    })
-  physical = {
-    command,
-    acknowledge: (requestId, threadId, cursor) =>
-      socket.send(
-        envelope(requestId, {
-          _tag: "AcknowledgeCursor",
-          threadId: ThreadId.make(threadId),
-          cursor: ThreadEventCursor.make(cursor),
-        }),
-      ),
-    attach,
-    invalidate: failPending(failure("Thread attachment was invalidated")),
-    detach: Effect.gen(function* () {
-      yield* socket.send(envelope(`detach:${yield* randomId}`, { _tag: "Detach" }))
-    }),
-    done: Deferred.await(disconnected),
-  }
-  yield* Effect.gen(function* () {
-    while (true) {
-      const frame = yield* socket.next
-      const payload = frame.payload
-      yield* input.receive(payload, physical)
-      if (payload._tag === "ThreadAttached") {
-        const waiter = attachments.get(payload.requestId)
-        if (waiter === undefined) return yield* failure("Thread attachment response was not requested")
-        yield* Deferred.succeed(waiter.response, payload)
-        yield* Deferred.await(waiter.processed)
-      } else if (
-        payload._tag === "CommandAdmitted" ||
-        payload._tag === "CommandAccepted" ||
-        payload._tag === "CommandRejected"
-      ) {
-        const waiter = outcomes.get(payload.requestId)
-        if (waiter !== undefined) {
-          if ("threadId" in waiter.command && String(payload.threadId) !== String(waiter.command.threadId)) {
-            const error = protocolFailure("Thread response identity did not match its command")
-            yield* failPending(error)
-            return yield* error
-          }
-          if (
-            "commandId" in waiter.command &&
-            (payload.commandId === undefined || String(payload.commandId) !== String(waiter.command.commandId))
-          ) {
-            const error = protocolFailure("Thread response command identity did not match its command")
-            yield* failPending(error)
-            return yield* error
-          }
-          if (payload._tag === "CommandRejected") yield* Effect.uninterruptible(waiter.onRejected(payload))
-          yield* Queue.offer(waiter.outcomes, payload)
-        }
-        if (payload._tag === "CommandRejected") {
-          const attachmentWaiter = attachments.get(payload.requestId)
-          if (attachmentWaiter !== undefined) {
-            const error = HostedError.make({ kind: "protocol", message: payload.message })
-            yield* Deferred.fail(attachmentWaiter.response, error)
-            yield* Deferred.fail(attachmentWaiter.processed, error)
-          }
-        }
-      }
-    }
-  }).pipe(
-    Effect.catch((error) => failPending(error)),
-    Effect.ensuring(failPending(failure("Thread connection closed"))),
-    Effect.forkScoped,
-  )
-  yield* input.opening(physical)
-  const initialThreadId = input.threadId()
-  yield* Effect.uninterruptibleMask((restore) =>
-    Effect.suspend(() => {
-      const attachment = HostedObservability.observe(
-        "attach",
-        { threadId: initialThreadId },
-        Effect.gen(function* () {
-          const pending = yield* restore(
-            physical.attach(initialThreadId, input.cursor(initialThreadId), input.checkpointCursor(initialThreadId)),
-          )
-          yield* input.attached(pending.attachment, physical).pipe(
-            Effect.andThen(input.processed(pending.attachment, physical)),
-            Effect.andThen(pending.complete),
-            Effect.onExit((exit) =>
-              Exit.isFailure(exit)
-                ? pending
-                    .fail(failure("Thread attachment processing did not complete"))
-                    .pipe(Effect.andThen(physical.invalidate))
-                : Effect.void,
-            ),
-          )
-        }),
-      )
-      return input.resolving()
-        ? HostedObservability.observe("target_resolution", { threadId: initialThreadId }, attachment)
-        : attachment
-    }),
-  )
-  return physical
-})
+const { encodeThreadView, failure, prepareAttachment, threadViewFromHostedSnapshot, unavailable } = AttachmentProjection
+export { threadViewFromHostedSnapshot }
 
 export interface HostedInteractiveSession {
   readonly session: InteractiveSession
@@ -422,42 +56,18 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     Effect.mapError(() => failure("Thread request identifier could not be created")),
   )
   const selectionAdmission = yield* Semaphore.make(1)
-  const initialState: InteractiveConnection.State = {
-    connectivity: "connecting",
-    target: "resolving",
-    participants: 0,
-  }
-  const state = yield* SubscriptionRef.make(initialState)
+  const { initialState, state, update, setActivity, setParticipants, publishProjection } =
+    yield* interactiveSessionStatus
   const closed = yield* Deferred.make<void>()
-  let selection: SelectionState = {
-    _tag: "Loading",
-    token: {},
-    threadId: input.threadId,
-    authority: undefined,
-  }
+  let selection: SelectionState = { _tag: "Loading", token: {}, threadId: input.threadId, authority: undefined }
   let dispatch: (event: InteractiveEvent) => void = () => undefined
   let consumerAttached = false
   let stopped = false
   let current: PhysicalConnection | undefined
   let connecting: PhysicalConnection | undefined
-  const latestSubmitCommandIds = new Map<string, string>()
-  const pendingSubmitCommandIds = new Map<string, Map<string, PendingSubmission>>()
   const threadCursors = new Map<string, string>()
-  const activePreviews = new Map<string, Preview>()
+  const { activePreviews, resetPreviews } = interactivePreviewState((event) => dispatch(event))
   let connectionChanged = Deferred.makeUnsafe<void>()
-  const updateState = (update: (previousState: InteractiveConnection.State) => InteractiveConnection.State) =>
-    SubscriptionRef.updateSome(state, (previousState) => {
-      const next = update(previousState)
-      return next === previousState ? Option.none() : Option.some(next)
-    })
-  const setActivity = (activity: InteractiveConnection.Activity) =>
-    updateState((previousState) =>
-      previousState.activity === activity ? previousState : { ...previousState, activity },
-    )
-  const setParticipants = (participants: number) =>
-    updateState((previousState) =>
-      previousState.participants === participants ? previousState : { ...previousState, participants },
-    )
   const refreshThreads = input.listThreads.pipe(
     Effect.tap((threads) => Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads }))),
     Effect.catch((error) =>
@@ -483,59 +93,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       yield* connection.acknowledge(requestId, threadId, cursor)
     }).pipe(Effect.ignore)
   const authority = () => (selection._tag === "Attached" ? selection.projection : selection.authority)
-  const registerPendingSubmitCommandId = (threadId: string, submissionId: string) => {
-    let threadSubmissions = pendingSubmitCommandIds.get(threadId)
-    if (threadSubmissions === undefined) {
-      threadSubmissions = new Map()
-      pendingSubmitCommandIds.set(threadId, threadSubmissions)
-    }
-    const existing = threadSubmissions.get(submissionId)
-    if (existing !== undefined) return undefined
-    const created: PendingSubmission = {
-      commandId: Deferred.makeUnsafe<string, OperationUnavailable>(),
-      sending: false,
-    }
-    threadSubmissions.set(submissionId, created)
-    return created
-  }
-  const markPendingSubmissionSending = (threadId: string, submissionId: string) =>
-    Effect.sync(() => {
-      const pending = pendingSubmitCommandIds.get(threadId)?.get(submissionId)
-      if (pending !== undefined) pending.sending = true
-    })
-  const forgetPendingSubmitCommandId = (threadId: string, submissionId: string) =>
-    Effect.sync(() => {
-      const threadSubmissions = pendingSubmitCommandIds.get(threadId)
-      threadSubmissions?.delete(submissionId)
-      if (threadSubmissions?.size === 0) pendingSubmitCommandIds.delete(threadId)
-    })
-  const forgetUnsentSubmission = (threadId: string, submissionId: string) =>
-    Effect.sync(() => {
-      const threadSubmissions = pendingSubmitCommandIds.get(threadId)
-      if (threadSubmissions?.get(submissionId)?.sending !== false) return
-      threadSubmissions.delete(submissionId)
-      if (threadSubmissions.size === 0) pendingSubmitCommandIds.delete(threadId)
-    })
-  const reconcilePendingSubmissions = (prepared: PreparedAttachment) =>
-    Effect.uninterruptible(
-      Effect.gen(function* () {
-        const threadId = String(prepared.attachment.threadId)
-        for (const event of prepared.attachment.events)
-          if (
-            (event.event._tag === "SubmissionAdmitted" || event.event._tag === "SubmissionRejected") &&
-            event.event.submissionId !== undefined
-          )
-            yield* forgetPendingSubmitCommandId(threadId, event.event.submissionId)
-      }),
-    )
-  const activeTurnId = () =>
-    authority()?.view.turns.findLast(
-      (entry) =>
-        entry.turn.status === "accepted" ||
-        entry.turn.status === "running" ||
-        entry.turn.status === "cancelling" ||
-        entry.turn.status === "waiting",
-    )?.turn.id
   const replaceAuthority = (expected: Projection, replacement: Projection) => {
     if (selection._tag === "Attached" && selection.projection === expected) {
       selection = { _tag: "Attached", projection: replacement }
@@ -550,104 +107,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const selectedFrame = (threadId: string) =>
     selection._tag === "Attached" ? selection.projection.threadId === threadId : selection.threadId === threadId
   const currentFrame = (connection: PhysicalConnection) => current === connection || connecting === connection
-  const resetPreviews = (threadId: string) => {
-    for (const [key, payload] of activePreviews) {
-      if (String(payload.threadId) !== threadId) continue
-      dispatch({
-        _tag: "ExecutionModelPreviewChanged",
-        threadId: ProductThreadId.make(payload.threadId),
-        turnId: payload.turnId,
-        preview:
-          payload.preview.parentId === undefined
-            ? {
-                _tag: "ModelPreviewCleared",
-                runId: payload.preview.runId,
-                attemptFence: payload.preview.attemptFence,
-                generation: 0,
-              }
-            : {
-                _tag: "ModelPreviewCleared",
-                runId: payload.preview.runId,
-                parentId: payload.preview.parentId,
-                attemptFence: payload.preview.attemptFence,
-                generation: 0,
-              },
-      })
-      activePreviews.delete(key)
-    }
-  }
-  const projectionActivity = (
-    view: ThreadView.ThreadViewSnapshot,
-    pendingAuthorizations: ReadonlyArray<unknown>,
-    executorKind: HostedThreadSnapshot["executorKind"],
-    workspace: HostedThreadSnapshot["workspace"],
-  ): InteractiveConnection.Activity => {
-    const active = view.turns
-    if (pendingAuthorizations.length > 0) return "approval-required"
-    if (
-      active.length > 0 &&
-      active.every(
-        (entry) =>
-          entry.turn.status === "completed" || entry.turn.status === "failed" || entry.turn.status === "cancelled",
-      )
-    )
-      return "terminal"
-    if (active.length > 0 && executorKind === "orb" && workspace?._tag === "OrbWorkspace") {
-      if (workspace.state === "preparing") return "workspace-preparing"
-      if (workspace.state === "failed") return "workspace-failed"
-    }
-    if (active.some((entry) => entry.turn.status === "waiting")) return "executor-waiting"
-    if (active.some((entry) => entry.turn.status === "running" || entry.turn.status === "cancelling"))
-      return "executor-connected"
-    return "executor-waiting"
-  }
-  const projectionFromSnapshot = (
-    payload: SnapshotProjection,
-    participants: number,
-    deliveredCursor: string,
-    deliveredFingerprint: string | undefined,
-  ): Projection | HostedError => {
-    const view = ThreadView.fromSnapshot(payload.snapshot.view)
-    if (view._tag === "Failure") return failure("Thread snapshot view was invalid")
-    return {
-      threadId: String(payload.threadId),
-      view: view.success.snapshot(),
-      authorizations: new Map(
-        payload.snapshot.pendingAuthorizations.map((pending) => [
-          `${pending.turnId}:${pending.authorizationId}`,
-          pending,
-        ]),
-      ),
-      target: payload.snapshot.executorKind,
-      workspace: payload.snapshot.workspace,
-      activity: projectionActivity(
-        payload.snapshot.view,
-        payload.snapshot.pendingAuthorizations,
-        payload.snapshot.executorKind,
-        payload.snapshot.workspace,
-      ),
-      participants,
-      committedCursor: String(payload.cursor),
-      checkpointCursor: String(payload.cursor),
-      version: String(payload.threadVersion),
-      representedVersion: String(payload.threadVersion),
-      deliveredCursor,
-      deliveredFingerprint,
-    }
-  }
-  const publishProjectionState = (projection: Projection) =>
-    updateState((previousState) =>
-      previousState.target === projection.target &&
-      previousState.activity === projection.activity &&
-      previousState.participants === projection.participants
-        ? previousState
-        : {
-            ...previousState,
-            target: projection.target,
-            activity: projection.activity,
-            participants: projection.participants,
-          },
-    )
   const commitSnapshot = (payload: Snapshot, connection: PhysicalConnection) =>
     Effect.gen(function* () {
       const threadId = String(payload.threadId)
@@ -660,18 +119,19 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       if (cursor < previousCursor) return
       if (BigInt(payload.threadVersion) < BigInt(previous.representedVersion))
         return yield* failure("Thread snapshot version regressed")
-      const projected = projectionFromSnapshot(
+      const projected = InteractiveSessionState.projectionFromSnapshot(
         payload,
         previous.participants,
         previous.deliveredCursor,
         previous.deliveredFingerprint,
+        failure,
       )
       if (Schema.is(HostedError)(projected)) return yield* projected
       const candidate =
         BigInt(projected.version) < BigInt(previous.version) ? { ...projected, version: previous.version } : projected
       const fingerprint = encodeThreadView(payload.snapshot.view)
       if (!replaceAuthority(previous, candidate)) return
-      yield* publishProjectionState(candidate)
+      yield* publishProjection(candidate)
       if (previous.deliveredFingerprint !== fingerprint)
         dispatch({ _tag: "ThreadViewSnapshot", snapshot: threadViewFromHostedSnapshot(payload.snapshot) })
       replaceAuthority(candidate, {
@@ -682,63 +142,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       threadCursors.set(threadId, candidate.committedCursor)
       yield* acknowledge(connection, threadId, String(payload.cursor))
     })
-  const planAttachment = (prepared: PreparedAttachment, previous: Projection | undefined) => {
-    const threadId = String(prepared.attachment.threadId)
-    const continuing = previous?.threadId === threadId
-    const deliveredCursor = continuing ? previous.deliveredCursor : (threadCursors.get(threadId) ?? "0")
-    const currentCursor = BigInt(deliveredCursor)
-    if (currentCursor > prepared.terminalCursor)
-      return {
-        _tag: "Invalid" as const,
-        error: failure("Thread attachment terminal cursor regressed"),
-      }
-    const view = ThreadView.fromSnapshot(prepared.view)
-    if (view._tag === "Failure")
-      return { _tag: "Invalid" as const, error: failure("Thread committed view was invalid") }
-    const payload = prepared.attachment
-    const checkpoint = prepared.checkpoint
-    const basis = checkpoint === undefined ? previous! : undefined
-    if (
-      previous !== undefined &&
-      previous.threadId === threadId &&
-      BigInt(payload.threadVersion) < BigInt(previous.version)
-    )
-      return {
-        _tag: "Invalid" as const,
-        error: failure("Thread attachment terminal version regressed"),
-      }
-    const authorizations =
-      checkpoint === undefined
-        ? basis!.authorizations
-        : new Map(
-            checkpoint.pendingAuthorizations.map((pending) => [
-              `${pending.turnId}:${pending.authorizationId}`,
-              pending,
-            ]),
-          )
-    const target = checkpoint?.executorKind ?? basis!.target
-    const workspace = checkpoint === undefined ? basis!.workspace : checkpoint.workspace
-    const candidate: Projection = {
-      threadId,
-      view: view.success.snapshot(),
-      authorizations,
-      target,
-      workspace,
-      activity: projectionActivity(prepared.view, [...authorizations.values()], target, workspace),
-      participants: payload.participants.length,
-      committedCursor: String(payload.cursor),
-      checkpointCursor: checkpoint === undefined ? basis!.checkpointCursor : String(payload.baseCursor),
-      version: String(payload.threadVersion),
-      representedVersion: String(prepared.representedVersion),
-      deliveredCursor,
-      deliveredFingerprint: continuing ? previous.deliveredFingerprint : undefined,
-    }
-    return {
-      _tag: "Valid" as const,
-      publishSnapshot: previous?.deliveredFingerprint !== encodeThreadView(prepared.view),
-      candidate,
-    }
-  }
+  const planAttachment = (prepared: PreparedAttachment, previous: Projection | undefined) =>
+    InteractiveSessionState.planAttachment(prepared, previous, threadCursors, failure)
   const publishAttachment = (
     prepared: PreparedAttachment,
     plan: Extract<ReturnType<typeof planAttachment>, { readonly _tag: "Valid" }>,
@@ -754,13 +159,13 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       const threadId = String(validation.prepared.attachment.threadId)
       const plan = planAttachment(validation.prepared, authority())
       if (plan._tag === "Invalid") return yield* plan.error
-      yield* reconcilePendingSubmissions(validation.prepared)
+      yield* commands.reconcilePendingSubmissions(validation.prepared)
       const bootstrap = selection._tag === "Loading" && selection.authority === undefined
       selection =
         selection._tag === "Loading" && !bootstrap
           ? { ...selection, authority: plan.candidate }
           : { _tag: "Attached", projection: plan.candidate }
-      yield* publishProjectionState(plan.candidate)
+      yield* publishProjection(plan.candidate)
       const fingerprint = yield* publishAttachment(validation.prepared, plan)
       const delivered = {
         ...plan.candidate,
@@ -771,86 +176,21 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       threadCursors.set(threadId, delivered.deliveredCursor)
       yield* refreshThreads
     })
-  const receive = (payload: Payload, connection: PhysicalConnection) =>
-    Effect.gen(function* () {
-      if (payload._tag === "ThreadPreview" || payload._tag === "ThreadPreviewReset") {
-        const threadId = String(payload.threadId)
-        if (!currentFrame(connection) || !selectedFrame(threadId)) return
-        if (payload._tag === "ThreadPreviewReset") {
-          resetPreviews(threadId)
-          return
-        }
-        const key = `${threadId}:${payload.turnId}:${payload.preview.runId}`
-        if (payload.preview._tag === "ModelPreview") activePreviews.set(key, payload)
-        else activePreviews.delete(key)
-        dispatch({
-          _tag: "ExecutionModelPreviewChanged",
-          threadId: ProductThreadId.make(payload.threadId),
-          turnId: payload.turnId,
-          preview: payload.preview,
-        })
-        return
-      }
-      if (payload._tag === "PresenceSnapshot") {
-        if (!currentFrame(connection) || !selectedFrame(String(payload.threadId))) return
-        const projection = authority()!
-        replaceAuthority(projection, { ...projection, participants: payload.participants.length })
-        yield* setParticipants(payload.participants.length)
-        return
-      }
-      if (payload._tag === "ThreadSnapshot") {
-        if (payload.requestId === undefined && currentFrame(connection)) yield* commitSnapshot(payload, connection)
-        return
-      }
-      if (payload._tag === "ThreadEvent") {
-        const threadId = String(payload.event.threadId)
-        if (!currentFrame(connection) || !selectedFrame(threadId)) return
-        const eventThreadId = interactiveEventThreadId(payload.event.event)
-        if (eventThreadId !== undefined && eventThreadId !== threadId)
-          return yield* failure("Thread event identity did not match its response")
-        const next = BigInt(payload.event.cursor)
-        const projection = authority()!
-        const previous = BigInt(projection.committedCursor)
-        if (next <= previous) return
-        if (next !== previous + 1n) return yield* failure("Thread event cursor was not contiguous")
-        const eventVersion = BigInt(payload.event.threadVersion)
-        if (eventVersion < BigInt(projection.representedVersion))
-          return yield* failure("Thread event version regressed")
-        if (
-          (payload.event.event._tag === "SubmissionAdmitted" || payload.event.event._tag === "SubmissionRejected") &&
-          payload.event.event.submissionId !== undefined
-        )
-          yield* Effect.uninterruptible(forgetPendingSubmitCommandId(threadId, payload.event.event.submissionId))
-        let nextView = projection.view
-        if (payload.event.event._tag === "ThreadViewSnapshot") {
-          const view = ThreadView.fromSnapshot(payload.event.event.snapshot)
-          if (view._tag === "Failure") return yield* failure("Thread event snapshot was invalid")
-          nextView = view.success.snapshot()
-        } else if (payload.event.event._tag === "ThreadViewPatch") {
-          const candidate = ThreadView.fromSnapshot(projection.view)
-          if (candidate._tag === "Failure") return yield* failure("Thread event view was invalid")
-          const applied = candidate.success.apply(payload.event.event.patch)
-          if (applied._tag === "Failure") return yield* failure("Thread event patch was invalid")
-          nextView = candidate.success.snapshot()
-        }
-        const candidate: Projection = {
-          ...projection,
-          view: nextView,
-          version: eventVersion < BigInt(projection.version) ? projection.version : String(payload.event.threadVersion),
-          representedVersion: String(payload.event.threadVersion),
-          committedCursor: String(payload.event.cursor),
-        }
-        if (!replaceAuthority(projection, candidate)) return
-        dispatch(payload.event.event)
-        replaceAuthority(candidate, {
-          ...candidate,
-          deliveredCursor: candidate.committedCursor,
-          deliveredFingerprint: encodeThreadView(nextView),
-        })
-        threadCursors.set(threadId, candidate.committedCursor)
-        yield* acknowledge(connection, threadId, String(payload.event.cursor))
-      }
-    })
+  const receive = interactiveSessionEvents({
+    activePreviews,
+    currentFrame,
+    selectedFrame,
+    resetPreviews,
+    dispatch: (event) => dispatch(event),
+    authority,
+    replaceAuthority,
+    setParticipants,
+    commitSnapshot,
+    reconcileSubmission: (threadId, submissionId) => commands.reconcileSubmission(threadId, submissionId),
+    acknowledge,
+    threadCursors,
+    failure,
+  })
 
   const attachSelection = (request: { readonly threadId: string; readonly token: object }, expected?: string) =>
     selectionAdmission.withPermits(1)(
@@ -866,7 +206,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               return yield* failure("Thread selection was superseded")
             const previous = selection.authority
             if (threadId !== previous?.threadId) {
-              yield* updateState(({ activity: _, ...previousState }) => ({
+              yield* update(({ activity: _, ...previousState }) => ({
                 ...previousState,
                 target: "resolving",
                 participants: 0,
@@ -892,61 +232,56 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
             ).pipe(Effect.exit)
             if (outcome._tag === "Success") pending = outcome.value
             let preparedCandidate: Projection | undefined
-            yield* Effect.gen(function* () {
+            const currentAuthority =
+              selection._tag === "Loading" && selection.token === request.token ? selection.authority : undefined
+            const validation =
+              outcome._tag === "Success" ? prepareAttachment(outcome.value.attachment, currentAuthority) : undefined
+            const plan =
+              validation?._tag === "Valid" ? planAttachment(validation.prepared, currentAuthority) : undefined
+            const selectionError = () => {
+              if (validation?._tag === "Invalid") return validation.error
+              if (plan?._tag === "Invalid") return plan.error
+              const currentSelection = selection
               const superseded =
                 outcome._tag === "Success" &&
                 (physical === undefined ||
                   current !== physical ||
-                  selection._tag !== "Loading" ||
-                  selection.token !== request.token ||
-                  selection.threadId !== threadId)
-              const currentAuthority =
-                selection._tag === "Loading" && selection.token === request.token ? selection.authority : undefined
-              const validation =
-                outcome._tag === "Success" ? prepareAttachment(outcome.value.attachment, currentAuthority) : undefined
-              const plan =
-                validation?._tag === "Valid" ? planAttachment(validation.prepared, currentAuthority) : undefined
-              let invalid: HostedError | undefined
-              if (validation?._tag === "Invalid") invalid = validation.error
-              else if (plan?._tag === "Invalid") invalid = plan.error
-              else if (superseded) invalid = failure("Thread selection was superseded")
-              if (outcome._tag === "Failure" || invalid !== undefined) {
-                if (pending !== undefined && invalid !== undefined) yield* pending.fail(invalid)
-                if (outcome._tag === "Failure") return yield* Effect.failCause(outcome.cause)
-                return yield* invalid ?? failure("Thread selection attachment was invalid")
-              }
-              if (
-                validation === undefined ||
-                validation._tag !== "Valid" ||
-                plan === undefined ||
-                plan._tag !== "Valid"
+                  currentSelection._tag !== "Loading" ||
+                  currentSelection.token !== request.token ||
+                  currentSelection.threadId !== threadId)
+              return superseded ? failure("Thread selection was superseded") : undefined
+            }
+            const failInvalidOutcome = (invalid: HostedError) =>
+              (pending === undefined ? Effect.void : pending.fail(invalid)).pipe(
+                Effect.andThen(outcome._tag === "Failure" ? Effect.failCause(outcome.cause) : invalid),
               )
+            const committedSelection = (candidate: Projection) =>
+              selection._tag === "Loading" && selection.token === request.token && selection.authority === candidate
+            const attachmentAdvanced = (candidate: Projection) =>
+              previous?.threadId !== threadId || previous.deliveredCursor !== candidate.committedCursor
+            yield* Effect.gen(function* () {
+              const invalid = selectionError()
+              if (outcome._tag === "Failure" || invalid !== undefined)
+                return yield* failInvalidOutcome(invalid ?? failure("Thread selection attachment was invalid"))
+              if (validation?._tag !== "Valid" || plan?._tag !== "Valid")
                 return yield* failure("Thread selection attachment was not valid")
               const prepared = validation.prepared
               const committedPlan = plan
-              yield* reconcilePendingSubmissions(prepared)
+              yield* commands.reconcilePendingSubmissions(prepared)
               preparedCandidate = committedPlan.candidate
               if (currentAuthority === undefined || !replaceAuthority(currentAuthority, preparedCandidate))
                 return yield* failure("Thread selection was superseded")
-              yield* publishProjectionState(committedPlan.candidate)
+              yield* publishProjection(committedPlan.candidate)
               const fingerprint = yield* publishAttachment(prepared, committedPlan)
               const delivered = {
                 ...committedPlan.candidate,
                 deliveredCursor: committedPlan.candidate.committedCursor,
                 deliveredFingerprint: fingerprint,
               }
-              if (
-                selection._tag !== "Loading" ||
-                selection.token !== request.token ||
-                selection.authority !== committedPlan.candidate
-              )
-                return yield* failure("Thread selection was superseded")
+              if (!committedSelection(committedPlan.candidate)) return yield* failure("Thread selection was superseded")
               selection = { _tag: "Attached", projection: delivered }
               threadCursors.set(threadId, delivered.deliveredCursor)
-              if (
-                previous?.threadId !== threadId ||
-                previous.deliveredCursor !== committedPlan.candidate.committedCursor
-              )
+              if (attachmentAdvanced(committedPlan.candidate))
                 yield* acknowledge(physical!, threadId, committedPlan.candidate.committedCursor)
               yield* pending!.complete
             }).pipe(
@@ -997,7 +332,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
             )
               return Effect.void
             selection = { _tag: "Attached", projection: previous }
-            return publishProjectionState(previous)
+            return publishProjection(previous)
           }),
         )
       }),
@@ -1007,7 +342,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     Effect.suspend(() => {
       if (stopped) return Effect.void
       let attached = false
-      return updateState((previousState) => ({
+      return update((previousState) => ({
         ...previousState,
         connectivity: connectedBefore ? "reconnecting" : "connecting",
         activity: "authenticating",
@@ -1015,7 +350,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         Effect.andThen(
           Effect.scoped(
             Effect.gen(function* () {
-              const physical = yield* makePhysicalConnection({
+              const physical = yield* openPhysicalConnection({
                 profile,
                 threadId: () => authority()?.threadId ?? input.threadId,
                 cursor: (threadId) => (authority()?.threadId === threadId ? authority()!.deliveredCursor : "0"),
@@ -1039,7 +374,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               )
               publishConnection(physical)
               attached = true
-              yield* updateState((previousState) => ({
+              yield* update((previousState) => ({
                 ...previousState,
                 connectivity: "connected",
                 ownership: profile.owner.kind === "personal" ? "personal" : "organization",
@@ -1059,7 +394,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
               onFailure: (error) => {
                 if (stopped) return Effect.void
                 if (!retryableConnectionFailure(error))
-                  return updateState((previousState) => ({
+                  return update((previousState) => ({
                     ...previousState,
                     connectivity: "disconnected",
                   })).pipe(Effect.andThen(Effect.fail(error)))
@@ -1080,7 +415,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                   error.retryAfterMillis === undefined
                     ? status
                     : { ...status, "rika.retry_after.ms": error.retryAfterMillis }
-                return updateState((previousState) => ({ ...previousState, connectivity: "reconnecting" })).pipe(
+                return update((previousState) => ({ ...previousState, connectivity: "reconnecting" })).pipe(
                   Effect.andThen(
                     Effect.logInfo("connection.reconnect.scheduled").pipe(Effect.annotateLogs(annotations)),
                   ),
@@ -1096,392 +431,64 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     })
   const connectionLoop = superviseConnection(false, 0)
 
-  const mutate = (
-    operation: string,
-    commandId: string,
-    make: (threadId: ThreadId, version: string) => MutatingThreadCommand,
-    completeOnAdmission = false,
-    onSending: Effect.Effect<void> = Effect.void,
-    onRejected: (outcome: Rejected) => Effect.Effect<void> = () => Effect.void,
-  ) =>
-    Effect.gen(function* () {
-      const admitted = authority()
-      if (admitted === undefined) return yield* failure("Thread authority is unavailable")
-      const threadId = admitted.threadId
-      const attempt = (retryStaleVersion: boolean): Effect.Effect<void, HostedError> =>
-        Effect.suspend(() => {
-          if (stopped) return Effect.fail(failure("Interactive session is closed"))
-          return Effect.gen(function* () {
-            const projection = authority()
-            if (projection === undefined || projection.threadId !== threadId)
-              return yield* failure("Thread authority changed during command execution")
-            const command = make(ThreadId.make(threadId), projection.version)
-            const sendUntilKnown = (): Effect.Effect<CommandOutcome, HostedError> =>
-              Effect.gen(function* () {
-                const physical = yield* awaitConnection
-                const requestId = `${commandId}:${yield* randomId}`
-                const outcome = yield* Effect.result(
-                  physical.command(requestId, command, completeOnAdmission, onSending, (rejected) =>
-                    rejected.reason === "unavailable" ||
-                    (retryStaleVersion &&
-                      rejected.reason === "stale-version" &&
-                      rejected.currentThreadVersion !== undefined)
-                      ? Effect.void
-                      : onRejected(rejected),
-                  ),
-                )
-                if (outcome._tag === "Success") {
-                  if (outcome.success._tag !== "CommandRejected" || outcome.success.reason !== "unavailable")
-                    return outcome.success
-                  yield* setActivity("unknown-operation")
-                  yield* Effect.sleep("250 millis")
-                  return yield* sendUntilKnown()
-                }
-                if (outcome.failure.kind === "protocol") return yield* outcome.failure
-                if (current === physical) publishConnection(undefined)
-                yield* updateState((previousState) => ({
-                  ...previousState,
-                  connectivity: "reconnecting",
-                }))
-                return yield* sendUntilKnown()
-              })
-            let outcome = yield* sendUntilKnown()
-            while (outcome._tag === "CommandAdmitted") {
-              const committed = authority()
-              if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
-                replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
-              if (completeOnAdmission) return
-              return yield* failure("Thread command completion was not pushed after durable admission")
-            }
-            if (outcome._tag === "CommandAccepted") {
-              const committed = authority()
-              if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
-                replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
-              return
-            }
-            if (retryStaleVersion && outcome.reason === "stale-version" && outcome.currentThreadVersion !== undefined) {
-              const committed = authority()
-              if (committed?.threadId !== threadId)
-                return yield* failure("Thread authority changed during command retry")
-              if (BigInt(outcome.currentThreadVersion) > BigInt(committed.version))
-                replaceAuthority(committed, {
-                  ...committed,
-                  version: String(outcome.currentThreadVersion),
-                })
-              return yield* attempt(false)
-            }
-            if (outcome.reason === "conflict") yield* setActivity("unknown-operation")
-            return yield* HostedError.make({
-              kind: outcome.reason === "forbidden" ? "denied" : "protocol",
-              message: outcome.message,
-            })
-          })
-        })
-      yield* attempt(true)
-    }).pipe(Effect.mapError((error) => unavailable(operation, error)))
-
-  const unsupported = (operation: string, message = "This action is unavailable in the current Thread") =>
-    Effect.fail(OperationUnavailable.make({ operation, message }))
   const nextCommandId = (prefix: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((id) => `${prefix}:${id}`),
       Effect.mapError((error) => unavailable(prefix, error)),
     )
-  const archiveCurrentThread = (operation: string) =>
-    Effect.gen(function* () {
-      const commandId = yield* nextCommandId("archive")
-      yield* mutate(operation, commandId, (threadId, version) => ({
-        _tag: "ArchiveThread",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-      }))
-      yield* refreshThreads
-    })
-  const session: InteractiveSession = {
-    events: (next) =>
-      Effect.suspend(() => {
-        if (consumerAttached)
-          return Effect.fail(
-            OperationUnavailable.make({
-              operation: "InteractiveSession.events",
-              message: "Interactive session already has an event consumer",
-            }),
-          )
-        consumerAttached = true
-        dispatch = next
-        return Effect.raceFirst(connectionLoop, Deferred.await(closed)).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              consumerAttached = false
-              dispatch = () => undefined
-            }),
-          ),
-          Effect.mapError((error) => unavailable("InteractiveSession.events", error)),
-        )
-      }),
-    currentView: () => authority()?.view,
-    projectionCheckpoint: (turnId) =>
-      [...(authority()?.authorizations.values() ?? [])].find((authorization) => String(authorization.turnId) === turnId)
-        ?.checkpoint,
-    submit: (prompt, mode, parts, _tuning, submissionId) =>
-      Effect.gen(function* () {
-        const selectedThreadId = authority()?.threadId
-        if (selectedThreadId === undefined) return yield* unsupported("InteractiveSession.submit")
-        const commandId = yield* Effect.uninterruptible(
-          Effect.gen(function* () {
-            const pendingCommandId =
-              submissionId === undefined ? undefined : registerPendingSubmitCommandId(selectedThreadId, submissionId)
-            if (submissionId !== undefined && pendingCommandId === undefined)
-              return yield* OperationUnavailable.make({
-                operation: "InteractiveSession.submit",
-                message: "Submission identity is already pending",
-              })
-            const allocatedCommandId = yield* nextCommandId("submit").pipe(
-              Effect.tapError((error) =>
-                pendingCommandId === undefined
-                  ? Effect.void
-                  : Deferred.fail(pendingCommandId.commandId, error).pipe(
-                      Effect.andThen(forgetPendingSubmitCommandId(selectedThreadId, submissionId!)),
-                      Effect.asVoid,
-                    ),
-              ),
-            )
-            if (pendingCommandId !== undefined) yield* Deferred.succeed(pendingCommandId.commandId, allocatedCommandId)
-            return allocatedCommandId
-          }),
-        )
-        const attachments = parts?.flatMap((part) => {
-          if (part.type !== "image") return []
-          const attachment: SubmitPromptAttachment =
-            part.filename === undefined
-              ? { mediaType: part.mediaType, data: part.data }
-              : { mediaType: part.mediaType, data: part.data, filename: part.filename }
-          return [attachment]
-        })
-        yield* mutate(
-          "InteractiveSession.submit",
-          commandId,
-          (threadId, version) => {
-            latestSubmitCommandIds.set(String(threadId), commandId)
-            const command: SubmitPromptCommand = {
-              _tag: "SubmitPrompt",
-              threadId,
-              commandId: CommandId.make(commandId),
-              idempotencyKey: IdempotencyKey.make(commandId),
-              expectedThreadVersion: ThreadVersion.make(version),
-              text: prompt,
-            }
-            if (submissionId !== undefined) command.submissionId = submissionId
-            if (mode !== undefined) command.mode = mode
-            if (attachments !== undefined && attachments.length > 0) command.attachments = attachments
-            return command
-          },
-          true,
-          submissionId === undefined ? Effect.void : markPendingSubmissionSending(selectedThreadId, submissionId),
-          () =>
-            submissionId === undefined ? Effect.void : forgetPendingSubmitCommandId(selectedThreadId, submissionId),
-        ).pipe(
-          Effect.ensuring(
-            submissionId === undefined ? Effect.void : forgetUnsentSubmission(selectedThreadId, submissionId),
-          ),
-        )
-      }),
-    shell: () => unsupported("InteractiveSession.shell", "Shell commands are unavailable in this Thread"),
-    editQueued: (turnId, prompt) =>
-      Effect.gen(function* () {
-        const commandId = yield* nextCommandId("edit-queued")
-        yield* mutate("InteractiveSession.editQueued", commandId, (threadId, version) => ({
-          _tag: "EditQueued",
-          threadId,
-          commandId: CommandId.make(commandId),
-          idempotencyKey: IdempotencyKey.make(commandId),
-          expectedThreadVersion: ThreadVersion.make(version),
-          turnId: Turn.TurnId.make(turnId),
-          prompt,
-        }))
-      }),
-    dequeue: (turnId) =>
-      Effect.gen(function* () {
-        const commandId = yield* nextCommandId("dequeue")
-        yield* mutate("InteractiveSession.dequeue", commandId, (threadId, version) => ({
-          _tag: "Dequeue",
-          threadId,
-          commandId: CommandId.make(commandId),
-          idempotencyKey: IdempotencyKey.make(commandId),
-          expectedThreadVersion: ThreadVersion.make(version),
-          turnId: Turn.TurnId.make(turnId),
-        }))
-      }),
-    steerQueued: (turnId, text, requestId) =>
-      mutate("InteractiveSession.steerQueued", requestId, (threadId, version) => ({
-        _tag: "Steer",
-        threadId,
-        commandId: CommandId.make(requestId),
-        idempotencyKey: IdempotencyKey.make(requestId),
-        expectedThreadVersion: ThreadVersion.make(version),
-        text,
-        targetTurnId: Turn.TurnId.make(turnId),
-      })),
-    steer: (text, requestId, turnId) => {
-      const targetTurnId = turnId ?? activeTurnId()
-      if (targetTurnId === undefined) return unsupported("InteractiveSession.steer")
-      return mutate("InteractiveSession.steer", requestId, (threadId, version) => ({
-        _tag: "Steer",
-        threadId,
-        commandId: CommandId.make(requestId),
-        idempotencyKey: IdempotencyKey.make(requestId),
-        expectedThreadVersion: ThreadVersion.make(version),
-        text,
-        targetTurnId: Turn.TurnId.make(String(targetTurnId)),
-      }))
+  const commands = interactiveSessionCommands({
+    authority,
+    replaceAuthority,
+    awaitConnection,
+    connectionLost: (physical) => {
+      if (current === physical) publishConnection(undefined)
+      return update((previousState) => ({ ...previousState, connectivity: "reconnecting" }))
     },
-    approveAuthorization: (turnId, authorizationId) => {
-      const pending = authority()?.authorizations.get(`${turnId}:${authorizationId}`)
-      if (pending === undefined) return unsupported("InteractiveSession.approveAuthorization")
-      const commandId = `approve:${turnId}:${authorizationId}`
-      return mutate("InteractiveSession.approveAuthorization", commandId, (threadId, version) => ({
-        _tag: "Approve",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-        turnId: pending.turnId,
-        authorizationId,
-        checkpoint: pending.checkpoint,
-      }))
+    randomId,
+    nextCommandId,
+    setUnknownActivity: setActivity("unknown-operation"),
+    refreshThreads,
+    closed,
+    stopped: () => stopped,
+    failure,
+    unavailable,
+  })
+  const quit = Effect.suspend(() => {
+    const physical = current
+    stopped = true
+    return (physical?.detach ?? Effect.void).pipe(
+      Effect.ignore,
+      Effect.asVoid,
+      Effect.ensuring(
+        Effect.sync(() => {
+          Deferred.doneUnsafe(closed, Effect.void)
+        }),
+      ),
+    )
+  })
+  const session = interactiveSessionInterface({
+    commands,
+    authority,
+    connectionLoop,
+    closed,
+    consumerAttached: () => consumerAttached,
+    attachConsumer: (next) => {
+      consumerAttached = true
+      dispatch = next
     },
-    denyAuthorization: (turnId, authorizationId) => {
-      const pending = authority()?.authorizations.get(`${turnId}:${authorizationId}`)
-      if (pending === undefined) return unsupported("InteractiveSession.denyAuthorization")
-      const commandId = `deny:${turnId}:${authorizationId}`
-      return mutate("InteractiveSession.denyAuthorization", commandId, (threadId, version) => ({
-        _tag: "Deny",
-        threadId,
-        commandId: CommandId.make(commandId),
-        idempotencyKey: IdempotencyKey.make(commandId),
-        expectedThreadVersion: ThreadVersion.make(version),
-        turnId: pending.turnId,
-        authorizationId,
-        checkpoint: pending.checkpoint,
-      }))
+    detachConsumer: () => {
+      consumerAttached = false
+      dispatch = () => undefined
     },
-    interruptAndSend: (prompt, requestedTargetTurnId) =>
-      Effect.gen(function* () {
-        const targetTurnId = requestedTargetTurnId ?? activeTurnId()
-        if (targetTurnId === undefined) return yield* unsupported("InteractiveSession.interruptAndSend")
-        const commandId = yield* nextCommandId("interrupt")
-        yield* mutate("InteractiveSession.interruptAndSend", commandId, (threadId, version) => ({
-          _tag: "InterruptAndSend",
-          threadId,
-          commandId: CommandId.make(commandId),
-          idempotencyKey: IdempotencyKey.make(commandId),
-          expectedThreadVersion: ThreadVersion.make(version),
-          text: prompt,
-          targetTurnId: Turn.TurnId.make(String(targetTurnId)),
-        }))
-      }),
-    cancel: (requestedTarget = {}) =>
-      Effect.gen(function* () {
-        const selectedThreadId = requestedTarget.threadId ?? authority()?.threadId
-        if (selectedThreadId === undefined) return yield* unsupported("InteractiveSession.cancel")
-        if (authority()?.threadId !== selectedThreadId)
-          return yield* unavailable(
-            "InteractiveSession.cancel",
-            failure("Thread authority changed before cancellation"),
-          )
-        const targetTurnId =
-          requestedTarget.turnId ?? (requestedTarget.submissionId === undefined ? activeTurnId() : undefined)
-        const latestSubmitCommandId = latestSubmitCommandIds.get(selectedThreadId)
-        let target: CancellationTarget | undefined
-        if (targetTurnId !== undefined) target = { _tag: "Turn", turnId: Turn.TurnId.make(String(targetTurnId)) }
-        else {
-          let targetCommandId = latestSubmitCommandId
-          if (requestedTarget.submissionId !== undefined) {
-            const pendingCommandId = pendingSubmitCommandIds.get(selectedThreadId)?.get(requestedTarget.submissionId)
-            if (pendingCommandId === undefined) return yield* unsupported("InteractiveSession.cancel")
-            targetCommandId = yield* Effect.raceFirst(
-              Deferred.await(pendingCommandId.commandId),
-              Deferred.await(closed).pipe(Effect.andThen(unsupported("InteractiveSession.cancel"))),
-            )
-          }
-          if (targetCommandId !== undefined) target = { _tag: "Command", commandId: CommandId.make(targetCommandId) }
-        }
-        if (target === undefined) return yield* unsupported("InteractiveSession.cancel")
-        const commandId = yield* nextCommandId("cancel")
-        if (authority()?.threadId !== selectedThreadId)
-          return yield* unavailable(
-            "InteractiveSession.cancel",
-            failure("Thread authority changed during cancellation"),
-          )
-        yield* mutate(
-          "InteractiveSession.cancel",
-          commandId,
-          (threadId, version) => ({
-            _tag: "Cancel",
-            threadId,
-            commandId: CommandId.make(commandId),
-            idempotencyKey: IdempotencyKey.make(commandId),
-            expectedThreadVersion: ThreadVersion.make(version),
-            target,
-          }),
-          true,
-        )
-        if (requestedTarget.submissionId !== undefined)
-          yield* forgetPendingSubmitCommandId(selectedThreadId, requestedTarget.submissionId)
-      }),
-    quit: Effect.suspend(() => {
-      const physical = current
-      stopped = true
-      return (physical?.detach ?? Effect.void).pipe(
-        Effect.ignore,
-        Effect.asVoid,
-        Effect.ensuring(
-          Effect.sync(() => {
-            Deferred.doneUnsafe(closed, Effect.void)
-          }),
-        ),
-      )
-    }),
-    newThread: Effect.gen(function* () {
-      const threadId = yield* input.createThread("runner")
-      yield* requestSelection(threadId)
-    }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newThread", error))),
-    newOrbThread: Effect.gen(function* () {
-      const threadId = yield* input.createThread("orb")
-      yield* requestSelection(threadId)
-    }).pipe(Effect.mapError((error) => unavailable("InteractiveSession.newOrbThread", error))),
-    archiveThread: archiveCurrentThread("InteractiveSession.archiveThread"),
-    archiveAndNewThread: Effect.gen(function* () {
-      const threadId = yield* input.createThread("runner", authority()?.threadId)
-      yield* requestSelection(threadId)
-    }).pipe(
-      Effect.mapError((error) =>
-        Schema.is(OperationUnavailable)(error) ? error : unavailable("InteractiveSession.archiveAndNewThread", error),
-      ),
-    ),
-    selectThread: (threadId) =>
-      requestSelection(threadId).pipe(
-        Effect.mapError((error) => unavailable("InteractiveSession.selectThread", error)),
-      ),
-    readQueue: (threadId) =>
-      Effect.suspend(() =>
-        authority()?.threadId === threadId
-          ? requestSelection(threadId)
-          : Effect.fail(failure("Queue refresh requires the selected Thread")),
-      ).pipe(Effect.mapError((error) => unavailable("InteractiveSession.readQueue", error))),
-    previewThread: (threadId, requestId) =>
-      input.previewThread(threadId).pipe(
-        Effect.tap((units) => Effect.sync(() => dispatch({ _tag: "ThreadPreviewLoaded", threadId, requestId, units }))),
-        Effect.catch((error) =>
-          Effect.sync(() => dispatch({ _tag: "ThreadPreviewFailed", threadId, requestId, message: error.message })),
-        ),
-      ),
-    reopenThread: Effect.suspend(() => requestSelection(authority()?.threadId ?? input.threadId)).pipe(
-      Effect.mapError((error) => unavailable("InteractiveSession.reopenThread", error)),
-    ),
-  }
+    unavailable,
+    quit,
+    createThread: input.createThread,
+    requestSelection,
+    initialThreadId: input.threadId,
+    previewThread: input.previewThread,
+    dispatch: (event) => dispatch(event),
+    failure,
+  })
   return {
     session,
     connection: {

@@ -157,6 +157,196 @@ const encodeBounded = (
 }
 const mapError = (error: { readonly message: string }) => QueryError.make({ message: error.message })
 
+type ReadBase = Omit<ReadSuccess, "items" | "omissions" | "truncated">
+type Turn = TurnQueueState.PageResult["turns"][number]
+
+interface ReadState {
+  readonly turns: TurnRepository.Interface
+  readonly transcripts: TranscriptRepository.Interface
+}
+
+const descendantsOf = (rootParentId: string, units: ReadonlyArray<TranscriptUnit.Unit>) => {
+  const descendants: Array<TranscriptUnit.Unit> = []
+  const parentIds = new Set([rootParentId])
+  for (const unit of units) {
+    if (unit.parentId === undefined || !parentIds.has(unit.parentId)) continue
+    descendants.push(unit)
+    const link = childLink(unit)
+    if (link !== undefined) parentIds.add(link.parentId)
+  }
+  return descendants
+}
+
+const ancestorsByParent = (descendants: ReadonlyArray<TranscriptUnit.Unit>) =>
+  new Map(
+    descendants.flatMap((unit) => {
+      const link = childLink(unit)
+      return link === undefined ? [] : ([[link.parentId, unit]] as const)
+    }),
+  )
+
+const selectionWithAncestors = (
+  candidate: TranscriptUnit.Unit,
+  selected: ReadonlySet<TranscriptUnit.Unit>,
+  rootParentId: string,
+  parents: ReadonlyMap<string, TranscriptUnit.Unit>,
+) => {
+  const trial = new Set(selected).add(candidate)
+  let parentId = candidate.parentId
+  while (parentId !== undefined && parentId !== rootParentId) {
+    const parent = parents.get(parentId)
+    if (parent === undefined) break
+    trial.add(parent)
+    parentId = parent.parentId
+  }
+  return trial
+}
+
+const selectSubtree = (
+  base: ReadBase,
+  selector: Extract<ReadInput["selector"], { _tag: "subtree" }>,
+  turn: Turn,
+  root: TranscriptUnit.Unit,
+  rootParentId: string,
+  descendants: ReadonlyArray<TranscriptUnit.Unit>,
+  offset: number,
+) => {
+  const parents = ancestorsByParent(descendants)
+  const selected = new Set<TranscriptUnit.Unit>()
+  let nextOffset = offset
+  let forcedItem: ReadItem | undefined
+  for (let index = offset; index < descendants.length; index += 1) {
+    const candidate = descendants[index]!
+    const trial = selectionWithAncestors(candidate, selected, rootParentId, parents)
+    const result = {
+      ...base,
+      items: [
+        subtreeItem(
+          turn,
+          root,
+          descendants.filter((unit) => trial.has(unit)),
+        ),
+      ],
+      omissions: [],
+      truncated: false,
+    }
+    if (encodeJson(result).length > QueryPolicy.transcriptBudget) {
+      if (selected.size === 0) {
+        selected.add(candidate)
+        nextOffset = index + 1
+        forcedItem = boundedSubtreeItem(turn, root, candidate)
+      }
+      break
+    }
+    for (const unit of trial) selected.add(unit)
+    nextOffset = index + 1
+  }
+  const omissions: ReadonlyArray<Omission> =
+    nextOffset < descendants.length
+      ? [{ reason: "responseBudget", continuation: { ...selector, offset: nextOffset } }]
+      : []
+  return {
+    ...base,
+    items: [
+      forcedItem ??
+        subtreeItem(
+          turn,
+          root,
+          descendants.filter((unit) => selected.has(unit)),
+        ),
+    ],
+    omissions,
+    truncated: omissions.length > 0,
+  }
+}
+
+const readSubtree = (
+  state: ReadState,
+  threadId: Thread.ThreadId,
+  base: ReadBase,
+  selector: Extract<ReadInput["selector"], { _tag: "subtree" }>,
+) =>
+  Effect.gen(function* () {
+    const page = yield* state.transcripts
+      .page(threadId, { before: selector.before, limit: 200 })
+      .pipe(Effect.mapError(mapError))
+    const root = page.entries.find((entry) => childLink(entry.unit)?.subagentId === selector.subagentId)
+    if (root === undefined) {
+      const continuation =
+        page.hasOlder && page.oldestCursor !== undefined ? { ...selector, before: page.oldestCursor } : selector
+      return encodeBounded(base, [], [{ reason: page.hasOlder ? "olderTurns" : "unavailableSubagent", continuation }])
+    }
+    const projection = yield* state.transcripts.get(root.turn.id).pipe(Effect.mapError(mapError))
+    const rootLink = childLink(root.unit)
+    if (rootLink === undefined)
+      return yield* QueryError.make({ message: `Child execution ${selector.subagentId} has no parent block` })
+    const descendants = descendantsOf(rootLink.parentId, projection?.units ?? [root.unit])
+    const offset = Math.min(selector.offset ?? 0, descendants.length)
+    return selectSubtree(base, selector, root.turn, root.unit, rootLink.parentId, descendants, offset)
+  })
+
+const readRelevant = (
+  state: ReadState,
+  threadId: Thread.ThreadId,
+  base: ReadBase,
+  selector: Extract<ReadInput["selector"], { _tag: "relevant" }>,
+) =>
+  Effect.gen(function* () {
+    const limit = yield* bounded("limit", selector.limit, 10, 20)
+    const page = yield* state.transcripts
+      .page(threadId, { before: selector.before, limit: 200 })
+      .pipe(Effect.mapError(mapError))
+    const needle = selector.query.toLocaleLowerCase()
+    const entries = page.entries
+      .filter(
+        (entry) => entry.unit.content._tag === "Entry" && entry.unit.content.text.toLocaleLowerCase().includes(needle),
+      )
+      .slice(-limit)
+    const grouped = new Map<string, typeof entries>()
+    for (const entry of entries) grouped.set(entry.turn.id, [...(grouped.get(entry.turn.id) ?? []), entry])
+    const candidates = [...grouped.values()].map((values) =>
+      item(
+        values[0]!.turn,
+        values.map((value) => value.unit),
+      ),
+    )
+    const omissions: ReadonlyArray<Omission> =
+      page.hasOlder && page.oldestCursor !== undefined
+        ? [{ reason: "olderTurns", continuation: { ...selector, before: page.oldestCursor } }]
+        : []
+    return encodeBounded(
+      page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
+      candidates,
+      omissions,
+    )
+  })
+
+const readRecent = (
+  state: ReadState,
+  threadId: Thread.ThreadId,
+  base: ReadBase,
+  selector: Exclude<ReadInput["selector"], { _tag: "overview" | "subtree" | "relevant" }>,
+) =>
+  Effect.gen(function* () {
+    const limit = yield* bounded("limit", selector.limit, 10, 20)
+    const page = yield* state.turns.page(threadId, { before: selector.before, limit }).pipe(Effect.mapError(mapError))
+    const candidates = yield* Effect.forEach(page.turns, (turn) =>
+      state.transcripts.get(turn.id).pipe(
+        Effect.mapError(mapError),
+        Effect.map((projection) => item(turn, projection?.units ?? [])),
+      ),
+    )
+    const omissions: ReadonlyArray<Omission> =
+      page.hasOlder && page.oldestCursor !== undefined
+        ? [{ reason: "olderTurns", continuation: { ...selector, before: page.oldestCursor } }]
+        : []
+    return encodeBounded(
+      page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
+      candidates,
+      omissions,
+    )
+  })
+
 const makeForWorkspace = (workspace: string) =>
   Effect.gen(function* () {
     const threadRepository = yield* ThreadRepository.Service
@@ -228,145 +418,10 @@ const makeForWorkspace = (workspace: string) =>
         selector: input.selector,
       }
       if (input.selector._tag === "overview") return encodeBounded(base, [], [])
-      if (input.selector._tag === "subtree") {
-        const subagentId = input.selector.subagentId
-        const page = yield* transcripts
-          .page(threadId, { before: input.selector.before, limit: 200 })
-          .pipe(Effect.mapError(mapError))
-        const root = page.entries.find((entry) => childLink(entry.unit)?.subagentId === subagentId)
-        if (root === undefined) {
-          const continuation =
-            page.hasOlder && page.oldestCursor !== undefined
-              ? { ...input.selector, before: page.oldestCursor }
-              : input.selector
-          return encodeBounded(
-            base,
-            [],
-            [{ reason: page.hasOlder ? "olderTurns" : "unavailableSubagent", continuation }],
-          )
-        }
-        const projection = yield* transcripts.get(root.turn.id).pipe(Effect.mapError(mapError))
-        const units = projection?.units ?? [root.unit]
-        const rootLink = childLink(root.unit)
-        if (rootLink === undefined)
-          return yield* QueryError.make({ message: `Child execution ${subagentId} has no parent block` })
-        const rootParentId = rootLink.parentId
-        const descendants: Array<TranscriptUnit.Unit> = []
-        const parentIds = new Set([rootParentId])
-        for (const unit of units) {
-          if (unit.parentId === undefined || !parentIds.has(unit.parentId)) continue
-          descendants.push(unit)
-          const link = childLink(unit)
-          if (link !== undefined) parentIds.add(link.parentId)
-        }
-        const offset = Math.min(input.selector.offset ?? 0, descendants.length)
-        const blockParents = new Map(
-          descendants.flatMap((unit) => {
-            const link = childLink(unit)
-            return link === undefined ? [] : ([[link.parentId, unit]] as const)
-          }),
-        )
-        const selected = new Set<TranscriptUnit.Unit>()
-        let nextOffset = offset
-        let forcedItem: ReadItem | undefined
-        for (let index = offset; index < descendants.length; index += 1) {
-          const candidate = descendants[index]!
-          const trial = new Set(selected).add(candidate)
-          let parentId = candidate.parentId
-          while (parentId !== undefined && parentId !== rootParentId) {
-            const parent = blockParents.get(parentId)
-            if (parent === undefined) break
-            trial.add(parent)
-            parentId = parent.parentId
-          }
-          const result = {
-            ...base,
-            items: [
-              subtreeItem(
-                root.turn,
-                root.unit,
-                descendants.filter((unit) => trial.has(unit)),
-              ),
-            ],
-            omissions: [],
-            truncated: false,
-          }
-          if (encodeJson(result).length > QueryPolicy.transcriptBudget) {
-            if (selected.size === 0) {
-              selected.add(candidate)
-              nextOffset = index + 1
-              forcedItem = boundedSubtreeItem(root.turn, root.unit, candidate)
-            }
-            break
-          }
-          for (const unit of trial) selected.add(unit)
-          nextOffset = index + 1
-        }
-        const continuation =
-          nextOffset < descendants.length
-            ? [{ reason: "responseBudget" as const, continuation: { ...input.selector, offset: nextOffset } }]
-            : []
-        return {
-          ...base,
-          items: [
-            forcedItem ??
-              subtreeItem(
-                root.turn,
-                root.unit,
-                descendants.filter((unit) => selected.has(unit)),
-              ),
-          ],
-          omissions: continuation,
-          truncated: continuation.length > 0,
-        }
-      }
-      if (input.selector._tag === "relevant") {
-        const limit = yield* bounded("limit", input.selector.limit, 10, 20)
-        const page = yield* transcripts
-          .page(threadId, { before: input.selector.before, limit: 200 })
-          .pipe(Effect.mapError(mapError))
-        const needle = input.selector.query.toLocaleLowerCase()
-        const entries = page.entries
-          .filter(
-            (entry) =>
-              entry.unit.content._tag === "Entry" && entry.unit.content.text.toLocaleLowerCase().includes(needle),
-          )
-          .slice(-limit)
-        const grouped = new Map<string, typeof entries>()
-        for (const entry of entries) grouped.set(entry.turn.id, [...(grouped.get(entry.turn.id) ?? []), entry])
-        const candidates = [...grouped.values()].map((values) =>
-          item(
-            values[0]!.turn,
-            values.map((value) => value.unit),
-          ),
-        )
-        const omissions: ReadonlyArray<Omission> =
-          page.hasOlder && page.oldestCursor !== undefined
-            ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
-            : []
-        return encodeBounded(
-          page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
-          candidates,
-          omissions,
-        )
-      }
-      const limit = yield* bounded("limit", input.selector.limit, 10, 20)
-      const page = yield* turns.page(threadId, { before: input.selector.before, limit }).pipe(Effect.mapError(mapError))
-      const candidates = yield* Effect.forEach(page.turns, (turn) =>
-        transcripts.get(turn.id).pipe(
-          Effect.mapError(mapError),
-          Effect.map((projection) => item(turn, projection?.units ?? [])),
-        ),
-      )
-      const omissions: ReadonlyArray<Omission> =
-        page.hasOlder && page.oldestCursor !== undefined
-          ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
-          : []
-      return encodeBounded(
-        page.oldestCursor === undefined ? base : { ...base, nextCursor: page.oldestCursor },
-        candidates,
-        omissions,
-      )
+      const state = { turns, transcripts }
+      if (input.selector._tag === "subtree") return yield* readSubtree(state, threadId, base, input.selector)
+      if (input.selector._tag === "relevant") return yield* readRelevant(state, threadId, base, input.selector)
+      return yield* readRecent(state, threadId, base, input.selector)
     })
     const search = Effect.fn("ThreadQueryService.search")(function* (input: FindInput) {
       const result = yield* find(input)

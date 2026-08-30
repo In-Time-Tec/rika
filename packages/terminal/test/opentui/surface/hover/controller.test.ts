@@ -8,7 +8,7 @@ import {
   transcriptUnitId as unitId,
 } from "../../../../src/presentation/transcript/row"
 import { initial, type Model } from "../../../../src/state/model"
-import { type TranscriptBlock } from "../../../../src/state/transcript/model"
+import type { TranscriptBlock } from "../../../../src/state/transcript/model"
 
 const longText =
   "Expected UnknownResponseStreamEvent, got " +
@@ -63,19 +63,34 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
   { _tag: "Compaction", summary: longText, checkpoint: "42" },
   { _tag: "Diff", path: "packages/providers/README.md", patch: longDiff },
   toolCall("shell-1", {
-    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
+    presentation: {
+      family: "shell",
+      action: "command",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
     input: JSON.stringify({
       command: `echo ${"a".repeat(90)} && rg --hidden --glob '!node_modules' ${"b".repeat(60)}`,
     }),
     result: { text: `${longText}\n${longText}` },
   }),
   toolCall("shell-2", {
-    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
+    presentation: {
+      family: "shell",
+      action: "command",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
     input: JSON.stringify({ command: nestedCommand }),
     detail: nestedCommand,
   }),
   toolCall("edit-1", {
-    presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+    presentation: {
+      family: "edit",
+      action: "edit",
+      activeLabel: "Editing",
+      completeLabel: "Edited",
+    },
     files: [
       {
         key: "readme",
@@ -90,7 +105,12 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     ],
   }),
   toolCall("agent-1", {
-    presentation: { family: "agent", action: "agent", activeLabel: "Oracle exploring", completeLabel: "Oracle" },
+    presentation: {
+      family: "agent",
+      action: "agent",
+      activeLabel: "Oracle exploring",
+      completeLabel: "Oracle",
+    },
     detail: `${longText} ${longText}`,
   }),
   toolCall("web-1", {
@@ -115,7 +135,12 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     detail: "Inspect the transcript renderer",
   }),
   toolCall("nested-shell", {
-    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
+    presentation: {
+      family: "shell",
+      action: "command",
+      activeLabel: "Running",
+      completeLabel: "Ran",
+    },
     input: JSON.stringify({ command: nestedCommand }),
     detail: nestedCommand,
   }),
@@ -138,7 +163,13 @@ const boundedModel = (width: number): Model => {
     blocks,
     items: blocks.map((block, index) =>
       block._tag === "ToolCall" && block.id === "nested-shell"
-        ? { _tag: "Block" as const, index, id: `item:${index}`, turnId: "turn", parentId: "nested-agent" }
+        ? {
+            _tag: "Block" as const,
+            index,
+            id: `item:${index}`,
+            turnId: "turn",
+            parentId: "nested-agent",
+          }
         : { _tag: "Block" as const, index, id: `item:${index}`, turnId: "turn" },
     ),
     entries: [

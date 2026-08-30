@@ -15,23 +15,32 @@ const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
 const encodeState = Schema.encodeSync(Schema.fromJsonString(ExecutionProjection.ProjectionState))
 const encodeUnit = Schema.encodeSync(Schema.fromJsonString(TranscriptUnit.Unit))
+const unitIsInvalid = (turnId: string, unit: TranscriptUnit.Unit, keys: Set<string>, orders: Set<string>) => {
+  const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+  return (
+    unit.turnId !== turnId || !TranscriptOrdering.hasIntrinsicOrder(unit) || keys.has(unit.key) || orders.has(order)
+  )
+}
 const validateUnits = (turnId: string, units: ReadonlyArray<TranscriptUnit.Unit>) =>
   Effect.gen(function* () {
     const keys = new Set<string>()
     const orders = new Set<string>()
     for (const unit of units) {
       const order = TranscriptOrdering.encodeUnitOrder(unit.order)
-      if (
-        unit.turnId !== turnId ||
-        !TranscriptOrdering.hasIntrinsicOrder(unit) ||
-        keys.has(unit.key) ||
-        orders.has(order)
-      )
+      if (unitIsInvalid(turnId, unit, keys, orders))
         return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} is invalid or duplicated` })
       keys.add(unit.key)
       orders.add(order)
     }
   })
+
+type ProjectionChange = Parameters<Interface["commitProjection"]>[1]
+const projectionUpserts = (change: ProjectionChange) =>
+  change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+const removedUnitKeys = (change: ProjectionChange): ReadonlyArray<string> =>
+  change._tag === "ProjectionPatch" ? change.remove : []
+const shouldDeleteStoredUnits = (change: ProjectionChange, replacingOlderProjection: boolean) =>
+  change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection)
 
 export const transcriptSqlWrites = {
   make: (
@@ -39,7 +48,7 @@ export const transcriptSqlWrites = {
     get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
   ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
     commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change, withinTransaction) {
-      const upserts = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+      const upserts = projectionUpserts(change)
       yield* validateUnits(turn.id, upserts)
       const clock = yield* Clock.Clock
       return yield* db
@@ -112,9 +121,9 @@ export const transcriptSqlWrites = {
                     .returning({ turnId: rikaTranscriptCheckpoints.turnId })
             if (rows.length === 0) return "stale" as const
             yield* updateThreadUsage(tx, turn, change.state.usage, now)
-            if (change._tag === "ProjectionSnapshot" && (!change.hasOlder || replacingOlderProjection))
+            if (shouldDeleteStoredUnits(change, replacingOlderProjection))
               yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
-            for (const key of change._tag === "ProjectionPatch" ? change.remove : [])
+            for (const key of removedUnitKeys(change))
               yield* tx
                 .delete(rikaTranscriptUnits)
                 .where(and(eq(rikaTranscriptUnits.turnId, turn.id), eq(rikaTranscriptUnits.unitKey, key)))

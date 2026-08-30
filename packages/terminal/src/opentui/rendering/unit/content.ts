@@ -1,46 +1,31 @@
 import { Function, Option, Schema } from "effect"
-import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
+import { bold, dim, fg, italic, StyledText, type TextChunk } from "@opentui/core"
 import { Block } from "@rika/transcript/transcript-presentation-model"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { truncateToWidth } from "../../../presentation/terminal/format"
-import {
-  renderMarkdownLines,
-  renderMarkdownStyled,
-  highlightShellCommand,
-  wrapStyledLine,
-  toOpenChunk,
-} from "../text-adapter"
-import { renderToolSummary } from "../diff-text-adapter"
+import { renderMarkdownLines, renderMarkdownStyled, toOpenChunk } from "../text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
 import { renderCellBody, renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./bodies"
-import { toolDetail, toolDetails } from "../../../presentation/transcript/tool/detail"
+import { toolDetail } from "../../../presentation/transcript/tool/detail"
 import { isExpandableUnit, orderedTranscriptItems, transcriptUnitId } from "../../../presentation/transcript/row"
 import type {
   AgentOutcome,
-  AgentResponseState,
   CellTranscriptUnit,
   NestedTranscriptUnit,
   SubagentTranscriptUnit,
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../../presentation/transcript/tool/types"
-import {
-  wrapTextToWidth,
-  wrapBodyText,
-  iconChar,
-  cancelledAgentLabel,
-  failedAgentLabel,
-  subagentPhrase,
-} from "../window"
-import { toolUnitsFor, shellCommandText, shellExitCode, type ToolUnit } from "../tool/detail"
+import { wrapTextToWidth, wrapBodyText, subagentPhrase } from "../window"
+import { toolUnitsFor, type ToolUnit } from "../tool/detail"
 import { transcriptWrapWidth, type TranscriptUnitBuild, type UnitLineRange } from "../transcript/window"
 import { createToolBodyRenderer } from "../tool/bodies"
 import { toolResultText } from "../../../presentation/transcript/tool/body"
-
-const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
-  state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
+import { fallbackContent } from "./fallback-content"
+import { detailContent } from "./detail-content"
+import { bodyContent, type TranscriptUnitBuilder } from "./body-content"
 
 const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   const blockAt = (index: number) => Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[index]))
@@ -75,7 +60,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   }
   const rowExpanded = (id: string): boolean => model.expandedRowKeys.includes(id)
   const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
-  let nestedRanges: Array<UnitLineRange> = []
+  const nestedRanges: Array<UnitLineRange> = []
   let rootHeaderEnd: number | undefined
   const renderEntryBody = (index: number) => {
     const entry = model.entries[index]!
@@ -180,47 +165,20 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     statusIcon,
   })
 
-  const renderOtherToolBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
-    const failed = unit.block.status === "failed"
-    const running = unit.block.status === "running"
-    const cancelled = unit.block.status === "cancelled"
-    let label = unit.block.presentation.completeLabel
-    if (running) label = unit.block.presentation.activeLabel
-    else if (cancelled && unit.block.presentation.family === "agent") {
-      label = cancelledAgentLabel(unit.block.presentation.activeLabel)
-    } else if (failed && unit.block.presentation.family === "agent") {
-      label = failedAgentLabel(unit.block.presentation.activeLabel)
-    }
-    const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
-    const agent = unit.block.presentation.family === "agent"
-    const shellFailure =
-      failed && unit.block.presentation.family === "shell" ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
-    const output = agent || !toolOutputDisplayed(unit.block) ? undefined : toolResultText(unit.block.result)
-    if (selected)
-      highlight(`${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${shellFailure}`)
-    else {
-      append(statusIcon(failed, running, cancelled))
-      const baseSummary = toolDetail(unit.index, {
-        ...unit.block,
-        presentation: { ...unit.block.presentation, activeLabel: label, completeLabel: label },
-      }).summary
-      for (const chunk of renderToolSummary(baseSummary, { leading: " " })[0]!) append(chunk)
-      if (shellFailure.length > 0) append(fg(colors.red)(shellFailure))
-    }
-    if (expanded && agent && unit.block.detail.length > 0) {
-      renderAgentPrompt(unit.block.detail, "  ")
-    } else if (expanded && !agent && output !== undefined) {
-      append(fg(colors.text)("\n"))
-      if (unit.block.presentation.action === "read-web-page") {
-        const rows = renderMarkdownLines(output.trimEnd(), Math.max(1, transcriptWrapWidth(model.width) - 2))
-        for (const [rowIndex, row] of rows.entries()) {
-          append(dim(fg(colors.text)("  ")))
-          for (const chunk of row) append(chunk)
-          if (rowIndex < rows.length - 1) append(fg(colors.text)("\n"))
-        }
-      } else append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
-    }
-  }
+  const renderOtherToolBody = (unit: ToolUnit, selected: boolean, expanded: boolean) =>
+    fallbackContent.renderToolBody(
+      {
+        append,
+        highlight,
+        renderAgentPrompt,
+        statusIcon,
+        width: transcriptWrapWidth(model.width),
+        spinnerFrame,
+      },
+      unit,
+      selected,
+      expanded,
+    )
   const renderNestedCell = (unit: CellTranscriptUnit, prefix: string, last: boolean) => {
     const block = blockAt(unit.block)
     if (block?._tag !== "Cell") return
@@ -260,6 +218,43 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     else if (unit.kind === "subagent") renderNestedSubagent(unit, prefix, last)
     else renderNestedTool(unit, prefix, last)
   }
+  const renderNestedToolContents = (
+    unit: ToolTranscriptUnit,
+    blockId: string,
+    bodyIndent: string,
+    expanded: boolean,
+  ) => {
+    if (!expanded) return
+    const children = unit.children ?? []
+    for (const [childIndex, child] of children.entries())
+      renderNested(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
+    if (unit.agentResponse === undefined) return
+    const timeline = children.length > 0
+    const terminalPrefix = timeline ? `${bodyIndent}│   ` : bodyIndent
+    const response = bodyContent.agentOutcome(unit.agentResponse)
+    const range =
+      response.kind === "answer"
+        ? renderAgentResponse(response.entry, terminalPrefix, timeline)
+        : renderAgentError(response, blockId, terminalPrefix, timeline)
+    if (range !== undefined) nestedRanges.push(range)
+  }
+  const renderNestedToolOutput = (
+    block: ToolUnit["block"],
+    output: string | undefined,
+    bodyIndent: string,
+    rowWidth: number,
+    expanded: boolean,
+  ) => {
+    if (!expanded) return
+    if (block.presentation.family === "agent" && block.detail.length > 0) renderAgentPrompt(block.detail, bodyIndent)
+    else if (output !== undefined && output.length > 0)
+      detailContent.renderExpandedToolOutput(
+        { append },
+        output,
+        rowWidth,
+        block.presentation.family === "shell" ? `${bodyIndent}  ` : bodyIndent,
+      )
+  }
   const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
     const index = unit.blocks[0]!
     const block = blockAt(index)
@@ -267,17 +262,11 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const id = transcriptUnitId(model, unit)
     const expanded = rowExpanded(id)
     const running = block.status === "running"
-    const failed = block.status === "failed"
-    const cancelled = block.status === "cancelled"
     const detail = toolDetail(index, block)
     const children = unit.children ?? []
     const agent = block.presentation.family === "agent"
     const output = agent || !toolOutputDisplayed(block) ? undefined : toolResultText(block.result)
-    const expandable =
-      children.length > 0 ||
-      unit.agentResponse !== undefined ||
-      (agent && (running || block.detail.length > 0)) ||
-      (output !== undefined && output.length > 0)
+    const expandable = bodyContent.nestedToolExpandable(unit, agent, running, block.detail, output)
     const rowWidth = transcriptWrapWidth(model.width)
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 8))
     const branchPrefix = `${visiblePrefix}${last ? "└" : "├"} `
@@ -285,51 +274,17 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append(fg(colors.text)("\n"))
     append(dim(fg(colors.subtle)(branchPrefix)))
     const start = line
-    if (cancelled && block.presentation.family === "shell") {
-      const command = detail.label.startsWith("$ ") ? detail.label.slice(2) : detail.label
-      append(bold(fg(colors.amber)("$ ")))
-      const suffix = " (cancelled)"
-      const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
-      const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix))
-      for (const [rowIndex, row] of wrapTextToWidth(command, commandWidth).entries()) {
-        if (rowIndex > 0) {
-          append(fg(colors.text)("\n"))
-          append(dim(fg(colors.subtle)(shellContinuationPrefix)))
-        }
-        append(strikethrough(fg(colors.text)(row)))
-      }
-      append(italic(fg(colors.amber)(" (cancelled)")))
-    } else {
-      append(statusIcon(failed, running, cancelled))
-      if (block.presentation.family === "shell") {
-        const failure = failed ? ` (exit code: ${shellExitCode(block) ?? 1})` : ""
-        const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
-        const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 4 - stringWidth(failure))
-        append(fg(colors.text)(" "))
-        append(dim(fg(colors.text)("$ ")))
-        const command = shellCommandText(block)
-        const rows = command
-          .split("\n")
-          .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
-        for (const [rowIndex, row] of rows.entries()) {
-          if (rowIndex > 0) {
-            append(fg(colors.text)("\n"))
-            append(dim(fg(colors.subtle)(shellContinuationPrefix)))
-          }
-          for (const chunk of row) append(chunk)
-        }
-        if (failure.length > 0) append(fg(colors.red)(failure))
-      } else
-        for (const [labelIndex, labelLine] of renderToolSummary(detail.summary, {
-          width: rowWidth - stringWidth(continuationPrefix),
-        }).entries()) {
-          if (labelIndex > 0) {
-            append(fg(colors.text)("\n"))
-            append(dim(fg(colors.subtle)(continuationPrefix)))
-          } else append(fg(colors.text)(" "))
-          for (const chunk of labelLine) append(chunk)
-        }
-    }
+    const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
+    detailContent.renderToolHeader(
+      { append, statusIcon },
+      block,
+      detail.label,
+      detail.summary,
+      rowWidth,
+      branchPrefix,
+      continuationPrefix,
+      shellContinuationPrefix,
+    )
     const headerEnd = line
     const rangeIndex = nestedRanges.length
     const nestedRangeBase: UnitLineRange = {
@@ -345,29 +300,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     nestedRanges.push(nestedRange)
     const bodyPrefix = `${visiblePrefix}${last ? "  " : "│ "}`
     const bodyIndent = `${bodyPrefix}  `
-    if (expanded && agent && block.detail.length > 0) {
-      renderAgentPrompt(block.detail, bodyIndent)
-    } else if (expanded && output !== undefined && output.length > 0) {
-      const outputIndent = block.presentation.family === "shell" ? `${bodyIndent}  ` : bodyIndent
-      const outputWidth = Math.max(1, rowWidth - stringWidth(outputIndent))
-      const renderedOutput = wrapTextToWidth(output, outputWidth).join(`\n${outputIndent}`)
-      append(fg(colors.text)("\n"))
-      append(dim(fg(colors.subtle)(outputIndent)))
-      append(dim(fg(colors.text)(renderedOutput)))
-    }
-    if (expanded)
-      for (const [childIndex, child] of children.entries())
-        renderNested(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
-    if (expanded && unit.agentResponse !== undefined) {
-      const timeline = children.length > 0
-      const terminalPrefix = timeline ? `${bodyIndent}│   ` : bodyIndent
-      const response = agentResponseOutcome(unit.agentResponse)
-      const range =
-        response.kind === "answer"
-          ? renderAgentResponse(response.entry, terminalPrefix, timeline)
-          : renderAgentError(response, block.id, terminalPrefix, timeline)
-      if (range !== undefined) nestedRanges.push(range)
-    }
+    renderNestedToolOutput(block, output, bodyIndent, rowWidth, expanded)
+    renderNestedToolContents(unit, block.id, bodyIndent, expanded)
     nestedRanges[rangeIndex] = {
       ...nestedRanges[rangeIndex]!,
       end: children.length === 0 ? line : (nestedRanges[rangeIndex + 1]?.start ?? start + 1) - 1,
@@ -395,7 +329,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     if (unit.agentResponse !== undefined) {
       const timeline = unit.children.length > 0
       const prefix = timeline ? `${bodyIndent}│   ` : bodyIndent
-      const outcome = agentResponseOutcome(unit.agentResponse)
+      const outcome = bodyContent.agentOutcome(unit.agentResponse)
       const range =
         outcome.kind === "answer"
           ? renderAgentResponse(outcome.entry, prefix, timeline)
@@ -485,6 +419,44 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   }
   const isUnitVisible = (unit: TranscriptUnit): boolean =>
     unit.kind !== "reasoning" || rowExpanded(transcriptUnitId(model, unit))
+  const renderAttachedTool = (
+    unit: Extract<TranscriptUnit, { kind: "tool" }>,
+    selected: boolean,
+    expanded: boolean,
+  ) => {
+    const tools = toolUnitsFor(model, unit.blocks)
+    renderOtherToolBody(tools[0]!, selected, expanded)
+    if (!expanded) return
+    for (const [childIndex, child] of (unit.children ?? []).entries())
+      renderNested(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined)
+    if (unit.agentResponse === undefined) return
+    const timeline = (unit.children?.length ?? 0) > 0
+    const prefix = timeline ? "  │   " : "  "
+    const ownerId = tools[0]?.block.id
+    if (ownerId === undefined) return
+    const response = bodyContent.agentOutcome(unit.agentResponse)
+    const range =
+      response.kind === "answer"
+        ? renderAgentResponse(response.entry, prefix, timeline)
+        : renderAgentError(response, ownerId, prefix, timeline)
+    if (range !== undefined) nestedRanges.push(range)
+  }
+  const renderUnitBody = (unit: TranscriptUnit, selected: boolean, expanded: boolean) => {
+    if (unit.kind === "entry") renderEntryBody(unit.entry)
+    else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected)
+    else if (unit.kind === "subagent") renderSubagentUnitBody(unit, expanded)
+    else if (unit.kind === "cell") renderCellUnitBody(unit.block, selected, expanded)
+    else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
+    else if (unit.kind === "block") renderPlainBlock(unit.block, selected, expanded)
+    else if (unit.children !== undefined || unit.agentResponse !== undefined)
+      renderAttachedTool(unit, selected, expanded)
+    else if (unit.group === "explore")
+      toolBodies.renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
+    else if (unit.group === "edit")
+      toolBodies.renderEditBody(toolUnitsFor(model, unit.blocks), unit.diffs, selected, expanded)
+    else if (unit.group === "shell") toolBodies.renderShellBody(toolUnitsFor(model, unit.blocks), selected, expanded)
+    else for (const toolUnit of toolUnitsFor(model, unit.blocks)) renderOtherToolBody(toolUnit, selected, expanded)
+  }
   const renderUnit = (unit: TranscriptUnit): TranscriptUnitBuild => {
     chunks = []
     line = 0
@@ -500,60 +472,15 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const selected = expandable && model.detailSelection === id
     const start = line
     const chunkStart = chunks.length
-    if (unit.kind === "entry") renderEntryBody(unit.entry)
-    else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected)
-    else if (unit.kind === "subagent") renderSubagentUnitBody(unit, expanded)
-    else if (unit.kind === "cell") renderCellUnitBody(unit.block, selected, expanded)
-    else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)
-    else if (unit.kind === "block") renderPlainBlock(unit.block, selected, expanded)
-    else if (unit.children !== undefined || unit.agentResponse !== undefined) {
-      renderOtherToolBody(toolUnitsFor(model, unit.blocks)[0]!, selected, expanded)
-      if (expanded)
-        for (const [childIndex, child] of (unit.children ?? []).entries())
-          renderNested(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined)
-      if (expanded && unit.agentResponse !== undefined) {
-        const timeline = (unit.children?.length ?? 0) > 0
-        const prefix = timeline ? "  │   " : "  "
-        const ownerId = toolUnitsFor(model, unit.blocks)[0]?.block.id
-        if (ownerId !== undefined) {
-          const response = agentResponseOutcome(unit.agentResponse)
-          const range =
-            response.kind === "answer"
-              ? renderAgentResponse(response.entry, prefix, timeline)
-              : renderAgentError(response, ownerId, prefix, timeline)
-          if (range !== undefined) nestedRanges.push(range)
-        }
-      }
-    } else if (unit.group === "explore")
-      toolBodies.renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
-    else if (unit.group === "edit")
-      toolBodies.renderEditBody(toolUnitsFor(model, unit.blocks), unit.diffs, selected, expanded)
-    else if (unit.group === "shell") toolBodies.renderShellBody(toolUnitsFor(model, unit.blocks), selected, expanded)
-    else for (const toolUnit of toolUnitsFor(model, unit.blocks)) renderOtherToolBody(toolUnit, selected, expanded)
+    renderUnitBody(unit, selected, expanded)
     const cancelledAgent =
       unit.kind === "tool" &&
       toolUnitsFor(model, unit.blocks).some(
         (toolUnit) => toolUnit.block.status === "cancelled" && toolUnit.block.presentation.family === "agent",
       )
     if (expanded && cancelledAgent) addExpandedBodyGutter(chunkStart)
-    let animated = false
-    if (unit.kind === "tool") {
-      animated = toolUnitsFor(model, unit.blocks).some((toolUnit) => toolUnit.block.status === "running")
-    } else if (unit.kind === "subagent") {
-      const block = blockAt(unit.block)
-      const status = block?._tag === "SubagentCard" ? block.status : undefined
-      animated = status === "running" || status === "waiting" || status === "cancelling"
-    } else if (unit.kind === "cell") {
-      const block = blockAt(unit.block)
-      animated = block?._tag === "Cell" && block.status === "running"
-    }
-    let targets: ReadonlyArray<{ readonly path: string; readonly line?: number; readonly column?: number }> | undefined
-    if (unit.kind === "tool") {
-      targets = toolDetails(model, unit).flatMap((detail) => (detail.target === undefined ? [] : [detail.target]))
-    } else if (unit.kind === "diff") {
-      const block = blockAt(unit.block)
-      if (block?._tag === "Diff") targets = [{ path: block.path }]
-    }
+    const animated = bodyContent.animated(model, unit)
+    const targets = bodyContent.targets(model, unit)
     const rootWithoutHeader: UnitLineRange = {
       start,
       end: nestedRanges.length === 0 ? line : nestedRanges[0]!.start - 1,
@@ -570,12 +497,4 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
   return { renderUnit, isUnitVisible }
 }
 
-export const transcriptUnitBuilder: {
-  (
-    arg1: Parameters<typeof transcriptUnitBuilderImpl>[1],
-  ): (arg0: Parameters<typeof transcriptUnitBuilderImpl>[0]) => ReturnType<typeof transcriptUnitBuilderImpl>
-  (
-    arg0: Parameters<typeof transcriptUnitBuilderImpl>[0],
-    arg1: Parameters<typeof transcriptUnitBuilderImpl>[1],
-  ): ReturnType<typeof transcriptUnitBuilderImpl>
-} = Function.dual(2, transcriptUnitBuilderImpl)
+export const transcriptUnitBuilder: TranscriptUnitBuilder = Function.dual(2, transcriptUnitBuilderImpl)

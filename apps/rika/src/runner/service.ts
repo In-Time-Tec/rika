@@ -249,7 +249,7 @@ export const runRunner = Effect.fn("Runner.run")(function* (
     ).pipe(Effect.andThen(Console.log(statusLine(status))))
   const receiptStore = yield* RunnerReceiptStore.makeRunnerReceiptStore({
     origin: profile.origin,
-    deviceId: String(profile.deviceId),
+    deviceId: profile.deviceId,
     directory: path.join(path.dirname(input.preferencePath), "runner-receipts"),
   })
   const running = yield* Ref.make(new Set<string>())

@@ -17,7 +17,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as GoalService from "@rika/product/goal-service"
 import { ThreadId as HostedThreadId, type OwnerId } from "@rika/product/hosted-model"
-import { executeInteractiveCommand, type InteractiveInvocation } from "@rika/product/interactive-command"
+import type { InteractiveInvocation } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { makeThreadViewFeed } from "@rika/product/interactive-thread-view-feed"
@@ -32,13 +32,18 @@ import type { ThreadSummary } from "@rika/product/thread-summary"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { isDurableThreadEvent, type HostedThreadSnapshot } from "@rika/product/client-protocol"
+import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { HostedModelRegistry } from "../environment/model-registry"
+import {
+  interactiveSessionBuffer,
+  interactiveSessionSnapshot,
+  type PendingInteractiveInvocation,
+} from "./interactive-session-buffer"
 
 export class HostedThreadApplicationError extends Schema.TaggedError<HostedThreadApplicationError>()(
   "HostedThreadApplicationError",
@@ -76,33 +81,10 @@ export class HostedThreadApplication extends Context.Service<HostedThreadApplica
   "@rika/api/hosted/thread/application/HostedThreadApplication",
 ) {}
 
-interface PendingInteractiveInvocation extends InteractiveInvocation {
-  readonly events: Array<InteractiveEvent>
-  readonly completed: Deferred.Deferred<HostedInteractiveBatch, ProductOperation.OperationUnavailable>
-}
-
 export interface HostedInteractiveBatch {
   readonly events: ReadonlyArray<InteractiveEvent>
   readonly snapshot: HostedThreadSnapshot
   readonly failure?: ProductOperation.OperationUnavailable
-}
-
-type MutableHostedInteractiveBatch = { -readonly [Key in keyof HostedInteractiveBatch]: HostedInteractiveBatch[Key] }
-
-interface HostedInteractiveSession {
-  readonly queue: Queue.Queue<PendingInteractiveInvocation, ProductOperation.OperationUnavailable>
-  readonly ready: Deferred.Deferred<void, ProductOperation.OperationUnavailable>
-  readonly executorKind: HostedThreadSnapshot["executorKind"]
-  session: InteractiveSession | undefined
-  invocation: PendingInteractiveInvocation | undefined
-}
-
-interface PendingBackgroundEvent {
-  readonly ownerId: OwnerId
-  readonly threadId: HostedThreadId
-  readonly event: InteractiveEvent
-  readonly snapshot?: HostedThreadSnapshot
-  readonly persisted: Deferred.Deferred<void, HostedThreadApplicationError>
 }
 
 const promptUnit = (turn: Turn): Unit => {
@@ -114,48 +96,6 @@ const promptUnit = (turn: Turn): Unit => {
     revision: 0,
     content: { _tag: "Entry", role: "user", text: turn.prompt },
   }
-}
-
-const pendingAuthorizations = (
-  threadId: HostedThreadId,
-  view: ThreadView.ThreadViewSnapshot,
-  checkpoint: (turnId: string) => ExecutionProjection.Checkpoint | undefined,
-): HostedThreadSnapshot["pendingAuthorizations"] | undefined => {
-  const pending: Array<HostedThreadSnapshot["pendingAuthorizations"][number]> = []
-  for (const turn of view.turns) {
-    const currentCheckpoint = checkpoint(String(turn.turn.id))
-    for (const unit of turn.units) {
-      if (
-        unit.content._tag !== "Block" ||
-        unit.content.block._tag !== "AuthorizationCard" ||
-        unit.content.block.status !== "pending"
-      )
-        continue
-      if (currentCheckpoint === undefined) return undefined
-      pending.push({
-        threadId,
-        turnId: turn.turn.id,
-        authorizationId: unit.content.block.id,
-        operation: unit.content.block.operation,
-        capability: unit.content.block.capability,
-        input: unit.content.block.input,
-        inputTruncated: unit.content.block.inputTruncated,
-        checkpoint: currentCheckpoint,
-      })
-    }
-  }
-  return pending
-}
-
-const sessionSnapshot = (
-  executorKind: HostedThreadSnapshot["executorKind"],
-  threadId: HostedThreadId,
-  session: InteractiveSession,
-): HostedThreadSnapshot | undefined => {
-  const view = session.currentView()
-  if (view === undefined) return undefined
-  const authorizations = pendingAuthorizations(threadId, view, session.projectionCheckpoint)
-  return authorizations === undefined ? undefined : { executorKind, view, pendingAuthorizations: authorizations }
 }
 
 const ownerLayer = (
@@ -213,9 +153,6 @@ export const layer = Layer.effect(
     const projectionAdmissions = yield* RcMap.make({
       lookup: () => Semaphore.make(1),
     })
-    const interactiveSessions = new Map<string, HostedInteractiveSession>()
-    const projectionTails = new Map<string, Deferred.Deferred<void, HostedThreadApplicationError>>()
-    const backgroundEvents = yield* Queue.unbounded<PendingBackgroundEvent>()
     const withProjectionAdmission = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
       Effect.scoped(
         RcMap.get(projectionAdmissions, key).pipe(Effect.flatMap((admission) => admission.withPermits(1)(effect))),
@@ -223,11 +160,6 @@ export const layer = Layer.effect(
     const applicationFailure = (error: { readonly message: string }) =>
       HostedThreadApplicationError.make({
         message: error.message,
-      })
-    const awaitProjection = (key: string): Effect.Effect<void, HostedThreadApplicationError> =>
-      Effect.suspend(() => {
-        const current = projectionTails.get(key)
-        return current === undefined ? Effect.void : Deferred.await(current).pipe(Effect.andThen(awaitProjection(key)))
       })
     const ownerRepositories = yield* LayerMap.make((ownerId: OwnerId) => ProductRepositories.layer(ownerId))
     const repositorySnapshot = Effect.fn("HostedThreadApplication.repositorySnapshot")(function* (
@@ -280,10 +212,13 @@ export const layer = Layer.effect(
               const view = feed.current()
               if (view === undefined)
                 return yield* HostedThreadApplicationError.make({ message: "Thread checkpoint is invalid" })
-              const authorizations = pendingAuthorizations(HostedThreadId.make(threadId), view, (turnId) =>
-                activeProjection !== undefined && turnId === String(activeProjection.turn.id)
-                  ? activeProjection.projectorCheckpoint
-                  : undefined,
+              const authorizations = interactiveSessionSnapshot.pendingAuthorizations(
+                HostedThreadId.make(threadId),
+                view,
+                (turnId) =>
+                  activeProjection !== undefined && turnId === String(activeProjection.turn.id)
+                    ? activeProjection.projectorCheckpoint
+                    : undefined,
               )
               if (authorizations === undefined)
                 return yield* HostedThreadApplicationError.make({
@@ -302,126 +237,33 @@ export const layer = Layer.effect(
         ),
       )
     })
-    yield* Effect.forkIn(
-      Effect.gen(function* () {
-        while (true) {
-          const current = yield* Queue.take(backgroundEvents)
-          const key = `${current.ownerId}:${current.threadId}`
-          const createdAt = DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis))
-          const result = yield* withProjectionAdmission(
-            key,
-            Effect.gen(function* () {
-              const input = {
-                ownerId: current.ownerId,
-                threadId: current.threadId,
-                events: [current.event],
-                createdAt,
-              } satisfies Parameters<typeof store.appendEvents>[0]
-              if (current.snapshot !== undefined) Object.assign(input, { snapshot: current.snapshot })
-              yield* store.appendEvents(input)
-            }),
-          ).pipe(Effect.mapError(applicationFailure), Effect.result)
-          if (result._tag === "Success") yield* Deferred.succeed(current.persisted, undefined)
-          else yield* Deferred.fail(current.persisted, result.failure)
-          if (projectionTails.get(key) === current.persisted) projectionTails.delete(key)
-        }
-      }),
+    const sessionBuffer = yield* interactiveSessionBuffer({
+      store,
       ownerScope,
-    )
+      withProjectionAdmission,
+      applicationFailure,
+    })
+    const interactiveSessions = sessionBuffer.sessions
     const currentSnapshot = Effect.fn("HostedThreadApplication.currentSnapshot")(function* (
       ownerId: OwnerId,
       threadId: ThreadId,
     ) {
       const key = `${ownerId}:${threadId}`
-      yield* awaitProjection(key)
+      yield* sessionBuffer.awaitProjection(key)
       const state = interactiveSessions.get(key)
       const current =
         state?.session === undefined
           ? undefined
-          : sessionSnapshot(state.executorKind, HostedThreadId.make(threadId), state.session)
+          : interactiveSessionSnapshot.sessionSnapshot(state.executorKind, HostedThreadId.make(threadId), state.session)
       if (current !== undefined) return current
       return yield* repositorySnapshot(ownerId, threadId)
     })
-    const runInteractive = (
-      ownerId: OwnerId,
-      input: Extract<ProductOperation.Input, { readonly _tag: "Interactive" }>,
-      session: InteractiveSession,
-    ) => {
-      const threadId = ThreadId.make(input.threadId!)
-      const hostedThreadId = HostedThreadId.make(input.threadId!)
-      const state = interactiveSessions.get(`${ownerId}:${threadId}`)!
-      return Effect.scoped(
-        Effect.gen(function* () {
-          state.session = session
-          yield* Effect.forkScoped(
-            session
-              .events((event) => {
-                const invocation = state.invocation
-                if (invocation === undefined) {
-                  if (event._tag === "ThreadViewSnapshot" && event.snapshot.thread.id === threadId)
-                    Deferred.doneUnsafe(state.ready, Effect.void)
-                  else if (event._tag === "ExecutionFailed")
-                    Deferred.doneUnsafe(
-                      state.ready,
-                      Effect.fail(
-                        ProductOperation.OperationUnavailable.make({
-                          operation: "InteractiveSession.selectThread",
-                          message: event.failure.message,
-                        }),
-                      ),
-                    )
-                  if (isDurableThreadEvent(event)) {
-                    const persisted = Deferred.makeUnsafe<void, HostedThreadApplicationError>()
-                    projectionTails.set(`${ownerId}:${threadId}`, persisted)
-                    const snapshot = sessionSnapshot(state.executorKind, hostedThreadId, session)
-                    const pending = {
-                      ownerId,
-                      threadId: hostedThreadId,
-                      event,
-                      persisted,
-                    } satisfies PendingBackgroundEvent
-                    if (snapshot !== undefined) Object.assign(pending, { snapshot })
-                    Queue.offerUnsafe(backgroundEvents, pending)
-                  }
-                } else invocation.events.push(event)
-              })
-              .pipe(Effect.tapError((error) => Deferred.fail(state.ready, error))),
-          )
-          yield* session.selectThread(input.threadId!)
-          yield* Deferred.await(state.ready)
-          while (true) {
-            const invocation = yield* Queue.take(state.queue)
-            yield* Effect.gen(function* () {
-              state.invocation = invocation
-              const result = yield* executeInteractiveCommand(session, invocation).pipe(Effect.result)
-              yield* Effect.yieldNow
-              state.invocation = undefined
-              const snapshot = sessionSnapshot(state.executorKind, hostedThreadId, session)
-              if (snapshot === undefined)
-                return yield* ProductOperation.OperationUnavailable.make({
-                  operation: "InteractiveSession",
-                  message: "Thread checkpoint is unavailable",
-                })
-              const batch: MutableHostedInteractiveBatch = {
-                events: invocation.events,
-                snapshot,
-              }
-              if (result._tag === "Failure") batch.failure = result.failure
-              yield* Deferred.succeed(invocation.completed, batch)
-            }).pipe(
-              Effect.catch((error) => Deferred.fail(invocation.completed, error)),
-              Effect.ensuring(Effect.sync(() => (state.invocation = undefined))),
-            )
-          }
-        }),
-      )
-    }
     const owners = yield* LayerMap.make((ownerId: OwnerId) =>
       ownerLayer(
         ownerId,
         (mode) =>
           modelRegistry.resolve(ownerId, mode).pipe(Effect.mapError((error) => operationError(error.message, error))),
-        (input, session) => runInteractive(ownerId, input, session),
+        (input, session) => sessionBuffer.runInteractive(ownerId, input, session),
       ),
     )
     return HostedThreadApplication.of({

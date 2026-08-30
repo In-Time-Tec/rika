@@ -159,18 +159,102 @@ const frameText = (frame: BrowserFrame): string => {
 const frameThread = (frame: BrowserFrame): string | undefined => {
   const payload = frame.payload
   if (payload._tag === "ThreadEvent" && payload.event !== undefined) {
-    return String(payload.event.threadId)
+    return payload.event.threadId
   }
-  return "threadId" in payload && payload.threadId !== undefined ? String(payload.threadId) : undefined
+  return "threadId" in payload && payload.threadId !== undefined ? payload.threadId : undefined
 }
 
 const frameVersion = (frame: BrowserFrame): string | undefined => {
   const payload = frame.payload
-  if ("threadVersion" in payload && payload.threadVersion !== undefined) return String(payload.threadVersion)
+  if ("threadVersion" in payload && payload.threadVersion !== undefined) return payload.threadVersion
   if (payload._tag === "ThreadEvent" && payload.event !== undefined) {
-    return String(payload.event.threadVersion)
+    return payload.event.threadVersion
   }
   return undefined
+}
+
+const requestPortal = (model: Model): Update => {
+  const port = Number(model.portalPort)
+  return model.connection !== "connected" || !Number.isSafeInteger(port) || port < 1 || port > 65_535
+    ? [{ ...model, error: "Portal port must be between 1 and 65535" }, []]
+    : [{ ...model, error: null }, [OpenThreadPortal({ port })]]
+}
+
+const connect = (model: Model): Update => {
+  const threadId = model.threadId.trim()
+  const epoch = model.connectionEpoch + 1
+  return threadId.length === 0
+    ? [{ ...model, connection: "failed", error: "Enter a Thread ID" }, []]
+    : [
+        { ...model, connection: "connecting", connectionEpoch: epoch, error: null },
+        [ConnectThread({ epoch, threadId })],
+      ]
+}
+
+const attachThread = (model: Model, message: typeof ConnectedThread.Type): Update => {
+  if (message.epoch !== model.connectionEpoch) return [model, []]
+  return [
+    {
+      ...model,
+      connection: "connected",
+      threadId: message.threadId,
+      attachedThreadId: message.threadId,
+      threadVersion: frameVersion(message.frame) ?? model.threadVersion,
+      frames: [...model.frames.slice(-199), frameText(message.frame)],
+      error: null,
+    },
+    [],
+  ]
+}
+
+const connectionFailed = (model: Model, message: typeof FailedThreadConnection.Type): Update =>
+  message.epoch === model.connectionEpoch
+    ? [
+        {
+          ...model,
+          connection: model.attachedThreadId === null ? "failed" : "connected",
+          error: message.message,
+        },
+        [],
+      ]
+    : [model, []]
+
+const submitPrompt = (model: Model): Update => {
+  const text = model.draft.trim()
+  return model.attachedThreadId === null || text.length === 0
+    ? [model, []]
+    : [
+        { ...model, draft: "", error: null },
+        [SubmitThreadPrompt({ threadId: model.attachedThreadId, threadVersion: model.threadVersion, text })],
+      ]
+}
+
+const receiveFrame = (model: Model, frame: BrowserFrame): Update => {
+  const scopedThread = frameThread(frame)
+  if (scopedThread !== undefined && scopedThread !== model.attachedThreadId) return [model, []]
+  const reconnecting = frame.payload._tag === "ClientReconnecting"
+  const reconnectFailed = frame.payload._tag === "ClientReconnectFailed"
+  let connection = model.connection
+  let error = model.error
+  if (reconnecting) {
+    connection = "connecting"
+    error = null
+  } else if (reconnectFailed) {
+    connection = "failed"
+    error = "Thread reconnection failed"
+  }
+  const portalUrl = frame.payload._tag === "PortalOpened" ? (frame.payload.url ?? model.portalUrl) : model.portalUrl
+  return [
+    {
+      ...model,
+      connection,
+      threadVersion: frameVersion(frame) ?? model.threadVersion,
+      portalUrl,
+      frames: [...model.frames.slice(-199), frameText(frame)],
+      error,
+    },
+    [],
+  ]
 }
 
 const updateModel = (model: Model, message: Message): Update => {
@@ -181,93 +265,24 @@ const updateModel = (model: Model, message: Message): Update => {
       return [{ ...model, draft: message.value }, []]
     case "ChangedPortalPort":
       return [{ ...model, portalPort: message.value }, []]
-    case "ClickedOpenPortal": {
-      const port = Number(model.portalPort)
-      return model.connection !== "connected" || !Number.isSafeInteger(port) || port < 1 || port > 65_535
-        ? [{ ...model, error: "Portal port must be between 1 and 65535" }, []]
-        : [{ ...model, error: null }, [OpenThreadPortal({ port })]]
-    }
-    case "ClickedConnect": {
-      const threadId = model.threadId.trim()
-      const epoch = model.connectionEpoch + 1
-      return threadId.length === 0
-        ? [{ ...model, connection: "failed", error: "Enter a Thread ID" }, []]
-        : [
-            { ...model, connection: "connecting", connectionEpoch: epoch, error: null },
-            [ConnectThread({ epoch, threadId })],
-          ]
-    }
-    case "ConnectedThread": {
-      if (message.epoch !== model.connectionEpoch) return [model, []]
-      const version = frameVersion(message.frame)
-      return [
-        {
-          ...model,
-          connection: "connected",
-          threadId: message.threadId,
-          attachedThreadId: message.threadId,
-          threadVersion: version ?? model.threadVersion,
-          frames: [...model.frames.slice(-199), frameText(message.frame)],
-          error: null,
-        },
-        [],
-      ]
-    }
+    case "ClickedOpenPortal":
+      return requestPortal(model)
+    case "ClickedConnect":
+      return connect(model)
+    case "ConnectedThread":
+      return attachThread(model, message)
     case "FailedThreadConnection":
-      return message.epoch === model.connectionEpoch
-        ? [
-            {
-              ...model,
-              connection: model.attachedThreadId === null ? "failed" : "connected",
-              error: message.message,
-            },
-            [],
-          ]
-        : [model, []]
+      return connectionFailed(model, message)
     case "FailedThreadAction":
       return [{ ...model, connection: "failed", error: message.message }, []]
-    case "SubmittedPrompt": {
-      const text = model.draft.trim()
-      return model.attachedThreadId === null || text.length === 0
-        ? [model, []]
-        : [
-            { ...model, draft: "", error: null },
-            [SubmitThreadPrompt({ threadId: model.attachedThreadId, threadVersion: model.threadVersion, text })],
-          ]
-    }
+    case "SubmittedPrompt":
+      return submitPrompt(model)
     case "SentPrompt":
       return [model, []]
     case "SentPortalRequest":
       return [model, []]
-    case "GotThreadFrame": {
-      const frame = message.frame
-      const scopedThread = frameThread(message.frame)
-      if (scopedThread !== undefined && scopedThread !== model.attachedThreadId) return [model, []]
-      const version = frameVersion(message.frame)
-      const reconnecting = frame.payload?._tag === "ClientReconnecting"
-      const reconnectFailed = frame.payload?._tag === "ClientReconnectFailed"
-      let connection = model.connection
-      let error = model.error
-      if (reconnecting) {
-        connection = "connecting"
-        error = null
-      } else if (reconnectFailed) {
-        connection = "failed"
-        error = "Thread reconnection failed"
-      }
-      const portalUrl = frame.payload._tag === "PortalOpened" ? (frame.payload.url ?? model.portalUrl) : model.portalUrl
-      return [
-        {
-          ...model,
-          connection,
-          threadVersion: version ?? model.threadVersion,
-          portalUrl,
-          frames: [...model.frames.slice(-199), frameText(message.frame)],
-          error,
-        },
-        [],
-      ]
-    }
+    case "GotThreadFrame":
+      return receiveFrame(model, message.frame)
   }
 }
 
@@ -346,11 +361,9 @@ export const view: {
               : [h.p([], [h.a([h.Href(model.portalUrl), h.Target("_blank")], [model.portalUrl])])]),
             h.section(
               [h.Class("transcript"), h.AriaLabel("Thread event stream")],
-              [
-                ...(model.frames.length === 0
-                  ? [h.p([h.Class("empty")], ["Connect to a Thread to inspect its durable stream."])]
-                  : model.frames.map((frame, index) => h.keyed("pre")(`${index}:${frame.length}`, [], [frame]))),
-              ],
+              model.frames.length === 0
+                ? [h.p([h.Class("empty")], ["Connect to a Thread to inspect its durable stream."])]
+                : model.frames.map((frame, index) => h.keyed("pre")(`${index}:${frame.length}`, [], [frame])),
             ),
             h.form(
               [h.Class("composer"), h.OnSubmit(SubmittedPrompt())],

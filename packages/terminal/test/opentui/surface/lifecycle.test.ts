@@ -39,7 +39,7 @@ test("closes an expanded settled subagent's nested tree with the terminal connec
   expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
   expect(lines.some((line) => line.includes("╰"))).toBe(true)
   expect(lines.some((line) => line.includes("All checks passed."))).toBe(true)
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })
 test("shows a nested agent title and renders its prompt once in the expanded body", () => {
   const state = model({
@@ -60,7 +60,13 @@ test("shows a nested agent title and renders its prompt once in the expanded bod
       { _tag: "Block", index: 1, id: "tool:child", turnId: "child:parent", parentId: "parent" },
       { _tag: "Block", index: 2, id: "tool:grandchild", turnId: "child:child", parentId: "child" },
       { _tag: "Block", index: 3, id: "tool:following", turnId: "child:parent", parentId: "parent" },
-      { _tag: "Entry", index: 0, id: "assistant:child:child:0", turnId: "child:child", parentId: "child" },
+      {
+        _tag: "Entry",
+        index: 0,
+        id: "assistant:child:child:0",
+        turnId: "child:child",
+        parentId: "child",
+      },
     ],
     expandedRowKeys: ["tool:parent", "tool:child"],
   })
@@ -202,7 +208,13 @@ test("connects and aligns the subagent response after two blank timeline rows", 
     items: [
       { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
       { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
-      { _tag: "Entry", index: 0, id: "assistant:child:agent:0", turnId: "child:agent", parentId: "agent" },
+      {
+        _tag: "Entry",
+        index: 0,
+        id: "assistant:child:agent:0",
+        turnId: "child:agent",
+        parentId: "agent",
+      },
     ],
     expandedRowKeys: ["tool:agent"],
   })
@@ -223,5 +235,5 @@ test("connects and aligns the subagent response after two blank timeline rows", 
   for (const [offset, row] of lines.slice(childRow + 1, lastResponseRow).entries())
     expect([offset, row.startsWith("  │")]).toEqual([offset, true])
   expect(lines[lastResponseRow]!.startsWith("  ╰ ")).toBe(true)
-  expect(lines.every((line) => String(line).startsWith("│") === false)).toBe(true)
+  expect(lines.every((line) => line.startsWith("│") === false)).toBe(true)
 })

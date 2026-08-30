@@ -62,13 +62,22 @@ it.effect("renders and targets every compact mode notch on a real 24x12 surface"
         () =>
           new Surface(
             setup.renderer,
-            { key: () => undefined, resize: () => undefined, modeCommit: (selected) => committed.push(selected) },
+            {
+              key: () => undefined,
+              resize: () => undefined,
+              modeCommit: (selected) => committed.push(selected),
+            },
             { animate: false },
           ),
       ),
       (value) => Effect.sync(() => value.destroy()),
     )
-    surface.update({ ...initial("/work", "medium"), width: 24, height: 12, modePicker: { open: true, selected: 1 } })
+    surface.update({
+      ...initial("/work", "medium"),
+      width: 24,
+      height: 12,
+      modePicker: { open: true, selected: 1 },
+    })
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(setup.captureCharFrame().split("\n").slice(0, 4)).toEqual([
       "╭─ Mode ───────────────╮",
@@ -78,8 +87,8 @@ it.effect("renders and targets every compact mode notch on a real 24x12 surface"
     ])
     const palette = surface.palette
     for (const label of modeSelectorLabels(20, ["low", "medium", "high", "ultra"])) {
-      setup.mockMouse.click(palette.screenX + label.start, palette.screenY + 1)
-      setup.mockMouse.click(palette.screenX + label.end - 1, palette.screenY + 1)
+      void setup.mockMouse.click(palette.screenX + label.start, palette.screenY + 1)
+      void setup.mockMouse.click(palette.screenX + label.end - 1, palette.screenY + 1)
     }
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(committed).toEqual([0, 0, 1, 1, 2, 2, 3, 3])
@@ -98,7 +107,11 @@ it.effect("renders responsive context meters and per-cell mode commit wipe color
         () =>
           new Surface(
             setup.renderer,
-            { key: () => undefined, resize: () => undefined, modeCommit: (selected) => committed.push(selected) },
+            {
+              key: () => undefined,
+              resize: () => undefined,
+              modeCommit: (selected) => committed.push(selected),
+            },
             { animate: false },
           ),
       ),
@@ -106,18 +119,27 @@ it.effect("renders responsive context meters and per-cell mode commit wipe color
     )
     const modeLabel = () => surface.modeLabel.content.chunks
     setup.resize(32, 12)
-    surface.update({ ...initial("/work", "high"), width: 32, height: 12, modePicker: { open: true, selected: 1 } })
+    surface.update({
+      ...initial("/work", "high"),
+      width: 32,
+      height: 12,
+      modePicker: { open: true, selected: 1 },
+    })
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(text(modeLabel())).toContain(`${muncherGlyphs.open}${meterGlyphs.pellet.repeat(3)} 0% ─ high`)
     const palette = surface.palette
-    setup.mockMouse.click(
+    void setup.mockMouse.click(
       palette.screenX + modeSelectorLabels(28, ["low", "medium", "high", "ultra"])[2]!.start,
       palette.screenY + 1,
     )
     yield* Effect.tryPromise(() => setup.renderOnce())
     expect(committed).toEqual([2])
     setup.resize(80, 24)
-    surface.update({ ...initial("/work", "high"), width: 80, modePicker: { open: true, selected: 1 } })
+    surface.update({
+      ...initial("/work", "high"),
+      width: 80,
+      modePicker: { open: true, selected: 1 },
+    })
     expect(text(modeLabel())).toContain(`ctx ${muncherGlyphs.open}${meterGlyphs.pellet.repeat(7)} 0% ─ high`)
 
     surface.update({
@@ -314,8 +336,7 @@ it.effect("owns and drains the completed-compaction rainbow cadence after settle
       { _tag: "CompactionChanged", status: "complete" },
     )
     let ticks = 0
-    let surface!: Surface
-    surface = new Surface(
+    const surface = new Surface(
       setup.renderer,
       {
         key: () => undefined,
@@ -357,8 +378,7 @@ it.effect("owns a continuous welcome cadence and stops it when transcript conten
     )
     let model = { ...initial("/work", "high"), width: 120, height: 30 }
     let globalTicks = 0
-    let surface!: Surface
-    surface = new Surface(
+    const surface = new Surface(
       setup.renderer,
       {
         key: () => undefined,

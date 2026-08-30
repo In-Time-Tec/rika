@@ -66,6 +66,22 @@ const lineCounts = (patch: string) => {
   }
   return { additions, deletions }
 }
+const namedDetail = (name: string, input: ToolInput, path: string | undefined): string | undefined => {
+  switch (name) {
+    case "grep":
+      return `${path === undefined ? "" : `${path} `}"${field(input, ["pattern"]) ?? ""}"`.trim()
+    case "bash":
+      return [field(input, ["command", "cmd", "script"]) ?? "", ...(input.args ?? [])].join(" ").trim()
+    case "shell_command_status":
+      return field(input, ["processId", "process_id"]) ?? ""
+    case "web_search":
+      return field(input, ["objective", "query"]) ?? ""
+    case "read_web_page":
+      return field(input, ["url"]) ?? ""
+    default:
+      return undefined
+  }
+}
 const detail = (name: string, encodedInput: string): string => {
   const input = inputRecord(encodedInput)
   const normalized = name.toLowerCase()
@@ -77,15 +93,8 @@ const detail = (name: string, encodedInput: string): string => {
     const limit = input.limit
     return `${path ?? name}${limit === undefined ? "" : ` L${offset}-${offset + Math.max(0, limit - 1)}`}`
   }
-  if (normalized === "grep") return `${path === undefined ? "" : `${path} `}"${field(input, ["pattern"]) ?? ""}"`.trim()
-  if (normalized === "bash") {
-    const command = field(input, ["command", "cmd", "script"]) ?? ""
-    const args = input.args ?? []
-    return [command, ...args].join(" ").trim()
-  }
-  if (normalized === "shell_command_status") return field(input, ["processId", "process_id"]) ?? ""
-  if (normalized === "web_search") return field(input, ["objective", "query"]) ?? ""
-  if (normalized === "read_web_page") return field(input, ["url"]) ?? ""
+  const named = namedDetail(normalized, input, path)
+  if (named !== undefined) return named
   if (path !== undefined) return path
   return field(input, ["description", "prompt", "task", "query", "objective"]) ?? ""
 }
@@ -139,37 +148,35 @@ const makeToolImpl = (id: string, name: string, input: string, previous?: Tool):
   return tool
 }
 
+const processFrom = (value: typeof ToolOutput.Type): NonNullable<Tool["process"]> => {
+  const { status: _status, ...process } = value
+  return process
+}
+
+const completionStatus = (statusText: string, process: NonNullable<Tool["process"]>, isFailure: boolean) => {
+  const failed = isFailure || statusText === "failed" || (process.exitCode !== undefined && process.exitCode !== 0)
+  if (failed) return { tool: "failed", file: "failed" } as const
+  if (statusText === "cancelled" || statusText === "canceled") return { tool: "cancelled", file: "complete" } as const
+  if (process.running === true) return { tool: "running", file: "running" } as const
+  return { tool: "complete", file: "complete" } as const
+}
+
 const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean): Tool => {
   const decoded = Schema.decodeUnknownOption(ToolOutput)(output)
   const value = Option.isSome(decoded) ? decoded.value : emptyOutput
   const statusText = (value.status ?? "").toLowerCase()
-  let process: NonNullable<Tool["process"]> = {}
-  if (value.running !== undefined) process = { ...process, running: value.running }
-  if (value.processId !== undefined) process = { ...process, processId: value.processId }
-  if (value.exitCode !== undefined) process = { ...process, exitCode: value.exitCode }
-  if (value.stdout !== undefined) process = { ...process, stdout: value.stdout }
-  if (value.stderr !== undefined) process = { ...process, stderr: value.stderr }
-  if (value.truncated !== undefined) process = { ...process, truncated: value.truncated }
-  const failed = isFailure || statusText === "failed" || (process.exitCode !== undefined && process.exitCode !== 0)
-  const cancelled = statusText === "cancelled" || statusText === "canceled"
-  const running = process.running === true
-  let completionStatus: Tool["status"] = "complete"
-  if (running) completionStatus = "running"
-  if (cancelled) completionStatus = "cancelled"
-  if (failed) completionStatus = "failed"
-  let fileStatus: ToolFile["status"] = "complete"
-  if (running) fileStatus = "running"
-  if (failed) fileStatus = "failed"
+  const process = processFrom(value)
+  const status = completionStatus(statusText, process, isFailure)
   const resolved = value.diff ?? ""
   const json = Schema.decodeUnknownOption(Schema.Json)(output)
   const result: Schema.Json = Option.isSome(json) ? json.value : String(output)
   let completed: Tool = {
     ...tool,
-    status: completionStatus,
+    status: status.tool,
     result,
     files: tool.files.map((file, index) => {
       const applied = index === 0 && resolved.length > 0 ? { patch: resolved, ...lineCounts(resolved) } : {}
-      return { ...file, ...applied, preview: false, status: fileStatus }
+      return { ...file, ...applied, preview: false, status: status.file }
     }),
   }
   if (Object.keys(process).length > 0) completed = { ...completed, process }

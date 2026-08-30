@@ -51,43 +51,62 @@ let generation = 0
 const failed = (message: string) => ThreadConnectionFailed.make({ message })
 const requestId = (kind: string) => `${kind}:${(sequence += 1)}`
 const emit = (detail: ThreadFrameDetail) => window.dispatchEvent(new CustomEvent(frameEventName, { detail }))
-const validateAttachment = (payload: Attachment, threadId: string): ThreadView.ThreadViewAccumulator | undefined => {
+const attachmentHasForeignIdentity = (payload: Attachment, threadId: string) =>
+  String(payload.threadId) !== threadId ||
+  (payload.checkpoint !== undefined && !hostedThreadSnapshotMatches(payload.checkpoint.snapshot, threadId)) ||
+  payload.events.some((event) => {
+    const eventThreadId = interactiveEventThreadId(event.event)
+    return String(event.threadId) !== threadId || (eventThreadId !== undefined && eventThreadId !== threadId)
+  })
+
+const attachmentBaseView = (
+  payload: Attachment,
+  threadId: string,
+  baseCursor: bigint,
+): ThreadView.ThreadViewAccumulator | undefined => {
   const checkpoint = payload.checkpoint
-  if (
-    String(payload.threadId) !== threadId ||
-    (checkpoint !== undefined && !hostedThreadSnapshotMatches(checkpoint.snapshot, threadId)) ||
-    payload.events.some((event) => {
-      const eventThreadId = interactiveEventThreadId(event.event)
-      return String(event.threadId) !== threadId || (eventThreadId !== undefined && eventThreadId !== threadId)
-    })
-  )
-    return undefined
-  const baseCursor = BigInt(payload.baseCursor)
   if (checkpoint !== undefined && BigInt(checkpoint.cursor) !== baseCursor) return undefined
   if (
     checkpoint === undefined &&
     (attachedThreadId !== threadId || attachedView === undefined || attachedCursor !== baseCursor)
   )
     return undefined
+  const view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? attachedView!.snapshot())
+  return view._tag === "Failure" ? undefined : view.success
+}
+
+const replayAttachment = (
+  payload: Attachment,
+  initialView: ThreadView.ThreadViewAccumulator,
+): ThreadView.ThreadViewAccumulator | undefined => {
+  const checkpoint = payload.checkpoint
+  const baseCursor = BigInt(payload.baseCursor)
   let expectedCursor = baseCursor + 1n
   let representedVersion = BigInt(checkpoint?.threadVersion ?? attachedVersion)
-  let view = ThreadView.fromSnapshot(checkpoint?.snapshot.view ?? attachedView!.snapshot())
-  if (view._tag === "Failure") return undefined
+  let view = initialView
   for (const event of payload.events) {
     if (BigInt(event.cursor) !== expectedCursor || BigInt(event.threadVersion) < representedVersion) return undefined
     representedVersion = BigInt(event.threadVersion)
     expectedCursor += 1n
     if (event.event._tag === "ThreadViewSnapshot") {
-      view = ThreadView.fromSnapshot(event.event.snapshot)
-      if (view._tag === "Failure") return undefined
+      const replacement = ThreadView.fromSnapshot(event.event.snapshot)
+      if (replacement._tag === "Failure") return undefined
+      view = replacement.success
     } else if (event.event._tag === "ThreadViewPatch") {
-      const applied = view.success.apply(event.event.patch)
+      const applied = view.apply(event.event.patch)
       if (applied._tag === "Failure") return undefined
     }
   }
   return expectedCursor - 1n === BigInt(payload.cursor) && representedVersion === BigInt(payload.threadVersion)
-    ? view.success
+    ? view
     : undefined
+}
+
+const validateAttachment = (payload: Attachment, threadId: string): ThreadView.ThreadViewAccumulator | undefined => {
+  if (attachmentHasForeignIdentity(payload, threadId)) return undefined
+  const baseCursor = BigInt(payload.baseCursor)
+  const view = attachmentBaseView(payload, threadId, baseCursor)
+  return view === undefined ? undefined : replayAttachment(payload, view)
 }
 const payloadThreadId = (payload: Payload): string | undefined => {
   if (payload._tag === "ThreadEvent") return String(payload.event.threadId)
@@ -128,6 +147,86 @@ const acknowledge = (current: WebSocket, threadId: string, cursor: bigint) => {
   } catch {
     quarantine(current, "cursor acknowledgement failed")
   }
+}
+
+const quarantinesForeignFrame = (payload: Payload) =>
+  payload._tag === "CommandAccepted" ||
+  payload._tag === "CommandRejected" ||
+  payload._tag === "ThreadSnapshot" ||
+  payload._tag === "ThreadEvent" ||
+  payload._tag === "ThreadPreview" ||
+  payload._tag === "ThreadPreviewReset"
+
+const applyThreadEvent = (current: WebSocket, payload: Extract<Payload, { readonly _tag: "ThreadEvent" }>) => {
+  const cursor = BigInt(payload.event.cursor)
+  const version = BigInt(payload.event.threadVersion)
+  if (cursor <= attachedCursor) return false
+  if (cursor !== attachedCursor + 1n || version < attachedVersion || attachedView === undefined) {
+    quarantine(current, "non-contiguous Thread event")
+    return false
+  }
+  const eventThreadId = interactiveEventThreadId(payload.event.event)
+  if (eventThreadId !== undefined && eventThreadId !== attachedThreadId) {
+    quarantine(current, "foreign Thread event")
+    return false
+  }
+  const candidateView = ThreadView.fromSnapshot(attachedView.snapshot())
+  if (candidateView._tag === "Failure") {
+    quarantine(current, "invalid Thread view")
+    return false
+  }
+  if (payload.event.event._tag === "ThreadViewSnapshot") {
+    const view = ThreadView.fromSnapshot(payload.event.event.snapshot)
+    if (view._tag === "Failure") {
+      quarantine(current, "invalid Thread view snapshot")
+      return false
+    }
+    attachedView = view.success
+  } else if (payload.event.event._tag === "ThreadViewPatch") {
+    const applied = candidateView.success.apply(payload.event.event.patch)
+    if (applied._tag === "Failure") {
+      quarantine(current, "invalid Thread view patch")
+      return false
+    }
+    attachedView = candidateView.success
+  }
+  attachedCursor = cursor
+  attachedVersion = version
+  acknowledge(current, attachedThreadId!, attachedCursor)
+  return true
+}
+
+const applyThreadSnapshot = (current: WebSocket, payload: Extract<Payload, { readonly _tag: "ThreadSnapshot" }>) => {
+  const cursor = BigInt(payload.cursor)
+  const version = BigInt(payload.threadVersion)
+  const view = ThreadView.fromSnapshot(payload.snapshot.view)
+  if (
+    cursor < attachedCursor ||
+    version < attachedVersion ||
+    !hostedThreadSnapshotMatches(payload.snapshot, attachedThreadId!) ||
+    view._tag === "Failure"
+  ) {
+    quarantine(current, "invalid Thread snapshot")
+    return false
+  }
+  attachedCursor = cursor
+  attachedCheckpointCursor = cursor
+  attachedVersion = version
+  attachedView = view.success
+  acknowledge(current, attachedThreadId!, attachedCursor)
+  return true
+}
+
+const applyActiveFrame = (current: WebSocket, frame: ServerFrame) => {
+  const payload = frame.payload
+  const scopedThreadId = payloadThreadId(payload)
+  if (scopedThreadId !== undefined && scopedThreadId !== attachedThreadId) {
+    if (quarantinesForeignFrame(payload)) quarantine(current, "foreign Thread frame")
+    return
+  }
+  if (payload._tag === "ThreadEvent" && !applyThreadEvent(current, payload)) return
+  if (payload._tag === "ThreadSnapshot" && !applyThreadSnapshot(current, payload)) return
+  emit(frame)
 }
 
 const open = (ticket: Ticket) =>
@@ -180,6 +279,41 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
       current.close(1000, "attachment rejected")
       resume(Effect.fail(failed(message)))
     }
+    const receiveAttachment = (frame: ServerFrame) => {
+      const payload = frame.payload
+      if (payload._tag === "CommandRejected" && String(payload.requestId) === attachRequestId) {
+        reject(payload.message)
+        return
+      }
+      if (payload._tag !== "ThreadAttached" || String(payload.requestId) !== attachRequestId) return
+      const view = validateAttachment(payload, threadId)
+      if (view === undefined) {
+        reject("The Thread attachment response identity did not match its request")
+        return
+      }
+      if (selectedGeneration !== generation) {
+        reject("The Thread connection was superseded")
+        return
+      }
+      if (attachedThreadId === threadId && BigInt(payload.cursor) < attachedCursor) {
+        reject("The Thread attachment response was behind the committed cursor")
+        return
+      }
+      const previous = socket
+      socket = current
+      candidate = undefined
+      attachedThreadId = threadId
+      attachedCursor = BigInt(payload.cursor)
+      attachedCheckpointCursor =
+        payload.checkpoint === undefined ? (afterCheckpointCursor ?? 0n) : BigInt(payload.checkpoint.cursor)
+      attachedVersion = BigInt(payload.threadVersion)
+      attachedView = view
+      active = true
+      settled = true
+      acknowledge(current, threadId, attachedCursor)
+      previous?.close(1000, "replaced")
+      resume(Effect.succeed(frame))
+    }
     const receive = (event: MessageEvent) => {
       if (active ? socket !== current : selectedGeneration !== generation || candidate !== current) return
       let frame: ServerFrame
@@ -194,111 +328,11 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
         quarantine(current, "invalid Server frame")
         return
       }
-      const payload = frame.payload
       if (!active) {
-        if (payload._tag === "CommandRejected" && String(payload.requestId) === attachRequestId) {
-          reject(payload.message)
-          return
-        }
-        if (payload._tag !== "ThreadAttached" || String(payload.requestId) !== attachRequestId) return
-        const view = validateAttachment(payload, threadId)
-        if (view === undefined) {
-          reject("The Thread attachment response identity did not match its request")
-          return
-        }
-        if (selectedGeneration !== generation) {
-          reject("The Thread connection was superseded")
-          return
-        }
-        if (attachedThreadId === threadId && BigInt(payload.cursor) < attachedCursor) {
-          reject("The Thread attachment response was behind the committed cursor")
-          return
-        }
-        const previous = socket
-        socket = current
-        candidate = undefined
-        attachedThreadId = threadId
-        attachedCursor = BigInt(payload.cursor)
-        attachedCheckpointCursor =
-          payload.checkpoint === undefined ? (afterCheckpointCursor ?? 0n) : BigInt(payload.checkpoint.cursor)
-        attachedVersion = BigInt(payload.threadVersion)
-        attachedView = view
-        active = true
-        settled = true
-        acknowledge(current, threadId, attachedCursor)
-        previous?.close(1000, "replaced")
-        resume(Effect.succeed(frame))
+        receiveAttachment(frame)
         return
       }
-      const scopedThreadId = payloadThreadId(payload)
-      if (scopedThreadId !== undefined && scopedThreadId !== attachedThreadId) {
-        if (
-          payload._tag === "CommandAccepted" ||
-          payload._tag === "CommandRejected" ||
-          payload._tag === "ThreadSnapshot" ||
-          payload._tag === "ThreadEvent" ||
-          payload._tag === "ThreadPreview" ||
-          payload._tag === "ThreadPreviewReset"
-        )
-          quarantine(current, "foreign Thread frame")
-        return
-      }
-      if (payload._tag === "ThreadEvent") {
-        const cursor = BigInt(payload.event.cursor)
-        const version = BigInt(payload.event.threadVersion)
-        if (cursor <= attachedCursor) return
-        if (cursor !== attachedCursor + 1n || version < attachedVersion || attachedView === undefined) {
-          quarantine(current, "non-contiguous Thread event")
-          return
-        }
-        const eventThreadId = interactiveEventThreadId(payload.event.event)
-        if (eventThreadId !== undefined && eventThreadId !== attachedThreadId) {
-          quarantine(current, "foreign Thread event")
-          return
-        }
-        const candidateView = ThreadView.fromSnapshot(attachedView.snapshot())
-        if (candidateView._tag === "Failure") {
-          quarantine(current, "invalid Thread view")
-          return
-        }
-        if (payload.event.event._tag === "ThreadViewSnapshot") {
-          const view = ThreadView.fromSnapshot(payload.event.event.snapshot)
-          if (view._tag === "Failure") {
-            quarantine(current, "invalid Thread view snapshot")
-            return
-          }
-          attachedView = view.success
-        } else if (payload.event.event._tag === "ThreadViewPatch") {
-          const applied = candidateView.success.apply(payload.event.event.patch)
-          if (applied._tag === "Failure") {
-            quarantine(current, "invalid Thread view patch")
-            return
-          }
-          attachedView = candidateView.success
-        }
-        attachedCursor = cursor
-        attachedVersion = version
-        acknowledge(current, attachedThreadId!, attachedCursor)
-      } else if (payload._tag === "ThreadSnapshot") {
-        const cursor = BigInt(payload.cursor)
-        const version = BigInt(payload.threadVersion)
-        const view = ThreadView.fromSnapshot(payload.snapshot.view)
-        if (
-          cursor < attachedCursor ||
-          version < attachedVersion ||
-          !hostedThreadSnapshotMatches(payload.snapshot, attachedThreadId!) ||
-          view._tag === "Failure"
-        ) {
-          quarantine(current, "invalid Thread snapshot")
-          return
-        }
-        attachedCursor = cursor
-        attachedCheckpointCursor = cursor
-        attachedVersion = version
-        attachedView = view.success
-        acknowledge(current, attachedThreadId!, attachedCursor)
-      }
-      emit(frame)
+      applyActiveFrame(current, frame)
     }
     const closed = () => {
       if (!active) {

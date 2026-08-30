@@ -40,7 +40,12 @@ const {
 } = turnRowJson
 
 const repositoryError = (error: string | { readonly message: string }) =>
-  Schema.is(RepositoryError)(error) ? error : RepositoryError.make({ message: String(error) })
+  Schema.is(RepositoryError)(error)
+    ? error
+    : RepositoryError.make({ message: Schema.is(Schema.String)(error) ? error : error.message })
+
+const shellResultIsMissing = (value: typeof Row.Type) =>
+  value.shell_result_text === null || (value.shell_result_truncated !== 0 && value.shell_result_truncated !== 1)
 
 export const decodeQueueState = <Row>(row: Row) =>
   Schema.decodeUnknownEffect(QueueStateRow)(row).pipe(Effect.mapError(repositoryError))
@@ -56,10 +61,7 @@ export const decode = <Row>(row: Row) =>
       if (value.shell_command === null)
         return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no command` })
       const terminal = value.status !== "running"
-      if (
-        terminal &&
-        (value.shell_result_text === null || (value.shell_result_truncated !== 0 && value.shell_result_truncated !== 1))
-      )
+      if (terminal && shellResultIsMissing(value))
         return yield* RepositoryError.make({ message: `Recorded shell turn ${id} has no terminal result` })
       const recordedShell = {
         _tag: "RecordedShell",

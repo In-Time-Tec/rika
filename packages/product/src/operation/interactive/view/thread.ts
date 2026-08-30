@@ -1,137 +1,34 @@
 import * as ExecutionProjection from "../../../execution/projection/contract"
 import * as ThreadView from "@rika/product/thread-view"
-import { promptUnit } from "./transcript-window"
-import { compareUnitOrder, encodeUnitOrder } from "@rika/transcript/transcript-unit-order"
+import { promptUnit } from "./prompt-unit"
 import { Result } from "effect"
-import { type InteractiveEvent as ClientEvent } from "../event"
-import { type InteractiveEvent as RuntimeEvent, type QueueItem } from "../session-event"
+import type { InteractiveEvent as ClientEvent } from "../event"
+import type { InteractiveEvent as RuntimeEvent, QueueItem } from "../session-event"
 import { threadUsage } from "./usage"
+import { threadSnapshot } from "./thread-snapshot"
 const pending = (items: ReadonlyArray<QueueItem>): ReadonlyArray<ThreadView.ThreadViewPendingTurn> =>
   items.slice(0, ThreadView.limits.pending).map((item) => ({
     id: item.id,
     prompt: item.prompt,
     createdAt: item.createdAt,
   }))
-const orderedUnits = <T extends { readonly units: ReadonlyArray<import("@rika/transcript/transcript-unit").Unit> }>(
-  entry: T,
-): T => ({
-  ...entry,
-  units: [...entry.units].toSorted((left, right) => {
-    const order = compareUnitOrder(left.order, right.order)
-    return order === 0 ? left.key.localeCompare(right.key) : order
-  }),
-})
-const orderedTurns = (turns: ReadonlyArray<ThreadView.ThreadViewTurn>): ReadonlyArray<ThreadView.ThreadViewTurn> =>
-  turns.map(orderedUnits).toSorted((left, right) => {
-    const createdAt = left.turn.createdAt - right.turn.createdAt
-    return createdAt === 0 ? String(left.turn.id).localeCompare(String(right.turn.id)) : createdAt
-  })
-const sourceFor = (
-  turns: ReadonlyArray<ThreadView.ThreadViewTurn>,
-  projectionVersion: number,
-  boundaries: Pick<ThreadView.ThreadViewSource, "oldestCursor" | "newestCursor"> = {},
-): ThreadView.ThreadViewSource => {
-  const oldest = turns.find((entry) => entry.units.length > 0)
-  const newest = turns.findLast((entry) => entry.units.length > 0)
-  const oldestUnit = oldest?.units[0]
-  const newestUnit = newest?.units.at(-1)
-  const oldestCursor =
-    boundaries.oldestCursor ??
-    (oldest === undefined || oldestUnit === undefined
-      ? undefined
-      : {
-          createdAt: oldest.turn.createdAt,
-          turnId: oldest.turn.id,
-          orderKey: encodeUnitOrder(oldestUnit.order),
-        })
-  const newestCursor =
-    boundaries.newestCursor ??
-    (newest === undefined || newestUnit === undefined
-      ? undefined
-      : {
-          createdAt: newest.turn.createdAt,
-          turnId: newest.turn.id,
-          orderKey: encodeUnitOrder(newestUnit.order),
-        })
-  if (oldestCursor === undefined)
-    return newestCursor === undefined ? { projectionVersion } : { projectionVersion, newestCursor }
-  return newestCursor === undefined
-    ? { projectionVersion, oldestCursor }
-    : { projectionVersion, oldestCursor, newestCursor }
-}
 const trackedProjectionLimit = 64
-const snapshotFromSelection = (
-  event: Extract<RuntimeEvent, { readonly _tag: "SelectionLoaded" }>,
-  revision: number,
-): ThreadView.ThreadViewSnapshot => {
-  const grouped = new Map<
-    string,
-    {
-      readonly turn: ThreadView.ThreadViewTurnRecord
-      readonly units: Array<import("@rika/transcript/transcript-unit").Unit>
-      projectionRevision: number
-      usage: ExecutionProjection.UsageState
-      pendingSteering: ReadonlyArray<ExecutionProjection.PendingSteering>
-      settledSteering: ReadonlyArray<ExecutionProjection.SteeringDisposition>
-    }
-  >()
-  for (const entry of event.entries) {
-    const id = String(entry.turn.id)
-    const current = grouped.get(id)
-    if (current === undefined)
-      grouped.set(id, {
-        turn: { ...ThreadView.turnRecord(entry.turn), status: entry.projectionState.status },
-        units: [entry.unit],
-        projectionRevision: entry.projectionRevision,
-        usage: entry.projectionState.usage,
-        pendingSteering: entry.projectionState.steering.pending ?? [],
-        settledSteering: entry.projectionState.steering.settled ?? [],
-      })
-    else {
-      current.units.push(entry.unit)
-      if (entry.projectionRevision >= current.projectionRevision) {
-        current.usage = entry.projectionState.usage
-        current.pendingSteering = entry.projectionState.steering.pending ?? []
-        current.settledSteering = entry.projectionState.steering.settled ?? []
-      }
-      current.projectionRevision = Math.max(current.projectionRevision, entry.projectionRevision)
-    }
-  }
-  if (event.activeTurn !== undefined && !grouped.has(String(event.activeTurn.id))) {
-    grouped.set(String(event.activeTurn.id), {
-      turn: ThreadView.turnRecord(event.activeTurn),
-      units: [promptUnit(event.activeTurn)],
-      projectionRevision: 0,
-      usage: ExecutionProjection.emptyUsageState(),
-      pendingSteering: [],
-      settledSteering: [],
-    })
-  }
-  const groupedTurns = [...grouped.values()]
-  const turns = orderedTurns(groupedTurns)
-  let sourceBounds
-  if (event.oldestCursor === undefined)
-    sourceBounds = event.newestCursor === undefined ? {} : { newestCursor: event.newestCursor }
-  else
-    sourceBounds =
-      event.newestCursor === undefined
-        ? { oldestCursor: event.oldestCursor }
-        : { oldestCursor: event.oldestCursor, newestCursor: event.newestCursor }
-  const usage =
-    event.usage.contextCapacity === undefined
-      ? { state: event.usage.usage }
-      : { state: event.usage.usage, contextCapacity: event.usage.contextCapacity }
-  return {
-    thread: event.thread,
-    revision,
-    source: sourceFor(turns, ExecutionProjection.projectionVersion, sourceBounds),
-    turns,
-    pending: pending(event.queue),
-    hasOlder: event.hasOlder,
-    hasNewer: event.hasNewer ?? false,
-    usage,
-  }
-}
+type ProjectionChanged = Extract<RuntimeEvent, { readonly _tag: "ExecutionProjectionChanged" }>
+type ProjectionUnits = ProjectionChanged["change"] extends infer Change
+  ? Change extends { readonly units: infer Units }
+    ? Units
+    : Change extends { readonly upsert: infer Units }
+      ? Units
+      : never
+  : never
+const requiresProjectionCheckpoint = (change: ProjectionChanged["change"], units: ProjectionUnits): boolean =>
+  change.checkpoint === undefined &&
+  units.some(
+    (unit) =>
+      unit.content._tag === "Block" &&
+      unit.content.block._tag === "AuthorizationCard" &&
+      unit.content.block.status === "pending",
+  )
 const resync = (
   view: Pick<ThreadView.ThreadViewAccumulator, "thread" | "revision">,
   receivedBaseRevision = view.revision,
@@ -237,110 +134,90 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       ...change,
     })
   }
-  const publish = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
-    if (event._tag === "SelectionLoaded") {
-      const result = replace(
-        snapshotFromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0),
-      )
-      if (!snapshotRequired)
-        for (const value of event.projectionCheckpoints ?? [])
-          knownCheckpoints.set(String(value.turnId), value.checkpoint)
-      return result
+  const projectionChanged = (event: ProjectionChanged): ReadonlyArray<ClientEvent> => {
+    if (current === undefined || event.threadId !== current.thread.id) return []
+    const view = current
+    const change = event.change
+    const changedUnits = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
+    if (requiresProjectionCheckpoint(change, changedUnits)) {
+      snapshotRequired = true
+      return [resync(current)]
     }
-    if (current !== undefined && event._tag === "ThreadTitled" && event.threadId === current.thread.id)
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [],
-        header: {
-          thread: { ...current.thread, title: event.title },
-          source: current.source,
-          pending: current.pending,
-          hasOlder: current.hasOlder,
-          hasNewer: current.hasNewer,
-          usage: current.usage,
-        },
-      })
-    if (event._tag === "ExecutionProjectionChanged") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      const change = event.change
-      const changedUnits = change._tag === "ProjectionSnapshot" ? change.units : change.upsert
-      if (
-        change.checkpoint === undefined &&
-        changedUnits.some(
-          (unit) =>
-            unit.content._tag === "Block" &&
-            unit.content.block._tag === "AuthorizationCard" &&
-            unit.content.block.status === "pending",
-        )
-      ) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      const turnId = event.turn?.id ?? changedUnits[0]?.turnId
-      if (turnId === undefined) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      const turnKey = String(turnId)
-      const existing = current.turn(turnKey)
-      const knownRevision = knownProjectionRevisions.get(turnKey) ?? existing?.projectionRevision
-      const projectedStatus = knownTerminalStatuses.get(turnKey) ?? change.state.status
-      const isTrackedOffWindow = existing === undefined && current.hasNewer && knownRevision !== undefined
+    const projectionTurnId = () => event.turn?.id ?? changedUnits[0]?.turnId
+    const turnId = projectionTurnId()
+    if (turnId === undefined) {
+      snapshotRequired = true
+      return [resync(current)]
+    }
+    const turnKey = turnId
+    const existing = view.turn(turnKey)
+    const knownRevisionForTurn = () => knownProjectionRevisions.get(turnKey) ?? existing?.projectionRevision
+    const projectedStatusForTurn = () => knownTerminalStatuses.get(turnKey) ?? change.state.status
+    const knownRevision = knownRevisionForTurn()
+    const projectedStatus = projectedStatusForTurn()
+    const projectionPosition = () => {
+      const isTrackedOffWindow = existing === undefined && view.hasNewer && knownRevision !== undefined
       const canInsertUnknown =
-        existing === undefined && !current.hasNewer && event.turn !== undefined && change._tag === "ProjectionSnapshot"
-      if (existing === undefined && !isTrackedOffWindow && !canInsertUnknown) {
-        snapshotRequired = true
-        return [resync(current)]
+        existing === undefined && !view.hasNewer && event.turn !== undefined && change._tag === "ProjectionSnapshot"
+      return { isTrackedOffWindow, canInsertUnknown }
+    }
+    const { isTrackedOffWindow, canInsertUnknown } = projectionPosition()
+    const positionAccepted = () => existing !== undefined || isTrackedOffWindow || canInsertUnknown
+    if (!positionAccepted()) {
+      snapshotRequired = true
+      return [resync(current)]
+    }
+    const revisionAccepted = () => change._tag !== "ProjectionPatch" || knownRevision === change.baseRevision
+    if (!revisionAccepted()) {
+      snapshotRequired = true
+      return [resync(current)]
+    }
+    const previousUsageForTurn = () => knownUsage.get(turnKey) ?? existing?.usage
+    const header = {
+      thread: current.thread,
+      source: current.source,
+      pending: current.pending,
+      hasOlder: current.hasOlder,
+      hasNewer: current.hasNewer,
+      usage: threadUsage.next(current.usage, previousUsageForTurn(), change.state.usage, event.turn),
+    }
+    const accepted = (events: ReadonlyArray<ClientEvent>) => {
+      if (events.every((clientEvent) => clientEvent._tag !== "ResyncRequired")) {
+        rememberProjection(turnKey, change.revision, change.state.usage)
+        if (change.checkpoint !== undefined) knownCheckpoints.set(turnKey, change.checkpoint)
       }
-      if (change._tag === "ProjectionPatch" && knownRevision !== change.baseRevision) {
-        snapshotRequired = true
-        return [resync(current)]
-      }
-      const previousUsage = knownUsage.get(turnKey) ?? existing?.usage
-      const header = {
-        thread: current.thread,
-        source: current.source,
-        pending: current.pending,
-        hasOlder: current.hasOlder,
-        hasNewer: current.hasNewer,
-        usage: threadUsage.next(current.usage, previousUsage, change.state.usage, event.turn),
-      }
-      const accepted = (events: ReadonlyArray<ClientEvent>) => {
-        if (events.every((clientEvent) => clientEvent._tag !== "ResyncRequired")) {
-          rememberProjection(turnKey, change.revision, change.state.usage)
-          if (change.checkpoint !== undefined) knownCheckpoints.set(turnKey, change.checkpoint)
-        }
-        return events
-      }
-      if (existing === undefined) {
-        if (isTrackedOffWindow)
-          return accepted(
-            nextPatch({
-              upsert: [],
-              remove: [],
-              turnChanges: [],
-              header,
-            }),
-          )
+      return events
+    }
+    const insertProjection = (): ReadonlyArray<ClientEvent> => {
+      if (isTrackedOffWindow)
         return accepted(
           nextPatch({
-            upsert: changedUnits,
+            upsert: [],
             remove: [],
-            turnChanges: [
-              {
-                _tag: "UpsertTurn",
-                turn: { ...ThreadView.turnRecord(event.turn!), status: projectedStatus },
-                projectionRevision: change.revision,
-                usage: change.state.usage,
-                pendingSteering: change.state.steering.pending ?? [],
-                settledSteering: change.state.steering.settled ?? [],
-              },
-            ],
+            turnChanges: [],
             header,
           }),
         )
-      }
+      return accepted(
+        nextPatch({
+          upsert: changedUnits,
+          remove: [],
+          turnChanges: [
+            {
+              _tag: "UpsertTurn",
+              turn: { ...ThreadView.turnRecord(event.turn!), status: projectedStatus },
+              projectionRevision: change.revision,
+              usage: change.state.usage,
+              pendingSteering: change.state.steering.pending ?? [],
+              settledSteering: change.state.steering.settled ?? [],
+            },
+          ],
+          header,
+        }),
+      )
+    }
+    const updateProjection = (): ReadonlyArray<ClientEvent> => {
+      if (existing === undefined) return insertProjection()
       const record =
         event.turn === undefined
           ? { ...existing.turn, status: projectedStatus, updatedAt: now() }
@@ -375,93 +252,125 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         }),
       )
     }
-    if (event._tag === "TurnStarted") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      if (current.hasNewer) {
-        rememberProjection(String(event.turn.id), 0, ExecutionProjection.emptyUsageState())
-        return []
-      }
-      const seed = promptUnit(event.turn)
-      return nextPatch({
-        upsert: [seed],
-        remove: [],
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: {
-              ...ThreadView.turnRecord(event.turn),
-              status: knownTerminalStatuses.get(String(event.turn.id)) ?? event.turn.status,
-            },
-            projectionRevision: 0,
-            usage: ExecutionProjection.emptyUsageState(),
-            pendingSteering: [],
-            settledSteering: [],
-          },
-        ],
-      })
+    return updateProjection()
+  }
+  const turnStarted = (event: Extract<RuntimeEvent, { readonly _tag: "TurnStarted" }>): ReadonlyArray<ClientEvent> => {
+    if (current === undefined || event.threadId !== current.thread.id) return []
+    if (current.hasNewer) {
+      rememberProjection(String(event.turn.id), 0, ExecutionProjection.emptyUsageState())
+      return []
     }
-    if (event._tag === "TurnSettled") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      rememberTerminal(String(event.turnId), event.status)
-      knownProjectionRevisions.delete(String(event.turnId))
-      knownUsage.delete(String(event.turnId))
-      const existing = current.turn(String(event.turnId))
-      if (existing === undefined) return []
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [
-          {
-            _tag: "UpsertTurn",
-            turn: { ...existing.turn, status: event.status, updatedAt: now() },
-            projectionRevision: existing.projectionRevision,
-            usage: existing.usage,
-            pendingSteering: existing.pendingSteering ?? [],
-            settledSteering: existing.settledSteering ?? [],
+    const seed = promptUnit(event.turn)
+    return nextPatch({
+      upsert: [seed],
+      remove: [],
+      turnChanges: [
+        {
+          _tag: "UpsertTurn",
+          turn: {
+            ...ThreadView.turnRecord(event.turn),
+            status: knownTerminalStatuses.get(String(event.turn.id)) ?? event.turn.status,
           },
-        ],
-      })
-    }
-    if (event._tag === "QueueUpdated") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      let items = current.pending
-      const change = event.change
-      switch (change._tag) {
-        case "Reset":
-          items = pending(change.items)
-          break
-        case "Added": {
-          const inserted = [...items]
-          inserted.splice(Math.min(change.position ?? inserted.length, inserted.length), 0, change.item)
-          items = pending(inserted)
-          break
-        }
-        case "Updated":
-          items = pending(items.map((item) => (item.id === change.item.id ? change.item : item)))
-          break
-        case "Removed":
-          items = items.filter((item) => item.id !== change.turnId)
-          break
-      }
-      return nextPatch({
-        upsert: [],
-        remove: [],
-        turnChanges: [],
-        header: {
-          thread: current.thread,
-          source: current.source,
-          pending: items,
-          hasOlder: current.hasOlder,
-          hasNewer: current.hasNewer,
-          usage: current.usage,
+          projectionRevision: 0,
+          usage: ExecutionProjection.emptyUsageState(),
+          pendingSteering: [],
+          settledSteering: [],
         },
-      })
+      ],
+    })
+  }
+  const turnSettled = (event: Extract<RuntimeEvent, { readonly _tag: "TurnSettled" }>): ReadonlyArray<ClientEvent> => {
+    if (current === undefined || event.threadId !== current.thread.id) return []
+    rememberTerminal(String(event.turnId), event.status)
+    knownProjectionRevisions.delete(String(event.turnId))
+    knownUsage.delete(String(event.turnId))
+    const existing = current.turn(String(event.turnId))
+    if (existing === undefined) return []
+    return nextPatch({
+      upsert: [],
+      remove: [],
+      turnChanges: [
+        {
+          _tag: "UpsertTurn",
+          turn: { ...existing.turn, status: event.status, updatedAt: now() },
+          projectionRevision: existing.projectionRevision,
+          usage: existing.usage,
+          pendingSteering: existing.pendingSteering ?? [],
+          settledSteering: existing.settledSteering ?? [],
+        },
+      ],
+    })
+  }
+  const queueUpdated = (
+    event: Extract<RuntimeEvent, { readonly _tag: "QueueUpdated" }>,
+  ): ReadonlyArray<ClientEvent> => {
+    if (current === undefined || event.threadId !== current.thread.id) return []
+    let items = current.pending
+    const change = event.change
+    switch (change._tag) {
+      case "Reset":
+        items = pending(change.items)
+        break
+      case "Added": {
+        const inserted = [...items]
+        inserted.splice(Math.min(change.position ?? inserted.length, inserted.length), 0, change.item)
+        items = pending(inserted)
+        break
+      }
+      case "Updated":
+        items = pending(items.map((item) => (item.id === change.item.id ? change.item : item)))
+        break
+      case "Removed":
+        items = items.filter((item) => item.id !== change.turnId)
+        break
     }
-    if (event._tag === "ExecutionProjectionResyncRequired" || event._tag === "ThreadViewResyncRequired") {
-      if (current === undefined || event.threadId !== current.thread.id) return []
-      snapshotRequired = true
-      return [resync(current)]
-    }
+    return nextPatch({
+      upsert: [],
+      remove: [],
+      turnChanges: [],
+      header: {
+        thread: current.thread,
+        source: current.source,
+        pending: items,
+        hasOlder: current.hasOlder,
+        hasNewer: current.hasNewer,
+        usage: current.usage,
+      },
+    })
+  }
+  const selectionLoaded = (event: Extract<RuntimeEvent, { readonly _tag: "SelectionLoaded" }>) => {
+    const result = replace(
+      threadSnapshot.fromSelection(event, current?.thread.id === event.thread.id ? current.revision + 1 : 0),
+    )
+    if (!snapshotRequired)
+      for (const value of event.projectionCheckpoints ?? [])
+        knownCheckpoints.set(String(value.turnId), value.checkpoint)
+    return result
+  }
+  const threadTitled = (event: Extract<RuntimeEvent, { readonly _tag: "ThreadTitled" }>) => {
+    if (current === undefined || event.threadId !== current.thread.id) return [event]
+    return nextPatch({
+      upsert: [],
+      remove: [],
+      turnChanges: [],
+      header: {
+        thread: { ...current.thread, title: event.title },
+        source: current.source,
+        pending: current.pending,
+        hasOlder: current.hasOlder,
+        hasNewer: current.hasNewer,
+        usage: current.usage,
+      },
+    })
+  }
+  const resyncRequired = (
+    event: Extract<RuntimeEvent, { readonly _tag: "ExecutionProjectionResyncRequired" | "ThreadViewResyncRequired" }>,
+  ): ReadonlyArray<ClientEvent> => {
+    if (current === undefined || event.threadId !== current.thread.id) return []
+    snapshotRequired = true
+    return [resync(current)]
+  }
+  const passThrough = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
     switch (event._tag) {
       case "ExecutionModelPreviewChanged":
         return current !== undefined && event.threadId === current.thread.id ? [event] : []
@@ -477,6 +386,12 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
         const { selectionEpoch: _, ...value } = event
         return [value]
       }
+      default:
+        return passThroughViewEvent(event)
+    }
+  }
+  const passThroughViewEvent = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
+    switch (event._tag) {
       case "ThreadsListed":
       case "AssistantCompleted":
       case "ShellCompleted":
@@ -486,7 +401,20 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       case "ThreadPreviewLoaded":
       case "ThreadPreviewFailed":
         return [event]
+      default:
+        return []
     }
+  }
+  const publish = (event: RuntimeEvent): ReadonlyArray<ClientEvent> => {
+    if (event._tag === "SelectionLoaded") return selectionLoaded(event)
+    if (event._tag === "ThreadTitled") return threadTitled(event)
+    if (event._tag === "ExecutionProjectionChanged") return projectionChanged(event)
+    if (event._tag === "TurnStarted") return turnStarted(event)
+    if (event._tag === "TurnSettled") return turnSettled(event)
+    if (event._tag === "QueueUpdated") return queueUpdated(event)
+    if (event._tag === "ExecutionProjectionResyncRequired" || event._tag === "ThreadViewResyncRequired")
+      return resyncRequired(event)
+    return passThrough(event)
   }
   return {
     publish,

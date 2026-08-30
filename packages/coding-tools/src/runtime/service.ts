@@ -31,7 +31,7 @@ export const Request = Schema.Union([
   Inputs.Inputs.ReadPage.Request,
   Inputs.Inputs.Media.Request,
 ])
-type Request = typeof Request.Type
+export type Request = typeof Request.Type
 type Result = CodingToolResult.Result
 export class ToolError extends Schema.TaggedError<ToolError>()("ToolError", {
   tool: Schema.String,
@@ -103,21 +103,7 @@ const outputRecovery = (request: Request): string => {
   }
 }
 
-const boundResult = (request: Request, result: Result): Result => {
-  const values = [
-    result.text,
-    result.stdout,
-    result.stderr,
-    result.diff,
-    result.artifact?.path,
-    result.artifact?.mimeType,
-    ...(result.matches ?? []).flatMap((match) => [match.path, match.text]),
-  ].filter((value): value is string => value !== undefined)
-  const limit = contract(request).outputLimit
-  const totalBytes = values.reduce((total, value) => total + RuntimeFilesystem.byteLength(value), 0)
-  if (totalBytes <= limit) return result
-
-  const recovery = outputRecovery(request)
+const boundMatches = (result: Result, limit: number, recovery: string): Result => {
   if (result.matches !== undefined) {
     const boundedText = RuntimeFilesystem.boundedText(result.text, Math.floor(limit / 2), recovery)
     const markerBudget = RuntimeFilesystem.byteLength(
@@ -146,6 +132,10 @@ const boundResult = (request: Request, result: Result): Result => {
     if (matchesTruncation !== undefined) Object.assign(boundedResult, { matchesTruncation })
     return boundedResult
   }
+  return result
+}
+
+const boundFields = (result: Result, limit: number, totalBytes: number, recovery: string): Result => {
   const longestMarker = `[truncated: kept first ${totalBytes} of ${totalBytes} bytes — ${recovery}]`
   let remaining = Math.max(0, limit - RuntimeFilesystem.byteLength(longestMarker) - 1)
   let keptBytes = 0
@@ -187,6 +177,25 @@ const boundResult = (request: Request, result: Result): Result => {
   return boundedResult
 }
 
+const boundResult = (request: Request, result: Result): Result => {
+  const values = [
+    result.text,
+    result.stdout,
+    result.stderr,
+    result.diff,
+    result.artifact?.path,
+    result.artifact?.mimeType,
+    ...(result.matches ?? []).flatMap((match) => [match.path, match.text]),
+  ].filter((value): value is string => value !== undefined)
+  const limit = contract(request).outputLimit
+  const totalBytes = values.reduce((total, value) => total + RuntimeFilesystem.byteLength(value), 0)
+  if (totalBytes <= limit) return result
+  const recovery = outputRecovery(request)
+  return result.matches === undefined
+    ? boundFields(result, limit, totalBytes, recovery)
+    : boundMatches(result, limit, recovery)
+}
+
 const runtimeError = (details: FailureDetails) => new RuntimeOperationError(details)
 
 /**
@@ -201,6 +210,71 @@ const searchMessage = (operation: string, message: string): string => {
   return missingRipgrep(message) ? message : `Workspace search could not complete ${operation}`
 }
 
+const webSearchError = (cause: unknown): RuntimeOperationError | undefined => {
+  if (Schema.is(WebSearchErrors.SelectionError)(cause))
+    return runtimeError({
+      category: "dependency_unavailable",
+      message: cause.message,
+      outcome: "known",
+      recovery: "after_change",
+      nextAction: "Configure a provider that supports this search kind or choose a configured search kind",
+    })
+  if (!Schema.is(WebSearchErrors.ExecutionError)(cause)) return undefined
+  const rateLimited =
+    cause.outcomes.length > 0 && cause.outcomes.every((outcome) => outcome.error?.kind === "rate-limit")
+  if (rateLimited)
+    return runtimeError({
+      category: "rate_limited",
+      message: "Every selected web search provider is rate limited",
+      outcome: "known",
+      recovery: "later",
+      nextAction: "Retry later or use a different configured provider",
+    })
+  const outcomes = cause.outcomes
+    .map(
+      (outcome) =>
+        `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}${outcome.error?.message === undefined ? "" : ` (${outcome.error.message})`}`,
+    )
+    .join(", ")
+  return runtimeError({
+    category: "dependency_unavailable",
+    message: `Every selected web search provider failed before returning results${outcomes.length === 0 ? "" : `: ${outcomes}`}`,
+    outcome: "known",
+    recovery: "later",
+    nextAction: "Retry later or use a different configured provider",
+  })
+}
+
+const readPageError = (cause: unknown): RuntimeOperationError | undefined => {
+  if (Schema.is(ReadWebPageService.HttpError)(cause)) {
+    const missingKey = cause.message.includes("PARALLEL_API_KEY")
+    return runtimeError({
+      category: "dependency_unavailable",
+      message: missingKey
+        ? "Web page extraction is unavailable because PARALLEL_API_KEY is not configured"
+        : `The web page provider failed before returning usable content: ${cause.message}`,
+      outcome: "known",
+      recovery: missingKey ? "after_change" : "later",
+      nextAction: missingKey
+        ? "Configure PARALLEL_API_KEY or use another tool that can read the URL"
+        : "Retry later or use another source",
+    })
+  }
+  if (!Schema.is(ReadWebPageService.ContentError)(cause)) return undefined
+  const invalid = cause.reason === "invalid_input"
+  return runtimeError({
+    category: invalid ? "invalid_input" : "dependency_unavailable",
+    message: invalid
+      ? "The web page URL or request options are invalid"
+      : `The web page provider could not return usable content: ${cause.message}`,
+    outcome: "known",
+    recovery: invalid ? "after_change" : "later",
+    nextAction: invalid
+      ? "Correct the URL or request options, or use another source"
+      : "Use another source or retry later",
+  })
+}
+
 const operationError = (cause: unknown): RuntimeOperationError => {
   if (cause instanceof RuntimeOperationError) return cause
   if (cause instanceof ProcessRegistry.ProcessNotFound)
@@ -211,81 +285,10 @@ const operationError = (cause: unknown): RuntimeOperationError => {
       recovery: "after_change",
       nextAction: "Use a process id returned by a running bash call",
     })
-  if (Schema.is(WebSearchErrors.SelectionError)(cause))
-    return runtimeError({
-      category: "dependency_unavailable",
-      message: cause.message,
-      outcome: "known",
-      recovery: "after_change",
-      nextAction: "Configure a provider that supports this search kind or choose a configured search kind",
-    })
-  if (Schema.is(WebSearchErrors.ExecutionError)(cause)) {
-    const rateLimited =
-      cause.outcomes.length > 0 && cause.outcomes.every((outcome) => outcome.error?.kind === "rate-limit")
-    return rateLimited
-      ? runtimeError({
-          category: "rate_limited",
-          message: "Every selected web search provider is rate limited",
-          outcome: "known",
-          recovery: "later",
-          nextAction: "Retry later or use a different configured provider",
-        })
-      : runtimeError({
-          category: "dependency_unavailable",
-          /**
-           * Each provider already reported why it failed, and summarising them away left a reader
-           * unable to tell an expired key from an outage. The reasons are what decide what to do
-           * next.
-           */
-          message: `Every selected web search provider failed before returning results${
-            cause.outcomes.length === 0
-              ? ""
-              : `: ${cause.outcomes
-                  .map(
-                    (outcome) =>
-                      `${outcome.provider}: ${outcome.error?.kind ?? "unknown"}${
-                        outcome.error?.message === undefined ? "" : ` (${outcome.error.message})`
-                      }`,
-                  )
-                  .join(", ")}`
-          }`,
-          outcome: "known",
-          recovery: "later",
-          nextAction: "Retry later or use a different configured provider",
-        })
-  }
-  if (Schema.is(ReadWebPageService.HttpError)(cause))
-    return cause.message.includes("PARALLEL_API_KEY")
-      ? runtimeError({
-          category: "dependency_unavailable",
-          message: "Web page extraction is unavailable because PARALLEL_API_KEY is not configured",
-          outcome: "known",
-          recovery: "after_change",
-          nextAction: "Configure PARALLEL_API_KEY or use another tool that can read the URL",
-        })
-      : runtimeError({
-          category: "dependency_unavailable",
-          message: `The web page provider failed before returning usable content: ${cause.message}`,
-          outcome: "known",
-          recovery: "later",
-          nextAction: "Retry later or use another source",
-        })
-  if (Schema.is(ReadWebPageService.ContentError)(cause))
-    return cause.reason === "invalid_input"
-      ? runtimeError({
-          category: "invalid_input",
-          message: "The web page URL or request options are invalid",
-          outcome: "known",
-          recovery: "after_change",
-          nextAction: "Correct the URL or request options, or use another source",
-        })
-      : runtimeError({
-          category: "dependency_unavailable",
-          message: `The web page provider could not return usable content: ${cause.message}`,
-          outcome: "known",
-          recovery: "later",
-          nextAction: "Use another source or retry later",
-        })
+  const webError = webSearchError(cause)
+  if (webError !== undefined) return webError
+  const pageError = readPageError(cause)
+  if (pageError !== undefined) return pageError
   if (Schema.is(WorkspaceIndex.WorkspaceIndexError)(cause))
     return runtimeError({
       category: cause.operation === "initialize" ? "dependency_unavailable" : "operation",
@@ -365,6 +368,7 @@ const toolError = (request: Request, cause: unknown, kind: "operation" | "timeou
 
 type WorkspaceIndexLayer = ReturnType<typeof WorkspaceIndex.layer>
 const runtimeDependencies: RuntimeLayerDependencies = {
+  service: Service,
   bounded,
   boundResult,
   contract,

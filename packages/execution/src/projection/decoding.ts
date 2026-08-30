@@ -1,7 +1,6 @@
 import { Function, Schema } from "effect"
 import type { Run, RunEvent } from "tenetkit/runtime"
-import { bounded, record } from "./values"
-import { toolTextLimit } from "./values"
+import { bounded, record, toolTextLimit } from "./values"
 
 type ModelValue = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionStarted" }>["call"]["params"]
 

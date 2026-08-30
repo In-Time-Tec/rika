@@ -61,7 +61,7 @@ test(
         expect(new Set(cards.map(({ id }) => id)).size).toBe(2)
         // Order is a race between two concurrently admitted Runs; each card keeping its OWN prompt
         // is the property the reload has to preserve.
-        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).sort()).toEqual([
+        expect(cards.map(({ name, prompt }) => `${name}:${prompt}`).toSorted()).toEqual([
           "Oracle:FIRST_GROUP_PROMPT",
           "Surgeon:SECOND_GROUP_PROMPT",
         ])

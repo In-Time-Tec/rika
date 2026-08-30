@@ -126,7 +126,7 @@ export const resolveEnvironmentReferences = (input: ResolveEnvironmentInput): Re
         reference.phases.includes(input.phase) &&
         (reference.classification === "plain" || mayReceiveSecrets(reference)),
     )
-    .sort(
+    .toSorted(
       (left, right) =>
         scopeRank[left.scope] - scopeRank[right.scope] ||
         left.name.localeCompare(right.name) ||
@@ -145,7 +145,7 @@ export const resolveEnvironmentReferences = (input: ResolveEnvironmentInput): Re
       selected.set(candidate.name, candidate)
     }
   }
-  return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name))
+  return [...selected.values()].toSorted((left, right) => left.name.localeCompare(right.name))
 }
 
 const forbiddenEgressSuffixes = [".e2b.app", ".e2b.dev", ".internal", ".local", ".localhost"] as const
@@ -197,7 +197,7 @@ export const resolveEgressPolicy = (input: {
   const destinations = allow.flatMap((entry) => (entry === undefined ? [] : [entry]))
   return {
     phase: input.phase,
-    allow: [...new Set(destinations)].sort(),
+    allow: [...new Set(destinations)].toSorted(),
   }
 }
 

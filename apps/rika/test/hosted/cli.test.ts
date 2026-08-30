@@ -1,57 +1,23 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import {
-  identityMember,
-  identityOrganization,
-  identityUser,
-  type Account,
-  type CliDeviceDirectory,
-  type IdentityDirectory,
-  type IdentityRuntime,
-} from "@rika/identity"
+import type { CliDeviceDirectory, IdentityDirectory, IdentityRuntime } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
-import {
-  rikaHostedEnvironmentValues,
-  rikaHostedExecutorAssignments,
-  rikaHostedOwners,
-  rikaHostedThreadEvents,
-  rikaHostedThreadProtocolCommands,
-  rikaHostedThreads,
-} from "@rika/product-store/database-schema"
+import { rikaHostedEnvironmentValues, rikaHostedOwners } from "@rika/product-store/database-schema"
 import * as HostedStore from "@rika/product-store/layer"
-import { ApiMessage, ExecutorMessage, type CellResponse } from "@rika/remote-execution/protocol"
+import { ApiMessage, type CellResponse } from "@rika/remote-execution/protocol"
 import { asc, eq, inArray } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
-import {
-  Clock,
-  Config,
-  Context,
-  DateTime,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Random,
-  Redacted,
-  Ref,
-  Schema,
-} from "effect"
+import { Clock, Context, DateTime, Effect, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { fileURLToPath } from "node:url"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Pool } from "pg"
-import { runMigration } from "../../../../packages/identity/src/database/postgres"
-import { identityMigrations } from "../../../../packages/identity/src/database/migrations"
-import { migrations as productMigrations } from "../../../../packages/product-store/src/hosted/migrations"
-import * as ExecutionPostgres from "../../../../packages/execution/src/postgres"
 import { layer as controllerLayer } from "../../../../packages/e2b-executor/src/controller"
 import { Credentials, CredentialError } from "../../../../packages/e2b-executor/src/checkout"
 import { ObjectStore, memoryObjectStore, vaultLayer } from "../../../../packages/e2b-executor/src/checkpoint"
 import { Provider, type BootstrapRequest, type CreateRequest } from "../../../../packages/e2b-executor/src/provider"
-import { type Gateway, type Socket } from "../../../api/src/executor/gateway"
+import type { Socket } from "../../../api/src/executor/gateway"
 import { Executor, service as executorService } from "../../../api/src/executor/service"
 import { HostedEnvironment, layer as hostedEnvironmentLayer } from "../../../api/src/hosted/environment/runtime"
 import { HostedProduct, layer as hostedProductLayer } from "../../../api/src/hosted/product"
@@ -78,69 +44,25 @@ import {
 import { generate } from "../../src/hosted/dpop"
 import { Service as ProductService } from "@rika/product/product-operation-service"
 import { BetterAuthUserId, OrganizationId, Timestamp } from "@rika/product/hosted-model"
+import {
+  account,
+  bunLayer,
+  clientId,
+  databaseUrl,
+  deviceId,
+  encodeExecutorMessage,
+  type GatewayRef,
+  live,
+  migrate,
+  seedIdentity,
+  unusedHttpClient,
+  webRequest,
+  verifyQueuedTurn,
+  workspaceCapabilities,
+  workspaceEncryptionKey,
+} from "./cli.fixture"
 
-const databaseUrl = Effect.runSync(Config.option(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL"))).pipe(
-  Option.getOrUndefined,
-)
-const live = databaseUrl !== undefined
-const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
-const workspaceCapabilities = {
-  environmentDigest: `sha256:${"1".repeat(64)}`,
-  capturedAt: "2026-01-01T00:00:00.000Z",
-  filesystem: { _tag: "Ready", detail: "available" },
-  typescriptKernel: { _tag: "Ready", detail: "available" },
-  git: { _tag: "Ready", detail: "available" },
-  process: { _tag: "Ready", detail: "available" },
-  pty: { _tag: "Unavailable", reason: "not required" },
-  browser: { _tag: "Unavailable", reason: "not required" },
-  services: { _tag: "Ready", detail: "available" },
-  workspaceLifecycle: { _tag: "Ready", detail: "available" },
-} as const
-const deviceId = "device-cli-e2b"
-const clientId = "client-cli-e2b"
-const workspaceEncryptionKey = Redacted.make(btoa(String.fromCharCode(...new Uint8Array(32).fill(7))))
-
-const account: Account = {
-  user: {
-    id: "user-cli-e2b",
-    name: "Rika User",
-    email: "rika@example.test",
-    emailVerified: true,
-    image: null,
-  },
-  memberships: [],
-}
-
-const migrate = (url: string) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
-    for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* fileSystem.readFileString(fileURLToPath(migration.url))
-      yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
-    }
-    yield* ExecutionPostgres.applySchema({ url, source: "rika-cli-e2b-integration" })
-    for (const migration of [...identityMigrations, ...productMigrations]) {
-      const sql = yield* fileSystem.readFileString(fileURLToPath(migration.url))
-      expect(yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })).toBe(false)
-    }
-    yield* ExecutionPostgres.applySchema({ url, source: "rika-cli-e2b-integration" })
-    return pool
-  })
-
-const webRequest = (request: HttpClientRequest.HttpClientRequest) => {
-  const body = request.body._tag === "Uint8Array" ? request.body.body : undefined
-  const init: RequestInit = {
-    method: request.method,
-    headers: request.headers,
-  }
-  if (body !== undefined) init.body = body
-  return new Request(request.url, init)
-}
-
-const unusedHttpClient = HttpClient.make(() => Effect.die("The integration test did not install its HTTP client"))
-
-it.layer(BunServices.layer)((test) => {
+it.layer(bunLayer)((test) => {
   test.effect.skipIf(!live)("queues a routed CLI turn durably without executing tools in the HTTP request", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -155,33 +77,7 @@ it.layer(BunServices.layer)((test) => {
           migrated = yield* migrate(url)
           const databaseClient = drizzle({ client: migrated })
           const createdAt = DateTime.toDate(DateTime.makeUnsafe(yield* TestClock.withLive(Clock.currentTimeMillis)))
-          yield* Effect.tryPromise(() =>
-            databaseClient.insert(identityUser).values({
-              id: account.user.id,
-              name: account.user.name,
-              email: account.user.email,
-              emailVerified: account.user.emailVerified,
-              createdAt,
-              updatedAt: createdAt,
-            }),
-          )
-          yield* Effect.tryPromise(() =>
-            databaseClient.insert(identityOrganization).values({
-              id: "organization-cli-e2b",
-              name: "Rika Organization",
-              slug: "rika-organization",
-              createdAt,
-            }),
-          )
-          yield* Effect.tryPromise(() =>
-            databaseClient.insert(identityMember).values({
-              id: "member-cli-e2b",
-              organizationId: "organization-cli-e2b",
-              userId: account.user.id,
-              role: "owner",
-              createdAt,
-            }),
-          )
+          yield* seedIdentity(databaseClient, createdAt)
           yield* Effect.tryPromise(() =>
             databaseClient.insert(rikaHostedOwners).values({
               id: "organization-owner-cli-e2b",
@@ -189,7 +85,7 @@ it.layer(BunServices.layer)((test) => {
               organizationId: "organization-cli-e2b",
             }),
           )
-          let gateway: Gateway | undefined
+          const gateway: GatewayRef = { current: undefined }
           const runFork = Effect.runForkWith(yield* Effect.context<never>())
           let helloAccepted = 0
           const creates: Array<CreateRequest> = []
@@ -207,7 +103,7 @@ it.layer(BunServices.layer)((test) => {
               if (message._tag === "CellExecute") {
                 operations.push(message)
                 runFork(
-                  gateway!.receive(
+                  gateway.current!.receive(
                     socket,
                     encodeExecutorMessage({
                       _tag: "CellResult",
@@ -233,7 +129,7 @@ it.layer(BunServices.layer)((test) => {
                 Effect.sync(() => {
                   bootstraps.push(request)
                   runFork(
-                    gateway!.receive(
+                    gateway.current!.receive(
                       socket,
                       encodeExecutorMessage({
                         _tag: "ExecutorHello",
@@ -284,7 +180,7 @@ it.layer(BunServices.layer)((test) => {
                 BunCrypto.layer,
                 vaultLayer(workspaceEncryptionKey).pipe(
                   Layer.provide(Layer.succeed(ObjectStore, memoryObjectStore())),
-                  Layer.provide(BunServices.layer),
+                  Layer.provide(bunLayer),
                 ),
                 Layer.succeed(
                   Credentials,
@@ -336,7 +232,7 @@ it.layer(BunServices.layer)((test) => {
           const product = Context.get(context, HostedProduct)
           const toolPolicy = Context.get(context, HostedToolPolicy)
           const executor = Context.get(context, Executor)
-          gateway = executor.gateway
+          gateway.current = executor.gateway
           const connection = yield* product.createConnection({
             principal: { userId: account.user.id, deviceId, clientId, dpopJkt: "dpop-thumbprint" },
             owner: { _tag: "PersonalOwner", userId: BetterAuthUserId.make(account.user.id) },
@@ -560,10 +456,10 @@ it.layer(BunServices.layer)((test) => {
                 HostedCommand.Service.of({ run: (input) => HostedCli.run(input).pipe(Effect.provide(services)) }),
               ),
             ),
-          ).pipe(Layer.provide(hostedDependencies), Layer.provide(BunServices.layer))
+          ).pipe(Layer.provide(hostedDependencies), Layer.provide(bunLayer))
           const cli = yield* Layer.build(
             Layer.mergeAll(
-              BunServices.layer,
+              bunLayer,
               TestConsole.layer,
               hostedCommand,
               Layer.succeed(
@@ -574,47 +470,14 @@ it.layer(BunServices.layer)((test) => {
           ).pipe(Effect.provideService(HttpClient.HttpClient, client))
           yield* run(["--execute", "echo hosted-mvp", "--thread", connection.threadId]).pipe(Effect.provide(cli))
           expect(ticketRequests).toBe(1)
-          const [thread, assignment, commands, events] = yield* Effect.all(
-            [
-              Effect.tryPromise(() =>
-                databaseClient
-                  .select({ executorKind: rikaHostedThreads.executorKind })
-                  .from(rikaHostedThreads)
-                  .where(eq(rikaHostedThreads.id, connection.threadId)),
-              ).pipe(Effect.orDie),
-              Effect.tryPromise(() =>
-                databaseClient
-                  .select({ id: rikaHostedExecutorAssignments.id, threadId: rikaHostedExecutorAssignments.threadId })
-                  .from(rikaHostedExecutorAssignments)
-                  .where(eq(rikaHostedExecutorAssignments.threadId, connection.threadId)),
-              ).pipe(Effect.orDie),
-              Effect.tryPromise(() =>
-                databaseClient
-                  .select({ idempotencyKey: rikaHostedThreadProtocolCommands.idempotencyKey })
-                  .from(rikaHostedThreadProtocolCommands)
-                  .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
-              ).pipe(Effect.orDie),
-              Effect.tryPromise(() =>
-                databaseClient
-                  .select({ event: rikaHostedThreadEvents.event })
-                  .from(rikaHostedThreadEvents)
-                  .where(eq(rikaHostedThreadEvents.threadId, connection.threadId)),
-              ).pipe(Effect.orDie),
-            ],
-            { concurrency: "unbounded" },
-          )
-          expect(thread).toEqual([{ executorKind: "orb" }])
-          expect(assignment).toHaveLength(1)
-          expect(assignment[0]).toMatchObject({ threadId: connection.threadId })
-          expect(assignment[0]?.id).not.toBe(connection.threadId)
-          expect(helloAccepted).toBe(0)
-          expect(closes).toEqual([])
-          expect(commands).toHaveLength(1)
-          expect(operations).toHaveLength(0)
-          expect(events).toHaveLength(0)
-          expect(creates).toHaveLength(0)
-          expect(bootstraps).toHaveLength(0)
-          expect(yield* Ref.get(localServerSpawns)).toBe(0)
+          yield* verifyQueuedTurn(databaseClient, connection.threadId, {
+            helloAccepted,
+            closes,
+            operations,
+            creates,
+            bootstraps,
+            localServerSpawns,
+          })
           yield* Effect.tryPromise(api.dispose)
         } finally {
           if (migrated !== undefined) {

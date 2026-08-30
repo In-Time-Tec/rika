@@ -145,7 +145,9 @@ test("binds source, manifest, SBOM, scan, and image digests into signed provenan
     "predicate-path": "executor-build.json",
     "push-to-registry": true,
   })
-  expect(String(identity?.with?.["predicate-type"])).toContain("/attestations/executor-image/v1")
+  const predicateType = identity?.with?.["predicate-type"]
+  expect(Schema.is(Schema.String)(predicateType)).toBe(true)
+  if (Schema.is(Schema.String)(predicateType)) expect(predicateType).toContain("/attestations/executor-image/v1")
 })
 
 test("cannot publish or promote a mutable, reused, unreviewed, or unattested image", () => {

@@ -35,7 +35,7 @@ it.effect("reads current account credentials per request and forwards rejected g
     const credentials = fromRikaAuth(
       service({
         acquire: Effect.sync(() => {
-          acquisitions = acquisitions + 1
+          acquisitions += 1
           return credential("expected", `expected.${acquisitions}`)
         }),
         refreshRejected: (generation) => {

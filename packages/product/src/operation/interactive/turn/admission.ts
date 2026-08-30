@@ -12,9 +12,9 @@ import { Function, Effect, Cause, Clock, Duration, Exit, Ref } from "effect"
 import { turnFailure } from "../../failure-message"
 import * as OperationFailure from "../../failure"
 import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../../retry-policy"
-import { type ModeId } from "@rika/configuration/behavior-mode"
-import { type InteractiveEvent } from "../session-event"
-import { type InteractiveRuntimeContext } from "../session"
+import type { ModeId } from "@rika/configuration/behavior-mode"
+import type { InteractiveEvent } from "../session-event"
+import type { InteractiveRuntimeContext } from "../session"
 import * as InteractiveQueue from "./queue"
 export const admitInteractiveTurn = (input: {
   readonly turns: TurnRepository.Interface
@@ -125,68 +125,82 @@ interface SettleInteractiveSubmissionState {
   readonly dispatch: (event: InteractiveEvent) => void
   readonly retry?: { readonly attempt: number; readonly sourceTurnId: string }
 }
+const settleFailedSubmission = Effect.fn("InteractiveSubmission.settleFailure")(function* (
+  input: InteractiveSubmissionContext,
+  state: SettleInteractiveSubmissionState,
+) {
+  const { thread, turn, outcome, dispatch } = state
+  if (outcome._tag !== "Failure") return undefined
+  const current = yield* (yield* TurnRepository.Service).get(turn.id)
+  if (current?._tag === "AgentExecution" && current.executionLink !== undefined) return { _tag: "settled" as const }
+  if (Cause.hasInterruptsOnly(outcome.cause)) {
+    yield* input.setTurnStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
+    return { _tag: "settled" as const }
+  }
+  yield* input.setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
+  emitEvent(input, dispatch, {
+    _tag: "ExecutionFailed",
+    selectionEpoch: 0,
+    threadId: thread.id,
+    turnId: turn.id,
+    failure: OperationFailure.makeFailure(Cause.squash(outcome.cause)),
+  })
+  yield* input.settleThread(thread, dispatch)
+  return { _tag: "settled" as const }
+})
+const remainsActive = (status: ExecutionProjection.Result["status"]): boolean =>
+  status === "waiting" || status === "running" || status === "cancelling"
+const decideRetry = (result: ExecutionProjection.Result, retry: SettleInteractiveSubmissionState["retry"]) => {
+  if (result.status !== "failed") return undefined
+  const failure = turnFailure(result.units)
+  const attempt = retry?.attempt ?? 1
+  const retryable = failure?.retryable ?? false
+  return shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt })
+    ? {
+        _tag: "retry" as const,
+        attempt,
+        sourceTurnId: retry?.sourceTurnId,
+        message: failure?.message ?? "Execution failed",
+      }
+    : { _tag: "failure" as const, message: failure?.message ?? `Execution ${result.status}` }
+}
+const settleCompletedSubmission = Effect.fn("InteractiveSubmission.settleCompletion")(function* (
+  input: InteractiveSubmissionContext,
+  state: SettleInteractiveSubmissionState,
+) {
+  const { thread, turn, outcome, dispatch, retry } = state
+  if (outcome._tag === "Failure") return { _tag: "settled" as const }
+  const result = outcome.value
+  if (result === undefined) {
+    yield* input.settleThread(thread, dispatch)
+    return { _tag: "settled" as const }
+  }
+  yield* input.setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
+  if (remainsActive(result.status)) return { _tag: "settled" as const }
+  const decision = decideRetry(result, retry)
+  if (decision?._tag === "retry") return { ...decision, sourceTurnId: decision.sourceTurnId ?? turn.id }
+  if (decision?._tag === "failure") {
+    emitEvent(input, dispatch, {
+      _tag: "ExecutionFailed",
+      selectionEpoch: 0,
+      threadId: thread.id,
+      turnId: turn.id,
+      failure: OperationFailure.makeFailure(decision.message),
+    })
+  }
+  yield* input.settleThread(thread, dispatch)
+  return { _tag: "settled" as const }
+})
 const settleInteractiveSubmissionImpl = (
   input: InteractiveSubmissionContext,
   state: SettleInteractiveSubmissionState,
-) => {
-  const { setTurnStatus, settleThread } = input
-  const { thread, turn, outcome, dispatch, retry } = state
-  return Effect.uninterruptible(
+) =>
+  Effect.uninterruptible(
     Effect.gen(function* () {
-      if (outcome._tag === "Failure") {
-        const current = yield* (yield* TurnRepository.Service).get(turn.id)
-        if (current?._tag === "AgentExecution" && current.executionLink !== undefined) return { _tag: "settled" }
-        if (Cause.hasInterruptsOnly(outcome.cause)) {
-          yield* setTurnStatus(turn.id, "cancelled", yield* Clock.currentTimeMillis)
-          return { _tag: "settled" }
-        }
-        yield* setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
-        // The cause is right here; a hardcoded sentence would discard the one fact the user needs.
-        emitEvent(input, dispatch, {
-          _tag: "ExecutionFailed",
-          selectionEpoch: 0,
-          threadId: thread.id,
-          turnId: turn.id,
-          failure: OperationFailure.makeFailure(Cause.squash(outcome.cause)),
-        })
-        yield* settleThread(thread, dispatch)
-        return { _tag: "settled" }
-      }
-      const result = outcome.value
-      if (result === undefined) {
-        yield* settleThread(thread, dispatch)
-        return { _tag: "settled" }
-      }
-      yield* setTurnStatus(turn.id, result.status, yield* Clock.currentTimeMillis)
-      if (result.status === "waiting" || result.status === "running" || result.status === "cancelling")
-        return { _tag: "settled" }
-      if (result.status === "failed") {
-        // The projector carried the run's real failure into the last Error unit with its
-        // classification; surface it instead of a generic status sentence.
-        const failure = turnFailure(result.units)
-        const attempt = retry?.attempt ?? 1
-        const retryable = failure?.retryable ?? false
-        if (shouldRetryTurn({ retryable, retry: retryable ? "automatic" : "none", attempt }))
-          return {
-            _tag: "retry",
-            attempt,
-            sourceTurnId: retry?.sourceTurnId ?? turn.id,
-            message: failure?.message ?? "Execution failed",
-          }
-        const message = failure?.message ?? `Execution ${result.status}`
-        emitEvent(input, dispatch, {
-          _tag: "ExecutionFailed",
-          selectionEpoch: 0,
-          threadId: thread.id,
-          turnId: turn.id,
-          failure: OperationFailure.makeFailure(message),
-        })
-      }
-      yield* settleThread(thread, dispatch)
-      return { _tag: "settled" }
+      const failed = yield* settleFailedSubmission(input, state)
+      return failed ?? (yield* settleCompletedSubmission(input, state))
     }),
   )
-}
 export const settleInteractiveSubmission: {
   (
     arg1: SettleInteractiveSubmissionState,
@@ -210,7 +224,7 @@ const executeInteractiveSubmissionImpl = (
     const clock = yield* Clock.Clock
     let current = turn
     let attempt = 1
-    let sourceTurnId = turn.id
+    const sourceTurnId = turn.id
     let submission = submissionId
     for (;;) {
       const startedAt = clock.currentTimeMillisUnsafe()
@@ -461,8 +475,8 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
           Effect.suspend(() =>
             observerTurn === undefined || executionLaunched
               ? Effect.void
-              : releaseTurnObserver(observerTurn!.threadId, observerTurn!.id).pipe(
-                  Effect.andThen(notifyTurnChanged(observerTurn!)),
+              : releaseTurnObserver(observerTurn.threadId, observerTurn.id).pipe(
+                  Effect.andThen(notifyTurnChanged(observerTurn)),
                   Effect.ignore,
                 ),
           ),

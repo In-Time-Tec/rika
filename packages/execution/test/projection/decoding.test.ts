@@ -108,13 +108,9 @@ it.live(
       expect(last?.state.status).toBe("completed")
       expect(last?.state.title?.text).toBe("Generated Title")
       expect(last?.state.usage.sourceComplete).toBe(true)
-      expect(last?.state.usage.tokens).toEqual(
-        expect.objectContaining({
-          total: 8,
-          input: expect.objectContaining({ total: 5 }),
-          output: expect.objectContaining({ total: 3 }),
-        }),
-      )
+      expect(last?.state.usage.tokens?.total).toBe(8)
+      expect(last?.state.usage.tokens?.input.total).toBe(5)
+      expect(last?.state.usage.tokens?.output.total).toBe(3)
       const units = changes.flatMap((change) => (change._tag === "ProjectionSnapshot" ? change.units : change.upsert))
       expect(assistantText(units)).toContain("ROOT_ANSWER")
     }),

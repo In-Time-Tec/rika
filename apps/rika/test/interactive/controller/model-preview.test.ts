@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Option, Schema } from "effect"
-import { createTestRenderer } from "@opentui/core/testing"
-import { Surface } from "@rika/terminal/opentui-surface"
+import "./model-preview/clearing.fixture"
+import "./model-preview/reconciliation.fixture"
+import { Option, Schema } from "effect"
 import * as InteractiveController from "../../../src/interactive/controller/service"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import type * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -116,7 +116,6 @@ const loaded = () =>
   ).state
 const assistantText = (state: InteractiveController.State): string | undefined =>
   state.model.entries.findLast((entry) => entry.role === "assistant")?.text
-const ReasoningBlock = Schema.TaggedStruct("Reasoning", { text: Schema.String })
 const TranscriptItemProjection = Schema.Struct({
   _tag: Schema.String,
   id: Schema.optionalKey(Schema.String),
@@ -125,8 +124,6 @@ const TranscriptItemProjection = Schema.Struct({
 })
 const transcriptItems = (state: InteractiveController.State) =>
   state.model.items.flatMap((item) => Option.toArray(Schema.decodeUnknownOption(TranscriptItemProjection)(item)))
-const reasoningText = (state: InteractiveController.State): string | undefined =>
-  state.model.blocks.flatMap((block) => Option.toArray(Schema.decodeUnknownOption(ReasoningBlock)(block))).at(-1)?.text
 const ids = (state: InteractiveController.State): ReadonlyArray<string> =>
   transcriptItems(state).flatMap((item) => (item.id === undefined ? [] : [item.id]))
 const runPreview = (state: InteractiveController.State, runId = "run") => state.modelPreview?.byRun.get(runId)
@@ -137,25 +134,6 @@ const timelineUnit = (key: string, content: TranscriptUnit.Unit["content"], revi
   order: TranscriptOrdering.unitOrder(key, revision),
   revision,
   content,
-})
-
-const toolCall = (status: "running" | "complete" = "running"): TranscriptUnit.Unit["content"] => ({
-  _tag: "Block",
-  block: {
-    _tag: "ToolCall",
-    id: "tool",
-    name: "read",
-    input: "{}",
-    status,
-    presentation: {
-      family: "explore",
-      action: "read",
-      activeLabel: "Reading",
-      completeLabel: "Read",
-    },
-    detail: "file.ts",
-    files: [],
-  },
 })
 
 interface PatchOptions {
@@ -276,7 +254,7 @@ describe("tentative model preview overlay", () => {
     for (let sequence = 0; sequence < text.length; sequence += 1) {
       state = InteractiveController.update(
         state,
-        preview(sequence + 1, text[sequence]!, {}, reasoning[sequence]!, {
+        preview(sequence + 1, text[sequence]!, {}, reasoning[sequence], {
           text: textOffset,
           reasoning: reasoningOffset,
         }),
@@ -408,336 +386,4 @@ describe("tentative model preview overlay", () => {
     state = InteractiveController.update(state, preview(99, "retired attempt")).state
     expect(assistantText(state)).toBe("new attempt")
   })
-
-  it("keeps a second model-call preview across a delayed durable projection from the first call", () => {
-    let state = InteractiveController.update(loaded(), preview(1, "first answer", {}, "first thought")).state
-    state = InteractiveController.update(
-      state,
-      preview(1, "second answer", { turn: 1, modelCallId: "call-2", modelAttemptId: "attempt-2" }, "second thought"),
-    ).state
-    const second = state.modelPreview
-    const priorUnits = [
-      timelineUnit("first:reasoning", {
-        _tag: "Block",
-        block: { _tag: "Reasoning", text: "first durable thought" },
-      }),
-      timelineUnit("first:tool", toolCall()),
-      timelineUnit("first:answer", { _tag: "Entry", role: "assistant", text: "first durable answer" }),
-    ]
-    state = applyPatch(state, { upsert: priorUnits })
-    expect(state.modelPreview).toBe(second)
-    expect(state.view?.snapshot().turns[0]?.units.map((unit) => unit.key)).toEqual(
-      expect.arrayContaining(priorUnits.map((unit) => unit.key)),
-    )
-    expect(assistantText(state)).toBe("second answer")
-    expect(reasoningText(state)).toBe("second thought")
-
-    state = InteractiveController.update(
-      state,
-      preview(2, " revised", { turn: 1, modelCallId: "call-2", modelAttemptId: "attempt-2" }, " revised", {
-        text: "second answer".length,
-        reasoning: "second thought".length,
-      }),
-    ).state
-    expect(runPreview(state)?.sequence).toBe(1)
-    expect(runPreview(state)?.text).toBe("second answer revised")
-    expect(runPreview(state)?.reasoning).toBe("second thought revised")
-  })
-
-  it.each([
-    {
-      name: "assistant text",
-      content: { _tag: "Entry", role: "assistant", text: "durable text" } as const,
-      previewText: "tentative text",
-      previewReasoning: "",
-    },
-    {
-      name: "reasoning",
-      content: { _tag: "Block", block: { _tag: "Reasoning", text: "durable thought" } } as const,
-      previewText: "",
-      previewReasoning: "tentative thought",
-    },
-    {
-      name: "tool-only output",
-      content: toolCall(),
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-    {
-      name: "cell",
-      content: {
-        _tag: "Block",
-        block: {
-          _tag: "Cell",
-          id: "cell",
-          status: "running",
-          visual: "ts",
-          source: { text: "1 + 1", lines: 1 },
-          output: { stdout: "", stderr: "" },
-          calls: [],
-          epoch: 1,
-          notices: [],
-          files: [],
-        },
-      } as const,
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-    {
-      name: "subagent card",
-      content: {
-        _tag: "Block",
-        block: {
-          _tag: "SubagentCard",
-          id: "child",
-          name: "reviewer",
-          prompt: "review",
-          promptTruncated: false,
-          summary: "Reviewing",
-          status: "running",
-          activity: [],
-        },
-      } as const,
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-    {
-      name: "file-source notification",
-      content: {
-        _tag: "Block",
-        block: { _tag: "Notification", title: "File source unavailable", detail: "file.ts" },
-      } as const,
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-    {
-      name: "model error",
-      content: {
-        _tag: "Block",
-        block: { _tag: "Error", title: "Model failed", detail: "provider rejected the request" },
-      } as const,
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-  ])("keeps a live preview across a delayed $name unit", ({ name, content, previewText, previewReasoning }) => {
-    let state = InteractiveController.update(loaded(), preview(1, previewText, {}, previewReasoning)).state
-    const overlay = state.modelPreview
-    const key = `new:${name}`
-    state = applyPatch(state, { upsert: [timelineUnit(key, content)] })
-    expect(state.view?.snapshot().turns[0]?.units.some((unit) => unit.key === key)).toBe(true)
-    expect(state.modelPreview).toBe(overlay)
-    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(true)
-  })
-
-  it("keeps the preview across same-key tool progress, ToolResult, usage, and non-terminal status patches", () => {
-    const toolKey = "baseline:tool"
-    let state = applyPatch(loaded(), { upsert: [timelineUnit(toolKey, toolCall())] })
-    state = InteractiveController.update(state, preview(1, "still streaming", {}, "still thinking")).state
-    const overlay = state.modelPreview
-
-    state = applyPatch(state, { upsert: [timelineUnit(toolKey, toolCall("complete"), 2)] })
-    expect(state.modelPreview).toBe(overlay)
-    expect(assistantText(state)).toBe("still streaming")
-
-    const resultKey = "tool:result"
-    state = applyPatch(state, {
-      upsert: [
-        timelineUnit(resultKey, {
-          _tag: "Block",
-          block: { _tag: "ToolResult", id: "tool", output: "done", failed: false },
-        }),
-      ],
-    })
-    expect(state.view?.snapshot().turns[0]?.units.some((unit) => unit.key === resultKey)).toBe(true)
-    expect(state.modelPreview).toBe(overlay)
-
-    const usage = {
-      ...ExecutionProjection.emptyUsageState(),
-      costNanoUsd: 12,
-      pricedAttempts: 1,
-      active: { _tag: "Available" as const, accumulatedMillis: 5 },
-    }
-    state = applyPatch(state, { status: "waiting", turnUsage: usage, threadUsage: usage })
-    expect(state.view?.turn(String(turnId))?.turn.status).toBe("waiting")
-    expect(state.view?.usage.state.costNanoUsd).toBe(12)
-    expect(state.modelPreview).toBe(overlay)
-    expect(assistantText(state)).toBe("still streaming")
-  })
-
-  it.each(["completed", "failed", "cancelled"] as const)("clears on terminal %s status", (status) => {
-    let state = InteractiveController.update(loaded(), preview(1, "tentative answer")).state
-    expect(state.modelPreview).toBeDefined()
-    state = applyPatch(state, { status })
-    expect(state.view?.turn(String(turnId))?.turn.status).toBe(status)
-    expect(state.modelPreview).toBeUndefined()
-    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
-  })
-
-  it("replaces tentative text and reasoning with durable semantic units", () => {
-    let state = InteractiveController.update(loaded(), preview(1, "tentative answer", {}, "tentative thought")).state
-    const reasoningKey = "turn:reasoning"
-    const answerKey = "turn:answer"
-    const patch: ThreadView.ThreadViewPatch = {
-      threadId,
-      baseRevision: 0,
-      revision: 1,
-      upsert: [
-        {
-          key: reasoningKey,
-          turnId,
-          order: TranscriptOrdering.unitOrder(reasoningKey, 1),
-          revision: 1,
-          content: { _tag: "Block", block: { _tag: "Reasoning", text: "durable thought" } },
-        },
-        {
-          key: answerKey,
-          turnId,
-          order: TranscriptOrdering.unitOrder(answerKey, 2),
-          revision: 1,
-          content: { _tag: "Entry", role: "assistant", text: "durable answer" },
-        },
-      ],
-      remove: [],
-      turnChanges: [
-        {
-          _tag: "UpsertTurn",
-          turn: { ...turn, status: "completed", updatedAt: 2 },
-          projectionRevision: 1,
-          usage: ExecutionProjection.emptyUsageState(),
-        },
-      ],
-    }
-    state = InteractiveController.update(state, { _tag: "ThreadViewPatch", patch }).state
-    expect(assistantText(state)).toBe("durable answer")
-    expect(reasoningText(state)).toBe("durable thought")
-    expect(state.model.entries.filter((entry) => entry.role === "assistant")).toHaveLength(1)
-    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
-    expect(state.modelPreview).toBeUndefined()
-  })
-
-  it("clears tentative rows on terminal control and ignores foreign turns", () => {
-    const state = InteractiveController.update(loaded(), preview(1, "tentative")).state
-    const foreign = InteractiveController.update(state, { ...preview(2, "foreign"), turnId: Turn.TurnId.make("other") })
-    expect(foreign.state).toBe(state)
-    const cleared = InteractiveController.clearPreview(state, String(turnId))
-    expect(cleared.modelPreview).toBeUndefined()
-    expect(ids(cleared).some((id) => id.startsWith("tentative:"))).toBe(false)
-  })
-
-  it("clears tentative rows when the durable view requires resynchronization", () => {
-    const state = InteractiveController.update(loaded(), preview(1, "tentative")).state
-    const update = InteractiveController.update(
-      state,
-      ThreadView.ResyncRequired.make({
-        threadId,
-        expectedRevision: 1,
-        receivedBaseRevision: 2,
-        currentRevision: 0,
-      }),
-    )
-    expect(update.resync).toBe(true)
-    expect(update.state.modelPreview).toBeUndefined()
-    expect(ids(update.state).some((id) => id.startsWith("tentative:"))).toBe(false)
-  })
-
-  it("clears tentative rows when a same-thread durable patch is rejected", () => {
-    const state = InteractiveController.update(loaded(), preview(1, "tentative")).state
-    const view = state.view!
-    const update = InteractiveController.update(state, {
-      _tag: "ThreadViewPatch",
-      patch: {
-        threadId,
-        baseRevision: view.revision + 1,
-        revision: view.revision + 2,
-        upsert: [],
-        remove: [],
-        turnChanges: [],
-      },
-    })
-
-    expect(update).toMatchObject({ resync: true, rejection: "revision" })
-    expect(update.state.modelPreview).toBeUndefined()
-    expect(ids(update.state).some((id) => id.startsWith("tentative:"))).toBe(false)
-  })
-
-  it.effect("normalizes a CRLF split across tentative frames as one newline", () =>
-    Effect.gen(function* () {
-      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 60, height: 20 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          surface.destroy()
-          setup.renderer.destroy()
-        }),
-      )
-      let state = InteractiveController.update(loaded(), preview(1, "line\r", {}, "")).state
-      surface.update(state.model)
-      state = InteractiveController.update(state, preview(2, "\nnext", {}, "", { text: 5, reasoning: 0 })).state
-      surface.update(state.model)
-      yield* Effect.tryPromise(() => setup.flush())
-
-      const lines = setup
-        .captureCharFrame()
-        .split("\n")
-        .map((line) => line.trim())
-      const line = lines.findIndex((value) => value === "line")
-      expect(line).toBeGreaterThanOrEqual(0)
-      expect(lines[line + 1]).toBe("next")
-      expect(setup.captureCharFrame()).not.toContain("�")
-    }),
-  )
-
-  it.effect(
-    "reuses a bounded set of physical OpenTUI rows across preview revisions",
-    () =>
-      Effect.gen(function* () {
-        const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 100, height: 30 }))
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            surface.destroy()
-            setup.renderer.destroy()
-          }),
-        )
-        let state = loaded()
-        let textOffset = 0
-        let reasoningOffset = 0
-        let stableRow: ReturnType<typeof surface.transcriptDiagnostics>["rows"][number] | undefined
-        let stableRowKey: string | undefined
-        for (let revision = 1; revision <= 10_000; revision += 1) {
-          const text = `answer ${revision} `
-          const reasoning = revision === 1 ? "reasoning" : ""
-          state = InteractiveController.update(
-            state,
-            preview(revision, text, {}, reasoning, { text: textOffset, reasoning: reasoningOffset }),
-          ).state
-          textOffset += text.length
-          reasoningOffset += reasoning.length
-          surface.update(state.model)
-          if (revision === 5_000) {
-            const halfway = surface.transcriptDiagnostics()
-            const answerRows = halfway.keys
-              .map((key, index) => ({ key, row: halfway.rows[index] }))
-              .filter(({ key }) => key.includes(":assistant:body"))
-            const stable = answerRows.at(-2)
-            stableRow = stable?.row
-            stableRowKey = stable?.key
-          }
-        }
-        yield* Effect.tryPromise(() => setup.flush())
-        const diagnostics = surface.transcriptDiagnostics()
-        expect(state.model.items).toHaveLength(3)
-        expect(runPreview(state)?.text).toContain("answer 10000")
-        expect(diagnostics.rows.length).toBeLessThan(32)
-        expect(diagnostics.mountedPhysicalRows).toBeLessThanOrEqual(1_265)
-        const tentativeRows = diagnostics.keys
-          .map((key, index) => ({ key, row: diagnostics.rows[index]! }))
-          .filter(({ key }) => key.includes("tentative:"))
-        expect(tentativeRows.length).toBeGreaterThan(0)
-        expect(tentativeRows.every(({ row }) => !row.selectable)).toBe(true)
-        expect(stableRowKey).toBeDefined()
-        expect(diagnostics.rows[diagnostics.keys.indexOf(stableRowKey!)]).toBe(stableRow)
-      }),
-    { timeout: 60_000 },
-  )
 })
