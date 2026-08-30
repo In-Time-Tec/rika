@@ -47,7 +47,10 @@ export class ToolSpinner {
     if (stable || repeats || this.generation >= 15 || live < 2) {
       let seeded: Array<boolean>
       do seeded = Array.from({ length: 8 }, () => this.random() > 0.6)
-      while (seeded.filter(Boolean).length < 3)
+      while (
+        seeded.filter(Boolean).length < 3 ||
+        seeded.every((alive, index) => alive === this.previousState[index])
+      )
       this.state = seeded
       this.previousState = []
       this.generation = 0

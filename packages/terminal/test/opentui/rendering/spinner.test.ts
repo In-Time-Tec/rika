@@ -2,10 +2,22 @@ import { createTestRenderer, ManualClock } from "@opentui/core/testing"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../src/opentui/surface/service"
-import { spinnerInterval } from "../../../src/opentui/rendering/spinner"
+import { spinnerInterval, ToolSpinner } from "../../../src/opentui/rendering/spinner"
 import { initial, type Model } from "../../../src/state/model"
 import type { TranscriptBlock } from "../../../src/state/transcript/model"
 import { openTui, styledTextValue } from "./window.fixture"
+
+test("re-seeds to a visible new frame when randomness first repeats the current frame", () => {
+  const values = [1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+  let index = 0
+  const spinner = new ToolSpinner(() => values[index++] ?? 1)
+  const before = spinner.toBraille()
+
+  spinner.step()
+
+  expect(spinner.toBraille()).not.toBe(before)
+  expect(index).toBe(16)
+})
 
 const settled = (): Model => ({
   ...initial("/work", "high"),
