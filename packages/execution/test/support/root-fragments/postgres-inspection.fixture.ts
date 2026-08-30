@@ -12,6 +12,8 @@ import { remoteCell } from "../adapters"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const maxConnections = 6
+const listenerConnections = 2
+const inspectionConnections = 1
 
 const backendCount = (pool: Pool) =>
   Effect.tryPromise(() =>
@@ -88,8 +90,9 @@ it.live.skipIf(databaseUrl === "")(
           yield* inspect
           observed.push(yield* backendCount(pool))
         }
-        // The managed pool owns at most maxConnections backends, LISTEN owns one, and this test's pool owns one.
-        expect(Math.max(...observed)).toBeLessThanOrEqual(maxConnections + 2)
+        expect(Math.max(...observed)).toBeLessThanOrEqual(
+          maxConnections + listenerConnections + inspectionConnections,
+        )
         expect(yield* fixture.requests).toHaveLength(1)
       } finally {
         yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)

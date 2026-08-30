@@ -19,7 +19,7 @@ const DoctorResult = Schema.Struct({
   manifestSha256: Schema.String,
   manifestToolCount: Schema.Finite,
   manifestPackageCount: Schema.Finite,
-  checks: Schema.Array(Schema.Struct({ name: Schema.String, ok: Schema.Boolean })),
+  checks: Schema.Array(Schema.Struct({ detail: Schema.String, name: Schema.String, ok: Schema.Boolean })),
 })
 const ToolManifest = Schema.Struct({
   tools: Schema.Array(Schema.Unknown),
@@ -185,6 +185,7 @@ describe.skipIf(containerCommand === undefined)("E2B executor image", () => {
             const manifest = yield* Schema.decodeEffect(Schema.fromJsonString(ToolManifest))(
               new TextDecoder().decode(manifestBytes),
             )
+            expect(result.checks.filter(({ ok }) => !ok)).toEqual([])
             expect(result.ok).toBe(true)
             expect(result.image).toBe("rika-executor-v1")
             expect(result.buildId).toBe("template-readiness")
