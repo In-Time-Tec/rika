@@ -224,6 +224,12 @@ test("resumes only an exact failed promotion after verifying retained evidence a
     "github-token": "${{ github.token }}",
   })
   const resume = commands("resume")
+  expect(resume).toContain('.name == "review" and .conclusion == "success"')
+  expect(resume).toContain('.name == "publish" and .conclusion == "success"')
+  expect(resume).toContain('.name == "template" and .conclusion == "failure"')
+  expect(resume).toContain('select(.name == "publish")')
+  expect(resume).toContain('.name == "Create and smoke immutable E2B build" and .conclusion == "failure"')
+  expect(resume).not.toContain('select(.name == "promote")')
   expect(resume).toContain('test "$(jq -er \'.path\' resume-run.json)" = ".github/workflows/executor-image.yml"')
   expect(resume).toContain("test \"$(jq -er '.event' resume-run.json)\" = workflow_dispatch")
   expect(resume).toContain("test \"$(jq -er '.head_branch' resume-run.json)\" = main")

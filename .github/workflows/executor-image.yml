@@ -307,16 +307,17 @@ jobs:
           gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN_ID/jobs?per_page=100" > resume-jobs.json
           test "$(jq -er '.total_count' resume-jobs.json)" -lt 100
           jq -e 'any(.jobs[]; .name == "review" and .conclusion == "success")' resume-jobs.json
-          jq -e 'any(.jobs[]; .name == "promote" and .conclusion == "failure")' resume-jobs.json
+          jq -e 'any(.jobs[]; .name == "publish" and .conclusion == "success")' resume-jobs.json
+          jq -e 'any(.jobs[]; .name == "template" and .conclusion == "failure")' resume-jobs.json
           for step in \
             "Upload immutable digest without a tag" \
             "Attest exact image provenance" \
             "Attest executor build identity" \
-            "Verify image attestations before publication"
+            "Verify published image attestations"
           do
-            jq -e --arg step "$step" 'any(.jobs[] | select(.name == "promote") | .steps[]; .name == $step and .conclusion == "success")' resume-jobs.json
+            jq -e --arg step "$step" 'any(.jobs[] | select(.name == "publish") | .steps[]; .name == $step and .conclusion == "success")' resume-jobs.json
           done
-          jq -e 'any(.jobs[] | select(.name == "promote") | .steps[]; .name == "Create and smoke immutable E2B build" and .conclusion == "skipped")' resume-jobs.json
+          jq -e 'any(.jobs[] | select(.name == "template") | .steps[]; .name == "Create and smoke immutable E2B build" and .conclusion == "failure")' resume-jobs.json
           echo "source-commit=$source_commit" >> "$GITHUB_OUTPUT"
       - name: Download retained review evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
