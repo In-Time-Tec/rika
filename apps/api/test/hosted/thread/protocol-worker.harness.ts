@@ -4,7 +4,10 @@ import { CommandId, IdempotencyKey, ThreadEventCursor, ThreadId, ThreadVersion }
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
-import { Deferred, Effect, Layer } from "effect"
+import { rikaHostedThreadProtocolCommands } from "@rika/product-store/database-schema"
+import { and, eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-postgres"
+import { DateTime, Deferred, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { HostedThreadApplication } from "../../../src/hosted/thread/application"
 import { layer as hostedThreadCommandWorkerLayer } from "../../../src/hosted/thread/command-worker"
@@ -113,6 +116,25 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
         },
       }
       yield* protocol.admitCommand(input)
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        yield* TestClock.adjust("250 millis")
+        yield* Effect.yieldNow
+        yield* protocol.admitCommand(input)
+        if (completionAttempts > 0) break
+      }
+      expect(completionAttempts).toBe(1)
+      yield* Effect.tryPromise(() =>
+        drizzle({ client: pool })
+          .update(rikaHostedThreadProtocolCommands)
+          .set({ claimExpiresAt: DateTime.toDate(DateTime.makeUnsafe(0)) })
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolCommands.threadId, threadId),
+              eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+            ),
+          ),
+      )
 
       let completed: Effect.Success<ReturnType<typeof protocol.admitCommand>>["command"] | undefined
       for (let attempt = 0; attempt < 20; attempt += 1) {
