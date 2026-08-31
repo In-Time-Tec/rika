@@ -1,0 +1,726 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-30T21:59:44.730453+00:00",
+  "pid": 17186,
+  "exitCode": -9,
+  "durationMilliseconds": 21062.053,
+  "capturedBytes": 80354,
+  "chunks": [
+    {
+      "atMilliseconds": 49.534,
+      "bytes": 115
+    },
+    {
+      "atMilliseconds": 125.224,
+      "bytes": 205
+    },
+    {
+      "atMilliseconds": 125.368,
+      "bytes": 34
+    },
+    {
+      "atMilliseconds": 125.582,
+      "bytes": 32
+    },
+    {
+      "atMilliseconds": 125.588,
+      "bytes": 5
+    },
+    {
+      "atMilliseconds": 140.948,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 140.966,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 140.976,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 140.982,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 140.992,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 140.997,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 141.006,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 141.011,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 141.02,
+      "bytes": 106
+    },
+    {
+      "atMilliseconds": 157.159,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 157.177,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 157.183,
+      "bytes": 1024
+    },
+    {
+      "atMilliseconds": 157.2,
+      "bytes": 176
+    },
+    {
+      "atMilliseconds": 236.877,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 254.267,
+      "bytes": 293
+    },
+    {
+      "atMilliseconds": 354.95,
+      "bytes": 330
+    },
+    {
+      "atMilliseconds": 410.454,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 438.122,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 455.55,
+      "bytes": 581
+    },
+    {
+      "atMilliseconds": 539.177,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 556.331,
+      "bytes": 290
+    },
+    {
+      "atMilliseconds": 639.687,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 656.121,
+      "bytes": 512
+    },
+    {
+      "atMilliseconds": 739.799,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 758.219,
+      "bytes": 439
+    },
+    {
+      "atMilliseconds": 858.407,
+      "bytes": 551
+    },
+    {
+      "atMilliseconds": 941.189,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 958.756,
+      "bytes": 401
+    },
+    {
+      "atMilliseconds": 1049.835,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1069.23,
+      "bytes": 652
+    },
+    {
+      "atMilliseconds": 1136.487,
+      "bytes": 52
+    },
+    {
+      "atMilliseconds": 1138.445,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1154.454,
+      "bytes": 333
+    },
+    {
+      "atMilliseconds": 1244.191,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1261.618,
+      "bytes": 583
+    },
+    {
+      "atMilliseconds": 1363.642,
+      "bytes": 404
+    },
+    {
+      "atMilliseconds": 1445.906,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1463.419,
+      "bytes": 593
+    },
+    {
+      "atMilliseconds": 1547.142,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1565.014,
+      "bytes": 475
+    },
+    {
+      "atMilliseconds": 1648.292,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1666.234,
+      "bytes": 299
+    },
+    {
+      "atMilliseconds": 1749.393,
+      "bytes": 67
+    },
+    {
+      "atMilliseconds": 1764.86,
+      "bytes": 508
+    },
+    {
+      "atMilliseconds": 1858.493,
+      "bytes": 188
+    },
+    {
+      "atMilliseconds": 1959.09,
+      "bytes": 631
+    },
+    {
+      "atMilliseconds": 2063.956,
+      "bytes": 479
+    },
+    {
+      "atMilliseconds": 2159.43,
+      "bytes": 368
+    },
+    {
+      "atMilliseconds": 2259.616,
+      "bytes": 517
+    },
+    {
+      "atMilliseconds": 2361.059,
+      "bytes": 483
+    },
+    {
+      "atMilliseconds": 2463.615,
+      "bytes": 632
+    },
+    {
+      "atMilliseconds": 2564.389,
+      "bytes": 223
+    },
+    {
+      "atMilliseconds": 2665.465,
+      "bytes": 442
+    },
+    {
+      "atMilliseconds": 2765.234,
+      "bytes": 367
+    },
+    {
+      "atMilliseconds": 2866.387,
+      "bytes": 443
+    },
+    {
+      "atMilliseconds": 2966.176,
+      "bytes": 442
+    },
+    {
+      "atMilliseconds": 3074.97,
+      "bytes": 517
+    },
+    {
+      "atMilliseconds": 3169.45,
+      "bytes": 506
+    },
+    {
+      "atMilliseconds": 3270.806,
+      "bytes": 332
+    },
+    {
+      "atMilliseconds": 3370.49,
+      "bytes": 481
+    },
+    {
+      "atMilliseconds": 3473.141,
+      "bytes": 666
+    },
+    {
+      "atMilliseconds": 3573.414,
+      "bytes": 530
+    },
+    {
+      "atMilliseconds": 3674.985,
+      "bytes": 334
+    },
+    {
+      "atMilliseconds": 3777.082,
+      "bytes": 291
+    },
+    {
+      "atMilliseconds": 3877.795,
+      "bytes": 441
+    },
+    {
+      "atMilliseconds": 3978.653,
+      "bytes": 398
+    },
+    {
+      "atMilliseconds": 4080.2,
+      "bytes": 541
+    },
+    {
+      "atMilliseconds": 4179.64,
+      "bytes": 326
+    },
+    {
+      "atMilliseconds": 4279.202,
+      "bytes": 471
+    },
+    {
+      "atMilliseconds": 4379.423,
+      "bytes": 512
+    },
+    {
+      "atMilliseconds": 4480.249,
+      "bytes": 510
+    },
+    {
+      "atMilliseconds": 4580.381,
+      "bytes": 399
+    },
+    {
+      "atMilliseconds": 4680.908,
+      "bytes": 368
+    },
+    {
+      "atMilliseconds": 4781.351,
+      "bytes": 586
+    },
+    {
+      "atMilliseconds": 4881.082,
+      "bytes": 441
+    },
+    {
+      "atMilliseconds": 4983.088,
+      "bytes": 547
+    },
+    {
+      "atMilliseconds": 5089.626,
+      "bytes": 411
+    },
+    {
+      "atMilliseconds": 5189.84,
+      "bytes": 330
+    },
+    {
+      "atMilliseconds": 5290.085,
+      "bytes": 404
+    },
+    {
+      "atMilliseconds": 5389.564,
+      "bytes": 332
+    },
+    {
+      "atMilliseconds": 5490.251,
+      "bytes": 443
+    },
+    {
+      "atMilliseconds": 5589.478,
+      "bytes": 405
+    },
+    {
+      "atMilliseconds": 5691.437,
+      "bytes": 376
+    },
+    {
+      "atMilliseconds": 5793.747,
+      "bytes": 416
+    },
+    {
+      "atMilliseconds": 5894.473,
+      "bytes": 228
+    },
+    {
+      "atMilliseconds": 5995.264,
+      "bytes": 444
+    },
+    {
+      "atMilliseconds": 6102.459,
+      "bytes": 723
+    },
+    {
+      "atMilliseconds": 6198.395,
+      "bytes": 670
+    },
+    {
+      "atMilliseconds": 6298.78,
+      "bytes": 484
+    },
+    {
+      "atMilliseconds": 6401.297,
+      "bytes": 376
+    },
+    {
+      "atMilliseconds": 6501.014,
+      "bytes": 625
+    },
+    {
+      "atMilliseconds": 6601.962,
+      "bytes": 551
+    },
+    {
+      "atMilliseconds": 6701.623,
+      "bytes": 551
+    },
+    {
+      "atMilliseconds": 6803.78,
+      "bytes": 555
+    },
+    {
+      "atMilliseconds": 6902.953,
+      "bytes": 560
+    },
+    {
+      "atMilliseconds": 7006.744,
+      "bytes": 444
+    },
+    {
+      "atMilliseconds": 7113.501,
+      "bytes": 581
+    },
+    {
+      "atMilliseconds": 7209.373,
+      "bytes": 406
+    },
+    {
+      "atMilliseconds": 7307.444,
+      "bytes": 435
+    },
+    {
+      "atMilliseconds": 7410.819,
+      "bytes": 406
+    },
+    {
+      "atMilliseconds": 7511.162,
+      "bytes": 483
+    },
+    {
+      "atMilliseconds": 7611.65,
+      "bytes": 513
+    },
+    {
+      "atMilliseconds": 7712.919,
+      "bytes": 506
+    },
+    {
+      "atMilliseconds": 7813.674,
+      "bytes": 401
+    },
+    {
+      "atMilliseconds": 7914.796,
+      "bytes": 293
+    },
+    {
+      "atMilliseconds": 8020.853,
+      "bytes": 691
+    },
+    {
+      "atMilliseconds": 8131.418,
+      "bytes": 407
+    },
+    {
+      "atMilliseconds": 8237.844,
+      "bytes": 483
+    },
+    {
+      "atMilliseconds": 8338.463,
+      "bytes": 548
+    },
+    {
+      "atMilliseconds": 8441.193,
+      "bytes": 440
+    },
+    {
+      "atMilliseconds": 8540.869,
+      "bytes": 366
+    },
+    {
+      "atMilliseconds": 8639.323,
+      "bytes": 436
+    },
+    {
+      "atMilliseconds": 8741.218,
+      "bytes": 406
+    },
+    {
+      "atMilliseconds": 8841.643,
+      "bytes": 447
+    },
+    {
+      "atMilliseconds": 8941.742,
+      "bytes": 396
+    },
+    {
+      "atMilliseconds": 9050.751,
+      "bytes": 669
+    },
+    {
+      "atMilliseconds": 9149.261,
+      "bytes": 333
+    },
+    {
+      "atMilliseconds": 9251.42,
+      "bytes": 293
+    },
+    {
+      "atMilliseconds": 9351.284,
+      "bytes": 589
+    },
+    {
+      "atMilliseconds": 9450.832,
+      "bytes": 300
+    },
+    {
+      "atMilliseconds": 9551.92,
+      "bytes": 436
+    },
+    {
+      "atMilliseconds": 9652.258,
+      "bytes": 443
+    },
+    {
+      "atMilliseconds": 9753.929,
+      "bytes": 376
+    },
+    {
+      "atMilliseconds": 9854.615,
+      "bytes": 582
+    },
+    {
+      "atMilliseconds": 9954.042,
+      "bytes": 515
+    },
+    {
+      "atMilliseconds": 10062.247,
+      "bytes": 441
+    },
+    {
+      "atMilliseconds": 10161.711,
+      "bytes": 627
+    },
+    {
+      "atMilliseconds": 10263.959,
+      "bytes": 518
+    },
+    {
+      "atMilliseconds": 10364.034,
+      "bytes": 342
+    },
+    {
+      "atMilliseconds": 10464.058,
+      "bytes": 593
+    },
+    {
+      "atMilliseconds": 10564.721,
+      "bytes": 657
+    },
+    {
+      "atMilliseconds": 10665.329,
+      "bytes": 437
+    },
+    {
+      "atMilliseconds": 10766.606,
+      "bytes": 511
+    },
+    {
+      "atMilliseconds": 10867.574,
+      "bytes": 295
+    },
+    {
+      "atMilliseconds": 10967.746,
+      "bytes": 475
+    },
+    {
+      "atMilliseconds": 11076.286,
+      "bytes": 614
+    },
+    {
+      "atMilliseconds": 11175.587,
+      "bytes": 256
+    },
+    {
+      "atMilliseconds": 11275.956,
+      "bytes": 442
+    },
+    {
+      "atMilliseconds": 11376.634,
+      "bytes": 512
+    },
+    {
+      "atMilliseconds": 11478.197,
+      "bytes": 370
+    },
+    {
+      "atMilliseconds": 11579.507,
+      "bytes": 508
+    },
+    {
+      "atMilliseconds": 11680.039,
+      "bytes": 476
+    },
+    {
+      "atMilliseconds": 11780.234,
+      "bytes": 515
+    },
+    {
+      "atMilliseconds": 11880.723,
+      "bytes": 504
+    },
+    {
+      "atMilliseconds": 11981.966,
+      "bytes": 477
+    },
+    {
+      "atMilliseconds": 12088.859,
+      "bytes": 447
+    },
+    {
+      "atMilliseconds": 12188.518,
+      "bytes": 442
+    },
+    {
+      "atMilliseconds": 12288.576,
+      "bytes": 585
+    },
+    {
+      "atMilliseconds": 12390.101,
+      "bytes": 334
+    },
+    {
+      "atMilliseconds": 12490.237,
+      "bytes": 295
+    },
+    {
+      "atMilliseconds": 12591.328,
+      "bytes": 560
+    },
+    {
+      "atMilliseconds": 12692.571,
+      "bytes": 514
+    },
+    {
+      "atMilliseconds": 12792.427,
+      "bytes": 516
+    },
+    {
+      "atMilliseconds": 12893.358,
+      "bytes": 525
+    },
+    {
+      "atMilliseconds": 12995.174,
+      "bytes": 410
+    },
+    {
+      "atMilliseconds": 13101.448,
+      "bytes": 443
+    },
+    {
+      "atMilliseconds": 13201.251,
+      "bytes": 441
+    },
+    {
+      "atMilliseconds": 13301.646,
+      "bytes": 478
+    },
+    {
+      "atMilliseconds": 13403.062,
+      "bytes": 367
+    },
+    {
+      "atMilliseconds": 13504.38,
+      "bytes": 409
+    },
+    {
+      "atMilliseconds": 13604.285,
+      "bytes": 404
+    },
+    {
+      "atMilliseconds": 13704.264,
+      "bytes": 657
+    },
+    {
+      "atMilliseconds": 13804.982,
+      "bytes": 410
+    },
+    {
+      "atMilliseconds": 13905.921,
+      "bytes": 582
+    },
+    {
+      "atMilliseconds": 14006.863,
+      "bytes": 553
+    },
+    {
+      "atMilliseconds": 14116.321,
+      "bytes": 495
+    },
+    {
+      "atMilliseconds": 14216.049,
+      "bytes": 776
+    },
+    {
+      "atMilliseconds": 14315.455,
+      "bytes": 330
+    },
+    {
+      "atMilliseconds": 14415.19,
+      "bytes": 435
+    },
+    {
+      "atMilliseconds": 14517.55,
+      "bytes": 370
+    },
+    {
+      "atMilliseconds": 14618.393,
+      "bytes": 436
+    },
+    {
+      "atMilliseconds": 14719.853,
+      "bytes": 575
+    },
+    {
+      "atMilliseconds": 14820.098,
+      "bytes": 440
+    },
+    {
+      "atMilliseconds": 14920.569,
+      "bytes": 464
+    }
+  ]
+}

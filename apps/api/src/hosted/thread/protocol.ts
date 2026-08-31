@@ -83,6 +83,7 @@ export const layerWithOptions = (
     ) => Effect.Effect<WorkspacePlacement, HostedThreadProtocolError>
     readonly notifications?: ThreadProtocolNotifications
     readonly previews?: HostedPreviewBusService
+    readonly wakeCommand?: Effect.Effect<void>
   } = {},
 ) =>
   Layer.effect(
@@ -222,6 +223,7 @@ export const layerWithOptions = (
               .pipe(Effect.mapError(storeFailure), (effect) =>
                 HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
               )
+            if (admission._tag === "Admitted") yield* (options.wakeCommand ?? Effect.void)
             if (admission.command.state === "completed")
               return [frame(commandResult(admission.command, message.requestId))]
             pendingCommands.set(String(admission.command.commandId), {
@@ -333,7 +335,7 @@ export const layerWithOptions = (
             }
 
             if (command._tag === "AcknowledgeCursor") {
-              const cursor = yield* store
+              const acknowledged = yield* store
                 .acknowledgeCursor({
                   ownerId: authority.ownerId,
                   threadId,
@@ -343,36 +345,20 @@ export const layerWithOptions = (
                 })
                 .pipe(Effect.mapError(storeFailure))
               const replayCorrelation = { ownerId: authority.ownerId, threadId }
-              const replay = yield* HostedObservability.observe(
-                "attach",
-                replayCorrelation,
-                Effect.gen(function* () {
-                  const result = yield* store
-                    .replay({
-                      ownerId: authority.ownerId,
-                      threadId,
-                      actor: authority.actor,
-                      afterCursor: cursor,
-                      limit: 1,
-                    })
-                    .pipe(Effect.mapError(storeFailure))
-                  const replayLag = replayDistance(result.cursor, cursor)
-                  yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
-                  if (replayLag >= HostedObservability.replayLagAlertEvents)
-                    yield* HostedObservability.health("replay_lag", replayCorrelation, {
-                      value: replayLag,
-                      threshold: HostedObservability.replayLagAlertEvents,
-                    })
-                  return result
-                }),
-              )
+              const replayLag = replayDistance(acknowledged.headCursor, acknowledged.acknowledgedCursor)
+              yield* HostedObservability.replayLagObserved(replayCorrelation, replayLag)
+              if (replayLag >= HostedObservability.replayLagAlertEvents)
+                yield* HostedObservability.health("replay_lag", replayCorrelation, {
+                  value: replayLag,
+                  threshold: HostedObservability.replayLagAlertEvents,
+                })
               return [
                 frame({
                   _tag: "CommandAccepted",
                   requestId: message.requestId,
                   threadId,
-                  threadVersion: replay.threadVersion,
-                  cursor: replay.cursor,
+                  threadVersion: acknowledged.threadVersion,
+                  cursor: acknowledged.headCursor,
                   result: { _tag: "Applied" },
                 }),
               ]
@@ -406,6 +392,7 @@ export const layerWithOptions = (
                   effect,
                 ),
               )
+            if (admission._tag === "Admitted") yield* (options.wakeCommand ?? Effect.void)
             if (admission._tag === "Duplicate") {
               if (admission.command.state === "completed")
                 return [frame(commandResult(admission.command, message.requestId))]

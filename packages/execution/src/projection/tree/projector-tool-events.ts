@@ -91,6 +91,8 @@ const handleToolCellSubagentEvent: ProjectorEventHandler = (context, treeEvent, 
             : { ...tool, result: `${Schema.is(Schema.String)(tool.result) ? `${tool.result}\n` : ""}${event.message}` },
         )
       return true
+    case "ToolExecutionWaiting":
+      return true
     case "ToolExecutionCompleted":
       toolCompleted(context, treeEvent, node)
       return true

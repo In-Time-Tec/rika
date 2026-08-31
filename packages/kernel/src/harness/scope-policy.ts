@@ -33,7 +33,7 @@ export const scopeString: {
   return `${name}:${value}`
 })
 
-/** Outer to inner. `HarnessMerge.mergeStates` overlays each later scope on the accumulated earlier ones. */
+/** Outer to inner. `State.merge` overlays each later scope on the accumulated earlier ones. */
 export const mergeOrder: ReadonlyArray<ScopeName> = ["global", "workspace", "thread"]
 
 /** The scope name one stored scope string belongs to, or undefined when the string is not ours. */

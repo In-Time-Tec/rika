@@ -44,7 +44,7 @@ const runtime = (tools: ReadonlyArray<ReturnType<typeof tool>>, calls: Array<str
 const registry = (
   servers: ReadonlyArray<McpDiscovery.ConfiguredServer>,
   service = runtime([tool("read")]),
-  nested?: NestedOperation.Interface,
+  nested?: NestedOperation.Service,
 ) =>
   mountModules({
     modules: [McpBinding.make(servers)],

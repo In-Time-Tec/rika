@@ -60,6 +60,7 @@ it.effect.skipIf(!live)(
           const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
           const secondSocket = socket()
           yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+          expect(decode(secondSocket.sent[0]!)).toMatchObject({ _tag: "ExecutorReconnected" })
           expect(
             secondSocket.sent.map((value) => decode(value)).find((message) => message._tag === "CellReplay"),
           ).toEqual({
@@ -141,6 +142,65 @@ it.effect.skipIf(!live)(
         }),
       ),
     ),
+)
+
+it.effect.skipIf(!live)("redelivers an unacknowledged Cell execute and stops after acceptance", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "operation-redelivery"
+        yield* seed(databaseClient, operationKey)
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = socket()
+        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        const running = yield* Effect.forkChild(gateway.execute(cellRequest(operationKey)))
+        const deliveries = () =>
+          target.sent
+            .map((value) => decode(value))
+            .filter((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey)
+
+        yield* eventually(() => (deliveries().length === 1 ? true : undefined))
+        yield* TestClock.adjust("249 millis")
+        expect(deliveries()).toHaveLength(1)
+        yield* TestClock.adjust("1 millis")
+        yield* eventually(() => (deliveries().length === 2 ? true : undefined))
+
+        yield* gateway.disconnected(target)
+        const replacement = socket()
+        yield* gateway.receive(replacement, encode({ _tag: "ExecutorReconnect", access }))
+        const replayed = replacement.sent.map((value) => decode(value))
+        expect(replayed[0]).toMatchObject({ _tag: "ExecutorReconnected" })
+        expect(
+          replayed.filter((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
+        ).toHaveLength(1)
+        expect(replayed.filter((message) => message._tag === "CellReplay" && message.operationKey === operationKey)).toEqual(
+          [],
+        )
+
+        yield* gateway.receive(
+          replacement,
+          encode({
+            _tag: "CellLifecycle",
+            access,
+            frame: { _tag: "Accepted", attribution: operationAttribution(operationKey), cursor: 1 },
+          }),
+        )
+        yield* TestClock.adjust("1 second")
+        expect(deliveries()).toHaveLength(2)
+        expect(
+          replacement.sent
+            .map((value) => decode(value))
+            .filter((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
+        ).toHaveLength(1)
+
+        yield* persistTerminal(gateway, replacement, access, operationKey)
+        expect(yield* Fiber.join(running)).toMatchObject({ response, outcome: "completed" })
+      }),
+    ),
+  ),
 )
 
 it.effect.skipIf(!live)("replays the exact durable cancelled terminal without dispatching", () =>

@@ -1,0 +1,14 @@
+# Sanitized setup stderr sample (Bun install in an E2B sandbox)
+# The destination was explicitly allowed. No credentials, headers, or signed URLs are included.
+
+error: failed to download @aws-sdk/credential-providers@3.1117.0: UNKNOWN_CERTIFICATE_VERIFICATION_ERROR
+  https://registry.npmjs.org/@aws-sdk/credential-providers/-/credential-providers-3.1117.0.tgz
+
+error: failed to download @clack/prompts@1.7.0: UNKNOWN_CERTIFICATE_VERIFICATION_ERROR
+  https://registry.npmjs.org/@clack/prompts/-/prompts-1.7.0.tgz
+
+error: failed to download @alchemy.run/floci@2.0.0-beta.74: UNKNOWN_CERTIFICATE_VERIFICATION_ERROR
+  https://registry.npmjs.org/@alchemy.run/floci/-/floci-2.0.0-beta.74.tgz
+
+error: failed to download @alchemy.run/cloudflare-runtime@2.0.0-beta.74: UNKNOWN_CERTIFICATE_VERIFICATION_ERROR
+  https://registry.npmjs.org/@alchemy.run/cloudflare-runtime/-/cloudflare-runtime-2.0.0-beta.74.tgz

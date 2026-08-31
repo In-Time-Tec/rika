@@ -1,0 +1,24 @@
+
+
+
+
+
+
+
+
+
+
+
+
+ Δ src/agent.ts
+   ...
+   224     {
+   225       name: "oracle",
+   226 -     description: "Delegate a focused technical investigation",
+   226 +     description: "Delegate planning, review, and debugging",
+   227       permission: "allow",
+╭───────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ─╮
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰───────────────────────────────────────────────────────────────── /workspace ─╯

@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../../../src/host/session/foreground"
+import { ForegroundSession } from "../../../src/host/session/foreground-session"
 import {
   ApiMessage,
   RunnerMessage,
@@ -458,6 +459,18 @@ describe("foreground Runner", { concurrent: false }, () => {
           FakeWebSocket.instances.length = 0
         }),
     ),
+  )
+
+  it.effect("allows an exact trusted HTTP origin to use its local WebSocket endpoint", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* ForegroundSession.runnerUrl(
+          "ws://localhost:3000/api/v1/runners",
+          9_999_999_999_999,
+          "http://localhost:3000",
+        ),
+      ).toBe("ws://localhost:3000/api/v1/runners")
+    }),
   )
 
   it.effect("rejects a non-WSS Runner URL before it can connect", () =>

@@ -1,4 +1,4 @@
-import { McpToolSource } from "tenetkit/mcp"
+import { MCPClient } from "tenetkit/mcp"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
@@ -25,8 +25,8 @@ export type Outcome =
       readonly value:
         | { readonly _tag: "CodingTool"; readonly result: import("@rika/coding-tools/coding-tool-result").Result }
         | { readonly _tag: "ProcessStopped" }
-        | { readonly _tag: "McpDiscovered"; readonly tools: ReadonlyArray<McpToolSource.DiscoveredTool> }
-        | { readonly _tag: "McpCalled"; readonly content: McpToolSource.JsonValue }
+        | { readonly _tag: "McpDiscovered"; readonly tools: ReadonlyArray<MCPClient.DiscoveredTool> }
+        | { readonly _tag: "McpCalled"; readonly content: MCPClient.JsonValue }
     }
   | {
       readonly _tag: "Failure"
@@ -127,7 +127,7 @@ const mcp = Layer.effect(
     McpRuntime.McpRuntimeService.of({
       connect: (server) =>
         client.execute({ _tag: "McpDiscover", server }).pipe(
-          Effect.flatMap((outcome): Effect.Effect<McpToolSource.Interface, McpRuntime.Diagnostic> => {
+          Effect.flatMap((outcome): Effect.Effect<MCPClient.Service, McpRuntime.Diagnostic> => {
             if (outcome._tag === "Failure" && Schema.is(McpRuntime.Diagnostic)(outcome.failure))
               return Effect.fail(outcome.failure)
             if (outcome._tag === "Cancelled")
@@ -148,43 +148,41 @@ const mcp = Layer.effect(
               )
             const tools = outcome.value.tools
             return Effect.succeed(
-              McpToolSource.McpToolSource.of({
+              MCPClient.MCPClient.of({
                 server: server.name,
                 tools: Effect.succeed(tools),
                 callTool: (tool, input) =>
                   client.execute({ _tag: "McpCall", server, tool, input }).pipe(
-                    Effect.flatMap(
-                      (result): Effect.Effect<McpToolSource.JsonValue, McpToolSource.McpToolCallFailed> => {
-                        if (result._tag === "Success" && result.value._tag === "McpCalled")
-                          return Effect.succeed(result.value.content)
-                        if (result._tag === "Failure" && Schema.is(McpRuntime.Diagnostic)(result.failure))
-                          return Effect.fail(
-                            McpToolSource.McpToolCallFailed.make({
-                              server: server.name,
-                              tool,
-                              message: result.failure.message,
-                            }),
-                          )
-                        if (result._tag === "Cancelled")
-                          return Effect.fail(
-                            McpToolSource.McpToolCallFailed.make({
-                              server: server.name,
-                              tool,
-                              message: "Cell operation was cancelled before the MCP call completed",
-                            }),
-                          )
+                    Effect.flatMap((result): Effect.Effect<MCPClient.JsonValue, MCPClient.MCPToolCallFailed> => {
+                      if (result._tag === "Success" && result.value._tag === "McpCalled")
+                        return Effect.succeed(result.value.content)
+                      if (result._tag === "Failure" && Schema.is(McpRuntime.Diagnostic)(result.failure))
                         return Effect.fail(
-                          McpToolSource.McpToolCallFailed.make({
+                          MCPClient.MCPToolCallFailed.make({
                             server: server.name,
                             tool,
-                            message: "machine MCP call outcome is not safely observable",
+                            message: result.failure.message,
                           }),
                         )
-                      },
-                    ),
+                      if (result._tag === "Cancelled")
+                        return Effect.fail(
+                          MCPClient.MCPToolCallFailed.make({
+                            server: server.name,
+                            tool,
+                            message: "Cell operation was cancelled before the MCP call completed",
+                          }),
+                        )
+                      return Effect.fail(
+                        MCPClient.MCPToolCallFailed.make({
+                          server: server.name,
+                          tool,
+                          message: "machine MCP call outcome is not safely observable",
+                        }),
+                      )
+                    }),
                     Effect.catchTag("MachineBindingUnavailable", (error) =>
                       Effect.fail(
-                        McpToolSource.McpToolCallFailed.make({
+                        MCPClient.MCPToolCallFailed.make({
                           server: server.name,
                           tool,
                           message: error.message,

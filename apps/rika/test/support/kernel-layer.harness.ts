@@ -18,7 +18,7 @@ export type { Options } from "./kernel-options.fixture"
 /**
  * The services the mounted surface is closed over that are NOT per-call.
  *
- * ToolContext, NestedOperations, and Session are deliberately absent: they belong to one executing
+ * ToolContext, Operations, and Session are deliberately absent: they belong to one executing
  * cell and are supplied per request by `CellContext`, never captured here.
  */
 const staticBindingServices = (options: Options) => {

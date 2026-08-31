@@ -87,8 +87,15 @@ describe("HostedObservability", () => {
     return Effect.gen(function* () {
       yield* Observability.event("process_start", "success", correlation)
       yield* Observability.event("first_draw", "success", correlation)
+      yield* Observability.event("connection_ready", "success", correlation)
+      yield* Observability.observe("connection_ticket", correlation, Effect.void)
+      yield* Observability.observe("connection_socket", correlation, Effect.void)
       yield* Observability.observe("target_resolution", correlation, Effect.void)
       yield* Observability.observe("attach", correlation, Effect.void)
+      yield* Observability.observe("attach_response", correlation, Effect.void)
+      yield* Observability.observe("attach_projection", correlation, Effect.void)
+      yield* Observability.observe("attach_refresh", correlation, Effect.void)
+      yield* Observability.observe("attach_ack", correlation, Effect.void)
       yield* Observability.event("admission", "success", correlation)
       yield* Observability.event("turn_claim", "success", correlation)
       yield* Observability.event("run_created", "success", correlation)
@@ -126,6 +133,7 @@ describe("HostedObservability", () => {
       const immediateNames = [
         "hosted.process_start.success",
         "hosted.first_draw.success",
+        "hosted.connection_ready.success",
         "hosted.admission.success",
         "hosted.turn_claim.success",
         "hosted.run_created.success",
@@ -136,21 +144,40 @@ describe("HostedObservability", () => {
         "hosted.terminal.failure",
       ]
       const completionNames = [
+        "hosted.connection_ticket.success",
+        "hosted.connection_socket.success",
         "hosted.target_resolution.success",
         "hosted.attach.success",
+        "hosted.attach_response.success",
+        "hosted.attach_projection.success",
+        "hosted.attach_refresh.success",
+        "hosted.attach_ack.success",
         "hosted.model_terminal.failure",
         "hosted.model_terminal.interrupted",
         "hosted.cell_execution.success",
         "hosted.binding_terminal.failure",
       ]
       for (const name of [...immediateNames, ...completionNames]) assert.include(rendered, name)
-      for (const stage of ["target_resolution", "attach", "model_terminal", "cell_execution", "binding_terminal"])
+      for (const stage of [
+        "connection_ticket",
+        "connection_socket",
+        "target_resolution",
+        "attach",
+        "attach_response",
+        "attach_projection",
+        "attach_refresh",
+        "attach_ack",
+        "model_terminal",
+        "cell_execution",
+        "binding_terminal",
+      ])
         assert.isNumber(
           spans.find((span) => span.name === `rika.hosted.${stage}`)?.attributes.get("rika.duration.millis"),
         )
       for (const stage of [
         "process_start",
         "first_draw",
+        "connection_ready",
         "admission",
         "turn_claim",
         "run_created",
@@ -173,8 +200,15 @@ describe("HostedObservability", () => {
       assert.deepStrictEqual(Observability.stages, [
         "process_start",
         "first_draw",
+        "connection_ready",
+        "connection_ticket",
+        "connection_socket",
         "target_resolution",
         "attach",
+        "attach_response",
+        "attach_projection",
+        "attach_refresh",
+        "attach_ack",
         "admission",
         "turn_claim",
         "run_created",

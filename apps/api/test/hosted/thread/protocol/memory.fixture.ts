@@ -91,6 +91,7 @@ export const memoryStore = () => {
   let latestSnapshotVersion = 0n
   let latestSnapshotReplayRequired = false
   let snapshotSaves = 0
+  let replayReads = 0
   const claims = new Map<string, string>()
   const acknowledgements: Array<{
     readonly threadId: string
@@ -209,6 +210,7 @@ export const memoryStore = () => {
       }),
     replay: (input) =>
       Effect.sync(() => {
+        replayReads += 1
         const targetCursor =
           input.throughCursor === undefined || BigInt(input.throughCursor) > cursor
             ? cursor
@@ -264,7 +266,11 @@ export const memoryStore = () => {
           threadId: input.threadId,
           cursor: input.cursor,
         })
-        return input.cursor
+        return {
+          acknowledgedCursor: input.cursor,
+          headCursor: ThreadEventCursor.make(String(cursor)),
+          threadVersion: ThreadVersion.make(String(version)),
+        }
       }),
     issueTicket: () => Effect.void,
     redeemTicket: () =>
@@ -282,6 +288,7 @@ export const memoryStore = () => {
     admissions: () => admissions,
     acknowledgements: () => acknowledgements,
     command: (id: string) => commands.get(id),
+    replayReads: () => replayReads,
     snapshotSaves: () => snapshotSaves,
     dropSnapshot: () => {
       latestSnapshot = undefined

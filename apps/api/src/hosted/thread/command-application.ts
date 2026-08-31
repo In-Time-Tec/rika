@@ -1,4 +1,4 @@
-import { Clock, DateTime, Effect, Function, Schema } from "effect"
+import { Cause, Clock, DateTime, Effect, Exit, Function, Schema } from "effect"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId as ProductTurnId } from "@rika/product/turn-record"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
@@ -459,7 +459,9 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
           ).pipe(Effect.mapError(commandFailure))
         }),
         Effect.raceFirst(renew(record, claimToken)),
-        Effect.ensuring(release),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit) || Cause.hasInterrupts(exit.cause) ? release : Effect.void,
+        ),
       )
     }
   })

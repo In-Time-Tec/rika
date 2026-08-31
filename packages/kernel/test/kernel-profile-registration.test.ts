@@ -4,13 +4,17 @@ import { make, digest, pin, defaultLimits } from "@rika/kernel/kernel-profile-re
 const base = { runtimeVersion: "1.3.14", workspace: "/repo", dataRoot: "/data" } as const
 
 describe("kernel profile registration", () => {
-  it("pins the runtime, workspace, limits, and trust posture", () => {
+  it("pins the physical runtime, workspace, and limits without Rika policy", () => {
     const profile = make(base)
     expect(profile.runtime.name).toBe("bun")
     expect(profile.runtime.version).toBe("1.3.14")
+    expect(profile.provider).toBe("tenetkit/repl/bun")
+    expect(profile.image).toMatchObject({ kind: "runtime", reference: "bun@1.3.14" })
+    expect(profile.isolation).toBe("host-process")
+    expect(profile.checkpoints).toEqual({ liveProcess: true, filesystem: false, namespace: true })
     expect(profile.workspace).toEqual({ root: "/repo", dataRoot: "/data" })
     expect(profile.limits).toEqual(defaultLimits)
-    expect(profile.trustMode).toBe("trusted-local")
+    expect(profile).not.toHaveProperty("trustMode")
   })
 
   it("is stable for one identical input", () => {
@@ -24,10 +28,6 @@ describe("kernel profile registration", () => {
   it("starts a new epoch when the workspace or data root changes", () => {
     expect(digest(make({ ...base, workspace: "/other" }))).not.toBe(digest(make(base)))
     expect(digest(make({ ...base, dataRoot: "/other" }))).not.toBe(digest(make(base)))
-  })
-
-  it("starts a new epoch when the trust mode changes", () => {
-    expect(digest(make({ ...base, trustMode: "trusted-workspace" }))).not.toBe(digest(make(base)))
   })
 
   it("starts a new epoch when a limit changes", () => {

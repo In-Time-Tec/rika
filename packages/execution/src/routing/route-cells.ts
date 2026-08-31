@@ -140,7 +140,7 @@ export const remoteCellOperationOutcome: {
   ): Effect.Effect<RemoteCellOperationOutcome, ToolExecutor.FrameworkFailure>
 } = Function.dual(2, remoteCellOperationOutcomeImpl)
 
-const deadlinePool = (pool: KernelPool.Interface, deadlineMillis: number): KernelPool.Interface => ({
+const deadlinePool = (pool: KernelPool.Service, deadlineMillis: number): KernelPool.Service => ({
   ...pool,
   execute: (request) =>
     pool.execute(request).pipe(

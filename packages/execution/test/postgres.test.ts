@@ -3,16 +3,8 @@ import "./support/root-fragments/postgres-inspection.fixture"
 import { expect, it } from "@effect/vitest"
 import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import {
-  Address,
-  ExecutableManifest,
-  ExecutionHost,
-  Message,
-  RunClaims,
-  RunStore,
-  RuntimeWorker,
-  TreePolicy,
-} from "tenetkit/runtime"
+import { Address, ExecutableManifest, Message, RunExecutor, RunStore, TreePolicy } from "tenetkit/runtime"
+import { RunClaims, RuntimeWorker, type RunClaimsService } from "tenetkit/runtime/sql-driver"
 import { Prompt } from "effect/unstable/ai"
 import * as Postgres from "../src/postgres"
 
@@ -89,19 +81,19 @@ it.effect("rejects missing identities and non-positive PostgreSQL worker bounds 
 )
 
 const workerDependencies = (
-  claims: RunClaims.Interface,
-  executionHost: ExecutionHost.Interface = {
+  claims: RunClaimsService,
+  runExecutor: RunExecutor.Service = {
     execute: () => Effect.void,
     interrupt: () => Effect.void,
   },
 ) =>
   Layer.mergeAll(
-    Layer.succeed(RunClaims.RunClaims, RunClaims.RunClaims.of(claims)),
-    Layer.succeed(ExecutionHost.ExecutionHost, ExecutionHost.ExecutionHost.of(executionHost)),
+    Layer.succeed(RunClaims, RunClaims.of(claims)),
+    Layer.succeed(RunExecutor.RunExecutor, RunExecutor.RunExecutor.of(runExecutor)),
     RunStore.layerMemory({ addresses: [], resolver: { resolve: () => Effect.die("unused") } }),
   )
 
-const claims = (claimReadyRuns: RunClaims.Interface["claimReadyRuns"]): RunClaims.Interface => ({
+const claims = (claimReadyRuns: RunClaimsService["claimReadyRuns"]): RunClaimsService => ({
   changes: Stream.concat(Stream.succeed(undefined), Stream.never),
   claimReadyRuns,
   refreshLease: () => Effect.succeed(true),
@@ -149,7 +141,7 @@ it.effect("interrupts an active claim and clears its status when the worker scop
     const interrupted = yield* Deferred.make<void>()
     const claimed = yield* Ref.make(false)
     const executable = ExecutableManifest.makeTest("scope-close", "1")
-    const claim: Effect.Success<ReturnType<RunClaims.Interface["claimReadyRuns"]>>[number] = {
+    const claim: Effect.Success<ReturnType<RunClaimsService["claimReadyRuns"]>>[number] = {
       run: {
         runId: "run-active-scope-close",
         status: "running",
@@ -172,13 +164,20 @@ it.effect("interrupts an active claim and clears its status when the worker scop
         attempt: 1,
         attemptFence: 1,
         lastSequence: 0,
+        lastTurnCompletedSequence: -1,
         cancellationRequested: false,
         acceptedSequence: 0,
-        respondedWaitIds: new Set(),
         admittedAt: "2026-01-01T00:00:00.000Z",
       },
       workerId: worker.workerId,
       attemptFence: 1,
+      session: {
+        sessionId: "session-scope-close",
+        runId: "run-active-scope-close",
+        ownerId: worker.workerId,
+        runAttemptFence: 1,
+        epoch: "scope-close",
+      },
       leaseExpiresAt: DateTime.toDate(DateTime.makeUnsafe("2999-01-01T00:00:00.000Z")),
     }
     const dependencies = workerDependencies(
@@ -238,9 +237,9 @@ it.effect("reports a worker defect and keeps the supervised loop running", () =>
 )
 
 const workerStatus = (
-  scan: RuntimeWorker.WorkerStatus["scan"],
-  overrides: Partial<RuntimeWorker.WorkerStatus> = {},
-): RuntimeWorker.WorkerStatus => ({
+  scan: RuntimeWorker.Status["scan"],
+  overrides: Partial<RuntimeWorker.Status> = {},
+): RuntimeWorker.Status => ({
   scan,
   wakeup: { _tag: "Ready", at: 0 },
   lastFallbackAt: undefined,
@@ -251,7 +250,7 @@ const workerStatus = (
   ...overrides,
 })
 
-const readinessWorker = (status: Ref.Ref<RuntimeWorker.WorkerStatus>) => ({
+const readinessWorker = (status: Ref.Ref<RuntimeWorker.Status>) => ({
   workerId: worker.workerId,
   status: Ref.get(status),
 })

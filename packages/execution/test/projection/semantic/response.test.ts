@@ -48,7 +48,7 @@ describe("TenetKit semantic response projection", () => {
       const response = yield* Schema.decodeEffect(RunEvent.CompletedModelResponse)({
         content: [{ type: "text", text: "retained output", metadata: {} }],
       })
-      const resolveModelResponse: Runtime.Interface["resolveModelResponse"] = (event) =>
+      const resolveModelResponse: Runtime.Service["resolveModelResponse"] = (event) =>
         Effect.sync(() => {
           tags.push(event._tag)
           return response

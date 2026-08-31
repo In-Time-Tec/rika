@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { NestedOperation, ToolContext } from "tenetkit"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 
 const toolContext = ToolContext.ToolContext.of({
   signal: new AbortController().signal,
-  emit: () => Effect.void,
+  emit: () => Effect.succeed(true),
   sessionId: "session",
   runId: "run",
   toolCallId: "call",
@@ -16,16 +16,16 @@ const toolContext = ToolContext.ToolContext.of({
 
 const registry = (options: {
   readonly run: CodingToolRuntime.Interface["run"]
-  readonly nested?: NestedOperation.Interface
+  readonly nested?: NestedOperation.Service
 }) =>
   Effect.provideContext(
-    HostBindingRegistry.make([WorkspaceBinding.module]),
+    HostModules.make([WorkspaceBinding.module]),
     Context.empty().pipe(
       Context.add(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run: options.run })),
       Context.add(ToolContext.ToolContext, toolContext),
       Context.add(
-        NestedOperation.NestedOperations,
-        NestedOperation.NestedOperations.of(options.nested ?? { run: (_request, effect) => effect }),
+        NestedOperation.Operations,
+        NestedOperation.Operations.of(options.nested ?? { run: (_request, effect) => effect }),
       ),
     ),
   )
@@ -176,7 +176,7 @@ describe("workspace binding", () => {
     Effect.gen(function* () {
       const mounted = yield* registry({ run: () => result("") })
       const failure = yield* Effect.flip(mounted.invoke({ module: "workspace", operation: "read", input: { path: 7 } }))
-      expect(Schema.is(HostBindingRegistry.HostBindingSchemaFailure)(failure)).toBe(true)
+      expect(Schema.is(HostModules.HostModuleSchemaFailure)(failure)).toBe(true)
     }),
   )
 
@@ -184,7 +184,7 @@ describe("workspace binding", () => {
     Effect.gen(function* () {
       const mounted = yield* registry({ run: () => result("") })
       const failure = yield* Effect.flip(mounted.invoke({ module: "workspace", operation: "delete", input: {} }))
-      expect(Schema.is(HostBindingRegistry.HostBindingNotFound)(failure)).toBe(true)
+      expect(Schema.is(HostModules.HostModuleNotFound)(failure)).toBe(true)
     }),
   )
 
@@ -262,7 +262,7 @@ describe("workspace binding", () => {
         run: () => result(""),
         nested: {
           run: (request) =>
-            NestedOperation.NestedOperationSuspended.make({
+            NestedOperation.Suspended.make({
               token: "approval-token",
               operationKey: "operation",
               ordinal: 0,
@@ -292,7 +292,7 @@ describe("workspace binding", () => {
         run: () => result(""),
         nested: {
           run: (request) =>
-            NestedOperation.NestedOperationDivergence.make({
+            NestedOperation.Divergence.make({
               operationKey: "operation",
               ordinal: 0,
               recordedKind: "workspace.replace",

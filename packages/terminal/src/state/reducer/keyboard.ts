@@ -7,6 +7,7 @@ import { composerEdit } from "../composer/edit"
 import { reduceKeyboardPrelude } from "./keyboard-prelude"
 import { reduceKeyboardPicker } from "./keyboard-picker"
 import { decodeTranscriptBlocks, decodeTranscriptItems } from "../transcript/model"
+import { expandPastedText } from "../composer/paste"
 
 type Update = (model: Model, message: Message) => Model
 
@@ -223,12 +224,39 @@ const reduceComposerKey = (model: Model, key: Key): Model => {
   return isPrintable(key) ? composerEdit.insert(model, key.sequence) : model
 }
 
+const reduceComposerSteering = (model: Model, message: Extract<Message, { _tag: "KeyPressed" }>): Model | undefined => {
+  const requestId = message.steeringRequestId
+  if (
+    !message.key.ctrl ||
+    message.key.name !== "s" ||
+    !model.busy ||
+    model.activeTurnId === undefined ||
+    model.input.length === 0 ||
+    requestId === undefined
+  )
+    return undefined
+  const prompt = expandPastedText(model.input, model.pastedText)
+  return {
+    ...model,
+    input: "",
+    cursor: 0,
+    pastedText: [],
+    steeringRequests: [
+      ...model.steeringRequests,
+      { requestId, turnId: model.activeTurnId, text: prompt, origin: "composer" },
+    ],
+    pendingAction: { _tag: "Steer", prompt, requestId, turnId: model.activeTurnId },
+  }
+}
+
 const reduceKeyPressed = (model: Model, message: Extract<Message, { _tag: "KeyPressed" }>, update: Update): Model => {
   const key = message.key
   const contextDetails = reduceContextDetails(model, message, update)
   if (contextDetails !== undefined) return contextDetails
   const prelude = reduceKeyboardPrelude(model, key, update)
   if (prelude !== undefined) return prelude
+  const steering = reduceComposerSteering(model, message)
+  if (steering !== undefined) return steering
   const picker = reduceKeyboardPicker(model, key, update, composerEdit)
   if (picker !== undefined) return picker
   const detail = reduceDetailKey(model, key, update)

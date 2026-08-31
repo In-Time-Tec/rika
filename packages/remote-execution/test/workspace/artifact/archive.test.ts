@@ -180,6 +180,16 @@ describe("Workspace archive", () => {
           yield* createArchive(source)
           yield* fileSystem.writeFileString(
             `${source}/fixture.ts`,
+            `${fixture}type Session = { readonly accessToken: Redacted.Redacted<string> }\n`,
+          )
+          yield* createArchive(source)
+          yield* fileSystem.writeFileString(
+            `${source}/fixture.ts`,
+            `${fixture}const session = { accessToken: "local-credential-value" }\n`,
+          )
+          expect((yield* Effect.flip(createArchive(source))).kind).toBe("secret")
+          yield* fileSystem.writeFileString(
+            `${source}/fixture.ts`,
             `${fixture}const session = { accessToken: Redacted.make("access") }\n`,
           )
           yield* createArchive(source)

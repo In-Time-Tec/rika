@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "platformUnits": "bytes (macOS getrusage RUSAGE_CHILDREN ru_maxrss)",
+  "boundary": "packaged interactive process stopped after authenticated connection_ready; includes Bun, Effect, OpenTUI, and local Runner startup",
+  "samples": 10,
+  "minBytes": 162562048,
+  "p50Bytes": 166559744,
+  "p95Bytes": 207814656,
+  "maxBytes": 207814656,
+  "p50MiB": 158.844,
+  "p95MiB": 198.188,
+  "maxMiB": 198.188,
+  "processExit": "test harness requests Ctrl+C twice, then force-terminates the owned child if OpenTUI teardown exceeds its two-second bound"
+}

@@ -9,7 +9,7 @@
     "rika": "./dist/client-main.js"
   },
   "scripts": {
-    "build": "bun build ./src/client-main.ts ./src/performance-main.ts --outdir dist --target bun --format esm --splitting --loader .txt:text --external @opentui/core-darwin-arm64 --external @opentui/core-darwin-x64 --external @opentui/core-linux-arm64 --external @opentui/core-linux-arm64-musl --external @opentui/core-linux-x64 --external @opentui/core-linux-x64-musl --external @opentui/core-win32-arm64 --external @opentui/core-win32-x64",
+    "build": "bun build ./src/client-main.ts --outdir dist --target bun --format esm --splitting --loader .txt:text --external @opentui/core-darwin-arm64 --external @opentui/core-darwin-x64 --external @opentui/core-linux-arm64 --external @opentui/core-linux-arm64-musl --external @opentui/core-linux-x64 --external @opentui/core-linux-x64-musl --external @opentui/core-win32-arm64 --external @opentui/core-win32-x64",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings apps/rika/src apps/rika/test",
     "start": "bun ./src/client-main.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"

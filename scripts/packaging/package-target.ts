@@ -6,10 +6,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   archiveName,
   archiveRoot,
+  clientRuntime,
   isPackageTarget,
   kernelRuntime,
   kernelWorker,
   ownedTargetEntries,
+  packageExecutable,
   targetNames,
   targets,
   validateArchiveSet,
@@ -206,6 +208,42 @@ const program = Effect.gen(function* () {
     ),
   )
 
+  const compileLauncher = Effect.fn("Package.compileLauncher")((outfile: string, target: PackageTarget) => {
+    const metadata = targets[target]
+    if (process.platform !== metadata.platform || process.arch !== metadata.architecture)
+      return Effect.fail(
+        packageError(
+          "build launcher",
+          `${target} must be packaged on ${metadata.platform}-${metadata.architecture}; current host is ${process.platform}-${process.arch}`,
+        ),
+      )
+    return spawner
+      .exitCode(
+        ChildProcess.make(
+          "cc",
+          [
+            "-std=c11",
+            "-Os",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            `-DRIKA_CLIENT_RUNTIME="${clientRuntime}"`,
+            path.join(root, "scripts/packaging/client-launcher.c"),
+            "-o",
+            outfile,
+          ],
+          { cwd: root },
+        ),
+      )
+      .pipe(
+        Effect.flatMap((exitCode) =>
+          Number(exitCode) === 0
+            ? Effect.void
+            : Effect.fail(packageError("build launcher", `cc exited with code ${exitCode}`)),
+        ),
+      )
+  })
+
   const buildTarget = Effect.fn("Package.buildTarget")((target: PackageTarget) =>
     Effect.gen(function* () {
       yield* fileSystem.makeDirectory(artifacts, { recursive: true })
@@ -224,14 +262,15 @@ const program = Effect.gen(function* () {
           Effect.gen(function* () {
             yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
-            yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
+            yield* checkedBuild("client-main.ts", path.join(bin, clientRuntime), target, identity)
+            yield* compileLauncher(path.join(bin, packageExecutable), target)
             yield* bundleWorker(path.join(bin, kernelWorker))
             const runtime = path.join(bin, kernelRuntime)
             yield* fileSystem.copyFile(process.execPath, runtime)
             yield* fileSystem.chmod(runtime, 0o755)
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),
-              "Install bin/rika on PATH. Keep the private kernel runtime in bin beside it.\n",
+              "Install bin/rika on PATH. Keep the private client and kernel runtimes in bin beside it.\n",
             )
             const exitCode = yield* spawner.exitCode(
               ChildProcess.make(

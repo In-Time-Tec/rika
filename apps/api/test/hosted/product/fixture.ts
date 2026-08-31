@@ -137,12 +137,12 @@ const remoteCells = HostedExecution.remoteCells({
   admit: () => Effect.void,
 })
 
-const withAuthoritativeDatabase = <A, E, R>(
+const withAuthoritativeDatabase = <A, E>(
   label: string,
   use: (
     database: NodePgDatabase,
-  ) => Effect.Effect<A, E, R | HostedProduct | HostedTurnWorkerStore | ExecutionGateway.Service>,
-) =>
+  ) => Effect.Effect<A, E, HostedProduct | HostedTurnWorkerStore | ExecutionGateway.Service>,
+): Effect.Effect<A> =>
   Effect.scoped(
     Effect.gen(function* () {
       const suffix = String(yield* Random.nextInt).replaceAll("-", "n")
@@ -221,7 +221,7 @@ const withAuthoritativeDatabase = <A, E, R>(
         yield* Effect.tryPromise(() => admin.end())
       }
     }),
-  ).pipe(livePlatform)
+  ).pipe(livePlatform, Effect.orDie)
 
 export {
   expect,

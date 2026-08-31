@@ -377,6 +377,42 @@ describe("TenetKit tree projector checkpoints and lifecycle", () => {
     expect(projector.snapshot().state.status).toBe("cancelled")
   })
 
+  it("accepts tool suspension metadata while RunWaiting owns the waiting state", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-tool-wait", "wait for the tool")
+    const call = Response.toolCallPart({
+      id: "tool-call-1",
+      name: "read",
+      params: { path: "fixture.ts" },
+      providerExecuted: false,
+      metadata: {},
+    })
+    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call }))
+
+    const suspended = projector.apply(
+      treeEvent(
+        "raw-root-run",
+        runEvent({ _tag: "ToolExecutionWaiting", turn: 0, call, waitId: "wait-1", token: "nested-token" }),
+      ),
+    )
+    expect(suspended.state.status).toBe("running")
+    expect(suspended.upsert).toEqual([])
+    expect(suspended.remove).toEqual([])
+
+    const waiting = projector.apply(
+      treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "RunWaiting",
+          wait: { waitId: "wait-1", status: "open", openedAt: occurredAt(1), reason: { _tag: "ToolWait" } },
+        }),
+      ),
+    )
+    expect(waiting.state.status).toBe("waiting")
+  })
+
   it("does not double-settle active time when an operation parks a run that already waited", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-resolution-waited", "cancel me")

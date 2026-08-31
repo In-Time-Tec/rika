@@ -31,7 +31,7 @@ const watchFailureMessage = (cause: unknown) => {
 }
 
 const replayThenWatch = (
-  runtime: Runtime.Interface,
+  runtime: Runtime.Service,
   rootRunId: string,
   cursor: RunTree.TreeCursor,
 ): Stream.Stream<RunTree.TreeEvent, Runtime.TreeReplayError> =>
@@ -52,7 +52,7 @@ const replayThenWatch = (
   )
 
 const rootEvents = (
-  runtime: Runtime.Interface,
+  runtime: Runtime.Service,
   link: ExecutionGateway.ExecutionLink,
   input: WatchInput,
   hosted: boolean,
@@ -72,7 +72,7 @@ const rootEvents = (
   )
 }
 
-const titleEvents = (runtime: Runtime.Interface, titleId: string | undefined) =>
+const titleEvents = (runtime: Runtime.Service, titleId: string | undefined) =>
   titleId === undefined
     ? Stream.empty
     : runtime.events({ runId: titleId }).pipe(
@@ -136,7 +136,7 @@ const projectEvents = (projector: Projector, input: WatchInput) => {
 }
 
 const output = (
-  runtime: Runtime.Interface,
+  runtime: Runtime.Service,
   projector: Projector,
   link: ExecutionGateway.ExecutionLink,
   input: WatchInput,
@@ -173,7 +173,7 @@ const output = (
   )
 
 const watchTurn = (
-  runtime: Runtime.Interface,
+  runtime: Runtime.Service,
   hosted: boolean,
   link: ExecutionGateway.ExecutionLink,
   input: WatchInput,

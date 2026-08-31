@@ -1,11 +1,7 @@
 import { hostedThreadSnapshotMatches } from "@rika/product/client-protocol"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
-import type { InteractiveSession } from "@rika/product/interactive-session"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import type * as InteractiveConnection from "@rika/product/interactive-connection"
-import type { ThreadSummary } from "@rika/product/thread-summary"
-import type { Unit } from "@rika/transcript/transcript-unit"
-import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "./contract"
+import { CredentialStore, HostedError, Http, ProfileStore } from "./contract"
 import { reconnectDelay, retryableConnectionFailure } from "./reconnect-policy"
 import {
   physicalConnection as openPhysicalConnection,
@@ -14,7 +10,11 @@ import {
 } from "./interactive-session/connection"
 import { interactiveSessionCommands } from "./interactive-session/commands"
 import { interactivePreviewState, interactiveSessionEvents } from "./interactive-session/events"
-import { interactiveSessionInterface } from "./interactive-session/interface"
+import {
+  type HostedInteractiveSession,
+  type HostedInteractiveSessionInput,
+  interactiveSessionInterface,
+} from "./interactive-session/interface"
 import { InteractiveSessionState } from "./interactive-session/state"
 import { interactiveSessionStatus } from "./interactive-session/status"
 import {
@@ -30,22 +30,11 @@ import * as Socket from "effect/unstable/socket/Socket"
 
 const { encodeThreadView, failure, prepareAttachment, threadViewFromHostedSnapshot, unavailable } = AttachmentProjection
 export { threadViewFromHostedSnapshot }
+export type { HostedInteractiveSession }
 
-export interface HostedInteractiveSession {
-  readonly session: InteractiveSession
-  readonly connection: InteractiveConnection.Connection
-}
-
-export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (input: {
-  readonly profile: Profile
-  readonly threadId: string
-  readonly createThread: (
-    executorKind: "runner" | "orb",
-    archiveThreadId?: string,
-  ) => Effect.Effect<string, HostedError>
-  readonly listThreads: Effect.Effect<ReadonlyArray<ThreadSummary>, HostedError>
-  readonly previewThread: (threadId: string) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
-}) {
+export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (
+  input: HostedInteractiveSessionInput,
+) {
   const profile = input.profile
   const http = yield* Http
   const credentials = yield* CredentialStore
@@ -153,29 +142,32 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       return encodeThreadView(prepared.view)
     })
   const commitInitialAttachment = (attachment: Attachment) =>
-    Effect.gen(function* () {
-      const validation = prepareAttachment(attachment, authority())
-      if (validation._tag === "Invalid") return yield* validation.error
-      const threadId = String(validation.prepared.attachment.threadId)
-      const plan = planAttachment(validation.prepared, authority())
-      if (plan._tag === "Invalid") return yield* plan.error
-      yield* commands.reconcilePendingSubmissions(validation.prepared)
-      const bootstrap = selection._tag === "Loading" && selection.authority === undefined
-      selection =
-        selection._tag === "Loading" && !bootstrap
-          ? { ...selection, authority: plan.candidate }
-          : { _tag: "Attached", projection: plan.candidate }
-      yield* publishProjection(plan.candidate)
-      const fingerprint = yield* publishAttachment(validation.prepared, plan)
-      const delivered = {
-        ...plan.candidate,
-        deliveredCursor: plan.candidate.committedCursor,
-        deliveredFingerprint: fingerprint,
-      }
-      replaceAuthority(plan.candidate, delivered)
-      threadCursors.set(threadId, delivered.deliveredCursor)
-      yield* refreshThreads
-    })
+    HostedObservability.observe(
+      "attach_projection",
+      { threadId: String(attachment.threadId) },
+      Effect.gen(function* () {
+        const validation = prepareAttachment(attachment, authority())
+        if (validation._tag === "Invalid") return yield* validation.error
+        const threadId = String(validation.prepared.attachment.threadId)
+        const plan = planAttachment(validation.prepared, authority())
+        if (plan._tag === "Invalid") return yield* plan.error
+        yield* commands.reconcilePendingSubmissions(validation.prepared)
+        const bootstrap = selection._tag === "Loading" && selection.authority === undefined
+        selection =
+          selection._tag === "Loading" && !bootstrap
+            ? { ...selection, authority: plan.candidate }
+            : { _tag: "Attached", projection: plan.candidate }
+        yield* publishProjection(plan.candidate)
+        const fingerprint = yield* publishAttachment(validation.prepared, plan)
+        const delivered = {
+          ...plan.candidate,
+          deliveredCursor: plan.candidate.committedCursor,
+          deliveredFingerprint: fingerprint,
+        }
+        replaceAuthority(plan.candidate, delivered)
+        threadCursors.set(threadId, delivered.deliveredCursor)
+      }),
+    )
   const receive = interactiveSessionEvents({
     activePreviews,
     currentFrame,
@@ -379,6 +371,13 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                 connectivity: "connected",
                 ownership: profile.owner.kind === "personal" ? "personal" : "organization",
               }))
+              const attachedThreadId = authority()?.threadId
+              if (attachedThreadId !== undefined)
+                yield* HostedObservability.observe(
+                  "attach_refresh",
+                  { threadId: attachedThreadId },
+                  refreshThreads,
+                ).pipe(Effect.forkScoped)
               return yield* physical.done
             }).pipe(
               Effect.ensuring(

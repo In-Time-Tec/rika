@@ -55,38 +55,41 @@ const handoff = (id: string): Session.Entry => ({
 
 interface Recorder {
   readonly appended: Array<unknown>
-  readonly service: Session.Interface
+  readonly directory: Session.DirectoryInterface
 }
 
 const sessionStore = (entries: ReadonlyArray<Session.Entry>): Recorder => {
   const appended: Array<unknown> = []
   return {
     appended,
-    service: Session.SessionStore.of({
-      reserveEntryId: Effect.succeed("reserved"),
-      append: (entry) => {
-        appended.push(entry)
-        return Effect.succeed(message("appended", ""))
-      },
-      appendCheckpoint: (checkpoint) => {
-        appended.push(checkpoint)
-        return Effect.succeed({
-          _tag: "Appended",
-          checkpoint: compaction("checkpoint", checkpoint.summary ?? ""),
-          leafId: "leaf",
-        })
-      },
-      path: () => Effect.succeed(entries),
-      setLeaf: () => Effect.void,
-      leaf: Effect.succeed(null),
-    }),
+    directory: {
+      acquire: () =>
+        Effect.succeed({
+          reserveEntryId: Effect.succeed("reserved"),
+          append: (entry) => {
+            appended.push(entry)
+            return Effect.succeed(message("appended", ""))
+          },
+          appendCheckpoint: (checkpoint) => {
+            appended.push(checkpoint)
+            return Effect.succeed({
+              _tag: "Appended",
+              checkpoint: compaction("checkpoint", checkpoint.summary ?? ""),
+              leafId: "leaf",
+            })
+          },
+          path: () => Effect.succeed(entries),
+          setLeaf: () => Effect.void,
+          leaf: Effect.succeed(null),
+        }),
+    },
   }
 }
 
-const registry = (recorder: Recorder, nested?: NestedOperation.Interface) =>
+const registry = (recorder: Recorder, nested?: NestedOperation.Service) =>
   mountModules({
     modules: [ContextBinding.make({ workspace: "/repo", trustMode: "trusted-local" })],
-    services: Context.make(Session.SessionStore, recorder.service),
+    services: Context.make(Session.SessionDirectory, Session.SessionDirectory.of(recorder.directory)),
     nested,
   })
 

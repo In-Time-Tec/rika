@@ -18,7 +18,7 @@ export type SemanticTreeEvent = Omit<RunTree.TreeEvent, "event"> & {
   readonly event: SemanticRunEvent
 }
 
-type ResolveModelResponse = Runtime.Interface["resolveModelResponse"]
+type ResolveModelResponse = Runtime.Service["resolveModelResponse"]
 
 export const resolveSemanticTreeEvent: {
   (

@@ -1,0 +1,22 @@
+{
+  "measurement": "PostgreSQL completed_at minus admitted_at for the durable CreateThread command",
+  "before": {
+    "threadId": "1eac336b-6589-4c6d-bb1a-a6268e2caabe",
+    "admittedAt": "2026-08-31T04:04:46.226Z",
+    "completedAt": "2026-08-31T04:05:16.350Z",
+    "latencyMilliseconds": 30124,
+    "behavior": "the first command missed the worker notification and waited for the 30-second fallback"
+  },
+  "after": {
+    "threadId": "d46afd05-874f-40fc-8787-37e8b4253b91",
+    "admittedAt": "2026-08-31T04:13:09.289Z",
+    "completedAt": "2026-08-31T04:13:09.371Z",
+    "latencyMilliseconds": 82,
+    "behavior": "new command admission directly woke the in-process durable command worker"
+  },
+  "improvement": {
+    "latencyReductionMilliseconds": 30042,
+    "speedup": 367.37
+  },
+  "database": "rika_performance isolated local PostgreSQL database"
+}

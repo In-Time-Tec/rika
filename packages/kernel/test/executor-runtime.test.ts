@@ -1,13 +1,13 @@
 import { expect, it } from "@effect/vitest"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ExecutorRuntime from "../src/executor-runtime"
 
-const toolContext = (sessionId: string, operationKey: string): ToolContext.Interface =>
+const toolContext = (sessionId: string, operationKey: string): ToolContext.Service =>
   ToolContext.ToolContext.of({
     signal: new AbortController().signal,
-    emit: () => Effect.void,
+    emit: () => Effect.succeed(true),
     sessionId,
     runId: `run-${sessionId}`,
     toolCallId: `call-${sessionId}`,
@@ -15,7 +15,7 @@ const toolContext = (sessionId: string, operationKey: string): ToolContext.Inter
   })
 
 /** A registry whose one operation reports the identity its handler actually observed. */
-const observingRegistry = (observed: Array<string>): HostBindingRegistry.Interface => ({
+const observingRegistry = (observed: Array<string>): HostModules.Service => ({
   descriptors: [{ module: "probe", operations: ["identity"] }],
   resolve: () => Effect.die("unused"),
   invoke: () =>
@@ -26,7 +26,7 @@ const observingRegistry = (observed: Array<string>): HostBindingRegistry.Interfa
     }),
 })
 
-const request = (sessionId: string): HostBindingRegistry.Request => ({
+const request = (sessionId: string): HostModules.Request => ({
   module: "probe",
   operation: "identity",
   input: {},
@@ -107,15 +107,15 @@ it.effect("releases a Session's identity when its cell completes", () =>
   }).pipe(Effect.scoped),
 )
 
-it.effect("carries the cell's nested-operation journal and Session store to the handler", () =>
+it.effect("carries the cell's nested-operation journal and Session directory to the handler", () =>
   Effect.gen(function* () {
     const kinds: Array<string> = []
-    const registry: HostBindingRegistry.Interface = {
+    const registry: HostModules.Service = {
       descriptors: [{ module: "probe", operations: ["journal"] }],
       resolve: () => Effect.die("unused"),
       invoke: () =>
         Effect.gen(function* () {
-          const journal = yield* Effect.serviceOption(NestedOperation.NestedOperations)
+          const journal = yield* Effect.serviceOption(NestedOperation.Operations)
           const context = yield* Effect.serviceOption(ToolContext.ToolContext)
           if (journal._tag === "None" || context._tag === "None")
             return { _tag: "Failure" as const, failure: "no-journal" }
@@ -130,7 +130,7 @@ it.effect("carries the cell's nested-operation journal and Session store to the 
     }
     const calls = Context.get(yield* Layer.build(ExecutorRuntime.cellContextLayer), ExecutorRuntime.CellContext)
     const bound = ExecutorRuntime.bind(registry, calls)
-    const journal = NestedOperation.NestedOperations.of({
+    const journal = NestedOperation.Operations.of({
       run: (input, effect) => {
         kinds.push(input.kind)
         return effect
@@ -142,7 +142,7 @@ it.effect("carries the cell's nested-operation journal and Session store to the 
         .pipe(
           Effect.andThen(bound.invoke({ module: "probe", operation: "journal", input: {}, sessionId: "session-a" })),
           Effect.provideService(ToolContext.ToolContext, toolContext("session-a", "operation-a")),
-          Effect.provideService(NestedOperation.NestedOperations, journal),
+          Effect.provideService(NestedOperation.Operations, journal),
         ),
     )
     expect(response._tag).toBe("Success")
@@ -154,17 +154,17 @@ it.effect("captures only per-call authority before remote placement", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const context = toolContext("session-a", "operation-a")
-      const nested = NestedOperation.NestedOperations.of({ run: (_request, effect) => effect })
-      const session = Context.get(yield* Layer.build(Session.layerMemory), Session.SessionStore)
+      const nested = NestedOperation.Operations.of({ run: (_request, effect) => effect })
+      const sessions = Context.get(yield* Layer.build(Session.layerMemory), Session.SessionDirectory)
       const authority = Context.make(ToolContext.ToolContext, context).pipe(
-        Context.add(NestedOperation.NestedOperations, nested),
-        Context.add(Session.SessionStore, session),
+        Context.add(NestedOperation.Operations, nested),
+        Context.add(Session.SessionDirectory, sessions),
       )
       const captured = yield* ExecutorRuntime.capture.pipe(Effect.provide(authority))
 
       expect(Context.get(captured, ToolContext.ToolContext)).toBe(context)
-      expect(Context.get(captured, NestedOperation.NestedOperations)).toBe(nested)
-      expect(Context.get(captured, Session.SessionStore)).toBe(session)
+      expect(Context.get(captured, NestedOperation.Operations)).toBe(nested)
+      expect(Context.get(captured, Session.SessionDirectory)).toBe(sessions)
     }),
   ),
 )

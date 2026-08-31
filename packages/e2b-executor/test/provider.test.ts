@@ -77,11 +77,16 @@ describe("Provider", () => {
     expect(testing.protectedNetworks).toEqual([ALL_TRAFFIC])
   })
 
-  it.effect("attests the E2B template build before and after creation while preserving its receipt", () => {
+  it.effect("pins the approved E2B build and verifies the created template", () => {
+    let buildChecks = 0
     let template = ""
     let createOptions: SandboxOpts | undefined
     const sdk: Sdk = {
       ...attestationSdk,
+      buildStatus: (...arguments_) => {
+        buildChecks += 1
+        return attestationSdk.buildStatus(...arguments_)
+      },
       create: (templateBuildId: string, options: SandboxOpts) => {
         template = templateBuildId
         createOptions = options
@@ -92,6 +97,7 @@ describe("Provider", () => {
     const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.create(request)).toEqual({ sandboxId: "sandbox-e2b", state: "running" })
+      expect(buildChecks).toBe(1)
       expect(template).toBe("ar7-template-alias:7d0-build-receipt")
       expect(createOptions).toMatchObject({
         apiKey: "e2b-controller-secret",
@@ -137,31 +143,6 @@ describe("Provider", () => {
       const failure = yield* Effect.flip(provider.create(request))
       expect(failure).toMatchObject({ operation: "create", message: "E2B template build attestation failed" })
       expect(created).toBe(false)
-    })
-  })
-
-  it.effect("kills a new sandbox when its immutable build no longer attests during creation", () => {
-    let checks = 0
-    const killed: Array<string> = []
-    const sdk: Sdk = {
-      ...attestationSdk,
-      buildStatus: () =>
-        Effect.succeed({
-          templateId: request.templateId,
-          buildId: checks++ === 0 ? request.templateBuildId : "different-build",
-          status: "ready" as const,
-        }),
-      create: () => Effect.succeed({ sandboxId: "retargeted" }),
-      kill: (sandboxId: string) => {
-        killed.push(sandboxId)
-        return Effect.succeed(true)
-      },
-    }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
-    return Effect.gen(function* () {
-      const failure = yield* Effect.flip(provider.create(request))
-      expect(failure).toMatchObject({ operation: "create", message: "E2B template build attestation failed" })
-      expect(killed).toEqual(["retargeted"])
     })
   })
 

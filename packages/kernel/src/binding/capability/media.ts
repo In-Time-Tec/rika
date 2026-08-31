@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as MediaContract from "@rika/coding-tools/media-view-contract"
@@ -17,7 +17,7 @@ const Attached = Schema.Struct({
 
 const AttachInput = Schema.Struct({ path: Schema.String })
 
-export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
+export const operations: ReadonlyArray<HostModules.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
   operation({
     name: "attach",
     input: AttachInput,
@@ -37,4 +37,4 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
   }),
 ]
 
-export const module: HostBindingRegistry.Module<CodingToolRuntime.Service | Requirements> = { name, operations }
+export const module: HostModules.Module<CodingToolRuntime.Service | Requirements> = { name, operations }

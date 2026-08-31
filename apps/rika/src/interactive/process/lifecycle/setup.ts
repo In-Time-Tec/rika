@@ -105,7 +105,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           created.surface.update(loop.model)
           run(Effect.logInfo("tui.renderer.started"))
           if (loop.closed) return
-          run(session.events(dispatch))
+          run(recoverSession(session.events(dispatch)))
           run(watchChangedFiles)
           run(
             workspaceGlob(loop.model.workspace, "**/*", 10_000).pipe(
@@ -138,9 +138,10 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
               Effect.asVoid,
             ),
           )
-          const startInitialSelection = () => {
+          const ensureInitialSelection = () => {
             if (input.threadId === undefined) return Effect.void
             const threadId = input.threadId
+            if (String(session.currentView()?.thread.id) === threadId) return Effect.void
             return Effect.sync(() => startSelection(() => session.selectThread(threadId))).pipe(
               Effect.flatMap(Fiber.join),
             )
@@ -152,8 +153,8 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           )
           const initialAction = initialSubmitAction(input.prompt, loop.model.mode)
           run(
-            startInitialSelection().pipe(
-              Effect.andThen(awaitConnected),
+            awaitConnected.pipe(
+              Effect.andThen(ensureInitialSelection),
               Effect.andThen(
                 initialAction === undefined
                   ? Effect.void

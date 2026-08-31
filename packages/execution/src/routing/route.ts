@@ -24,7 +24,7 @@ export { configure } from "./route-configuration"
 
 const invalid = (cause: unknown) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })
 
-export const makeResolver = (options: ResolverOptions): ExecutableResolver.Interface =>
+export const makeResolver = (options: ResolverOptions): ExecutableResolver.Service =>
   ExecutableResolver.ExecutableResolver.of({
     resolve: (input) =>
       Effect.gen(function* () {

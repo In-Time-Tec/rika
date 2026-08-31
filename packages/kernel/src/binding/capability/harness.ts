@@ -1,15 +1,7 @@
 import { DateTime, Effect, Result, Schema } from "effect"
-import {
-  Authorship,
-  HarnessEntry,
-  HarnessMerge,
-  HarnessOverview,
-  HarnessState,
-  HarnessStore,
-  Refinement,
-} from "tenetkit/harness"
+import { Authorship, Entry, Overview, Refinement, State, Store } from "tenetkit/agent-guidance"
 import { ToolContext } from "tenetkit"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import * as ScopePolicy from "../../harness/scope-policy"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
 
@@ -26,22 +18,22 @@ const Failure = Schema.Union([HarnessRejected, NestedOperationFailed])
 const Scope = ScopePolicy.ScopeName
 type Scope = ScopePolicy.ScopeName
 
-const Applied = Schema.Struct({ snapshotId: HarnessEntry.HarnessSnapshotId, applied: Schema.Int })
+const Applied = Schema.Struct({ snapshotId: Entry.GuidanceSnapshotId, applied: Schema.Int })
 
 const SnapshotInput = Schema.Struct({ scope: Schema.optionalKey(Scope) })
 const OverviewInput = Schema.Struct({ scope: Schema.optionalKey(Scope) })
 
 /**
- * `baseSnapshot` is REQUIRED here even though `tenetkit/harness` types it optional. HarnessStore
+ * `baseSnapshot` is REQUIRED here even though Agent Guidance types it optional. `Store`
  * offers only load and save with no compare-and-swap, so every mutation is a whole-scope
  * read-modify-write and two concurrent cells would silently lose an update. Requiring the baseline
  * turns that race into an observable `baseline-drift` rejection the model can retry.
  */
 const Authored = {
-  id: HarnessEntry.HarnessId,
+  id: Entry.GuidanceId,
   title: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   content: Schema.String.check(Schema.isMaxLength(65_536)),
-  baseSnapshot: HarnessEntry.HarnessSnapshotId,
+  baseSnapshot: Entry.GuidanceSnapshotId,
   path: Schema.optionalKey(Schema.String),
   reference: Schema.optionalKey(Schema.String),
   arguments: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
@@ -51,21 +43,21 @@ const Authored = {
 }
 
 const CreateInput = Schema.Struct(Authored)
-const UpdateInput = Schema.Struct({ ...Authored, baseVersion: Schema.optionalKey(HarnessEntry.HarnessVersion) })
+const UpdateInput = Schema.Struct({ ...Authored, baseVersion: Schema.optionalKey(Entry.GuidanceVersion) })
 const DeleteInput = Schema.Struct({
-  id: HarnessEntry.HarnessId,
-  baseSnapshot: HarnessEntry.HarnessSnapshotId,
-  baseVersion: Schema.optionalKey(HarnessEntry.HarnessVersion),
+  id: Entry.GuidanceId,
+  baseSnapshot: Entry.GuidanceSnapshotId,
+  baseVersion: Schema.optionalKey(Entry.GuidanceVersion),
   scope: Schema.optionalKey(Scope),
 })
 const RefineInput = Schema.Struct({
   rationale: Schema.String.check(Schema.isMaxLength(65_536)),
   edits: Schema.Array(Schema.Unknown).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
-  baseSnapshot: HarnessEntry.HarnessSnapshotId,
+  baseSnapshot: Entry.GuidanceSnapshotId,
   scope: Schema.optionalKey(Scope),
 })
 const RollbackInput = Schema.Struct({
-  refinementId: HarnessEntry.HarnessId,
+  refinementId: Entry.GuidanceId,
   scope: Schema.optionalKey(Scope),
 })
 
@@ -106,7 +98,7 @@ export interface Options {
   readonly workspaceDigest: string
 }
 
-export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.HarnessStore | Requirements> => {
+export const make = (options: Options): HostModules.Module<Store.Store | Requirements> => {
   const scopeOf = (scope: Scope | undefined) =>
     Effect.map(ToolContext.ToolContext, (context) =>
       ScopePolicy.scopeString(scope ?? "thread", {
@@ -117,21 +109,21 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
 
   const load = (scope: Scope | undefined) =>
     Effect.flatMap(scopeOf(scope), (resolved) =>
-      Effect.flatMap(HarnessStore.HarnessStore, (store) =>
+      Effect.flatMap(Store.Store, (store) =>
         store.load(resolved).pipe(Effect.mapError((error) => rejected(error.reason, error.message))),
       ),
     )
 
   const merged = Effect.gen(function* () {
-    const store = yield* HarnessStore.HarnessStore
+    const store = yield* Store.Store
     const states = yield* Effect.forEach(ScopePolicy.mergeOrder, (level) =>
       Effect.flatMap(scopeOf(level), (scope) => store.load(scope)),
     )
-    return states.reduce((outer, inner) => HarnessMerge.mergeStates(outer, inner))
+    return states.reduce((outer, inner) => State.merge(outer, inner))
   }).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
 
   /**
-   * Cell input is authored through Authorship.authorProposal, which rejects a caller-supplied
+   * Cell input is authored through Authorship.author, which rejects a caller-supplied
    * revision and decodes with onExcessProperty "error". A binding that built a RefinementEdit
    * directly from cell input would let model code forge createdAt, updatedAt, and version.
    */
@@ -149,17 +141,17 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
         baseSnapshot: input.baseSnapshot,
         edits: input.edits,
       }
-      const proposal = yield* Authorship.authorProposal(
+      const proposal = yield* Authorship.author(
         input.rationale === undefined ? authored : { ...authored, rationale: input.rationale },
       ).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
       const state = yield* load(input.scope)
-      const result = Refinement.applyProposal(state, proposal, applyOptions)
+      const result = Refinement.apply(state, proposal, applyOptions)
       if (Result.isFailure(result))
         return yield* rejected(result.failure.reason, result.failure.message, result.failure.target)
-      const store = yield* HarnessStore.HarnessStore
+      const store = yield* Store.Store
       yield* store.save(result.success.state).pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
       return {
-        snapshotId: HarnessState.snapshotId(result.success.state),
+        snapshotId: State.snapshotId(result.success.state),
         applied: result.success.event.applied.length,
       }
     })
@@ -229,14 +221,14 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
          * makes every write a guess.
          */
         output: Schema.Struct({
-          ...HarnessState.HarnessState.fields,
-          snapshotId: HarnessEntry.HarnessSnapshotId,
+          ...State.GuidanceState.fields,
+          snapshotId: Entry.GuidanceSnapshotId,
         }),
         failure: Failure,
         handle: (input) =>
           Effect.map(input.scope === undefined ? merged : load(input.scope), (state) => ({
             ...state,
-            snapshotId: HarnessState.snapshotId(state),
+            snapshotId: State.snapshotId(state),
           })),
       }),
       operation({
@@ -246,7 +238,7 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
         failure: Failure,
         handle: (input) =>
           Effect.map(input.scope === undefined ? merged : load(input.scope), (state) => ({
-            text: HarnessOverview.formatOverview(state),
+            text: Overview.format(state),
           })),
       }),
       ...authoredKinds.map(createOperation),
@@ -282,19 +274,16 @@ export const make = (options: Options): HostBindingRegistry.Module<HarnessStore.
               if (event === undefined)
                 return yield* rejected("unknown-refinement", `No refinement is recorded under ${input.refinementId}`)
               const at = yield* instant
-              const proposal = Refinement.rollbackProposal(
-                { state, event },
-                { id: `rollback-${input.refinementId}`, at },
-              )
-              const result = Refinement.applyTrustedProposal(state, proposal)
+              const proposal = Refinement.makeRollback({ state, event }, { id: `rollback-${input.refinementId}`, at })
+              const result = Refinement.applyTrusted(state, proposal)
               if (Result.isFailure(result))
                 return yield* rejected(result.failure.reason, result.failure.message, result.failure.target)
-              const store = yield* HarnessStore.HarnessStore
+              const store = yield* Store.Store
               yield* store
                 .save(result.success.state)
                 .pipe(Effect.mapError((error) => rejected(error.reason, error.message)))
               return {
-                snapshotId: HarnessState.snapshotId(result.success.state),
+                snapshotId: State.snapshotId(result.success.state),
                 applied: result.success.event.applied.length,
               }
             }),

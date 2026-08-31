@@ -1,4 +1,6 @@
-import { McpToolSource, OAuth } from "tenetkit/mcp"
+import { MCPClient, OAuth } from "tenetkit/mcp"
+import * as MCPHttp from "tenetkit/mcp/client/http"
+import * as MCPStdio from "tenetkit/mcp/client/stdio"
 import { Context, Crypto, Effect, Layer, Schema, Scope } from "effect"
 import type { Server } from "./configuration"
 import * as McpOAuth from "./oauth-service"
@@ -11,7 +13,7 @@ export class Diagnostic extends Schema.TaggedError<Diagnostic>()("@rika/extensio
 }) {}
 
 export interface McpRuntimeInterface {
-  readonly connect: (server: Server) => Effect.Effect<McpToolSource.Interface, Diagnostic, Scope.Scope>
+  readonly connect: (server: Server) => Effect.Effect<MCPClient.Service, Diagnostic, Scope.Scope>
 }
 
 export class McpRuntimeService extends Context.Service<McpRuntimeService, McpRuntimeInterface>()(
@@ -27,7 +29,7 @@ export const layerWithStore: Layer.Layer<McpRuntimeService, never, OAuth.TokenSt
       const host = yield* McpOAuth.OAuthHost.Host
       return McpRuntimeService.of({
         connect: Effect.fn("McpRuntime.connect")(function* (server: Server) {
-          let oauth: OAuth.Interface | undefined
+          let oauth: OAuth.Service | undefined
           if (server.kind === "remote") {
             const callback = yield* host
               .prepareCallback("/oauth/callback")
@@ -49,20 +51,21 @@ export const layerWithStore: Layer.Layer<McpRuntimeService, never, OAuth.TokenSt
             )
           }
           return yield* Layer.build(
-            McpToolSource.layer({
-              name: server.name,
-              transport:
-                server.kind === "local"
-                  ? { kind: "stdio", command: server.command, args: server.args, env: { ...server.environment } }
-                  : {
-                      kind: "http",
-                      url: server.url,
-                      headers: { ...server.headers },
-                      oauth: oauth!,
-                    },
-            }),
+            server.kind === "local"
+              ? MCPStdio.layer({
+                  name: server.name,
+                  transport: { command: server.command, args: server.args, env: { ...server.environment } },
+                })
+              : MCPHttp.layer({
+                  name: server.name,
+                  transport: {
+                    url: server.url,
+                    requestInit: { headers: { ...server.headers } },
+                    oauth: oauth!,
+                  },
+                }),
           ).pipe(
-            Effect.map((context) => Context.get(context, McpToolSource.McpToolSource)),
+            Effect.map((context) => Context.get(context, MCPClient.MCPClient)),
             Effect.mapError((error) =>
               Diagnostic.make({ server: server.name, phase: "connect", message: error.message }),
             ),
@@ -82,21 +85,18 @@ export const testLayer = (connect: McpRuntimeInterface["connect"]) =>
 
 export const discover: (
   server: Server,
-) => Effect.Effect<ReadonlyArray<McpToolSource.DiscoveredTool>, Diagnostic, McpRuntimeService | Scope.Scope> =
-  Effect.fn("McpRuntime.discover")(function* (server: Server) {
-    const runtime = yield* McpRuntimeService
-    const source = yield* runtime.connect(server)
-    return yield* source.tools.pipe(
-      Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
-      Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "discover", message: String(error) })),
-    )
-  })
+) => Effect.Effect<ReadonlyArray<MCPClient.DiscoveredTool>, Diagnostic, McpRuntimeService | Scope.Scope> = Effect.fn(
+  "McpRuntime.discover",
+)(function* (server: Server) {
+  const runtime = yield* McpRuntimeService
+  const source = yield* runtime.connect(server)
+  return yield* source.tools.pipe(
+    Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
+    Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "discover", message: String(error) })),
+  )
+})
 
-export const call = Effect.fn("McpRuntime.call")(function* (
-  server: Server,
-  tool: string,
-  input: McpToolSource.JsonValue,
-) {
+export const call = Effect.fn("McpRuntime.call")(function* (server: Server, tool: string, input: MCPClient.JsonValue) {
   const runtime = yield* McpRuntimeService
   const source = yield* runtime.connect(server)
   return yield* source

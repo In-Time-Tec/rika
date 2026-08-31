@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { HarnessMerge, HarnessState, HarnessStore } from "tenetkit/harness"
+import { State, Store } from "tenetkit/agent-guidance"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
@@ -20,17 +20,17 @@ const temporaryRoots = Effect.gen(function* () {
 const storeLayer = Layer.unwrap(Effect.map(temporaryRoots, StoreLocations.layer))
 
 const effective = Effect.gen(function* () {
-  const store = yield* HarnessStore.HarnessStore
+  const store = yield* Store.Store
   const states = yield* Effect.forEach(ScopePolicy.mergeOrder, (level) =>
     store.load(ScopePolicy.scopeString(level, identity)),
   )
-  return states.reduce((outer, inner) => HarnessMerge.mergeStates(outer, inner))
+  return states.reduce((outer, inner) => State.merge(outer, inner))
 })
 
-const mounted = Effect.flatMap(HarnessStore.HarnessStore, (store) =>
+const mounted = Effect.flatMap(Store.Store, (store) =>
   mountModules({
     modules: [HarnessBinding.make({ workspaceDigest: identity.workspaceDigest })],
-    services: Context.make(HarnessStore.HarnessStore, store),
+    services: Context.make(Store.Store, store),
   }),
 )
 
@@ -48,7 +48,7 @@ describe("continual harness end to end over the real store", () => {
             id: "learned",
             title: "prefer the owning interface",
             content: "walk the interface before editing",
-            baseSnapshot: HarnessState.snapshotId(yield* effective),
+            baseSnapshot: State.snapshotId(yield* effective),
           },
         })
         const after = yield* effective
@@ -72,10 +72,10 @@ describe("continual harness end to end over the real store", () => {
             id: "durable",
             title: "durable",
             content: "c",
-            baseSnapshot: HarnessState.snapshotId(yield* effective),
+            baseSnapshot: State.snapshotId(yield* effective),
           },
         })
-        const store = yield* HarnessStore.HarnessStore
+        const store = yield* Store.Store
         const reloaded = yield* store.load(ScopePolicy.scopeString("thread", identity))
         expect(reloaded.entries.skill.map((entry) => entry.id)).toEqual(["durable"])
       }),
@@ -92,10 +92,10 @@ describe("continual harness end to end over the real store", () => {
             title: "reviewer",
             content: "review the diff",
             reference: "run_child",
-            baseSnapshot: HarnessState.snapshotId(yield* effective),
+            baseSnapshot: State.snapshotId(yield* effective),
           },
         })
-        const store = yield* HarnessStore.HarnessStore
+        const store = yield* Store.Store
         const workspaceScope = ScopePolicy.scopeString("workspace", identity)
         yield* surface.invoke({
           module: "harness",
@@ -105,7 +105,7 @@ describe("continual harness end to end over the real store", () => {
             title: "reviewer",
             content: "review the diff",
             reference: "run_child",
-            baseSnapshot: HarnessState.snapshotId(yield* store.load(workspaceScope)),
+            baseSnapshot: State.snapshotId(yield* store.load(workspaceScope)),
             scope: "workspace",
           },
         })
@@ -114,7 +114,7 @@ describe("continual harness end to end over the real store", () => {
           operation: "deleteSubagent",
           input: {
             id: "reviewer",
-            baseSnapshot: HarnessState.snapshotId(yield* store.load(ScopePolicy.scopeString("thread", identity))),
+            baseSnapshot: State.snapshotId(yield* store.load(ScopePolicy.scopeString("thread", identity))),
           },
         })
         const merged = yield* effective

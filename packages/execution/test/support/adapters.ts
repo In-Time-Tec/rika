@@ -14,4 +14,5 @@ export const remoteCell = remoteCells({
 export const configure = (options: Omit<ConfigureOptions, "cell">): ReturnType<typeof configureRoute> =>
   configureRoute({ ...options, cell: remoteCell })
 
-export const memoryLayer = (options: Omit<MemoryOptions, "cells">) => layerMemory({ ...options, cells: remoteCell })
+export const memoryLayer = (options: Omit<MemoryOptions, "cells">): ReturnType<typeof layerMemory> =>
+  layerMemory({ ...options, cells: remoteCell })

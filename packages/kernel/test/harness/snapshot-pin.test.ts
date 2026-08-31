@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry, HarnessState } from "tenetkit/harness"
+import { Entry, State } from "tenetkit/agent-guidance"
 import { Effect } from "effect"
 import * as SnapshotPin from "@rika/kernel/harness-snapshot-pin"
 import * as PromptSections from "@rika/kernel/harness-prompt-sections"
 
-const entry = (id: string, title: string, content: string): HarnessEntry.HarnessEntry => ({
+const entry = (id: string, title: string, content: string): Entry.GuidanceEntry => ({
   id,
   kind: "memory",
   scope: "thread:session",
@@ -15,14 +15,13 @@ const entry = (id: string, title: string, content: string): HarnessEntry.Harness
   updatedAt: "2024-01-01T00:00:00.000Z",
 })
 
-const state = (entries: ReadonlyArray<HarnessEntry.HarnessEntry>) =>
-  HarnessState.make({ scope: "thread:session", entries })
+const state = (entries: ReadonlyArray<Entry.GuidanceEntry>) => State.make({ scope: "thread:session", entries })
 
 describe("harness snapshot pinning", () => {
   it("pins a content-addressed capability an Execution can carry", () => {
     const pinned = SnapshotPin.pin(state([entry("a", "t", "c")]))
     expect(pinned.capability.name).toBe("rika-harness-snapshot")
-    expect(pinned.id).toMatch(/^harness-snapshot:v1:sha256:[0-9a-f]{64}$/)
+    expect(pinned.id).toMatch(/^guidance-snapshot:v1:sha256:[0-9a-f]{64}$/)
   })
 
   it("gives the same state the same pin, so an unchanged harness does not churn the Execution", () => {
@@ -42,7 +41,7 @@ describe("harness snapshot pinning", () => {
     Effect.gen(function* () {
       const pinned = SnapshotPin.pin(state([entry("a", "t", "c")]))
       const restored = yield* SnapshotPin.reconstruct(pinned.id, pinned.payload)
-      expect(HarnessState.snapshotId(restored)).toBe(pinned.id)
+      expect(State.snapshotId(restored)).toBe(pinned.id)
       expect(restored.entries.memory.map((value) => value.id)).toEqual(["a"])
     }),
   )
@@ -52,7 +51,7 @@ describe("harness snapshot pinning", () => {
       const pinned = SnapshotPin.pin(state([entry("a", "t", "c")]))
       const drifted = SnapshotPin.pin(state([entry("a", "t", "tampered")]))
       const failure = yield* Effect.flip(SnapshotPin.reconstruct(pinned.id, drifted.payload))
-      expect(failure._tag).toBe("tenetkit/harness/SnapshotMismatch")
+      expect(failure._tag).toBe("tenetkit/agent-guidance/SnapshotMismatch")
     }),
   )
 
@@ -60,7 +59,7 @@ describe("harness snapshot pinning", () => {
     Effect.gen(function* () {
       const pinned = SnapshotPin.pin(state([]))
       const failure = yield* Effect.flip(SnapshotPin.reconstruct(pinned.id, { nonsense: true }))
-      expect(failure._tag).toBe("tenetkit/harness/SnapshotInvalid")
+      expect(failure._tag).toBe("tenetkit/agent-guidance/SnapshotInvalid")
     }),
   )
 

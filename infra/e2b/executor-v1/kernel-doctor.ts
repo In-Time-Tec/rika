@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { CellExecutor, layer } from "@rika/kernel/cell-executor"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { Context, Effect, Layer } from "effect"
 
 const workspace = process.argv[2] ?? "/home/rika-workspace/workspace/repo"
@@ -16,10 +16,10 @@ const program = Effect.scoped(
         runtimeVersion: process.versions.bun,
         trustMode: "trusted-local",
         servers: [],
-        registry: HostBindingRegistry.layerTest({
+        registry: HostModules.layerTest({
           descriptors: [],
-          resolve: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
-          invoke: (request) => Effect.fail(HostBindingRegistry.HostBindingNotFound.make({ module: request.module })),
+          resolve: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
+          invoke: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
         }),
       }).pipe(Layer.provide(BunServices.layer)),
     )

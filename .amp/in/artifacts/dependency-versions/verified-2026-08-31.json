@@ -1,0 +1,15 @@
+{
+  "verifiedAt": "2026-08-31",
+  "source": "npm registry dist-tags/version queried with npm view",
+  "selected": {
+    "tenetkit": { "installed": "0.44.0", "registryLatest": "0.44.0" },
+    "@tenetkit/pg": { "installed": "0.44.0", "registryLatest": "0.44.0" },
+    "effectV4": { "installed": "4.0.0-rc.112", "registryRc": "4.0.0-rc.112" },
+    "@effect/ai-openrouterV4": { "installed": "4.0.0-rc.112", "registryRc": "4.0.0-rc.112" }
+  },
+  "deferredWithoutMeasuredBenefit": {
+    "@opentui/core": { "installed": "0.4.3", "registryLatest": "0.5.9" },
+    "e2b": { "installed": "2.41.0", "registryLatest": "2.46.1" },
+    "foldkit": { "installed": "0.148.2", "registryLatest": "0.156.0" }
+  }
+}

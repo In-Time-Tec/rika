@@ -186,7 +186,7 @@ test("submitting while a turn is active stays an ordinary submission", () => {
     { input: "queued follow-up", attachments: [], cursor: 0, submissionId: "sub-q" },
   ])
 })
-test("submitting while busy waits for admission before adding a provisional queue row", () => {
+test("submitting while busy adds a provisional queue row before admission", () => {
   const busy: Model = resetQueue(
     {
       ...initial("/work"),
@@ -200,7 +200,7 @@ test("submitting while busy waits for admission before adding a provisional queu
     [],
   )
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-1" })
-  expect(submitted.queue).toEqual([])
+  expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
   expect(submitted.queueRevision).toBe(3)
   expect(submitted.input).toBe("")
   const admitted = update(submitted, {

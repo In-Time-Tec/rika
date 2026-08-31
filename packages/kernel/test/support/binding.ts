@@ -1,11 +1,11 @@
 import { Context, Effect } from "effect"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { NestedOperation, ToolContext } from "tenetkit"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 
-export const toolContext: ToolContext.Interface = ToolContext.ToolContext.of({
+export const toolContext: ToolContext.Service = ToolContext.ToolContext.of({
   signal: new AbortController().signal,
-  emit: () => Effect.void,
+  emit: () => Effect.succeed(true),
   sessionId: "session",
   runId: "run",
   toolCallId: "call",
@@ -16,7 +16,7 @@ export interface Journal {
   readonly kinds: Array<string>
   readonly approvals: Array<string | undefined>
   readonly policies: Array<string>
-  readonly nested: NestedOperation.Interface
+  readonly nested: NestedOperation.Service
 }
 
 export const journal = (): Journal => {
@@ -42,13 +42,11 @@ export const codingToolRuntime = (run: CodingToolRuntime.Interface["run"]) =>
   Context.make(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run }))
 
 export const mountModules = <R>(input: {
-  readonly modules: ReadonlyArray<
-    HostBindingRegistry.Module<R | ToolContext.ToolContext | NestedOperation.NestedOperations>
-  >
+  readonly modules: ReadonlyArray<HostModules.Module<R | ToolContext.ToolContext | NestedOperation.Operations>>
   readonly services: Context.Context<R>
-  readonly nested?: NestedOperation.Interface | undefined
+  readonly nested?: NestedOperation.Service | undefined
   readonly sessionId?: string
-}): Effect.Effect<HostBindingRegistry.Interface, HostBindingRegistry.HostBindingConflict> => {
+}): Effect.Effect<HostModules.Service, HostModules.HostModuleConflict> => {
   const { modules, services } = input
   const nested = input.nested ?? { run: (_request, effect) => effect }
   const context =
@@ -56,10 +54,10 @@ export const mountModules = <R>(input: {
       ? toolContext
       : ToolContext.ToolContext.of({ ...toolContext, sessionId: input.sessionId })
   return Effect.provideContext(
-    HostBindingRegistry.make(modules),
+    HostModules.make(modules),
     services.pipe(
       Context.add(ToolContext.ToolContext, context),
-      Context.add(NestedOperation.NestedOperations, NestedOperation.NestedOperations.of(nested)),
+      Context.add(NestedOperation.Operations, NestedOperation.Operations.of(nested)),
     ),
   )
 }

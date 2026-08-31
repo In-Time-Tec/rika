@@ -1,13 +1,11 @@
 import { ModelRegistry } from "tenetkit"
-import {
-  AmazonBedrock,
-  Anthropic,
-  Deterministic,
-  OpenAi,
-  OpenAiChatCompletions,
-  OpenAiResponses,
-  OpenRouter,
-} from "tenetkit/ai"
+import * as AmazonBedrock from "tenetkit/ai/amazon-bedrock"
+import * as Anthropic from "tenetkit/ai/anthropic"
+import * as Deterministic from "tenetkit/ai/deterministic"
+import * as OpenAi from "tenetkit/ai/openai"
+import * as OpenAiChatCompletions from "tenetkit/ai/openai-chat-completions"
+import * as OpenAiResponses from "tenetkit/ai/openai-responses"
+import * as OpenRouter from "tenetkit/ai/openrouter"
 import { Errors } from "tenetkit/runtime"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
@@ -89,12 +87,14 @@ const openAiResponsesLayer = (
         Errors.ExecutableRegistrationInvalid.make({ message: "OpenAI account authentication is unavailable" }),
       ),
     )
-  return OpenAi.layerAccount({
-    model: candidate.model,
-    registrationKey,
-    config: OpenAiResponses.decodeConfig(candidate.providerOptions),
-    credentials: OpenAiAccountCredentials.fromRikaAuth(openAiAccountAccess(credentialIdentity), fingerprint),
-  }).pipe(Layer.provide(httpClientLayer))
+  const credentials = OpenAiAccountCredentials.fromRikaAuth(openAiAccountAccess(credentialIdentity), fingerprint)
+  return ModelRegistry.layer([
+    OpenAi.registration({
+      model: candidate.model,
+      registrationKey,
+      config: OpenAiResponses.decodeConfig(candidate.providerOptions),
+    }),
+  ]).pipe(Layer.provide(OpenAiAccountCredentials.layerClient(credentials)), Layer.provide(httpClientLayer))
 }
 
 export const layer = (options: {

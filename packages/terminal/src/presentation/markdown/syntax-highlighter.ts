@@ -1,5 +1,5 @@
 import { Function, Schema } from "effect"
-import Prism from "prismjs"
+import { Prism } from "./prism"
 import "prismjs/components/prism-typescript.js"
 import "prismjs/components/prism-jsx.js"
 import "prismjs/components/prism-tsx.js"

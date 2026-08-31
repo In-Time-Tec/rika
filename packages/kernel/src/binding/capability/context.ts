@@ -1,6 +1,6 @@
 import { Effect, Predicate, Schema } from "effect"
 import { Prompt, Session, SessionHistory, ToolContext } from "tenetkit"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import { operation } from "../envelope"
 
 export const name = "context"
@@ -125,15 +125,19 @@ const projected = (entry: Session.Entry) => ({
 const unavailable = (cause: { readonly message: string }) => ContextUnavailable.make({ message: cause.message })
 
 /**
- * Every operation reads the exact entry path and never appends. `SessionStore.append` is deliberately
+ * Every operation acquires the exact Session, reads its entry path, and never appends. `append` is deliberately
  * unreachable from this module: the kernel observes canonical history, it never authors it.
  */
-const path = Effect.flatMap(Session.SessionStore, (store) => store.path()).pipe(Effect.mapError(unavailable))
+const path = Effect.scoped(
+  Effect.flatMap(ToolContext.ToolContext, (context) =>
+    Effect.flatMap(Session.acquire(context.sessionId), (session) => session.path()),
+  ),
+).pipe(Effect.mapError(unavailable))
 
 export const make = (options: {
   readonly workspace: string
   readonly trustMode: string
-}): HostBindingRegistry.Module<Session.SessionStore | ToolContext.ToolContext> => ({
+}): HostModules.Module<Session.SessionDirectory | ToolContext.ToolContext> => ({
   name,
   operations: [
     operation({
@@ -164,7 +168,7 @@ export const make = (options: {
           const pageInput: HistoryPageInput = { limit: input.limit }
           if (input.before !== undefined) pageInput.before = input.before
           if (input.after !== undefined) pageInput.after = input.after
-          const page = SessionHistory.pageHistory(entries, pageInput)
+          const page = SessionHistory.page(entries, pageInput)
           const result: PageValue = {
             entries: page.entries.map(projected),
             hasBefore: page.hasBefore,

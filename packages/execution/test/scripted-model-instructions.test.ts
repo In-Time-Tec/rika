@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { HarnessState } from "tenetkit/harness"
+import { State } from "tenetkit/agent-guidance"
 import { ExecutableRegistration } from "tenetkit/runtime"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Effect } from "effect"
@@ -20,7 +20,7 @@ const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.
 it.effect("carries a harness refinement into the instructions the root agent is given", () =>
   Effect.gen(function* () {
     const executionRoute = testExecutionRoute()
-    const empty = HarnessState.empty("global")
+    const empty = State.empty("global")
     const harnessSnapshot = {
       ...empty,
       entries: {
@@ -154,7 +154,7 @@ it.effect("keeps subagent depth and fan-out as the only pinned execution limits"
 it.effect("registers the harness pin the resolver expects for the same workspace and refuses one from another", () =>
   Effect.gen(function* () {
     const executionRoute = testExecutionRoute()
-    const empty = HarnessState.empty("global")
+    const empty = State.empty("global")
     const snapshotFor = (scope: string) => ({ ...empty, scope })
     const one = yield* configure({
       executionRoute,
@@ -169,7 +169,7 @@ it.effect("registers the harness pin the resolver expects for the same workspace
       harnessSnapshot: snapshotFor("workspace:another"),
     })
     const harnessPinOf = (configured: Configured) =>
-      configured.registrations.find((registration) => registration.codec === "tenetkit/harness/snapshot")?.pin
+      configured.registrations.find((registration) => registration.codec === "tenetkit/agent-guidance/snapshot")?.pin
 
     /**
      * A harness pin is derived from the snapshot the workspace was read for, so two workspaces pin

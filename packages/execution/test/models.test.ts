@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { Anthropic, OpenAi } from "tenetkit/ai"
+import * as Anthropic from "tenetkit/ai/anthropic"
+import * as OpenAi from "tenetkit/ai/openai"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { Schema } from "effect"

@@ -32,7 +32,7 @@ const routeWithIdentity = (rootIdentity: string, titleIdentity: string) => {
   return { ...route, main: withIdentity(route.main, rootIdentity), title: withIdentity(route.title, titleIdentity) }
 }
 
-const readTreeEvents = (runtime: Runtime.Interface, rootRunId: string) =>
+const readTreeEvents = (runtime: Runtime.Service, rootRunId: string) =>
   RunTree.replay({ rootRunId, limit: 1_000 }).pipe(
     Effect.provideService(Runtime.Runtime, runtime),
     Effect.map(({ events }) => events),

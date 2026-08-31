@@ -66,6 +66,8 @@ test("publishes only unchanged, attested native archives from a validated tag", 
   expect(jobs.publish?.permissions).toEqual({ contents: "write" })
 
   expect(commands("package").match(/bun run package/g)).toHaveLength(1)
+  expect(commands("package")).toContain("command -v cc")
+  expect(commands("package")).toContain(".rika-client-runtime")
   expect(commands("package")).toContain("env -i")
   expect(commands("package")).toContain("--version")
   expect(commands("package")).toContain("--help")

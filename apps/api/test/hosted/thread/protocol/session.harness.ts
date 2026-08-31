@@ -1,7 +1,7 @@
 import "./harness"
 import { expect, it } from "@effect/vitest"
 import { makeSessionFixture } from "./session.fixture"
-import { Context, Effect, Fiber, Layer } from "effect"
+import { Context, Effect, Fiber, Layer, Ref } from "effect"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import {
   CommandId,
@@ -40,14 +40,11 @@ it.effect("derives personal authority, admits a retried submission once, and res
   return Effect.scoped(
     Effect.gen(function* () {
       const previews = yield* makeHostedPreviewBus()
-      const protocol = Context.get(
-        yield* Layer.build(
-          hostedThreadProtocolLayerWithOptions({ notifications, previews: previews.bus }).pipe(
-            Layer.provide(dependencies),
-          ),
-        ),
-        HostedThreadProtocol,
-      )
+      const commandWakeups = yield* Ref.make(0)
+      const wakeCommand = Ref.update(commandWakeups, (current) => current + 1)
+      const protocolLayer = hostedThreadProtocolLayerWithOptions({ notifications, previews: previews.bus, wakeCommand })
+        .pipe(Layer.provide(dependencies))
+      const protocol = Context.get(yield* Layer.build(protocolLayer), HostedThreadProtocol)
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
       const created = yield* first.receive({
         protocolVersion,
@@ -70,6 +67,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         _tag: "CommandAdmitted",
         threadVersion: "1",
       })
+      expect(yield* Ref.get(commandWakeups)).toBe(1)
       const creationCompletion = yield* Effect.forkChild(first.outbound, {
         startImmediately: true,
       })
@@ -303,6 +301,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         message: "creation unavailable",
         details: {},
       })
+      const replayReadsBeforeAcknowledgement = store.replayReads()
       expect(
         (yield* second.receive({
           protocolVersion,
@@ -318,6 +317,7 @@ it.effect("derives personal authority, admits a retried submission once, and res
         threadId,
       })
       expect(store.acknowledgements()).toEqual([{ threadId, cursor: "0" }])
+      expect(store.replayReads()).toBe(replayReadsBeforeAcknowledgement)
       expect(
         (yield* second.receive({
           ...submit,

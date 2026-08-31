@@ -13,7 +13,7 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import { type OwnerId, ThreadId } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { bindingManifest } from "@rika/remote-execution/protocol"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { Clock, Config, Context, Crypto, Effect, Layer, LayerMap, Schema, Scope } from "effect"
 import { HostedEnvironment } from "../hosted/environment/runtime"
 import { RunnerExecutor } from "../runner/executor"
@@ -111,7 +111,7 @@ export const service = Layer.effect(
         Context.merge(input.authority, apiContext),
         machineContext,
       )
-      const registry = yield* HostBindingRegistry.make(hostedBindingModules(input.workspaceId)).pipe(
+      const registry = yield* HostModules.make(hostedBindingModules(input.workspaceId)).pipe(
         Effect.provideContext(context),
         Effect.orDie,
       )

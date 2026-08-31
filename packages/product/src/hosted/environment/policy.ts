@@ -71,6 +71,11 @@ export const PhaseEgressPolicy = Schema.Struct({
 })
 export type PhaseEgressPolicy = typeof PhaseEgressPolicy.Type
 
+const defaultSetupEgress = ["github.com", "registry.npmjs.org"] as const
+
+export const defaultEgressDestinations = (phase: EnvironmentPhase): ReadonlyArray<string> =>
+  phase === "setup" ? defaultSetupEgress : []
+
 export interface EnvironmentCandidate {
   readonly reference: EnvironmentReference
 }

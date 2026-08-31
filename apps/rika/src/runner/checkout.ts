@@ -50,12 +50,18 @@ export const inspectRunnerCheckout = Effect.fn("RunnerCheckout.inspect")(functio
   const checkoutPath = yield* fileSystem
     .realPath(root)
     .pipe(Effect.mapError(() => RunnerError.make({ message: "Could not inspect the local checkout" })))
-  const commonDirectory =
-    (yield* runGit(checkoutPath, ["rev-parse", "--path-format=absolute", "--git-common-dir"])) ?? checkoutPath
+  const [commonDirectoryValue, remoteUrlValue, headRevision, branch] = yield* Effect.all(
+    [
+      runGit(checkoutPath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      runGit(checkoutPath, ["remote", "get-url", "origin"]),
+      runGit(checkoutPath, ["rev-parse", "HEAD"]),
+      runGit(checkoutPath, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
+    ],
+    { concurrency: 4 },
+  )
+  const commonDirectory = commonDirectoryValue ?? checkoutPath
   const repositoryPath = yield* fileSystem.realPath(commonDirectory).pipe(Effect.orElseSucceed(() => commonDirectory))
-  const remoteUrl = safeRemote(yield* runGit(checkoutPath, ["remote", "get-url", "origin"]))
-  const headRevision = yield* runGit(checkoutPath, ["rev-parse", "HEAD"])
-  const branch = yield* runGit(checkoutPath, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+  const remoteUrl = safeRemote(remoteUrlValue)
   const repositoryIdentity = digest([remoteUrl ?? repositoryPath])
   const checkoutFingerprint = digest([input.deviceId, checkoutPath, repositoryIdentity])
   const workspaceIdentity = `runner:${digest([input.deviceId, checkoutFingerprint])}`

@@ -3,6 +3,7 @@ import {
   EnvironmentReferenceId,
   EnvironmentValueDigest,
   SourceCommitSha,
+  defaultEgressDestinations,
   normalizeEgressDestination,
   resolveEgressPolicy,
   resolveEnvironmentReferences,
@@ -127,6 +128,8 @@ describe("hosted environment policy", () => {
   })
 
   it("creates separate constrained setup and runtime egress policies", () => {
+    expect(defaultEgressDestinations("setup")).toEqual(["github.com", "registry.npmjs.org"])
+    expect(defaultEgressDestinations("runtime")).toEqual([])
     expect(
       resolveEgressPolicy({ phase: "setup", approved: ["registry.npmjs.org", "github.com", "github.com"] }),
     ).toEqual({ phase: "setup", allow: ["github.com", "registry.npmjs.org"] })

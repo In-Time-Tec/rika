@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import { ArtifactStore, ArtifactUnavailable, Stored } from "./store"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
 
@@ -16,7 +16,7 @@ const PutInput = Schema.Struct({ value: Schema.Unknown, mediaType: Schema.option
 const GetInput = Schema.Struct({ id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/)) })
 const Loaded = Schema.Struct({ value: Schema.Unknown })
 
-export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<ArtifactStore | Requirements>> = [
+export const operations: ReadonlyArray<HostModules.AnyOperation<ArtifactStore | Requirements>> = [
   operation({
     name: "put",
     input: PutInput,
@@ -44,4 +44,4 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<Artifact
   }),
 ]
 
-export const module: HostBindingRegistry.Module<ArtifactStore | Requirements> = { name, operations }
+export const module: HostModules.Module<ArtifactStore | Requirements> = { name, operations }

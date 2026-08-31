@@ -44,7 +44,7 @@ export const failure: {
 )
 
 const secretPattern = new RegExp(
-  String.raw`(authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{12,}|(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|private[_-]?key)\s*[:=]\s*["']?[a-z0-9._~+/=-]{12,}["']?(?![a-z0-9._~+/=-]|\s*\()|\b(sk|ghp|github_pat)_[a-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)`,
+  String.raw`(authorization\s*[:=]\s*(bearer|basic)\s+[a-z0-9._~+/=-]{12,}|(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|private[_-]?key)\s*[:=]\s*["']?[a-z0-9._~+/=-]{12,}["']?(?![a-z0-9._~+/=-]|\s*[<(])|\b(sk|ghp|github_pat)_[a-z0-9_-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)`,
   "iu",
 )
 

@@ -340,6 +340,7 @@ export const layer = (options: {
           databaseUrl: options.databaseUrl,
           previews: Context.get(previewContext, HostedPreviewBus),
           workspacePlacement: workspacePlacement(placementDatabase),
+          wakeCommand: threadCommandWorker.wake,
         }).pipe(
           Layer.provide(
             Layer.succeedContext(

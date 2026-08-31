@@ -6,7 +6,7 @@ import * as ContextBinding from "@rika/kernel/context-binding"
 import { NestedOperationFailed } from "@rika/kernel/nested-operation-envelope"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { NestedOperation, Session, ToolContext } from "tenetkit"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Inspectable, Layer, Option, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as HostedKernel from "../../src/host/kernel"
@@ -59,7 +59,7 @@ const request = (
 const toolContext = (operationKey: string, toolCallId: string) =>
   ToolContext.ToolContext.of({
     signal: new AbortController().signal,
-    emit: () => Effect.void,
+    emit: () => Effect.succeed(true),
     sessionId: "session-1",
     runId: "run-1",
     toolCallId,
@@ -201,7 +201,7 @@ describe("hosted TypeScript kernel", () => {
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-hosted-kernel-" })
         const session = yield* Layer.build(Session.layerMemory)
         const nestedRequests: Array<Omit<NestedOperation.Request, "render">> = []
-        const nested = NestedOperation.NestedOperations.of({
+        const nested = NestedOperation.Operations.of({
           run: (input, effect) => {
             nestedRequests.push(
               input.approval === undefined
@@ -215,7 +215,7 @@ describe("hosted TypeScript kernel", () => {
             )
             return input.approval === undefined
               ? effect
-              : NestedOperation.NestedOperationSuspended.make({
+              : NestedOperation.Suspended.make({
                   token: "approval-token",
                   operationKey: "operation-write",
                   ordinal: 0,
@@ -230,19 +230,16 @@ describe("hosted TypeScript kernel", () => {
               run: () => Effect.succeed({ text: "unused", truncated: false }),
             }),
           ),
-          Context.add(NestedOperation.NestedOperations, nested),
+          Context.add(NestedOperation.Operations, nested),
         )
         const authority = (operationKey: string, toolCallId: string) =>
           Context.add(base, ToolContext.ToolContext, toolContext(operationKey, toolCallId))
         const modules: ReadonlyArray<
-          HostBindingRegistry.Module<
-            | CodingToolRuntime.Service
-            | NestedOperation.NestedOperations
-            | Session.SessionStore
-            | ToolContext.ToolContext
+          HostModules.Module<
+            CodingToolRuntime.Service | NestedOperation.Operations | Session.SessionDirectory | ToolContext.ToolContext
           >
         > = [ContextBinding.make({ workspace: root, trustMode: "hosted" }), WorkspaceBinding.module]
-        const registry = yield* HostBindingRegistry.make(modules).pipe(
+        const registry = yield* HostModules.make(modules).pipe(
           Effect.provideContext(authority("operation-1", "call-1")),
         )
         const manifest = yield* bindingManifest(registry.descriptors)

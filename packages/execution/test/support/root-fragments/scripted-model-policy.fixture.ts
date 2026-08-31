@@ -148,7 +148,6 @@ it.effect("pins the kernel profile the host builds its pool from into every conv
     expect(registration?.payload).toMatchObject({
       workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
       runtime: { name: "bun", version: kernel.runtimeVersion },
-      trustMode: "trusted-local",
     })
   }),
 )
@@ -177,7 +176,6 @@ it.effect("changes the admitted executable when any kernel profile input changes
       [
         { ...kernel, runtimeVersion: "9.9.9" },
         { ...kernel, dataRoot: "/other-data" },
-        { ...kernel, trustMode: "trusted-workspace" as const },
         { ...kernel, limits: { sourceBytes: 1_024, cellDeadlineMillis: 5_000 } },
       ],
       (variant) => configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel: variant }),

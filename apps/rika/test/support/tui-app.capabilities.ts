@@ -84,6 +84,7 @@ export interface TuiAppRuntimeCapability {
   readonly setConnectionState: (state: InteractiveConnectionState) => Effect.Effect<void>
   readonly modelRequestCount: Effect.Effect<number>
   readonly submissionAttempts: Effect.Effect<number>
+  readonly selectionAttempts: Effect.Effect<number>
   readonly modelProviderHttpEnvelopeCounts: Effect.Effect<ProviderHttpEnvelopeCounts>
   readonly modelPrompts: ReturnType<LaneModels["promptsFor"]>
   readonly modelToolNamesFor: (profile: Profile) => Effect.Effect<ReadonlyArray<ReadonlyArray<string>>>

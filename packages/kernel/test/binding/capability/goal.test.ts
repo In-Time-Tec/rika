@@ -7,7 +7,7 @@ import { GoalService, makeMemory } from "@rika/product/goal-service"
 import { exhausted } from "@rika/product/goal-record"
 import { journal, mountModules } from "../../support/binding"
 
-const registry = (nested?: NestedOperation.Interface) =>
+const registry = (nested?: NestedOperation.Service) =>
   Effect.flatMap(makeMemory, (goals) =>
     mountModules({ modules: [GoalBinding.module], services: Context.make(GoalService, GoalService.of(goals)), nested }),
   )

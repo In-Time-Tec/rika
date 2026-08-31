@@ -1,0 +1,8 @@
+{
+  "requestedModel": "z-ai/glm-5.3-flash",
+  "loginMilliseconds": 5424.712,
+  "flowMilliseconds": 5506.608,
+  "exitCode": 0,
+  "stdout": "{\"requestedModel\": \"z-ai/glm-5.3-flash\", \"connectionOnly\": true, \"processExitCode\": -9, \"firstFrameMilliseconds\": 16.33, \"connectionReadyMilliseconds\": 477.536, \"connectionReadyDetectionMilliseconds\": 1290.82, \"promptSentMilliseconds\": null, \"modelMarkerMilliseconds\": null, \"promptToMarkerMilliseconds\": null, \"markerObserved\": false, \"stageMilliseconds\": {\"process_start\": 245.536, \"first_draw\": 269.536, \"connection_ticket\": 414.536, \"connection_socket\": 418.536, \"attach_response\": 441.536, \"attach_projection\": 445.536, \"attach_ack\": 445.536, \"attach\": 445.536, \"target_resolution\": 445.536, \"connection_ready\": 477.536}, \"rawCapture\": \".amp/in/artifacts/glm-5.3-flash/local-rika-flow-source-before-retained-0.raw\", \"rawBytes\": 23016}\n",
+  "stderr": ""
+}

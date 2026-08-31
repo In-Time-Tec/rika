@@ -45,6 +45,7 @@ export const occurredAt = (millis: number): string => DateTime.formatIso(DateTim
 const treeEventImpl = (runId: string, event: RunEventInput, options: TreeEventOptions = {}): SemanticTreeEvent => {
   position += 1
   const rootRunId = options.rootRunId ?? "raw-root-run"
+  const withBudget = event._tag === "ModelResponseCommitted" ? { budgetCharge: 0, ...event } : event
   const normalizedEvent =
     event._tag === "RunCompleted"
       ? {
@@ -55,7 +56,7 @@ const treeEventImpl = (runId: string, event: RunEventInput, options: TreeEventOp
             ...event.result,
           },
         }
-      : event
+      : withBudget
   const decodedEvent = RunEvent.RunEvent.make({
     specVersion: "1",
     eventId: `${runId}:${position}`,

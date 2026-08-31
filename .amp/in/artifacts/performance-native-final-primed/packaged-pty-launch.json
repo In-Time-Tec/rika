@@ -1,0 +1,543 @@
+{
+  "schemaVersion": 1,
+  "method": {
+    "clock": "time.perf_counter_ns (monotonic)",
+    "terminal": {
+      "implementation": "Python standard-library PTY",
+      "columns": 80,
+      "rows": 24
+    },
+    "start": "immediately before subprocess creation",
+    "firstByte": "first byte read from the child PTY",
+    "firstCompletedFrame": "read containing the first synchronized-output end sequence ESC[?2026l",
+    "iterations": 100
+  },
+  "host": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.9.6"
+  },
+  "executable": {
+    "path": "/private/var/folders/l5/92s_16_15_nf455mdj3k64m80000gn/T/tmp.HlvbeamI8k/rika-0.11.5-darwin-arm64/bin/rika",
+    "bytes": 34376,
+    "sha256": "a842b77e4bfdb0c60de3ca6a4121ad3d6be1eec7b491d08cdbca33bcae56e7cd"
+  },
+  "summary": {
+    "spawnToFirstByteMilliseconds": {
+      "min": 1.396,
+      "p50": 1.64,
+      "p95": 1.864,
+      "max": 2.072
+    },
+    "spawnToFirstCompletedFrameMilliseconds": {
+      "min": 1.396,
+      "p50": 1.64,
+      "p95": 1.864,
+      "max": 2.072,
+      "targetMilliseconds": 50.0,
+      "pass": true
+    }
+  },
+  "samples": [
+    {
+      "iteration": 1,
+      "spawnToFirstByteMilliseconds": 2.072,
+      "spawnToFirstCompletedFrameMilliseconds": 2.072
+    },
+    {
+      "iteration": 2,
+      "spawnToFirstByteMilliseconds": 1.714,
+      "spawnToFirstCompletedFrameMilliseconds": 1.714
+    },
+    {
+      "iteration": 3,
+      "spawnToFirstByteMilliseconds": 1.69,
+      "spawnToFirstCompletedFrameMilliseconds": 1.69
+    },
+    {
+      "iteration": 4,
+      "spawnToFirstByteMilliseconds": 1.521,
+      "spawnToFirstCompletedFrameMilliseconds": 1.521
+    },
+    {
+      "iteration": 5,
+      "spawnToFirstByteMilliseconds": 1.619,
+      "spawnToFirstCompletedFrameMilliseconds": 1.619
+    },
+    {
+      "iteration": 6,
+      "spawnToFirstByteMilliseconds": 1.681,
+      "spawnToFirstCompletedFrameMilliseconds": 1.681
+    },
+    {
+      "iteration": 7,
+      "spawnToFirstByteMilliseconds": 1.58,
+      "spawnToFirstCompletedFrameMilliseconds": 1.58
+    },
+    {
+      "iteration": 8,
+      "spawnToFirstByteMilliseconds": 1.629,
+      "spawnToFirstCompletedFrameMilliseconds": 1.629
+    },
+    {
+      "iteration": 9,
+      "spawnToFirstByteMilliseconds": 1.461,
+      "spawnToFirstCompletedFrameMilliseconds": 1.461
+    },
+    {
+      "iteration": 10,
+      "spawnToFirstByteMilliseconds": 1.396,
+      "spawnToFirstCompletedFrameMilliseconds": 1.396
+    },
+    {
+      "iteration": 11,
+      "spawnToFirstByteMilliseconds": 1.576,
+      "spawnToFirstCompletedFrameMilliseconds": 1.576
+    },
+    {
+      "iteration": 12,
+      "spawnToFirstByteMilliseconds": 1.625,
+      "spawnToFirstCompletedFrameMilliseconds": 1.625
+    },
+    {
+      "iteration": 13,
+      "spawnToFirstByteMilliseconds": 1.539,
+      "spawnToFirstCompletedFrameMilliseconds": 1.539
+    },
+    {
+      "iteration": 14,
+      "spawnToFirstByteMilliseconds": 1.579,
+      "spawnToFirstCompletedFrameMilliseconds": 1.579
+    },
+    {
+      "iteration": 15,
+      "spawnToFirstByteMilliseconds": 1.522,
+      "spawnToFirstCompletedFrameMilliseconds": 1.522
+    },
+    {
+      "iteration": 16,
+      "spawnToFirstByteMilliseconds": 1.598,
+      "spawnToFirstCompletedFrameMilliseconds": 1.598
+    },
+    {
+      "iteration": 17,
+      "spawnToFirstByteMilliseconds": 1.545,
+      "spawnToFirstCompletedFrameMilliseconds": 1.545
+    },
+    {
+      "iteration": 18,
+      "spawnToFirstByteMilliseconds": 1.549,
+      "spawnToFirstCompletedFrameMilliseconds": 1.549
+    },
+    {
+      "iteration": 19,
+      "spawnToFirstByteMilliseconds": 1.473,
+      "spawnToFirstCompletedFrameMilliseconds": 1.473
+    },
+    {
+      "iteration": 20,
+      "spawnToFirstByteMilliseconds": 1.551,
+      "spawnToFirstCompletedFrameMilliseconds": 1.551
+    },
+    {
+      "iteration": 21,
+      "spawnToFirstByteMilliseconds": 1.464,
+      "spawnToFirstCompletedFrameMilliseconds": 1.464
+    },
+    {
+      "iteration": 22,
+      "spawnToFirstByteMilliseconds": 1.551,
+      "spawnToFirstCompletedFrameMilliseconds": 1.551
+    },
+    {
+      "iteration": 23,
+      "spawnToFirstByteMilliseconds": 1.61,
+      "spawnToFirstCompletedFrameMilliseconds": 1.61
+    },
+    {
+      "iteration": 24,
+      "spawnToFirstByteMilliseconds": 1.587,
+      "spawnToFirstCompletedFrameMilliseconds": 1.587
+    },
+    {
+      "iteration": 25,
+      "spawnToFirstByteMilliseconds": 1.408,
+      "spawnToFirstCompletedFrameMilliseconds": 1.408
+    },
+    {
+      "iteration": 26,
+      "spawnToFirstByteMilliseconds": 1.525,
+      "spawnToFirstCompletedFrameMilliseconds": 1.525
+    },
+    {
+      "iteration": 27,
+      "spawnToFirstByteMilliseconds": 1.863,
+      "spawnToFirstCompletedFrameMilliseconds": 1.863
+    },
+    {
+      "iteration": 28,
+      "spawnToFirstByteMilliseconds": 1.591,
+      "spawnToFirstCompletedFrameMilliseconds": 1.591
+    },
+    {
+      "iteration": 29,
+      "spawnToFirstByteMilliseconds": 1.483,
+      "spawnToFirstCompletedFrameMilliseconds": 1.483
+    },
+    {
+      "iteration": 30,
+      "spawnToFirstByteMilliseconds": 1.487,
+      "spawnToFirstCompletedFrameMilliseconds": 1.487
+    },
+    {
+      "iteration": 31,
+      "spawnToFirstByteMilliseconds": 1.574,
+      "spawnToFirstCompletedFrameMilliseconds": 1.574
+    },
+    {
+      "iteration": 32,
+      "spawnToFirstByteMilliseconds": 1.819,
+      "spawnToFirstCompletedFrameMilliseconds": 1.819
+    },
+    {
+      "iteration": 33,
+      "spawnToFirstByteMilliseconds": 1.633,
+      "spawnToFirstCompletedFrameMilliseconds": 1.633
+    },
+    {
+      "iteration": 34,
+      "spawnToFirstByteMilliseconds": 1.713,
+      "spawnToFirstCompletedFrameMilliseconds": 1.713
+    },
+    {
+      "iteration": 35,
+      "spawnToFirstByteMilliseconds": 1.577,
+      "spawnToFirstCompletedFrameMilliseconds": 1.577
+    },
+    {
+      "iteration": 36,
+      "spawnToFirstByteMilliseconds": 1.681,
+      "spawnToFirstCompletedFrameMilliseconds": 1.681
+    },
+    {
+      "iteration": 37,
+      "spawnToFirstByteMilliseconds": 1.695,
+      "spawnToFirstCompletedFrameMilliseconds": 1.695
+    },
+    {
+      "iteration": 38,
+      "spawnToFirstByteMilliseconds": 1.724,
+      "spawnToFirstCompletedFrameMilliseconds": 1.724
+    },
+    {
+      "iteration": 39,
+      "spawnToFirstByteMilliseconds": 1.579,
+      "spawnToFirstCompletedFrameMilliseconds": 1.579
+    },
+    {
+      "iteration": 40,
+      "spawnToFirstByteMilliseconds": 1.487,
+      "spawnToFirstCompletedFrameMilliseconds": 1.487
+    },
+    {
+      "iteration": 41,
+      "spawnToFirstByteMilliseconds": 1.765,
+      "spawnToFirstCompletedFrameMilliseconds": 1.765
+    },
+    {
+      "iteration": 42,
+      "spawnToFirstByteMilliseconds": 1.685,
+      "spawnToFirstCompletedFrameMilliseconds": 1.685
+    },
+    {
+      "iteration": 43,
+      "spawnToFirstByteMilliseconds": 1.753,
+      "spawnToFirstCompletedFrameMilliseconds": 1.753
+    },
+    {
+      "iteration": 44,
+      "spawnToFirstByteMilliseconds": 1.658,
+      "spawnToFirstCompletedFrameMilliseconds": 1.658
+    },
+    {
+      "iteration": 45,
+      "spawnToFirstByteMilliseconds": 1.824,
+      "spawnToFirstCompletedFrameMilliseconds": 1.824
+    },
+    {
+      "iteration": 46,
+      "spawnToFirstByteMilliseconds": 1.583,
+      "spawnToFirstCompletedFrameMilliseconds": 1.583
+    },
+    {
+      "iteration": 47,
+      "spawnToFirstByteMilliseconds": 1.547,
+      "spawnToFirstCompletedFrameMilliseconds": 1.547
+    },
+    {
+      "iteration": 48,
+      "spawnToFirstByteMilliseconds": 1.779,
+      "spawnToFirstCompletedFrameMilliseconds": 1.779
+    },
+    {
+      "iteration": 49,
+      "spawnToFirstByteMilliseconds": 1.718,
+      "spawnToFirstCompletedFrameMilliseconds": 1.718
+    },
+    {
+      "iteration": 50,
+      "spawnToFirstByteMilliseconds": 1.683,
+      "spawnToFirstCompletedFrameMilliseconds": 1.683
+    },
+    {
+      "iteration": 51,
+      "spawnToFirstByteMilliseconds": 1.578,
+      "spawnToFirstCompletedFrameMilliseconds": 1.578
+    },
+    {
+      "iteration": 52,
+      "spawnToFirstByteMilliseconds": 1.864,
+      "spawnToFirstCompletedFrameMilliseconds": 1.864
+    },
+    {
+      "iteration": 53,
+      "spawnToFirstByteMilliseconds": 1.754,
+      "spawnToFirstCompletedFrameMilliseconds": 1.754
+    },
+    {
+      "iteration": 54,
+      "spawnToFirstByteMilliseconds": 1.799,
+      "spawnToFirstCompletedFrameMilliseconds": 1.799
+    },
+    {
+      "iteration": 55,
+      "spawnToFirstByteMilliseconds": 1.485,
+      "spawnToFirstCompletedFrameMilliseconds": 1.485
+    },
+    {
+      "iteration": 56,
+      "spawnToFirstByteMilliseconds": 1.831,
+      "spawnToFirstCompletedFrameMilliseconds": 1.831
+    },
+    {
+      "iteration": 57,
+      "spawnToFirstByteMilliseconds": 1.664,
+      "spawnToFirstCompletedFrameMilliseconds": 1.664
+    },
+    {
+      "iteration": 58,
+      "spawnToFirstByteMilliseconds": 1.889,
+      "spawnToFirstCompletedFrameMilliseconds": 1.889
+    },
+    {
+      "iteration": 59,
+      "spawnToFirstByteMilliseconds": 1.816,
+      "spawnToFirstCompletedFrameMilliseconds": 1.816
+    },
+    {
+      "iteration": 60,
+      "spawnToFirstByteMilliseconds": 1.64,
+      "spawnToFirstCompletedFrameMilliseconds": 1.64
+    },
+    {
+      "iteration": 61,
+      "spawnToFirstByteMilliseconds": 1.663,
+      "spawnToFirstCompletedFrameMilliseconds": 1.663
+    },
+    {
+      "iteration": 62,
+      "spawnToFirstByteMilliseconds": 1.693,
+      "spawnToFirstCompletedFrameMilliseconds": 1.693
+    },
+    {
+      "iteration": 63,
+      "spawnToFirstByteMilliseconds": 1.834,
+      "spawnToFirstCompletedFrameMilliseconds": 1.834
+    },
+    {
+      "iteration": 64,
+      "spawnToFirstByteMilliseconds": 1.71,
+      "spawnToFirstCompletedFrameMilliseconds": 1.71
+    },
+    {
+      "iteration": 65,
+      "spawnToFirstByteMilliseconds": 1.51,
+      "spawnToFirstCompletedFrameMilliseconds": 1.51
+    },
+    {
+      "iteration": 66,
+      "spawnToFirstByteMilliseconds": 1.634,
+      "spawnToFirstCompletedFrameMilliseconds": 1.634
+    },
+    {
+      "iteration": 67,
+      "spawnToFirstByteMilliseconds": 1.711,
+      "spawnToFirstCompletedFrameMilliseconds": 1.711
+    },
+    {
+      "iteration": 68,
+      "spawnToFirstByteMilliseconds": 1.886,
+      "spawnToFirstCompletedFrameMilliseconds": 1.886
+    },
+    {
+      "iteration": 69,
+      "spawnToFirstByteMilliseconds": 1.674,
+      "spawnToFirstCompletedFrameMilliseconds": 1.674
+    },
+    {
+      "iteration": 70,
+      "spawnToFirstByteMilliseconds": 1.468,
+      "spawnToFirstCompletedFrameMilliseconds": 1.468
+    },
+    {
+      "iteration": 71,
+      "spawnToFirstByteMilliseconds": 1.681,
+      "spawnToFirstCompletedFrameMilliseconds": 1.681
+    },
+    {
+      "iteration": 72,
+      "spawnToFirstByteMilliseconds": 1.766,
+      "spawnToFirstCompletedFrameMilliseconds": 1.766
+    },
+    {
+      "iteration": 73,
+      "spawnToFirstByteMilliseconds": 1.679,
+      "spawnToFirstCompletedFrameMilliseconds": 1.679
+    },
+    {
+      "iteration": 74,
+      "spawnToFirstByteMilliseconds": 1.623,
+      "spawnToFirstCompletedFrameMilliseconds": 1.623
+    },
+    {
+      "iteration": 75,
+      "spawnToFirstByteMilliseconds": 1.762,
+      "spawnToFirstCompletedFrameMilliseconds": 1.762
+    },
+    {
+      "iteration": 76,
+      "spawnToFirstByteMilliseconds": 1.83,
+      "spawnToFirstCompletedFrameMilliseconds": 1.83
+    },
+    {
+      "iteration": 77,
+      "spawnToFirstByteMilliseconds": 1.738,
+      "spawnToFirstCompletedFrameMilliseconds": 1.738
+    },
+    {
+      "iteration": 78,
+      "spawnToFirstByteMilliseconds": 1.683,
+      "spawnToFirstCompletedFrameMilliseconds": 1.683
+    },
+    {
+      "iteration": 79,
+      "spawnToFirstByteMilliseconds": 1.79,
+      "spawnToFirstCompletedFrameMilliseconds": 1.79
+    },
+    {
+      "iteration": 80,
+      "spawnToFirstByteMilliseconds": 1.679,
+      "spawnToFirstCompletedFrameMilliseconds": 1.679
+    },
+    {
+      "iteration": 81,
+      "spawnToFirstByteMilliseconds": 1.527,
+      "spawnToFirstCompletedFrameMilliseconds": 1.527
+    },
+    {
+      "iteration": 82,
+      "spawnToFirstByteMilliseconds": 1.438,
+      "spawnToFirstCompletedFrameMilliseconds": 1.438
+    },
+    {
+      "iteration": 83,
+      "spawnToFirstByteMilliseconds": 1.542,
+      "spawnToFirstCompletedFrameMilliseconds": 1.542
+    },
+    {
+      "iteration": 84,
+      "spawnToFirstByteMilliseconds": 1.589,
+      "spawnToFirstCompletedFrameMilliseconds": 1.589
+    },
+    {
+      "iteration": 85,
+      "spawnToFirstByteMilliseconds": 1.588,
+      "spawnToFirstCompletedFrameMilliseconds": 1.588
+    },
+    {
+      "iteration": 86,
+      "spawnToFirstByteMilliseconds": 1.508,
+      "spawnToFirstCompletedFrameMilliseconds": 1.508
+    },
+    {
+      "iteration": 87,
+      "spawnToFirstByteMilliseconds": 1.648,
+      "spawnToFirstCompletedFrameMilliseconds": 1.648
+    },
+    {
+      "iteration": 88,
+      "spawnToFirstByteMilliseconds": 1.599,
+      "spawnToFirstCompletedFrameMilliseconds": 1.599
+    },
+    {
+      "iteration": 89,
+      "spawnToFirstByteMilliseconds": 1.604,
+      "spawnToFirstCompletedFrameMilliseconds": 1.604
+    },
+    {
+      "iteration": 90,
+      "spawnToFirstByteMilliseconds": 1.68,
+      "spawnToFirstCompletedFrameMilliseconds": 1.68
+    },
+    {
+      "iteration": 91,
+      "spawnToFirstByteMilliseconds": 1.878,
+      "spawnToFirstCompletedFrameMilliseconds": 1.878
+    },
+    {
+      "iteration": 92,
+      "spawnToFirstByteMilliseconds": 1.586,
+      "spawnToFirstCompletedFrameMilliseconds": 1.586
+    },
+    {
+      "iteration": 93,
+      "spawnToFirstByteMilliseconds": 1.516,
+      "spawnToFirstCompletedFrameMilliseconds": 1.516
+    },
+    {
+      "iteration": 94,
+      "spawnToFirstByteMilliseconds": 1.716,
+      "spawnToFirstCompletedFrameMilliseconds": 1.716
+    },
+    {
+      "iteration": 95,
+      "spawnToFirstByteMilliseconds": 1.525,
+      "spawnToFirstCompletedFrameMilliseconds": 1.525
+    },
+    {
+      "iteration": 96,
+      "spawnToFirstByteMilliseconds": 1.867,
+      "spawnToFirstCompletedFrameMilliseconds": 1.867
+    },
+    {
+      "iteration": 97,
+      "spawnToFirstByteMilliseconds": 1.684,
+      "spawnToFirstCompletedFrameMilliseconds": 1.684
+    },
+    {
+      "iteration": 98,
+      "spawnToFirstByteMilliseconds": 1.655,
+      "spawnToFirstCompletedFrameMilliseconds": 1.655
+    },
+    {
+      "iteration": 99,
+      "spawnToFirstByteMilliseconds": 1.864,
+      "spawnToFirstCompletedFrameMilliseconds": 1.864
+    },
+    {
+      "iteration": 100,
+      "spawnToFirstByteMilliseconds": 1.734,
+      "spawnToFirstCompletedFrameMilliseconds": 1.734
+    }
+  ]
+}

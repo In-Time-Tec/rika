@@ -3,8 +3,15 @@ import { Cause, Clock, Effect, Exit, Function, Metric } from "effect"
 export const stages = [
   "process_start",
   "first_draw",
+  "connection_ready",
+  "connection_ticket",
+  "connection_socket",
   "target_resolution",
   "attach",
+  "attach_response",
+  "attach_projection",
+  "attach_refresh",
+  "attach_ack",
   "admission",
   "turn_claim",
   "run_created",
@@ -22,6 +29,7 @@ export type Stage = (typeof stages)[number]
 export type ImmediateStage =
   | "process_start"
   | "first_draw"
+  | "connection_ready"
   | "admission"
   | "turn_claim"
   | "run_created"
@@ -30,7 +38,18 @@ export type ImmediateStage =
   | "cell_admission"
   | "binding_send"
   | "terminal"
-export type CompletionStage = "target_resolution" | "attach" | "model_terminal" | "cell_execution" | "binding_terminal"
+export type CompletionStage =
+  | "connection_ticket"
+  | "connection_socket"
+  | "target_resolution"
+  | "attach"
+  | "attach_response"
+  | "attach_projection"
+  | "attach_refresh"
+  | "attach_ack"
+  | "model_terminal"
+  | "cell_execution"
+  | "binding_terminal"
 export const outcomes = ["success", "failure", "interrupted", "unknown"] as const
 export type Outcome = (typeof outcomes)[number]
 export const tokenKinds = ["input", "output"] as const

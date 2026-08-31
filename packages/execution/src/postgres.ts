@@ -4,15 +4,8 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import {
-  Errors,
-  ExecutableResolver,
-  ExecutionHost,
-  RunClaims,
-  RunStore,
-  Runtime,
-  RuntimeWorker,
-} from "tenetkit/runtime"
+import { Errors, ExecutableResolver, RunExecutor, RunStore, Runtime } from "tenetkit/runtime"
+import { RunClaims, RuntimeWorker, type SqlRuntimeServices } from "tenetkit/runtime/sql-driver"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
@@ -66,7 +59,7 @@ export const ReadinessProof = Schema.Struct({
 
 export type ReadinessProof = typeof ReadinessProof.Type
 
-export interface WorkerDiagnostics extends RuntimeWorker.WorkerStatus {
+export interface WorkerDiagnostics extends RuntimeWorker.Status {
   readonly scanAgeMillis: number | undefined
   readonly wakeupAgeMillis: number | undefined
   readonly lastFallbackAgeMillis: number | undefined
@@ -96,7 +89,7 @@ export const validateWorkerOptions = Effect.fn("Postgres.validateWorkerOptions")
   )
 })
 
-export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.WorkerOptions => ({
+export const toWorkerOptions = (options: WorkerOptions): RuntimeWorker.Options => ({
   workerId: options.workerId,
   concurrency: options.concurrency,
   lease: options.leaseMillis,
@@ -136,7 +129,7 @@ export const observeClaim = (claim: ObservedClaim) => {
 }
 
 export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
-  const applied: Effect.Effect<undefined, SchemaError> = Effect.scoped(
+  const applied: Effect.Effect<void, SchemaError> = Effect.scoped(
     Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
       Effect.flatMap((context) => RunSchema.apply(input.source).pipe(Effect.provide(context))),
     ),
@@ -145,7 +138,7 @@ export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: P
 })
 
 export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: Pick<Options, "url" | "source">) {
-  const checked: Effect.Effect<undefined, SchemaError> = Effect.scoped(
+  const checked: Effect.Effect<void, SchemaError> = Effect.scoped(
     Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
       Effect.flatMap((context) => RunSchema.check(input.source).pipe(Effect.provide(context))),
     ),
@@ -155,24 +148,20 @@ export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: P
 
 export const workerLayer = (
   options: WorkerOptions,
-): Layer.Layer<
-  RuntimeWorker.RuntimeWorker,
-  InvalidOptions,
-  RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
-> =>
+): Layer.Layer<RuntimeWorker.RuntimeWorker, InvalidOptions, RunClaims | RunExecutor.RunExecutor | RunStore.RunStore> =>
   Layer.unwrap(
     validateWorkerOptions(options).pipe(
       Effect.map((validated) => {
         const worker: Layer.Layer<
           RuntimeWorker.RuntimeWorker,
           never,
-          RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore
-        > = RuntimeWorker.layerWorker(toWorkerOptions(validated))
+          RunClaims | RunExecutor.RunExecutor | RunStore.RunStore
+        > = RuntimeWorker.layer(toWorkerOptions(validated))
         const runLoop: Effect.Effect<void, never, RuntimeWorker.RuntimeWorker | Scope.Scope> = Effect.gen(function* () {
           const runtimeWorker = yield* RuntimeWorker.RuntimeWorker
           yield* Effect.forkScoped(runtimeWorker.run)
         })
-        const loop: Layer.Layer<never, never, RunClaims.RunClaims | ExecutionHost.ExecutionHost | RunStore.RunStore> =
+        const loop: Layer.Layer<never, never, RunClaims | RunExecutor.RunExecutor | RunStore.RunStore> =
           Layer.effectDiscard(runLoop).pipe(Layer.provide(worker))
         return Layer.merge(worker, loop)
       }),
@@ -181,7 +170,7 @@ export const workerLayer = (
 
 export interface LayerOptions {
   readonly postgres: Options
-  readonly resolver: ExecutableResolver.Interface
+  readonly resolver: ExecutableResolver.Service
   readonly subscriberQueueCapacity?: number
   readonly scheduler?: Runtime.LayerOptions["scheduler"]
 }
@@ -192,11 +181,11 @@ const runtimeUnavailable = (cause: Cause.Cause<unknown>) =>
 const age = (now: number, at: number | undefined) => (at === undefined ? undefined : now - at)
 
 export const workerDiagnostics: {
-  (now: number): (status: RuntimeWorker.WorkerStatus) => WorkerDiagnostics
-  (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics
+  (now: number): (status: RuntimeWorker.Status) => WorkerDiagnostics
+  (status: RuntimeWorker.Status, now: number): WorkerDiagnostics
 } = Function.dual(
   2,
-  (status: RuntimeWorker.WorkerStatus, now: number): WorkerDiagnostics => ({
+  (status: RuntimeWorker.Status, now: number): WorkerDiagnostics => ({
     ...status,
     scanAgeMillis: status.scan._tag === "Starting" ? undefined : age(now, status.scan.at),
     wakeupAgeMillis: status.wakeup._tag === "Starting" ? undefined : age(now, status.wakeup.at),
@@ -211,16 +200,12 @@ export const checkWorkerReadiness: {
   (
     now: number,
     fallbackIntervalMillis: number,
-  ): (status: RuntimeWorker.WorkerStatus) => Effect.Effect<void, WorkerUnavailable>
-  (
-    status: RuntimeWorker.WorkerStatus,
-    now: number,
-    fallbackIntervalMillis: number,
-  ): Effect.Effect<void, WorkerUnavailable>
+  ): (status: RuntimeWorker.Status) => Effect.Effect<void, WorkerUnavailable>
+  (status: RuntimeWorker.Status, now: number, fallbackIntervalMillis: number): Effect.Effect<void, WorkerUnavailable>
 } = Function.dual(
   3,
   (
-    status: RuntimeWorker.WorkerStatus,
+    status: RuntimeWorker.Status,
     now: number,
     fallbackIntervalMillis: number,
   ): Effect.Effect<void, WorkerUnavailable> => {
@@ -239,10 +224,10 @@ export const checkWorkerReadiness: {
 export const makeReadiness = (input: {
   readonly source: string
   readonly fallbackIntervalMillis: number
-  readonly worker: Pick<RuntimeWorker.Interface, "workerId" | "status">
+  readonly worker: Pick<RuntimeWorker.Service, "workerId" | "status">
   readonly schema: Effect.Effect<void, SchemaError>
 }): ReadinessInterface => {
-  const status: Effect.Effect<RuntimeWorker.WorkerStatus> = input.worker.status
+  const status: Effect.Effect<RuntimeWorker.Status> = input.worker.status
   const check: Effect.Effect<ReadinessProof, SchemaError | WorkerUnavailable> = Effect.gen(function* () {
     yield* input.schema
     const workerStatus = yield* status
@@ -262,12 +247,7 @@ export const makeReadiness = (input: {
 export const layer = (
   options: LayerOptions,
 ): Layer.Layer<
-  | Readiness
-  | Runtime.Runtime
-  | RuntimeWorker.RuntimeWorker
-  | RunStore.RunStore
-  | RunClaims.RunClaims
-  | ExecutionHost.ExecutionHost,
+  Readiness | RuntimeWorker.RuntimeWorker | SqlRuntimeServices,
   InvalidOptions | RuntimeUnavailable,
   PgClient.PgClient
 > =>

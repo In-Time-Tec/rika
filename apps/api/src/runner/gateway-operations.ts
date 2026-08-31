@@ -11,7 +11,7 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import type { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
-import { Cause, Clock, DateTime, Deferred, Effect, Exit, Ref, Semaphore } from "effect"
+import { Cause, Clock, DateTime, Deferred, Effect, Exit, FiberSet, Ref, Semaphore } from "effect"
 import {
   cancelledResponse,
   type GatewayError,
@@ -70,7 +70,36 @@ interface OperationDependencies {
     expected?: Pending,
   ) => Effect.Effect<Pending | undefined>
   readonly sendCancel: (assignmentId: string, operationKey: string, attempt: number) => Effect.Effect<void>
+  readonly redeliveries: FiberSet.FiberSet<void>
 }
+
+export const sendCellExecute = (operation: Pending) =>
+  Effect.try({
+    try: () =>
+      operation.socket.send(
+        gatewayModel.encode({
+          _tag: "CellExecute",
+          request: {
+            access: operation.access,
+            operationKey: operation.operationKey,
+            workspaceId: operation.workspaceId,
+            sessionId: operation.request.sessionId,
+            threadId: operation.request.threadId,
+            turnId: operation.request.turnId,
+            runId: operation.request.runId,
+            toolCallId: operation.request.toolCallId,
+            code: operation.code,
+            rootRunId: operation.request.rootRunId,
+            attempt: operation.attempt,
+            replayPolicy: operation.request.replayPolicy,
+            admittedAt: operation.request.admittedAt,
+            deadlineAt: operation.request.deadlineAt,
+            bindings: operation.bindings.manifest,
+          },
+        }),
+      ),
+    catch: () => undefined,
+  }).pipe(Effect.ignore)
 
 export const runnerGatewayOperations = (dependencies: OperationDependencies) => {
   const {
@@ -88,16 +117,32 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
     settlePending,
     retirePending,
     sendCancel,
+    redeliveries,
   } = dependencies
-  const {
-    encode,
-    failure,
-    finalResult,
-    operationKey: key,
-    sameFence: same,
-    timeoutResponse,
-    unknownResponse,
-  } = gatewayModel
+  const { encode, failure, finalResult, operationKey: key, sameFence: same, timeoutResponse, unknownResponse } =
+    gatewayModel
+  const startRedelivery = (operation: Pending) =>
+    FiberSet.run(
+      redeliveries,
+      Deferred.await(operation.acknowledged).pipe(
+        Effect.raceFirst(
+          Effect.forever(
+            Effect.sleep("250 millis").pipe(
+              Effect.andThen(
+                Ref.get(pending).pipe(
+                  Effect.map((current) =>
+                    current.get(key(operation.assignmentId, operation.operationKey, operation.attempt)),
+                  ),
+                  Effect.flatMap((current) =>
+                    current?.result === operation.result ? sendCellExecute(current) : Effect.void,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ).pipe(Effect.asVoid)
   const recoverTerminals = Effect.fn("RunnerGateway.recoverTerminals")(function* () {
     const rows = yield* operations.terminalRecoveryScan.pipe(
       Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipts")),
@@ -285,43 +330,20 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
           operationKey: request.operationKey,
           attempt: currentOperation.attempt,
           code: request.code,
+          workspaceId: workspace,
           request,
           socket: currentSession.socket,
           access: currentSession.access,
           result,
+          acknowledged: yield* Deferred.make<void>(),
           bindings: request.bindings,
           bindingCalls: yield* Ref.make(new Map<string, BindingCall>()),
           bindingLock: yield* Semaphore.make(1),
           nextMachineOrdinal: yield* Ref.make(0),
         }
         yield* Ref.update(pending, (values) => new Map(values).set(pendingKey, current))
-        yield* Effect.try({
-          try: () => {
-            currentSession.socket.send(
-              encode({
-                _tag: "CellExecute",
-                request: {
-                  access: currentSession.access,
-                  operationKey: request.operationKey,
-                  workspaceId: workspace,
-                  sessionId: request.sessionId,
-                  threadId: request.threadId,
-                  turnId: request.turnId,
-                  runId: request.runId,
-                  toolCallId: request.toolCallId,
-                  code: request.code,
-                  rootRunId: request.rootRunId,
-                  attempt: current.attempt,
-                  replayPolicy: request.replayPolicy,
-                  admittedAt: request.admittedAt,
-                  deadlineAt: request.deadlineAt,
-                  bindings: request.bindings.manifest,
-                },
-              }),
-            )
-          },
-          catch: () => undefined,
-        }).pipe(Effect.ignore)
+        yield* sendCellExecute(current)
+        yield* startRedelivery(current)
         return { current } as const
       }),
     )

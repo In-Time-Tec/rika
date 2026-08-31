@@ -1,6 +1,7 @@
 import type * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as InteractiveSession from "@rika/product/interactive-session"
+import * as HostedObservability from "@rika/product/hosted-observability"
 import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
@@ -118,7 +119,6 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
     yield* Deferred.await(firstDraw)
     const profile = yield* selectedProfile()
     const http = yield* Http
-    yield* authenticated(profile, (session) => http.context(profile.origin, session))
     const checkout = prepareRunnerCheckout({
       workspace: input.workspace ?? process.cwd(),
       preferencePath: yield* preferencePath,
@@ -155,7 +155,11 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
                 Effect.provideService(Scope.Scope, scope),
               )
             : undefined
-        const commandId = yield* crypto.randomUUIDv4
+        const commandId = yield* crypto.randomUUIDv4.pipe(
+          Effect.mapError(() =>
+            HostedError.make({ kind: "host", message: "Could not create a Thread identifier" }),
+          ),
+        )
         const created = yield* authenticated(profile, (session) =>
           Effect.gen(function* () {
             const seed =
@@ -189,11 +193,14 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
       }).pipe(
         Effect.provideService(Http, http),
         Effect.provideService(CredentialStore, credentials),
-        Effect.mapError((error) =>
-          Schema.is(HostedError)(error)
-            ? error
-            : HostedError.make({ kind: "host", message: "Could not create a Thread identifier" }),
-        ),
+        Effect.mapError((error) => {
+          if (Schema.is(HostedError)(error)) return error
+          const parsed = Schema.decodeOption(FailureMessage)(error)
+          return HostedError.make({
+            kind: "host",
+            message: parsed._tag === "Some" ? parsed.value.message : String(error),
+          })
+        }),
       )
     const threadId = input.threadId ?? (yield* createThread("runner"))
     const listThreads = authenticated(profile, (session) =>
@@ -231,6 +238,13 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
       Effect.andThen(
         Effect.suspend(() => SubscriptionRef.set(connectionState, runnerConnectionState(latestHostedState, true))),
       ),
+      Effect.forkScoped,
+    )
+    const initialConnectionState = yield* SubscriptionRef.get(connectionState)
+    yield* Stream.concat(Stream.make(initialConnectionState), SubscriptionRef.changes(connectionState)).pipe(
+      Stream.filter((state) => state.connectivity === "connected"),
+      Stream.runHead,
+      Effect.andThen(HostedObservability.event("connection_ready", "success", { threadId })),
       Effect.forkScoped,
     )
     deferred.attach(hosted.session)

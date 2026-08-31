@@ -30,9 +30,12 @@ describe("install contract", () => {
 
   test("install.sh verifies a checksum before publishing the install", () => {
     const verifyAt = installer.indexOf("verify_checksum ")
+    const executableAt = installer.indexOf('staged_version="$(env -i')
     const publishAt = installer.indexOf(`mv "\${staging}/\${archive_root}"`)
     expect(verifyAt).toBeGreaterThan(0)
+    expect(executableAt).toBeGreaterThan(verifyAt)
     expect(publishAt).toBeGreaterThan(verifyAt)
+    expect(publishAt).toBeGreaterThan(executableAt)
   })
 
   test("install.sh stages beside the install root so publishing is one same-filesystem rename", () => {
@@ -87,6 +90,7 @@ describe("install contract", () => {
   test("platform npm packages carry the public executable and private kernel runtime", () => {
     expect(platformManifest("linux-x64", "1.2.3").files).toEqual([
       "bin/rika",
+      "bin/.rika-client-runtime",
       "bin/.rika-kernel-runtime",
       "bin/.rika-kernel-worker.js",
     ])

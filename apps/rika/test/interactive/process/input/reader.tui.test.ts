@@ -262,6 +262,52 @@ test(
 )
 
 test(
+  "steers composer text directly into the active turn with Ctrl+S",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const activeTurnId = Turn.TurnId.make("tui-turn-0")
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          workspaceFiles: { "fixture.txt": "direct steering fixture" },
+          script: [
+            model.turn(
+              [
+                model.binding(
+                  { module: "workspace", operation: "read", input: { path: "fixture.txt" } },
+                  "direct-read",
+                ),
+              ],
+              { delayMillis: 4_000 },
+            ),
+            model.text("DIRECT_STEER_COMPLETE"),
+          ],
+        })
+
+        yield* Effect.tryPromise(() => app.type("Read the fixture slowly."))
+        app.pressEnter()
+        yield* app.waitModelRequests(1)
+        yield* Effect.tryPromise(() => app.type("Use the direct steering instruction."))
+        app.pressKey("s", { ctrl: true })
+        expect(yield* app.nextFrame).toContain("steering: Use the direct steering instruction.")
+        yield* app.waitTranscript(
+          activeTurnId,
+          (projection) =>
+            projection.state.steering.pending?.some(
+              (entry) => entry.text === "Use the direct steering instruction.",
+            ) === true || projection.state.steering.settled?.some((entry) => entry.outcome === "consumed") === true,
+          20_000,
+        )
+        const complete = yield* app.waitFrame("DIRECT_STEER_COMPLETE", 20_000)
+        expect(complete).not.toContain("Steering not delivered")
+        expect(complete.match(/Use the direct steering instruction\./g) ?? []).toHaveLength(1)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
   "interrupts the active turn with Ctrl+Enter and runs the replacement",
   () =>
     TuiApp.run(

@@ -1,10 +1,10 @@
-import { HarnessOverview, HarnessState } from "tenetkit/harness"
+import { Overview, State } from "tenetkit/agent-guidance"
 
 export interface Input {
-  readonly harness: HarnessState.HarnessState
+  readonly harness: State.GuidanceState
   readonly skillListings: string
   readonly mcpServers: ReadonlyArray<string>
-  readonly overviewOptions?: HarnessOverview.OverviewOptions
+  readonly overviewOptions?: Overview.OverviewOptions
 }
 
 export interface Section {
@@ -23,12 +23,12 @@ const mcpSection = (servers: ReadonlyArray<string>): string =>
  *
  * The base prompt is immutable: this returns only additions, never a rewritten prompt, so a harness
  * entry can extend what the model knows but can never displace Rika's own instructions. Everything
- * here is bounded — the harness overview by `HarnessOverview` limits, skills by their own formatter,
+ * here is bounded — the harness overview by `Overview` limits, skills by their own formatter,
  * MCP by server NAMES ONLY, because a server with forty tools must cost three words rather than
  * forty schemas.
  */
 export const sections = (input: Input): ReadonlyArray<Section> => [
-  { name: "continual-harness", text: HarnessOverview.formatOverview(input.harness, input.overviewOptions ?? {}) },
+  { name: "continual-harness", text: Overview.format(input.harness, input.overviewOptions ?? {}) },
   ...(input.skillListings.length === 0 ? [] : [{ name: "skills", text: input.skillListings }]),
   ...(input.mcpServers.length === 0 ? [] : [{ name: "mcp-servers", text: mcpSection(input.mcpServers) }]),
 ]

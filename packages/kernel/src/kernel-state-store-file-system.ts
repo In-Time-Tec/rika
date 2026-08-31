@@ -28,7 +28,7 @@ const safeName = (sessionId: string): string => encodeURIComponent(sessionId)
  */
 export const make = (
   dataRoot: string,
-): Effect.Effect<KernelStateStore.Interface, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<KernelStateStore.Service, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path

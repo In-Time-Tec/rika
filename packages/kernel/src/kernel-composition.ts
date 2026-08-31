@@ -1,4 +1,4 @@
-import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
+import { HostModules, KernelPool, KernelStateStore } from "tenetkit/repl"
 import { BunKernelPool, workerModule, workerSupportModules } from "tenetkit/repl/bun"
 
 /**
@@ -40,6 +40,8 @@ export const defaultIdleTimeToLive = Duration.minutes(5)
 
 export interface Options extends ProfileOptions {
   readonly workspaceDigest: string
+  /** Rika-owned policy reported by `rika.context.current`; it is not part of TenetKit's physical profile. */
+  readonly trustMode?: string
   readonly servers: ModuleOptions["servers"]
   readonly skills?: NonNullable<ProfileOptions["environment"]>["skills"]
   readonly runtimeCommand?: string
@@ -72,8 +74,8 @@ const profileOptions = (options: Options): ProfileOptions => {
 /** The mounted `rika.*` surface, closed over the services that back it. */
 export const bindings = (
   options: ModuleOptions,
-): Layer.Layer<HostBindingRegistry.HostBindingRegistry, HostBindingRegistry.HostBindingConflict, BindingRequirements> =>
-  HostBindingRegistry.layer(makeModules(options))
+): Layer.Layer<HostModules.HostModules, HostModules.HostModuleConflict, BindingRequirements> =>
+  HostModules.layer(makeModules(options))
 
 /** Best-effort namespace persistence under the profile data root. */
 export const state = (
@@ -133,8 +135,8 @@ export const pool = (
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore | HostBindingRegistry.HostBindingRegistry,
-  HostBindingRegistry.HostBindingConflict,
+  KernelPool.KernelPool | KernelStateStore.KernelStateStore | HostModules.HostModules,
+  HostModules.HostModuleConflict,
   BindingRequirements | ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > => {
   const surface = bindings(moduleOptions(options))

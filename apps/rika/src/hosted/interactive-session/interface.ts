@@ -1,11 +1,29 @@
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
+import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import { OperationUnavailable } from "@rika/product/product-operation"
+import type { ThreadSummary } from "@rika/product/thread-summary"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Deferred, Effect, Schema } from "effect"
-import type { HostedError } from "../contract"
+import type { HostedError, Profile } from "../contract"
 import type { CommandMethods } from "./commands"
 import type { Projection } from "./projection"
+
+export interface HostedInteractiveSession {
+  readonly session: InteractiveSession
+  readonly connection: InteractiveConnection.Connection
+}
+
+export interface HostedInteractiveSessionInput {
+  readonly profile: Profile
+  readonly threadId: string
+  readonly createThread: (
+    executorKind: "runner" | "orb",
+    archiveThreadId?: string,
+  ) => Effect.Effect<string, HostedError>
+  readonly listThreads: Effect.Effect<ReadonlyArray<ThreadSummary>, HostedError>
+  readonly previewThread: (threadId: string) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
+}
 
 export const interactiveSessionInterface = (dependencies: {
   readonly commands: {

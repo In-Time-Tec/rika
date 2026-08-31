@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
 import type { Input as ProductInput } from "@rika/product/product-operation"
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Scope, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
@@ -58,12 +58,15 @@ it("maps pure client interruption to success without masking failures", () => {
   expect(clientProcessExitCode({ exit: Exit.fail("real failure"), interruptedBySigint: true })).toBe(1)
 })
 
-const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E, never> =>
+const execute = <A, E, R>(
+  effect: Effect.Effect<A, E, R | Scope.Scope>,
+  layer: Layer.Layer<R>,
+): Effect.Effect<A, E, never> =>
   Effect.scoped(
     Effect.gen(function* () {
       const scope = yield* Effect.scope
       const context = yield* Layer.buildWithScope(layer, scope)
-      return yield* Effect.provide(effect, context)
+      return yield* effect.pipe(Effect.provide(context), Effect.provideService(Scope.Scope, scope))
     }),
   )
 

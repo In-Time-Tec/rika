@@ -42,9 +42,15 @@ export const sourceRepository = (remote: string | undefined) => {
 
 export const prepareWorkspaceSeed = Effect.fn("HostedWorkspaceSeed.prepare")(function* (workspace: string) {
   const root = (yield* git(workspace, ["rev-parse", "--show-toplevel"])) ?? workspace
-  const archive = yield* createArchive(root).pipe(
-    Effect.mapError((error) => failure(`Could not seed the local Workspace: ${error.message}`)),
+  const [archive, remote] = yield* Effect.all(
+    [
+      createArchive(root).pipe(
+        Effect.mapError((error) => failure(`Could not seed the local Workspace: ${error.message}`)),
+      ),
+      git(root, ["remote", "get-url", "origin"]),
+    ],
+    { concurrency: 2 },
   )
-  const repository = sourceRepository(yield* git(root, ["remote", "get-url", "origin"]))
+  const repository = sourceRepository(remote)
   return repository === undefined ? { archive } : { archive, sourceRepository: repository }
 })

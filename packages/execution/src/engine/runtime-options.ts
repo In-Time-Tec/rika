@@ -1,5 +1,5 @@
 import { ModelRegistry } from "tenetkit"
-import type { HarnessState } from "tenetkit/harness"
+import type { State } from "tenetkit/agent-guidance"
 import { KernelPool, KernelStateStore } from "tenetkit/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
@@ -24,7 +24,7 @@ export interface CommonOptions {
   readonly cells?: Cells
   readonly capabilities?: (workspace: string) => Effect.Effect<{
     readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
-    readonly harnessSnapshot: HarnessState.HarnessState
+    readonly harnessSnapshot: State.GuidanceState
   }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry, never, never>
   readonly credentialStore?: Layer.Layer<ProviderCredentialStore, never, never>

@@ -229,7 +229,14 @@ export interface ThreadProtocolStoreService {
     readonly actor: ActorAttribution
     readonly cursor: ThreadEventCursor
     readonly acknowledgedAt: Timestamp
-  }) => Effect.Effect<ThreadEventCursor, HostedPersistenceError>
+  }) => Effect.Effect<
+    {
+      readonly acknowledgedCursor: ThreadEventCursor
+      readonly headCursor: ThreadEventCursor
+      readonly threadVersion: ThreadVersion
+    },
+    HostedPersistenceError
+  >
   readonly issueTicket: (
     input: ThreadSocketTicketBinding & {
       readonly ticketDigest: string

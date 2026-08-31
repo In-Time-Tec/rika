@@ -1,4 +1,4 @@
-import { BetterAuthUserId, ClientId, DeviceId, ThreadEventCursor, Timestamp } from "@rika/product/hosted-model"
+import { BetterAuthUserId, ClientId, DeviceId, ThreadEventCursor, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
 import type { ThreadProtocolStoreService } from "@rika/product/thread-protocol-store"
 import { and, eq, gt, gte, isNull, lt, lte, max, min, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
@@ -37,6 +37,8 @@ export const connectionOperations = (db: PgDrizzle.EffectPgDatabase) => {
               .select({
                 ownerId: rikaHostedThreadProtocolState.ownerId,
                 threadId: rikaHostedThreadProtocolState.threadId,
+                threadVersion: bigintText(rikaHostedThreadProtocolState.version),
+                headCursor: bigintText(rikaHostedThreadProtocolState.eventCursor),
               })
               .from(rikaHostedThreadProtocolState)
               .where(
@@ -115,7 +117,11 @@ export const connectionOperations = (db: PgDrizzle.EffectPgDatabase) => {
                 .returning({ threadVersion: rikaHostedThreadProtocolSnapshots.threadVersion }),
             )
           }
-          return ThreadEventCursor.make(rows[0]!.cursor)
+          return {
+            acknowledgedCursor: ThreadEventCursor.make(rows[0]!.cursor),
+            headCursor: ThreadEventCursor.make(states[0].headCursor),
+            threadVersion: ThreadVersion.make(states[0].threadVersion),
+          }
         }),
       )
       .pipe(Effect.catchTag("SqlError", databaseError))

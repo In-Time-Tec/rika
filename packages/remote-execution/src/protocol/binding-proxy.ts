@@ -1,4 +1,4 @@
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Schema } from "effect"
 import type { AccessWire, BindingManifest, BindingRequest, CellRequest } from "./messages"
 import { bindingManifest, BindingOutcome, BindingRequest as BindingRequestSchema } from "./messages"
@@ -43,7 +43,7 @@ export interface Transport {
 }
 
 export interface Interface {
-  readonly registry: HostBindingRegistry.Interface
+  readonly registry: HostModules.Service
   readonly enter: (request: CellRequest) => Effect.Effect<void, BindingProxyError>
   readonly leave: (request: CellRequest) => Effect.Effect<void>
   readonly suspended: (request: CellRequest) => Effect.Effect<string, BindingProxyError>
@@ -77,13 +77,13 @@ export const make: (options: {
   const known = new Map(
     manifest.descriptors.map((descriptor) => [descriptor.module, new Set(descriptor.operations)] as const),
   )
-  const notFound = (request: HostBindingRegistry.Request) =>
+  const notFound = (request: HostModules.Request) =>
     known.has(request.module)
-      ? HostBindingRegistry.HostBindingNotFound.make({ module: request.module, operation: request.operation })
-      : HostBindingRegistry.HostBindingNotFound.make({ module: request.module })
-  const resolve: HostBindingRegistry.Interface["resolve"] = (request) => {
+      ? HostModules.HostModuleNotFound.make({ module: request.module, operation: request.operation })
+      : HostModules.HostModuleNotFound.make({ module: request.module })
+  const resolve: HostModules.Service["resolve"] = (request) => {
     if (known.get(request.module)?.has(request.operation) !== true) return notFound(request)
-    const operation: HostBindingRegistry.AnyOperation = {
+    const operation: HostModules.AnyOperation = {
       name: request.operation,
       input: Schema.Unknown,
       output: Schema.Unknown,
@@ -92,7 +92,7 @@ export const make: (options: {
     }
     return Effect.succeed(operation)
   }
-  const registry: HostBindingRegistry.Interface = {
+  const registry: HostModules.Service = {
     descriptors: manifest.descriptors,
     resolve,
     invoke: (request) =>
@@ -100,7 +100,7 @@ export const make: (options: {
         if (known.get(request.module)?.has(request.operation) !== true) return yield* notFound(request)
         const cell = (yield* Ref.get(active)).get(requestKey(request.sessionId, request.cellId))
         if (cell === undefined)
-          return yield* HostBindingRegistry.HostBindingSchemaFailure.make({
+          return yield* HostModules.HostModuleSchemaFailure.make({
             module: request.module,
             operation: request.operation,
             stage: "decode-input",
@@ -110,7 +110,7 @@ export const make: (options: {
         const callId = `${cell.operationKey}:binding:${ordinal}`
         const wireRequest = yield* Schema.decodeUnknownEffect(BindingRequestSchema)(request).pipe(
           Effect.mapError(() =>
-            HostBindingRegistry.HostBindingSchemaFailure.make({
+            HostModules.HostModuleSchemaFailure.make({
               module: request.module,
               operation: request.operation,
               stage: "decode-input",
@@ -121,7 +121,7 @@ export const make: (options: {
         const requestDigest = Encoding.encodeHex(
           yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeRequest(wireRequest))).pipe(
             Effect.mapError(() =>
-              HostBindingRegistry.HostBindingSchemaFailure.make({
+              HostModules.HostModuleSchemaFailure.make({
                 module: request.module,
                 operation: request.operation,
                 stage: "decode-input",
@@ -166,7 +166,7 @@ export const make: (options: {
               ),
             ),
             Effect.mapError((error) =>
-              HostBindingRegistry.HostBindingSchemaFailure.make({
+              HostModules.HostModuleSchemaFailure.make({
                 module: request.module,
                 operation: request.operation,
                 stage: "decode-input",
@@ -179,21 +179,21 @@ export const make: (options: {
             ? { _tag: "Success", output: outcome.response.output }
             : { _tag: "Failure", failure: outcome.response.failure }
         if (outcome._tag === "Rejected") {
-          if (outcome.failure._tag === "tenetkit/repl/HostBindingNotFound")
+          if (outcome.failure._tag === "tenetkit/repl/HostModuleNotFound")
             return yield* outcome.failure.operation === undefined
-              ? HostBindingRegistry.HostBindingNotFound.make({ module: outcome.failure.module })
-              : HostBindingRegistry.HostBindingNotFound.make({
+              ? HostModules.HostModuleNotFound.make({ module: outcome.failure.module })
+              : HostModules.HostModuleNotFound.make({
                   module: outcome.failure.module,
                   operation: outcome.failure.operation,
                 })
-          return yield* HostBindingRegistry.HostBindingSchemaFailure.make({
+          return yield* HostModules.HostModuleSchemaFailure.make({
             module: outcome.failure.module,
             operation: outcome.failure.operation,
             stage: outcome.failure.stage,
             message: outcome.failure.message,
           })
         }
-        return yield* HostBindingRegistry.HostBindingSchemaFailure.make({
+        return yield* HostModules.HostModuleSchemaFailure.make({
           module: request.module,
           operation: request.operation,
           stage: "decode-input",
@@ -341,5 +341,5 @@ export const make: (options: {
   return { registry, enter, leave, suspended, unknown, replay, complete } satisfies Interface
 })
 
-export const layer = (registry: HostBindingRegistry.Interface): Layer.Layer<HostBindingRegistry.HostBindingRegistry> =>
-  HostBindingRegistry.layerTest(registry)
+export const layer = (registry: HostModules.Service): Layer.Layer<HostModules.HostModules> =>
+  HostModules.layerTest(registry)

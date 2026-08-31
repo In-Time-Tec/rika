@@ -365,18 +365,16 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
         envs: request.environment,
       }),
     )
-    yield* Effect.all([
-      attestTemplateBuild({ ...request, operation: "create" }),
-      attempt("create", () => sdk.getInfo(sandbox.sandboxId, connection)).pipe(
-        Effect.flatMap((info) =>
-          info.templateId === request.templateId
-            ? Effect.void
-            : Effect.fail(
-                ProviderError.make({ operation: "create", message: "E2B sandbox template attestation failed" }),
-              ),
-        ),
+    yield* attempt("create", () => sdk.getInfo(sandbox.sandboxId, connection)).pipe(
+      Effect.flatMap((info) =>
+        info.templateId === request.templateId
+          ? Effect.void
+          : Effect.fail(
+              ProviderError.make({ operation: "create", message: "E2B sandbox template attestation failed" }),
+            ),
       ),
-    ]).pipe(Effect.tapError(() => attempt("kill", () => sdk.kill(sandbox.sandboxId, connection)).pipe(Effect.ignore)))
+      Effect.tapError(() => attempt("kill", () => sdk.kill(sandbox.sandboxId, connection)).pipe(Effect.ignore)),
+    )
     return { sandboxId: sandbox.sandboxId, state: "running" as const }
   })
 

@@ -115,7 +115,7 @@ const openCli = <E>(layer: Layer.Layer<Service, E>) =>
         const lines = (yield* TestConsole.logLines).slice(logsBefore).map(String)
         const errors = (yield* TestConsole.errorLines).slice(errorsBefore).map(String)
         return { exit, lines, errors }
-      }).pipe(Effect.provide(context))
+      }).pipe(Effect.provide(context), Effect.provideService(Scope.Scope, scope))
     return { invoke }
   })
 

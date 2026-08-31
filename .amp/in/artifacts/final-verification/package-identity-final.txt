@@ -1,0 +1,17 @@
+53575866 artifacts/rika-0.11.5-darwin-arm64.tar.gz
+34376 .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/rika
+73768178 .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-client-runtime
+63558256 .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-kernel-runtime
+299807 .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-kernel-worker.js
+554d644a7608969db593898b0389471805f1b0c830fd3f420dcc08e361fba726  artifacts/rika-0.11.5-darwin-arm64.tar.gz
+a842b77e4bfdb0c60de3ca6a4121ad3d6be1eec7b491d08cdbca33bcae56e7cd  .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/rika
+6a0e6394dcba837d02154c4db9c927c7c862472ba0a01da814b7ab81ef977b77  .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-client-runtime
+539598c775882420b9d8deb7dc14d845f20f7d26f5600c50ab067dde6ac3f3bf  .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-kernel-runtime
+45ade944c940324ac6d6bc10442c4d3de95642b5ceb3d6244493bf7855c5b521  .agents/state/final-package-identity/rika-0.11.5-darwin-arm64/bin/.rika-kernel-worker.js
+rika-0.11.5-darwin-arm64/
+rika-0.11.5-darwin-arm64/INSTALL
+rika-0.11.5-darwin-arm64/bin/
+rika-0.11.5-darwin-arm64/bin/.rika-kernel-runtime
+rika-0.11.5-darwin-arm64/bin/.rika-client-runtime
+rika-0.11.5-darwin-arm64/bin/rika
+rika-0.11.5-darwin-arm64/bin/.rika-kernel-worker.js

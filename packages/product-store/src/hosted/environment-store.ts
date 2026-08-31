@@ -3,6 +3,7 @@ import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import {
   EnvironmentReference,
   SourceCommitSha,
+  defaultEgressDestinations,
   type EnvironmentPhase,
   type EnvironmentReference as EnvironmentReferenceValue,
   type SourceEnvironmentApproval,
@@ -431,7 +432,10 @@ const make = Effect.gen(function* (): Effect.fn.Return<EnvironmentStoreService, 
           stored,
         ),
         organizationPersonalOverrides: policies[0]?.personalOverrides ?? true,
-        egress: { phase: input.phase, allow: [...(egressRows[0]?.allow ?? [])] },
+        egress: {
+          phase: input.phase,
+          allow: [...(egressRows[0]?.allow ?? defaultEgressDestinations(input.phase))],
+        },
       }
       return approvals[0] === undefined ? resolved : { ...resolved, approval: approvalValue(approvals[0]) }
     },

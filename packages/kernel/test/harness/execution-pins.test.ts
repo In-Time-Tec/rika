@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry, HarnessState } from "tenetkit/harness"
+import { Entry, State } from "tenetkit/agent-guidance"
 import { Effect } from "effect"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as SnapshotPin from "@rika/kernel/harness-snapshot-pin"
 
-const entry = (id: string, content: string): HarnessEntry.HarnessEntry => ({
+const entry = (id: string, content: string): Entry.GuidanceEntry => ({
   id,
   kind: "memory",
   scope: "thread:session",
@@ -15,8 +15,7 @@ const entry = (id: string, content: string): HarnessEntry.HarnessEntry => ({
   updatedAt: "2024-01-01T00:00:00.000Z",
 })
 
-const state = (entries: ReadonlyArray<HarnessEntry.HarnessEntry>) =>
-  HarnessState.make({ scope: "thread:session", entries })
+const state = (entries: ReadonlyArray<Entry.GuidanceEntry>) => State.make({ scope: "thread:session", entries })
 
 describe("skill pins on the Agent manifest", () => {
   it("turns discovered skills into named capabilities, replacing the pinned empty list", () => {
@@ -78,17 +77,18 @@ describe("harness snapshot on the Agent manifest", () => {
     expect(pinned.capabilities[0]!.name).toBe("rika-harness-snapshot")
   })
 
-  it("registers the payload under TenetKit's own harness codec", () => {
+  it("registers only the released Agent Guidance codec", () => {
     const pinned = ExecutionPins.harness(state([entry("a", "c")]))
-    expect(pinned.registrations[0]).toMatchObject({ codec: "tenetkit/harness/snapshot", version: "1" })
+    expect(pinned.registrations[0]).toMatchObject({ codec: "tenetkit/agent-guidance/snapshot", version: "1" })
+    expect(pinned.registrations.some(({ codec }) => codec === "tenetkit/harness/snapshot")).toBe(false)
   })
 
   it.effect("registers a payload that reconstructs the exact pinned snapshot", () =>
     Effect.gen(function* () {
       const source = state([entry("a", "c")])
       const pinned = ExecutionPins.harness(source)
-      const restored = yield* SnapshotPin.reconstruct(HarnessState.snapshotId(source), pinned.registrations[0]!.payload)
-      expect(HarnessState.snapshotId(restored)).toBe(HarnessState.snapshotId(source))
+      const restored = yield* SnapshotPin.reconstruct(State.snapshotId(source), pinned.registrations[0]!.payload)
+      expect(State.snapshotId(restored)).toBe(State.snapshotId(source))
     }),
   )
 

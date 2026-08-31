@@ -5,7 +5,7 @@ import {
   type BindingOutcome,
 } from "@rika/remote-execution/protocol"
 import { NestedOperation, ToolContext } from "tenetkit"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import { ActorAttribution, type HostedOwner } from "@rika/product/hosted-model"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Context, Crypto, Effect, Encoding, Exit, Match, Option, Schema } from "effect"
@@ -225,9 +225,9 @@ export const policyFor = (request: Pick<BindingRequest, "module" | "operation" |
 }
 
 const JsonRecord = Schema.Record(Schema.String, Schema.Json)
-const decodeBindingResponse: (
-  input: HostBindingRegistry.Response,
-) => Effect.Effect<BindingResponse, HostedToolPolicyError> = (input) => {
+const decodeBindingResponse: (input: HostModules.Response) => Effect.Effect<BindingResponse, HostedToolPolicyError> = (
+  input,
+) => {
   const decoded = Schema.decodeUnknownExit(BindingResponse)(input)
   return Exit.isSuccess(decoded)
     ? Effect.succeed(decoded.value)
@@ -358,7 +358,7 @@ export class HostedToolPolicy extends Context.Service<HostedToolPolicy, HostedTo
 
 export { organizationOwner, personalOwner }
 
-const directNestedOperations = NestedOperation.NestedOperations.of({
+const directOperations = NestedOperation.Operations.of({
   run: (_request, operation) => operation,
 })
 
@@ -382,7 +382,7 @@ export interface InvokeAdmittedToolInput {
   readonly callId: string
   readonly request: BindingRequest
   readonly access: AccessWire
-  readonly invoke: Effect.Effect<HostBindingRegistry.Response, HostBindingRegistry.BindingFailure>
+  readonly invoke: Effect.Effect<HostModules.Response, HostModules.BindingFailure>
 }
 
 export const invokeAdmittedTool: (
@@ -390,7 +390,7 @@ export const invokeAdmittedTool: (
 ) => Effect.Effect<
   BindingOutcome,
   HostedToolPolicyError,
-  Crypto.Crypto | NestedOperation.NestedOperations | ToolContext.ToolContext
+  Crypto.Crypto | NestedOperation.Operations | ToolContext.ToolContext
 > = Effect.fn("HostedToolPolicy.invoke")(function* (input) {
   const policy = yield* Effect.try({
     try: () => policyFor(input.request),
@@ -413,7 +413,7 @@ export const invokeAdmittedTool: (
   })
   const exactRequest = toolAuthorizationRequest(context)
   const kind = `rika.tool.${context.module}.${context.operation}`
-  const invocation = input.invoke.pipe(Effect.provideService(NestedOperation.NestedOperations, directNestedOperations))
+  const invocation = input.invoke.pipe(Effect.provideService(NestedOperation.Operations, directOperations))
   const replayPolicy: "pure" | "never" | "provider-idempotent" =
     policy.replayPolicy === "none" ? "pure" : policy.replayPolicy
   const operation =

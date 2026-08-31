@@ -1,11 +1,11 @@
 import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
-import { HostBindingRegistry, KernelPool, KernelStateStore } from "tenetkit/repl"
+import { HostModules, KernelPool, KernelStateStore } from "tenetkit/repl"
 import { Context, Effect, Function, Layer, Option, Ref, Scope, type FileSystem, type Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type { BindingRequirements } from "./binding/modules"
 import * as KernelComposition from "./kernel-composition"
 
-export type CapturedServices = ToolContext.ToolContext | NestedOperation.NestedOperations | Session.SessionStore
+export type CapturedServices = ToolContext.ToolContext | NestedOperation.Operations | Session.SessionDirectory
 
 export type CellServices = BindingRequirements
 
@@ -22,20 +22,20 @@ const requiredService = <Identifier, Service>(key: Context.Key<Identifier, Servi
 export const capture: Effect.Effect<Context.Context<CapturedServices>> = Effect.gen(function* () {
   const context = Context.make(ToolContext.ToolContext, yield* requiredService(ToolContext.ToolContext))
   return context.pipe(
-    Context.add(NestedOperation.NestedOperations, yield* requiredService(NestedOperation.NestedOperations)),
-    Context.add(Session.SessionStore, yield* requiredService(Session.SessionStore)),
+    Context.add(NestedOperation.Operations, yield* requiredService(NestedOperation.Operations)),
+    Context.add(Session.SessionDirectory, yield* requiredService(Session.SessionDirectory)),
   )
 })
 
 const ambient: Effect.Effect<Context.Context<never>> = Effect.gen(function* () {
   const toolContext = yield* Effect.serviceOption(ToolContext.ToolContext)
-  const nested = yield* Effect.serviceOption(NestedOperation.NestedOperations)
-  const session = yield* Effect.serviceOption(Session.SessionStore)
+  const nested = yield* Effect.serviceOption(NestedOperation.Operations)
+  const sessions = yield* Effect.serviceOption(Session.SessionDirectory)
   const approvals = yield* Effect.serviceOption(Approvals.Approvals)
   let captured = Context.empty()
   if (toolContext._tag === "Some") captured = Context.add(captured, ToolContext.ToolContext, toolContext.value)
-  if (nested._tag === "Some") captured = Context.add(captured, NestedOperation.NestedOperations, nested.value)
-  if (session._tag === "Some") captured = Context.add(captured, Session.SessionStore, session.value)
+  if (nested._tag === "Some") captured = Context.add(captured, NestedOperation.Operations, nested.value)
+  if (sessions._tag === "Some") captured = Context.add(captured, Session.SessionDirectory, sessions.value)
   if (approvals._tag === "Some") captured = Context.add(captured, Approvals.Approvals, approvals.value)
   return captured
 })
@@ -75,17 +75,14 @@ export const cellContextLayer: Layer.Layer<CellContext> = Layer.effect(
   ),
 )
 
-const unavailable = (request: HostBindingRegistry.Request) => ({
+const unavailable = (request: HostModules.Request) => ({
   _tag: "CellContextUnavailable" as const,
   module: request.module,
   operation: request.operation,
   message: "the rika surface was called outside an executing cell, so this Session has no durable operation identity",
 })
 
-const bindImpl = (
-  registry: HostBindingRegistry.Interface,
-  calls: CellContextInterface,
-): HostBindingRegistry.Interface => ({
+const bindImpl = (registry: HostModules.Service, calls: CellContextInterface): HostModules.Service => ({
   descriptors: registry.descriptors,
   resolve: registry.resolve,
   invoke: (request) =>
@@ -97,8 +94,8 @@ const bindImpl = (
 })
 
 export const bind: {
-  (calls: CellContextInterface): (registry: HostBindingRegistry.Interface) => HostBindingRegistry.Interface
-  (registry: HostBindingRegistry.Interface, calls: CellContextInterface): HostBindingRegistry.Interface
+  (calls: CellContextInterface): (registry: HostModules.Service) => HostModules.Service
+  (registry: HostModules.Service, calls: CellContextInterface): HostModules.Service
 } = Function.dual(2, bindImpl)
 
 export type Services = KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellContext
@@ -124,8 +121,8 @@ export const layer = (
 ): Layer.Layer<Services, never, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path> => {
   const calls = cellContextLayer
   const registry = Layer.effect(
-    HostBindingRegistry.HostBindingRegistry,
-    Effect.map(Effect.all([HostBindingRegistry.HostBindingRegistry, CellContext]), ([mounted, callContext]) =>
+    HostModules.HostModules,
+    Effect.map(Effect.all([HostModules.HostModules, CellContext]), ([mounted, callContext]) =>
       bind(mounted, callContext),
     ),
   ).pipe(

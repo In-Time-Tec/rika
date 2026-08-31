@@ -36,7 +36,7 @@ test("workspace skills override global skills and activation lazily loads contai
       const first = yield* program
       const second = yield* program
       expect(first.registry.listings).toEqual(["- build: build things", "- review: workspace"])
-      expect(first.selected?.frontmatter.description).toBe("workspace")
+      expect(first.selected?.description).toBe("workspace")
       expect(first.activated).toEqual({
         body: "workspace body",
         resources: [{ path: "references/checklist.md", content: "check" }],

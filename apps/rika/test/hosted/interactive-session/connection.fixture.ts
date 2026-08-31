@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
-import { Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import { ThreadEventCursor, ThreadVersion, ThreadId as HostedThreadId } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
@@ -31,6 +31,28 @@ it.effect("does not poll AttachThread while an idle WebSocket remains connected"
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
       for (let advance = 0; advance < 4; advance += 1) yield* TestClock.adjust("500 millis")
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("publishes the attachment before the initial Thread list refresh completes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const refreshStarted = yield* Deferred.make<void>()
+      const releaseRefresh = yield* Deferred.make<void>()
+      const harness = H.makeHarness(H.fixtures.defaultReceive)
+      const hosted = yield* H.runSession(
+        harness,
+        undefined,
+        undefined,
+        Deferred.succeed(refreshStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseRefresh)), Effect.as([])),
+      )
+      yield* Deferred.await(refreshStarted)
+      yield* Effect.yieldNow
+      expect(hosted.states.at(-1)?.connectivity).toBe("connected")
+      expect(String(hosted.session.currentView()?.thread.id)).toBe("thread-1")
+      yield* Deferred.succeed(releaseRefresh, undefined)
       yield* hosted.session.quit
     }),
   ),

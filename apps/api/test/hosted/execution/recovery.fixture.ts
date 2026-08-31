@@ -1,19 +1,20 @@
 import { identityMigrations, runMigration } from "@rika/identity"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import { FileSystem, Config, Effect } from "effect"
+import { FileSystem, Config, Effect, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { Pool } from "pg"
 import { Address, ExecutableManifest, Message } from "tenetkit/runtime"
-import { SqlCodecs } from "tenetkit/runtime/driver/sql"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }
 const executable: ReturnType<typeof ExecutableManifest.makeTest> = ExecutableManifest.makeTest("recovery", "test")
-const executableRef = SqlCodecs.encodeExecutableRef(executable.ref)
-const executableManifest = SqlCodecs.encodeExecutableManifest(executable.manifest)
+const executableRef = Schema.encodeSync(Schema.fromJsonString(ExecutableManifest.ExecutableRef))(executable.ref)
+const executableManifest = Schema.encodeSync(Schema.fromJsonString(ExecutableManifest.ExecutableManifest))(
+  executable.manifest,
+)
 const storedMessage = (suffix: string) =>
-  SqlCodecs.encodeMessage(
+  Schema.encodeSync(Schema.fromJsonString(Message.Message))(
     Message.make({
       id: `message-${suffix}`,
       to: Address.make("agent:recovery"),

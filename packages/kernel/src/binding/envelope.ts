@@ -1,8 +1,8 @@
 import { NestedOperation, ToolContext } from "tenetkit"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import { Effect, Function, Schema } from "effect"
 
-export type Requirements = NestedOperation.NestedOperations | ToolContext.ToolContext
+export type Requirements = NestedOperation.Operations | ToolContext.ToolContext
 
 export const NestedOperationFailed = Schema.Struct({
   _tag: Schema.tag("NestedOperationFailed"),
@@ -14,10 +14,10 @@ export const NestedOperationFailed = Schema.Struct({
 export type NestedOperationFailed = typeof NestedOperationFailed.Type
 
 const NestedOperationFailure = Schema.Union([
-  NestedOperation.NestedOperationDivergence,
-  NestedOperation.NestedOperationUnknown,
-  NestedOperation.NestedOperationDenied,
-  NestedOperation.NestedOperationSuspended,
+  NestedOperation.Divergence,
+  NestedOperation.Unknown,
+  NestedOperation.Denied,
+  NestedOperation.Suspended,
 ])
 
 const failed = (kind: string, failure: NestedOperation.Failure): NestedOperationFailed => {
@@ -54,7 +54,7 @@ const failed = (kind: string, failure: NestedOperation.Failure): NestedOperation
 export interface Crossing {
   readonly kind: string
   readonly payload: unknown
-  readonly replayPolicy: NestedOperation.NestedReplayPolicy
+  readonly replayPolicy: NestedOperation.ReplayPolicy
   readonly approval?: NestedOperation.ApprovalRequirement
 }
 
@@ -87,10 +87,8 @@ export const operation = <
   readonly input: Input
   readonly output: Output
   readonly failure: Failure
-  readonly handle: (
-    input: Input["Type"],
-  ) => Effect.Effect<Output["Type"], Failure["Type"] & HostBindingRegistry.Tagged, R>
-}): HostBindingRegistry.AnyOperation<R> => ({
+  readonly handle: (input: Input["Type"]) => Effect.Effect<Output["Type"], Failure["Type"] & HostModules.Tagged, R>
+}): HostModules.AnyOperation<R> => ({
   name: definition.name,
   input: definition.input,
   output: definition.output,

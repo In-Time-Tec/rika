@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-31",
+  "provider": {
+    "name": "openrouter",
+    "model": "z-ai/glm-5.3-flash",
+    "authentication": {
+      "status": "blocked",
+      "httpStatus": 401,
+      "message": "API key expired."
+    }
+  },
+  "networkExperiment": {
+    "confinementRetained": true,
+    "denyOut": ["0.0.0.0/0"],
+    "withoutRegistry": {
+      "bunManifestFailures": 3,
+      "bunManifestAttempts": 3,
+      "error": "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR"
+    },
+    "withRegistry": {
+      "allowed": ["registry.npmjs.org"],
+      "certificateVerified": true,
+      "frozenInstallPackages": 664,
+      "frozenInstallMilliseconds": 8110
+    },
+    "conclusion": "Adding the missing registry destination fixes the deterministic policy defect; repeated constrained-E2B reliability remains unresolved."
+  },
+  "realOrb": {
+    "threadId": "247c199f-55e3-4b1c-94c1-401f73d1db67",
+    "turnId": "ed6bf28f-5477-4979-8a07-785a0fff170b",
+    "threadCreationMilliseconds": 2880,
+    "preparation": {
+      "startedAt": "2026-08-31T06:26:57.514Z",
+      "readyAt": "2026-08-31T06:27:33.060Z",
+      "durationMilliseconds": 35546,
+      "state": "ready",
+      "phase": "capabilities",
+      "storedEgressRows": 0
+    },
+    "postFixPreparations": {
+      "attempts": 3,
+      "ready": 1,
+      "setupFailures": 2,
+      "assignments": 2,
+      "failure": "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR downloading from registry.npmjs.org",
+      "verdict": "partial; intermittent constrained-E2B TLS/setup reliability unresolved"
+    },
+    "modelAttempt": {
+      "status": "failed",
+      "activeMilliseconds": 1093,
+      "reason": "provider-authentication"
+    },
+    "marker": "not-proven",
+    "toolAction": "not-proven",
+    "continuation": "failed-before-durable-submission-after-workspace-repreparation-failed",
+    "reconnect": {
+      "transportAttach": "proven",
+      "attachMilliseconds": [17, 25],
+      "successfulTurnUx": "not-proven"
+    },
+    "cancellation": "not-proven"
+  },
+  "e2bSdkReview": {
+    "installed": "2.41.0",
+    "reviewedThrough": "2.46.1",
+    "verdict": "No intervening SDK change affects hostname filtering, DNS, or in-sandbox TLS; an SDK upgrade is not an evidence-backed fix for the observed npm failure."
+  },
+  "sourceThreads": [
+    "https://ampcode.com/threads/T-01a05638-f1bb-76cb-995d-cbaa1415bb48",
+    "https://ampcode.com/threads/T-01a05685-9bf7-711b-b226-dabb4da941d2"
+  ]
+}

@@ -13,6 +13,7 @@ export class HostedThreadCommandWorkerError extends Schema.TaggedError<HostedThr
 export interface HostedThreadCommandWorkerService {
   readonly ready: Effect.Effect<void, HostedThreadCommandWorkerError>
   readonly status: Effect.Effect<HostedThreadCommandWorkerStatus>
+  readonly wake: Effect.Effect<void>
 }
 
 export class HostedThreadCommandWorker extends Context.Service<
@@ -64,6 +65,7 @@ export const layer = (options: {
       })
       return HostedThreadCommandWorker.of({
         status: worker.status,
+        wake: worker.wake,
         ready: worker.ready.pipe(
           Effect.mapError((error) => HostedThreadCommandWorkerError.make({ message: error.message })),
         ),

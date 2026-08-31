@@ -193,6 +193,12 @@
   },
   "overrides": [
     {
+      "files": ["apps/rika/src/platform/client-entry-host.ts", "apps/rika/test/client-startup-preview.test.ts"],
+      "rules": {
+        "effecttsgo/process-env": "off"
+      }
+    },
+    {
       "files": ["apps/rika/src/platform/diagnostic-file-host.ts"],
       "rules": {
         "effecttsgo/node-builtin-import": "off"

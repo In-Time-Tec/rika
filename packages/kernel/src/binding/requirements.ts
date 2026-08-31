@@ -1,5 +1,5 @@
 import type { Session } from "tenetkit"
-import type { HarnessStore } from "tenetkit/harness"
+import type { Store } from "tenetkit/agent-guidance"
 import type * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
@@ -15,8 +15,8 @@ export type BindingRequirements =
   | ShellProcessRegistry.Service
   | ThreadQuery.Factory
   | McpRuntime.McpRuntimeService
-  | HarnessStore.HarnessStore
-  | Session.SessionStore
+  | Store.Store
+  | Session.SessionDirectory
   | GoalService
   | ArtifactStore
   | Requirements

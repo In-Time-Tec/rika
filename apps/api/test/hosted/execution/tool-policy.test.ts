@@ -100,7 +100,7 @@ describe("hosted tool policy", () => {
         ToolContext.ToolContext,
         ToolContext.ToolContext.of({
           signal: new AbortController().signal,
-          emit: () => Effect.void,
+          emit: () => Effect.succeed(true),
           sessionId: "thread-test",
           runId: "run-test",
           toolCallId: "call-test",
@@ -108,11 +108,11 @@ describe("hosted tool policy", () => {
         }),
       ),
       Layer.succeed(
-        NestedOperation.NestedOperations,
-        NestedOperation.NestedOperations.of({
+        NestedOperation.Operations,
+        NestedOperation.Operations.of({
           run: (candidate) => {
             nestedRequest = candidate
-            return NestedOperation.NestedOperationSuspended.make({
+            return NestedOperation.Suspended.make({
               token: "approval-token",
               operationKey: "operation-test",
               ordinal: 0,

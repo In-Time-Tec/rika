@@ -1,9 +1,9 @@
 import { dual } from "effect/Function"
 
 export const targets = {
-  "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "" },
-  "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc" },
-  "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc" },
+  "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "", platform: "darwin", architecture: "arm64" },
+  "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc", platform: "linux", architecture: "arm64" },
+  "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc", platform: "linux", architecture: "x64" },
 } as const
 
 export type PackageTarget = keyof typeof targets
@@ -13,9 +13,11 @@ export const isPackageTarget = (value: string): value is PackageTarget => Object
 export const targetNames = Object.keys(targets).filter(isPackageTarget)
 
 export const packageExecutable = "rika"
+export const clientRuntime = ".rika-client-runtime"
 export const kernelRuntime = ".rika-kernel-runtime"
 export const kernelWorker = ".rika-kernel-worker.js"
-export const packageBinEntries = [packageExecutable, kernelRuntime, kernelWorker] as const
+export const packageExecutables = [packageExecutable, clientRuntime, kernelRuntime] as const
+export const packageBinEntries = [...packageExecutables, kernelWorker] as const
 
 export const archiveName: {
   (version: string, target: PackageTarget): string

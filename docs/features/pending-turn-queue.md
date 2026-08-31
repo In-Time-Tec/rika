@@ -2,6 +2,8 @@
 
 Input admitted while a Thread has active work is persisted immediately as a Pending Turn. Each Thread has a bounded FIFO queue; admission beyond its capacity fails with a typed queue-full result and does not displace accepted work.
 
+The terminal shows a provisional queue row in the same reduction that clears the submitted composer. Durable admission rebinds that row from the client submission identity to the admitted Turn identity; definitive rejection removes it. Network and server latency therefore do not delay local feedback or create a second optimistic queue authority.
+
 The Rika Server drains each Thread's queue directly after active work settles with any terminal outcome, including failure: a failed Turn never blocks the queued Turns behind it, and a queued Turn that itself fails does not stop the drain. Claims are durable and safe to retry after interruption. A claimed Turn emits `TurnStarted` only after preparation succeeds and it enters `running`; before that event it appears only in the queue, never as a transcript message. Users may edit, remove, or steer queued text into the active Execution before that point. Preparing steering withdraws the exact source row so the drain cannot claim it; acceptance deletes it, while rejection restores it at the same FIFO position. Withdrawn rows continue to occupy capacity until that outcome is known.
 
 Recovery and cancellation settle their active Turn before draining the queue. A queue claim is released on interruption, typed failure, or defect so one failed promotion cannot block later work until process restart.

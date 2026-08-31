@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { McpToolSource } from "tenetkit/mcp"
+import { MCPClient } from "tenetkit/mcp"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, Layer, PlatformError } from "effect"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
@@ -74,11 +74,11 @@ it.effect("maps MCP discovery, call, and connection errors", () =>
         source: "workspace",
         sourceDigest: "d",
       }
-      const source = McpToolSource.McpToolSource.of({
+      const source = MCPClient.MCPClient.of({
         server: "remote",
         tools: Effect.succeed([]),
         callTool: () =>
-          Effect.fail(McpToolSource.McpToolCallFailed.make({ server: "remote", tool: "x", message: "call failed" })),
+          Effect.fail(MCPClient.MCPToolCallFailed.make({ server: "remote", tool: "x", message: "call failed" })),
         aiTools: Effect.succeed([]),
       })
       const call = yield* Effect.flip(

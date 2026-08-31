@@ -28,6 +28,7 @@ test(
             height: 24,
             script: [model.text("STARTUP_REPLY")],
           })
+          expect(yield* app.selectionAttempts).toBe(0)
           yield* app.waitFrame("SEEDED_THREAD")
           yield* Effect.tryPromise(() => app.type("Send while connecting"))
           app.pressEnter()

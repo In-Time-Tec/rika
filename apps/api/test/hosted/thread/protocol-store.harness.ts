@@ -170,7 +170,7 @@ it.effect.skipIf(!live)("serializes controllers, replays cursors, and consumes s
           cursor: ThreadEventCursor.make("1"),
           acknowledgedAt: later,
         }),
-      ).toBe("1")
+      ).toMatchObject({ acknowledgedCursor: "1", headCursor: "2", threadVersion: "2" })
       const compacted = yield* protocol.replay({
         ownerId,
         threadId,

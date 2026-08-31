@@ -141,7 +141,6 @@ it.effect.skipIf(databaseUrl === "")(
                 maxDepth: 8,
                 maxSubagents: 8,
                 acceptedSequence: 1,
-                respondedWaitIdsJson: "[]",
                 createdAt: now,
                 updatedAt: now,
               })),

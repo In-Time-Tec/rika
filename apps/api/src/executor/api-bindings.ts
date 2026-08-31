@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import type * as PgClient from "@effect/sql-pg/PgClient"
-import { HarnessStore } from "tenetkit/harness"
+import { Store } from "tenetkit/agent-guidance"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
 import * as HarnessStoreLocations from "@rika/kernel/harness-store-locations"
 import * as GoalService from "@rika/product/goal-service"
@@ -10,11 +10,7 @@ import * as ProductRepositories from "@rika/product-store/product-repositories"
 import * as ThreadSearchIndex from "@rika/product-store/thread-search-index"
 import { Layer } from "effect"
 
-export type Services =
-  | ThreadQuery.Factory
-  | HarnessStore.HarnessStore
-  | GoalService.GoalService
-  | ArtifactStore.ArtifactStore
+export type Services = ThreadQuery.Factory | Store.Store | GoalService.GoalService | ArtifactStore.ArtifactStore
 
 export const layer = ({
   ownerId,

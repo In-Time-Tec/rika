@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
@@ -7,7 +7,7 @@ import { nested, NestedOperationFailed, operation, type Requirements } from "../
 export const name = "mcp"
 
 /**
- * Shaped like TenetKit's HostBindingNotFound so an unknown server or tool reaches the cell as tagged
+ * Shaped like TenetKit's HostModuleNotFound so an unknown server or tool reaches the cell as tagged
  * data. The bootstrap Proxy over `rika.mcp.<server>.<tool>` resolves names lazily, so this is the
  * only thing standing between a typo and `undefined is not a function`.
  */
@@ -51,7 +51,7 @@ const Called = Schema.Struct({ content: Schema.Json, isError: Schema.Boolean })
 
 export const make = (
   servers: ReadonlyArray<McpDiscovery.ConfiguredServer>,
-): HostBindingRegistry.Module<McpRuntime.McpRuntimeService | Requirements> => {
+): HostModules.Module<McpRuntime.McpRuntimeService | Requirements> => {
   const configured = new Map(servers.map((entry) => [entry.server.name, entry] as const))
   const reachable = servers.filter((entry) => entry.enabled).map((entry) => entry.server.name)
   const resolve = (server: string) => {

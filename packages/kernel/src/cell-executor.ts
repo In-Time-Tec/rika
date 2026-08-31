@@ -1,4 +1,4 @@
-import { Cell, HostBindingRegistry, KernelPool } from "tenetkit/repl"
+import { Cell, HostModules, KernelPool } from "tenetkit/repl"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import * as Composition from "./kernel-composition"
 import * as KernelBootstrap from "./kernel-bootstrap"
@@ -23,7 +23,7 @@ export class CellExecutor extends Context.Service<CellExecutor, Interface>()(
   "@rika/kernel/cell-executor/CellExecutor",
 ) {}
 
-const make = (pool: KernelPool.Interface, modules: ReadonlyArray<string>): Interface => ({
+const make = (pool: KernelPool.Service, modules: ReadonlyArray<string>): Interface => ({
   execute: (request) => {
     const emit = request.emit ?? (() => Effect.void)
     return Effect.acquireUseRelease(
@@ -57,13 +57,13 @@ const make = (pool: KernelPool.Interface, modules: ReadonlyArray<string>): Inter
 })
 
 export interface Options extends Composition.Options {
-  readonly registry: Layer.Layer<HostBindingRegistry.HostBindingRegistry>
+  readonly registry: Layer.Layer<HostModules.HostModules>
 }
 
 export const layer = (options: Options) =>
   Layer.effect(
     CellExecutor,
-    Effect.map(Effect.all([KernelPool.KernelPool, HostBindingRegistry.HostBindingRegistry]), ([pool, registry]) =>
+    Effect.map(Effect.all([KernelPool.KernelPool, HostModules.HostModules]), ([pool, registry]) =>
       make(
         pool,
         registry.descriptors.map((descriptor) => descriptor.module),

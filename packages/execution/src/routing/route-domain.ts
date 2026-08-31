@@ -1,7 +1,7 @@
 import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "tenetkit"
-import { ModelRoute } from "tenetkit/ai"
+import * as ModelRoute from "tenetkit/ai/model-route"
 import { Errors, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
-import type { HarnessState } from "tenetkit/harness"
+import type { State } from "tenetkit/agent-guidance"
 import { CellTool, KernelPool, type KernelProfile } from "tenetkit/repl"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
@@ -23,7 +23,8 @@ export interface KernelOptions {
   readonly runtimeVersion: string
   readonly dataRoot: string
   readonly limits?: KernelProfile.Limits
-  readonly trustMode?: KernelProfile.TrustMode
+  /** Rika-owned policy surfaced to cells; TenetKit's physical KernelProfile intentionally excludes it. */
+  readonly trustMode?: string
 }
 
 export type LocalCellServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
@@ -73,7 +74,7 @@ export interface ConfigureOptions {
   readonly kernel: KernelOptions
   readonly cell?: CellRoute
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
-  readonly harnessSnapshot?: HarnessState.HarnessState
+  readonly harnessSnapshot?: State.GuidanceState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreService
   readonly openAiAccountAccess?: (credentialIdentity: string) => OpenAiAuth.CredentialAccess
@@ -94,7 +95,7 @@ export interface ResolverOptions {
   readonly cell?: CellResolver
   readonly capabilities?: (workspace: string) => Effect.Effect<{
     readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
-    readonly harnessSnapshot: HarnessState.HarnessState
+    readonly harnessSnapshot: State.GuidanceState
   }>
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
   readonly credentialStore?: ProviderCredentialStoreService
@@ -127,7 +128,7 @@ export { profileInstructions }
  * nothing rather than an empty section, so a session with no refinements looks exactly as it did.
  */
 const harnessSupplement = (
-  harness: HarnessState.HarnessState | undefined,
+  harness: State.GuidanceState | undefined,
   skills: ReadonlyArray<ExecutionPins.SkillPin>,
 ): string =>
   harness === undefined

@@ -14,6 +14,23 @@ export interface LocalSession {
 
 const failure = (message: string) => ForegroundRunnerError.make({ message })
 
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+const runnerProtocol = (trusted: URL | undefined) =>
+  trusted?.protocol === "http:" && loopbackHosts.has(trusted.hostname) ? "ws:" : "wss:"
+
+const validRunnerEndpoint = (url: URL, protocol: "ws:" | "wss:") =>
+  url.protocol === protocol &&
+  url.pathname === "/api/v1/runners" &&
+  url.username.length === 0 &&
+  url.password.length === 0 &&
+  url.search.length === 0 &&
+  url.hash.length === 0
+
+const validTrustedOrigin = (url: URL, trusted: URL | undefined, protocol: "ws:" | "wss:") =>
+  trusted === undefined ||
+  (trusted.protocol === (protocol === "ws:" ? "http:" : "https:") && `${protocol}//${trusted.host}` === url.origin)
+
 const sameFence = (left: Fence, right: Fence) =>
   left.target === right.target &&
   left.assignmentId === right.assignmentId &&
@@ -39,23 +56,14 @@ const runnerUrl = (
     return yield* Effect.try({
       try: () => {
         const url = new URL(value)
-        if (
-          url.protocol !== "wss:" ||
-          url.pathname !== "/api/v1/runners" ||
-          url.username.length > 0 ||
-          url.password.length > 0 ||
-          url.search.length > 0 ||
-          url.hash.length > 0
-        )
-          throw new Error("Runner URL is not a pinned wss:// endpoint")
-        if (trustedOrigin !== undefined) {
-          const origin = new URL(trustedOrigin)
-          if (origin.protocol !== "https:" || `wss://${origin.host}` !== url.origin)
-            throw new Error("Runner URL is outside the trusted hosted origin")
-        }
+        const trusted = trustedOrigin === undefined ? undefined : new URL(trustedOrigin)
+        const protocol = runnerProtocol(trusted)
+        if (!validRunnerEndpoint(url, protocol)) throw new Error("Runner URL is not a pinned endpoint")
+        if (!validTrustedOrigin(url, trusted, protocol))
+          throw new Error("Runner URL is outside the trusted hosted origin")
         return url.toString()
       },
-      catch: () => failure("Runner URL must be a pinned wss:// endpoint"),
+      catch: () => failure("Runner URL must be a pinned wss:// endpoint or exact loopback ws:// endpoint"),
     })
   })
 

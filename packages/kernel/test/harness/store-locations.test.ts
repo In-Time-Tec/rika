@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { HarnessState, HarnessStore } from "tenetkit/harness"
+import { State, Store } from "tenetkit/agent-guidance"
 import { Effect, FileSystem, Layer } from "effect"
 import * as StoreLocations from "@rika/kernel/harness-store-locations"
 
@@ -32,8 +32,8 @@ describe("filesystem harness store", () => {
   it.layer(Layer.merge(storeLayer, BunServices.layer).pipe(Layer.provideMerge(BunServices.layer)))((test) => {
     test.effect("round-trips one thread scope and returns what it stored", () =>
       Effect.gen(function* () {
-        const store = yield* HarnessStore.HarnessStore
-        yield* store.save(HarnessState.make({ scope: "thread:session", entries: [entry("kept")] }))
+        const store = yield* Store.Store
+        yield* store.save(State.make({ scope: "thread:session", entries: [entry("kept")] }))
         const loaded = yield* store.load("thread:session")
         expect(loaded.entries.memory.map((value) => value.id)).toEqual(["kept"])
       }),
@@ -41,10 +41,10 @@ describe("filesystem harness store", () => {
 
     test.effect("keeps each scope in its own file rather than one shared blob", () =>
       Effect.gen(function* () {
-        const store = yield* HarnessStore.HarnessStore
-        yield* store.save(HarnessState.make({ scope: "global", entries: [] }))
-        yield* store.save(HarnessState.make({ scope: "workspace:digest", entries: [entry("shared")] }))
-        yield* store.save(HarnessState.make({ scope: "thread:session", entries: [entry("local")] }))
+        const store = yield* Store.Store
+        yield* store.save(State.make({ scope: "global", entries: [] }))
+        yield* store.save(State.make({ scope: "workspace:digest", entries: [entry("shared")] }))
+        yield* store.save(State.make({ scope: "thread:session", entries: [entry("local")] }))
         expect((yield* store.load("global")).entries.memory).toEqual([])
         expect((yield* store.load("workspace:digest")).entries.memory.map((value) => value.id)).toEqual(["shared"])
         expect((yield* store.load("thread:session")).entries.memory.map((value) => value.id)).toEqual(["local"])
@@ -53,8 +53,8 @@ describe("filesystem harness store", () => {
 
     test.effect("returns an empty scope rather than failing when nothing was ever written", () =>
       Effect.gen(function* () {
-        const store = yield* HarnessStore.HarnessStore
-        expect(HarnessState.allEntries(yield* store.load("thread:fresh"))).toEqual([])
+        const store = yield* Store.Store
+        expect(State.allEntries(yield* store.load("thread:fresh"))).toEqual([])
       }),
     )
   })

@@ -63,7 +63,14 @@ const reduceSubmitted = (model: Model, message: Message): Model | undefined => {
             : { ...submittedDraft, submissionId: message.submissionId },
         ],
       }
-      if (submission._tag !== "Prompt" || model.busy) return submitted
+      if (submission._tag !== "Prompt") return submitted
+      if (model.busy)
+        return message.submissionId === undefined
+          ? submitted
+          : {
+              ...submitted,
+              queue: [...model.queue, { id: message.submissionId, prompt, provisional: true }],
+            }
       return {
         ...appendProvisionalUserEntry(submitted, prompt, message.submissionId),
         busy: true,

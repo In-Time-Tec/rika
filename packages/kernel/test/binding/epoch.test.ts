@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessState, HarnessStore } from "tenetkit/harness"
+import { State, Store } from "tenetkit/agent-guidance"
 import { Context, Effect, Schema } from "effect"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { mountModules } from "../support/binding"
 
 const store = () => {
-  const states = new Map<string, HarnessState.HarnessState>()
+  const states = new Map<string, State.GuidanceState>()
   return {
     states,
-    service: HarnessStore.HarnessStore.of({
-      load: (scope) => Effect.succeed(states.get(scope) ?? HarnessState.empty(scope)),
+    service: Store.Store.of({
+      load: (scope) => Effect.succeed(states.get(scope) ?? State.empty(scope)),
       save: (state) => Effect.sync(() => void states.set(state.scope, state)),
     }),
   }
@@ -18,17 +18,17 @@ const store = () => {
 const registry = (backing: ReturnType<typeof store>) =>
   mountModules({
     modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
-    services: Context.make(HarnessStore.HarnessStore, backing.service),
+    services: Context.make(Store.Store, backing.service),
   })
 
 const baseline = (backing: ReturnType<typeof store>, scope: string) =>
-  HarnessState.snapshotId(backing.states.get(scope) ?? HarnessState.empty(scope))
+  State.snapshotId(backing.states.get(scope) ?? State.empty(scope))
 
 const MutationResponse = Schema.Struct({
   _tag: Schema.tag("Success"),
   output: Schema.Struct({ snapshotId: Schema.String, applied: Schema.Finite }),
 })
-const SnapshotResponse = Schema.Struct({ _tag: Schema.tag("Success"), output: HarnessState.HarnessState })
+const SnapshotResponse = Schema.Struct({ _tag: Schema.tag("Success"), output: State.GuidanceState })
 const OverviewResponse = Schema.Struct({ _tag: Schema.tag("Success"), output: Schema.Struct({ text: Schema.String }) })
 
 const memories = (backing: ReturnType<typeof store>, scope: string) =>

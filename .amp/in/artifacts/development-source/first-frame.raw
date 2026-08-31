@@ -1,0 +1,2 @@
+$ bun ./src/client-main.ts --workspace /Users/dallenpyrah/Projects/in-time-tec/rika --thread "9f0994d9-9736-48ff-a0aa-963ae2daeb7b"
+[?1049h[?2026h[?25l[2J[12;33H[1;38;2;61;255;166mWelcome to Rika[0m[14;36H[2;38;5;7mStarting…[0m[?2026l

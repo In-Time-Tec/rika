@@ -164,6 +164,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   let selectionsLoaded = 0
   let submissionAdmissions = 0
   let submissionAttempts = 0
+  let selectionAttempts = 0
   const awaitSelectionLoaded = (count: number): Effect.Effect<void> =>
     Effect.suspend(() =>
       selectionsLoaded >= count
@@ -220,9 +221,15 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             if (delivered._tag === "SubmissionAdmitted") submissionAdmissions += 1
           }),
         selectThread: (threadId) =>
-          options.initialThreadSelected === true && threadId === settings.threadId
-            ? Effect.void
-            : current.selectThread(threadId),
+          Effect.sync(() => {
+            selectionAttempts += 1
+          }).pipe(
+            Effect.andThen(
+              options.initialThreadSelected === true && threadId === settings.threadId
+                ? Effect.void
+                : current.selectThread(threadId),
+            ),
+          ),
       }
       if (options.newOrbThreadFailure !== undefined)
         Object.assign(tuiSession, {
@@ -398,6 +405,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
     setConnectionState: (state) => SubscriptionRef.set(connectionState, state),
     modelRequestCount: laneModels.requestCountFor("Root"),
     submissionAttempts: Effect.sync(() => submissionAttempts),
+    selectionAttempts: Effect.sync(() => selectionAttempts),
     modelProviderHttpEnvelopeCounts: laneModels.providerHttpEnvelopeCountsFor("Root"),
     modelPrompts: laneModels.promptsFor("Root"),
     modelToolNamesFor: (profile) =>

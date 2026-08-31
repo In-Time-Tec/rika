@@ -36,10 +36,12 @@ export interface Pending {
   readonly operationKey: string
   readonly attempt: number
   readonly code: string
+  readonly workspaceId: string
   readonly request: LocalExecuteInput
   readonly socket: Socket
   readonly access: AccessWire
   readonly result: Deferred.Deferred<FinalResult, GatewayError>
+  readonly acknowledged: Deferred.Deferred<void>
   readonly bindings: BindingAuthority
   readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
   readonly bindingLock: Semaphore.Semaphore

@@ -13,11 +13,14 @@ const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 const executionIdentity = { threadId: "thread-1", turnId: "turn-1" } as const
 
 const profile = KernelProfile.make({
+  provider: "tenetkit/repl/bun",
   runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
+  image: { kind: "runtime", reference: `bun@${kernel.runtimeVersion}`, digest: "runtime-digest" },
+  isolation: "host-process",
+  checkpoints: { liveProcess: true, filesystem: false, namespace: true },
   bindingsDigest: KernelProfile.bindingsDigest(["workspace"]),
   workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
   limits: { sourceBytes: CellTool.maxSourceBytes, cellDeadlineMillis: 1_000 },
-  trustMode: "trusted-local",
 })
 
 const request = (code: string, sessionId: string): ToolExecutor.Request => {
@@ -65,9 +68,9 @@ const remoteRequest = RemoteCells.Request.make({
 const cellContext = (sessionId: string) =>
   Effect.map(
     Effect.abortSignal,
-    (signal): ToolContext.Interface => ({
+    (signal): ToolContext.Service => ({
       signal,
-      emit: () => Effect.void,
+      emit: () => Effect.succeed(true),
       sessionId,
       toolCallId: `call-${sessionId}`,
       operationKey: `operation-${sessionId}`,

@@ -2,7 +2,7 @@ import * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as SkillRegistry from "@rika/extensions/skill-registry"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
-import { HarnessMerge, HarnessStore } from "tenetkit/harness"
+import { State, Store } from "tenetkit/agent-guidance"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as HarnessStoreLocations from "@rika/kernel/harness-store-locations"
 import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
@@ -27,7 +27,7 @@ const harnessRoots = (options: Options): HarnessStoreLocations.Roots => ({
 })
 
 /** The durable per-scope harness store every Thread refines through. */
-export const harnessStoreLayer = (options: Options): Layer.Layer<HarnessStore.HarnessStore> =>
+export const harnessStoreLayer = (options: Options): Layer.Layer<Store.Store> =>
   HarnessStoreLocations.layer(harnessRoots(options)).pipe(Layer.provide(BunServices.layer))
 
 /**
@@ -39,7 +39,7 @@ export const harnessStoreLayer = (options: Options): Layer.Layer<HarnessStore.Ha
  */
 const effectiveHarnessImpl = (options: Options, threadId: string | undefined) =>
   Effect.gen(function* () {
-    const store = yield* HarnessStore.HarnessStore
+    const store = yield* Store.Store
     const digest = yield* workspaceDigest(options.workspace)
     const identity = { thread: threadId ?? "", workspaceDigest: digest }
     /**
@@ -50,7 +50,7 @@ const effectiveHarnessImpl = (options: Options, threadId: string | undefined) =>
      */
     const levels = threadId === undefined ? ["global" as const, "workspace" as const] : ScopePolicy.mergeOrder
     const states = yield* Effect.forEach(levels, (level) => store.load(ScopePolicy.scopeString(level, identity)))
-    return states.reduce((outer, inner) => HarnessMerge.mergeStates(outer, inner))
+    return states.reduce((outer, inner) => State.merge(outer, inner))
   })
 
 export const effectiveHarness: {

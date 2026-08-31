@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "method": {
+    "source": "Rika structured diagnostic milestones emitted by the packaged darwin-arm64 binary during a real PTY continuation of an existing Runner Thread",
+    "clock": "UTC wall-clock timestamps for milestone deltas; Effect monotonic Clock durations for phase spans",
+    "baselinePid": 3434,
+    "finalPid": 17186
+  },
+  "baseline": {
+    "blockingAttachMilliseconds": 8092,
+    "blockingRefreshMilliseconds": 7787,
+    "duplicateAttachObserved": true
+  },
+  "final": {
+    "processStartToFirstDrawMilliseconds": 24,
+    "firstDrawToConnectionReadyMilliseconds": 1621,
+    "processStartToConnectionReadyMilliseconds": 1645,
+    "attachCompleteToConnectionReadyMilliseconds": 624,
+    "phasesMilliseconds": {
+      "connection_ticket": 173,
+      "connection_socket": 204,
+      "attach_response": 341,
+      "attach_projection": 6,
+      "attach_ack": 0,
+      "attach": 350
+    },
+    "backgroundRefreshMilliseconds": 6188,
+    "duplicateAttachObserved": false
+  },
+  "comparison": {
+    "blockingAttachReductionPercent": 95.7
+  },
+  "capture": {
+    "path": ".amp/in/artifacts/attach-final/session.raw",
+    "sha256": "55db1bb6420f23f087458c00fab07fd601fa1c2d4f9a74d8ca69e088f3e547d0",
+    "bytes": 80354
+  },
+  "limitations": [
+    "This is one real hosted continuation, not a latency distribution.",
+    "The final connection-ready milestone includes truthful local Runner readiness, not only WebSocket attachment.",
+    "The thread-list refresh still took several seconds, but ran after connectivity became connected and did not block attachment.",
+    "The capture process was force-killed after evidence collection; connection measurements completed before shutdown."
+  ]
+}

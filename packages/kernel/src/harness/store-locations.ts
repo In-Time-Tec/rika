@@ -1,12 +1,12 @@
-import { FileSystemHarnessStore, type HarnessStore } from "tenetkit/harness"
+import { FileSystemStore, type Store } from "tenetkit/agent-guidance"
 import { globalDirectory, workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { FileSystem, Layer, Path as EffectPath } from "effect"
 import { scopeName } from "./scope-policy"
 
 /**
  * Where one harness scope's file lives. `@rika/extensions` cannot own this: the package boundary
- * forbids it importing `@rika/configuration` or `tenetkit/harness`, so the kernel owns the location
- * decision `FileSystemHarnessStore` delegates to its host.
+ * forbids it importing `@rika/configuration` or `tenetkit/agent-guidance`, so the kernel owns the
+ * location decision `FileSystemStore` delegates to its host.
  */
 export interface Roots {
   readonly home: string
@@ -32,7 +32,5 @@ export const path =
     under(directory(scope, roots), `${encodeURIComponent(scope)}.json`)
 
 /** The durable per-scope harness store every Thread refines through. */
-export const layer = (
-  roots: Roots,
-): Layer.Layer<HarnessStore.HarnessStore, never, FileSystem.FileSystem | EffectPath.Path> =>
-  FileSystemHarnessStore.layer({ path: path(roots) })
+export const layer = (roots: Roots): Layer.Layer<Store.Store, never, FileSystem.FileSystem | EffectPath.Path> =>
+  FileSystemStore.layer({ path: path(roots) })

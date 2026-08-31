@@ -97,7 +97,7 @@ it.effect("fails reconstruction typed when the host kernel profile drifts under 
     const drifted = yield* configure({
       executionRoute,
       workspace,
-      kernel: { ...kernel, trustMode: "trusted-workspace" },
+      kernel: { ...kernel, dataRoot: "/different-kernel-data" },
     })
     const pinOf = (configured: {
       readonly registrations: ReadonlyArray<{ readonly pin: string; readonly codec: string }>

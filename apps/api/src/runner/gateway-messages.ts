@@ -44,6 +44,16 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
           if (message._tag === "RunnerHello")
             return authority.hello(message.hello).pipe(
               Effect.tap((welcome) =>
+                Effect.sync(() => {
+                  socket.send(
+                    encode({
+                      _tag: "ExecutorWelcome",
+                      welcome: { ...welcome, sessionToken: Redacted.value(welcome.sessionToken) },
+                    }),
+                  )
+                }),
+              ),
+              Effect.tap((welcome) =>
                 register({
                   socket,
                   access: {
@@ -53,16 +63,6 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                     sessionToken: Redacted.value(welcome.sessionToken),
                   },
                   leaseExpiresAt: welcome.leaseExpiresAt,
-                }),
-              ),
-              Effect.tap((welcome) =>
-                Effect.sync(() => {
-                  socket.send(
-                    encode({
-                      _tag: "ExecutorWelcome",
-                      welcome: { ...welcome, sessionToken: Redacted.value(welcome.sessionToken) },
-                    }),
-                  )
                 }),
               ),
               Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
@@ -75,12 +75,10 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                   access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
                   leaseExpiresAt: welcome.leaseExpiresAt,
                 }
-                return register(session).pipe(
-                  Effect.andThen(
-                    Effect.sync(() => {
-                      socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
-                    }),
-                  ),
+                return Effect.sync(() => {
+                  socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+                }).pipe(
+                  Effect.andThen(register(session)),
                   Effect.andThen(replayPending(session)),
                 )
               }),

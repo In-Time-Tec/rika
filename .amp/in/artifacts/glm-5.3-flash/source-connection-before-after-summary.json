@@ -1,0 +1,44 @@
+{
+  "before": {
+    "connectionReadyMilliseconds": {
+      "p50": 489.28150000000005,
+      "p95": 529.998,
+      "min": 463.455,
+      "max": 529.998
+    },
+    "firstDrawToConnectionMilliseconds": {
+      "p50": 210,
+      "p95": 249.00000000000006,
+      "min": 186,
+      "max": 249.00000000000006
+    },
+    "firstDrawToTicketMilliseconds": {
+      "p50": 156,
+      "p95": 193,
+      "min": 136,
+      "max": 193
+    }
+  },
+  "after": {
+    "connectionReadyMilliseconds": {
+      "p50": 438.824,
+      "p95": 492.93,
+      "min": 427.725,
+      "max": 492.93
+    },
+    "firstDrawToConnectionMilliseconds": {
+      "p50": 165,
+      "p95": 211,
+      "min": 154,
+      "max": 211
+    },
+    "firstDrawToTicketMilliseconds": {
+      "p50": 116.5,
+      "p95": 150,
+      "min": 107,
+      "max": 150
+    }
+  },
+  "p50ImprovementMilliseconds": 45,
+  "p50ImprovementPercent": 21.43
+}

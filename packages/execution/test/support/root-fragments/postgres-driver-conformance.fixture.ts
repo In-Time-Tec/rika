@@ -3,9 +3,10 @@ import { Config, Context, Effect, Layer, Random } from "effect"
 import { SqlClient, type SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { afterAll, beforeAll } from "vitest"
 import { Pool } from "pg"
-import { Agent, TurnPolicy } from "tenetkit"
+import { Agent, Policy } from "tenetkit"
 import { TestModel } from "tenetkit/test"
-import { Address, ExecutableManifest, ExecutableRegistration, ExecutableResolver, RunClaims } from "tenetkit/runtime"
+import { Address, ExecutableManifest, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
+import { RunClaims, type ClaimedRun, type RunClaimsService } from "tenetkit/runtime/sql-driver"
 import { driverConformance, type Services } from "tenetkit/test/runtime-driver"
 import * as Postgres from "../../../src/postgres"
 
@@ -16,7 +17,7 @@ const executable = ExecutableManifest.makeTest("rika-postgres-conformance", "1")
 const agent = Agent.close(
   Agent.make({
     name: "rika-postgres-conformance",
-    policy: TurnPolicy.make(() => Effect.succeed(TurnPolicy.decision.continue())),
+    policy: Policy.make(() => Effect.succeed(Policy.decision.continue())),
   }),
   TestModel.layer([]),
 )
@@ -31,7 +32,7 @@ let isolatedUrl = databaseUrl
 let database = ""
 let admin: Pool | undefined
 let isolated: Pool | undefined
-let activeClaims: RunClaims.Interface | undefined
+let activeClaims: RunClaimsService | undefined
 let activeSql: SqlClientService | undefined
 
 if (databaseUrl !== "") {
@@ -68,7 +69,7 @@ const layer = Layer.unwrap(
       Layer.provideMerge(client),
       Layer.tap((context) =>
         Effect.sync(() => {
-          activeClaims = Context.get(context, RunClaims.RunClaims)
+          activeClaims = Context.get(context, RunClaims)
           activeSql = Context.get(context, SqlClient)
         }),
       ),
@@ -82,7 +83,12 @@ const claim = (services: Services, input: { readonly runId: string; readonly wor
     const [claimed] = yield* services.claims.claimReadyRuns({ workerId: input.workerId, limit: 1, lease: "10 seconds" })
     if (claimed === undefined || claimed.run.runId !== input.runId)
       return yield* Effect.die(`PostgreSQL did not claim expected Run ${input.runId}`)
-    return { runId: claimed.run.runId, ownerId: claimed.workerId, attemptFence: claimed.attemptFence }
+    return {
+      runId: claimed.run.runId,
+      ownerId: claimed.workerId,
+      attemptFence: claimed.attemptFence,
+      session: claimed.session,
+    }
   }).pipe(Effect.orDie)
 
 const forceRollback = <A, E>(effect: Effect.Effect<A, E>) => {
@@ -92,7 +98,12 @@ const forceRollback = <A, E>(effect: Effect.Effect<A, E>) => {
     .pipe(Effect.catchTag("SqlError", Effect.die))
 }
 
-const expire = (workerClaim: { readonly runId: string; readonly workerId: string; readonly attemptFence: number }) =>
+const expire = (workerClaim: {
+  readonly runId: string
+  readonly workerId: string
+  readonly attemptFence: number
+  readonly session: ClaimedRun["session"]
+}) =>
   activeClaims === undefined
     ? Effect.die("PostgreSQL claims service is missing")
     : activeClaims

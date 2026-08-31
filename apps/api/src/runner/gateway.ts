@@ -19,14 +19,14 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
-import { Crypto, Deferred, Effect, Encoding, Layer, Ref, Semaphore } from "effect"
+import { Crypto, Deferred, Effect, Encoding, FiberSet, Layer, Ref, Semaphore } from "effect"
 import { GatewayError, type ExecutorDataPlane, type OperationIdentity, type OperationInput } from "../executor/gateway"
 import type { HostedToolPolicyService } from "../hosted/execution/tool-policy"
 import type { RunnerExecutorAuthority } from "./executor"
 import type { Socket } from "../executor/gateway"
 import { runnerGatewayCalls } from "./gateway-calls"
 import { runnerGatewayMessages } from "./gateway-messages"
-import { runnerGatewayOperations } from "./gateway-operations"
+import { runnerGatewayOperations, sendCellExecute } from "./gateway-operations"
 import {
   gatewayModel,
   type FinalResult,
@@ -51,6 +51,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const pending = yield* Ref.make(new Map<string, Pending>())
+  const redeliveries = yield* FiberSet.make<void>()
   const gatewayLock = yield* Semaphore.make(1)
   const lifecycleLock = yield* Semaphore.make(1)
   const machineLock = yield* Semaphore.make(1)
@@ -165,10 +166,17 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     )
   })
   const replayPending = Effect.fn("RunnerGateway.replayPending")(function* (session: Session) {
+    const delivered = new Set<string>()
+    for (const operation of (yield* Ref.get(pending)).values()) {
+      if (operation.assignmentId !== session.access.fence.assignmentId) continue
+      delivered.add(key(operation.assignmentId, operation.operationKey, operation.attempt))
+      yield* sendCellExecute(operation)
+    }
     const queuedOperations = yield* operations
       .replayQueue(session.access.fence.assignmentId)
       .pipe(Effect.mapError(() => failure("transport", "Could not load Runner replay queue")))
-    for (const queued of queuedOperations)
+    for (const queued of queuedOperations) {
+      if (delivered.has(key(session.access.fence.assignmentId, queued.operationKey, queued.attempt))) continue
       session.socket.send(
         encode({
           _tag: "CellReplay",
@@ -178,6 +186,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
           afterCursor: queued.afterCursor,
         }),
       )
+    }
     yield* calls.replayMachineCalls(session)
   })
   const finalize = Effect.fn("RunnerGateway.finalize")(function* (input: {
@@ -275,6 +284,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
       }),
     )
     if (entry === undefined) return undefined
+    yield* Deferred.succeed(entry.acknowledged, undefined)
     yield* calls.retireOperation(assignmentId, operationKey, attempt)
     return entry
   })
@@ -396,6 +406,10 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
           .pipe(Effect.mapError(() => failure("transport", "Could not persist Runner lifecycle frame")))
         if (disposition === "invalid-sequence")
           return yield* failure("fenced", "Runner lifecycle sequence or attribution is invalid")
+        const operation = (yield* Ref.get(pending)).get(
+          key(assignmentId, frame.attribution.operationKey, frame.attribution.attempt),
+        )
+        if (operation !== undefined) yield* Deferred.succeed(operation.acknowledged, undefined)
         if (frame._tag === "Terminal") {
           if (frame.outcome === "cancelled")
             yield* calls.settleCancelledOperation(assignmentId, attribution.operationKey, attribution.attempt)
@@ -446,6 +460,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     settlePending,
     retirePending,
     sendCancel,
+    redeliveries,
   })
   yield* operationGateway.recovery.pipe(Effect.forkScoped)
   const active: RunnerGateway["active"] = (socket) =>

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostBindingRegistry } from "tenetkit/repl"
+import type { HostModules } from "tenetkit/repl"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
@@ -50,7 +50,7 @@ const applyOne = (replacement: typeof Replacement.Type) => {
   })
 }
 
-export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
+export const operations: ReadonlyArray<HostModules.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
   operation({
     name: "apply",
     input: ApplyInput,
@@ -75,4 +75,4 @@ export const operations: ReadonlyArray<HostBindingRegistry.AnyOperation<CodingTo
   }),
 ]
 
-export const module: HostBindingRegistry.Module<CodingToolRuntime.Service | Requirements> = { name, operations }
+export const module: HostModules.Module<CodingToolRuntime.Service | Requirements> = { name, operations }

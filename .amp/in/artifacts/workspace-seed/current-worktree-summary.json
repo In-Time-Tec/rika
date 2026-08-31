@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "boundary": "prepareWorkspaceSeed on the full uncommitted Rika worktree after the TypeScript declaration false-positive fix; excludes Bun module import and remote HTTP upload",
+  "samples": 10,
+  "minMilliseconds": 600.129,
+  "p50Milliseconds": 609.247,
+  "p95Milliseconds": 624.15,
+  "maxMilliseconds": 624.15,
+  "archiveBytes": [
+    2063965,
+    2064122,
+    2064134,
+    2064151,
+    2064172,
+    2064174,
+    2064274,
+    2064295,
+    2064297,
+    2064310
+  ],
+  "allIdentifiedSourceRepository": true
+}

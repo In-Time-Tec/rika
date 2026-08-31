@@ -15,7 +15,6 @@ export interface Options {
   readonly dataRoot: string
   readonly runtimeDigest?: string
   readonly limits?: KernelProfile.Limits
-  readonly trustMode?: KernelProfile.TrustMode
   readonly environment?: Environment
 }
 
@@ -27,18 +26,23 @@ export interface Options {
  * changing how the object is assembled, adding an executable skill, enabling an MCP server — yields
  * a different digest and therefore a new epoch rather than a worker running a stale surface.
  */
-export const make = (options: Options): KernelProfile.KernelProfile =>
-  KernelProfile.make({
-    runtime: {
-      name: runtimeName,
-      version: options.runtimeVersion,
-      digest: options.runtimeDigest ?? Pins.digest({ name: runtimeName, version: options.runtimeVersion }),
-    },
+export const make = (options: Options): KernelProfile.KernelProfile => {
+  const runtime = {
+    name: runtimeName,
+    version: options.runtimeVersion,
+    digest: options.runtimeDigest ?? Pins.digest({ name: runtimeName, version: options.runtimeVersion }),
+  }
+  return KernelProfile.make({
+    provider: "tenetkit/repl/bun",
+    runtime,
+    image: { kind: "runtime", reference: `${runtime.name}@${runtime.version}`, digest: runtime.digest },
+    isolation: "host-process",
+    checkpoints: { liveProcess: true, filesystem: false, namespace: true },
     bindingsDigest: bindingsDigest(options.environment),
     workspace: { root: options.workspace, dataRoot: options.dataRoot },
     limits: options.limits ?? defaultLimits,
-    trustMode: options.trustMode ?? "trusted-local",
   })
+}
 
 /** Content-addressed identity of one profile. A different digest requires a new epoch. */
 export const digest = (profile: KernelProfile.KernelProfile): string => KernelProfile.digest(profile)

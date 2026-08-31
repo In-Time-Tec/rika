@@ -11,9 +11,6 @@ import { Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika"
 import * as HostedCommand from "../command/root/hosted"
 import * as RunnerCommand from "../command/root/runner"
-import * as Runner from "../runner/service"
-import * as HostedCli from "../hosted/cli"
-import { runHostedInteractive } from "../hosted/interactive-controller"
 import * as Logging from "../diagnostics/file-logging"
 import { clientSigintOwnership, type SigintOwnership } from "./signal-ownership"
 
@@ -108,6 +105,24 @@ const dispatcherLayer = () =>
               })
             return yield* Effect.scoped(
               Effect.gen(function* () {
+                const unavailable = "Interactive support could not be loaded"
+                const [Runner, HostedCli, interactive] = yield* Effect.all(
+                  [
+                    Effect.tryPromise({
+                      try: () => import("../runner/service"),
+                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                    }),
+                    Effect.tryPromise({
+                      try: () => import("../hosted/cli"),
+                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                    }),
+                    Effect.tryPromise({
+                      try: () => import("../hosted/interactive-controller"),
+                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                    }),
+                  ],
+                  { concurrency: 3 },
+                )
                 const environment = yield* Config.all({
                   home: Config.option(Config.string("HOME")),
                   visual: Config.option(Config.string("VISUAL")),
@@ -126,7 +141,7 @@ const dispatcherLayer = () =>
                 const firstDrawContext = yield* Effect.context<never>()
                 const runFirstDraw = Effect.runSyncWith(firstDrawContext)
                 yield* Deferred.await(firstDraw).pipe(Effect.andThen(startLogging), Effect.orDie, Effect.forkScoped)
-                return yield* runHostedInteractive(input, {
+                return yield* interactive.runHostedInteractive(input, {
                   editor,
                   onFirstDraw: () =>
                     runFirstDraw(
@@ -188,10 +203,24 @@ const runnerCommandLayer = Layer.effect(
     return RunnerCommand.Service.of({
       run: (input) =>
         Effect.gen(function* () {
+          const unavailable = "Runner support could not be loaded"
+          const [Runner, HostedCli] = yield* Effect.all(
+            [
+              Effect.tryPromise({
+                try: () => import("../runner/service"),
+                catch: () => ProductOperation.OperationUnavailable.make({ operation: "Runner", message: unavailable }),
+              }),
+              Effect.tryPromise({
+                try: () => import("../hosted/cli"),
+                catch: () => ProductOperation.OperationUnavailable.make({ operation: "Runner", message: unavailable }),
+              }),
+            ],
+            { concurrency: 2 },
+          )
           const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
           const preferencePath = yield* Runner.preferencePath
           const hosted = HostedCli.liveLayer(home)
-          const runnerInput: Parameters<typeof Runner.runRunner>[0] =
+          const runnerInput =
             input.remoteThreadCreation === undefined
               ? { workspace: input.workspace ?? process.cwd(), preferencePath }
               : {

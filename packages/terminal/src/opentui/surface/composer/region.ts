@@ -42,7 +42,7 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["Shift+Enter", "newline"],
   ],
   [
-    ["Ctrl+S", "switch modes"],
+    ["Ctrl+S", "modes / steer"],
     ["Ctrl+Y", "context & usage"],
   ],
   [

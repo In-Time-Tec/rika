@@ -1,5 +1,5 @@
 import { AgentManifest, Compaction, ExecutableManifest, LanguageModel, ModelRegistry, Pins } from "tenetkit"
-import { ModelRoute } from "tenetkit/ai"
+import * as ModelRoute from "tenetkit/ai/model-route"
 import { Errors, ExecutableRegistration } from "tenetkit/runtime"
 import { CellTool } from "tenetkit/repl"
 import * as BindingModules from "@rika/kernel/binding-modules"
@@ -42,7 +42,6 @@ const kernelProfileFor = (options: ConfigureOptions) =>
         dataRoot: options.kernel.dataRoot,
       },
       options.kernel.limits === undefined ? undefined : { limits: options.kernel.limits },
-      options.kernel.trustMode === undefined ? undefined : { trustMode: options.kernel.trustMode },
     ),
   )
 
@@ -117,7 +116,7 @@ export const configure = (
       summaryPromptIdentity: Pins.digest(route.compaction.summaryPrompt),
     }
     const summaryModel = Layer.unwrap(
-      ModelRegistry.operate(
+      ModelRegistry.withModel(
         routed.Compaction.selection,
         Effect.context<LanguageModel.LanguageModel>().pipe(Effect.map(Layer.succeedContext)),
       ),

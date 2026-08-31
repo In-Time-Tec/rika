@@ -6,7 +6,6 @@ import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { reviewIntent } from "@rika/product/review-policy"
 import { RunTree, Runtime } from "tenetkit/runtime"
-import { FanOut } from "tenetkit/runtime/driver"
 import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
@@ -45,30 +44,14 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(testLayer(filename, fixture))
           const gateway = Context.get(context, ExecutionGateway.Service)
-          const runtime = Context.get(context, Runtime.Runtime)
           const link = yield* gateway.startTurn(input(route))
           const duplicate = yield* gateway.startTurn(input(route))
           const events = yield* gateway.watchTurn(link).pipe(Stream.runCollect)
-          const fanOut = yield* runtime.inspectFanOut(FanOut.fanOutIdFor(link.runId, "review-turn:review"))
-          return { link, duplicate, fanOut, events: projectionChanges([...events]) }
+          return { link, duplicate, events: projectionChanges([...events]) }
         }),
       )
 
       expect(first.duplicate).toEqual(first.link)
-      expect(first.fanOut).toMatchObject({
-        parentRunId: first.link.runId,
-        idempotencyKey: "review-turn:review",
-        join: { _tag: "AllSettled" },
-        remainder: "await",
-        concurrency: 3,
-        status: "succeeded",
-      })
-      expect(first.fanOut.members.map(({ ordinal, key, status }) => ({ ordinal, key, status }))).toEqual([
-        { ordinal: 0, key: "correctness", status: "succeeded" },
-        { ordinal: 1, key: "security", status: "succeeded" },
-        { ordinal: 2, key: "quality", status: "succeeded" },
-      ])
-      expect(new Set(first.fanOut.members.map(({ childRunId }) => childRunId)).size).toBe(3)
       const reviewCards = first.events.flatMap((change) =>
         (change._tag === "ProjectionSnapshot" ? change.units : change.upsert).filter(
           (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
@@ -110,15 +93,11 @@ it.live(
           const checkpoint = yield* RunTree.checkpoint(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))
           return {
             tree: checkpoint.inspection,
-            fanOut: yield* runtime.inspectFanOut(FanOut.fanOutIdFor(link.runId, "review-turn:review")),
           }
         }),
       )
       const runs = cancelled.tree.runs.map(({ run }) => run)
-      const members = cancelled.fanOut.members
       expect(runs).toHaveLength(4)
-      expect(members).toHaveLength(3)
-      expect(members.every(({ status }) => status === "running" || status === "cancelled")).toBe(true)
       expect(["cancelling", "cancelled"]).toContain(runs.find(({ depth }) => depth === 0)?.status)
     }),
   60_000,

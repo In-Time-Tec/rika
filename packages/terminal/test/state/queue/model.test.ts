@@ -20,6 +20,7 @@ test("admission rebinds a queued provisional row and the real delta replaces it 
     [],
   )
   const submitted = update(busy, { _tag: "Submitted", submissionId: "sub-1" })
+  expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
   const admitted = update(submitted, {
     _tag: "SubmissionAdmitted",
     turnId: "turn-b",
@@ -147,6 +148,36 @@ test("steering a selected queued message projects the handoff until authoritativ
     id: "queued-1",
     prompt: "steer me please",
     requestId: "request-1",
+  })
+})
+test("steers composer text directly into the active turn with Ctrl+S", () => {
+  const busy: Model = {
+    ...initial("/work"),
+    busy: true,
+    activeTurnId: "turn-a",
+    input: "steer me now",
+    cursor: 12,
+  }
+  const steered = update(busy, {
+    _tag: "KeyPressed",
+    key: key({ name: "s", ctrl: true }),
+    steeringRequestId: "request-composer",
+  })
+  expect(steered.input).toBe("")
+  expect(steered.cursor).toBe(0)
+  expect(steered.steeringRequests).toEqual([
+    {
+      requestId: "request-composer",
+      turnId: "turn-a",
+      text: "steer me now",
+      origin: "composer",
+    },
+  ])
+  expect(steered.pendingAction).toEqual({
+    _tag: "Steer",
+    prompt: "steer me now",
+    requestId: "request-composer",
+    turnId: "turn-a",
   })
 })
 test("keeps the active turn running and restores text when steering fails", () => {

@@ -15,7 +15,11 @@ if (securedAlchemyState.exitCode !== 0 && (await Bun.file(".alchemy").exists()) 
   throw new Error("Alchemy state permissions could not be secured")
 
 const publicPort = Number(Bun.env.PORT ?? "3000")
-if (!Number.isSafeInteger(publicPort) || publicPort <= 0 || publicPort > 65_535) throw new Error("PORT must be valid")
+if (!Number.isSafeInteger(publicPort) || publicPort <= 0 || publicPort > 65_532)
+  throw new Error("PORT must leave three consecutive ports available")
+const apiPort = publicPort + 1
+const webPort = publicPort + 2
+const executorPort = publicPort + 3
 const publicUrl = Bun.env.PUBLIC_URL?.trim() || `http://localhost:${publicPort}`
 const openRouterApiKey = Bun.env.OPENROUTER_API_KEY?.trim()
 if (openRouterApiKey === undefined || openRouterApiKey.length === 0) throw new Error("OPENROUTER_API_KEY is required")
@@ -164,15 +168,15 @@ export default Alchemy.Stack(
       env: {
         PUBLIC_URL: publicUrl,
         PUBLIC_PORT: String(publicPort),
-        API_PORT: "3001",
-        WEB_PORT: "3002",
-        EXECUTOR_PORT: "3003",
+        API_PORT: String(apiPort),
+        WEB_PORT: String(webPort),
+        EXECUTOR_PORT: String(executorPort),
       },
     })
 
     const apiEnvironmentBase = {
       NODE_ENV: "development",
-      PORT: "3001",
+      PORT: String(apiPort),
       DATABASE_URL: databaseUrl,
       DATABASE_SSL: "disable",
       BETTER_AUTH_URL: publicUrl,
@@ -201,7 +205,7 @@ export default Alchemy.Stack(
             RIKA_DEV_E2B_SOURCE_DIGEST: e2b.sourceDigest,
             RIKA_DEV_E2B_IDENTITY_PATH: ".alchemy/e2b-development-template.json",
             RIKA_DEV_E2B_TEMPLATE_READY: Output.map(Output.of(executorTemplate), () => "ready"),
-            RIKA_DEV_EXECUTOR_ORIGIN: "http://127.0.0.1:3003",
+            RIKA_DEV_EXECUTOR_ORIGIN: `http://127.0.0.1:${executorPort}`,
             RIKA_DEV_PROXY: Output.map(Output.of(proxy), () => "ready"),
             RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
             RIKA_WORKSPACE_CHECKPOINT_REGION: "us-east-1",
@@ -224,9 +228,9 @@ export default Alchemy.Stack(
       cwd: "apps/web",
       env: {
         NODE_ENV: "development",
-        PORT: "3002",
+        PORT: String(webPort),
         API_DOMAIN: "127.0.0.1",
-        API_PORT: "3001",
+        API_PORT: String(apiPort),
         RIKA_DEV_WEB_BUILD: Output.map(webBuild.hash.output, (hash) => hash ?? "built"),
       },
     })

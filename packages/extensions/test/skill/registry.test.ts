@@ -36,7 +36,7 @@ it("discovers overrides and activates sorted files while ignoring directories an
           const activated = yield* registry.activate("review")
           const empty = yield* registry.activate("empty")
           expect(registry.listings).toEqual(["- empty: empty", "- review: workspace"])
-          expect(selected?.frontmatter.description).toBe("workspace")
+          expect(selected?.description).toBe("workspace")
           expect(activated).toEqual({
             body: "workspace body",
             resources: [

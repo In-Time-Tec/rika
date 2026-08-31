@@ -6,8 +6,8 @@ import {
   type Resource,
   SkillRegistryError,
 } from "./registry-model"
-import { SkillSource } from "tenetkit"
-import { SkillLoader } from "tenetkit/skills"
+import { SkillCatalog } from "tenetkit"
+import { FileSystemCatalog } from "tenetkit/skills"
 import { Crypto, Effect, Encoding, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { SkillFileSystem } from "./file-system"
 
@@ -55,26 +55,27 @@ const discoverImplementation = (
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto
     const skillFileSystem = yield* SkillFileSystem
-    const loaderOptions = (root: string): SkillLoader.LoadOptions => {
-      let loadOptions: SkillLoader.LoadOptions = { roots: [root], cwd: "/" }
-      if (options.descriptionCap !== undefined) loadOptions = { ...loadOptions, descriptionCap: options.descriptionCap }
-      return loadOptions
-    }
-    const global = yield* SkillLoader.make(loaderOptions(options.globalRoot)).pipe(
+    const global = yield* FileSystemCatalog.make({ roots: [options.globalRoot], cwd: "/" }).pipe(
       Effect.mapError(failure.bind(undefined, "discover", options.globalRoot)),
     )
-    const workspace = yield* SkillLoader.make(loaderOptions(options.workspaceRoot)).pipe(
+    const workspace = yield* FileSystemCatalog.make({ roots: [options.workspaceRoot], cwd: "/" }).pipe(
       Effect.mapError(failure.bind(undefined, "discover", options.workspaceRoot)),
     )
-    const source = SkillSource.merge(global, workspace)
+    const source = SkillCatalog.merge(global, workspace)
     const skills = yield* source.all.pipe(Effect.mapError(failure.bind(undefined, "list", options.workspaceRoot)))
-    const canonical = skills.toSorted((left, right) => left.frontmatter.name.localeCompare(right.frontmatter.name))
+    const canonical = skills.toSorted((left, right) => left.name.localeCompare(right.name))
+    const listings = canonical.map(
+      (skill) =>
+        `- ${skill.name}: ${
+          options.descriptionCap === undefined ? skill.description : skill.description.slice(0, options.descriptionCap)
+        }`,
+    )
     const digestBytes = yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(canonical.map((skill) => skill.listing).join("\n")))
+      .digest("SHA-256", new TextEncoder().encode(listings.join("\n")))
       .pipe(Effect.mapError(failure.bind(undefined, "digest", options.workspaceRoot)))
     const executable: Array<Executable> = []
     for (const skill of canonical) {
-      const name = skill.frontmatter.name
+      const name = skill.name
       const workspaceSkill = yield* workspace.get(name).pipe(Effect.mapError(failure.bind(undefined, "discover", name)))
       const origin: Origin = workspaceSkill === undefined ? "global" : "workspace"
       const root = path.resolve(origin === "global" ? options.globalRoot : options.workspaceRoot)
@@ -82,7 +83,7 @@ const discoverImplementation = (
        * The source says where it found the skill, because it reads its root recursively and a name
        * does not locate a directory. A source that does not say falls back to the flat layout.
        */
-      const directory = skill.directory ?? path.join(root, name)
+      const directory = skill.location ?? path.join(root, name)
       const manifestPath = path.join(directory, "package.json")
       /**
        * Discovery reads its root recursively and follows what it finds, so a link inside the root
@@ -152,7 +153,7 @@ const discoverImplementation = (
           .get(name)
           .pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
         const root = workspaceSkill === undefined ? options.globalRoot : options.workspaceRoot
-        const directory = skill.directory ?? path.join(path.resolve(root), name)
+        const directory = skill.location ?? path.join(path.resolve(root), name)
         const exists = yield* skillFileSystem
           .exists(directory)
           .pipe(Effect.mapError((cause) => failure("activate", directory, cause)))
@@ -166,7 +167,7 @@ const discoverImplementation = (
           .pipe(Effect.mapError((cause) => failure("activate", manifest, cause)))
         if (!contained(path, realDirectory, realManifest))
           return yield* failure("activate", manifest, "Skill manifest escapes skill directory")
-        const body = yield* skill.body.pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
+        const body = yield* skill.instructions.pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
         const entries = yield* skillFileSystem
           .readDirectory(directory)
           .pipe(Effect.mapError((cause) => failure("activate", directory, cause)))
@@ -195,7 +196,7 @@ const discoverImplementation = (
     )
     return {
       source,
-      listings: canonical.map((skill) => skill.listing),
+      listings,
       executable,
       digest: Encoding.encodeHex(digestBytes),
       executableDigest: Encoding.encodeHex(executableDigestBytes),

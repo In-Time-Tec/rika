@@ -190,6 +190,7 @@ jobs:
           EXPECTED_KERNEL: ${{ matrix.kernel }}
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
+          command -v cc >/dev/null
           test "$(uname -s)" = "$EXPECTED_KERNEL"
           test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
           if [ "$EXPECTED_KERNEL" = Darwin ]; then
@@ -212,8 +213,8 @@ jobs:
         run: |
           directory="$(mktemp -d)"
           tar -xzf "$ARCHIVE" -C "$directory"
-          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime
-          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime; do
+          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-client-runtime "$directory"/rika-*/bin/.rika-kernel-runtime
+          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-client-runtime "$directory"/rika-*/bin/.rika-kernel-runtime; do
             case "$EXPECTED_ARCHITECTURE" in
               x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
               arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
@@ -234,6 +235,7 @@ jobs:
           tar -xzf "$ARCHIVE" -C "$directory"
           binary="$directory/$root/bin/rika"
           test -x "$binary"
+          test -x "$directory/$root/bin/.rika-client-runtime"
           test -x "$directory/$root/bin/.rika-kernel-runtime"
           version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
           env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version | grep -Fq "$version"

@@ -1,4 +1,4 @@
-import { HarnessOverview, HarnessRegistration, HarnessSnapshot, HarnessState } from "tenetkit/harness"
+import { Overview, Registration, Snapshot, State } from "tenetkit/agent-guidance"
 import type { AgentManifest } from "tenetkit"
 import { Effect, Function, Schema } from "effect"
 
@@ -20,13 +20,13 @@ export interface Pinned {
  * derived from the same state that is pinned, so a reconstruction that sees different entries fails
  * `SnapshotMismatch` rather than silently drifting.
  */
-export const pin = (state: HarnessState.HarnessState): Pinned => {
-  const registration = HarnessRegistration.registration(state, capabilityName)
+export const pin = (state: State.GuidanceState): Pinned => {
+  const registration = Registration.make(state, capabilityName)
   return {
     id: registration.id,
     capability: registration.capability,
     payload: Schema.decodeSync(Schema.Json)(registration.payload),
-    overview: HarnessOverview.formatOverview(state),
+    overview: Overview.format(state),
   }
 }
 
@@ -34,16 +34,14 @@ export const pin = (state: HarnessState.HarnessState): Pinned => {
 export const reconstruct: {
   (
     payload: Schema.Json,
-  ): (
-    id: string,
-  ) => Effect.Effect<HarnessState.HarnessState, HarnessSnapshot.SnapshotInvalid | HarnessSnapshot.SnapshotMismatch>
+  ): (id: string) => Effect.Effect<State.GuidanceState, Snapshot.SnapshotInvalid | Snapshot.SnapshotMismatch>
   (
     id: string,
     payload: Schema.Json,
-  ): Effect.Effect<HarnessState.HarnessState, HarnessSnapshot.SnapshotInvalid | HarnessSnapshot.SnapshotMismatch>
+  ): Effect.Effect<State.GuidanceState, Snapshot.SnapshotInvalid | Snapshot.SnapshotMismatch>
 } = Function.dual(2, (id: string, payload: Schema.Json) =>
-  Schema.decodeUnknownEffect(HarnessSnapshot.SnapshotPayload)(payload).pipe(
-    Effect.mapError((issue) => HarnessSnapshot.SnapshotInvalid.make({ message: String(issue) })),
-    Effect.flatMap((decoded) => HarnessSnapshot.decode(id, decoded)),
+  Schema.decodeUnknownEffect(Snapshot.SnapshotPayload)(payload).pipe(
+    Effect.mapError((issue) => Snapshot.SnapshotInvalid.make({ message: String(issue) })),
+    Effect.flatMap((decoded) => Snapshot.decode(id, decoded)),
   ),
 )

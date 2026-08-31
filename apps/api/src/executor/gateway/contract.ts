@@ -18,7 +18,7 @@ import type {
   WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
 import { Context, Effect, Redacted, Schema, Stream } from "effect"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import type { EnvironmentPhase } from "@rika/product/environment-policy"
 
 export interface Socket {
@@ -73,7 +73,7 @@ export interface BranchPushInput {
 }
 
 export interface BindingAuthority {
-  readonly registry: HostBindingRegistry.Interface
+  readonly registry: HostModules.Service
   readonly context: Context.Context<ExecutorRuntime.CellServices>
   readonly manifest: BindingManifest
 }

@@ -1,5 +1,5 @@
 import { Pins, type AgentManifest } from "tenetkit"
-import { HarnessSnapshot, HarnessState } from "tenetkit/harness"
+import { Snapshot, State } from "tenetkit/agent-guidance"
 import { Schema } from "effect"
 
 /**
@@ -76,14 +76,16 @@ export const harnessCapabilityName = "rika-harness-snapshot"
  * running model's system prompt, and a reconstruction that decodes a different state fails
  * `SnapshotMismatch` rather than drifting.
  */
-export const harness = (state: HarnessState.HarnessState): Pinned => {
-  const payload = Schema.decodeSync(Schema.Json)(HarnessSnapshot.encode(state))
+export const harness = (state: State.GuidanceState): Pinned => {
+  const payload = Schema.decodeSync(Schema.Json)(Snapshot.encode(state))
   const capability = {
     name: harnessCapabilityName,
-    pin: Pins.makeCapability({ codec: HarnessSnapshot.CODEC, version: HarnessSnapshot.VERSION, payload }),
+    pin: Pins.makeCapability({ codec: Snapshot.codec, version: Snapshot.version, payload }),
   }
   return {
     capabilities: [capability],
-    registrations: [{ pin: capability.pin, codec: HarnessSnapshot.CODEC, version: HarnessSnapshot.VERSION, payload }],
+    // Clean break: only the released Agent Guidance codec is admitted. Registrations persisted with
+    // `tenetkit/harness/snapshot` deliberately fail pin validation instead of being aliased forward.
+    registrations: [{ pin: capability.pin, codec: Snapshot.codec, version: Snapshot.version, payload }],
   }
 }

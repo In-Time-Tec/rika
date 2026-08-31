@@ -1,4 +1,5 @@
-import { Console, Crypto, Effect } from "effect"
+import { Console, Crypto, Effect, FileSystem } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import type { RepositoryService } from "@rika/product/workspace-capability"
 import { HostedError, Http, ThreadClient, type ThreadClientInterface } from "../contract"
@@ -124,23 +125,37 @@ export const createRemoteThread = Effect.fn("HostedAccount.createRemoteThread")(
   const http = yield* Http
   const threads = yield* ThreadClient
   const crypto = yield* Crypto.Crypto
+  const fileSystem = yield* FileSystem.FileSystem
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const commandId = yield* crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("host", "Could not create a Thread identifier")),
   )
-  const workspaceSeed = yield* Effect.scoped(prepareWorkspaceSeed(workspace))
   const threadId = yield* authenticated(profile, (session) =>
-    http.context(profile.origin, session).pipe(
-      Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner),
-      Effect.andThen(
-        Effect.all({
-          seed: http.uploadWorkspaceSeed(
-            profile.origin,
-            workspaceSeed.archive,
-            workspaceSeed.sourceRepository,
-            session,
-          ),
-          ticket: http.issueThreadTicket(profile.origin, session),
-        }),
+    Effect.all(
+      {
+        workspaceSeed: Effect.scoped(prepareWorkspaceSeed(workspace)).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+        identity: http
+          .context(profile.origin, session)
+          .pipe(Effect.filterOrFail((identity) => validOwner(profile, identity), staleOwner)),
+      },
+      { concurrency: 2 },
+    ).pipe(
+      Effect.flatMap(({ workspaceSeed }) =>
+        Effect.all(
+          {
+            seed: http.uploadWorkspaceSeed(
+              profile.origin,
+              workspaceSeed.archive,
+              workspaceSeed.sourceRepository,
+              session,
+            ),
+            ticket: http.issueThreadTicket(profile.origin, session),
+          },
+          { concurrency: 2 },
+        ),
       ),
       Effect.flatMap(({ seed, ticket }) => {
         const request = {

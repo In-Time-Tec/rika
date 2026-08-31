@@ -1,4 +1,4 @@
-import { SkillSource } from "tenetkit"
+import { SkillCatalog } from "tenetkit"
 import { Effect, Schema } from "effect"
 
 export interface Options {
@@ -29,7 +29,7 @@ export interface Activation {
 }
 
 export interface Discovered {
-  readonly source: SkillSource.Interface
+  readonly source: SkillCatalog.Service
   readonly listings: ReadonlyArray<string>
   readonly executable: ReadonlyArray<Executable>
   readonly digest: string

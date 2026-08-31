@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 import { NestedOperation, ToolContext } from "tenetkit"
-import { HostBindingRegistry } from "tenetkit/repl"
+import { HostModules } from "tenetkit/repl"
 import { Context, Deferred, Effect, Fiber, Layer, Logger } from "effect"
 import { GatewayTestHarness } from "../fixture"
 
@@ -37,7 +37,7 @@ describe("executor gateway: binding-authority", () => {
           ToolContext.ToolContext,
           ToolContext.ToolContext.of({
             signal,
-            emit: () => Effect.void,
+            emit: () => Effect.succeed(true),
             sessionId: "thread-1",
             runId: "run-1",
             toolCallId: "call-1",
@@ -45,11 +45,11 @@ describe("executor gateway: binding-authority", () => {
           }),
         ),
         Context.add(
-          NestedOperation.NestedOperations,
-          NestedOperation.NestedOperations.of({ run: (_request, operation) => operation }),
+          NestedOperation.Operations,
+          NestedOperation.Operations.of({ run: (_request, operation) => operation }),
         ),
       )
-      const registry = HostBindingRegistry.HostBindingRegistry.of({
+      const registry = HostModules.HostModules.of({
         descriptors: [{ module: "workspace", operations: ["read"] }],
         resolve: () => Effect.die("unused"),
         invoke: () =>
@@ -157,7 +157,7 @@ describe("executor gateway: binding-authority", () => {
           ToolContext.ToolContext,
           ToolContext.ToolContext.of({
             signal,
-            emit: () => Effect.void,
+            emit: () => Effect.succeed(true),
             sessionId: "thread-1",
             runId: "run-1",
             toolCallId: "call-1",
@@ -165,15 +165,15 @@ describe("executor gateway: binding-authority", () => {
           }),
         ),
         Context.add(
-          NestedOperation.NestedOperations,
-          NestedOperation.NestedOperations.of({
+          NestedOperation.Operations,
+          NestedOperation.Operations.of({
             run: (request) => {
               nestedRequests.push({
                 kind: request.kind,
                 replayPolicy: request.replayPolicy,
                 approval: request.approval,
               })
-              return NestedOperation.NestedOperationSuspended.make({
+              return NestedOperation.Suspended.make({
                 token: "approval-token",
                 operationKey: "operation-bindings",
                 ordinal: 0,
@@ -184,7 +184,7 @@ describe("executor gateway: binding-authority", () => {
         ),
         Context.merge(machineContext),
       )
-      const registry = yield* HostBindingRegistry.make([WorkspaceBinding.module]).pipe(Effect.provideContext(context))
+      const registry = yield* HostModules.make([WorkspaceBinding.module]).pipe(Effect.provideContext(context))
       const authority = bindingAuthority(registry, context, "b".repeat(64))
       const target = socket()
       const gateway = yield* makeGateway(controller())

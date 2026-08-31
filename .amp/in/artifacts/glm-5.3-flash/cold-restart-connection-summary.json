@@ -1,0 +1,37 @@
+{
+  "scenario": "source CLI, fresh client home, isolated local API restarted before every trial",
+  "requestedModel": "z-ai/glm-5.3-flash",
+  "sampleCount": 5,
+  "successfulConnections": 5,
+  "firstFrameMilliseconds": {
+    "samples": [16.601, 16.493, 16.556, 17.245, 16.323],
+    "p50": 16.556,
+    "p95": 17.245,
+    "max": 17.245
+  },
+  "diagnosticsFileDetectionMilliseconds": {
+    "samples": [1289.914, 1298.309, 1297.185, 1291.32, 1287.396],
+    "p50": 1291.32,
+    "p95": 1298.309,
+    "max": 1298.309,
+    "measurementError": "the harness polled the diagnostics file, whose writer intentionally flushes after a one-second sleep; these values are not connection latency"
+  },
+  "actualConnectionReadyMilliseconds": {
+    "sampleCount": 0,
+    "reason": "these five original runs did not preserve enough clock-correlated data to recover the connection event time"
+  },
+  "timingBoundary": "firstFrame and diagnostics-file detection begin at source CLI process spawn; fresh development login happens before the CLI process starts and is excluded",
+  "interpretation": "the source startup preview is visible in under 18 ms in all five trials. This artifact does not establish connection latency. A corrected later source run measured the connection_ready event at 478.278 ms; corrected packaged runs measured 340.165 ms and 382.371 ms.",
+  "correctedEvidence": [
+    "local-rika-flow-source-connection-corrected-1.json",
+    "local-rika-flow-packaged-connection-corrected-1.json",
+    "local-rika-flow-packaged-connection-stages-1.json"
+  ],
+  "inputs": [
+    "local-rika-flow-isolated-wake-cold-1.json",
+    "local-rika-flow-connection-cold-2.json",
+    "local-rika-flow-connection-cold-3.json",
+    "local-rika-flow-connection-cold-4.json",
+    "local-rika-flow-connection-cold-5.json"
+  ]
+}

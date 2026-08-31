@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { HarnessEntry } from "tenetkit/harness"
+import { Entry } from "tenetkit/agent-guidance"
 import { Schema } from "effect"
 import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import * as StoreLocations from "@rika/kernel/harness-store-locations"
 
 const identity = { thread: "thread-9f2a", workspaceDigest: "a1b2c3d4" }
-const isScope = Schema.is(HarnessEntry.HarnessScope)
+const isScope = Schema.is(Entry.GuidanceScope)
 
 describe("harness scope policy", () => {
   it("renders the three documented scope strings", () => {

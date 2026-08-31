@@ -1,0 +1,8 @@
+{
+  "requestedModel": "z-ai/glm-5.3-flash",
+  "loginMilliseconds": 5416.434,
+  "flowMilliseconds": 49227.535,
+  "exitCode": 1,
+  "stdout": "{\"requestedModel\": \"z-ai/glm-5.3-flash\", \"processExitCode\": -9, \"firstFrameMilliseconds\": 16.694, \"connectionReadyMilliseconds\": 31564.931, \"promptSentMilliseconds\": 32067.971, \"modelMarkerMilliseconds\": null, \"promptToMarkerMilliseconds\": null, \"markerObserved\": false, \"rawCapture\": \".amp/in/artifacts/glm-5.3-flash/local-rika-flow-isolated-ack-1.raw\", \"rawBytes\": 314905}\n",
+  "stderr": ""
+}

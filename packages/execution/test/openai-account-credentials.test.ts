@@ -1,11 +1,12 @@
 import { expect, it } from "@effect/vitest"
 import { ModelRegistry } from "tenetkit"
-import { OpenAi } from "tenetkit/ai"
+import * as OpenAi from "tenetkit/ai/openai"
+import * as OpenAiResponses from "tenetkit/ai/openai-responses"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { Chat, LanguageModel } from "effect/unstable/ai"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { fromRikaAuth } from "../src/openai-account-credentials"
+import { fromRikaAuth, layerClient } from "../src/openai-account-credentials"
 
 const credential = (fingerprint: string, generation = `${fingerprint}.generation`) => ({
   accessToken: Redacted.make(`access-${generation}`),
@@ -62,7 +63,7 @@ it.effect("refuses a different logged-in account before exposing its credentials
       fromRikaAuth(service({ acquire: Effect.succeed(credential("other")) }), "expected").acquire,
     )
     expect(failure).toMatchObject({
-      _tag: "tenetkit/ai/OpenAiAccountCredentialError",
+      _tag: "@rika/execution/OpenAiAccountCredentialError",
       operation: "acquire",
     })
     const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(failure)
@@ -88,22 +89,24 @@ it.effect("uses the Codex endpoint and refreshes one rejected account request at
           )
         }),
       )
-      const provider = OpenAi.layerAccount({
-        model: "gpt-5.6-sol",
-        config: OpenAi.decodeConfig({ store: false }),
-        credentials: fromRikaAuth(
-          service({
-            acquire: Effect.succeed(credential("expected", "expected.old")),
-            refreshRejected: (generation) => {
-              rejected.push(generation)
-              return Effect.succeed(credential("expected", "expected.new"))
-            },
-          }),
-          "expected",
-        ),
-      }).pipe(Layer.provide(http))
+      const credentials = fromRikaAuth(
+        service({
+          acquire: Effect.succeed(credential("expected", "expected.old")),
+          refreshRejected: (generation) => {
+            rejected.push(generation)
+            return Effect.succeed(credential("expected", "expected.new"))
+          },
+        }),
+        "expected",
+      )
+      const provider = ModelRegistry.layer([
+        OpenAi.registration({
+          model: "gpt-5.6-sol",
+          config: OpenAiResponses.decodeConfig({ store: false }),
+        }),
+      ]).pipe(Layer.provide(layerClient(credentials)), Layer.provide(http))
       const context = yield* Layer.build(provider)
-      const model = yield* ModelRegistry.operate(
+      const model = yield* ModelRegistry.withModel(
         { provider: "openai", model: "gpt-5.6-sol" },
         Effect.service(LanguageModel.LanguageModel),
       ).pipe(Effect.provideService(ModelRegistry.ModelRegistry, Context.get(context, ModelRegistry.ModelRegistry)))

@@ -1,38 +1,38 @@
 import { describe, expect, it } from "@effect/vitest"
 import { NestedOperation } from "tenetkit"
 import { Context, Effect, Schema } from "effect"
-import { HarnessState, HarnessStore } from "tenetkit/harness"
+import { State, Store } from "tenetkit/agent-guidance"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { journal, mountModules } from "../../support/binding"
 
 const store = () => {
-  const states = new Map<string, HarnessState.HarnessState>()
+  const states = new Map<string, State.GuidanceState>()
   return {
     states,
-    service: HarnessStore.HarnessStore.of({
-      load: (scope) => Effect.succeed(states.get(scope) ?? HarnessState.empty(scope)),
+    service: Store.Store.of({
+      load: (scope) => Effect.succeed(states.get(scope) ?? State.empty(scope)),
       save: (state) => Effect.sync(() => void states.set(state.scope, state)),
     }),
   }
 }
 
-const registry = (backing = store(), nested?: NestedOperation.Interface, sessionId?: string) =>
+const registry = (backing = store(), nested?: NestedOperation.Service, sessionId?: string) =>
   mountModules(
     sessionId === undefined
       ? {
           modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
-          services: Context.make(HarnessStore.HarnessStore, backing.service),
+          services: Context.make(Store.Store, backing.service),
           nested,
         }
       : {
           modules: [HarnessBinding.make({ workspaceDigest: "digest" })],
-          services: Context.make(HarnessStore.HarnessStore, backing.service),
+          services: Context.make(Store.Store, backing.service),
           nested,
           sessionId,
         },
   )
 
-const emptySnapshot = HarnessState.snapshotId(HarnessState.empty("thread:session"))
+const emptySnapshot = State.snapshotId(State.empty("thread:session"))
 
 describe("harness binding", () => {
   it.effect("mounts the read surface plus create, update, and delete for all four kinds", () =>
@@ -69,7 +69,7 @@ describe("harness binding", () => {
           input: { id: "note", title: "t", content: "c" },
         }),
       )
-      expect(failure._tag).toBe("tenetkit/repl/HostBindingSchemaFailure")
+      expect(failure._tag).toBe("tenetkit/repl/HostModuleSchemaFailure")
     }),
   )
 
@@ -158,7 +158,7 @@ describe("harness binding", () => {
           id: "skill",
           title: "t",
           content: "c",
-          baseSnapshot: HarnessState.snapshotId(HarnessState.empty("workspace:digest")),
+          baseSnapshot: State.snapshotId(State.empty("workspace:digest")),
           scope: "workspace",
         },
       })
@@ -182,7 +182,7 @@ describe("harness binding", () => {
           id: "global",
           title: "t",
           content: "c",
-          baseSnapshot: HarnessState.snapshotId(HarnessState.empty("global")),
+          baseSnapshot: State.snapshotId(State.empty("global")),
           scope: "global",
         },
       })
@@ -233,7 +233,7 @@ describe("harness binding", () => {
       if (response._tag === "Success")
         expect(
           (yield* Schema.decodeUnknownEffect(Schema.Struct({ snapshotId: Schema.String }))(response.output)).snapshotId,
-        ).toMatch(/^harness-snapshot:v1:sha256:/)
+        ).toMatch(/^guidance-snapshot:v1:sha256:/)
     }),
   )
 
@@ -244,7 +244,7 @@ describe("harness binding", () => {
       // A refinement event copies every entry it touched, so an unbounded history grows a scope by
       // its own past rather than by what it knows.
       for (let index = 0; index < 210; index += 1) {
-        const current = backing.states.get("thread:session") ?? HarnessState.empty("thread:session")
+        const current = backing.states.get("thread:session") ?? State.empty("thread:session")
         const response = yield* mounted.invoke({
           module: "harness",
           operation: "createMemory",
@@ -252,7 +252,7 @@ describe("harness binding", () => {
             id: `note-${index}`,
             title: "t",
             content: "c",
-            baseSnapshot: HarnessState.snapshotId(current),
+            baseSnapshot: State.snapshotId(current),
           },
         })
         expect(response._tag).toBe("Success")

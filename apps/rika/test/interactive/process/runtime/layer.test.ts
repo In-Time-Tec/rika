@@ -57,9 +57,9 @@ const cellRequest = (code: string, sessionId: string): ToolExecutor.Request => {
 const cellContext = (sessionId: string) =>
   Effect.map(
     Effect.abortSignal,
-    (signal): ToolContext.Interface => ({
+    (signal): ToolContext.Service => ({
       signal,
-      emit: () => Effect.void,
+      emit: () => Effect.succeed(true),
       sessionId,
       runId: `run-${sessionId}`,
       toolCallId: `call-${sessionId}`,
@@ -104,11 +104,14 @@ it.effect("routes an admitted cell through the pool the composition root supplie
     const pool = Layer.mergeAll(
       TestKernel.layerTestPool({
         profile: KernelProfile.make({
+          provider: "tenetkit/repl/bun",
           runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
+          image: { kind: "runtime", reference: `bun@${kernel.runtimeVersion}`, digest: "runtime-digest" },
+          isolation: "host-process",
+          checkpoints: { liveProcess: true, filesystem: false, namespace: true },
           bindingsDigest: KernelProfile.bindingsDigest(["workspace"]),
           workspace: { root: "/workspace", dataRoot: kernel.dataRoot },
           limits: { sourceBytes: CellTool.maxSourceBytes, cellDeadlineMillis: 1_000 },
-          trustMode: "trusted-local",
         }),
         script: (request) => {
           executed.push(request.code)

@@ -83,10 +83,15 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
   const randomId = crypto.randomUUIDv4.pipe(
     Effect.mapError(() => failure("Thread request identifier could not be created")),
   )
-  const ticket = yield* authenticated(input.profile, (session) =>
-    http.issueThreadTicket(input.profile.origin, session),
-  ).pipe(Effect.provideService(Http, http), Effect.provideService(CredentialStore, credentials))
-  const socket = yield* connect(ticket)
+  const ticket = yield* HostedObservability.observe(
+    "connection_ticket",
+    {},
+    authenticated(input.profile, (session) => http.issueThreadTicket(input.profile.origin, session)).pipe(
+      Effect.provideService(Http, http),
+      Effect.provideService(CredentialStore, credentials),
+    ),
+  )
+  const socket = yield* HostedObservability.observe("connection_socket", {}, connect(ticket))
   const outcomes = new Map<string, CommandWaiter>()
   const attachments = new Map<string, AttachmentWaiter>()
   const disconnected = yield* Deferred.make<never, HostedError>()
@@ -231,10 +236,20 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
         { threadId: initialThreadId },
         Effect.gen(function* () {
           const pending = yield* restore(
-            physical.attach(initialThreadId, input.cursor(initialThreadId), input.checkpointCursor(initialThreadId)),
+            HostedObservability.observe(
+              "attach_response",
+              { threadId: initialThreadId },
+              physical.attach(initialThreadId, input.cursor(initialThreadId), input.checkpointCursor(initialThreadId)),
+            ),
           )
           yield* input.attached(pending.attachment, physical).pipe(
-            Effect.andThen(input.processed(pending.attachment, physical)),
+            Effect.andThen(
+              HostedObservability.observe(
+                "attach_ack",
+                { threadId: initialThreadId },
+                input.processed(pending.attachment, physical),
+              ),
+            ),
             Effect.andThen(pending.complete),
             Effect.onExit((exit) =>
               Exit.isFailure(exit)

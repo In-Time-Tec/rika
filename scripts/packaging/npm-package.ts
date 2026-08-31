@@ -6,9 +6,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   archiveName,
   archiveRoot,
-  kernelRuntime,
   packageBinEntries,
-  packageExecutable,
+  packageExecutables,
   targetNames,
   type PackageTarget,
 } from "./package-contract"
@@ -152,7 +151,7 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
       { concurrency: "unbounded", discard: true },
     )
     yield* Effect.forEach(
-      [packageExecutable, kernelRuntime],
+      packageExecutables,
       (entry) => fileSystem.chmod(path.join(directory, "bin", entry), 0o755),
       { concurrency: "unbounded", discard: true },
     )

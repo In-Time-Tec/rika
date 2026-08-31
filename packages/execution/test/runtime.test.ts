@@ -3,7 +3,7 @@ import { Chat, LanguageModel } from "effect/unstable/ai"
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { ModelRegistry } from "tenetkit"
-import { OpenRouter } from "tenetkit/ai"
+import * as OpenRouter from "tenetkit/ai/openrouter"
 
 const captured: Array<{ readonly url: string; readonly body: string }> = []
 const ChatRequest = Schema.Struct({
@@ -64,7 +64,7 @@ describe("OpenRouter provider conversation continuity", () => {
     Effect.scoped(
       Effect.flatMap(Layer.build(layer), (context) =>
         Effect.gen(function* () {
-          const model = yield* ModelRegistry.operate(
+          const model = yield* ModelRegistry.withModel(
             { provider: "openrouter", model: "~deepseek/deepseek-v4-flash-latest" },
             Effect.service(LanguageModel.LanguageModel),
           ).pipe(Effect.provideService(ModelRegistry.ModelRegistry, Context.get(context, ModelRegistry.ModelRegistry)))

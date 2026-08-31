@@ -7,6 +7,7 @@ import {
   kernelWorker,
   packageBinEntries,
   packageExecutable,
+  packageExecutables,
 } from "../../scripts/packaging/package-contract"
 
 const rootUrl = new URL("../..", import.meta.url)
@@ -65,12 +66,15 @@ const publish = Effect.fn("installUpgrade.publish")(function* (
     (entry) =>
       fileSystem.writeFileString(
         path.join(payload, "bin", entry),
-        entry === packageExecutable ? marker : `${entry} ${marker}`,
+        entry === packageExecutable ? `#!/bin/sh\nprintf 'rika v${version}\\n'\n# ${marker}\n` : `${entry} ${marker}`,
       ),
     { concurrency: "unbounded", discard: true },
   )
-  yield* fileSystem.chmod(path.join(payload, "bin", packageExecutable), 0o755)
-  yield* fileSystem.chmod(path.join(payload, "bin", kernelRuntime), 0o755)
+  yield* Effect.forEach(
+    packageExecutables,
+    (entry) => fileSystem.chmod(path.join(payload, "bin", entry), 0o755),
+    { concurrency: "unbounded", discard: true },
+  )
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = path.join(releases, archiveFile)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -112,7 +116,7 @@ const acceptance = Effect.gen(function* () {
   expect(fresh.stderr).toBe("")
   expect(fresh.exitCode).toBe(0)
   expect(yield* fileSystem.readLink(command)).toBe(path.join(installRoot, "bin", "rika"))
-  expect(yield* fileSystem.readFileString(command)).toBe("first")
+  expect(yield* fileSystem.readFileString(command)).toContain("# first")
 
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "stale interactive")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "stale performance")
@@ -122,7 +126,7 @@ const acceptance = Effect.gen(function* () {
   const upgrade = yield* run(root, installer, environment)
   expect(upgrade.stderr).toBe("")
   expect(upgrade.exitCode).toBe(0)
-  expect(yield* fileSystem.readFileString(command)).toBe("second")
+  expect(yield* fileSystem.readFileString(command)).toContain("# second")
   expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelRuntime))).toBe(`${kernelRuntime} second`)
   expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelWorker))).toBe(`${kernelWorker} second`)
   for (const stale of [".rika-interactive", ".rika-performance", ".rika-server"]) {
@@ -135,8 +139,8 @@ const acceptance = Effect.gen(function* () {
   const rejected = yield* run(root, installer, environment)
   expect(rejected.exitCode).not.toBe(0)
   expect(rejected.stderr).toContain("checksum mismatch")
-  expect(yield* fileSystem.readFileString(command)).toBe("second")
-  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", "rika"))).toBe("second")
+  expect(yield* fileSystem.readFileString(command)).toContain("# second")
+  expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", "rika"))).toContain("# second")
   expect(yield* strays(path.dirname(installRoot))).toEqual([])
 
   yield* publish(releases, "1.0.3", "third", false)
@@ -151,7 +155,7 @@ const acceptance = Effect.gen(function* () {
   expect(forced.stderr).toBe("")
   expect(forced.exitCode).toBe(0)
   expect(yield* fileSystem.readLink(command)).toBe(path.join(installRoot, "bin", "rika"))
-  expect(yield* fileSystem.readFileString(command)).toBe("third")
+  expect(yield* fileSystem.readFileString(command)).toContain("# third")
 })
 
 test("re-running the installer upgrades in place, verifies checksums, and never adopts a foreign command", () =>
