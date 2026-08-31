@@ -174,6 +174,7 @@ describe("foreground Runner", { concurrent: false }, () => {
             const foregroundContext = yield* Layer.build(foregroundRunnerLayer)
             const fileSystem = yield* FileSystem.FileSystem
             const workspacePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runner-" })
+            const workspaceIdentity = `test:${workspacePath}`
             const ready = yield* Deferred.make<
               void,
               import("../../../src/host/session/foreground").ForegroundRunnerError
@@ -188,7 +189,7 @@ describe("foreground Runner", { concurrent: false }, () => {
                   admissionId: "admission-1",
                   ticket: "one-use-ticket",
                   executorUrl: "wss://controller.example.test/api/v1/runners",
-                  workspaceIdentity: "workspace-binding-1",
+                  workspaceIdentity,
                   expiresAt: 9_999_999_999_999,
                 },
                 workspacePath,
@@ -284,7 +285,7 @@ describe("foreground Runner", { concurrent: false }, () => {
             const request = {
               access,
               operationKey: "operation-1",
-              workspaceId: "workspace-binding-1",
+              workspaceId: workspaceIdentity,
               sessionId: "session-1",
               threadId: "thread-1",
               turnId: "turn-1",
