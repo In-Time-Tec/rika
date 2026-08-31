@@ -3,7 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { CellExecutor, layer as cellExecutorLayer } from "@rika/kernel/cell-executor"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 import { kernelRuntime, kernelWorker } from "./package-contract"
 
 const smoke = Effect.fn("Package.kernelRuntimeSmoke")(function* (directory: string) {
@@ -21,7 +21,7 @@ const smoke = Effect.fn("Package.kernelRuntimeSmoke")(function* (directory: stri
       workerModule: path.join(directory, kernelWorker),
       trustMode: "trusted-local",
       servers: [],
-      registry: HostModules.layer([]),
+      registry: HostBindings.layer([]),
     }).pipe(Layer.provide(BunServices.layer)),
   )
   const result = yield* Context.get(context, CellExecutor).execute({

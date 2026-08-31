@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
-    "tenetkit": "catalog:",
+    "generalist": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ToolContext, ToolExecutor } from "tenetkit"
-import { CellTool, KernelPool, KernelProfile, TestKernel } from "tenetkit/repl"
+import { ToolContext, ToolExecutor } from "generalist"
+import { CellTool, KernelPool, KernelProfile, TestKernel } from "generalist/repl"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import { configure } from "@rika/execution/route"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
@@ -104,7 +104,7 @@ it.effect("routes an admitted cell through the pool the composition root supplie
     const pool = Layer.mergeAll(
       TestKernel.layerTestPool({
         profile: KernelProfile.make({
-          provider: "tenetkit/repl/bun",
+          provider: "generalist/repl/bun",
           runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
           image: { kind: "runtime", reference: `bun@${kernel.runtimeVersion}`, digest: "runtime-digest" },
           isolation: "host-process",

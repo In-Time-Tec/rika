@@ -1,4 +1,4 @@
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import type { Node } from "./model"
 import type { AttemptStart, ModelCallState } from "./persistence"
@@ -73,15 +73,15 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
   const observeLifecycleAt = (event: RunEvent.RunEvent): number => {
     const at = occurredAt(event)
     if (lastLifecycleAt !== undefined && at < lastLifecycleAt)
-      throw new TypeError(`TenetKit lifecycle timestamp regressed: ${event.eventId}`)
+      throw new TypeError(`Generalist lifecycle timestamp regressed: ${event.eventId}`)
     lastLifecycleAt = at
     return at
   }
 
   const activate = (node: Node, event: RunEvent.RunEvent) => {
     const at = observeLifecycleAt(event)
-    if (node.lifecycle === "active") throw new TypeError(`TenetKit Run ${node.rawRunId} activated twice`)
-    if (node.lifecycle === "terminal") throw new TypeError(`TenetKit Run ${node.rawRunId} activated after terminal`)
+    if (node.lifecycle === "active") throw new TypeError(`Generalist Run ${node.rawRunId} activated twice`)
+    if (node.lifecycle === "terminal") throw new TypeError(`Generalist Run ${node.rawRunId} activated after terminal`)
     if (activeDepth === 0) activeSince = at
     activeDepth += 1
     activeAvailable = true
@@ -91,16 +91,16 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
   const deactivate = (node: Node, event: RunEvent.RunEvent, next: "waiting" | "terminal") => {
     const at = observeLifecycleAt(event)
     if (node.lifecycle === "active") {
-      if (activeDepth <= 0 || activeSince === undefined) throw new TypeError("Invalid TenetKit active-time depth")
+      if (activeDepth <= 0 || activeSince === undefined) throw new TypeError("Invalid Generalist active-time depth")
       activeDepth -= 1
       if (activeDepth === 0) {
         activeAccumulatedMillis += at - activeSince
         activeSince = undefined
       }
     } else if (next === "waiting" && node.lifecycle !== "unknown" && node.lifecycle !== "accepted")
-      throw new TypeError(`TenetKit Run ${node.rawRunId} waited while ${node.lifecycle}`)
+      throw new TypeError(`Generalist Run ${node.rawRunId} waited while ${node.lifecycle}`)
     else if (next === "terminal" && node.lifecycle === "terminal")
-      throw new TypeError(`TenetKit Run ${node.rawRunId} settled twice`)
+      throw new TypeError(`Generalist Run ${node.rawRunId} settled twice`)
     node.lifecycle = next
   }
 
@@ -286,7 +286,7 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
         activeAccumulatedMillis < 0 ||
         (activeDepth === 0) !== (activeSince === undefined)
       )
-        throw new TypeError("Invalid bounded TenetKit usage checkpoint")
+        throw new TypeError("Invalid bounded Generalist usage checkpoint")
     },
   }
 }

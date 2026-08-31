@@ -1,5 +1,5 @@
-import { Cell, CellTool, KernelPool } from "tenetkit/repl"
-import { ToolContext, ToolExecutor } from "tenetkit"
+import { Cell, CellTool, KernelPool } from "generalist/repl"
+import { ToolContext, ToolExecutor } from "generalist"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import { Clock, Context, DateTime, Effect, Function, Layer, Schema, Stream } from "effect"
 import type { LocalCellServices, RemoteCellRoute } from "./route-domain"
@@ -20,7 +20,7 @@ const unavailableCellExecutor = Layer.succeed(
 )
 
 const deadlineFailure = (failure: Cell.CellFailure, deadlineMillis: number): Cell.CellFailure => {
-  if (failure._tag !== "tenetkit/repl/CellExecutionFailed") return failure
+  if (failure._tag !== "generalist/repl/CellExecutionFailed") return failure
   const exceeded =
     failure.name === "Celltimed-out" || (failure.name === "Cellaborted" && failure.durationMillis >= deadlineMillis)
   if (!exceeded) return failure

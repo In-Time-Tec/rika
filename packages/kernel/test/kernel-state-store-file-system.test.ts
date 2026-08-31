@@ -86,7 +86,7 @@ describe("kernel state store", () => {
       yield* store.save({ manifest: manifest("session"), payload: new TextEncoder().encode("x") })
       yield* fileSystem.writeFileString(path.join(root, "kernel-state", "session.manifest.json"), "{ not json")
       const failure = yield* Effect.flip(store.load("session"))
-      expect(failure._tag).toBe("tenetkit/repl/KernelStateUnavailable")
+      expect(failure._tag).toBe("generalist/repl/KernelStateUnavailable")
       expect(failure.reason).toBe("corrupt")
     }).pipe(provide(platform), Effect.scoped),
   )

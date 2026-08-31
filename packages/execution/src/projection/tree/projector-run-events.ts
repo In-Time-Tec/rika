@@ -1,10 +1,10 @@
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import type { Node } from "../model"
 import type { ProjectorEventContext, ProjectorEventHandler } from "./projector-event-context"
 
 const startAttempt = (context: ProjectorEventContext, node: Node, event: RunEvent.RunAttemptStarted): void => {
   if (node.attempt !== undefined && event.attempt < node.attempt)
-    throw new TypeError(`TenetKit Run ${node.rawRunId} attempt regressed`)
+    throw new TypeError(`Generalist Run ${node.rawRunId} attempt regressed`)
   if (node.attempt === event.attempt) {
     context.usage.observeLifecycleAt(event)
     return

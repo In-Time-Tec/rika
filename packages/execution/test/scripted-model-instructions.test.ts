@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { State } from "tenetkit/agent-guidance"
-import { ExecutableRegistration } from "tenetkit/runtime"
+import { State } from "generalist/instructions"
+import { ExecutableRegistration } from "generalist/runtime"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Effect } from "effect"
 import { profileInstructions } from "../src/routing/route"
@@ -169,7 +169,7 @@ it.effect("registers the harness pin the resolver expects for the same workspace
       harnessSnapshot: snapshotFor("workspace:another"),
     })
     const harnessPinOf = (configured: Configured) =>
-      configured.registrations.find((registration) => registration.codec === "tenetkit/agent-guidance/snapshot")?.pin
+      configured.registrations.find((registration) => registration.codec === "generalist/instructions/snapshot")?.pin
 
     /**
      * A harness pin is derived from the snapshot the workspace was read for, so two workspaces pin

@@ -122,9 +122,9 @@ COPY apps/proxy ./apps/proxy
 COPY apps/rika ./apps/rika
 COPY apps/web ./apps/web
 RUN bun install --production --frozen-lockfile --ignore-scripts \
-  && test -f node_modules/tenetkit/package.json \
+  && test -f node_modules/generalist/package.json \
   && test -f packages/kernel/src/executor-runtime.ts \
-  && bun -e 'import { workerModule } from "tenetkit/repl/bun"; if (!(await Bun.file(workerModule).exists())) process.exit(1)' \
+  && bun -e 'import { workerModule } from "generalist/repl/bun"; if (!(await Bun.file(workerModule).exists())) process.exit(1)' \
   && rm -rf node_modules/.bun/@typescript+typescript-* /root/.bun
 COPY infra/e2b/executor-v1/start.sh ./start.sh
 COPY infra/e2b/executor-v1/tool-manifest.json ./tool-manifest.json

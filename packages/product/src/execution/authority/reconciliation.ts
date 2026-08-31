@@ -58,7 +58,8 @@ export const make = Effect.fn("ExecutionAuthorityReconciliation.make")(function*
       yield* Effect.logWarning("execution.authority.run_unavailable").pipe(
         Effect.annotateLogs("rika.turn.id", String(turn.id)),
       )
-      active.push(turn)
+      yield* input.setTurnStatus(turn.id, "failed", yield* Clock.currentTimeMillis)
+      settledThreads.push(turn.threadId)
       continue
     }
     if (ExecutionStatus.isTerminalStatus(inspected.success.status)) {

@@ -1,16 +1,16 @@
-import { ModelRegistry } from "tenetkit"
-import * as AmazonBedrock from "tenetkit/ai/amazon-bedrock"
-import * as Anthropic from "tenetkit/ai/anthropic"
-import * as Deterministic from "tenetkit/ai/deterministic"
-import * as OpenAi from "tenetkit/ai/openai"
-import * as OpenAiChatCompletions from "tenetkit/ai/openai-chat-completions"
-import * as OpenAiResponses from "tenetkit/ai/openai-responses"
-import * as OpenRouter from "tenetkit/ai/openrouter"
-import { Errors } from "tenetkit/runtime"
+import { ModelRegistry } from "generalist"
+import * as AmazonBedrock from "generalist/ai/amazon-bedrock"
+import * as Anthropic from "generalist/ai/anthropic"
+import * as Deterministic from "generalist/ai/deterministic"
+import * as OpenAi from "generalist/ai/openai"
+import * as OpenAiChatCompletions from "generalist/ai/openai-chat-completions"
+import * as OpenAiResponses from "generalist/ai/openai-responses"
+import * as OpenRouter from "generalist/ai/openrouter"
+import { Errors } from "generalist/runtime"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ProviderCredentialStore from "@rika/product/provider-credential-store"
-import { Config, Effect, Layer, Option, Redacted } from "effect"
+import { Config, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 import * as OpenAiAccountCredentials from "./openai-account-credentials"
 
@@ -24,6 +24,18 @@ const apiKey = (candidate: CandidateSnapshot) =>
   candidate.providerConnection.apiKeyEnvironment === undefined
     ? Config.succeed(Redacted.make(""))
     : Config.redacted(candidate.providerConnection.apiKeyEnvironment)
+
+const decodeProviderConfig = <A>(
+  protocol: CandidateSnapshot["providerConnection"]["protocol"],
+  decoded: Effect.Effect<A, Schema.SchemaError>,
+): Effect.Effect<A, Errors.ExecutableRegistrationInvalid> =>
+  decoded.pipe(
+    Effect.mapError((cause) =>
+      Errors.ExecutableRegistrationInvalid.make({
+        message: `Invalid ${protocol} provider options: ${String(cause)}`,
+      }),
+    ),
+  )
 
 const storedCredentialApiKey = (
   candidate: CandidateSnapshot,
@@ -56,13 +68,19 @@ const openAiResponsesLayer = (
   const registrationKey = candidate.registrationIdentity
   if (candidate.providerConnection.authentication !== "account")
     return Layer.unwrap(
-      storedCredentialApiKey(candidate, credentialStore).pipe(
-        Effect.map((resolvedApiKey) =>
+      Effect.all({
+        apiKey: storedCredentialApiKey(candidate, credentialStore),
+        config: decodeProviderConfig(
+          candidate.providerConnection.protocol,
+          OpenAiResponses.decodeConfig(candidate.providerOptions),
+        ),
+      }).pipe(
+        Effect.map(({ apiKey: resolvedApiKey, config }) =>
           OpenAiResponses.layer({
             model: candidate.model,
             provider: candidate.providerConnection.provider,
             registrationKey,
-            config: OpenAiResponses.decodeConfig(candidate.providerOptions),
+            config,
             apiKey: resolvedApiKey,
             baseUrl: candidate.providerConnection.baseUrl,
           }).pipe(Layer.provide(httpClientLayer)),
@@ -88,13 +106,22 @@ const openAiResponsesLayer = (
       ),
     )
   const credentials = OpenAiAccountCredentials.fromRikaAuth(openAiAccountAccess(credentialIdentity), fingerprint)
-  return ModelRegistry.layer([
-    OpenAi.registration({
-      model: candidate.model,
-      registrationKey,
-      config: OpenAiResponses.decodeConfig(candidate.providerOptions),
-    }),
-  ]).pipe(Layer.provide(OpenAiAccountCredentials.layerClient(credentials)), Layer.provide(httpClientLayer))
+  return Layer.unwrap(
+    decodeProviderConfig(
+      candidate.providerConnection.protocol,
+      OpenAiResponses.decodeConfig(candidate.providerOptions),
+    ).pipe(
+      Effect.map((config) =>
+        ModelRegistry.layer([
+          OpenAi.registration({
+            model: candidate.model,
+            registrationKey,
+            config,
+          }),
+        ]).pipe(Layer.provide(OpenAiAccountCredentials.layerClient(credentials)), Layer.provide(httpClientLayer)),
+      ),
+    ),
+  )
 }
 
 export const layer = (options: {
@@ -114,13 +141,19 @@ export const layer = (options: {
       return openAiResponsesLayer(candidate, credentialStore, openAiAccountAccess, httpClientLayer)
     case "openai-chat-completions":
       return Layer.unwrap(
-        storedCredentialApiKey(candidate, credentialStore).pipe(
-          Effect.map((resolvedApiKey) =>
+        Effect.all({
+          apiKey: storedCredentialApiKey(candidate, credentialStore),
+          config: decodeProviderConfig(
+            candidate.providerConnection.protocol,
+            OpenAiChatCompletions.decodeConfig(candidate.providerOptions),
+          ),
+        }).pipe(
+          Effect.map(({ apiKey: resolvedApiKey, config }) =>
             OpenAiChatCompletions.layer({
               model: candidate.model,
               provider: candidate.providerConnection.provider,
               registrationKey,
-              config: OpenAiChatCompletions.decodeConfig(candidate.providerOptions),
+              config,
               apiKey: resolvedApiKey,
               baseUrl: candidate.providerConnection.baseUrl,
             }).pipe(Layer.provide(httpClientLayer)),
@@ -129,12 +162,18 @@ export const layer = (options: {
       )
     case "anthropic":
       return Layer.unwrap(
-        storedCredentialApiKey(candidate, credentialStore).pipe(
-          Effect.map((resolvedApiKey) =>
+        Effect.all({
+          apiKey: storedCredentialApiKey(candidate, credentialStore),
+          config: decodeProviderConfig(
+            candidate.providerConnection.protocol,
+            Anthropic.decodeConfig(candidate.providerOptions),
+          ),
+        }).pipe(
+          Effect.map(({ apiKey: resolvedApiKey, config }) =>
             Anthropic.layer({
               model: candidate.model,
               registrationKey,
-              config: Anthropic.decodeConfig(candidate.providerOptions),
+              config,
               apiKey: resolvedApiKey,
               clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
             }).pipe(Layer.provide(httpClientLayer)),
@@ -143,12 +182,18 @@ export const layer = (options: {
       )
     case "openrouter":
       return Layer.unwrap(
-        storedCredentialApiKey(candidate, credentialStore).pipe(
-          Effect.map((resolvedApiKey) =>
+        Effect.all({
+          apiKey: storedCredentialApiKey(candidate, credentialStore),
+          config: decodeProviderConfig(
+            candidate.providerConnection.protocol,
+            OpenRouter.decodeConfig(candidate.providerOptions),
+          ),
+        }).pipe(
+          Effect.map(({ apiKey: resolvedApiKey, config }) =>
             OpenRouter.layer({
               model: candidate.model,
               registrationKey,
-              config: OpenRouter.decodeConfig(candidate.providerOptions),
+              config,
               apiKey: resolvedApiKey,
               clientConfig: { apiUrl: Config.succeed(candidate.providerConnection.baseUrl) },
             }).pipe(Layer.provide(httpClientLayer)),
@@ -167,12 +212,21 @@ export const layer = (options: {
       if (region !== null) Object.assign(client, { region })
       if (profile !== null) Object.assign(client, { profile })
       if (connection.hostname !== "default") Object.assign(client, { endpoint })
-      return AmazonBedrock.layer({
-        model: candidate.model,
-        registrationKey,
-        config: AmazonBedrock.decodeConfig(candidate.providerOptions),
-        client,
-      })
+      return Layer.unwrap(
+        decodeProviderConfig(
+          candidate.providerConnection.protocol,
+          AmazonBedrock.decodeConfig(candidate.providerOptions),
+        ).pipe(
+          Effect.map((config) =>
+            AmazonBedrock.layer({
+              model: candidate.model,
+              registrationKey,
+              config,
+              client,
+            }),
+          ),
+        ),
+      )
     }
     case "test":
       return Deterministic.layer({
@@ -185,7 +239,7 @@ export const layer = (options: {
         ModelRegistry.ModelRegistry,
         Effect.fail(
           Errors.ExecutableRegistrationInvalid.make({
-            message: `Unsupported TenetKit provider protocol ${candidate.providerConnection.protocol}`,
+            message: `Unsupported Generalist provider protocol ${candidate.providerConnection.protocol}`,
           }),
         ),
       )

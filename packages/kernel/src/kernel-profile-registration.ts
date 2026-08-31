@@ -1,5 +1,5 @@
-import { Pins } from "tenetkit"
-import { KernelProfile } from "tenetkit/repl"
+import { Pins } from "generalist"
+import { KernelProfile } from "generalist/repl"
 import { bindingsDigest, type Environment } from "./binding/epoch"
 
 const runtimeName = "bun"
@@ -33,7 +33,7 @@ export const make = (options: Options): KernelProfile.KernelProfile => {
     digest: options.runtimeDigest ?? Pins.digest({ name: runtimeName, version: options.runtimeVersion }),
   }
   return KernelProfile.make({
-    provider: "tenetkit/repl/bun",
+    provider: "generalist/repl/bun",
     runtime,
     image: { kind: "runtime", reference: `${runtime.name}@${runtime.version}`, digest: runtime.digest },
     isolation: "host-process",

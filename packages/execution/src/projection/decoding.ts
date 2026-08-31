@@ -1,5 +1,5 @@
 import { Function, Schema } from "effect"
-import type { Run, RunEvent } from "tenetkit/runtime"
+import type { Run, RunEvent } from "generalist/runtime"
 import { bounded, record, toolTextLimit } from "./values"
 
 type ModelValue = Extract<RunEvent.RunEvent, { readonly _tag: "ToolExecutionStarted" }>["call"]["params"]
@@ -27,7 +27,7 @@ export const token = (value: number | undefined): number | undefined =>
 const addImpl = (left: number | undefined, right: number | undefined): number | undefined => {
   if (right === undefined) return left
   const value = (left ?? 0) + right
-  if (!Number.isSafeInteger(value)) throw new RangeError("TenetKit usage total exceeds the safe integer range")
+  if (!Number.isSafeInteger(value)) throw new RangeError("Generalist usage total exceeds the safe integer range")
   return value
 }
 
@@ -44,7 +44,7 @@ export const providerCostNanoUsd = (value: RunEvent.RunEvent | Run.RawUsageFact)
 export const occurredAt = (event: RunEvent.RunEvent): number => {
   const value = Date.parse(event.occurredAt)
   if (!Number.isFinite(value) || value < 0)
-    throw new TypeError(`Invalid TenetKit lifecycle timestamp: ${event.eventId}`)
+    throw new TypeError(`Invalid Generalist lifecycle timestamp: ${event.eventId}`)
   return value
 }
 

@@ -15,7 +15,8 @@ const startCall = (
   const rootConversation = node.parentRawRunId === undefined && !node.hidden && event.purpose === "conversation"
   const existing = usage.modelCalls.get(key)
   if (existing !== undefined) {
-    if (existing.purpose !== event.purpose) throw new TypeError(`Conflicting TenetKit model call: ${event.modelCallId}`)
+    if (existing.purpose !== event.purpose)
+      throw new TypeError(`Conflicting Generalist model call: ${event.modelCallId}`)
     return
   }
   const value: ModelCallState = rootConversation

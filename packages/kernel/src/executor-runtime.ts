@@ -1,5 +1,5 @@
-import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
-import { HostModules, KernelPool, KernelStateStore } from "tenetkit/repl"
+import { Approvals, NestedOperation, Session, ToolContext } from "generalist"
+import { HostBindings, KernelPool, KernelSnapshotStore } from "generalist/repl"
 import { Context, Effect, Function, Layer, Option, Ref, Scope, type FileSystem, type Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type { BindingRequirements } from "./binding/modules"
@@ -75,14 +75,14 @@ export const cellContextLayer: Layer.Layer<CellContext> = Layer.effect(
   ),
 )
 
-const unavailable = (request: HostModules.Request) => ({
+const unavailable = (request: HostBindings.Request) => ({
   _tag: "CellContextUnavailable" as const,
   module: request.module,
   operation: request.operation,
   message: "the rika surface was called outside an executing cell, so this Session has no durable operation identity",
 })
 
-const bindImpl = (registry: HostModules.Service, calls: CellContextInterface): HostModules.Service => ({
+const bindImpl = (registry: HostBindings.Service, calls: CellContextInterface): HostBindings.Service => ({
   descriptors: registry.descriptors,
   resolve: registry.resolve,
   invoke: (request) =>
@@ -94,11 +94,11 @@ const bindImpl = (registry: HostModules.Service, calls: CellContextInterface): H
 })
 
 export const bind: {
-  (calls: CellContextInterface): (registry: HostModules.Service) => HostModules.Service
-  (registry: HostModules.Service, calls: CellContextInterface): HostModules.Service
+  (calls: CellContextInterface): (registry: HostBindings.Service) => HostBindings.Service
+  (registry: HostBindings.Service, calls: CellContextInterface): HostBindings.Service
 } = Function.dual(2, bindImpl)
 
-export type Services = KernelPool.KernelPool | KernelStateStore.KernelStateStore | CellContext
+export type Services = KernelPool.KernelPool | KernelSnapshotStore.KernelSnapshotStore | CellContext
 
 export interface Executor<Request, Response, Error> {
   readonly execute: (request: Request) => Effect.Effect<Response, Error>
@@ -121,8 +121,8 @@ export const layer = (
 ): Layer.Layer<Services, never, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path> => {
   const calls = cellContextLayer
   const registry = Layer.effect(
-    HostModules.HostModules,
-    Effect.map(Effect.all([HostModules.HostModules, CellContext]), ([mounted, callContext]) =>
+    HostBindings.HostBindings,
+    Effect.map(Effect.all([HostBindings.HostBindings, CellContext]), ([mounted, callContext]) =>
       bind(mounted, callContext),
     ),
   ).pipe(

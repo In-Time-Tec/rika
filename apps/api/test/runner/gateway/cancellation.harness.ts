@@ -4,8 +4,8 @@ import { rikaHostedExecutorOperations } from "@rika/product-store/database-schem
 import * as HostedPostgres from "@rika/product-store/layer"
 import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
-import { NestedOperation, ToolContext } from "tenetkit"
-import { HostModules } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "generalist"
+import { HostBindings } from "generalist/repl"
 import { sql } from "drizzle-orm"
 import { Context, Deferred, Effect, Fiber, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
@@ -206,7 +206,7 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
             NestedOperation.Operations.of({ run: (_request, operation) => operation }),
           ),
         )
-        const registry = HostModules.HostModules.of({
+        const registry = HostBindings.HostBindings.of({
           descriptors: [{ module: "workspace", operations: ["read"] }],
           resolve: () => Effect.die("unused"),
           invoke: () =>

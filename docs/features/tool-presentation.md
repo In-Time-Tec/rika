@@ -1,6 +1,6 @@
 # Tool presentation
 
-The model uses the `typescript` cell for its persistent RLM environment and TenetKit's blocking child tools for durable delegation. Cells stay in source order, appear once while running, and are updated in place when they complete. Child-tool plumbing is hidden behind subagent cards; direct children appear at their parent's transcript level and descendants nest beneath the child that delegated them.
+The model uses the `typescript` cell for its persistent RLM environment and Generalist's blocking child tools for durable delegation. Cells stay in source order, appear once while running, and are updated in place when they complete. Child-tool plumbing is hidden behind subagent cards; direct children appear at their parent's transcript level and descendants nest beneath the child that delegated them.
 
 Unselected summaries show the action or agent identity as primary text and mute statuses, targets, counts, and context at every nesting depth. The agent identity stays primary while its lifecycle wording is muted, including in nested rows.
 

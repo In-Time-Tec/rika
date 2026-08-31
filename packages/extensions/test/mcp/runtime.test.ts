@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { MCPClient } from "tenetkit/mcp"
+import { MCPClient } from "generalist/mcp"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as McpConfig from "@rika/extensions/mcp-configuration"
@@ -32,7 +32,7 @@ it.effect("skill MCP configuration is composed only from activated skill resourc
   }).pipe(provideLayer(BunServices.layer)),
 )
 
-it.effect("runtime discovers and calls through a deterministic TenetKit MCP client", () => {
+it.effect("runtime discovers and calls through a deterministic Generalist MCP client", () => {
   const source = MCPClient.MCPClient.of({
     server: "docs",
     tools: Effect.succeed([

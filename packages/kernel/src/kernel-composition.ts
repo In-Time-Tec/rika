@@ -1,5 +1,5 @@
-import { HostModules, KernelPool, KernelStateStore } from "tenetkit/repl"
-import { BunKernelPool, workerModule, workerSupportModules } from "tenetkit/repl/bun"
+import { HostBindings, KernelPool, KernelSnapshotStore } from "generalist/repl"
+import { BunKernelPool, workerModule, workerSupportModules } from "generalist/repl/bun"
 
 /**
  * Where the kernel worker lives in an ordinary install. A packaging step needs it to ship the worker
@@ -40,7 +40,7 @@ export const defaultIdleTimeToLive = Duration.minutes(5)
 
 export interface Options extends ProfileOptions {
   readonly workspaceDigest: string
-  /** Rika-owned policy reported by `rika.context.current`; it is not part of TenetKit's physical profile. */
+  /** Rika-owned policy reported by `rika.context.current`; it is not part of Generalist's physical profile. */
   readonly trustMode?: string
   readonly servers: ModuleOptions["servers"]
   readonly skills?: NonNullable<ProfileOptions["environment"]>["skills"]
@@ -74,18 +74,19 @@ const profileOptions = (options: Options): ProfileOptions => {
 /** The mounted `rika.*` surface, closed over the services that back it. */
 export const bindings = (
   options: ModuleOptions,
-): Layer.Layer<HostModules.HostModules, HostModules.HostModuleConflict, BindingRequirements> =>
-  HostModules.layer(makeModules(options))
+): Layer.Layer<HostBindings.HostBindings, HostBindings.HostModuleConflict, BindingRequirements> =>
+  HostBindings.layer(makeModules(options))
 
 /** Best-effort namespace persistence under the profile data root. */
 export const state = (
   dataRoot: string,
-): Layer.Layer<KernelStateStore.KernelStateStore, never, FileSystem.FileSystem | Path.Path> => stateStoreLayer(dataRoot)
+): Layer.Layer<KernelSnapshotStore.KernelSnapshotStore, never, FileSystem.FileSystem | Path.Path> =>
+  stateStoreLayer(dataRoot)
 
 /**
  * One Server-scoped pool of Bun kernels, one per Session.
  *
- * `workerModule` is resolved by `tenetkit/repl/bun` against its own module URL: the worker is not an
+ * `workerModule` is resolved by `generalist/repl/bun` against its own module URL: the worker is not an
  * importable entrypoint and its layout is an implementation detail, so a host must never name a dist
  * path itself. A host whose modules are compiled into a single executable is the exception — that URL
  * no longer names a file anything can spawn — so it supplies the path it shipped the worker to.
@@ -93,7 +94,7 @@ export const state = (
 export const pool = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore,
+  KernelPool.KernelPool | KernelSnapshotStore.KernelSnapshotStore,
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > =>
@@ -135,8 +136,8 @@ export const pool = (
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore | HostModules.HostModules,
-  HostModules.HostModuleConflict,
+  KernelPool.KernelPool | KernelSnapshotStore.KernelSnapshotStore | HostBindings.HostBindings,
+  HostBindings.HostModuleConflict,
   BindingRequirements | ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > => {
   const surface = bindings(moduleOptions(options))

@@ -3,7 +3,7 @@ import { TreeProjector } from "../../../src/projection/tree/projector"
 import { modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 import { Prompt } from "effect/unstable/ai"
 
-describe("TenetKit tree projector parent attribution", () => {
+describe("Generalist tree projector parent attribution", () => {
   it("attributes a child unit to its subagent card when the child streams before ChildLinked", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-early", "delegate this")

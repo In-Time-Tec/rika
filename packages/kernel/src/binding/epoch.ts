@@ -1,4 +1,4 @@
-import { KernelProfile } from "tenetkit/repl"
+import { KernelProfile } from "generalist/repl"
 import { source } from "../kernel-bootstrap"
 import { moduleNames } from "./module-catalog"
 

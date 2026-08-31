@@ -1,4 +1,4 @@
-import type { HostModules } from "tenetkit/repl"
+import type { HostBindings } from "generalist/repl"
 import type { BindingRequirements, Options } from "./requirements"
 import * as ArtifactsBinding from "./artifact/capability"
 import * as ContextBinding from "./capability/context"
@@ -17,7 +17,7 @@ import * as WorkspaceBinding from "./capability/workspace"
  * kernel global, so adding, removing, or renaming one changes `bindingsDigest` and starts a new
  * kernel epoch.
  */
-export const make = (options: Options): ReadonlyArray<HostModules.Module<BindingRequirements>> => [
+export const make = (options: Options): ReadonlyArray<HostBindings.Module<BindingRequirements>> => [
   WorkspaceBinding.module,
   EditsBinding.module,
   ProcessesBinding.module,

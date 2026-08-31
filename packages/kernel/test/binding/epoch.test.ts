@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { State, Store } from "tenetkit/agent-guidance"
+import { State, Store } from "generalist/instructions"
 import { Context, Effect, Schema } from "effect"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { mountModules } from "../support/binding"

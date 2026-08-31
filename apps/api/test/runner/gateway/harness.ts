@@ -5,7 +5,7 @@ import {
   type AccessWire,
   type CellResponse,
 } from "@rika/remote-execution/protocol"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 import { Effect, Config, Schema } from "effect"
 import { createHash } from "node:crypto"
 import { makeRunnerGateway as makeRunnerGatewayService, type RunnerGateway } from "../../../src/runner/gateway"
@@ -30,10 +30,10 @@ export const bindingRequestDigest = (request: BindingRequest) =>
 export const code = 'printf "restart"'
 export const emptyCellContext = Effect.runSync(CellAuthority.capture())
 export const bindings: BindingAuthority = {
-  registry: HostModules.HostModules.of({
+  registry: HostBindings.HostBindings.of({
     descriptors: [],
-    resolve: (input) => Effect.fail(HostModules.HostModuleNotFound.make({ module: input.module })),
-    invoke: (input) => Effect.fail(HostModules.HostModuleNotFound.make({ module: input.module })),
+    resolve: (input) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: input.module })),
+    invoke: (input) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: input.module })),
   }),
   context: emptyCellContext,
   manifest: { digest: "a".repeat(64), descriptors: [] },

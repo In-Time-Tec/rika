@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Inspectable, Logger, Metric } from "effect"
-import { ExecutableManifest, RunEvent, RunTree } from "tenetkit/runtime"
+import { ExecutableManifest, RunEvent, RunTree } from "generalist/runtime"
 import { makeHostedModelObserver, makeModelTerminalTelemetry } from "../../src/engine/runtime"
 import type { SemanticTreeEvent } from "../../src/projection/semantic/event"
 

@@ -1,4 +1,4 @@
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { AuthorizationProjection } from "../authorization"
 import type { CellProjection } from "../cell/state"

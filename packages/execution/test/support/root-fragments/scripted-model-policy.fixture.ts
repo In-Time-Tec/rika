@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { ExecutableManifest } from "tenetkit"
-import { CellTool } from "tenetkit/repl"
-import { ExecutableRegistration } from "tenetkit/runtime"
+import { ExecutableManifest } from "generalist"
+import { CellTool } from "generalist/repl"
+import { ExecutableRegistration } from "generalist/runtime"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
@@ -70,7 +70,7 @@ it.effect("registers one stable payload per model registry pin regardless of whi
   }),
 )
 
-it.effect("pins child authority without duplicating TenetKit-owned tools in host manifests", () =>
+it.effect("pins child authority without duplicating Generalist-owned tools in host manifests", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),

@@ -1,8 +1,8 @@
-import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "tenetkit"
-import * as ModelRoute from "tenetkit/ai/model-route"
-import { Errors, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
-import type { State } from "tenetkit/agent-guidance"
-import { CellTool, KernelPool, type KernelProfile } from "tenetkit/repl"
+import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "generalist"
+import * as ModelRoute from "generalist/ai/model-route"
+import { Errors, ExecutableRegistration, ExecutableResolver } from "generalist/runtime"
+import type { State } from "generalist/instructions"
+import { CellTool, KernelPool, type KernelProfile } from "generalist/repl"
 import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
@@ -23,7 +23,7 @@ export interface KernelOptions {
   readonly runtimeVersion: string
   readonly dataRoot: string
   readonly limits?: KernelProfile.Limits
-  /** Rika-owned policy surfaced to cells; TenetKit's physical KernelProfile intentionally excludes it. */
+  /** Rika-owned policy surfaced to cells; Generalist's physical KernelProfile intentionally excludes it. */
   readonly trustMode?: string
 }
 

@@ -1,8 +1,8 @@
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import { RunSchema } from "@tenetkit/pg"
-import { ModelRegistry } from "tenetkit"
-import { TestModel } from "tenetkit/test"
+import { RuntimeSchema } from "generalist/pg"
+import { ModelRegistry } from "generalist"
+import { TestModel } from "generalist/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Config, Context, Effect, Exit, Layer, Random, Scope, Stream } from "effect"
@@ -34,11 +34,8 @@ it.live.skipIf(databaseUrl === "")(
       const pool = new Pool({ connectionString: url })
       const scope = yield* Scope.make()
       try {
-        const postgresContext = yield* Layer.buildWithScope(
-          RunSchema.layerClient({ url, maxConnections }),
-          scope,
-        )
-        yield* RunSchema.apply("postgres-inspection-test").pipe(Effect.provide(postgresContext))
+        const postgresContext = yield* Layer.buildWithScope(RuntimeSchema.layerClient({ url, maxConnections }), scope)
+        yield* RuntimeSchema.apply("postgres-inspection-test").pipe(Effect.provide(postgresContext))
         const fixture = yield* TestModel.make([TestModel.turn([TestModel.text("POSTGRES_INSPECTION_OK")])], {
           provider: "test",
           model: "test",
@@ -63,9 +60,7 @@ it.live.skipIf(databaseUrl === "")(
                 cancellationIntervalMillis: 20,
               },
             },
-          }).pipe(
-            Layer.provide(Layer.succeed(PgClient.PgClient, Context.get(postgresContext, PgClient.PgClient))),
-          ),
+          }).pipe(Layer.provide(Layer.succeed(PgClient.PgClient, Context.get(postgresContext, PgClient.PgClient)))),
           scope,
         )
         const gateway = Context.get(context, ExecutionGateway.Service)
@@ -80,7 +75,7 @@ it.live.skipIf(databaseUrl === "")(
         expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
         const positionType = yield* Effect.tryPromise(() =>
           pool.query<{ readonly type: string }>(
-            "SELECT pg_typeof(position)::text AS type FROM tenetkit_tree_event_index LIMIT 1",
+            "SELECT pg_typeof(position)::text AS type FROM generalist_tree_event_index LIMIT 1",
           ),
         )
         expect(positionType.rows[0]?.type).toBe("bigint")
@@ -92,9 +87,7 @@ it.live.skipIf(databaseUrl === "")(
           expect(yield* gateway.inspectTurn(link)).toMatchObject({ status: "completed" })
           observed.push(yield* backendCount(pool))
         }
-        expect(Math.max(...observed)).toBeLessThanOrEqual(
-          maxConnections + listenerConnections + inspectionConnections,
-        )
+        expect(Math.max(...observed)).toBeLessThanOrEqual(maxConnections + listenerConnections + inspectionConnections)
         expect(yield* fixture.requests).toHaveLength(1)
       } finally {
         yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { HostModules } from "tenetkit/repl"
-import { NestedOperation, ToolContext } from "tenetkit"
+import { HostBindings } from "generalist/repl"
+import { NestedOperation, ToolContext } from "generalist"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
 
@@ -19,7 +19,7 @@ const registry = (options: {
   readonly nested?: NestedOperation.Service
 }) =>
   Effect.provideContext(
-    HostModules.make([WorkspaceBinding.module]),
+    HostBindings.make([WorkspaceBinding.module]),
     Context.empty().pipe(
       Context.add(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run: options.run })),
       Context.add(ToolContext.ToolContext, toolContext),
@@ -176,7 +176,7 @@ describe("workspace binding", () => {
     Effect.gen(function* () {
       const mounted = yield* registry({ run: () => result("") })
       const failure = yield* Effect.flip(mounted.invoke({ module: "workspace", operation: "read", input: { path: 7 } }))
-      expect(Schema.is(HostModules.HostModuleSchemaFailure)(failure)).toBe(true)
+      expect(Schema.is(HostBindings.HostModuleSchemaFailure)(failure)).toBe(true)
     }),
   )
 
@@ -184,7 +184,7 @@ describe("workspace binding", () => {
     Effect.gen(function* () {
       const mounted = yield* registry({ run: () => result("") })
       const failure = yield* Effect.flip(mounted.invoke({ module: "workspace", operation: "delete", input: {} }))
-      expect(Schema.is(HostModules.HostModuleNotFound)(failure)).toBe(true)
+      expect(Schema.is(HostBindings.HostModuleNotFound)(failure)).toBe(true)
     }),
   )
 

@@ -1,8 +1,8 @@
 import "./support/root-fragments/scripted-model-policy.fixture"
 import { expect, it } from "@effect/vitest"
-import { ExecutableManifest } from "tenetkit"
-import { CellTool } from "tenetkit/repl"
-import { ExecutableRegistration } from "tenetkit/runtime"
+import { ExecutableManifest } from "generalist"
+import { CellTool } from "generalist/repl"
+import { ExecutableRegistration } from "generalist/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
@@ -142,7 +142,7 @@ it.effect("builds exact closed root and title executables with role-specific too
     expect(configured.resolverEntries).toHaveLength(9)
     const rootResolution = configured.resolverEntries[0]!
     expect("agent" in rootResolution ? rootResolution.agent.model : undefined).toMatchObject({
-      provider: "tenetkit/ai",
+      provider: "generalist/ai",
       model: "ordered-route",
     })
     expect(configured.executable.manifest.version).toBe("2")
@@ -235,7 +235,7 @@ it.effect("builds exact closed root and title executables with role-specific too
   }),
 )
 
-it.effect("delegates persisted provider-option decoding to TenetKit", () =>
+it.effect("delegates persisted provider-option decoding to Generalist", () =>
   Effect.gen(function* () {
     const route = testExecutionRoute()
     const candidate = {

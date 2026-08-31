@@ -1,13 +1,13 @@
-import { RunSchema, layer as postgresLayer } from "@tenetkit/pg"
+import { RuntimeSchema, layer as postgresLayer } from "generalist/pg"
 import { Config, Context, Effect, Layer, Random } from "effect"
 import { SqlClient, type SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { afterAll, beforeAll } from "vitest"
 import { Pool } from "pg"
-import { Agent, Policy } from "tenetkit"
-import { TestModel } from "tenetkit/test"
-import { Address, ExecutableManifest, ExecutableRegistration, ExecutableResolver } from "tenetkit/runtime"
-import { RunClaims, type ClaimedRun, type RunClaimsService } from "tenetkit/runtime/sql-driver"
-import { driverConformance, type Services } from "tenetkit/test/runtime-driver"
+import { Agent, Policy } from "generalist"
+import { TestModel } from "generalist/test"
+import { Address, ExecutableManifest, ExecutableRegistration, ExecutableResolver } from "generalist/runtime"
+import { RunClaims, type ClaimedRun } from "generalist/runtime/sql-driver"
+import { driverConformance, type Services } from "generalist/test/runtime-driver"
 import * as Postgres from "../../../src/postgres"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -32,7 +32,7 @@ let isolatedUrl = databaseUrl
 let database = ""
 let admin: Pool | undefined
 let isolated: Pool | undefined
-let activeClaims: RunClaimsService | undefined
+let activeClaims: RunClaims["Service"] | undefined
 let activeSql: SqlClientService | undefined
 
 if (databaseUrl !== "") {
@@ -60,12 +60,12 @@ if (databaseUrl !== "") {
 
 const layer = Layer.unwrap(
   Effect.sync(() => {
-    const client = RunSchema.layerClient({ url: isolatedUrl, maxConnections: 12 })
+    const client = RuntimeSchema.layerClient({ url: isolatedUrl, maxConnections: 12 })
     return postgresLayer({
       source,
-      resolver: ExecutableResolver.makeStatic([{ executable, agent }]),
       addresses: [{ address, executable, registrations }],
     }).pipe(
+      Layer.provide(ExecutableResolver.layerStatic([{ executable, agent }])),
       Layer.provideMerge(client),
       Layer.tap((context) =>
         Effect.sync(() => {
@@ -118,8 +118,8 @@ const setup = Effect.tryPromise(() => {
       SELECT string_agg(format('%I.%I', schemaname, tablename), ', ') INTO tables
       FROM pg_tables
       WHERE schemaname = 'public'
-        AND tablename LIKE 'tenetkit_%'
-        AND tablename NOT IN ('tenetkit_schema_meta', 'tenetkit_sql_migrations');
+        AND tablename LIKE 'generalist_%'
+        AND tablename NOT IN ('generalist_schema_meta', 'generalist_sql_migrations');
       IF tables IS NOT NULL THEN EXECUTE 'TRUNCATE TABLE ' || tables || ' CASCADE'; END IF;
     END $$`)
 }).pipe(Effect.orDie, Effect.andThen(Effect.void))

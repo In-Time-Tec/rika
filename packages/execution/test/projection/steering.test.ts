@@ -151,7 +151,7 @@ it("projects oversized message-backed steering delivered by the runtime", () => 
     digest: "digest-message",
     prompt: Prompt.make([
       {
-        options: { tenetkit: { message: { from: "run:run-child", messageId: "child-settled:run-child" } } },
+        options: { generalist: { message: { from: "run:run-child", messageId: "child-settled:run-child" } } },
         role: "user",
         content: [{ type: "text", text: body }],
       },

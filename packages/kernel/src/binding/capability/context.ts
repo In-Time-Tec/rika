@@ -1,6 +1,6 @@
 import { Effect, Predicate, Schema } from "effect"
-import { Prompt, Session, SessionHistory, ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { Prompt, Session, SessionHistory, ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import { operation } from "../envelope"
 
 export const name = "context"
@@ -137,7 +137,7 @@ const path = Effect.scoped(
 export const make = (options: {
   readonly workspace: string
   readonly trustMode: string
-}): HostModules.Module<Session.SessionDirectory | ToolContext.ToolContext> => ({
+}): HostBindings.Module<Session.SessionDirectory | ToolContext.ToolContext> => ({
   name,
   operations: [
     operation({

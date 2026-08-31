@@ -1,6 +1,6 @@
 import * as Toolkits from "@rika/coding-tools/agent-role-toolkits"
 import { expect, test } from "vitest"
-import type { Tool } from "tenetkit"
+import type { Tool } from "generalist"
 
 const names = (toolkit: { readonly tools: Readonly<Record<string, Tool.Any>> }) => Object.keys(toolkit.tools).toSorted()
 

@@ -1,6 +1,6 @@
 # Persistence
 
-PostgreSQL is the only authoritative durable store. Rika stores Hosted Owners, Organizations, Projects, Workspace Identities, Threads, Turns, commands, ordered events, projections, executor assignments, checkpoint manifests, credential metadata, integrations, and audit records in Rika-owned schemas. TenetKit stores Runs, registrations, operations, continuations, claims, and execution events in TenetKit-owned PostgreSQL tables. A release migration job applies ordered migrations before stateless API replicas become ready.
+PostgreSQL is the only authoritative durable store. Rika stores Hosted Owners, Organizations, Projects, Workspace Identities, Threads, Turns, commands, ordered events, projections, executor assignments, checkpoint manifests, credential metadata, integrations, and audit records in Rika-owned schemas. Generalist stores Runs, registrations, operations, continuations, claims, and execution events in Generalist-owned PostgreSQL tables. A release migration job applies ordered migrations before stateless API replicas become ready.
 
 Clients persist only non-secret selection state and durable cursors. Their refresh credential and proof-of-possession private key stay in the operating-system credential store. A local Executor persists an opaque Workspace binding, highest observed fencing values, and encrypted idempotency receipts needed to reconnect safely. These local records cannot create product events, choose a Turn, resolve an approval, or replace PostgreSQL authority.
 

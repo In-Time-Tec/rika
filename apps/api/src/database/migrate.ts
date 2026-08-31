@@ -28,7 +28,7 @@ const program = Effect.scoped(
       url: Redacted.value(config.databaseUrl),
       source: "rika-api",
     })
-    yield* Console.log("TenetKit PostgreSQL schema is compatible")
+    yield* Console.log("Generalist PostgreSQL schema is compatible")
   }),
 )
 

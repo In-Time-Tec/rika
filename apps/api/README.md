@@ -53,7 +53,7 @@ bun --cwd apps/api run migrate
 bun --cwd apps/api run start
 ```
 
-`migrate` applies the reviewed identity and hosted-product PostgreSQL migrations transactionally under an advisory lock, records them in `rika_api_migration`, and then applies the TenetKit PostgreSQL schema. It is safe to run before every Railway release.
+`migrate` applies the reviewed identity and hosted-product PostgreSQL migrations transactionally under an advisory lock, records them in `rika_api_migration`, and then applies the Generalist PostgreSQL schema. It is safe to run before every Railway release.
 
 ## Native CLI device authorization
 

@@ -18,7 +18,7 @@ const segment = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
  * `HarnessScope` allows `:` but not `/`, so a raw workspace path can never be a scope. A caller that
  * supplies an unusable segment fails here rather than producing a scope the store cannot decode.
  *
- * A colon is admitted because TenetKit derives a subagent's session from the invocation that created
+ * A colon is admitted because Generalist derives a subagent's session from the invocation that created
  * it — `child:<run>:<invocation>` and `fanout:<id>:<key>` — and narrowing it away would deny every
  * subagent its harness, including the global scope every agent shares. The store encodes the whole
  * scope before it becomes a filename, so the separator never reaches a path.

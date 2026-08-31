@@ -1,6 +1,6 @@
 import type { SemanticTreeEvent } from "../../../src/projection/semantic/event"
 import { describe, expect, it } from "@effect/vitest"
-import { RunEvent } from "tenetkit/runtime"
+import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { Prompt, Response } from "effect/unstable/ai"
 import { Schema } from "effect"
@@ -20,7 +20,7 @@ type RunEventInput = {
 }[RunEvent.RunEvent["_tag"]]
 const runEvent = (event: RunEventInput): RunEventInput => event
 
-describe("TenetKit tree projector checkpoints and lifecycle", () => {
+describe("Generalist tree projector checkpoints and lifecycle", () => {
   it("keeps the opaque checkpoint bounded after a long materialized history", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-long", "long")
@@ -213,7 +213,7 @@ describe("TenetKit tree projector checkpoints and lifecycle", () => {
             runEvent({
               _tag: "RunFailed",
               error: Schema.decodeSync(RunEvent.RunFailure)({
-                _tag: "tenetkit/runtime/AgentExecutionFailure",
+                _tag: "generalist/runtime/AgentExecutionFailure",
                 message: "failed",
               }),
             }),
@@ -444,7 +444,7 @@ describe("TenetKit tree projector checkpoints and lifecycle", () => {
         runEvent({
           _tag: "RunFailed",
           error: Schema.decodeSync(RunEvent.RunFailure)({
-            _tag: "tenetkit/runtime/AgentExecutionFailure",
+            _tag: "generalist/runtime/AgentExecutionFailure",
             message: "OpenAiClient.createResponseStream: InvalidKey: Verify your API key is correct",
           }),
         }),

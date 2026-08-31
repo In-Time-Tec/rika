@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as MachineBindings from "@rika/kernel/machine-bindings"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
-import { NestedOperation, ToolContext } from "tenetkit"
-import { HostModules } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "generalist"
+import { HostBindings } from "generalist/repl"
 import { Context, Deferred, Effect, Fiber, Layer, Logger } from "effect"
 import { GatewayTestHarness } from "../fixture"
 
@@ -49,7 +49,7 @@ describe("executor gateway: binding-authority", () => {
           NestedOperation.Operations.of({ run: (_request, operation) => operation }),
         ),
       )
-      const registry = HostModules.HostModules.of({
+      const registry = HostBindings.HostBindings.of({
         descriptors: [{ module: "workspace", operations: ["read"] }],
         resolve: () => Effect.die("unused"),
         invoke: () =>
@@ -184,7 +184,7 @@ describe("executor gateway: binding-authority", () => {
         ),
         Context.merge(machineContext),
       )
-      const registry = yield* HostModules.make([WorkspaceBinding.module]).pipe(Effect.provideContext(context))
+      const registry = yield* HostBindings.make([WorkspaceBinding.module]).pipe(Effect.provideContext(context))
       const authority = bindingAuthority(registry, context, "b".repeat(64))
       const target = socket()
       const gateway = yield* makeGateway(controller())

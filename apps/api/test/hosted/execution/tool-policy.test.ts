@@ -2,7 +2,7 @@ import "./tool-policy.harness"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { BindingRequest } from "@rika/remote-execution/protocol"
-import { NestedOperation, ToolContext } from "tenetkit"
+import { NestedOperation, ToolContext } from "generalist"
 import { Context, Crypto, Effect, Layer, Schema } from "effect"
 import {
   argumentsDigest,

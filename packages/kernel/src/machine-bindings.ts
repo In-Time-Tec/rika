@@ -1,4 +1,4 @@
-import { MCPClient } from "tenetkit/mcp"
+import { MCPClient } from "generalist/mcp"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"

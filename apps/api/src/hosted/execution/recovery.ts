@@ -13,10 +13,10 @@ import { remoteCellOperationOutcome } from "@rika/execution/route"
 import * as RemoteCells from "@rika/execution/remote-cells"
 import { and, asc, eq, isNotNull, or } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
-import { OperationResolution as TenetOperationResolution, Runtime } from "tenetkit/runtime"
+import { OperationResolution as GeneralistOperationResolution, Runtime } from "generalist/runtime"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import type { AuthenticatedPrincipal } from "../product"
-import { runOperations, runs } from "./tenetkit-schema"
+import { runOperations, runs } from "./generalist-schema"
 
 export const RecoveryResolution = Schema.Union([
   Schema.TaggedStruct("Retry", {}),
@@ -50,7 +50,7 @@ interface OperationRow {
   readonly attempt: number
   readonly replayPolicy: "pure" | "provider-idempotent" | "never"
   readonly started: boolean
-  readonly resolution: TenetOperationResolution.OperationResolution | null
+  readonly resolution: GeneralistOperationResolution.OperationResolution | null
 }
 
 interface PersistedOperationRow {
@@ -88,7 +88,9 @@ const unavailable = (message: string) => HostedRecoveryError.make({ kind: "unava
 const decodeOperationRow = (row: PersistedOperationRow): Effect.Effect<OperationRow, HostedRecoveryError> =>
   row.resolutionJson === null
     ? Effect.succeed({ ...row, started: row.startedAt !== null, resolution: null })
-    : Schema.decodeEffect(Schema.fromJsonString(TenetOperationResolution.OperationResolution))(row.resolutionJson).pipe(
+    : Schema.decodeEffect(Schema.fromJsonString(GeneralistOperationResolution.OperationResolution))(
+        row.resolutionJson,
+      ).pipe(
         Effect.map(
           (resolution): OperationRow => ({
             operationId: row.operationId,
@@ -100,7 +102,7 @@ const decodeOperationRow = (row: PersistedOperationRow): Effect.Effect<Operation
             resolution,
           }),
         ),
-        Effect.mapError(() => unavailable("TenetKit recovery resolution is invalid")),
+        Effect.mapError(() => unavailable("Generalist recovery resolution is invalid")),
       )
 
 const project = (row: OperationRow): RecoveryOperation => {
@@ -281,11 +283,11 @@ export const layer = Layer.effect(
         })
         .pipe(
           Effect.mapError((error) => {
-            if (error._tag === "tenetkit/runtime/OperationResolutionConflict")
+            if (error._tag === "generalist/runtime/OperationResolutionConflict")
               return HostedRecoveryError.make({ kind: "conflict", message: "Recovery resolution conflicts" })
-            if (error._tag === "tenetkit/runtime/RunNotFound")
+            if (error._tag === "generalist/runtime/RunNotFound")
               return HostedRecoveryError.make({ kind: "not-found", message: "Run is unavailable" })
-            return unavailable("TenetKit recovery is unavailable")
+            return unavailable("Generalist recovery is unavailable")
           }),
         )
       const resolvedRows = yield* operations(input.threadId, input.runId)
@@ -367,8 +369,8 @@ export const layer = Layer.effect(
                 resolution: { _tag: "Succeeded", value },
               }),
             ),
-            Effect.catchTag("tenetkit/runtime/OperationResolutionConflict", () => Effect.void),
-            Effect.mapError(() => unavailable("TenetKit completed operation recovery is unavailable")),
+            Effect.catchTag("generalist/runtime/OperationResolutionConflict", () => Effect.void),
+            Effect.mapError(() => unavailable("Generalist completed operation recovery is unavailable")),
           ),
         { concurrency: 8, discard: true },
       )

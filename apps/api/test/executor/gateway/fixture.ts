@@ -7,7 +7,7 @@ import {
   type CellLifecycleFrame,
   type CellResponse,
 } from "@rika/remote-execution/protocol"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 import { Context, Crypto, Effect, Layer, Logger, Redacted, Schema } from "effect"
 import * as GatewayModule from "../../../src/executor/gateway"
 import {
@@ -250,17 +250,17 @@ const makeGateway = (
   )
 
 const bindings: BindingAuthority = {
-  registry: HostModules.HostModules.of({
+  registry: HostBindings.HostBindings.of({
     descriptors: [],
-    resolve: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
-    invoke: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
+    resolve: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
+    invoke: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
   }),
   context: Effect.runSync(CellAuthority.capture()),
   manifest: { digest: "a".repeat(64), descriptors: [] },
 }
 
 const bindingAuthority = (
-  registry: HostModules.Service,
+  registry: HostBindings.Service,
   context: Context.Context<never>,
   digest: string,
 ): BindingAuthority => ({

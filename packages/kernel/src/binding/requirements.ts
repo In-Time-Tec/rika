@@ -1,5 +1,5 @@
-import type { Session } from "tenetkit"
-import type { Store } from "tenetkit/agent-guidance"
+import type { Session } from "generalist"
+import type { Store } from "generalist/instructions"
 import type * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import type * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"

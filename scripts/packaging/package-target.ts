@@ -65,7 +65,7 @@ const program = Effect.gen(function* () {
         .readFileString(path.join(root, "package.json"))
         .pipe(Effect.flatMap(Schema.decodeUnknownEffect(WorkspaceCatalogJson)))
       const pinned = Object.entries(catalog.workspaces.catalog).filter(
-        ([name]) => name === "tenetkit" || name.startsWith("@tenetkit/"),
+        ([name]) => name === "generalist" || name.startsWith("@generalist/"),
       )
       const workspaceManifestPaths = [path.join(root, "package.json")]
       for (const directory of ["apps", "packages"]) {

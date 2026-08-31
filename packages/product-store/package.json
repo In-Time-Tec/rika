@@ -45,7 +45,7 @@
     "./migrations/postgres/0027-executor-recovery-authority.sql": "./migrations/postgres/0027-executor-recovery-authority.sql",
     "./migrations/postgres/0028-tool-policy-decision-identity.sql": "./migrations/postgres/0028-tool-policy-decision-identity.sql",
     "./migrations/postgres/0029-command-application-and-prompt-cancellation.sql": "./migrations/postgres/0029-command-application-and-prompt-cancellation.sql",
-    "./migrations/postgres/0030-tenetkit-recovery-authority.sql": "./migrations/postgres/0030-tenetkit-recovery-authority.sql",
+    "./migrations/postgres/0030-runtime-recovery-authority.sql": "./migrations/postgres/0030-runtime-recovery-authority.sql",
     "./migrations/postgres/0031-transactional-thread-notifications.sql": "./migrations/postgres/0031-transactional-thread-notifications.sql",
     "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql": "./migrations/postgres/0032-terminalize-unrecoverable-turns.sql",
     "./migrations/postgres/0033-transcript-projection-notifications.sql": "./migrations/postgres/0033-transcript-projection-notifications.sql",

@@ -1,18 +1,18 @@
-import { KernelStateStore, type Cell } from "tenetkit/repl"
+import { KernelSnapshotStore, type Cell } from "generalist/repl"
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
 
 const DIRECTORY_MODE = 0o700
 const FILE_MODE = 0o600
 
-const decodeManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(KernelStateStore.Manifest))
-const encodeManifest = Schema.encodeEffect(Schema.fromJsonString(KernelStateStore.Manifest))
+const decodeManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(KernelSnapshotStore.Manifest))
+const encodeManifest = Schema.encodeEffect(Schema.fromJsonString(KernelSnapshotStore.Manifest))
 
 const unavailable = (
   sessionId: string,
   reason: "missing" | "corrupt" | "io",
   message: string,
-): KernelStateStore.KernelStateUnavailable =>
-  KernelStateStore.KernelStateUnavailable.make({ sessionId, reason, message })
+): KernelSnapshotStore.KernelStateUnavailable =>
+  KernelSnapshotStore.KernelStateUnavailable.make({ sessionId, reason, message })
 
 const isNotFound = (error: PlatformError.PlatformError): boolean => error.reason._tag === "NotFound"
 
@@ -21,14 +21,14 @@ const safeName = (sessionId: string): string => encodeURIComponent(sessionId)
 /**
  * Best-effort namespace persistence under the profile data root, keyed by Session.
  *
- * This is never durable authority: TenetKit operations, events, Session entries, and children remain
+ * This is never durable authority: Generalist operations, events, Session entries, and children remain
  * the only truth, so a missing snapshot is simply absent and a corrupt one is a typed, non-fatal
  * report rather than a failure of the cell. Files are owner-only and land through a same-directory
  * temporary plus rename, so a reader never observes a half-written payload.
  */
 export const make = (
   dataRoot: string,
-): Effect.Effect<KernelStateStore.Service, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<KernelSnapshotStore.Service, never, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -40,7 +40,7 @@ export const make = (
       sessionId: Cell.SessionId,
       file: string,
       write: (temporary: string) => Effect.Effect<void, PlatformError.PlatformError>,
-    ): Effect.Effect<void, KernelStateStore.KernelStateUnavailable> =>
+    ): Effect.Effect<void, KernelSnapshotStore.KernelStateUnavailable> =>
       Effect.gen(function* () {
         const temporary = `${file}.tmp`
         yield* write(temporary)
@@ -53,7 +53,7 @@ export const make = (
 
     const readManifest = (
       sessionId: Cell.SessionId,
-    ): Effect.Effect<Option.Option<KernelStateStore.Manifest>, KernelStateStore.KernelStateUnavailable> =>
+    ): Effect.Effect<Option.Option<KernelSnapshotStore.Manifest>, KernelSnapshotStore.KernelStateUnavailable> =>
       fileSystem.readFileString(manifestFile(sessionId)).pipe(
         Effect.matchEffect({
           onFailure: (error) =>
@@ -113,5 +113,5 @@ export const make = (
 
 export const layer = (
   dataRoot: string,
-): Layer.Layer<KernelStateStore.KernelStateStore, never, FileSystem.FileSystem | Path.Path> =>
-  Layer.effect(KernelStateStore.KernelStateStore, make(dataRoot))
+): Layer.Layer<KernelSnapshotStore.KernelSnapshotStore, never, FileSystem.FileSystem | Path.Path> =>
+  Layer.effect(KernelSnapshotStore.KernelSnapshotStore, make(dataRoot))

@@ -8,4 +8,4 @@ Notices come from kernel events, never from parsing cell source: the kernel star
 
 Cell display output is projected by media type. An image becomes an image attachment block beneath the cell. A diff or patch becomes a file entry on the cell carrying its path, add or update kind, bounded patch, and added and removed line counts.
 
-Child orchestration does not run inside a cell. TenetKit's blocking child tools suspend and resume the parent Run durably, while child-tree events drive each subagent card and its nested activity without parsing cell source or correlating child identity to JavaScript execution.
+Child orchestration does not run inside a cell. Generalist's blocking child tools suspend and resume the parent Run durably, while child-tree events drive each subagent card and its nested activity without parsing cell source or correlating child identity to JavaScript execution.

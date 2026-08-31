@@ -244,11 +244,11 @@ export const BindingResponse = Schema.Union([
 export type BindingResponse = typeof BindingResponse.Type
 
 export const BindingBoundaryFailure = Schema.Union([
-  Schema.TaggedStruct("tenetkit/repl/HostModuleNotFound", {
+  Schema.TaggedStruct("generalist/repl/HostModuleNotFound", {
     module: Identifier,
     operation: Schema.optionalKey(Identifier),
   }),
-  Schema.TaggedStruct("tenetkit/repl/HostModuleSchemaFailure", {
+  Schema.TaggedStruct("generalist/repl/HostModuleSchemaFailure", {
     module: Identifier,
     operation: Identifier,
     stage: Schema.Literals(["decode-input", "encode-output", "encode-failure"]),

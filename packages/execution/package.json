@@ -19,10 +19,9 @@
     "@rika/coding-tools": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
-    "@tenetkit/pg": "catalog:",
     "effect": "catalog:",
     "prettier": "catalog:",
-    "tenetkit": "catalog:"
+    "generalist": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

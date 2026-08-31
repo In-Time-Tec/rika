@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Entry, State } from "tenetkit/agent-guidance"
+import { Entry, State } from "generalist/instructions"
 import { Effect } from "effect"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as SnapshotPin from "@rika/kernel/harness-snapshot-pin"
@@ -77,10 +77,9 @@ describe("harness snapshot on the Agent manifest", () => {
     expect(pinned.capabilities[0]!.name).toBe("rika-harness-snapshot")
   })
 
-  it("registers only the released Agent Guidance codec", () => {
+  it("registers only the released Generalist Instructions codec", () => {
     const pinned = ExecutionPins.harness(state([entry("a", "c")]))
-    expect(pinned.registrations[0]).toMatchObject({ codec: "tenetkit/agent-guidance/snapshot", version: "1" })
-    expect(pinned.registrations.some(({ codec }) => codec === "tenetkit/harness/snapshot")).toBe(false)
+    expect(pinned.registrations[0]).toMatchObject({ codec: "generalist/instructions/snapshot", version: "1" })
   })
 
   it.effect("registers a payload that reconstructs the exact pinned snapshot", () =>

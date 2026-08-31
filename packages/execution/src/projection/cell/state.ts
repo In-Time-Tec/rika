@@ -1,6 +1,6 @@
 import { partialInputRecord, type Block, type Unit } from "@rika/product/execution-transcript-contract"
-import { Cell as TenetCell } from "tenetkit/repl"
-import type { RunEvent } from "tenetkit/runtime"
+import { Cell as GeneralistCell } from "generalist/repl"
+import type { RunEvent } from "generalist/runtime"
 import { Option, Schema } from "effect"
 import type { CellState, Node } from "../model"
 import { bounded, optionalString, record, string } from "../values"
@@ -50,7 +50,7 @@ const lineCounts = (patch: string) => {
   return { additions, deletions }
 }
 
-const hostCall = (event: Extract<TenetCell.CellEvent, { readonly _tag: "HostCall" }>): CellHostCall => {
+const hostCall = (event: Extract<GeneralistCell.CellEvent, { readonly _tag: "HostCall" }>): CellHostCall => {
   let call: CellHostCall = {
     id: event.requestId,
     module: event.module,
@@ -63,7 +63,7 @@ const hostCall = (event: Extract<TenetCell.CellEvent, { readonly _tag: "HostCall
   return call
 }
 
-const updateCellEvent = (block: Cell, event: TenetCell.CellEvent): Cell => {
+const updateCellEvent = (block: Cell, event: GeneralistCell.CellEvent): Cell => {
   switch (event._tag) {
     case "HostCall": {
       if (event.requestId.length === 0) return block
@@ -85,9 +85,9 @@ const updateCellEvent = (block: Cell, event: TenetCell.CellEvent): Cell => {
   }
 }
 
-const failedCell = (block: Cell, failure: TenetCell.CellFailure): Cell => {
+const failedCell = (block: Cell, failure: GeneralistCell.CellFailure): Cell => {
   const outcome = failureOutcome(failure)
-  const executionFailure = failure._tag === "tenetkit/repl/CellExecutionFailed" ? failure : undefined
+  const executionFailure = failure._tag === "generalist/repl/CellExecutionFailed" ? failure : undefined
   const failed: Cell = {
     ...block,
     status: outcome.status,
@@ -199,7 +199,9 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   const appendNotice = (block: Cell, appended: CellNotice | undefined): Cell =>
     appended === undefined ? block : { ...block, notices: [...block.notices, appended].slice(-maxCellNotices) }
 
-  const imageAttachment = (event: Extract<TenetCell.CellEvent, { readonly _tag: "Display" }>): ImageAttachment => ({
+  const imageAttachment = (
+    event: Extract<GeneralistCell.CellEvent, { readonly _tag: "Display" }>,
+  ): ImageAttachment => ({
     _tag: "ImageAttachment",
     name: string(event.name, "attachment"),
     mediaType: event.mediaType,
@@ -208,7 +210,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
 
   const diffFile = (
     blockId: string,
-    event: Extract<TenetCell.CellEvent, { readonly _tag: "Display" }>,
+    event: Extract<GeneralistCell.CellEvent, { readonly _tag: "Display" }>,
   ): CellFile | undefined => {
     const patch = event.data
     if (patch.length === 0) return undefined
@@ -227,7 +229,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
     const block = cellBlock(node, rawId)
     if (block === undefined) return
     const raw = record(data)
-    const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
+    const decoded = Schema.decodeUnknownOption(GeneralistCell.CellEvent)(data)
     if (Option.isNone(decoded)) {
       if (raw._tag !== "KernelStarting" && raw._tag !== "KernelReady") return
       const cellNotice = eventNotice(data)
@@ -263,7 +265,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
   const completeCell = (node: Node, rawId: string, result: ToolResult, isFailure: boolean) => {
     const block = cellBlock(node, rawId)
     if (block === undefined) return
-    const success = Schema.decodeUnknownOption(TenetCell.CellResult)(result)
+    const success = Schema.decodeUnknownOption(GeneralistCell.CellResult)(result)
     if (!isFailure && Option.isSome(success)) {
       write(node, rawId, {
         ...block,
@@ -279,7 +281,7 @@ export const makeCellProjection = (dependencies: CellProjectionInput): CellProje
       return
     }
     if (!isFailure) return
-    const decoded = Schema.decodeUnknownOption(TenetCell.CellFailure)(result)
+    const decoded = Schema.decodeUnknownOption(GeneralistCell.CellFailure)(result)
     if (Option.isNone(decoded)) return
     const failure = decoded.value
     const outcome = failureOutcome(failure)

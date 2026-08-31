@@ -1,10 +1,10 @@
-import { ModelRegistry } from "tenetkit"
+import { ModelRegistry } from "generalist"
 import { it } from "@effect/vitest"
 import { Context, Effect, Layer } from "effect"
 import { expect } from "vitest"
 import * as ScriptedModel from "../src/scripted-model"
 
-it.effect("registers scripted responses for the TenetKit test route", () =>
+it.effect("registers scripted responses for the Generalist test route", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const context = yield* Layer.build(

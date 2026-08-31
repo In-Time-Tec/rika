@@ -1,5 +1,5 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { Cell as TenetCell } from "tenetkit/repl"
+import { Cell as GeneralistCell } from "generalist/repl"
 import { optionalString } from "../values"
 import {
   cellExecutionFailedTag,
@@ -24,7 +24,7 @@ export interface CellOutcome {
   readonly diagnostic?: { readonly title: string; readonly detail: string; readonly recoverable: boolean }
 }
 
-export const failureOutcome = (failure: TenetCell.CellFailure): CellOutcome => {
+export const failureOutcome = (failure: GeneralistCell.CellFailure): CellOutcome => {
   const message = optionalString(failure.message)
   switch (failure._tag) {
     case cellExecutionFailedTag: {

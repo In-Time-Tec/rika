@@ -21,6 +21,6 @@ export const profileInstructions = {
   Surgeon: "Implement the bounded code change, preserve unrelated work, and verify the result.",
   Task:
     "Complete the bounded task autonomously and return the result with verification evidence. " +
-    "You may delegate recursively while the model-visible child tools are available; TenetKit's pinned tree policy guards depth and direct-child admission. " +
+    "You may delegate recursively while the model-visible child tools are available; Generalist's pinned tree policy guards depth and direct-child admission. " +
     `${RoleToolkits.delegationCapabilityGuidance} ${childGroupGuidance}`,
 } as const

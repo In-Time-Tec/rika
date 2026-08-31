@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 
 const Failure = Schema.Struct({ _tag: Schema.tag("Failure"), retry: Schema.Boolean })
 
-const registry = HostModules.make([
+const registry = HostBindings.make([
   {
     name: "fixture",
     operations: [
@@ -53,7 +53,7 @@ describe("host binding schema failure details", () => {
       const failure = yield* schemaFailure("failure", {})
 
       expect(decode).toMatchObject({
-        _tag: "tenetkit/repl/HostModuleSchemaFailure",
+        _tag: "generalist/repl/HostModuleSchemaFailure",
         stage: "decode-input",
       })
       expect(decode.message).toContain("Expected string")

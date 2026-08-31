@@ -1,6 +1,6 @@
 # Transcript delivery
 
-Clients read semantic transcript units, never raw TenetKit pages. Opening a thread
+Clients read semantic transcript units, never raw Generalist pages. Opening a thread
 delivers its **full timeline in one snapshot**: the newest units up to the wire
 payload bound (32 MiB) and the client's in-memory cap (20,000 units), whichever
 binds first. The snapshot is ancestry-closed: whenever a parented unit is kept

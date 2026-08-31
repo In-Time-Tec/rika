@@ -4,8 +4,8 @@ import {
   type BindingRequest,
   type BindingOutcome,
 } from "@rika/remote-execution/protocol"
-import { NestedOperation, ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import { ActorAttribution, type HostedOwner } from "@rika/product/hosted-model"
 import type * as ExecutionProjection from "@rika/product/execution-projection"
 import { Cause, Context, Crypto, Effect, Encoding, Exit, Match, Option, Schema } from "effect"
@@ -225,7 +225,7 @@ export const policyFor = (request: Pick<BindingRequest, "module" | "operation" |
 }
 
 const JsonRecord = Schema.Record(Schema.String, Schema.Json)
-const decodeBindingResponse: (input: HostModules.Response) => Effect.Effect<BindingResponse, HostedToolPolicyError> = (
+const decodeBindingResponse: (input: HostBindings.Response) => Effect.Effect<BindingResponse, HostedToolPolicyError> = (
   input,
 ) => {
   const decoded = Schema.decodeUnknownExit(BindingResponse)(input)
@@ -266,21 +266,21 @@ export const argumentsDigest: (input: BindingRequest["input"]) => Effect.Effect<
 ) => sha256(canonical(input ?? null))
 
 const nestedFailure = (kind: string, failure: NestedOperation.Failure) => {
-  if (failure._tag === "tenetkit/core/NestedOperationDivergence")
+  if (failure._tag === "generalist/core/NestedOperationDivergence")
     return {
       _tag: "NestedOperationFailed" as const,
       reason: "divergence" as const,
       kind,
       message: `nested operation ${failure.ordinal} recorded ${failure.recordedKind} and was requested as ${failure.requestedKind}`,
     }
-  if (failure._tag === "tenetkit/core/NestedOperationUnknown")
+  if (failure._tag === "generalist/core/NestedOperationUnknown")
     return {
       _tag: "NestedOperationFailed" as const,
       reason: "unknown" as const,
       kind,
       message: `nested operation ${failure.operationId} crossed its boundary with an unobserved outcome`,
     }
-  if (failure._tag === "tenetkit/core/NestedOperationDenied")
+  if (failure._tag === "generalist/core/NestedOperationDenied")
     return {
       _tag: "NestedOperationFailed" as const,
       reason: "denied" as const,
@@ -382,7 +382,7 @@ export interface InvokeAdmittedToolInput {
   readonly callId: string
   readonly request: BindingRequest
   readonly access: AccessWire
-  readonly invoke: Effect.Effect<HostModules.Response, HostModules.BindingFailure>
+  readonly invoke: Effect.Effect<HostBindings.Response, HostBindings.BindingFailure>
 }
 
 export const invokeAdmittedTool: (
@@ -440,7 +440,7 @@ export const invokeAdmittedTool: (
     yield* input.policyService.outcome({ ...context, outcome: "unknown" })
     return { _tag: "Unknown", message: "Binding authority was lost after its operation crossed" }
   }
-  if (failure._tag === "tenetkit/core/NestedOperationSuspended") {
+  if (failure._tag === "generalist/core/NestedOperationSuspended") {
     yield* input.policyService.outcome({
       ...context,
       authorizationId: failure.token,
@@ -449,20 +449,20 @@ export const invokeAdmittedTool: (
     return { _tag: "Suspend", token: failure.token }
   }
   const isNested =
-    failure._tag === "tenetkit/core/NestedOperationDenied" ||
-    failure._tag === "tenetkit/core/NestedOperationDivergence" ||
-    failure._tag === "tenetkit/core/NestedOperationUnknown"
+    failure._tag === "generalist/core/NestedOperationDenied" ||
+    failure._tag === "generalist/core/NestedOperationDivergence" ||
+    failure._tag === "generalist/core/NestedOperationUnknown"
   let outcome: "denied" | "unknown" | "failed" = "failed"
   if (isNested) outcome = "unknown"
-  if (failure._tag === "tenetkit/core/NestedOperationDenied") outcome = "denied"
+  if (failure._tag === "generalist/core/NestedOperationDenied") outcome = "denied"
   yield* input.policyService.outcome({
     ...context,
     outcome,
   })
   switch (failure._tag) {
-    case "tenetkit/core/NestedOperationDenied":
-    case "tenetkit/core/NestedOperationDivergence":
-    case "tenetkit/core/NestedOperationUnknown":
+    case "generalist/core/NestedOperationDenied":
+    case "generalist/core/NestedOperationDivergence":
+    case "generalist/core/NestedOperationUnknown":
       return {
         _tag: "Returned",
         response: { _tag: "Failure", failure: nestedFailure(kind, failure) },

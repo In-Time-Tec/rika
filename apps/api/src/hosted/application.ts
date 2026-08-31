@@ -6,7 +6,7 @@ import { installationTokenLayer } from "@rika/github-app/installation-token"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Config, Context, Effect, Layer, Redacted } from "effect"
 import { HttpClient } from "effect/unstable/http"
-import { Runtime as TenetRuntime } from "tenetkit/runtime"
+import { Runtime as GeneralistRuntime } from "generalist/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
@@ -245,7 +245,9 @@ export const layer = (options: {
       )
       const recoveryContext = yield* Layer.build(
         hostedRecoveryLayer.pipe(
-          Layer.provide(Layer.succeed(TenetRuntime.Runtime, Context.get(executionContext, TenetRuntime.Runtime))),
+          Layer.provide(
+            Layer.succeed(GeneralistRuntime.Runtime, Context.get(executionContext, GeneralistRuntime.Runtime)),
+          ),
           Layer.provide(retainedData),
         ),
       )

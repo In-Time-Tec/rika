@@ -229,7 +229,7 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       !Number.isSafeInteger(parsed.requestOrdinal) ||
       !Number.isSafeInteger(parsed.activeDepth)
     )
-      throw new TypeError("Invalid TenetKit tree projector checkpoint")
+      throw new TypeError("Invalid Generalist tree projector checkpoint")
     core.revision = parsed.revision
     core.historyOmitted = parsed.hasOlder
     core.rootStatus = parsed.rootStatus ?? "running"

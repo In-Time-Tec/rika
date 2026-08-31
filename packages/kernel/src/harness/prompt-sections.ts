@@ -1,4 +1,4 @@
-import { Overview, State } from "tenetkit/agent-guidance"
+import { Overview, State } from "generalist/instructions"
 
 export interface Input {
   readonly harness: State.GuidanceState

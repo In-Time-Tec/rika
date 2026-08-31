@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import { Goal } from "@rika/product/goal-record"
 import { GoalAlreadyActive, GoalNotActive, GoalService, GoalUnavailable } from "@rika/product/goal-service"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
@@ -26,7 +26,7 @@ const CompleteInput = Schema.Struct({ summary: Schema.optionalKey(Schema.String.
 /** The Thread a goal belongs to is the ambient session, never a field the cell may supply. */
 const threadId = Effect.map(ToolContext.ToolContext, (context) => context.sessionId)
 
-export const operations: ReadonlyArray<HostModules.AnyOperation<GoalService | Requirements>> = [
+export const operations: ReadonlyArray<HostBindings.AnyOperation<GoalService | Requirements>> = [
   operation({
     name: "get",
     input: Empty,
@@ -85,4 +85,4 @@ export const operations: ReadonlyArray<HostModules.AnyOperation<GoalService | Re
   }),
 ]
 
-export const module: HostModules.Module<GoalService | Requirements> = { name, operations }
+export const module: HostBindings.Module<GoalService | Requirements> = { name, operations }

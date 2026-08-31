@@ -11,10 +11,11 @@ export const subagentCardStatus = (status: Node["status"]): "running" | "complet
 const boundedInsertImpl = <A>(map: Map<string, A>, key: string, value: A, limit: number, label: string) => {
   const previous = map.get(key)
   if (previous !== undefined) {
-    if (JSON.stringify(previous) !== JSON.stringify(value)) throw new TypeError(`Conflicting TenetKit ${label}: ${key}`)
+    if (JSON.stringify(previous) !== JSON.stringify(value))
+      throw new TypeError(`Conflicting Generalist ${label}: ${key}`)
     return false
   }
-  if (map.size >= limit) throw new RangeError(`TenetKit projector ${label} exceeds ${limit}`)
+  if (map.size >= limit) throw new RangeError(`Generalist projector ${label} exceeds ${limit}`)
   map.set(key, value)
   return true
 }

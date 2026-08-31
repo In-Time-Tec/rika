@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Entry } from "tenetkit/agent-guidance"
+import { Entry } from "generalist/instructions"
 import { Schema } from "effect"
 import * as ScopePolicy from "@rika/kernel/harness-scope-policy"
 import * as StoreLocations from "@rika/kernel/harness-store-locations"
@@ -26,7 +26,7 @@ describe("harness scope policy", () => {
     expect(() => ScopePolicy.scopeString("thread", { ...identity, thread: "" })).toThrow()
   })
 
-  it("scopes a subagent by the derived session TenetKit gives it", () => {
+  it("scopes a subagent by the derived session Generalist gives it", () => {
     expect(ScopePolicy.scopeString("thread", { ...identity, thread: "child:run-abc:inv-1" })).toBe(
       "thread:child:run-abc:inv-1",
     )

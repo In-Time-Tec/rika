@@ -1,4 +1,4 @@
-import { RunEvent, RunTree } from "tenetkit/runtime"
+import { RunEvent, RunTree } from "generalist/runtime"
 import { DateTime, Function, Schema } from "effect"
 import { TreeProjector } from "../../src/projection/tree/projector"
 import type { SemanticTreeEvent } from "../../src/projection/semantic/event"

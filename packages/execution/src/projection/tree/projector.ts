@@ -1,4 +1,4 @@
-import type { Run, RunEvent } from "tenetkit/runtime"
+import type { Run, RunEvent } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -317,7 +317,7 @@ const make = (
   const applyRunEvent = (treeEvent: SemanticTreeEvent): void => {
     const node = nodeFor(treeEvent)
     if (eventHandlers.some((handler) => handler(eventContext, treeEvent, node))) return
-    throw new TypeError(`Unsupported TenetKit Run event: ${treeEvent.event._tag}`)
+    throw new TypeError(`Unsupported Generalist Run event: ${treeEvent.event._tag}`)
   }
 
   const { serialize, restore } = Checkpoint.makeProjectorCheckpointCodec({

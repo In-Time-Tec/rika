@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { NestedOperation, Prompt, Session } from "tenetkit"
+import { NestedOperation, Prompt, Session } from "generalist"
 import * as ContextBinding from "@rika/kernel/context-binding"
 import { journal, mountModules } from "../../support/binding"
 
@@ -55,7 +55,7 @@ const handoff = (id: string): Session.Entry => ({
 
 interface Recorder {
   readonly appended: Array<unknown>
-  readonly directory: Session.DirectoryInterface
+  readonly directory: Session.Directory
 }
 
 const sessionStore = (entries: ReadonlyArray<Session.Entry>): Recorder => {

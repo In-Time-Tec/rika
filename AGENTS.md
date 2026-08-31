@@ -1,6 +1,6 @@
 # Rika
 
-Rika is a collaborative coding-agent CLI and OpenTUI application written in Effect TypeScript. A local Runner works in a user-controlled checkout; an explicitly selected Orb works in an isolated E2B workspace. The hosted API owns identity, access, Threads, and product state, while TenetKit owns durable execution and the agent loop.
+Rika is a collaborative coding-agent CLI and OpenTUI application written in Effect TypeScript. A local Runner works in a user-controlled checkout; an explicitly selected Orb works in an isolated E2B workspace. The hosted API owns identity, access, Threads, and product state, while Generalist owns durable execution and the agent loop.
 
 Read [PRODUCT.md](PRODUCT.md) for product direction and [CONTEXT.md](CONTEXT.md) for exact vocabulary and ownership. Current behavior belongs in [docs/features](docs/features), lasting choices in [docs/decisions](docs/decisions), and meaningful costs in [docs/tradeoffs](docs/tradeoffs).
 
@@ -54,13 +54,13 @@ The exhaustive local Runner, Orb, restart, cancellation, and recovery acceptance
 - `apps/api` owns hosted composition, HTTP and WebSocket entry points, model routing, command workers, and Executor assignment.
 - `apps/web` owns browser rendering and browser-local interaction only. `apps/proxy` is the only public Railway ingress.
 - `packages/product` owns Rika product contracts and rules. `packages/product-store` owns their PostgreSQL persistence and migrations.
-- `packages/execution` is Rika's TenetKit boundary. TenetKit remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
+- `packages/execution` is Rika's Generalist boundary. Generalist remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
 - `packages/kernel` owns the `rika.*` cell bindings and Executor runtime. Kernel variables are working memory, not durable state; see [kernel state](docs/decisions/kernel-state-is-not-authority.md).
 - `packages/terminal` owns terminal state and presentation. Keep OpenTUI imports behind that adapter.
 - `packages/e2b-executor`, `packages/remote-execution`, and `infra/e2b` own Orb execution. E2B is the only remote workspace provider; see [the E2B decision](docs/decisions/e2b-remote-execution.md).
 - `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract.
 
-Use released TenetKit, Effect, FoldKit, and OpenTUI package exports. Do not edit, import from, format, build, or test anything under `repos/`. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
+Use released Generalist, Effect, FoldKit, and OpenTUI package exports. Do not edit, import from, format, build, or test anything under `repos/`. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
 
 Keep temporary run state under a distinct `.agents/state/<run>/` directory. It is ignored and must never become implemented product truth or be force-added to Git.
 

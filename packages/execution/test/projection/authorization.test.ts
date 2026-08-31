@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry, Response as AiResponse } from "tenetkit"
-import { TestModel } from "tenetkit/test"
+import { ModelRegistry, Response as AiResponse } from "generalist"
+import { TestModel } from "generalist/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
@@ -23,7 +23,7 @@ const withIdentity = (model: RouteModel, identity: string): RouteModel => ({
 })
 
 it.live(
-  "completes above TenetKit's default token ceiling because Rika pins no budget dimension",
+  "completes above Generalist's default token ceiling because Rika pins no budget dimension",
   () =>
     Effect.scoped(
       Effect.gen(function* () {

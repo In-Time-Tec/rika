@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect"
-import { Cell } from "tenetkit/repl"
+import { Cell } from "generalist/repl"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())

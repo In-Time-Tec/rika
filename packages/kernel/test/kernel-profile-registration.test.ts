@@ -8,7 +8,7 @@ describe("kernel profile registration", () => {
     const profile = make(base)
     expect(profile.runtime.name).toBe("bun")
     expect(profile.runtime.version).toBe("1.3.14")
-    expect(profile.provider).toBe("tenetkit/repl/bun")
+    expect(profile.provider).toBe("generalist/repl/bun")
     expect(profile.image).toMatchObject({ kind: "runtime", reference: "bun@1.3.14" })
     expect(profile.isolation).toBe("host-process")
     expect(profile.checkpoints).toEqual({ liveProcess: true, filesystem: false, namespace: true })

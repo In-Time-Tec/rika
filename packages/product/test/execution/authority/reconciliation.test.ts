@@ -36,3 +36,31 @@ it.effect("leaves a link-less nonterminal Turn blocked without inventing a termi
     expect(result.settledThreads).toEqual([])
   }),
 )
+
+it.effect("fails a linked nonterminal Turn when its persisted Run is unavailable", () =>
+  Effect.gen(function* () {
+    const linked = {
+      ...turn,
+      executionLink: { runId: "archived-run", threadId: turn.threadId, turnId: turn.id },
+    }
+    const settled = new Array<{ readonly status: string; readonly now: number }>()
+    const result = yield* make({
+      turns: TurnRepository.Service.of({
+        listNonterminal: Effect.succeed([linked]),
+        listSteeringAdmissions: Effect.succeed([]),
+      }),
+      backend: ExecutionGateway.makeTest({
+        inspectTurn: () => Effect.succeed({ status: "unavailable" }),
+      }),
+      setTurnStatus: (_id, status, now) =>
+        Effect.sync(() => {
+          settled.push({ status, now })
+          return { ...linked, status, updatedAt: now }
+        }),
+    })
+
+    expect(settled).toEqual([expect.objectContaining({ status: "failed" })])
+    expect(result.active).toEqual([])
+    expect(result.settledThreads).toEqual([turn.threadId])
+  }),
+)

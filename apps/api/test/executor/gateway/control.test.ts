@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
-import { NestedOperation, ToolContext } from "tenetkit"
-import { HostModules } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "generalist"
+import { HostBindings } from "generalist/repl"
 import { Context, Deferred, Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import { cancelledResponse } from "../../../src/executor/gateway"
@@ -188,7 +188,7 @@ describe("executor gateway: binding-deadlines", () => {
           NestedOperation.Operations.of({ run: (_request, operation) => operation }),
         ),
       )
-      const registry = HostModules.HostModules.of({
+      const registry = HostBindings.HostBindings.of({
         descriptors: [{ module: "workspace", operations: ["read"] }],
         resolve: () => Effect.die("unused"),
         invoke: () =>

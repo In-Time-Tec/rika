@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
-import { Address, RunEvent } from "tenetkit/runtime"
+import { Address, RunEvent } from "generalist/runtime"
 import { Schema } from "effect"
 
 const runFailure = (message: string) =>
-  Schema.decodeSync(RunEvent.RunFailure)({ _tag: "tenetkit/runtime/AgentExecutionFailure", message })
+  Schema.decodeSync(RunEvent.RunFailure)({ _tag: "generalist/runtime/AgentExecutionFailure", message })
 
 describe("friendly failure presentation in the projector", () => {
   it("renders a model rate-limit failure as one what-happened message and an action", () => {

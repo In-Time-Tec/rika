@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { NestedOperation } from "tenetkit"
+import { NestedOperation } from "generalist"
 import { Context, Effect, Schema } from "effect"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"

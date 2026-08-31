@@ -1,5 +1,5 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import { OAuth } from "tenetkit/mcp"
+import { OAuth } from "generalist/mcp"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import {
@@ -61,8 +61,9 @@ const service = (
           Schema.Union([OAuth.OAuthExpired, OAuth.OAuthDenied, OAuth.OAuthProviderError]),
         )(cause)
         if (Option.isSome(decoded)) {
-          if (decoded.value._tag === "tenetkit/mcp/OAuthExpired") detail = "OAuth callback state is invalid or expired"
-          else if (decoded.value._tag === "tenetkit/mcp/OAuthDenied") detail = "OAuth authorization was denied"
+          if (decoded.value._tag === "generalist/mcp/OAuthExpired")
+            detail = "OAuth callback state is invalid or expired"
+          else if (decoded.value._tag === "generalist/mcp/OAuthDenied") detail = "OAuth authorization was denied"
           else detail = `OAuth ${decoded.value.operation} failed`
         }
         return McpOAuthError.make({ server, operation, message: detail })

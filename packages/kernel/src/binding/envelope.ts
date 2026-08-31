@@ -1,5 +1,5 @@
-import { NestedOperation, ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { NestedOperation, ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import { Effect, Function, Schema } from "effect"
 
 export type Requirements = NestedOperation.Operations | ToolContext.ToolContext
@@ -21,21 +21,21 @@ const NestedOperationFailure = Schema.Union([
 ])
 
 const failed = (kind: string, failure: NestedOperation.Failure): NestedOperationFailed => {
-  if (failure._tag === "tenetkit/core/NestedOperationDivergence")
+  if (failure._tag === "generalist/core/NestedOperationDivergence")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "divergence",
       kind,
       message: `nested operation ${failure.ordinal} recorded ${failure.recordedKind} and was requested as ${failure.requestedKind}`,
     })
-  if (failure._tag === "tenetkit/core/NestedOperationUnknown")
+  if (failure._tag === "generalist/core/NestedOperationUnknown")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "unknown",
       kind,
       message: `nested operation ${failure.operationId} crossed its boundary with an unobserved outcome`,
     })
-  if (failure._tag === "tenetkit/core/NestedOperationDenied")
+  if (failure._tag === "generalist/core/NestedOperationDenied")
     return NestedOperationFailed.make({
       _tag: "NestedOperationFailed",
       reason: "denied",
@@ -87,8 +87,8 @@ export const operation = <
   readonly input: Input
   readonly output: Output
   readonly failure: Failure
-  readonly handle: (input: Input["Type"]) => Effect.Effect<Output["Type"], Failure["Type"] & HostModules.Tagged, R>
-}): HostModules.AnyOperation<R> => ({
+  readonly handle: (input: Input["Type"]) => Effect.Effect<Output["Type"], Failure["Type"] & HostBindings.Tagged, R>
+}): HostBindings.AnyOperation<R> => ({
   name: definition.name,
   input: definition.input,
   output: definition.output,

@@ -17,19 +17,19 @@ import { and, asc, eq, ne } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Pool } from "pg"
-import { ExecutableResolver } from "tenetkit/runtime"
+import { ExecutableResolver } from "generalist/runtime"
 import { HostedRecovery, layer as hostedRecoveryLayer } from "../../../src/hosted/execution/recovery"
 import {
-  runOperations as tenetkitRunOperations,
-  runs as tenetkitRuns,
-} from "../../../src/hosted/execution/tenetkit-schema"
+  runOperations as generalistRunOperations,
+  runs as generalistRuns,
+} from "../../../src/hosted/execution/generalist-schema"
 import { live as livePlatform } from "../../support/live-platform"
 
 import { recoveryFixture } from "./recovery.fixture"
 const { databaseUrl, executableManifest, executableRef, migrate, principal, storedMessage } = recoveryFixture
 
 it.effect.skipIf(databaseUrl === "")(
-  "persists deterministic inspect, retry, accept, and abort resolutions through the TenetKit contract",
+  "persists deterministic inspect, retry, accept, and abort resolutions through the Generalist contract",
   () =>
     livePlatform(
       Effect.gen(function* () {
@@ -124,7 +124,7 @@ it.effect.skipIf(databaseUrl === "")(
             }),
           )
           yield* Effect.tryPromise(() =>
-            db.insert(tenetkitRuns).values(
+            db.insert(generalistRuns).values(
               ["retry", "accept", "abort", "auto"].map((runKind) => ({
                 runId: `run-${runKind}`,
                 status: "needs-resolution",
@@ -147,10 +147,10 @@ it.effect.skipIf(databaseUrl === "")(
             ),
           )
           yield* Effect.tryPromise(() =>
-            db.insert(tenetkitRunOperations).values([
+            db.insert(generalistRunOperations).values([
               {
                 runId: "run-retry",
-                operationId: "tenet-retry",
+                operationId: "generalist-retry",
                 operationKey: "operation-retry",
                 kind: "tool",
                 status: "unknown",
@@ -163,7 +163,7 @@ it.effect.skipIf(databaseUrl === "")(
               },
               {
                 runId: "run-accept",
-                operationId: "tenet-accept",
+                operationId: "generalist-accept",
                 operationKey: "operation-accept",
                 kind: "tool",
                 status: "unknown",
@@ -176,7 +176,7 @@ it.effect.skipIf(databaseUrl === "")(
               },
               {
                 runId: "run-abort",
-                operationId: "tenet-abort",
+                operationId: "generalist-abort",
                 operationKey: "operation-abort",
                 kind: "tool",
                 status: "unknown",
@@ -189,7 +189,7 @@ it.effect.skipIf(databaseUrl === "")(
               },
               {
                 runId: "run-auto",
-                operationId: "tenet-auto",
+                operationId: "generalist-auto",
                 operationKey: "operation-auto",
                 kind: "tool",
                 status: "unknown",
@@ -317,6 +317,7 @@ it.effect.skipIf(databaseUrl === "")(
             ]),
           )
           const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })
+          const resolver = yield* ExecutableResolver.makeStatic([])
           const context = yield* Layer.build(
             hostedRecoveryLayer.pipe(
               Layer.provide(
@@ -336,7 +337,7 @@ it.effect.skipIf(databaseUrl === "")(
                         cancellationIntervalMillis: 60_000,
                       },
                     },
-                    resolver: ExecutableResolver.makeStatic([]),
+                    resolver,
                   }).pipe(Layer.provide(postgres)),
                 ),
               ),
@@ -347,16 +348,16 @@ it.effect.skipIf(databaseUrl === "")(
           const automaticallyRecovered = (yield* Effect.tryPromise(() =>
             db
               .select({
-                status: tenetkitRunOperations.status,
-                resolution_idempotency_key: tenetkitRunOperations.resolutionIdempotencyKey,
-                resolution_json: tenetkitRunOperations.resolutionJson,
+                status: generalistRunOperations.status,
+                resolution_idempotency_key: generalistRunOperations.resolutionIdempotencyKey,
+                resolution_json: generalistRunOperations.resolutionJson,
               })
-              .from(tenetkitRunOperations)
-              .where(eq(tenetkitRunOperations.operationId, "tenet-auto")),
+              .from(generalistRunOperations)
+              .where(eq(generalistRunOperations.operationId, "generalist-auto")),
           ))[0]
           expect(automaticallyRecovered).toEqual({
             status: "succeeded",
-            resolution_idempotency_key: "tenet-auto:executor-terminal",
+            resolution_idempotency_key: "generalist-auto:executor-terminal",
             resolution_json:
               '{"_tag":"Succeeded","value":{"_tag":"Success","result":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1},"encodedResult":{"cellId":"call-auto","epoch":0,"sequence":0,"value":"42","stdout":"","stderr":"","durationMillis":1}}}',
           })
@@ -366,7 +367,7 @@ it.effect.skipIf(databaseUrl === "")(
             runId: "run-retry",
           })
           expect(operations).toEqual([
-            expect.objectContaining({ operationId: "tenet-retry", state: "needs-resolution", started: true }),
+            expect.objectContaining({ operationId: "generalist-retry", state: "needs-resolution", started: true }),
           ])
           expect(operations.every((operation) => operation.actions.join(",") === "inspect,retry,accept,abort")).toBe(
             true,
@@ -375,7 +376,7 @@ it.effect.skipIf(databaseUrl === "")(
             principal,
             threadId: "recovery-thread",
             runId: "run-retry",
-            operationId: "tenet-retry",
+            operationId: "generalist-retry",
             idempotencyKey: "resolve-retry",
             resolution: { _tag: "Retry" },
           }
@@ -387,7 +388,7 @@ it.effect.skipIf(databaseUrl === "")(
           const resolvedAt = DateTime.toDate(DateTime.nowUnsafe())
           yield* Effect.tryPromise(() =>
             db
-              .update(tenetkitRunOperations)
+              .update(generalistRunOperations)
               .set({
                 status: "succeeded",
                 resultJson: '{"answer":42}',
@@ -397,22 +398,22 @@ it.effect.skipIf(databaseUrl === "")(
               })
               .where(
                 and(
-                  eq(tenetkitRunOperations.runId, "run-accept"),
-                  eq(tenetkitRunOperations.operationId, "tenet-accept"),
+                  eq(generalistRunOperations.runId, "run-accept"),
+                  eq(generalistRunOperations.operationId, "generalist-accept"),
                 ),
               ),
           )
           yield* Effect.tryPromise(() =>
             db
-              .update(tenetkitRuns)
+              .update(generalistRuns)
               .set({ status: "queued", ownerWorkerId: null, updatedAt: resolvedAt })
-              .where(eq(tenetkitRuns.runId, "run-accept")),
+              .where(eq(generalistRuns.runId, "run-accept")),
           )
           expect(
             yield* recovery.resolve({
               ...retryInput,
               runId: "run-accept",
-              operationId: "tenet-accept",
+              operationId: "generalist-accept",
               idempotencyKey: "resolve-accept",
               resolution: { _tag: "Accept", value: { answer: 42 } },
             }),
@@ -421,7 +422,7 @@ it.effect.skipIf(databaseUrl === "")(
             yield* recovery.resolve({
               ...retryInput,
               runId: "run-abort",
-              operationId: "tenet-abort",
+              operationId: "generalist-abort",
               idempotencyKey: "resolve-abort",
               resolution: { _tag: "Abort", reason: "operator confirmed failure" },
             }),
@@ -437,31 +438,31 @@ it.effect.skipIf(databaseUrl === "")(
             yield* Effect.tryPromise(() =>
               db
                 .select({
-                  operation_id: tenetkitRunOperations.operationId,
-                  status: tenetkitRunOperations.status,
-                  resolution_idempotency_key: tenetkitRunOperations.resolutionIdempotencyKey,
-                  resolution_json: tenetkitRunOperations.resolutionJson,
+                  operation_id: generalistRunOperations.operationId,
+                  status: generalistRunOperations.status,
+                  resolution_idempotency_key: generalistRunOperations.resolutionIdempotencyKey,
+                  resolution_json: generalistRunOperations.resolutionJson,
                 })
-                .from(tenetkitRunOperations)
-                .where(ne(tenetkitRunOperations.operationId, "tenet-auto"))
-                .orderBy(asc(tenetkitRunOperations.operationId)),
+                .from(generalistRunOperations)
+                .where(ne(generalistRunOperations.operationId, "generalist-auto"))
+                .orderBy(asc(generalistRunOperations.operationId)),
             ),
           ).toEqual([
             {
-              operation_id: "tenet-abort",
+              operation_id: "generalist-abort",
               status: "failed",
               resolution_idempotency_key: "resolve-abort",
               resolution_json:
                 '{"_tag":"Failed","error":{"_tag":"UserAbortedUnknownOperation","message":"operator confirmed failure"}}',
             },
             {
-              operation_id: "tenet-accept",
+              operation_id: "generalist-accept",
               status: "succeeded",
               resolution_idempotency_key: "resolve-accept",
               resolution_json: '{"_tag":"Succeeded","value":{"answer":42}}',
             },
             {
-              operation_id: "tenet-retry",
+              operation_id: "generalist-retry",
               status: "requested",
               resolution_idempotency_key: "resolve-retry",
               resolution_json: '{"_tag":"Retry"}',

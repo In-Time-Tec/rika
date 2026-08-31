@@ -49,7 +49,7 @@ try {
 }
 ```
 
-Delegate when the work is large or independent with the model-facing `run_child` and `run_child_group` tools, not from inside a cell. TenetKit suspends the current Run while it waits and resumes that same Run with the durable child result.
+Delegate when the work is large or independent with the model-facing `run_child` and `run_child_group` tools, not from inside a cell. Generalist suspends the current Run while it waits and resumes that same Run with the durable child result.
 
 Keep what you learned. A harness refinement requires the baseline you read. The overview's first line is `harness <snapshotId> (scope <scope>)`, so read the scope you intend to write.
 

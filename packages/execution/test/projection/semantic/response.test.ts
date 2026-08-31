@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest"
-import { RunEvent, type RunTree, type Runtime } from "tenetkit/runtime"
+import { RunEvent, type RunTree, type Runtime } from "generalist/runtime"
 import { compareUnitOrder } from "@rika/product/execution-transcript-contract"
 import { Effect, Schema } from "effect"
 import { resolveSemanticTreeEvent } from "../../../src/projection/semantic/event"
@@ -41,7 +41,7 @@ const projectFragments = (fragments: ReadonlyArray<ProviderFragment>) => {
   return { commits, snapshot: projector.snapshot() }
 }
 
-describe("TenetKit semantic response projection", () => {
+describe("Generalist semantic response projection", () => {
   it.effect("hydrates compact committed and interrupted responses through the Runtime API", () =>
     Effect.gen(function* () {
       const tags: Array<string> = []

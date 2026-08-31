@@ -18,8 +18,8 @@
         "@rika/transcript": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
+        "generalist": "catalog:",
         "pg": "catalog:",
-        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@ast-grep/cli": "catalog:",
@@ -58,8 +58,8 @@
         "@rika/remote-execution": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
+        "generalist": "catalog:",
         "pg": "catalog:",
-        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
@@ -89,7 +89,7 @@
         "@rika/terminal": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
-        "tenetkit": "catalog:",
+        "generalist": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
@@ -206,10 +206,9 @@
         "@rika/coding-tools": "workspace:*",
         "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
-        "@tenetkit/pg": "catalog:",
         "effect": "catalog:",
+        "generalist": "catalog:",
         "prettier": "catalog:",
-        "tenetkit": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
@@ -226,7 +225,7 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "catalog:",
         "effect": "catalog:",
-        "tenetkit": "catalog:",
+        "generalist": "catalog:",
       },
       "devDependencies": {
         "@effect/platform-bun": "catalog:",
@@ -278,7 +277,7 @@
         "@rika/extensions": "workspace:*",
         "@rika/product": "workspace:*",
         "effect": "catalog:",
-        "tenetkit": "catalog:",
+        "generalist": "catalog:",
       },
       "devDependencies": {
         "@effect/platform-bun": "catalog:",
@@ -340,7 +339,7 @@
         "@rika/kernel": "workspace:*",
         "@rika/product": "workspace:*",
         "effect": "catalog:",
-        "tenetkit": "catalog:",
+        "generalist": "catalog:",
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
@@ -428,7 +427,6 @@
     "@oxlint/plugins": "1.78.0",
     "@pierre/diffs": "1.2.11",
     "@rikalabs/repo-lint": "2.3.0",
-    "@tenetkit/pg": "0.44.0",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.4.0",
     "@types/node": "24.12.2",
@@ -442,6 +440,7 @@
     "e2b": "2.41.0",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.148.2",
+    "generalist": "0.45.1",
     "happy-dom": "20.10.6",
     "jose": "6.2.9",
     "marked": "17.0.1",
@@ -452,7 +451,6 @@
     "prettier": "3.6.2",
     "prismjs": "1.30.0",
     "string-width": "7.2.0",
-    "tenetkit": "0.44.0",
     "turbo": "2.8.13",
     "typescript": "7.0.2",
     "vite": "8.1.3",
@@ -1225,8 +1223,6 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@tenetkit/pg": ["@tenetkit/pg@0.44.0", "", { "dependencies": { "@effect/sql-pg": "4.0.0-rc.112", "pg": "8.23.0", "tenetkit": "0.44.0" }, "peerDependencies": { "effect": "4.0.0-rc.112" } }, "sha512-hH2GRK0R8UyA9G2oUT+VBllVcnaYahK7lQdPpqqix+rty1XOoJTGEZpIIE2UXMkK3CHnFV3npHSpV1OwGu/tvg=="],
-
     "@tsconfig/bun": ["@tsconfig/bun@1.0.9", "", {}, "sha512-4M0/Ivfwcpz325z6CwSifOBZYji3DFOEpY6zEUt0+Xi2qRhzwvmqQN9XAHJh3OVvRJuAqVTLU2abdCplvp6mwQ=="],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg=="],
@@ -1526,6 +1522,8 @@
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
+
+    "generalist": ["generalist@0.45.1", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-mysql2": "4.0.0-rc.112", "@effect/sql-pg": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/sql-sqlite-do": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "pg": "8.23.0", "rivetkit": "2.3.10", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-mysql2", "@effect/sql-pg", "@effect/sql-sqlite-bun", "@effect/sql-sqlite-do", "@effect/vitest", "@modelcontextprotocol/sdk", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "pg", "rivetkit", "vitest"] }, "sha512-JckwMXBQUXKgqOhgN7h6MyMlQhsYH7IjCa3Nqi7QcAPEUsvQ2fo+dBinb/dWPG6N5ATo1TxGVDZiKQb5EO9n6g=="],
 
     "get-caller-file": ["get-caller-file@2.0.5", "", {}, "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg=="],
 
@@ -1945,8 +1943,6 @@
 
     "tar": ["tar@7.5.22", "", { "dependencies": { "@isaacs/fs-minipass": "^4.0.0", "chownr": "^3.0.0", "minipass": "^7.1.2", "minizlib": "^3.1.0", "yallist": "^5.0.0" } }, "sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA=="],
 
-    "tenetkit": ["tenetkit@0.44.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1", "effect": "4.0.0-rc.112", "foldkit": "0.148.2", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-sqlite-bun", "@effect/vitest", "@modelcontextprotocol/sdk", "@smithy/types", "foldkit", "vitest"] }, "sha512-4d6XHR9Y04w3szSRV4qBqlDQlaCUlu5o2c4PReNRFmvF9SxucSwFJ2GG+JskJ2pP7cBT9ARfqsEb6b5M1N4ZTw=="],
-
     "terminal-size": ["terminal-size@4.0.1", "", {}, "sha512-avMLDQpUI9I5XFrklECw1ZEUPJhqzcwSWsyyI8blhRLT+8N1jLJWLWWYQpB2q2xthq8xDvjZPISVh53T/+CLYQ=="],
 
     "tinybench": ["tinybench@2.9.0", "", {}, "sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg=="],
@@ -2214,8 +2210,6 @@
     "@prisma/dev/std-env": ["std-env@3.10.0", "", {}, "sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg=="],
 
     "@rikalabs/repo-lint/effect": ["effect@3.22.1", "", { "dependencies": { "@standard-schema/spec": "^1.0.0", "fast-check": "^3.23.1" } }, "sha512-TNoXushmPOBAjJlthF5d2QwnX2xBPEtcNJr5XKNKbRLbDvBcOYkXlYDfvGfSA0zriwLFuCll5MDtNMAdZL17PQ=="],
-
-    "@tenetkit/pg/pg": ["pg@8.23.0", "", { "dependencies": { "pg-connection-string": "^2.14.0", "pg-pool": "^3.14.0", "pg-protocol": "^1.16.0", "pg-types": "2.2.0", "pgpass": "1.0.5" }, "optionalDependencies": { "pg-cloudflare": "^1.4.0" }, "peerDependencies": { "pg-native": ">=3.0.1" }, "optionalPeers": ["pg-native"] }, "sha512-Ip2EQCngowJLGOfCwkFhPXU7/ljlhn6Rxlmy4XYfL2Y+vyRM59+8uR2xqRWKdYmbXmxCFOAmKxBuSUCdF34qLg=="],
 
     "alchemy/undici": ["undici@7.29.0", "", {}, "sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw=="],
 

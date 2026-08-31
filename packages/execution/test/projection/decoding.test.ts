@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry, Response as AiResponse } from "tenetkit"
-import { TestModel } from "tenetkit/test"
-import { RunTree, Runtime } from "tenetkit/runtime"
+import { ModelRegistry, Response as AiResponse } from "generalist"
+import { TestModel } from "generalist/test"
+import { RunTree, Runtime } from "generalist/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
@@ -52,7 +52,7 @@ it.live(
   "starts the root turn without waiting for thread titling and still generates the title",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-nonblocking-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-nonblocking-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
         provider: "test",
         model: "test",
@@ -121,7 +121,7 @@ it.live(
   "projects a completed title while the root turn is still running",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-first-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-first-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "3 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-first-root" },
@@ -166,7 +166,7 @@ it.live(
   "cancelling a first turn while titling is in flight still delivered the user prompt and settles",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-cancel-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-cancel-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "10 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-root" },
@@ -229,7 +229,7 @@ it.live(
   "keeps a completed title out of the next root model request",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-isolation-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-isolation-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [
           TestModel.turn([TestModel.text("FIRST_ANSWER")]),
@@ -286,7 +286,7 @@ it.live(
   "settles the projection when a recorded title run is unavailable",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-missing-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-missing-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
         provider: "test",
         model: "test",
@@ -324,7 +324,7 @@ it.live(
   "re-admits the same turn after a restart without duplicating the title run",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-tenetkit-title-restart-${yield* Random.nextInt}.db`
+      const filename = `/tmp/rika-generalist-title-restart-${yield* Random.nextInt}.db`
       const start = Effect.fn("titleRestart.start")(function* () {
         const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
           provider: "test",

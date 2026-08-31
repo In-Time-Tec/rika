@@ -171,7 +171,7 @@ it.effect("rejects queued images before preparing a steering admission", () =>
  * A queued turn becomes steering text when the user promotes it into a running turn, and a prompt
  * carries no size bound of its own — a pasted stack trace, a file, a diff. Refusing those on
  * delivery consumed the queued row and delivered nothing, so the steer vanished with no admission
- * and no report. TenetKit bounds a steering prompt by the same message limits as any other prompt, so
+ * and no report. Generalist bounds a steering prompt by the same message limits as any other prompt, so
  * a long one is admitted rather than dropped.
  */
 it.effect("admits a queued prompt longer than the composer convenience limit", () =>

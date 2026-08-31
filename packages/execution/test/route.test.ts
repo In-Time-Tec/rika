@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "tenetkit"
+import { ModelRegistry } from "generalist"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"

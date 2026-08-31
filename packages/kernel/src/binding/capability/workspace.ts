@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostModules } from "tenetkit/repl"
+import type { HostBindings } from "generalist/repl"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import { maximumDepth } from "@rika/coding-tools/list-files-tool"
@@ -80,7 +80,7 @@ const edited = (result: CodingToolResult.Result) => {
   return result.diff === undefined ? value : { ...value, diff: result.diff }
 }
 
-export const operations: ReadonlyArray<HostModules.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
+export const operations: ReadonlyArray<HostBindings.AnyOperation<CodingToolRuntime.Service | Requirements>> = [
   operation({
     name: "search",
     input: SearchInput,
@@ -170,4 +170,4 @@ export const operations: ReadonlyArray<HostModules.AnyOperation<CodingToolRuntim
   }),
 ]
 
-export const module: HostModules.Module<CodingToolRuntime.Service | Requirements> = { name, operations }
+export const module: HostBindings.Module<CodingToolRuntime.Service | Requirements> = { name, operations }

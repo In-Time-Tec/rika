@@ -1,5 +1,5 @@
-import { Overview, Registration, Snapshot, State } from "tenetkit/agent-guidance"
-import type { AgentManifest } from "tenetkit"
+import { Overview, Registration, Snapshot, State } from "generalist/instructions"
+import type { AgentManifest } from "generalist"
 import { Effect, Function, Schema } from "effect"
 
 /** The capability name a pinned harness snapshot is registered under on every Rika Agent manifest. */

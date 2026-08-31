@@ -10,7 +10,7 @@ const text = Effect.fn(function* (path: string, base: URL = image) {
   return yield* fileSystem.readFileString(new URL(path, base).pathname)
 })
 const RootManifest = Schema.Struct({
-  workspaces: Schema.Struct({ catalog: Schema.Struct({ tenetkit: Schema.String }) }),
+  workspaces: Schema.Struct({ catalog: Schema.Struct({ generalist: Schema.String }) }),
 })
 const ToolManifest = Schema.Struct({
   debianSnapshot: Schema.String,
@@ -41,9 +41,9 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(dockerfile).not.toContain("COPY packages ./packages")
       expect(dockerfile).not.toContain("COPY apps ./apps")
       expect(dockerfile).toContain("bun install --production --frozen-lockfile --ignore-scripts")
-      expect(dockerfile).toContain("node_modules/tenetkit/package.json")
+      expect(dockerfile).toContain("node_modules/generalist/package.json")
       expect(dockerfile).toContain("packages/kernel/src/executor-runtime.ts")
-      expect(dockerfile).toContain('import { workerModule } from "tenetkit/repl/bun"')
+      expect(dockerfile).toContain('import { workerModule } from "generalist/repl/bun"')
       expect(yield* text("start.sh")).toContain("packages/remote-execution/src/host/service.ts")
       expect(yield* text("doctor.ts")).toContain(
         "/opt/rika/packages/remote-execution/src/host/machinery/machine-doctor.ts",
@@ -51,7 +51,7 @@ it.layer(BunServices.layer)("E2B image source contract", (test) => {
       expect(yield* text("packages/remote-execution/src/host/machinery/machine-doctor.ts", root)).toContain(
         "rika-workspace:machine-environment",
       )
-      expect(lock).toContain(`"tenetkit": "${manifest.workspaces.catalog.tenetkit}"`)
+      expect(lock).toContain(`"generalist": "${manifest.workspaces.catalog.generalist}"`)
     }),
   )
 

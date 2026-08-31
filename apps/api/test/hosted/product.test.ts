@@ -24,7 +24,7 @@ import {
   DateTime,
   Effect,
   HostedProduct,
-  tenetkitRuns,
+  generalistRuns,
   live,
   principal,
   personal,
@@ -39,7 +39,7 @@ import "./product/workspace.harness"
 
 const { withAuthoritativeDatabase, withDatabase } = hostedProductFixture
 
-it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run atomically", () =>
+it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run atomically", () =>
   withAuthoritativeDatabase("atomic-run", (database) =>
     Effect.gen(function* () {
       const authenticated = principal("atomic-run-user")
@@ -100,7 +100,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run a
         ),
         turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
         runs: yield* Effect.tryPromise(() =>
-          database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId)),
+          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
         ),
         events: yield* Effect.tryPromise(() =>
           database.$count(
@@ -133,7 +133,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run a
         ),
         turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
         runs: yield* Effect.tryPromise(() =>
-          database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId)),
+          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
         ),
         events: yield* Effect.tryPromise(() =>
           database.$count(
@@ -193,7 +193,9 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run a
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(firstActivation)
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(recoveredActivation)
       expect(
-        yield* Effect.tryPromise(() => database.$count(tenetkitRuns, eq(tenetkitRuns.sessionId, connection.threadId))),
+        yield* Effect.tryPromise(() =>
+          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
+        ),
       ).toBe(1)
       yield* turnWorkerStore.completeActivation(recoveredClaim, recoveredActivation, yield* Clock.currentTimeMillis)
       expect(

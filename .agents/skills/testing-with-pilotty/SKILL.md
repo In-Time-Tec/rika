@@ -31,6 +31,6 @@ pilotty kill -s rika
 pilotty kill -s amp
 ```
 
-Use isolated `HOME`, product SQLite, TenetKit SQLite, and `RIKA_TEST_MODEL_SCRIPT` for deterministic agentic workflows. Never treat text echoed in the composer as proof of model completion; wait for a unique scripted response or tool result.
+Use isolated `HOME`, product SQLite, Generalist SQLite, and `RIKA_TEST_MODEL_SCRIPT` for deterministic agentic workflows. Never treat text echoed in the composer as proof of model completion; wait for a unique scripted response or tool result.
 
 Compare exact terminal dimensions, borders, spacing, labels, colors, cursor placement, wrapping, overlays, transcript cards, and responsive behavior. Save evidence beneath `artifacts/`.

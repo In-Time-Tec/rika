@@ -1,6 +1,6 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { Effect, Option, Schema, Stream } from "effect"
-import { Errors, Run, RunTree, Runtime } from "tenetkit/runtime"
+import { Errors, Run, RunTree, Runtime } from "generalist/runtime"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "../projection/semantic/event"
 import { TreeProjector } from "../projection/tree/projector"
 import * as RuntimeTelemetry from "./runtime-telemetry"
@@ -82,7 +82,7 @@ const titleEvents = (runtime: Runtime.Service, titleId: string | undefined) =>
         Stream.take(1),
         Stream.mapEffect(() => runtime.snapshot(titleId)),
         Stream.map((snapshot): TitleProjectionEvent => ({ _tag: "title", snapshot })),
-        Stream.catchTag("tenetkit/runtime/RunNotFound", () =>
+        Stream.catchTag("generalist/runtime/RunNotFound", () =>
           Stream.succeed<TitleProjectionEvent>({ _tag: "title", snapshot: undefined }),
         ),
       )

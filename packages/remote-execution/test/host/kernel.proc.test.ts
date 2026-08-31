@@ -5,8 +5,8 @@ import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ContextBinding from "@rika/kernel/context-binding"
 import { NestedOperationFailed } from "@rika/kernel/nested-operation-envelope"
 import * as WorkspaceBinding from "@rika/kernel/workspace-binding"
-import { NestedOperation, Session, ToolContext } from "tenetkit"
-import { HostModules } from "tenetkit/repl"
+import { NestedOperation, Session, ToolContext } from "generalist"
+import { HostBindings } from "generalist/repl"
 import { Context, Crypto, Deferred, Effect, Fiber, FileSystem, Inspectable, Layer, Option, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as HostedKernel from "../../src/host/kernel"
@@ -235,11 +235,11 @@ describe("hosted TypeScript kernel", () => {
         const authority = (operationKey: string, toolCallId: string) =>
           Context.add(base, ToolContext.ToolContext, toolContext(operationKey, toolCallId))
         const modules: ReadonlyArray<
-          HostModules.Module<
+          HostBindings.Module<
             CodingToolRuntime.Service | NestedOperation.Operations | Session.SessionDirectory | ToolContext.ToolContext
           >
         > = [ContextBinding.make({ workspace: root, trustMode: "hosted" }), WorkspaceBinding.module]
-        const registry = yield* HostModules.make(modules).pipe(
+        const registry = yield* HostBindings.make(modules).pipe(
           Effect.provideContext(authority("operation-1", "call-1")),
         )
         const manifest = yield* bindingManifest(registry.descriptors)

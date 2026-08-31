@@ -1,4 +1,4 @@
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { Node } from "./model"

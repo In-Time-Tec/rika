@@ -1,5 +1,5 @@
-import { Approvals, NestedOperation, Session, ToolContext } from "tenetkit"
-import { Store } from "tenetkit/agent-guidance"
+import { Approvals, NestedOperation, Session, ToolContext } from "generalist"
+import { Store } from "generalist/instructions"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as ShellProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as McpRuntime from "@rika/extensions/mcp-runtime"

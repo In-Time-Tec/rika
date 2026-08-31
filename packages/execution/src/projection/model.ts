@@ -1,4 +1,4 @@
-import type { Run } from "tenetkit/runtime"
+import type { Run } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import type { Effect } from "effect"
 import type { SemanticTreeEvent } from "./semantic/event"

@@ -1,13 +1,14 @@
-import { KernelPool, KernelStateStore } from "tenetkit/repl"
+import { KernelPool, KernelSnapshotStore } from "generalist/repl"
 import {
   Approval,
   ExecutableManifest,
   ExecutableRegistration,
+  ExecutableResolver,
   Message,
   RunTree,
   Runtime,
   TreePolicy,
-} from "tenetkit/runtime"
+} from "generalist/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import type * as PgClient from "@effect/sql-pg/PgClient"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
@@ -313,14 +314,15 @@ const make = (
               ? { status: "unavailable" as const }
               : { status: status(root.run.status), cursor: checkpoint.cursor }
           }),
-          Effect.catchTag("tenetkit/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
+          Effect.catchTag("generalist/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),
         ),
     })
     const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
     const builtPools: Effect.Effect<
       ReadonlyArray<
-        Context.Context<KernelPoolServices> | Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>
+        | Context.Context<KernelPoolServices>
+        | Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>
       >
     > = options.cells?._tag === "Local" ? options.cells.built : Effect.succeed([])
     const lifecycle = ExecutionSessionLifecycle.Service.of({
@@ -337,7 +339,7 @@ const make = (
       dropKernelState: ({ sessionId }) =>
         Effect.flatMap(builtPools, (pools) =>
           Effect.forEach(
-            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelStateStore.KernelStateStore))),
+            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelSnapshotStore.KernelSnapshotStore))),
             (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
             { discard: true },
           ),
@@ -431,13 +433,15 @@ export const layerMemory = (
     kernel: options.kernel ?? derivedKernelOptions(options.dataRoot),
   }
   return executionLayer(shared, (credentialStore) => {
+    const resolver = resolverFor(shared, credentialStore)
     let runtimeOptions: Parameters<typeof Runtime.layerMemory>[0] = {
-      resolver: resolverFor(shared, credentialStore),
       addresses: [],
     }
     if (options.subscriberQueueCapacity !== undefined)
       runtimeOptions = { ...runtimeOptions, subscriberQueueCapacity: options.subscriberQueueCapacity }
     if (options.scheduler !== undefined) runtimeOptions = { ...runtimeOptions, scheduler: options.scheduler }
-    return Runtime.layerMemory(runtimeOptions)
+    return Runtime.layerMemory(runtimeOptions).pipe(
+      Layer.provide(Layer.succeed(ExecutableResolver.ExecutableResolver, resolver)),
+    )
   })
 }

@@ -4,7 +4,7 @@ import type { Card, Node } from "../model"
 import type { ProjectorCore } from "../persistence"
 import { bounded, projectorNames, toolTextLimit } from "../values"
 import { promptText } from "../decoding"
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import { Schema } from "effect"
 
 export const SubagentGroupParams = Schema.Struct({

@@ -2,8 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { Chat, LanguageModel } from "effect/unstable/ai"
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { ModelRegistry } from "tenetkit"
-import * as OpenRouter from "tenetkit/ai/openrouter"
+import { ModelRegistry } from "generalist"
+import * as OpenRouter from "generalist/ai/openrouter"
 
 const captured: Array<{ readonly url: string; readonly body: string }> = []
 const ChatRequest = Schema.Struct({
@@ -52,12 +52,18 @@ const mockHttp = Layer.succeed(
   }),
 )
 
-const layer = OpenRouter.layer({
-  model: "~deepseek/deepseek-v4-flash-latest",
-  config: OpenRouter.decodeConfig({ reasoning: { effort: "low", summary: "auto" } }),
-  apiKey: Config.succeed(Redacted.make("sk-or-v1-test")),
-  clientConfig: { apiUrl: Config.succeed("https://openrouter.ai/api/v1") },
-}).pipe(Layer.provide(mockHttp))
+const layer = Layer.unwrap(
+  OpenRouter.decodeConfig({ reasoning: { effort: "low", summary: "auto" } }).pipe(
+    Effect.map((config) =>
+      OpenRouter.layer({
+        model: "~deepseek/deepseek-v4-flash-latest",
+        config,
+        apiKey: Config.succeed(Redacted.make("sk-or-v1-test")),
+        clientConfig: { apiUrl: Config.succeed("https://openrouter.ai/api/v1") },
+      }),
+    ),
+  ),
+).pipe(Layer.provide(mockHttp))
 
 describe("OpenRouter provider conversation continuity", () => {
   it.effect("sends the second turn as chat completions with full message history and no item ids", () =>

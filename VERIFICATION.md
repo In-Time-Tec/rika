@@ -39,15 +39,15 @@ Focused tests must prove:
 - Submission replay with one command identity creates one Turn and one immutable start input.
 - Distinct submit, cancel, and target identities settle both possible database orderings deterministically.
 - Out-of-order command completion cannot regress durable event versions, snapshot cursors, client authority versions, or attachment cursors.
-- The worker persists the exact nonsecret prepared TenetKit envelope before admission and retries it with the same session, Run, and idempotency identities.
+- The worker persists the exact nonsecret prepared Generalist envelope before admission and retries it with the same session, Run, and idempotency identities.
 - Exact staged admission is idempotent while divergent idempotency or Run identity collisions remain typed and block activation.
-- TenetKit is the only durable operation-resolution authority. Rika has no duplicate resolution columns, and retry after TenetKit committed but before an HTTP response converges to the same `retrying`, `accepted`, or `aborted` projection while divergent identity conflicts.
+- Generalist is the only durable operation-resolution authority. Rika has no duplicate resolution columns, and retry after Generalist committed but before an HTTP response converges to the same `retrying`, `accepted`, or `aborted` projection while divergent identity conflicts.
 - Cancellation before `activation_requested_at` prevents activation and terminally cancels any staged Run without model or tool execution.
-- Activation and cancellation racing after `activation_requested_at` are ordered by TenetKit and never produce execution after cancel won. Cancellation of a `needs-resolution` Run tree uses `Runtime.cancel` plus `RunTree.awaitTerminal`; it does not scan bounded history or fabricate operation resolutions, and all unknown operation evidence remains unknown.
+- Activation and cancellation racing after `activation_requested_at` are ordered by Generalist and never produce execution after cancel won. Cancellation of a `needs-resolution` Run tree uses `Runtime.cancel` plus `RunTree.awaitTerminal`; it does not scan bounded history or fabricate operation resolutions, and all unknown operation evidence remains unknown.
 - Lost staged-admission and activation receipts produce at most one Run and one `RunAttemptStarted` event.
 - If the staged-admission receipt is lost and cancellation wins before recovery, replaying the exact admission persists the Run link, cancels that staged Run, and clears the outbox without requiring current Orb readiness or executing model/tool work.
 - Migration 0032 marks a legacy nonqueued Agent Turn failed only when both its execution link and prepared staged-admission record are absent. It preserves every Turn with a recoverable prepared outbox row, and the reconciler no longer logs `execution.authority.link_missing` forever for the already-stuck legacy Threads.
-- Only a matching TenetKit terminal snapshot clears the Thread's active Turn and promotes queued work.
+- Only a matching Generalist terminal snapshot clears the Thread's active Turn and promotes queued work.
 - Projection failure cannot cancel or terminalize a nonterminal Run.
 - A second submission is admitted or visibly queued while an earlier network result is unknown.
 - Atomic attachment during concurrent publication yields a contiguous event cursor without missing or double-applied events.
@@ -64,11 +64,11 @@ Focused tests must prove:
 - Unknown Executor operation receipt remains `unknown` and is not blindly replayed.
 - A hosted remote cell is journaled as `provider-idempotent` only when its gateway durably deduplicates the exact `ToolContext.operationKey`; direct/local tools remain `never`.
 - API loss while a Runner or Orb cell is active does not interrupt the cell, cancel the Run, fail a pending binding, or append `OperationUnknown`.
-- TenetKit re-enters the retry-safe tool with the same operation key, Rika attaches fresh binding authority to the existing dispatch, and the executor replays the pending binding and terminal receipt without executing the cell twice.
+- Generalist re-enters the retry-safe tool with the same operation key, Rika attaches fresh binding authority to the existing dispatch, and the executor replays the pending binding and terminal receipt without executing the cell twice.
 - Re-entry with newly generated admission timestamps adopts the first durable `admittedAt` and `deadlineAt`; it neither conflicts nor extends the execution window.
 - Executor process loss never reruns a persisted running cell and produces an executor-authored unknown result that remains operator-visible.
 - Durable Runtime cancellation closes new operation admission before invoking the selected concrete ToolExecutor cancellation route. A Run does not become cancelled while one admitted cancellable tool operation lacks a definitive cancelled or already-terminal acknowledgement.
-- A worker crash after semantic cancellation crosses the Runner or Orb boundary but before TenetKit persists its acknowledgement redelivers the same operation identity after reclaim and converges to one cancelled terminal. Worker lease loss, API shutdown, and ordinary ToolExecutor interruption never issue semantic cancellation.
+- A worker crash after semantic cancellation crosses the Runner or Orb boundary but before Generalist persists its acknowledgement redelivers the same operation identity after reclaim and converges to one cancelled terminal. Worker lease loss, API shutdown, and ordinary ToolExecutor interruption never issue semantic cancellation.
 - Cancellation before Executor dispatch terminalizes the accepted executor operation without sending `CellExecute`. Cancellation after dispatch sends a fenced `CellCancel`, waits for the durable Terminal lifecycle frame, and exact repeated cancellation returns that same terminal.
 - Cancelling a root with active child Runs cancels every admitted descendant cell, prevents later descendant tool admission, and leaves no late workspace side effect.
 - Cancelling a cell while a nested machine request is active interrupts the delegated workspace process, prevents a delayed write, and permits an immediate next machine call on the same assignment generation and process incarnation.
@@ -164,9 +164,9 @@ Process or integration tests, supported by concise logs where needed, must exerc
 - before submission admission;
 - after admission but before preparation claim;
 - after the prepared Runtime envelope is persisted but before staged admission;
-- after TenetKit stages the Run but before Rika receives the admission result;
-- after `activation_requested_at` but before calling TenetKit;
-- after TenetKit activates the Run but before Rika receives the result;
+- after Generalist stages the Run but before Rika receives the admission result;
+- after `activation_requested_at` but before calling Generalist;
+- after Generalist activates the Run but before Rika receives the result;
 - during cancellation delivery;
 - after terminal persistence but before client delivery;
 - after Orb creation but before preparation start;

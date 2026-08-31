@@ -1,6 +1,6 @@
 import { Context, Effect } from "effect"
-import { HostModules } from "tenetkit/repl"
-import { NestedOperation, ToolContext } from "tenetkit"
+import { HostBindings } from "generalist/repl"
+import { NestedOperation, ToolContext } from "generalist"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 
 export const toolContext: ToolContext.Service = ToolContext.ToolContext.of({
@@ -42,11 +42,11 @@ export const codingToolRuntime = (run: CodingToolRuntime.Interface["run"]) =>
   Context.make(CodingToolRuntime.Service, CodingToolRuntime.Service.of({ run }))
 
 export const mountModules = <R>(input: {
-  readonly modules: ReadonlyArray<HostModules.Module<R | ToolContext.ToolContext | NestedOperation.Operations>>
+  readonly modules: ReadonlyArray<HostBindings.Module<R | ToolContext.ToolContext | NestedOperation.Operations>>
   readonly services: Context.Context<R>
   readonly nested?: NestedOperation.Service | undefined
   readonly sessionId?: string
-}): Effect.Effect<HostModules.Service, HostModules.HostModuleConflict> => {
+}): Effect.Effect<HostBindings.Service, HostBindings.HostModuleConflict> => {
   const { modules, services } = input
   const nested = input.nested ?? { run: (_request, effect) => effect }
   const context =
@@ -54,7 +54,7 @@ export const mountModules = <R>(input: {
       ? toolContext
       : ToolContext.ToolContext.of({ ...toolContext, sessionId: input.sessionId })
   return Effect.provideContext(
-    HostModules.make(modules),
+    HostBindings.make(modules),
     services.pipe(
       Context.add(ToolContext.ToolContext, context),
       Context.add(NestedOperation.Operations, NestedOperation.Operations.of(nested)),

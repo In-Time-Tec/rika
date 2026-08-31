@@ -1,11 +1,11 @@
-import { RunSchema, layer as upstreamLayer } from "@tenetkit/pg"
+import { RuntimeSchema, layer as upstreamLayer } from "generalist/pg"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import { Errors, ExecutableResolver, RunExecutor, RunStore, Runtime } from "tenetkit/runtime"
-import { RunClaims, RuntimeWorker, type SqlRuntimeServices } from "tenetkit/runtime/sql-driver"
+import { Errors, ExecutableResolver, RunExecutor, RunStore, Runtime } from "generalist/runtime"
+import { RunClaims, RuntimeWorker, type SqlRuntimeServices } from "generalist/runtime/sql-driver"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
@@ -130,8 +130,8 @@ export const observeClaim = (claim: ObservedClaim) => {
 
 export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: Pick<Options, "url" | "source">) {
   const applied: Effect.Effect<void, SchemaError> = Effect.scoped(
-    Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
-      Effect.flatMap((context) => RunSchema.apply(input.source).pipe(Effect.provide(context))),
+    Layer.build(RuntimeSchema.layerClient({ url: input.url })).pipe(
+      Effect.flatMap((context) => RuntimeSchema.apply(input.source).pipe(Effect.provide(context))),
     ),
   )
   return yield* applied
@@ -139,8 +139,8 @@ export const applySchema = Effect.fn("Postgres.applySchema")(function* (input: P
 
 export const checkSchema = Effect.fn("Postgres.checkSchema")(function* (input: Pick<Options, "url" | "source">) {
   const checked: Effect.Effect<void, SchemaError> = Effect.scoped(
-    Layer.build(RunSchema.layerClient({ url: input.url })).pipe(
-      Effect.flatMap((context) => RunSchema.check(input.source).pipe(Effect.provide(context))),
+    Layer.build(RuntimeSchema.layerClient({ url: input.url })).pipe(
+      Effect.flatMap((context) => RuntimeSchema.check(input.source).pipe(Effect.provide(context))),
     ),
   )
   return yield* checked
@@ -256,7 +256,6 @@ export const layer = (
       Effect.map((postgres) => {
         const postgresLayerOptionsBase = {
           source: postgres.source,
-          resolver: options.resolver,
           addresses: [],
         }
         const withQueue =
@@ -267,6 +266,7 @@ export const layer = (
           options.scheduler === undefined ? withQueue : { ...withQueue, scheduler: options.scheduler }
         const client = Layer.effect(SqlClient, PgClient.PgClient)
         const runtime = upstreamLayer(postgresLayerOptions).pipe(
+          Layer.provide(Layer.succeed(ExecutableResolver.ExecutableResolver, options.resolver)),
           Layer.catchCause((cause) => Layer.effectContext(Effect.fail(runtimeUnavailable(cause)))),
         )
         const worker = workerLayer(postgres.worker).pipe(Layer.provideMerge(runtime))
@@ -280,7 +280,7 @@ export const layer = (
                 source: postgres.source,
                 fallbackIntervalMillis: postgres.worker.fallbackIntervalMillis,
                 worker: runtimeWorker,
-                schema: RunSchema.check(postgres.source).pipe(Effect.provideService(SqlClient, sql)),
+                schema: RuntimeSchema.check(postgres.source).pipe(Effect.provideService(SqlClient, sql)),
               }),
             )
           }),

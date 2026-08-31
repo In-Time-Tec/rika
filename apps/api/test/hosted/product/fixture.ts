@@ -45,7 +45,7 @@ import {
 } from "../../../src/hosted/product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
 import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../../src/hosted/repositories"
-import { runs as tenetkitRuns } from "../../../src/hosted/execution/tenetkit-schema"
+import { runs as generalistRuns } from "../../../src/hosted/execution/generalist-schema"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
@@ -286,7 +286,7 @@ export {
   postgresTest,
   hostedModelRegistryTestLayer,
   hostedRepositoriesUnavailableLayer,
-  tenetkitRuns,
+  generalistRuns,
   live,
   principal,
   personal,

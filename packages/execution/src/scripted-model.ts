@@ -1,5 +1,5 @@
-import { AiError, ModelRegistry, Response as AiResponse } from "tenetkit"
-import { TestModel } from "tenetkit/test"
+import { AiError, ModelRegistry, Response as AiResponse } from "generalist"
+import { TestModel } from "generalist/test"
 import { Effect, Layer, Schema } from "effect"
 
 const Part = Schema.Union([

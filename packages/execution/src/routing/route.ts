@@ -1,4 +1,4 @@
-import { ExecutableResolver, Errors, ExecutableRegistration } from "tenetkit/runtime"
+import { ExecutableResolver, Errors, ExecutableRegistration } from "generalist/runtime"
 import { Effect } from "effect"
 import * as Registration from "../registration"
 import { configure } from "./route-configuration"
@@ -62,6 +62,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Servi
             manifest: input.manifest,
           }),
         })
-        return yield* ExecutableResolver.makeStatic(configured.resolverEntries).resolve(input)
+        const resolver = yield* ExecutableResolver.makeStatic(configured.resolverEntries)
+        return yield* resolver.resolve(input)
       }),
   })

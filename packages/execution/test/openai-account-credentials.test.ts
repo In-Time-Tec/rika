@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry } from "tenetkit"
-import * as OpenAi from "tenetkit/ai/openai"
-import * as OpenAiResponses from "tenetkit/ai/openai-responses"
+import { ModelRegistry } from "generalist"
+import * as OpenAi from "generalist/ai/openai"
+import * as OpenAiResponses from "generalist/ai/openai-responses"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { Chat, LanguageModel } from "effect/unstable/ai"
@@ -99,12 +99,18 @@ it.effect("uses the Codex endpoint and refreshes one rejected account request at
         }),
         "expected",
       )
-      const provider = ModelRegistry.layer([
-        OpenAi.registration({
-          model: "gpt-5.6-sol",
-          config: OpenAiResponses.decodeConfig({ store: false }),
-        }),
-      ]).pipe(Layer.provide(layerClient(credentials)), Layer.provide(http))
+      const provider = Layer.unwrap(
+        OpenAiResponses.decodeConfig({ store: false }).pipe(
+          Effect.map((config) =>
+            ModelRegistry.layer([
+              OpenAi.registration({
+                model: "gpt-5.6-sol",
+                config,
+              }),
+            ]),
+          ),
+        ),
+      ).pipe(Layer.provide(layerClient(credentials)), Layer.provide(http))
       const context = yield* Layer.build(provider)
       const model = yield* ModelRegistry.withModel(
         { provider: "openai", model: "gpt-5.6-sol" },

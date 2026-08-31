@@ -10,7 +10,7 @@ Rika is for technical teams that prefer a CLI and TUI while needing secure brows
 
 - Keep account, ownership, access, and shared Thread authority in the hosted API.
 - Keep local and remote execution as explicit first-class choices; never move work between them implicitly.
-- Run remote work only in isolated E2B workspaces while preserving TenetKit as execution authority.
+- Run remote work only in isolated E2B workspaces while preserving Generalist as execution authority.
 - Let multiple authorized people inspect and control durable work without sharing host or provider credentials.
 - Make ongoing and completed agent work easy to inspect in the terminal.
 - Preserve durable work across process failure without duplicating execution authority.
@@ -22,6 +22,6 @@ Rika is for technical teams that prefer a CLI and TUI while needing secure brows
 
 ## Boundaries
 
-Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. TenetKit owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
+Rika owns identity integration, organizations, access, execution placement, workspace policy, configuration, projections, tools, extensions, product persistence, and terminal behavior. Generalist owns durable execution and the agent loop. E2B supplies remote sandbox infrastructure without becoming product authority. OpenTUI stays behind the rendering adapter.
 
 Rika is not a billing system, public agent SDK, general browser IDE, general sandbox platform, or social network. Runner execution is not isolated from the developer's machine; Orb isolation belongs to E2B. Rika does not copy another product's branding or protocol, support interchangeable remote providers, or own a local semantic code index or ast-grep outline subsystem.

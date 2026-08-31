@@ -28,7 +28,7 @@
     "@rika/terminal": "workspace:*",
     "@rika/transcript": "workspace:*",
     "effect": "catalog:",
-    "tenetkit": "catalog:"
+    "generalist": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

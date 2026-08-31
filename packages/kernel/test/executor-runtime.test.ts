@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { NestedOperation, Session, ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { NestedOperation, Session, ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ExecutorRuntime from "../src/executor-runtime"
 
@@ -15,7 +15,7 @@ const toolContext = (sessionId: string, operationKey: string): ToolContext.Servi
   })
 
 /** A registry whose one operation reports the identity its handler actually observed. */
-const observingRegistry = (observed: Array<string>): HostModules.Service => ({
+const observingRegistry = (observed: Array<string>): HostBindings.Service => ({
   descriptors: [{ module: "probe", operations: ["identity"] }],
   resolve: () => Effect.die("unused"),
   invoke: () =>
@@ -26,7 +26,7 @@ const observingRegistry = (observed: Array<string>): HostModules.Service => ({
     }),
 })
 
-const request = (sessionId: string): HostModules.Request => ({
+const request = (sessionId: string): HostBindings.Request => ({
   module: "probe",
   operation: "identity",
   input: {},
@@ -110,7 +110,7 @@ it.effect("releases a Session's identity when its cell completes", () =>
 it.effect("carries the cell's nested-operation journal and Session directory to the handler", () =>
   Effect.gen(function* () {
     const kinds: Array<string> = []
-    const registry: HostModules.Service = {
+    const registry: HostBindings.Service = {
       descriptors: [{ module: "probe", operations: ["journal"] }],
       resolve: () => Effect.die("unused"),
       invoke: () =>

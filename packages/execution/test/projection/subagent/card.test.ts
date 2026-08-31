@@ -1,6 +1,6 @@
 import "./card-lifecycle.fixture"
 import { describe, expect, it } from "@effect/vitest"
-import { Prompt, Response } from "tenetkit"
+import { Prompt, Response } from "generalist"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
@@ -8,7 +8,7 @@ import { block, modelResponse, resetEventPosition, treeEvent } from "../../suppo
 const subagentCard = (unit: Unit | undefined) =>
   unit?.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block : undefined
 
-describe("TenetKit subagent card projection", () => {
+describe("Generalist subagent card projection", () => {
   it("shows a run_child prompt immediately, nests child output, and treats completion as settlement only", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-one", "delegate this")

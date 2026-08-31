@@ -1,12 +1,12 @@
-import { ModelRegistry } from "tenetkit"
-import type { State } from "tenetkit/agent-guidance"
-import { KernelPool, KernelStateStore } from "tenetkit/repl"
+import { ModelRegistry } from "generalist"
+import type { State } from "generalist/instructions"
+import { KernelPool, KernelSnapshotStore } from "generalist/repl"
 import type * as ExecutionPins from "@rika/kernel/execution-pins"
 import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
 import type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { Context, Effect, Layer } from "effect"
-import type { Runtime } from "tenetkit/runtime"
+import type { Runtime } from "generalist/runtime"
 import type * as Postgres from "../postgres"
 import type { KernelOptions, RemoteCellRoute } from "../routing/route"
 import type * as Route from "../routing/route"
@@ -14,7 +14,9 @@ import type * as Route from "../routing/route"
 export type KernelPoolServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
 
 export interface LocalCells extends Route.LocalCellResolver {
-  readonly built: Effect.Effect<ReadonlyArray<Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>>>
+  readonly built: Effect.Effect<
+    ReadonlyArray<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
+  >
 }
 
 export type Cells = LocalCells | RemoteCellRoute
@@ -46,6 +48,8 @@ export interface MemoryOptions extends Omit<CommonOptions, "kernel"> {
 export interface LocalCellsOptions {
   readonly forWorkspace: (
     workspace: string,
-  ) => Effect.Effect<Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>>
-  readonly built: Effect.Effect<ReadonlyArray<Context.Context<KernelPoolServices | KernelStateStore.KernelStateStore>>>
+  ) => Effect.Effect<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
+  readonly built: Effect.Effect<
+    ReadonlyArray<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
+  >
 }

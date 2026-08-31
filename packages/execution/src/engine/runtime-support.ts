@@ -1,5 +1,5 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Errors, Run, Runtime } from "tenetkit/runtime"
+import { Errors, Run, Runtime } from "generalist/runtime"
 import type { Status } from "@rika/product/execution-status"
 import { Option, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
@@ -33,9 +33,9 @@ export const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalRespon
 export const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFailure =>
   ExecutionGateway.SteeringFailure.make({
     kind:
-      cause._tag === "tenetkit/runtime/RunNotFound" ||
-      cause._tag === "tenetkit/runtime/RunTerminal" ||
-      cause._tag === "tenetkit/runtime/SteeringConflict"
+      cause._tag === "generalist/runtime/RunNotFound" ||
+      cause._tag === "generalist/runtime/RunTerminal" ||
+      cause._tag === "generalist/runtime/SteeringConflict"
         ? "rejected"
         : "unknown",
     message: message(cause),

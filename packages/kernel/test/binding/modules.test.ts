@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Schema } from "effect"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 import type * as McpDiscovery from "@rika/extensions/mcp-discovery"
 import { make as makeModules, moduleNames } from "@rika/kernel/binding-modules"
 import { operation as bindingOperation } from "@rika/kernel/nested-operation-envelope"
@@ -64,8 +64,8 @@ describe("binding schema round trip", () => {
 
   it.effect("mounts the whole surface without a name conflict", () =>
     Effect.gen(function* () {
-      const context = yield* Layer.build(HostModules.layer(mountModules))
-      const mounted = Context.get(context, HostModules.HostModules)
+      const context = yield* Layer.build(HostBindings.layer(mountModules))
+      const mounted = Context.get(context, HostBindings.HostBindings)
       expect(mounted.descriptors.map((descriptor) => descriptor.module)).toEqual([...moduleNames])
     }).pipe(Effect.scoped),
   )
@@ -73,7 +73,7 @@ describe("binding schema round trip", () => {
   it.effect("declares an input schema that decodes for every operation", () =>
     Effect.gen(function* () {
       for (const { module, operation: entry } of every) {
-        const mounted = yield* HostModules.make([
+        const mounted = yield* HostBindings.make([
           {
             name: module,
             operations: [
@@ -130,7 +130,7 @@ describe("binding schema round trip", () => {
         const found = every.find(({ module, operation }) => `${module}.${operation.name}` === key)
         expect(`${key}:${found !== undefined}`).toBe(`${key}:true`)
         if (found === undefined) throw new Error(`Missing operation ${key}`)
-        const mounted = yield* HostModules.make([
+        const mounted = yield* HostBindings.make([
           {
             name: found.module,
             operations: [
@@ -154,7 +154,7 @@ describe("binding schema round trip", () => {
     Effect.gen(function* () {
       const write = every.find(({ module, operation }) => module === "workspace" && operation.name === "write")
       if (write === undefined) throw new Error("Missing workspace.write")
-      const mounted = yield* HostModules.make([
+      const mounted = yield* HostBindings.make([
         {
           name: write.module,
           operations: [

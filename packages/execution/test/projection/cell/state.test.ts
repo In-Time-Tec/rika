@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { Response } from "tenetkit"
-import { Cell as TenetCell } from "tenetkit/repl"
-import type { RunEvent } from "tenetkit/runtime"
+import { Response } from "generalist"
+import { Cell as GeneralistCell } from "generalist/repl"
+import type { RunEvent } from "generalist/runtime"
 import { Schema } from "effect"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
@@ -49,7 +49,7 @@ const progress = (id: string, data: ToolProgressData) => {
   return treeEvent("raw-root-run", event)
 }
 
-const decodeCellEvent = Schema.decodeUnknownSync(TenetCell.CellEvent)
+const decodeCellEvent = Schema.decodeUnknownSync(GeneralistCell.CellEvent)
 
 const completed = (id: string, code: string, result: ToolResult, isFailure: boolean) => {
   const event: RunEventInput<"ToolExecutionCompleted"> = {
@@ -70,7 +70,7 @@ const completed = (id: string, code: string, result: ToolResult, isFailure: bool
   return treeEvent("raw-root-run", event)
 }
 
-describe("TenetKit cell projection", () => {
+describe("Generalist cell projection", () => {
   it("opens a running cell with visual and the complete call source", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-cell-open", "run a cell")
@@ -198,8 +198,8 @@ describe("TenetKit cell projection", () => {
         completed(
           "cell-4",
           "throw new Error('boom')",
-          TenetCell.CellExecutionFailed.make({
-            _tag: "tenetkit/repl/CellExecutionFailed",
+          GeneralistCell.CellExecutionFailed.make({
+            _tag: "generalist/repl/CellExecutionFailed",
             cellId: "cell-4",
             epoch: 1,
             sequence: 3,
@@ -233,7 +233,7 @@ describe("TenetKit cell projection", () => {
         "cell-5",
         "await rika.workspace.write({ path: 'a', content: 'b' })",
         {
-          _tag: "tenetkit/repl/CellOutcomeUnknown",
+          _tag: "generalist/repl/CellOutcomeUnknown",
           sessionId: "session",
           cellId: "cell-5",
           epoch: 0,
@@ -260,7 +260,7 @@ describe("TenetKit cell projection", () => {
         "cell-6",
         "1 + 1",
         {
-          _tag: "tenetkit/repl/KernelUnavailable",
+          _tag: "generalist/repl/KernelUnavailable",
           sessionId: "session",
           reason: "start-failed",
           message: "no worker",

@@ -26,7 +26,7 @@
     "@rika/extensions": "workspace:*",
     "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
-    "tenetkit": "catalog:",
+    "generalist": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

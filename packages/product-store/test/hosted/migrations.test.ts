@@ -60,7 +60,7 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0027_executor_recovery_authority",
       "product/0028_tool_policy_decision_identity",
       "product/0029_command_application_and_prompt_cancellation",
-      "product/0030_tenetkit_recovery_authority",
+      "product/0030_runtime_recovery_authority",
       "product/0031_transactional_thread_notifications",
       "product/0032_terminalize_unrecoverable_turns",
       "product/0033_transcript_projection_notifications",

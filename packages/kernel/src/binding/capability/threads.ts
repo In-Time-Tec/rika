@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostModules } from "tenetkit/repl"
+import type { HostBindings } from "generalist/repl"
 import { ThreadContract } from "@rika/coding-tools/thread-tool-contract"
 import * as ThreadQuery from "@rika/product/thread-query-service"
 import * as ThreadToolAction from "@rika/product/thread-tool-action"
@@ -57,7 +57,7 @@ const selector = (selection: typeof ThreadContract.ReadThreadInput.Type.selectio
   return value
 }
 
-export const make = (workspace: string): HostModules.Module<ThreadQuery.Factory> => {
+export const make = (workspace: string): HostBindings.Module<ThreadQuery.Factory> => {
   const query = Effect.flatMap(ThreadQuery.Factory, (factory) => factory.forWorkspace(workspace))
   return {
     name,

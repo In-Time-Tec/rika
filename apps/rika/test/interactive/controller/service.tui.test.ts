@@ -66,7 +66,7 @@ test(
   tuiTestTimeout,
 )
 
-// Rika provides no Approvals service, so TenetKit approves every declared capability without asking
+// Rika provides no Approvals service, so Generalist approves every declared capability without asking
 // and no authorization can reach the transcript. See docs/tradeoffs/declared-capabilities-that-do-not-act.md;
 // this describes the behaviour that lane would have and runs when it is connected.
 test.fails(

@@ -325,7 +325,7 @@ describe("tentative model preview overlay", () => {
     expect(assistantText(state)).toBe("new fence")
   })
 
-  it("renders a committed assistant message once after TenetKit discards the frame on commit", () => {
+  it("renders a committed assistant message once after Generalist discards the frame on commit", () => {
     const text = "Breakage began at 2b8aabb."
     let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
     expect(assistantText(state)).toBe(text)

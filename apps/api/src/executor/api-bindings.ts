@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import type * as PgClient from "@effect/sql-pg/PgClient"
-import { Store } from "tenetkit/agent-guidance"
+import { Store } from "generalist/instructions"
 import * as ArtifactStore from "@rika/kernel/artifact-store"
 import * as HarnessStoreLocations from "@rika/kernel/harness-store-locations"
 import * as GoalService from "@rika/product/goal-service"

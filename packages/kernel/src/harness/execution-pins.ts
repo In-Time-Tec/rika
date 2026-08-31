@@ -1,10 +1,10 @@
-import { Pins, type AgentManifest } from "tenetkit"
-import { Snapshot, State } from "tenetkit/agent-guidance"
+import { Pins, type AgentManifest } from "generalist"
+import { Snapshot, State } from "generalist/instructions"
 import { Schema } from "effect"
 
 /**
  * One registration record a durable host must supply for every Execution of the manifest that pins
- * it. This mirrors TenetKit's `ExecutableRegistration` shape without importing the runtime: the kernel
+ * it. This mirrors Generalist's `ExecutableRegistration` shape without importing the runtime: the kernel
  * describes what must be registered, and the execution adapter records it.
  */
 export interface Registration {
@@ -84,8 +84,6 @@ export const harness = (state: State.GuidanceState): Pinned => {
   }
   return {
     capabilities: [capability],
-    // Clean break: only the released Agent Guidance codec is admitted. Registrations persisted with
-    // `tenetkit/harness/snapshot` deliberately fail pin validation instead of being aliased forward.
     registrations: [{ pin: capability.pin, codec: Snapshot.codec, version: Snapshot.version, payload }],
   }
 }

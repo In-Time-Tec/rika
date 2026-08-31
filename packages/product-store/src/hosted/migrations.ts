@@ -151,9 +151,9 @@ export const migrations: ReadonlyArray<Migration> = [
     url: new URL("../../migrations/postgres/0029-command-application-and-prompt-cancellation.sql", import.meta.url),
   },
   {
-    id: "product/0030_tenetkit_recovery_authority",
+    id: "product/0030_runtime_recovery_authority",
     checksum: "3417c332907c9ac4a137168559b1e93a4839d023fcb2b106771fc24e793d6895",
-    url: new URL("../../migrations/postgres/0030-tenetkit-recovery-authority.sql", import.meta.url),
+    url: new URL("../../migrations/postgres/0030-runtime-recovery-authority.sql", import.meta.url),
   },
   {
     id: "product/0031_transactional_thread_notifications",

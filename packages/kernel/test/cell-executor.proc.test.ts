@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { HostModules } from "tenetkit/repl"
+import { HostBindings } from "generalist/repl"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect"
 import { CellExecutor, layer } from "../src/cell-executor"
 
@@ -18,10 +18,10 @@ const withExecutor = <A, E, R>(use: (executor: CellExecutor["Service"]) => Effec
             runtimeVersion: process.versions.bun,
             trustMode: "trusted-local",
             servers: [],
-            registry: HostModules.layerTest({
+            registry: HostBindings.layerTest({
               descriptors: [],
-              resolve: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
-              invoke: (request) => Effect.fail(HostModules.HostModuleNotFound.make({ module: request.module })),
+              resolve: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
+              invoke: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
             }),
           }).pipe(Layer.provide(BunServices.layer)),
         )
@@ -57,9 +57,9 @@ describe("hosted cell executor", () => {
           code: "throw new Error('boom')",
         })
         expect(failure._tag).toBe("DomainFailure")
-        if (failure._tag === "DomainFailure") expect(failure.failure._tag).toBe("tenetkit/repl/CellExecutionFailed")
+        if (failure._tag === "DomainFailure") expect(failure.failure._tag).toBe("generalist/repl/CellExecutionFailed")
 
-        expect(failure._tag === "DomainFailure" && failure.failure._tag).toBe("tenetkit/repl/CellExecutionFailed")
+        expect(failure._tag === "DomainFailure" && failure.failure._tag).toBe("generalist/repl/CellExecutionFailed")
 
         const started = yield* Deferred.make<void>()
         const running = yield* Effect.forkChild(

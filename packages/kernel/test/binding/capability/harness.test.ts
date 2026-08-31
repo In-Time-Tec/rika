@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { NestedOperation } from "tenetkit"
+import { NestedOperation } from "generalist"
 import { Context, Effect, Schema } from "effect"
-import { State, Store } from "tenetkit/agent-guidance"
+import { State, Store } from "generalist/instructions"
 import * as HarnessBinding from "@rika/kernel/harness-binding"
 import { journal, mountModules } from "../../support/binding"
 
@@ -59,7 +59,7 @@ describe("harness binding", () => {
     }),
   )
 
-  it.effect("rejects a mutation that omits baseSnapshot, which TenetKit types as optional", () =>
+  it.effect("rejects a mutation that omits baseSnapshot, which Generalist types as optional", () =>
     Effect.gen(function* () {
       const mounted = yield* registry()
       const failure = yield* Effect.flip(
@@ -69,7 +69,7 @@ describe("harness binding", () => {
           input: { id: "note", title: "t", content: "c" },
         }),
       )
-      expect(failure._tag).toBe("tenetkit/repl/HostModuleSchemaFailure")
+      expect(failure._tag).toBe("generalist/repl/HostModuleSchemaFailure")
     }),
   )
 

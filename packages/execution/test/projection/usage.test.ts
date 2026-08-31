@@ -1,4 +1,4 @@
-import { RunEvent, RunTree } from "tenetkit/runtime"
+import { RunEvent, RunTree } from "generalist/runtime"
 import { DateTime } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import { TreeProjector } from "../../src/projection/tree/projector"
@@ -50,7 +50,7 @@ const treeEvent = (
 
 const occurredAt = (millis: number): string => DateTime.formatIso(DateTime.makeUnsafe(millis))
 
-describe("TenetKit tree projector usage accounting", () => {
+describe("Generalist tree projector usage accounting", () => {
   it("keeps hidden title usage without exposing its transcript", () => {
     position = 0
     const projector = TreeProjector.make("turn-title", "title me")

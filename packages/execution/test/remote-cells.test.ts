@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ToolContext, ToolExecutor } from "tenetkit"
-import { CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
+import { ToolContext, ToolExecutor } from "generalist"
+import { CellTool, KernelProfile, TestKernel } from "generalist/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer } from "effect"
 import { Response } from "effect/unstable/ai"
@@ -13,7 +13,7 @@ const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 const executionIdentity = { threadId: "thread-1", turnId: "turn-1" } as const
 
 const profile = KernelProfile.make({
-  provider: "tenetkit/repl/bun",
+  provider: "generalist/repl/bun",
   runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
   image: { kind: "runtime", reference: `bun@${kernel.runtimeVersion}`, digest: "runtime-digest" },
   isolation: "host-process",
@@ -49,7 +49,7 @@ const result = (cellId: string, value = "2") => ({
   durationMillis: 1,
 })
 
-/** The per-call context TenetKit installs around one tool execution, with the fiber's own signal. */
+/** The per-call context Generalist installs around one tool execution, with the fiber's own signal. */
 const cellContext = (sessionId: string) =>
   Effect.map(
     Effect.abortSignal,
@@ -277,7 +277,7 @@ it.effect("reports a remote success or domain failure that won the cancellation 
   Effect.gen(function* () {
     const completed = result("operation-terminal", "finished")
     const failed = {
-      _tag: "tenetkit/repl/CellExecutionFailed" as const,
+      _tag: "generalist/repl/CellExecutionFailed" as const,
       cellId: "call-1",
       epoch: 0,
       sequence: 1,
@@ -331,9 +331,9 @@ it.effect("reports a remote success or domain failure that won the cancellation 
       _tag: "AlreadyTerminal",
       outcome: {
         _tag: "DomainFailure",
-        failure: { _tag: "tenetkit/repl/CellExecutionFailed", message: "execution completed with a failure" },
+        failure: { _tag: "generalist/repl/CellExecutionFailed", message: "execution completed with a failure" },
         encodedFailure: {
-          _tag: "tenetkit/repl/CellExecutionFailed",
+          _tag: "generalist/repl/CellExecutionFailed",
           message: "execution completed with a failure",
         },
       },
@@ -341,7 +341,7 @@ it.effect("reports a remote success or domain failure that won the cancellation 
   }).pipe(Effect.scoped),
 )
 
-it.effect("keeps an unknown cancellation outcome pending for TenetKit recovery", () =>
+it.effect("keeps an unknown cancellation outcome pending for Generalist recovery", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
@@ -377,7 +377,7 @@ it.effect("keeps an unknown cancellation outcome pending for TenetKit recovery",
       }).pipe(Effect.provideServiceEffect(ToolContext.ToolContext, cellContext("session-unknown-cancel"))),
     )
     expect(failure).toMatchObject({
-      _tag: "@tenetkit/core/CancellationFailure",
+      _tag: "generalist/core/CancellationFailure",
       tool: CellTool.name,
       message: "cancellation delivery is not definitive",
     })

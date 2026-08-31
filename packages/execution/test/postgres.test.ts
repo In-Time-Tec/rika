@@ -3,8 +3,8 @@ import "./support/root-fragments/postgres-inspection.fixture"
 import { expect, it } from "@effect/vitest"
 import { Context, DateTime, Deferred, Effect, Exit, Layer, Logger, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { Address, ExecutableManifest, Message, RunExecutor, RunStore, TreePolicy } from "tenetkit/runtime"
-import { RunClaims, RuntimeWorker, type RunClaimsService } from "tenetkit/runtime/sql-driver"
+import { Address, ExecutableManifest, Message, RunExecutor, RunStore, TreePolicy } from "generalist/runtime"
+import { RunClaims, RuntimeWorker } from "generalist/runtime/sql-driver"
 import { Prompt } from "effect/unstable/ai"
 import * as Postgres from "../src/postgres"
 
@@ -17,8 +17,8 @@ const worker = {
 } as const
 
 const options = {
-  url: "postgresql://runtime.invalid/tenetkit",
-  source: "rika-tenetkit",
+  url: "postgresql://runtime.invalid/generalist",
+  source: "rika-generalist",
   maxConnections: 10,
   worker,
 } as const
@@ -81,7 +81,7 @@ it.effect("rejects missing identities and non-positive PostgreSQL worker bounds 
 )
 
 const workerDependencies = (
-  claims: RunClaimsService,
+  claims: RunClaims["Service"],
   runExecutor: RunExecutor.Service = {
     execute: () => Effect.void,
     interrupt: () => Effect.void,
@@ -90,10 +90,10 @@ const workerDependencies = (
   Layer.mergeAll(
     Layer.succeed(RunClaims, RunClaims.of(claims)),
     Layer.succeed(RunExecutor.RunExecutor, RunExecutor.RunExecutor.of(runExecutor)),
-    RunStore.layerMemory({ addresses: [], resolver: { resolve: () => Effect.die("unused") } }),
+    RunStore.layerMemory({ addresses: [] }),
   )
 
-const claims = (claimReadyRuns: RunClaimsService["claimReadyRuns"]): RunClaimsService => ({
+const claims = (claimReadyRuns: RunClaims["Service"]["claimReadyRuns"]): RunClaims["Service"] => ({
   changes: Stream.concat(Stream.succeed(undefined), Stream.never),
   claimReadyRuns,
   refreshLease: () => Effect.succeed(true),
@@ -141,7 +141,7 @@ it.effect("interrupts an active claim and clears its status when the worker scop
     const interrupted = yield* Deferred.make<void>()
     const claimed = yield* Ref.make(false)
     const executable = ExecutableManifest.makeTest("scope-close", "1")
-    const claim: Effect.Success<ReturnType<RunClaimsService["claimReadyRuns"]>>[number] = {
+    const claim: Effect.Success<ReturnType<RunClaims["Service"]["claimReadyRuns"]>>[number] = {
       run: {
         runId: "run-active-scope-close",
         status: "running",

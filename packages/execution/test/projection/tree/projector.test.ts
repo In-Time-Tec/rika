@@ -1,7 +1,7 @@
 import "./projector-checkpoint.fixture"
 import "./projector-indexed-recovery.fixture"
 import { describe, expect, it } from "@effect/vitest"
-import { RunEvent } from "tenetkit/runtime"
+import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Effect, Schema } from "effect"
@@ -23,7 +23,7 @@ type RunEventInput = {
 }[RunEvent.RunEvent["_tag"]]
 const runEvent = (event: RunEventInput): RunEventInput => event
 
-describe("TenetKit tree projector", () => {
+describe("Generalist tree projector", () => {
   it("preserves a multi-chunk user prompt exactly across restart", () => {
     resetEventPosition()
     const prompt = "user-".repeat(5_000)

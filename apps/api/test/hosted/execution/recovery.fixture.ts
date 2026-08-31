@@ -4,7 +4,7 @@ import * as ExecutionPostgres from "@rika/execution/postgres"
 import { FileSystem, Config, Effect, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { Pool } from "pg"
-import { Address, ExecutableManifest, Message } from "tenetkit/runtime"
+import { Address, ExecutableManifest, Message } from "generalist/runtime"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const principal = { userId: "recovery-user", deviceId: "recovery-device", clientId: "recovery-client" }

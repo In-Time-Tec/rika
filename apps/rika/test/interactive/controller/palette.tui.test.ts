@@ -11,7 +11,7 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         // Two spawns of one profile from one cell share an admission key, so only the ordinal tells
-        // them apart. Without it TenetKit reads the second as a repeat of the first and one child runs.
+        // them apart. Without it Generalist reads the second as a repeat of the first and one child runs.
         const app = yield* TuiApp.tuiApp({
           lanes: [
             {

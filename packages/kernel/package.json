@@ -34,7 +34,7 @@
     "./test-cell-authority": "./test/support/cell-authority.ts"
   },
   "dependencies": {
-    "tenetkit": "catalog:",
+    "generalist": "catalog:",
     "@rika/coding-tools": "workspace:*",
     "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",

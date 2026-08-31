@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { ToolContext, ToolExecutor } from "tenetkit"
-import { Cell, CellTool, KernelProfile, TestKernel } from "tenetkit/repl"
+import { ToolContext, ToolExecutor } from "generalist"
+import { Cell, CellTool, KernelProfile, TestKernel } from "generalist/repl"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Response } from "effect/unstable/ai"
@@ -13,7 +13,7 @@ const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
 const executionIdentity = { threadId: "thread-1", turnId: "turn-1" } as const
 
 const profile = KernelProfile.make({
-  provider: "tenetkit/repl/bun",
+  provider: "generalist/repl/bun",
   runtime: { name: "bun", version: kernel.runtimeVersion, digest: "runtime-digest" },
   image: { kind: "runtime", reference: `bun@${kernel.runtimeVersion}`, digest: "runtime-digest" },
   isolation: "host-process",
@@ -101,13 +101,13 @@ it.effect("reconstructs the exact durable tool outcome from a retained remote co
     ).toMatchObject({
       _tag: "DomainFailure",
       failure: {
-        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        _tag: "generalist/repl/CellOutcomeUnknown",
         sessionId: "session-recovery",
         cellId: "call-recovery",
         reason: "transport-lost",
       },
       encodedFailure: {
-        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        _tag: "generalist/repl/CellOutcomeUnknown",
         sessionId: "session-recovery",
         cellId: "call-recovery",
         reason: "transport-lost",
@@ -116,7 +116,7 @@ it.effect("reconstructs the exact durable tool outcome from a retained remote co
   }),
 )
 
-it.effect("decodes an encoded remote cell failure before returning it to TenetKit", () =>
+it.effect("decodes an encoded remote cell failure before returning it to Generalist", () =>
   Effect.gen(function* () {
     const configured = yield* configure({
       executionRoute: testExecutionRoute(),
@@ -130,7 +130,7 @@ it.effect("decodes an encoded remote cell failure before returning it to TenetKi
             Effect.succeed({
               _tag: "DomainFailure",
               failure: {
-                _tag: "tenetkit/repl/CellExecutionFailed",
+                _tag: "generalist/repl/CellExecutionFailed",
                 cellId: "call-session-failed",
                 epoch: 0,
                 sequence: 1,
@@ -158,7 +158,7 @@ it.effect("decodes an encoded remote cell failure before returning it to TenetKi
     expect(outcome).toMatchObject({
       _tag: "DomainFailure",
       failure: {
-        _tag: "tenetkit/repl/CellExecutionFailed",
+        _tag: "generalist/repl/CellExecutionFailed",
         message: "The requested operation failed",
       },
     })
@@ -196,7 +196,7 @@ it.effect("turns a remote transport loss into a model-visible uncertain cell out
     expect(outcome).toMatchObject({
       _tag: "DomainFailure",
       failure: {
-        _tag: "tenetkit/repl/CellOutcomeUnknown",
+        _tag: "generalist/repl/CellOutcomeUnknown",
         sessionId: "session-lost",
         cellId: "call-session-lost",
         reason: "transport-lost",
@@ -226,8 +226,8 @@ it.effect("rejects an invalid remote cell response at the schema boundary", () =
     const failure = yield* Effect.flip(
       withCellAuthority(executor.execute(request("1", "session-invalid")), "session-invalid"),
     )
-    expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
-    if (failure._tag === "tenetkit/core/FrameworkFailure") {
+    expect(failure._tag).toBe("generalist/core/FrameworkFailure")
+    if (failure._tag === "generalist/core/FrameworkFailure") {
       expect(failure.stage).toBe("placement")
       expect(failure.message).toContain("remote cell response is invalid")
     }
@@ -260,7 +260,7 @@ it.effect("does not blindly retry a remote cell whose outcome is unknown", () =>
       withCellAuthority(executor.execute(request("1 + 1", "session-unknown")), "session-unknown"),
     )
     expect(failure).toMatchObject({
-      _tag: "tenetkit/core/FrameworkFailure",
+      _tag: "generalist/core/FrameworkFailure",
       message: "dispatch acknowledgement was lost",
     })
     expect(dispatched).toHaveLength(1)
@@ -340,8 +340,8 @@ it.effect("refuses any tool name other than the one advertised cell tool", () =>
         "session-a",
       ),
     )
-    expect(failure._tag).toBe("tenetkit/core/FrameworkFailure")
-    if (failure._tag === "tenetkit/core/FrameworkFailure") expect(failure.tool).toBe("bash")
+    expect(failure._tag).toBe("generalist/core/FrameworkFailure")
+    if (failure._tag === "generalist/core/FrameworkFailure") expect(failure.tool).toBe("bash")
   }).pipe(Effect.scoped),
 )
 
@@ -387,13 +387,13 @@ it.effect("names an async deadline and keeps the next cell healthy", () =>
     expect(failed).toMatchObject({
       _tag: "DomainFailure",
       failure: {
-        _tag: "tenetkit/repl/CellExecutionFailed",
+        _tag: "generalist/repl/CellExecutionFailed",
         name: "CellDeadlineExceeded",
       },
     })
     if (failed._tag === "DomainFailure") {
       const failure = Schema.decodeUnknownOption(Cell.CellFailure)(failed.failure)
-      if (Option.isSome(failure) && failure.value._tag === "tenetkit/repl/CellExecutionFailed") {
+      if (Option.isSome(failure) && failure.value._tag === "generalist/repl/CellExecutionFailed") {
         expect(failure.value.message).toContain("cell exceeded the 120s deadline")
         expect(failure.value.message).toContain("rika.processes.start")
       }

@@ -1,19 +1,19 @@
 import type { Block } from "@rika/product/execution-transcript-contract"
-import { Cell as TenetCell } from "tenetkit/repl"
-import type { RunEvent } from "tenetkit/runtime"
+import { Cell as GeneralistCell } from "generalist/repl"
+import type { RunEvent } from "generalist/runtime"
 import { Option, Schema } from "effect"
 
 type Cell = Extract<Block, { readonly _tag: "Cell" }>
 export type CellNotice = Cell["notices"][number]
 type ToolProgressData = Extract<RunEvent.RunEvent, { readonly _tag: "ToolProgress" }>["data"]
 
-export const cellExecutionFailedTag = "tenetkit/repl/CellExecutionFailed"
-export const kernelUnavailableTag = "tenetkit/repl/KernelUnavailable"
-export const kernelProtocolViolationTag = "tenetkit/repl/KernelProtocolViolation"
-export const cellOutcomeUnknownTag = "tenetkit/repl/CellOutcomeUnknown"
+export const cellExecutionFailedTag = "generalist/repl/CellExecutionFailed"
+export const kernelUnavailableTag = "generalist/repl/KernelUnavailable"
+export const kernelProtocolViolationTag = "generalist/repl/KernelProtocolViolation"
+export const cellOutcomeUnknownTag = "generalist/repl/CellOutcomeUnknown"
 
 export const eventNotice = (data: ToolProgressData): CellNotice | undefined => {
-  const decoded = Schema.decodeUnknownOption(TenetCell.CellEvent)(data)
+  const decoded = Schema.decodeUnknownOption(GeneralistCell.CellEvent)(data)
   if (Option.isNone(decoded)) return undefined
   const event = decoded.value
   switch (event._tag) {
@@ -46,7 +46,7 @@ export const eventNotice = (data: ToolProgressData): CellNotice | undefined => {
 export const restartNotification = (
   data: ToolProgressData,
 ): { readonly title: string; readonly detail: string } | undefined => {
-  const decoded = Schema.decodeUnknownOption(TenetCell.KernelRestarted)(data)
+  const decoded = Schema.decodeUnknownOption(GeneralistCell.KernelRestarted)(data)
   return Option.isSome(decoded)
     ? {
         title: "Kernel restarted",

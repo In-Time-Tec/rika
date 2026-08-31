@@ -1,5 +1,5 @@
 import { Option, Schema, SchemaAST } from "effect"
-import type { HostModules } from "tenetkit/repl"
+import type { HostBindings } from "generalist/repl"
 import type { BindingRequirements } from "./requirements"
 
 /**
@@ -92,7 +92,7 @@ const objectDescription = (fields: ReadonlyArray<SchemaAST.PropertySignature> | 
   return `{ ${named.join(", ")} }`
 }
 
-export const surfaceOf = (modules: ReadonlyArray<HostModules.Module<BindingRequirements>>): string =>
+export const surfaceOf = (modules: ReadonlyArray<HostBindings.Module<BindingRequirements>>): string =>
   modules
     .map((module) => {
       const operations = module.operations
@@ -144,7 +144,7 @@ export const surfaceOf = (modules: ReadonlyArray<HostModules.Module<BindingRequi
  * them as a tool name — and the only tool that exists is the cell.
  */
 export interface CellInstructionFacts {
-  readonly modules: ReadonlyArray<HostModules.Module<BindingRequirements>>
+  readonly modules: ReadonlyArray<HostBindings.Module<BindingRequirements>>
   readonly workspace: string
   readonly workspaceState?: "empty" | "not empty"
   readonly cellDeadlineMillis: number

@@ -1,4 +1,4 @@
-import type { RunEvent, RunTree, Runtime } from "tenetkit/runtime"
+import type { RunEvent, RunTree, Runtime } from "generalist/runtime"
 import { Effect, Function } from "effect"
 
 type ModelResponseEvent = Extract<

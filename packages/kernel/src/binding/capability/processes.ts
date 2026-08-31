@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { HostModules } from "tenetkit/repl"
+import type { HostBindings } from "generalist/repl"
 import * as Bash from "@rika/coding-tools/bash-tool"
 import * as CodingToolResult from "@rika/coding-tools/coding-tool-result"
 import * as CodingToolRuntime from "@rika/coding-tools/coding-tool-runtime"
@@ -80,7 +80,7 @@ const stopFailure = (processId: string) =>
   })
 
 export const operations: ReadonlyArray<
-  HostModules.AnyOperation<CodingToolRuntime.Service | ShellProcessRegistry.Service | Requirements>
+  HostBindings.AnyOperation<CodingToolRuntime.Service | ShellProcessRegistry.Service | Requirements>
 > = [
   operation({
     name: "start",
@@ -123,7 +123,7 @@ export const operations: ReadonlyArray<
   }),
 ]
 
-export const module: HostModules.Module<CodingToolRuntime.Service | ShellProcessRegistry.Service | Requirements> = {
+export const module: HostBindings.Module<CodingToolRuntime.Service | ShellProcessRegistry.Service | Requirements> = {
   name,
   operations,
 }

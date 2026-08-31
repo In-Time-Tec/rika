@@ -1,4 +1,4 @@
-import { KernelStateStore, type KernelPool } from "tenetkit/repl"
+import { KernelSnapshotStore, type KernelPool } from "generalist/repl"
 import type { Options } from "./kernel-options.fixture"
 import { discoverServers, discoverSkills, harnessStoreLayer, workspaceDigest } from "./kernel.harness"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -41,7 +41,7 @@ const staticBindingServices = (options: Options) => {
 export const layer = (
   options: Options,
 ): Layer.Layer<
-  KernelPool.KernelPool | KernelStateStore.KernelStateStore | ExecutorRuntime.CellContext,
+  KernelPool.KernelPool | KernelSnapshotStore.KernelSnapshotStore | ExecutorRuntime.CellContext,
   never,
   ChildProcessSpawner.ChildProcessSpawner
 > =>

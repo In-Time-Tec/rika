@@ -265,7 +265,7 @@ it.effect("falls back to the persisted running status when the backend run is un
   }),
 )
 
-it.effect("does not authorize a terminal result when TenetKit inspection is unavailable", () =>
+it.effect("does not authorize a terminal result when Generalist inspection is unavailable", () =>
   Effect.gen(function* () {
     const completedTurn = { ...turn, status: "completed" as const }
     const projection: Projection = {
@@ -301,7 +301,7 @@ it.effect("does not authorize a terminal result when TenetKit inspection is unav
   }),
 )
 
-it.effect("withholds an emitted terminal projection until matching TenetKit inspection succeeds", () =>
+it.effect("withholds an emitted terminal projection until matching Generalist inspection succeeds", () =>
   Effect.gen(function* () {
     const completed: ExecutionProjection.Change = {
       _tag: "ProjectionSnapshot",

@@ -48,8 +48,8 @@ const modelFailureMessages = {
 } satisfies Readonly<Record<ModelFailureCategory, string>>
 
 /**
- * Present a TenetKit model-call failure from its structured category and
- * classification. `transient` means TenetKit retried and the same call could
+ * Present a Generalist model-call failure from its structured category and
+ * classification. `transient` means Generalist retried and the same call could
  * succeed later; `terminal` means an identical attempt fails identically.
  */
 export const modelFailurePresentation = (input: {

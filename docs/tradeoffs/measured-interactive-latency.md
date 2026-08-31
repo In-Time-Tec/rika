@@ -24,7 +24,7 @@ measured again rather than inferred from these values.
 | `connection_ready`         | The authenticated hosted session reports connected and the selected local Runner reports ready.                       |
 | Optimistic queue row       | The local reducer inserted the submitted prompt on the next render. It is not durable admission.                      |
 | Durable queue admission    | The API accepted and persisted the command and returned its durable identity.                                         |
-| Execution/model completion | TenetKit ran the turn and the selected provider finished. Provider time remains visible.                              |
+| Execution/model completion | Generalist ran the turn and the selected provider finished. Provider time remains visible.                            |
 
 Rika diagnostics emit `process_start`, `first_draw`, and `connection_ready` in
 `client.performance.jsonl`. The API emits command receipt, enqueue, claim, turn start,
@@ -173,7 +173,7 @@ The record is `.amp/in/artifacts/glm-5.3-flash/packaged-final-glm-full-1.json`.
 Across repeated GLM 5.3 Flash samples, prompt completion tails included approximately 1.883 s,
 5.521 s, 7.155 s, 14.896 s, 20.372 s, 25.271 s, and one run beyond a 45-second test deadline.
 In the same controlled flows, durable queue waits were generally 77-108 ms and ordinary kernel
-tool cells 113-168 ms. The multi-second variance begins after durable claim and TenetKit
+tool cells 113-168 ms. The multi-second variance begins after durable claim and Generalist
 execution start, so it belongs to the OpenRouter/model boundary rather than a hidden client queue
 or kernel sleep. Rika preserves that time instead of manufacturing an early success state or
 speculatively duplicating model/tool work.
@@ -182,8 +182,8 @@ speculatively duplicating model/tool work.
 
 The reported `host-terminated` / `Cell operation deadline exceeded` failures were not a short
 client timeout. The live checkout was simultaneously owned by the current 0.11.6 TUI and a
-headless 0.11.2 Runner that had remained alive across the TenetKit 0.44 and Effect rc112 clean
-break. Its receipt store contained 25 cells: seven had reached the 120-second operation deadline,
+headless 0.11.2 Runner that had remained alive across an incompatible runtime upgrade. Its receipt
+store contained 25 cells: seven had reached the 120-second operation deadline,
 and one was still running with an accepted/started receipt but no terminal frame. A later snapshot
 contained 27 completed cells: nine deadline failures, 17 successes, and one ordinary command
 failure. The old process also showed repeated reconnect cycles. The 120-second default was already
@@ -301,7 +301,7 @@ experiment, real Thread identifiers, timestamps, and blocker are in
 - In-process command creation directly wakes the worker; the poll remains a recovery mechanism.
 - ACK avoids a redundant replay query.
 - Reconnect redelivery stays idempotent, and one process does not start duplicate Runners.
-- TenetKit 0.44 remains the sole execution authority on Effect rc112 public APIs.
+- Generalist 0.45 remains the sole execution authority on Effect rc112 public APIs.
 
 ## Complexity deliberately rejected
 
@@ -324,7 +324,7 @@ experiment, real Thread identifiers, timestamps, and blocker are in
   replicas deliberately pointed at one benchmark database produced duplicate observer work, but
   PostgreSQL revision checks preserved the winning projection. A new lock/coordinator would add
   a failure mode without evidence of a correctness defect.
-- **Broad dependency upgrades without measured benefit.** TenetKit 0.44 is current. Newer FoldKit,
+- **Broad dependency upgrades without measured benefit.** Generalist 0.45 is current. Newer FoldKit,
   OpenTUI, or E2B versions require their own compatibility and product evidence instead of being
   mixed into this latency change. Registry versions checked for this decision are recorded in
   `.amp/in/artifacts/dependency-versions/verified-2026-08-31.json`.

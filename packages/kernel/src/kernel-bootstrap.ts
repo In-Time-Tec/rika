@@ -3,10 +3,10 @@ import { moduleNames } from "./binding/module-catalog"
 /**
  * The bootstrap cell source.
  *
- * TenetKit's registry mounts each module as its own flat kernel global; assembling them into one
+ * Generalist's registry mounts each module as its own flat kernel global; assembling them into one
  * ergonomic `rika` object is product vocabulary, not framework concern, so it lives here. The kernel
  * evaluates this on every worker start AFTER snapshot restore and BEFORE the model's first cell,
- * matching TenetKit's restore-then-rebootstrap-then-notify order. It is never snapshot-restored, so
+ * matching Generalist's restore-then-rebootstrap-then-notify order. It is never snapshot-restored, so
  * `rika` and `context` are always live bindings over the current worker.
  *
  * This source text is an input to `bindingsDigest`, so changing the surface changes the kernel

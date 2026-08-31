@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { RunEvent } from "tenetkit/runtime"
+import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import type { CheckpointInstrumentation } from "../../../src/projection/tree/projector-recovery"
 import { Response } from "effect/unstable/ai"
@@ -22,7 +22,7 @@ type RunEventInput = {
 }[RunEvent.RunEvent["_tag"]]
 const runEvent = (event: RunEventInput): RunEventInput => event
 
-describe("TenetKit tree projector indexed recovery", () => {
+describe("Generalist tree projector indexed recovery", () => {
   it("checkpoints indexed recovery without visiting settled history and restores the next patch exactly", () => {
     resetEventPosition()
     const visits = new Map<string, number>()

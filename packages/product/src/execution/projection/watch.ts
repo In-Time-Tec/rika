@@ -67,7 +67,7 @@ const reconcileTerminal = (
       last.checkpoint?.cursor !== inspection.cursor
     )
       return yield* TranscriptRepository.RepositoryError.make({
-        message: `Turn ${turnId} terminal projection does not match TenetKit inspection at ${inspection.cursor}`,
+        message: `Turn ${turnId} terminal projection does not match Generalist inspection at ${inspection.cursor}`,
       })
     yield* Effect.forEach(pending, commit, { discard: true })
     pending.length = 0
@@ -125,7 +125,7 @@ const runAttempt = (
     const stored = yield* transcripts.get(turnId)
     if (terminalInspection(inspection) && stored?.projectorCheckpoint?.cursor !== inspection.cursor)
       return yield* TranscriptRepository.RepositoryError.make({
-        message: `Turn ${turnId} projection cursor does not match terminal TenetKit inspection at ${inspection.cursor}`,
+        message: `Turn ${turnId} projection cursor does not match terminal Generalist inspection at ${inspection.cursor}`,
       })
     return { stored, inspection, hasUncommittedTerminal: pending.length > 0 }
   }).pipe(Effect.scoped)

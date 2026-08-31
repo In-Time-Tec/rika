@@ -1,6 +1,6 @@
 import { bigint, boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
-export const runs = pgTable("tenetkit_runs", {
+export const runs = pgTable("generalist_runs", {
   runId: text("run_id").primaryKey(),
   status: text().notNull(),
   address: text().notNull(),
@@ -35,7 +35,7 @@ export const runs = pgTable("tenetkit_runs", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 })
 
-export const runOperations = pgTable("tenetkit_run_operations", {
+export const runOperations = pgTable("generalist_run_operations", {
   runId: text("run_id").notNull(),
   operationId: text("operation_id").notNull(),
   operationKey: text("operation_key").notNull(),

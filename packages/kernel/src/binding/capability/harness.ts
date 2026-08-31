@@ -1,7 +1,7 @@
 import { DateTime, Effect, Result, Schema } from "effect"
-import { Authorship, Entry, Overview, Refinement, State, Store } from "tenetkit/agent-guidance"
-import { ToolContext } from "tenetkit"
-import type { HostModules } from "tenetkit/repl"
+import { Authorship, Entry, Overview, Refinement, State, Store } from "generalist/instructions"
+import { ToolContext } from "generalist"
+import type { HostBindings } from "generalist/repl"
 import * as ScopePolicy from "../../harness/scope-policy"
 import { nested, NestedOperationFailed, operation, type Requirements } from "../envelope"
 
@@ -98,7 +98,7 @@ export interface Options {
   readonly workspaceDigest: string
 }
 
-export const make = (options: Options): HostModules.Module<Store.Store | Requirements> => {
+export const make = (options: Options): HostBindings.Module<Store.Store | Requirements> => {
   const scopeOf = (scope: Scope | undefined) =>
     Effect.map(ToolContext.ToolContext, (context) =>
       ScopePolicy.scopeString(scope ?? "thread", {

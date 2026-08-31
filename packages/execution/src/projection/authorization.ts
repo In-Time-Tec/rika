@@ -1,5 +1,5 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import type { RunEvent } from "tenetkit/runtime"
+import type { RunEvent } from "generalist/runtime"
 import { Schema } from "effect"
 import type { Node } from "./model"
 import type { AuthorizationState, ProjectorCore } from "./persistence"

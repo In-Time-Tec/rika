@@ -1,11 +1,11 @@
-import { FileSystemStore, type Store } from "tenetkit/agent-guidance"
+import { FileSystemStore, type Store } from "generalist/instructions"
 import { globalDirectory, workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { FileSystem, Layer, Path as EffectPath } from "effect"
 import { scopeName } from "./scope-policy"
 
 /**
  * Where one harness scope's file lives. `@rika/extensions` cannot own this: the package boundary
- * forbids it importing `@rika/configuration` or `tenetkit/agent-guidance`, so the kernel owns the
+ * forbids it importing `@rika/configuration` or `generalist/instructions`, so the kernel owns the
  * location decision `FileSystemStore` delegates to its host.
  */
 export interface Roots {

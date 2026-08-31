@@ -1,5 +1,5 @@
 import { OpenAiClient as OpenAIClient, OpenAiSchema as OpenAISchema } from "@effect/ai-openai"
-import * as OpenAi from "tenetkit/ai/openai"
+import * as OpenAi from "generalist/ai/openai"
 import type * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Effect, Function, Layer, Redacted, Schema, Stream } from "effect"
@@ -148,7 +148,7 @@ const createResponse =
 const createEmbedding: OpenAIClient.Service["createEmbedding"] = () =>
   Effect.fail(accountError("createEmbedding", "The OpenAI account endpoint does not support embeddings"))
 
-/** The account transport remains a Rika provider concern because TenetKit 0.44 exposes no account model registration. */
+/** The account transport remains a Rika provider concern because Generalist 0.45 exposes no account model registration. */
 export const layerClient = (
   credentials: Credentials,
 ): Layer.Layer<OpenAIClient.OpenAiClient, never, HttpClient.HttpClient> =>
