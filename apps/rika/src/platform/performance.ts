@@ -37,9 +37,7 @@ export const clientRuntime = (input: {
   readonly sourceDirectory: string
 }): ClientRuntime => {
   const executable = input.packaged ? `${input.sourceDirectory}/rika` : input.executable
-  const evidencePath = input.packaged
-    ? `${input.sourceDirectory}/.rika-client-runtime`
-    : `${input.sourceDirectory}/client-main.ts`
+  const evidencePath = input.packaged ? executable : `${input.sourceDirectory}/client-main.ts`
   return {
     kind: input.packaged ? "packaged" : "source",
     executable,
@@ -55,7 +53,5 @@ const executableName = (command: string) => {
 
 export const matchesClientProcess = (input: { readonly command: string; readonly runtime: ClientRuntime }): boolean =>
   input.runtime.kind === "packaged"
-    ? [input.runtime.executable, input.runtime.evidencePath]
-        .map(executableName)
-        .includes(executableName(input.command))
+    ? executableName(input.runtime.executable) === executableName(input.command)
     : input.command.includes(input.runtime.evidencePath)

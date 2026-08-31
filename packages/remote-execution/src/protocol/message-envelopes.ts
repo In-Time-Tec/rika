@@ -1,4 +1,5 @@
 import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { WorkspaceRequest, WorkspaceResponse } from "@rika/product/workspace-capability"
 import { Schema } from "effect"
 import { SetupCacheKey } from "../workspace/artifact/archive"
@@ -53,7 +54,10 @@ import {
 
 export const RunnerMessage = Schema.Union([
   Schema.TaggedStruct("RunnerHello", { hello: RunnerHelloWire }),
-  Schema.TaggedStruct("ExecutorReconnect", { access: AccessWire }),
+  Schema.TaggedStruct("ExecutorReconnect", {
+    protocolVersion: Schema.Literal(runnerProtocolVersion),
+    access: AccessWire,
+  }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
   Schema.TaggedStruct("RunnerGoodbye", { access: AccessWire }),
   Schema.TaggedStruct("LocalCellResult", {

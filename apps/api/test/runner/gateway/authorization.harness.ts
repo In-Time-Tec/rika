@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
 import { cliRegistration, identityMember } from "@rika/identity"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import {
   rikaHostedClients,
   rikaHostedDevices,
@@ -40,7 +41,10 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* Effect.tryPromise(() =>
           databaseClient.delete(identityMember).where(eq(identityMember.id, "member-local-gateway")),
         )
@@ -84,7 +88,10 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
           }),
         ).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* Effect.yieldNow
         expect(yield* gateway.active(target)).toBe(true)
 
@@ -170,7 +177,10 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         expect(yield* gateway.execute(cellRequest("operation-environment-changed")).pipe(Effect.flip)).toMatchObject({
           kind: "fenced",
           message: "Runner fence is no longer current",
@@ -196,7 +206,10 @@ it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay"
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         target.failSend = true
         const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-personal")))
         yield* eventually(() =>
@@ -225,7 +238,10 @@ it.effect.skipIf(!live)(
           const gateway = yield* makeRunnerGateway(authority({ renewedLeaseEpoch: 2 })).pipe(Effect.provide(context))
           const target = socket()
           const renewed = { ...access, leaseEpoch: 2 }
-          yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access: renewed }))
+          yield* gateway.receive(
+            target,
+            encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access: renewed }),
+          )
           yield* persistTerminal(gateway, target, renewed, "operation-stale")
           expect(target.closed).toEqual([[1008, "fenced"]])
           expect(

@@ -15,7 +15,5 @@ ignores:
   - "**/dist/**"
   - "**/coverage/**"
   - "**/generated/**"
-  - "apps/rika/src/platform/client-entry-host.ts"
-  - "apps/rika/test/client-startup-preview.test.ts"
   - "node_modules/**"
   - "repos/**"

@@ -21,29 +21,29 @@ describe("performance process observation", () => {
   test("locates the packaged client executable", () => {
     const runtime = clientRuntime({
       packaged: true,
-      executable: "/install/bin/.rika-client-runtime",
+      executable: "/install/bin/rika",
       sourceDirectory: "/install/bin",
     })
     expect(runtime).toEqual({
       kind: "packaged",
       executable: "/install/bin/rika",
       arguments: [],
-      evidencePath: "/install/bin/.rika-client-runtime",
+      evidencePath: "/install/bin/rika",
     })
   })
 
   test("finds the packaged client in an ordinary process tree", () => {
     const runtime = clientRuntime({
       packaged: true,
-      executable: "/install/bin/.rika-client-runtime",
+      executable: "/install/bin/rika",
       sourceDirectory: "/install/bin",
     })
     const rows: ReadonlyArray<PsRow> = [
       { pid: 10, parent: 1, rss: 20_000, cpu: 0, cpuSeconds: 0, command: "/bin/sh" },
-      { pid: 11, parent: 10, rss: 200_000, cpu: 0, cpuSeconds: 0, command: "/install/bin/.rika-client-runtime" },
+      { pid: 11, parent: 10, rss: 200_000, cpu: 0, cpuSeconds: 0, command: "/install/bin/rika" },
     ]
     expect(matchesClientProcess({ command: "/install/bin/rika", runtime })).toBe(true)
-    expect(matchesClientProcess({ command: "/install/bin/.rika-client-runtime", runtime })).toBe(true)
+    expect(matchesClientProcess({ command: "/install/bin/.rika-kernel-runtime", runtime })).toBe(false)
     expect(observedClientRow(rows, 10, runtime)?.pid).toBe(11)
   })
 

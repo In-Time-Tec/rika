@@ -25,7 +25,8 @@ describe("install contract", () => {
     expect(installer).toContain("verify_archive_inventory")
     expect(installer).toContain('"${archive_root}/INSTALL"')
     for (const required of packageBinEntries) expect(installer).toContain('"${archive_root}/bin/' + required + '"')
-    for (const forbidden of [".rika-interactive", ".rika-performance"]) expect(installer).not.toContain(forbidden)
+    for (const forbidden of [".rika-client-runtime", ".rika-interactive", ".rika-performance"])
+      expect(installer).not.toContain(forbidden)
   })
 
   test("install.sh verifies a checksum before publishing the install", () => {
@@ -87,10 +88,9 @@ describe("install contract", () => {
     expect(manifest.bin.rika).toBe("bin/rika.js")
   })
 
-  test("platform npm packages carry the public executable and private kernel runtime", () => {
+  test("platform npm packages carry the public client and private kernel runtime", () => {
     expect(platformManifest("linux-x64", "1.2.3").files).toEqual([
       "bin/rika",
-      "bin/.rika-client-runtime",
       "bin/.rika-kernel-runtime",
       "bin/.rika-kernel-worker.js",
     ])

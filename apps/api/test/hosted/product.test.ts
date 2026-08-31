@@ -32,6 +32,7 @@ import {
   requireAdmitted,
   hostedProductFixture,
 } from "./product/fixture"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import "./product/admission.harness"
 import "./product/authorization.harness"
 import "./product/workspace.harness"
@@ -59,6 +60,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and TenetKit Run a
         principal: authenticated,
         checkoutFingerprint: fingerprint,
         registration: {
+          protocolVersion: runnerProtocolVersion,
           workspaceIdentity: WorkspaceId.make("atomic-run-workspace"),
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
           kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },

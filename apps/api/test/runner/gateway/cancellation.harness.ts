@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { rikaHostedExecutorOperations } from "@rika/product-store/database-schema"
 import * as HostedPostgres from "@rika/product-store/layer"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { NestedOperation, ToolContext } from "tenetkit"
 import { HostModules } from "tenetkit/repl"
@@ -42,7 +43,10 @@ it.effect.skipIf(!live)("settles active Local Runner machine work before accepti
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const running = yield* Effect.forkChild(gateway.execute(cellRequest(operationKey)))
         yield* eventually(() =>
           target.sent
@@ -227,7 +231,10 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const first = socket()
-        yield* gateway.receive(first, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          first,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const running = yield* Effect.forkChild(
           gateway.execute({ ...cellRequest(operationKey, deadlineAt), bindings: operationBindings }),
         )
@@ -246,7 +253,10 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
 
         yield* gateway.disconnected(first)
         const second = socket()
-        yield* gateway.receive(second, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          second,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         expect(
           second.sent.map((value) => decode(value)).filter((message) => message._tag === "MachineExecute"),
         ).toEqual([
@@ -307,7 +317,10 @@ it.effect.skipIf(!live)("bounds reconnected binding and machine work by the pare
 
         yield* gateway.disconnected(second)
         const third = socket()
-        yield* gateway.receive(third, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          third,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         expect(third.sent.map((value) => decode(value)).filter((message) => message._tag === "MachineExecute")).toEqual(
           [],
         )

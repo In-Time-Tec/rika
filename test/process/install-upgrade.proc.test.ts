@@ -70,11 +70,10 @@ const publish = Effect.fn("installUpgrade.publish")(function* (
       ),
     { concurrency: "unbounded", discard: true },
   )
-  yield* Effect.forEach(
-    packageExecutables,
-    (entry) => fileSystem.chmod(path.join(payload, "bin", entry), 0o755),
-    { concurrency: "unbounded", discard: true },
-  )
+  yield* Effect.forEach(packageExecutables, (entry) => fileSystem.chmod(path.join(payload, "bin", entry), 0o755), {
+    concurrency: "unbounded",
+    discard: true,
+  })
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = path.join(releases, archiveFile)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -120,6 +119,7 @@ const acceptance = Effect.gen(function* () {
 
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "stale interactive")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "stale performance")
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-client-runtime"), "stale client runtime")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-kernel-runtime"), "stale runtime")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-kernel-worker.js"), "stale worker")
   yield* publish(releases, "1.0.1", "second", false)
@@ -129,7 +129,7 @@ const acceptance = Effect.gen(function* () {
   expect(yield* fileSystem.readFileString(command)).toContain("# second")
   expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelRuntime))).toBe(`${kernelRuntime} second`)
   expect(yield* fileSystem.readFileString(path.join(installRoot, "bin", kernelWorker))).toBe(`${kernelWorker} second`)
-  for (const stale of [".rika-interactive", ".rika-performance", ".rika-server"]) {
+  for (const stale of [".rika-interactive", ".rika-performance", ".rika-client-runtime", ".rika-server"]) {
     expect(yield* fileSystem.exists(path.join(installRoot, "bin", stale))).toBe(false)
   }
   expect(yield* strays(path.dirname(installRoot))).toEqual([])

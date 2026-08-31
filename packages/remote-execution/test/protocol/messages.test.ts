@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Effect, Schema } from "effect"
 import {
   CellRequest,
@@ -206,19 +207,26 @@ describe("executor protocol v1", () => {
 
   it.effect("keeps local admission frames out of the E2B executor decoder", () =>
     Effect.gen(function* () {
+      const hello = {
+        protocolVersion: runnerProtocolVersion,
+        admissionId: "admission-1",
+        ticket: "one-use-ticket",
+        processIncarnation: "process-1",
+        capabilities: { cells: true, checkpoints: false, pty: false },
+        workspaceCapabilities,
+        cursors: { command: 0, event: 0, pty: 0 },
+      } as const
       const local = RunnerMessage.make({
         _tag: "RunnerHello",
-        hello: {
-          admissionId: "admission-1",
-          ticket: "one-use-ticket",
-          processIncarnation: "process-1",
-          capabilities: { cells: true, checkpoints: false, pty: false },
-          workspaceCapabilities,
-          cursors: { command: 0, event: 0, pty: 0 },
-        },
+        hello,
       })
       expect(yield* Schema.decodeEffect(RunnerMessage)(local)).toEqual(local)
       expect((yield* Effect.flip(Schema.decodeUnknownEffect(ExecutorMessage)(local))).issue).toBeDefined()
+      expect(
+        (yield* Effect.flip(
+          Schema.decodeUnknownEffect(RunnerMessage)({ ...local, hello: { ...hello, protocolVersion: undefined } }),
+        )).issue,
+      ).toBeDefined()
     }),
   )
 

@@ -6,6 +6,7 @@ import { generate, publicJwk, thumbprint } from "../../src/hosted/dpop"
 import { Http } from "../../src/hosted/contract"
 import { layer } from "../../src/hosted/http"
 import { WorkspaceId } from "@rika/product/hosted-model"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 
 const response = (
   request: HttpClientRequest.HttpClientRequest,
@@ -187,6 +188,7 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
         origin,
         "checkout-1",
         {
+          protocolVersion: runnerProtocolVersion,
           workspaceIdentity: WorkspaceId.make("workspace-1"),
           repository: { identity: "repository-1" },
           kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },

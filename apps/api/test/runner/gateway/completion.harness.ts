@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest"
 import { ControllerError } from "@rika/e2b-executor/controller"
 import { rikaHostedExecutorAssignments, rikaHostedExecutorOperations } from "@rika/product-store/database-schema"
 import * as HostedPostgres from "@rika/product-store/layer"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
 import { eq, sql } from "drizzle-orm"
 import { Effect, Fiber, Layer, Redacted } from "effect"
@@ -39,7 +40,10 @@ it.effect.skipIf(!live)("accepts a retained completion after reconnect renews th
         const gateway = yield* makeRunnerGateway(authority({ renewedLeaseEpoch: 2 })).pipe(Effect.provide(context))
         const target = socket()
         const renewed = { ...access, leaseEpoch: 2 }
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access: renewed }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access: renewed }),
+        )
         yield* persistTerminal(gateway, target, renewed, "operation-renewed")
         yield* gateway.receive(
           target,
@@ -71,7 +75,10 @@ it.effect.skipIf(!live)("rejects a conflicting completion after a durable result
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* persistTerminal(gateway, target, access, "operation-conflict")
         yield* gateway.receive(
           target,
@@ -168,7 +175,10 @@ it.effect.skipIf(!live)("publishes a durable terminal receipt after the assignme
         )
         const connected = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* connected.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* connected.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* persistTerminal(connected, target, access, operationKey)
         yield* Effect.tryPromise(() =>
           databaseClient
@@ -207,7 +217,10 @@ it.effect.skipIf(!live)("releases the assignment without inventing terminal work
           }),
         ).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* gateway.receive(target, encode({ _tag: "RunnerGoodbye", access }))
         expect(target.closed).toEqual([[1000, "shutdown"]])
         expect(
@@ -234,7 +247,10 @@ it.effect.skipIf(!live)("accepts a retained completion on the same gateway after
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const firstSocket = socket()
-        yield* gateway.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          firstSocket,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* gateway.disconnected(firstSocket)
         expect(
           yield* Effect.tryPromise(() =>
@@ -245,7 +261,10 @@ it.effect.skipIf(!live)("accepts a retained completion on the same gateway after
           ),
         ).toEqual([{ state: "dispatched" }])
         const secondSocket = socket()
-        yield* gateway.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          secondSocket,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* persistTerminal(gateway, secondSocket, access, "operation-live")
         yield* gateway.receive(
           secondSocket,
@@ -274,7 +293,10 @@ it.effect.skipIf(!live)("closes a local PTY frame as malformed", () =>
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* gateway.receive(
           target,
           '{"_tag":"PtyOpened","access":{"version":1,"fence":{"target":"runner","assignmentId":"assignment-local-gateway","assignmentGeneration":1,"instanceId":"11111111-1111-4111-8111-111111111111","executorId":"executor-local-gateway","processIncarnation":"process-local-gateway"},"leaseEpoch":1,"sessionToken":"session-local-gateway"},"pty":{"ptyId":"pty-1","command":"bash","cwd":"/tmp","cols":80,"rows":24}}',

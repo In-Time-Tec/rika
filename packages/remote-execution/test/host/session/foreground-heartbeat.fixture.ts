@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { foregroundRunnerLayer, runForegroundRunner } from "../../../src/host/session/foreground"
@@ -230,7 +231,7 @@ describe("foreground Runner", { concurrent: false }, () => {
             const connected = yield* eventually(() => FakeWebSocket.instances[3])
             expect(FakeWebSocket.instances).toHaveLength(4)
             const reconnect = yield* eventually(() => connected.messages("ExecutorReconnect")[0])
-            expect(reconnect).toEqual({ _tag: "ExecutorReconnect", access })
+            expect(reconnect).toEqual({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access })
             connected.message({
               _tag: "ExecutorReconnected",
               welcome: {

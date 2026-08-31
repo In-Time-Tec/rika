@@ -1,26 +1,30 @@
 # Measured interactive latency
 
-This note records the 2026-08-31 performance pass. It separates the first pixels a person
-sees from a usable client, a usable connection, durable queue admission, execution, and model
-completion. Those boundaries must not be collapsed into one favorable number.
+This note records the 2026-08-31 performance pass and the subsequent removal of its synthetic
+startup preview. It separates the first real TUI frame from a usable connection, durable queue
+admission, execution, and model completion. Those boundaries must not be collapsed into one
+favorable number. Preview measurements remain below as historical evidence, not as the current
+interaction or performance target.
 
-The measurements were made on macOS arm64 with the packaged Rika 0.11.5 client, a local API
-and PostgreSQL database, and an already authenticated profile. Provider-backed samples used
-only OpenRouter `z-ai/glm-5.3-flash`. Results from another machine, network, database, or
-provider must be measured again rather than inferred from these values.
+Except for the current first-frame follow-up identified below, the measurements were made on
+macOS arm64 with the packaged Rika 0.11.5 client, a local API and PostgreSQL database, and an
+already authenticated profile. Provider-backed samples used only OpenRouter
+`z-ai/glm-5.3-flash`. Results from another machine, network, database, or provider must be
+measured again rather than inferred from these values.
 
 ## Boundaries
 
-| Boundary                   | Meaning                                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Native preview             | The packaged C launcher has written its embedded, synchronized startup frame to the PTY. Bun and the product are not initialized yet. |
-| `process_start`            | Effect command dispatch has started after the runtime loaded and parsed the command.                                                  |
-| `first_draw`               | The real OpenTUI surface invoked its first-render callback.                                                                           |
-| Connection ticket complete | The ticketed WebSocket setup request completed. This is a diagnostic sub-boundary, not usable connection by itself.                   |
-| `connection_ready`         | The authenticated hosted session reports connected and the selected local Runner reports ready.                                       |
-| Optimistic queue row       | The local reducer inserted the submitted prompt on the next render. It is not durable admission.                                      |
-| Durable queue admission    | The API accepted and persisted the command and returned its durable identity.                                                         |
-| Execution/model completion | TenetKit ran the turn and the selected provider finished. Provider time remains visible.                                              |
+| Boundary                   | Meaning                                                                                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| First terminal byte        | The first OpenTUI terminal-capability probe or draw byte written by the new process.                                  |
+| First real frame           | The first complete synchronized OpenTUI frame containing the welcome surface and orb.                                 |
+| `process_start`            | Effect command dispatch has started after the runtime loaded and parsed the command.                                  |
+| `first_draw`               | The real OpenTUI surface invoked its first-render callback. This corresponds to the real frame, not a native preview. |
+| Connection ticket complete | The ticketed WebSocket setup request completed. This is a diagnostic sub-boundary, not usable connection by itself.   |
+| `connection_ready`         | The authenticated hosted session reports connected and the selected local Runner reports ready.                       |
+| Optimistic queue row       | The local reducer inserted the submitted prompt on the next render. It is not durable admission.                      |
+| Durable queue admission    | The API accepted and persisted the command and returned its durable identity.                                         |
+| Execution/model completion | TenetKit ran the turn and the selected provider finished. Provider time remains visible.                              |
 
 Rika diagnostics emit `process_start`, `first_draw`, and `connection_ready` in
 `client.performance.jsonl`. The API emits command receipt, enqueue, claim, turn start,
@@ -29,10 +33,36 @@ sequence follows a submission across the API and Runner. File diagnostics flush 
 the timestamp inside an event is authoritative; the later moment a benchmark notices the file
 is not connection latency.
 
-## Native launch target
+## Current first-frame contract
 
-The packaged launcher was extracted into a fresh directory for each of 100 PTY samples. A
-separate 100-sample run measured an installer-primed launcher.
+The startup preview and its C launcher were removed after the interaction review. `bin/rika` is
+now the compiled client itself. It leaves the previous terminal content visible while Bun,
+command parsing, and OpenTUI initialize; the first synchronized Rika frame is the full animated
+orb, “Welcome to Rika,” command hints, composer, and truthful connection status. There is no
+intermediate “Starting Rika” frame and no private `.rika-client-runtime` process.
+
+One hundred new-process launches of the packaged macOS arm64 client were recorded after one
+installer-equivalent priming launch. Every sample initialized Bun, Effect, command parsing,
+OpenTUI, and the complete frame. The harness included OpenTUI's terminal probes in first-byte
+latency and accepted a frame only when the same synchronized draw contained both the welcome
+text and an orb glyph.
+
+| Current packaged boundary |        p50 |        p95 |    maximum |
+| ------------------------- | ---------: | ---------: | ---------: |
+| First terminal byte       | 142.495 ms | 166.463 ms | 196.088 ms |
+| First real TUI frame      | 159.879 ms | 184.096 ms | 218.615 ms |
+
+All 100 first frames contained the real welcome and orb, and none of the complete captured
+output contained `Starting`. The first frame was 7,716 bytes, compared with the removed
+115-byte preview. This deliberately gives up the old sub-50 ms synthetic-frame claim: the number
+now measures the requested product surface rather than pixels from a launcher that had not
+initialized Rika. Raw timing, PTY output, exact inventory, hashes, and a rendered text snapshot
+are under `.agents/state/startup-real-frame/`.
+
+## Superseded native preview benchmark
+
+Before removal, the packaged launcher was extracted into a fresh directory for each of 100 PTY
+samples. A separate 100-sample run measured an installer-primed launcher.
 
 | Native preview        |      p50 |      p95 |    maximum | 50 ms p95 target |
 | --------------------- | -------: | -------: | ---------: | ---------------- |
@@ -48,11 +78,11 @@ installed launch. Raw summaries are:
 - `.amp/in/artifacts/performance-native-final-primed/packaged-pty-launch.json`
 - `.amp/in/artifacts/performance-native-final-release/packaged-pty-launch.json`
 
-This proves a sub-50 ms visible startup frame at p95. It does **not** claim that Bun, OpenTUI,
-authentication, or a network connection initializes within 50 ms. The preview owns no product
-state and is replaced by the real surface after runtime initialization.
+This proved a sub-50 ms visible preview at p95. It did **not** prove that Bun, OpenTUI,
+authentication, or a network connection initialized within 50 ms. That distinction made the
+measurement unsuitable for the desired interaction, so the preview and this target were retired.
 
-## Full runtime and connection
+## Historical full runtime and connection
 
 Ten consecutive packaged runs used the same installed client, local authenticated profile, API,
 and database.
@@ -71,9 +101,9 @@ Evidence:
 - `.amp/in/artifacts/glm-5.3-flash/packaged-final-primed-connection-distribution.jsonl`
 - `.amp/in/artifacts/glm-5.3-flash/packaged-final-primed-connection-summary.json`
 
-The truthful local connection path is about 0.3 seconds end to end, not the previously reported
-10-15 seconds. The remaining gap after the 2 ms preview is visible and measured rather than
-hidden by calling a socket open “connected.”
+The truthful local connection path was about 0.3 seconds end to end, not the previously reported
+10-15 seconds. The measured gap after the former 2 ms preview was not hidden by calling a socket
+open “connected.”
 
 Two startup-path deletions produced a controlled source-client improvement:
 
@@ -132,7 +162,7 @@ replay query.
 ## Model and tool latency
 
 Provider-backed acceptance used a route manifest containing only OpenRouter
-`z-ai/glm-5.3-flash`. A final packaged marker flow measured:
+`z-ai/glm-5.3-flash`. A final packaged marker flow with the former preview measured:
 
 - visible preview: 2.160 ms;
 - truthful `connection_ready`: 350.016 ms;
@@ -147,6 +177,30 @@ tool cells 113-168 ms. The multi-second variance begins after durable claim and 
 execution start, so it belongs to the OpenRouter/model boundary rather than a hidden client queue
 or kernel sleep. Rika preserves that time instead of manufacturing an early success state or
 speculatively duplicating model/tool work.
+
+## Runner version skew and unknown tool outcomes
+
+The reported `host-terminated` / `Cell operation deadline exceeded` failures were not a short
+client timeout. The live checkout was simultaneously owned by the current 0.11.6 TUI and a
+headless 0.11.2 Runner that had remained alive across the TenetKit 0.44 and Effect rc112 clean
+break. Its receipt store contained 25 cells: seven had reached the 120-second operation deadline,
+and one was still running with an accepted/started receipt but no terminal frame. A later snapshot
+contained 27 completed cells: nine deadline failures, 17 successes, and one ordinary command
+failure. The old process also showed repeated reconnect cycles. The 120-second default was already
+generous; increasing it would only keep an incompatible host authoritative for longer.
+
+The defect was admission, not replay: Runner registration, fresh hello, and reconnect did not
+carry a Runner implementation revision. The API could therefore admit an old installed Runner
+to current tool work. All three Runner boundaries now require the same explicit revision and
+reject a missing or obsolete process before session acquisition. The gate is Runner-only, so it
+does not change E2B Orb access. Unknown outcomes remain unknown and non-replayable work is still
+never guessed or duplicated.
+
+The database-backed gateway suite proves a legacy hello and reconnect both close as malformed
+before acquiring a session, while current reconnect, retained completion, cancellation, lease,
+and authorization cases continue to pass. The local checkout schema test proves a pre-revision
+HTTP registration cannot decode, and foreground Runner tests prove current hello and reconnect
+frames carry the revision.
 
 ## Kernel execution
 
@@ -229,8 +283,8 @@ experiment, real Thread identifiers, timestamps, and blocker are in
 
 ## Changes retained
 
-- A tiny native launcher owns only the embedded startup preview and hands control to the packaged
-  runtime; the installer primes the installed launcher.
+- The public `bin/rika` is the compiled client; OpenTUI owns the first visible Rika frame and no
+  launcher or private client runtime exists.
 - CLI command parsing stays isolated from OpenTUI, models, SQL, plugins, MCP, and Runner startup.
 - Interactive and Runner implementation modules load only for the selected operation.
 - Trusted loopback development origins may use `ws://`; production still requires `wss://`.
@@ -251,8 +305,8 @@ experiment, real Thread identifiers, timestamps, and blocker are in
 
 ## Complexity deliberately rejected
 
-- **Calling the native preview initialized or connected.** It would create stale-green status
-  while the real runtime or connection was unavailable.
+- **Reintroducing a launcher or placeholder to preserve the sub-50 ms claim.** It would optimize
+  pixels the user explicitly rejected while the real runtime remained unavailable.
 - **Dropping durable admission for local speed.** The optimistic row is presentation only;
   reconnect still reconciles against API authority.
 - **Removing the worker recovery poll.** Direct wake covers one process. The poll remains the
@@ -294,7 +348,7 @@ GIT_CONFIG_COUNT=1 \
   bun --bun vitest run --project unit
 ```
 
-The measured archive is `artifacts/rika-0.11.5-darwin-arm64.tar.gz`:
+The historical full-pass archive is `artifacts/rika-0.11.5-darwin-arm64.tar.gz`:
 
 - size: 53,575,866 bytes;
 - SHA-256: `554d644a7608969db593898b0389471805f1b0c830fd3f420dcc08e361fba726`;

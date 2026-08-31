@@ -3,7 +3,7 @@ import { Controller, type Interface as ControllerService } from "@rika/e2b-execu
 import { cliRegistration, identityMigrations, oauthClient, identityUser, runMigration } from "@rika/identity"
 import { AuthorizationPolicy } from "@rika/product/hosted-authorization"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { CheckoutFingerprint } from "@rika/product/runner-registration"
+import { CheckoutFingerprint, runnerProtocolVersion } from "@rika/product/runner-registration"
 import { BetterAuthUserId, DeviceId, OrganizationId, WorkspaceId } from "@rika/product/hosted-model"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
 import { layer as productPostgres } from "@rika/product-store/layer"
@@ -29,6 +29,7 @@ import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
 const helloReadiness = {
+  protocolVersion: runnerProtocolVersion,
   capabilities: { cells: true, checkpoints: false, pty: true },
   workspaceCapabilities: {
     environmentDigest: `sha256:${"0".repeat(64)}`,
@@ -163,6 +164,7 @@ const localConnection = (
       principal: authenticated,
       checkoutFingerprint: fingerprint,
       registration: {
+        protocolVersion: runnerProtocolVersion,
         workspaceIdentity: WorkspaceId.make(`${checkoutFingerprint}-identity`),
         repository: {
           identity: `repository-${checkoutFingerprint}`,

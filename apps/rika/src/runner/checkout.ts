@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { DeviceId, WorkspaceId } from "@rika/product/hosted-model"
-import { CheckoutFingerprint } from "@rika/product/runner-registration"
+import { CheckoutFingerprint, runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { RunnerRegistration, RemoteThreadCreation } from "./contract"
@@ -72,6 +72,7 @@ export const inspectRunnerCheckout = Effect.fn("RunnerCheckout.inspect")(functio
   return {
     workspacePath: checkoutPath,
     registration: {
+      protocolVersion: runnerProtocolVersion,
       deviceId: DeviceId.make(input.deviceId),
       checkoutFingerprint: CheckoutFingerprint.make(checkoutFingerprint),
       repository,

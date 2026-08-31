@@ -4,7 +4,6 @@ import { Config, Context, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import * as Logging from "./diagnostics/file-logging"
 import { version } from "./platform/application-version"
-import type { StartupPreview } from "./platform/client-entry-host"
 
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
@@ -27,7 +26,7 @@ interface RootFiberOwner {
   fiber: ReturnType<typeof Effect.runFork> | undefined
 }
 
-export const startClient = (startupPreview?: StartupPreview) => {
+export const startClient = () => {
   let interruptedBySigint = false
   const root: RootFiberOwner = { fiber: undefined }
   const removeSigintHandler = installClientSigintHandler({
@@ -46,7 +45,6 @@ export const startClient = (startupPreview?: StartupPreview) => {
   if (interruptedBySigint) rootFiber.interruptUnsafe()
   rootFiber.addObserver((exit) => {
     removeSigintHandler()
-    startupPreview?.restore()
     exitProcess(
       clientProcessExitCode({
         exit,

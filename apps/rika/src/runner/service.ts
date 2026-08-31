@@ -22,6 +22,7 @@ const statusLine = (status: RunnerStatus) => {
 
 const runnerProfile = (registration: Parameters<RunnerAdmission["Service"]["awaitAdmission"]>[0], profile: Profile) => {
   const result = {
+    protocolVersion: registration.protocolVersion,
     workspaceIdentity: registration.workspaceIdentity,
     repository: registration.repository,
     kernel: registration.kernel,

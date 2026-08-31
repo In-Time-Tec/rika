@@ -1,4 +1,5 @@
 import { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Schema } from "effect"
 import {
   AccessWire,
@@ -212,6 +213,7 @@ export const WorkspacePreparationEvidenceWire = Schema.Struct({
 export type WorkspacePreparationEvidenceWire = typeof WorkspacePreparationEvidenceWire.Type
 
 export const RunnerHelloWire = Schema.Struct({
+  protocolVersion: Schema.Literal(runnerProtocolVersion),
   admissionId: Identifier,
   ticket: Identifier,
   processIncarnation: Identifier,

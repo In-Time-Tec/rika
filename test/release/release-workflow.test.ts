@@ -66,8 +66,8 @@ test("publishes only unchanged, attested native archives from a validated tag", 
   expect(jobs.publish?.permissions).toEqual({ contents: "write" })
 
   expect(commands("package").match(/bun run package/g)).toHaveLength(1)
-  expect(commands("package")).toContain("command -v cc")
-  expect(commands("package")).toContain(".rika-client-runtime")
+  expect(commands("package")).not.toContain("command -v cc")
+  expect(commands("package")).not.toContain(".rika-client-runtime")
   expect(commands("package")).toContain("env -i")
   expect(commands("package")).toContain("--version")
   expect(commands("package")).toContain("--help")
@@ -109,7 +109,7 @@ test("publishes npm packages built from the same attested archives", () => {
 
   expect(commands("npm")).toContain('import { packageBinEntries } from "./scripts/packaging/package-contract"')
   expect(commands("npm")).toContain("package/bin/${entry}")
-  for (const privateArtifact of [".rika-interactive", ".rika-performance", ".rika-server"])
+  for (const privateArtifact of [".rika-client-runtime", ".rika-interactive", ".rika-performance", ".rika-server"])
     expect(commands("npm")).not.toContain(`package/bin/${privateArtifact}`)
 
   const npmCommands = commands("npm")

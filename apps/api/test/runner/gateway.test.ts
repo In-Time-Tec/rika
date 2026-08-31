@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { rikaHostedExecutorOperations, rikaHostedThreadEvents } from "@rika/product-store/database-schema"
 import * as HostedPostgres from "@rika/product-store/layer"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { eq, sql } from "drizzle-orm"
 import { Effect, Fiber, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
@@ -24,6 +25,7 @@ import { eventually, isolated, operationState, seed } from "./gateway/database.h
 import "./gateway/authorization.harness"
 import "./gateway/cancellation.harness"
 import "./gateway/completion.harness"
+import "./gateway/protocol-version.harness"
 
 it.effect.skipIf(!live)(
   "keeps a dispatched operation after a passive disconnect and accepts the retained result after restart",
@@ -37,7 +39,10 @@ it.effect.skipIf(!live)(
           )
           const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
           const firstSocket = socket()
-          yield* first.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+          yield* first.receive(
+            firstSocket,
+            encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+          )
           const attribution = operationAttribution("operation-restart")
           yield* first.receive(
             firstSocket,
@@ -59,7 +64,10 @@ it.effect.skipIf(!live)(
 
           const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
           const secondSocket = socket()
-          yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+          yield* restarted.receive(
+            secondSocket,
+            encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+          )
           expect(decode(secondSocket.sent[0]!)).toMatchObject({ _tag: "ExecutorReconnected" })
           expect(
             secondSocket.sent.map((value) => decode(value)).find((message) => message._tag === "CellReplay"),
@@ -155,7 +163,10 @@ it.effect.skipIf(!live)("redelivers an unacknowledged Cell execute and stops aft
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const running = yield* Effect.forkChild(gateway.execute(cellRequest(operationKey)))
         const deliveries = () =>
           target.sent
@@ -170,15 +181,18 @@ it.effect.skipIf(!live)("redelivers an unacknowledged Cell execute and stops aft
 
         yield* gateway.disconnected(target)
         const replacement = socket()
-        yield* gateway.receive(replacement, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          replacement,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const replayed = replacement.sent.map((value) => decode(value))
         expect(replayed[0]).toMatchObject({ _tag: "ExecutorReconnected" })
         expect(
           replayed.filter((message) => message._tag === "CellExecute" && message.request.operationKey === operationKey),
         ).toHaveLength(1)
-        expect(replayed.filter((message) => message._tag === "CellReplay" && message.operationKey === operationKey)).toEqual(
-          [],
-        )
+        expect(
+          replayed.filter((message) => message._tag === "CellReplay" && message.operationKey === operationKey),
+        ).toEqual([])
 
         yield* gateway.receive(
           replacement,
@@ -217,7 +231,10 @@ it.effect.skipIf(!live)("replays the exact durable cancelled terminal without di
           _tag: "DomainFailure" as const,
           failure: { kind: "cancelled", message: "Cell operation was cancelled" },
         }
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         yield* persistTerminal(gateway, target, access, "operation-cancelled", cancelled, "cancelled")
         const first = yield* gateway.execute(cellRequest("operation-cancelled"))
         const replay = yield* gateway.execute(cellRequest("operation-cancelled"))
@@ -258,7 +275,10 @@ it.effect.skipIf(!live)("terminalizes repeated cancellation before Runner dispat
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const target = socket()
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
 
         const first = yield* gateway.cancel(cellRequest(operationKey))
         const repeated = yield* gateway.cancel(cellRequest(operationKey))
@@ -295,7 +315,10 @@ it.effect.skipIf(!live)("waits for a dispatched Runner cancellation terminal and
         )
         const first = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const firstSocket = socket()
-        yield* first.receive(firstSocket, encode({ _tag: "ExecutorReconnect", access }))
+        yield* first.receive(
+          firstSocket,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const interrupted = yield* Effect.forkChild(first.cancel(cellRequest(operationKey)))
         yield* eventually(() =>
           firstSocket.sent
@@ -308,7 +331,10 @@ it.effect.skipIf(!live)("waits for a dispatched Runner cancellation terminal and
 
         const restarted = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
         const secondSocket = socket()
-        yield* restarted.receive(secondSocket, encode({ _tag: "ExecutorReconnect", access }))
+        yield* restarted.receive(
+          secondSocket,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const cancelling = yield* Effect.forkChild(restarted.cancel(cellRequest(operationKey)))
         yield* eventually(() =>
           secondSocket.sent
@@ -345,7 +371,10 @@ it.effect.skipIf(!live)("accepts the Runner terminal that arrives after the call
           _tag: "DomainFailure" as const,
           failure: { kind: "cancelled", message: "Cell operation was cancelled" },
         }
-        yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
+        yield* gateway.receive(
+          target,
+          encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
+        )
         const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-deadline-first", deadlineAt)))
         yield* eventually(() =>
           target.sent

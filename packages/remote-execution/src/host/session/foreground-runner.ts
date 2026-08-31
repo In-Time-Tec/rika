@@ -2,6 +2,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { BunFileSystem } from "@effect/platform-bun"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import {
   Clock,
   Config,
@@ -135,6 +136,7 @@ const connected = (
                 encodeRunnerMessage({
                   _tag: "RunnerHello",
                   hello: {
+                    protocolVersion: runnerProtocolVersion,
                     admissionId: admission.admissionId,
                     ticket: admission.ticket,
                     processIncarnation,
@@ -145,9 +147,13 @@ const connected = (
                 }),
               ).pipe(Effect.mapError(() => failure("Could not write Runner hello")))
             })
-          : writer(encodeRunnerMessage({ _tag: "ExecutorReconnect", access: access(previous) })).pipe(
-              Effect.mapError(() => failure("Could not write Runner reconnect")),
-            )
+          : writer(
+              encodeRunnerMessage({
+                _tag: "ExecutorReconnect",
+                protocolVersion: runnerProtocolVersion,
+                access: access(previous),
+              }),
+            ).pipe(Effect.mapError(() => failure("Could not write Runner reconnect")))
       const onOpen = handshake.pipe(
         Effect.matchEffect({
           onFailure: (error) => Deferred.fail(handshakeResult, error),

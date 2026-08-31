@@ -27,6 +27,7 @@ import {
   requireAdmitted,
   hostedProductFixture,
 } from "./fixture"
+import { runnerProtocolVersion } from "@rika/product/runner-registration"
 
 const { decodeExecutionRoute, decodePromptParts, encodeStartTurn, withDatabase } = hostedProductFixture
 
@@ -308,6 +309,7 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
         principal: authenticated,
         checkoutFingerprint: fingerprint,
         registration: {
+          protocolVersion: runnerProtocolVersion,
           workspaceIdentity,
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
           kernel: {

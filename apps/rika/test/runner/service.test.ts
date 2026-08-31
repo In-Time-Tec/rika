@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import { Context, Effect, Fiber, Layer, Option, Redacted, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { DeviceId, ExecutorAssignmentId, WorkspaceId } from "@rika/product/hosted-model"
-import { CheckoutFingerprint } from "@rika/product/runner-registration"
+import { CheckoutFingerprint, runnerProtocolVersion } from "@rika/product/runner-registration"
 import {
   CredentialStore,
   HostedError,
@@ -32,6 +32,7 @@ const credential: Credential = {
 }
 const supervisorId = "10000000-0000-4000-8000-000000000001"
 const registration: RunnerRegistration = {
+  protocolVersion: runnerProtocolVersion,
   deviceId: DeviceId.make("device-1"),
   checkoutFingerprint: CheckoutFingerprint.make("checkout-1"),
   workspaceIdentity: WorkspaceId.make("workspace-1"),
@@ -143,6 +144,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
       {
         fingerprint: "checkout-1",
         runner: {
+          protocolVersion: runnerProtocolVersion,
           workspaceIdentity: "workspace-1",
           projectId: "project-1",
           repository: registration.repository,
@@ -153,6 +155,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
       {
         fingerprint: "checkout-1",
         runner: {
+          protocolVersion: runnerProtocolVersion,
           workspaceIdentity: "workspace-1",
           projectId: "project-1",
           repository: registration.repository,
