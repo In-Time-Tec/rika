@@ -129,7 +129,7 @@ export const resolveModelRoute: {
   },
 )
 
-export const agentIds = ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const
+export const agentIds = ["librarian", "painter", "review", "surgeon", "task"] as const
 
 const resolveAgentRouteImpl = (
   settings: ConfigurationSettings,

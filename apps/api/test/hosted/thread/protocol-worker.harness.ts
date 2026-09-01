@@ -12,10 +12,8 @@ import { TestClock } from "effect/testing"
 import { HostedThreadApplication } from "../../../src/hosted/thread/application"
 import { layer as hostedThreadCommandWorkerLayer } from "../../../src/hosted/thread/command-worker"
 import { HostedProduct } from "../../../src/hosted/product"
-import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../src/hosted/environment/workspace"
 import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
-import { testToolPolicy } from "../execution/tool-policy.fixture"
 import { command, completeMockPrompt } from "./protocol/commands.harness"
 import { live, setup, withDatabase } from "./protocol/database.harness"
 import { fakeApplication, fakeProduct, fakeWorkspace } from "./protocol/fakes.harness"
@@ -69,7 +67,6 @@ it.effect.skipIf(!live)("applies an admitted prompt without client traffic and r
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(HostedWorkspace, fakeWorkspace()),
-              Layer.succeed(HostedToolPolicy, testToolPolicy),
               BunCrypto.layer,
             ),
           ),
@@ -231,7 +228,6 @@ it.effect.skipIf(!live)("lets command cancellation finish before a delayed promp
               Layer.succeed(HostedProduct, product),
               Layer.succeed(HostedThreadApplication, operations),
               Layer.succeed(HostedWorkspace, fakeWorkspace()),
-              Layer.succeed(HostedToolPolicy, testToolPolicy),
               BunCrypto.layer,
             ),
           ),

@@ -6,11 +6,11 @@ import { model } from "../../support/tui-model.fixture"
 const tuiTestTimeout = 60_000
 
 test(
-  "keeps two spawns of one profile apart inside a single cell",
+  "keeps two spawns of one profile apart inside a single model turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        // Two spawns of one profile from one cell share an admission key, so only the ordinal tells
+        // Two spawns of one profile from one tool call share an admission key, so only the ordinal tells
         // them apart. Without it Generalist reads the second as a repeat of the first and one child runs.
         const app = yield* TuiApp.tuiApp({
           lanes: [
@@ -22,7 +22,7 @@ test(
                       { profile: "Task", prompt: "FIRST_SAME" },
                       { profile: "Task", prompt: "SECOND_SAME" },
                     ],
-                    "same-cell",
+                    "same-tool-call",
                   ),
                 ]),
                 model.text("ROOT_SAME_DONE"),
@@ -40,6 +40,10 @@ test(
         yield* Effect.tryPromise(() => app.type("Delegate twice under one id."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_SAME_DONE", 30_000)
+        // A terminal group collapses to its neutral summary. Expand it before checking member rows.
+        yield* app.waitFrame("2 agents · 2/2 complete", 30_000)
+        app.pressKey("\t")
+        app.pressEnter()
         const completed = yield* app.waitFrameMatch(
           (frame) => (frame.match(/Subagent finished/g) ?? []).length === 2,
           30_000,

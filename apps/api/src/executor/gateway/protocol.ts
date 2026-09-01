@@ -1,9 +1,6 @@
 import type { ControllerError } from "@rika/e2b-executor/controller"
 import {
   ApiMessage,
-  BindingRequest,
-  CellLifecycleFrame,
-  CellResponse,
   ExecutorMessage,
   MachineRequest,
   WorkspaceRequest,
@@ -18,14 +15,11 @@ import { GatewayError } from "./contract"
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage))
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
-const equivalentLifecycle = Schema.toEquivalence(CellLifecycleFrame)
-const equivalentResponse = Schema.toEquivalence(CellResponse)
 const key = (assignmentId: string, operationKey: string, attempt: number) =>
   `${assignmentId}\u0000${operationKey}\u0000${attempt}`
 const machineKey = (assignmentId: string, operationKey: string, attempt: number, machineId: string) =>
   `${assignmentId}\u0000${operationKey}\u0000${attempt}\u0000${machineId}`
 const workspaceKey = (assignmentId: string, requestId: string) => `${assignmentId}\u0000${requestId}`
-const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
 const equivalentWorkspaceRequest = Schema.toEquivalence(WorkspaceRequest)
 
@@ -81,10 +75,7 @@ export const gatewayProtocol = {
   accessFailure,
   decode,
   encode,
-  encodeBindingRequest,
   encodeMachineRequest,
-  equivalentLifecycle,
-  equivalentResponse,
   equivalentWorkspaceRequest,
   expired,
   fenceOf,

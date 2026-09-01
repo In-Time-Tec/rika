@@ -8,7 +8,7 @@ import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Config, Context, Effect, Exit, Layer, Random, Scope, Stream } from "effect"
 import { Pool } from "pg"
 import { layerHosted } from "../../../src/engine/runtime"
-import { remoteCell } from "../adapters"
+import { remoteTool } from "../adapters"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const maxConnections = 6
@@ -43,8 +43,7 @@ it.live.skipIf(databaseUrl === "")(
         })
         const context = yield* Layer.buildWithScope(
           layerHosted({
-            kernel: { runtimeVersion: Bun.version, dataRoot: `/tmp/rika-postgres-inspection-${suffix}` },
-            cells: remoteCell,
+            tools: remoteTool,
             modelServices: ModelRegistry.layer([
               Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
             ]),

@@ -86,10 +86,11 @@ test("matches Amp edit, wait, explore, and subagent row shapes", () => {
   expect(text).toContain("Editing src/a.ts +1 -1\n")
   expect(text).toContain("- old")
   expect(text).not.toContain("Edit src/a.ts")
-  expect(text).toContain("Waited for bun test")
-  expect(text).toContain('✕ Grep src "needle" src/a.ts:1:needle')
-  expect(text).toContain("Subagent finished")
-  expect(text).not.toMatch(/[▸▾]/u)
+  expect(text).toContain("▸ ✓ Checked 1")
+  expect(text).toContain('▾ ✕ Grep src "needle"')
+  expect(text).toContain("src/a.ts:1:needle")
+  expect(text).toContain("▾ ✓ Subagent finished")
+  expect(text).toMatch(/[▸▾]/u)
   expect(text).toContain("Fix packaging integration tests")
   expect(text).not.toContain("Subagent finished Fix packaging integration tests")
 })
@@ -109,7 +110,7 @@ test("renders an expanded delegation prompt as markdown", () => {
           activeLabel: "Subagent working",
           completeLabel: "Subagent finished",
         },
-        detail: "Review `packages/coding-tools` first.\n\n1. Check the resolver\n2. Check the tests",
+        detail: "Review `packages/execution` first.\n\n1. Check the resolver\n2. Check the tests",
         files: [],
       },
     ],
@@ -117,8 +118,8 @@ test("renders an expanded delegation prompt as markdown", () => {
   })
   const built = buildTranscript(state)
   const text = built.styled.chunks.map((chunk) => chunk.text).join("")
-  expect(text).toContain("packages/coding-tools")
-  expect(text).not.toContain("`packages/coding-tools`")
+  expect(text).toContain("packages/execution")
+  expect(text).not.toContain("`packages/execution`")
   expect(text).toContain("1. Check the resolver")
 })
 test("keeps the exit code on a failed shell row with nested process waits", () => {
@@ -159,7 +160,7 @@ test("keeps the exit code on a failed shell row with nested process waits", () =
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
   expect(text).toContain("$ bun test (exit code: 7)")
-  expect(text).toContain("Waited for bun test")
+  expect(text).toContain("Checked 1")
 })
 test("renders an expanded failed subagent's failure text in red", () => {
   const state = model({
@@ -216,4 +217,151 @@ test("renders a completed subagent's final answer, not a blank terminal", () => 
     .join("")
   expect(text).toContain("The bug was a missing await.")
   expect(text).not.toContain("finished without a final message")
+})
+
+test("renders a real SubagentGroup with live cards and streamed answers", () => {
+  const counts = {
+    total: 2,
+    queued: 0,
+    running: 1,
+    waiting: 0,
+    cancelling: 0,
+    complete: 1,
+    failed: 0,
+    cancelled: 0,
+  }
+  const state = model({
+    entries: [{ role: "assistant", text: "Do not show this tentative answer yet." }],
+    blocks: [
+      {
+        _tag: "SubagentGroup",
+        id: "group",
+        name: "Reviewers",
+        status: "running",
+        settled: false,
+        memberIds: ["one", "two"],
+        counts,
+      },
+      {
+        _tag: "SubagentCard",
+        id: "one",
+        name: "Oracle",
+        prompt: "Review the design",
+        promptTruncated: false,
+        summary: "",
+        status: "running",
+        activity: ["Reading the projection", "Checking failure precedence"],
+      },
+      {
+        _tag: "SubagentCard",
+        id: "two",
+        name: "Task",
+        prompt: "Run the tests",
+        promptTruncated: false,
+        summary: "",
+        status: "complete",
+        activity: ["Tests passed"],
+      },
+    ],
+    items: [
+      { _tag: "Block", index: 0, id: "group" },
+      { _tag: "Block", index: 1, id: "one", parentId: "group" },
+      { _tag: "Entry", index: 0, id: "one-answer", parentId: "one" },
+      { _tag: "Block", index: 2, id: "two", parentId: "group" },
+    ],
+  })
+  const running = buildTranscript(state)
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(running).toContain("▾")
+  expect(running).toContain("Reviewers")
+  expect(running).toContain("Checking failure precedence")
+  expect(running).toContain("Do not show this tentative answer yet.")
+
+  const settled = {
+    ...state,
+    blocks: state.blocks.map((block, index) =>
+      index === 1
+        ? {
+            _tag: "SubagentCard" as const,
+            id: "one",
+            name: "Oracle",
+            prompt: "Review the design",
+            promptTruncated: false,
+            summary: "",
+            status: "complete" as const,
+            activity: ["Checking failure precedence"],
+          }
+        : block,
+    ),
+    expandedRowKeys: ["subagent-group:group", "subagent:one"],
+  }
+  const complete = buildTranscript(settled)
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(complete).toContain("Do not show this tentative answer yet.")
+})
+
+test("uses failure precedence for mixed groups and distinct rejected and unknown tones", () => {
+  const blocks = [
+    shell("ok", "echo ok", "ok"),
+    { ...shell("bad", "exit 7", "bad"), status: "failed" as const },
+    {
+      ...shell("rejected", "rm -rf build", ""),
+      status: "rejected" as const,
+    },
+    {
+      ...shell("unknown", "lost-process", ""),
+      status: "unknown" as const,
+    },
+  ]
+  const built = buildTranscript(model({ blocks, expandedRowKeys: ["tool:ok"] }))
+  const text = built.styled.chunks.map((chunk) => chunk.text).join("")
+  expect(text).toContain("✕ Ran 4 commands, 3 failed")
+  expect(text).not.toContain("✓ Ran 4 commands")
+  const rejected = built.styled.chunks.find((chunk) => chunk.text.includes("(rejected)"))
+  const unknown = built.styled.chunks.find((chunk) => chunk.text.includes("(unknown)"))
+  expect(rejected?.fg).toBe(colors.red)
+  expect(unknown?.fg).toBe(colors.red)
+})
+
+test("renders gold Bash prompts, muted native process metadata, and underlined paths", () => {
+  const state = model({
+    blocks: [
+      {
+        ...shell("bash", "bun test\nbun run lint", "done"),
+        process: {
+          processId: "process-7",
+          command: "bun test\nbun run lint",
+          workdir: "/workspace/packages/terminal",
+          background: true,
+        },
+      },
+      {
+        _tag: "ToolCall",
+        id: "read",
+        name: "read",
+        input: JSON.stringify({ path: "src/main.ts" }),
+        result: { text: "source" },
+        status: "complete",
+        presentation: {
+          family: "explore",
+          action: "read",
+          activeLabel: "Exploring",
+          completeLabel: "Explored",
+          counter: "file",
+        },
+        detail: "src/main.ts",
+        files: [],
+      },
+    ],
+  })
+  const built = buildTranscript(state)
+  const prompt = built.styled.chunks.find((chunk) => chunk.text === "$")
+  expect(prompt?.fg).toEqual(colors.gold)
+  const metadata = built.styled.chunks.find((chunk) => chunk.text.includes("cwd /workspace/packages/terminal"))
+  expect(metadata?.fg).toEqual(colors.muted)
+  expect(metadata?.text).toContain("process process-7 · detached · script")
+  const path = built.styled.chunks.find((chunk) => chunk.text.includes("src/main.ts"))
+  expect((path?.attributes ?? 0) & 8).toBe(8)
 })

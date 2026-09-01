@@ -77,7 +77,7 @@ verify_archive_inventory() {
   archive_path="$1"
   archive_root="$2"
   actual="$(tar -tzf "$archive_path" | LC_ALL=C sort)"
-  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" "${archive_root}/bin/.rika-kernel-runtime" "${archive_root}/bin/.rika-kernel-worker.js" | LC_ALL=C sort)"
+  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" | LC_ALL=C sort)"
   [ "$actual" = "$expected" ] || fail "release archive has unexpected contents"
 }
 
@@ -149,7 +149,6 @@ verify_archive_inventory "${staging}/${archive_file}" "$archive_root"
 
 tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
-[ -x "${staging}/${archive_root}/bin/.rika-kernel-runtime" ] || fail "release archive is missing the kernel runtime"
 staged_version="$(env -i HOME="$HOME" PATH="$PATH" TERM=dumb "${staging}/${archive_root}/bin/rika" --version)" ||
   fail "release executable did not start"
 [ "$staged_version" = "rika v${version}" ] || fail "release executable reported an unexpected version: $staged_version"

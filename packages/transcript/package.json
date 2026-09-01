@@ -9,13 +9,11 @@
     "./transcript-unit-order": "./src/ordering/unit-order.ts",
     "./recorded-shell-presentation": "./src/presentation/recorded-shell.ts",
     "./subagent-presentation": "./src/presentation/subagent.ts",
-    "./partial-tool-input": "./src/presentation/partial-input.ts",
-    "./cell-presentation": "./src/presentation/cell.ts",
+    "./result-presentation": "./src/presentation/result.ts",
     "./transcript-presentation-model": "./src/schema/presentation.ts",
     "./transcript-unit": "./src/schema/unit.ts"
   },
   "dependencies": {
-    "@rika/coding-tools": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

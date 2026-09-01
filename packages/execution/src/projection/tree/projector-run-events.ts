@@ -24,6 +24,8 @@ const resume = (context: ProjectorEventContext, node: Node, event: RunEvent.RunR
     node.lifecycle = "unknown"
   }
   node.status = "running"
+  const card = context.cardsByChild.get(node.rawRunId)
+  if (card !== undefined) context.subagents.updateCard(card, "running")
   if (node.parentRawRunId === undefined) context.core.rootStatus = "running"
   if (event.resolution._tag === "Approved") context.authorization.resolveAuthorization(node, event.waitId, "approved")
   if (event.resolution._tag === "Denied") context.authorization.resolveAuthorization(node, event.waitId, "denied")
@@ -70,17 +72,22 @@ const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node)
     case "RunAttemptStarted":
       startAttempt(context, node, event)
       return true
-    case "RunWaiting":
+    case "RunWaiting": {
       context.usage.deactivate(node, event, "waiting")
       node.status = "waiting"
+      const waitingCard = context.cardsByChild.get(node.rawRunId)
+      if (waitingCard !== undefined) context.subagents.updateCard(waitingCard, "waiting")
       if (node.parentRawRunId === undefined) context.core.rootStatus = "waiting"
       if (event.wait.reason._tag === "Approval")
         context.authorization.putAuthorization(node, event.wait.waitId, event.wait.reason.request)
       return true
+    }
     case "RunResumed":
       resume(context, node, event)
       return true
-    case "OperationUnknown":
+    case "OperationUnknown": {
+      const activeToolId = context.recovery.activeToolIds(node)[0]
+      if (activeToolId !== undefined) context.tools.settleUnknown(node, activeToolId, event.operationId)
       if (context.core.rootStatus !== "cancelling") {
         if (node.lifecycle === "active") context.usage.deactivate(node, event, "waiting")
         node.status = "waiting"
@@ -94,6 +101,7 @@ const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node)
         )
       }
       return true
+    }
     default:
       return false
   }

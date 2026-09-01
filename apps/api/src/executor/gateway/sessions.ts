@@ -1,11 +1,11 @@
 import type { Quiescence } from "@rika/e2b-executor/controller"
 import type { AccessWire, ApiMessage, WorkspaceResponse } from "@rika/remote-execution/protocol"
 import { Clock, Deferred, Effect, Ref, type Semaphore } from "effect"
-import { GatewayError, type ExecutionResult, type LifecycleStore, type Socket } from "./contract"
+import { GatewayError, type ExecutionResult, type Socket } from "./contract"
 import { gatewayProtocol } from "./protocol"
 import type { GatewaySession as Session, MachineCall, PendingOperation as Pending, WorkspaceCall } from "./rpc/model"
 
-const { key, sameAccess, sameExecutor } = gatewayProtocol
+const { sameAccess, sameExecutor } = gatewayProtocol
 
 interface SessionRegistryOptions {
   readonly sessions: Ref.Ref<Map<string, Session>>
@@ -13,30 +13,24 @@ interface SessionRegistryOptions {
   readonly pending: Ref.Ref<Map<string, Pending>>
   readonly machineCalls: Ref.Ref<Map<string, MachineCall>>
   readonly workspaceCalls: Ref.Ref<Map<string, WorkspaceCall>>
-  readonly terminals: Ref.Ref<
-    Map<string, Extract<import("@rika/remote-execution/protocol").CellLifecycleFrame, { readonly _tag: "Terminal" }>>
-  >
   readonly quiescence: Ref.Ref<
     Map<
       string,
       {
         readonly access: AccessWire
         readonly requestId: string
-        readonly expected: ReadonlySet<string>
         readonly result: Deferred.Deferred<Quiescence, GatewayError>
       }
     >
   >
   readonly admission: Semaphore.Semaphore
   readonly machineLock: Semaphore.Semaphore
-  readonly lifecycle: LifecycleStore
   readonly close: (socket: Socket, code: number, reason: string) => void
   readonly failBranchPush: (
     predicate: (call: { readonly socket: Socket }) => boolean,
     message: string,
   ) => Effect.Effect<void>
   readonly grantRuntime: (session: Session, operationKey: string) => Effect.Effect<void, GatewayError>
-  readonly sendCellExecute: (operation: Pending) => Effect.Effect<void, GatewayError>
   readonly send: (socket: Socket, message: ApiMessage) => void
   readonly machineDeadlineOutcome: import("@rika/remote-execution/protocol").MachineOutcome
 }
@@ -191,35 +185,9 @@ export const gatewaySessionsFactory = (options: SessionRegistryOptions) => {
   })
 
   const replayPending = Effect.fn("ExecutorGateway.replayPending")(function* (session: Session) {
-    const delivered = new Set<string>()
     for (const operation of (yield* Ref.get(options.pending)).values()) {
       if (operation.assignmentId !== session.access.fence.assignmentId) continue
-      const operationKey = key(operation.assignmentId, operation.operationKey, operation.attempt)
-      const terminal = (yield* Ref.get(options.terminals)).get(operationKey)
-      if (terminal !== undefined) {
-        delivered.add(operationKey)
-        options.send(session.socket, {
-          _tag: "CellTerminalReceipt",
-          access: session.access,
-          operationKey: operation.operationKey,
-          attempt: operation.attempt,
-          cursor: terminal.cursor,
-        })
-        continue
-      }
-      delivered.add(operationKey)
       yield* options.grantRuntime(session, operation.operationKey)
-      yield* options.sendCellExecute(operation)
-    }
-    for (const operation of yield* options.lifecycle.replay(session.access.fence.assignmentId)) {
-      if (delivered.has(key(session.access.fence.assignmentId, operation.operationKey, operation.attempt))) continue
-      options.send(session.socket, {
-        _tag: "CellReplay",
-        access: session.access,
-        operationKey: operation.operationKey,
-        attempt: operation.attempt,
-        afterCursor: operation.afterCursor,
-      })
     }
     yield* options.machineLock.withPermits(1)(
       Effect.uninterruptible(
@@ -237,15 +205,27 @@ export const gatewaySessionsFactory = (options: SessionRegistryOptions) => {
               })
               continue
             }
-            options.send(session.socket, {
-              _tag: "MachineExecute",
-              access: session.access,
-              operationKey: operation.operationKey,
-              attempt: operation.attempt,
-              machineId: operation.machineId,
-              requestDigest: operation.requestDigest,
-              request: operation.request,
-            })
+            options.send(
+              session.socket,
+              operation.cancelling
+                ? {
+                    _tag: "MachineCancel",
+                    access: session.access,
+                    operationKey: operation.operationKey,
+                    attempt: operation.attempt,
+                    machineId: operation.machineId,
+                    requestDigest: operation.requestDigest,
+                  }
+                : {
+                    _tag: "MachineExecute",
+                    access: session.access,
+                    operationKey: operation.operationKey,
+                    attempt: operation.attempt,
+                    machineId: operation.machineId,
+                    requestDigest: operation.requestDigest,
+                    request: operation.request,
+                  },
+            )
           }
         }),
       ),

@@ -5,11 +5,11 @@ import type { ToolSummary } from "../../../presentation/transcript/tool/detail-t
 import { renderToolSummary } from "../diff-text-adapter"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
 import { shellCommandText, shellExitCode, type ToolUnit } from "../tool/detail"
-import { wrapTextToWidth } from "../window"
+import { wrapTextToWidth, type RowStatus } from "../window"
 
 type DetailContent = {
   readonly append: (chunk: TextChunk) => void
-  readonly statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk
+  readonly statusIcon: (status: RowStatus) => TextChunk
 }
 
 type ToolBlock = ToolUnit["block"]
@@ -23,7 +23,9 @@ const renderCancelledShellHeader = (
   continuationPrefix: string,
 ) => {
   const command = label.startsWith("$ ") ? label.slice(2) : label
-  content.append(bold(fg(colors.amber)("$ ")))
+  content.append(content.statusIcon(block.status))
+  content.append(fg(colors.text)(" "))
+  content.append(bold(fg(colors.gold)("$ ")))
   const suffix = " (cancelled)"
   const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix))
   for (const [rowIndex, row] of wrapTextToWidth(command, commandWidth).entries()) {
@@ -46,7 +48,7 @@ const renderShellHeader = (
   const failure = block.status === "failed" ? ` (exit code: ${shellExitCode(block) ?? 1})` : ""
   const commandWidth = Math.max(1, rowWidth - stringWidth(branchPrefix) - 4 - stringWidth(failure))
   content.append(fg(colors.text)(" "))
-  content.append(dim(fg(colors.text)("$ ")))
+  content.append(bold(fg(colors.gold)("$ ")))
   const rows = shellCommandText(block)
     .split("\n")
     .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
@@ -82,16 +84,18 @@ const renderActiveToolHeader = (
   branchPrefix: string,
   continuationPrefix: string,
   shellContinuationPrefix: string,
+  underlineSecondary: boolean,
 ) => {
-  content.append(
-    content.statusIcon(block.status === "failed", block.status === "running", block.status === "cancelled"),
-  )
+  content.append(content.statusIcon(block.status))
   if (block.presentation.family === "shell")
     renderShellHeader(content, block, rowWidth, branchPrefix, shellContinuationPrefix)
   else
     renderSummaryHeader(
       content,
-      renderToolSummary(summary, { width: rowWidth - stringWidth(continuationPrefix) }),
+      renderToolSummary(summary, {
+        width: rowWidth - stringWidth(continuationPrefix),
+        underlineSecondary,
+      }),
       continuationPrefix,
     )
 }
@@ -105,11 +109,21 @@ const renderToolHeader = (
   branchPrefix: string,
   continuationPrefix: string,
   shellContinuationPrefix: string,
+  underlineSecondary = false,
 ) => {
   if (block.status === "cancelled" && block.presentation.family === "shell")
     renderCancelledShellHeader(content, block, label, rowWidth, branchPrefix, shellContinuationPrefix)
   else
-    renderActiveToolHeader(content, block, summary, rowWidth, branchPrefix, continuationPrefix, shellContinuationPrefix)
+    renderActiveToolHeader(
+      content,
+      block,
+      summary,
+      rowWidth,
+      branchPrefix,
+      continuationPrefix,
+      shellContinuationPrefix,
+      underlineSecondary,
+    )
 }
 
 const renderExpandedToolOutput = (

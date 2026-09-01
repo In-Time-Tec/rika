@@ -41,8 +41,8 @@ const registration: RunnerRegistration = {
     remoteUrl: "https://example.test/acme/repository.git",
     branch: "main",
   },
-  kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
-  capabilities: { cells: true, checkpoints: true, pty: true },
+  nativeToolRuntime: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
+  capabilities: { nativeTools: true, checkpoints: true, pty: true },
   remoteThreadCreation: "allowed",
 }
 const unusedHttp: HttpInterface = {
@@ -148,7 +148,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
           workspaceIdentity: "workspace-1",
           projectId: "project-1",
           repository: registration.repository,
-          kernel: registration.kernel,
+          nativeToolRuntime: registration.nativeToolRuntime,
           capabilities: registration.capabilities,
         },
       },
@@ -159,7 +159,7 @@ it.effect("registers the authenticated checkout, waits for admission, and revoke
           workspaceIdentity: "workspace-1",
           projectId: "project-1",
           repository: registration.repository,
-          kernel: registration.kernel,
+          nativeToolRuntime: registration.nativeToolRuntime,
           capabilities: registration.capabilities,
         },
       },

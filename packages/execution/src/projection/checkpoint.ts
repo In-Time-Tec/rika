@@ -18,12 +18,6 @@ const AuthorizationCheckpointSchema = Schema.Struct({
 })
 
 const ToolStateSchema = Schema.Struct({ rawId: Schema.String, key: Schema.String, blockId: Schema.String })
-const CellStateSchema = Schema.Struct({
-  rawId: Schema.String,
-  key: Schema.String,
-  blockId: Schema.String,
-  partial: Schema.String,
-})
 const NodeSchema = Schema.Struct({
   rawRunId: Schema.String,
   publicId: Schema.String,
@@ -37,7 +31,6 @@ const NodeSchema = Schema.Struct({
   started: Schema.Boolean,
   attempt: Schema.optionalKey(Schema.Finite),
   tools: Schema.Array(Schema.Tuple([Schema.String, ToolStateSchema])),
-  cells: Schema.Array(Schema.Tuple([Schema.String, CellStateSchema])),
 })
 const CardSchema = Schema.Struct({
   parentRawRunId: Schema.String,
@@ -184,7 +177,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
         publicId: persisted.publicId,
         hidden: persisted.hidden,
         tools: new Map(persisted.tools),
-        cells: new Map(persisted.cells),
         phase: persisted.phase,
         status: persisted.status,
         lifecycle: persisted.lifecycle,
@@ -197,7 +189,6 @@ export const makeProjectorCheckpointCodec = (input: ProjectorCheckpointInput): P
       nodes.set(node.rawRunId, node)
       recovery.nodeChanged(node)
       for (const tool of node.tools.values()) recovery.toolChanged(node, tool, true)
-      for (const cell of node.cells.values()) recovery.cellChanged(node, cell, true)
     }
   }
 

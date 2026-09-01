@@ -16,7 +16,6 @@ import type { HostedRecoveryService } from "../hosted/execution/recovery"
 import type { HostedPublicationService } from "../hosted/publication"
 import type { Runtime as Executor } from "../executor/service"
 import type { ReadinessInterface as ExecutionReadiness } from "@rika/execution/postgres"
-import type { HostedToolPolicyService } from "../hosted/execution/tool-policy"
 import type { HostedWorkspaceSeedsService } from "../hosted/workspace-seeds"
 import type { HostedThreadApplicationService } from "../hosted/thread/application"
 
@@ -25,7 +24,6 @@ export interface HttpDependencies {
   readonly directory: IdentityDirectory
   readonly devices: CliDeviceDirectory
   readonly product: HostedProductService
-  readonly toolPolicy: HostedToolPolicyService
   readonly threads?: HostedThreadProtocolService
   readonly threadApplication?: HostedThreadApplicationService
   readonly credentials?: HostedProviderCredentialsService

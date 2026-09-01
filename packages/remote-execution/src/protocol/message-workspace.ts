@@ -3,7 +3,6 @@ import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Schema } from "effect"
 import {
   AccessWire,
-  BindingContractDigest,
   ByteLength,
   Capabilities,
   Cursor,
@@ -20,7 +19,6 @@ import {
   Sha256,
   Timestamp,
 } from "./message-core"
-import { CellTerminalOutcome } from "./message-execution"
 
 export const FilesystemCheckpoint = Schema.Struct({
   version: ProtocolVersion,
@@ -40,12 +38,6 @@ export const CheckpointProposal = Schema.Struct({
   cursor: Cursor,
 })
 export type CheckpointProposal = typeof CheckpointProposal.Type
-
-export const QuiescedOperation = Schema.Struct({
-  operationKey: Identifier,
-  outcome: CellTerminalOutcome,
-})
-export type QuiescedOperation = typeof QuiescedOperation.Type
 
 export const WorkspaceProof = Schema.Struct({
   workspaceId: Identifier,
@@ -198,8 +190,7 @@ export const WorkspacePreparationEvidenceWire = Schema.Struct({
   workspaceId: Identifier,
   repositoryId: Schema.NullOr(Identifier),
   commitSha: Schema.NullOr(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
-  kernelProfileDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-  bindingContractDigest: BindingContractDigest,
+  nativeToolRuntimeDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   setup: HookEvidenceWire,
   resume: Schema.NullOr(HookEvidenceWire),
   capabilities: Schema.Array(Identifier).check(Schema.isMaxLength(32)),

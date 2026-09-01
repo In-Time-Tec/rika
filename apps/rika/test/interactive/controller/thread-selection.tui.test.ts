@@ -30,12 +30,7 @@ test(
             {
               profile: "Oracle",
               steps: [
-                model.turn([
-                  model.binding(
-                    { module: "workspace", operation: "read", input: { path: "nested.txt" } },
-                    "nested-read",
-                  ),
-                ]),
+                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
                 model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
               ],
             },
@@ -46,31 +41,31 @@ test(
         app.pressEnter()
         yield* app.waitFrame("ROOT_STYLE_RESULT", 25_000)
         yield* app.settled
-        // Two rows expand now: the cell that spawned the child, then the child's card. Selecting the
-        // card is one Tab past the cell, and a card opens on Enter rather than on selection.
+        // The root card opens first. Its nested read is the next selectable row.
         yield* app.waitFrame("Oracle has spoken")
         app.pressKey("\t")
         app.pressKey("\t")
         app.pressEnter()
-        const nestedCell = 'await rika.workspace.read({ path: "nested.txt" })'
-        yield* app.waitFrame(nestedCell)
+        const nestedTool = "Read nested.txt"
+        yield* app.waitFrame(nestedTool)
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("NESTED_TOOL_CONTENT")
         yield* app.settled
         const completed = app.frame()
         expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
-        expect(completed.split(nestedCell)).toHaveLength(2)
+        expect(completed.split(nestedTool)).toHaveLength(2)
         expect(completed).toContain("Oracle result")
         expect(completed).toContain("ORACLE_STYLE_RESULT")
+        expect(completed).toContain("NESTED_TOOL_CONTENT")
         expect(completed).not.toContain("## Oracle result")
         expect(completed).not.toContain("The subagent finished without a final message.")
         expect(completed).not.toContain("Collected subagents")
         expect(completed).not.toContain("Waiting for subagents")
         expect(completed).not.toContain("1 line")
         expect(completed).not.toMatch(/\d+(?:ms|\.\d+s)\b/)
-        expect(completed).toMatch(/await rika\.workspace\.read\([^\n]+/)
-        expect(completed).not.toMatch(/[▸▾]/u)
-        expect(completed).toContain("1 call")
         expect(completed).not.toContain(" ts ")
-        expect(spanHasColor(app, "\u251c ", "128,128,128,255"), "nested cell branch span").toBe(true)
+        expect(spanHasColor(app, "\u251c ", "128,128,128,255"), "nested tool branch span").toBe(true)
         const connectors = app
           .spans()
           .lines.flatMap((line) => line.spans)

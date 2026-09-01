@@ -37,7 +37,7 @@ test("canonical route conversion preserves every branch and field", () => {
     title: model("title"),
     compactionSummary: model("compaction"),
     agents: Object.fromEntries(
-      ["librarian", "painter", "readThread", "review", "surgeon", "task"].map((role) => [role, model(role)]),
+      ["librarian", "painter", "review", "surgeon", "task"].map((role) => [role, model(role)]),
     ),
   }
   const snapshot = toExecutionRouteSnapshot(route)
@@ -79,7 +79,7 @@ test("preserves the pinned OpenAI account identity and rejects incomplete accoun
     title: accountModel("title"),
     compactionSummary: accountModel("compaction"),
     agents: Object.fromEntries(
-      ["librarian", "painter", "readThread", "review", "surgeon", "task"].map((role) => [role, accountModel(role)]),
+      ["librarian", "painter", "review", "surgeon", "task"].map((role) => [role, accountModel(role)]),
     ),
   }
   expect(toExecutionRouteSnapshot(route).main.candidates[0]?.providerConnection).toMatchObject({
@@ -139,9 +139,7 @@ const routeWithModels = () => ({
   oracle: model("oracle"),
   title: model("title"),
   compactionSummary: model("compaction"),
-  agents: Object.fromEntries(
-    ["librarian", "painter", "readThread", "review", "surgeon", "task"].map((role) => [role, model(role)]),
-  ),
+  agents: Object.fromEntries(["librarian", "painter", "review", "surgeon", "task"].map((role) => [role, model(role)])),
 })
 const legacyModel = (role: string) => ({
   ...model(role),

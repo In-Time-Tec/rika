@@ -34,34 +34,27 @@ const rendered = (current: Model) =>
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
 
-describe("read tool detail is inspectable", () => {
-  test("the read child is registered as expandable once its group is open", () => {
-    const opened = model(["tool:read-1"])
-    expect(expandableRowIds(opened)).toContain("tool-child:read-1")
+describe("singleton Read detail is inspectable", () => {
+  test("registers the flat Read row itself as expandable", () => {
+    expect(expandableRowIds(model([]))).toEqual(["tool:read-1"])
   })
 
-  test("fully collapsed shows only the group summary, never file content", () => {
+  test("collapsed shows Read plus its path and a chevron, never file content", () => {
     const output = rendered(model([]))
-    expect(output).toContain("Explored 1 file")
+    expect(output).toContain("▸ ✓ Read src/main.ts")
+    expect(output).not.toContain("Explored 1 file")
     expect(output).not.toContain("line 100")
   })
 
-  test("opening the group shows the path but still not the content", () => {
+  test("opening the Read row shows every line without an intermediate child disclosure", () => {
     const output = rendered(model(["tool:read-1"]))
-    expect(output).toContain("src/main.ts")
-    expect(output).not.toContain("line 100")
-  })
-
-  test("expanded shows every line of the window, not a 12-line slice", () => {
-    const output = rendered(model(["tool:read-1", "tool-child:read-1"]))
-    expect(output).toContain("100")
-    expect(output).toContain("line 100")
-    expect(output).toContain("139")
-    expect(output).toContain("line 139")
+    expect(output).toContain("▾ ✓ Read src/main.ts")
+    expect(output).toContain("100: line 100")
+    expect(output).toContain("139: line 139")
+    expect(expandableRowIds(model(["tool:read-1"]))).not.toContain("tool-child:read-1")
   })
 
   test("a typed read result renders its numbered text directly", () => {
-    const output = rendered(model(["tool:read-1", "tool-child:read-1"]))
-    expect(output).toContain("100: line 100")
+    expect(rendered(model(["tool:read-1"]))).toContain("100: line 100")
   })
 })

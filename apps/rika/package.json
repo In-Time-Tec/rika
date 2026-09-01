@@ -17,11 +17,9 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
-    "@rika/coding-tools": "workspace:*",
     "@rika/configuration": "workspace:*",
     "@rika/execution": "workspace:*",
     "@rika/extensions": "workspace:*",
-    "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/remote-execution": "workspace:*",

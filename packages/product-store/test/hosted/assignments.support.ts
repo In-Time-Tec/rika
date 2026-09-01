@@ -51,7 +51,7 @@ export const capabilities: WorkspaceCapabilitySnapshot = {
   environmentDigest: `sha256:${"a".repeat(64)}`,
   capturedAt: at(0),
   filesystem: { _tag: "Ready", detail: "workspace filesystem" },
-  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel" },
+  nativeTools: { _tag: "Ready", detail: "native tools" },
   git: { _tag: "Ready", detail: "git" },
   process: { _tag: "Ready", detail: "process execution" },
   pty: { _tag: "Ready", detail: "PTY" },
@@ -60,7 +60,7 @@ export const capabilities: WorkspaceCapabilitySnapshot = {
   workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle" },
 }
 export const unknownEvent = {
-  _tag: "CellResult",
+  _tag: "NativeToolResult",
   operationKey: "operation-recovered",
   response: {
     _tag: "DomainFailure",

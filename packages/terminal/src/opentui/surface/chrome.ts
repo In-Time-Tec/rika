@@ -6,8 +6,7 @@ import { contentColumnWidth } from "../../state/layout/model"
 import { spacing } from "../../presentation/terminal/theme"
 import { spinnerFrames } from "../rendering/spinner"
 import { renderSidebar } from "../rendering/block"
-import { goalAnimationActive, goalIndicatorVisible, statusContent, welcomeContent } from "./content"
-import { goalLabelContent } from "./goal/controller"
+import { statusContent, welcomeContent } from "./content"
 import { welcomeAnimationActive } from "./welcome/state"
 import { ToastController } from "./toast/controller"
 import { SurfaceOverlay } from "./overlay"
@@ -79,19 +78,6 @@ export abstract class SurfaceChrome extends SurfaceOverlay {
     if (this.destroyed || current === undefined || child === undefined) return
     this.welcomeController.strike(this.welcomeWidthFor(current), current.height, event.x - child.x, event.y - child.y)
     this.renderer.requestRender()
-  }
-  protected tickGoal(): void {
-    if (this.destroyed || !this.goalController.running) return
-    const current = this.model
-    if (current === undefined || !goalAnimationActive(current)) return
-    this.goalController.advance()
-    this.renderGoalLabel(current)
-    this.renderer.requestRender()
-  }
-  protected renderGoalLabel(model: Model): void {
-    this.goalLabel.content = goalIndicatorVisible(model)
-      ? goalLabelContent(this.goalController.frame, this.currentTimeMillis() - model.goal!.startedAtMillis)
-      : ""
   }
   protected tickLoader(): void {
     if (this.destroyed || !this.loaderController.running) return

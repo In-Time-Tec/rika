@@ -1,8 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Crypto, Effect, FileSystem, Layer, Schema, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { testing } from "../../src/host/service"
 import { provideLayer } from "../support/layer"
 
 const packageRoot = new URL("../..", import.meta.url).pathname
@@ -275,45 +274,6 @@ try {
 `
 
 describe("executor host process", { concurrent: false }, () => {
-  it.effect("restores durable operation receipts after host replacement", () =>
-    Effect.scoped(
-      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
-        Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem
-          const crypto = yield* Crypto.Crypto
-          const directory = `/tmp/rika-operation-receipts-${yield* crypto.randomUUIDv4}`
-          const identity = {
-            operationKey: "operation-1",
-            workspaceId: "workspace-1",
-            sessionId: "session-1",
-            threadId: "thread-1",
-            turnId: "turn-1",
-            runId: "run-1",
-            rootRunId: "run-1",
-            toolCallId: "call-1",
-            attempt: 0,
-          }
-          const frames = new Map([
-            [
-              "operation-1\u00000",
-              [
-                { _tag: "Accepted" as const, attribution: identity, cursor: 1 },
-                { _tag: "Started" as const, attribution: identity, cursor: 2 },
-              ],
-            ],
-          ])
-          const first = yield* testing.operationReceiptStore(directory, "assignment-1", 1)
-          yield* first.save(frames)
-          const replacement = yield* testing.operationReceiptStore(directory, "assignment-1", 1)
-          expect(yield* replacement.load).toEqual(frames)
-          const nextGeneration = yield* testing.operationReceiptStore(directory, "assignment-1", 2)
-          expect(yield* nextGeneration.load).toEqual(new Map())
-          yield* fileSystem.remove(directory, { recursive: true, force: true })
-        }).pipe(Effect.provide(context)),
-      ),
-    ),
-  )
-
   it.effect("flushes the accepted bootstrap response and closes its one-shot listener", () =>
     Effect.scoped(
       Effect.gen(function* () {

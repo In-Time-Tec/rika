@@ -28,7 +28,6 @@ type BoundedTranscriptModel = Omit<Model, "items"> & { readonly items: ReadonlyA
 
 interface ParentProjection {
   readonly itemPositionByBlockId: ReadonlyMap<string, number>
-  readonly cellBlockIds: ReadonlySet<string>
 }
 interface PartialUnitFit {
   readonly positions: ReadonlySet<number>
@@ -61,15 +60,14 @@ const projectItems = (model: Model, source: ReadonlyArray<TranscriptItem>): Boun
 
 const parentProjection = (model: Model, items: ReadonlyArray<TranscriptItem>): ParentProjection => {
   const itemPositionByBlockId = new Map<string, number>()
-  const cellBlockIds = new Set<string>()
   for (const [position, item] of items.entries()) {
     if (item._tag !== "Block") continue
     const candidate = model.blocks[item.index]
     const block = candidate === undefined ? undefined : Schema.decodeUnknownSync(Block)(candidate)
-    if (block?._tag === "ToolCall" || block?._tag === "SubagentCard") itemPositionByBlockId.set(block.id, position)
-    if (block?._tag === "Cell") cellBlockIds.add(block.id)
+    if (block?._tag === "ToolCall" || block?._tag === "SubagentCard" || block?._tag === "SubagentGroup")
+      itemPositionByBlockId.set(block.id, position)
   }
-  return { itemPositionByBlockId, cellBlockIds }
+  return { itemPositionByBlockId }
 }
 
 const ancestorPositions = (
@@ -143,8 +141,11 @@ const positionVisibility = (
       seen.add(current)
       const parentId = items[current]?.parentId
       if (parentId === undefined) break
-      if (projection.cellBlockIds.has(parentId)) break
-      if (!expandedRows.has(`tool:${parentId}`) && !expandedRows.has(`subagent:${parentId}`)) {
+      if (
+        !expandedRows.has(`tool:${parentId}`) &&
+        !expandedRows.has(`subagent:${parentId}`) &&
+        !expandedRows.has(`subagent-group:${parentId}`)
+      ) {
         visible = false
         break
       }
@@ -179,6 +180,19 @@ const fitPartialUnit = (
     visible += additionsVisible
   }
   return { positions, visible }
+}
+
+const autoExpandedRowId = (block: Block): string | undefined => {
+  if (
+    block._tag === "SubagentCard" &&
+    (block.status === "running" || block.status === "waiting" || block.status === "cancelling")
+  )
+    return `subagent:${block.id}`
+  if (block._tag === "SubagentGroup" && (block.status === "running" || block.status === "cancelling"))
+    return `subagent-group:${block.id}`
+  if (block._tag === "ToolCall" && block.status === "running" && block.presentation.family === "edit")
+    return `tool:${block.id}`
+  return undefined
 }
 
 const selectUnitPositions = (
@@ -241,7 +255,16 @@ export const boundedTranscriptModel: {
     }
     const projection = parentProjection(model, allItems)
     const unitMembers = groupUnitPositions(allItems, windowEnd, projection.itemPositionByBlockId)
-    const isVisiblePosition = positionVisibility(allItems, projection, model.expandedRowKeys)
+    const expandedRows = new Set(model.expandedRowKeys)
+    const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
+    for (const block of model.blocks.flatMap((value) => {
+      const decoded = Schema.decodeUnknownOption(Block)(value)
+      return decoded._tag === "Some" ? [decoded.value] : []
+    })) {
+      const id = autoExpandedRowId(block)
+      if (id !== undefined && !explicitlyCollapsed.has(id)) expandedRows.add(id)
+    }
+    const isVisiblePosition = positionVisibility(allItems, projection, [...expandedRows])
     const selectedPositions = selectUnitPositions(unitMembers, allItems, projection, isVisiblePosition)
     const source = [...selectedPositions].toSorted((left, right) => left - right).map((position) => allItems[position]!)
     return projectItems(model, source)

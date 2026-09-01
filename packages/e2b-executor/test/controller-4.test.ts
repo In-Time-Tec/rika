@@ -13,7 +13,7 @@ const workspaceCapabilities = {
   environmentDigest,
   capturedAt: "2026-08-21T00:00:00.000Z",
   filesystem: { _tag: "Ready" as const, detail: "workspace filesystem available" },
-  typescriptKernel: { _tag: "Ready" as const, detail: "persistent Bun TypeScript kernel available" },
+  nativeTools: { _tag: "Ready" as const, detail: "native Workspace tools available" },
   git: { _tag: "Ready" as const, detail: "Git executable available" },
   process: { _tag: "Ready" as const, detail: "Bun process operations available" },
   pty: { _tag: "Unavailable" as const, reason: "durable PTY is unavailable" },
@@ -31,7 +31,6 @@ const archive = {
 
 const quiescence = (access: Access) => ({
   access,
-  operations: [],
   checkpoint: {
     version: 1 as const,
     checkpointId: "checkpoint-pause",
@@ -65,7 +64,7 @@ const authenticate = Effect.fn("test.authenticate")(function* (
     maximumVersion: 1,
     fence,
     templateBuildId: "template-build-v1-immutable",
-    capabilities: { cells: true, checkpoints: true, pty: true },
+    capabilities: { nativeTools: true, checkpoints: true, pty: true },
     workspaceCapabilities,
     cursors: { command: 0, event: 0, pty: 0 },
     latestCheckpointId: null,
@@ -402,7 +401,7 @@ describe("Controller", () => {
     )
   })
 
-  it.effect("rejects a cell dispatch access after its lease expires or is replaced", () => {
+  it.effect("rejects a native tool dispatch access after its lease expires or is replaced", () => {
     const harness = makeHarness()
     return Effect.gen(function* () {
       const service = yield* controller

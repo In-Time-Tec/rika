@@ -84,7 +84,7 @@
     "@ast-grep/cli"
   ],
   "scripts": {
-    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",
+    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts",
     "build": "bun turbo build",
     "check": "bun turbo run --continue typecheck \"//#ast-grep-check\" \"//#lint\" \"//#repo-lint\"",
     "dev": "bun run scripts/development/stack.ts local",
@@ -118,7 +118,6 @@
     "@effect/platform-bun": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@rika/product": "workspace:*",
-    "@rika/kernel": "workspace:*",
     "@rika/product-store": "workspace:*",
     "@rika/transcript": "workspace:*",
     "drizzle-orm": "catalog:",

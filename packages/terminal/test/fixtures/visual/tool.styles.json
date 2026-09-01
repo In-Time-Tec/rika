@@ -501,7 +501,7 @@
           "width": 1
         },
         {
-          "text": " Exploring",
+          "text": " Read",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -519,10 +519,10 @@
             }
           },
           "attributes": 0,
-          "width": 10
+          "width": 5
         },
         {
-          "text": " 1 file",
+          "text": " src/main.ts",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -540,7 +540,7 @@
             }
           },
           "attributes": 0,
-          "width": 7
+          "width": 12
         },
         {
           "text": "                                                             ",

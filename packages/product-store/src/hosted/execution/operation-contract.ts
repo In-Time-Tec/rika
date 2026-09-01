@@ -1,8 +1,9 @@
 import { Effect, Schema } from "effect"
 import type {
-  CellLifecycleFrame as CellLifecycleFrameValue,
-  CellResponse as CellResponseValue,
-} from "@rika/remote-execution/protocol"
+  ToolOperationLifecycleFrame as ToolOperationLifecycleFrameValue,
+  ToolOperationResponse as ToolOperationResponseValue,
+  ToolOperationTerminalOutcome as ToolOperationTerminalOutcomeValue,
+} from "@rika/product/tool-operation-lifecycle"
 import { rikaHostedRunnerAdmissions } from "../../database/schema/product"
 
 export class HostedExecutionOperationsError extends Schema.TaggedError<HostedExecutionOperationsError>()(
@@ -44,8 +45,8 @@ export interface OperationRecord extends OperationIdentity {
   readonly dispatchedLeaseEpoch: number | null
   readonly dispatchedExecutorInstanceId: string | null
   readonly dispatchedProcessIncarnation: string | null
-  readonly response: CellResponseValue | null
-  readonly terminalOutcome: "completed" | "failed" | "cancelled" | "unknown" | null
+  readonly response: ToolOperationResponseValue | null
+  readonly terminalOutcome: ToolOperationTerminalOutcomeValue | null
 }
 
 export type AppendFrameResult = "appended" | "duplicate" | "already-terminal" | "invalid-sequence"
@@ -54,7 +55,7 @@ export interface FinalizeOperationInput {
   readonly assignmentId: string
   readonly operationKey: string
   readonly attempt: number
-  readonly response: CellResponseValue
+  readonly response: ToolOperationResponseValue
   readonly state: "completed" | "unknown"
   readonly completionFence?: Omit<DispatchFence, "providerInstanceId">
   readonly expectedFence?: Omit<DispatchFence, "providerInstanceId">
@@ -63,7 +64,7 @@ export interface FinalizeOperationInput {
 
 export interface FinalizedOperation {
   readonly _tag: "finalized"
-  readonly response: CellResponseValue
+  readonly response: ToolOperationResponseValue
   readonly outcome: NonNullable<OperationRecord["terminalOutcome"]>
   readonly commandSequence: number
   readonly fence: Omit<DispatchFence, "providerInstanceId">
@@ -73,7 +74,7 @@ export type FinalizeOperationResult =
   | FinalizedOperation
   | {
       readonly _tag: "already-terminal"
-      readonly response: CellResponseValue
+      readonly response: ToolOperationResponseValue
       readonly outcome: NonNullable<OperationRecord["terminalOutcome"]>
     }
   | {
@@ -102,15 +103,15 @@ export interface HostedExecutionOperationsService {
   ) => Effect.Effect<"claimed" | "same-fence" | "fenced" | "missing", HostedExecutionOperationsError>
   readonly appendFrame: (
     assignmentId: string,
-    frame: CellLifecycleFrameValue,
+    frame: ToolOperationLifecycleFrameValue,
   ) => Effect.Effect<AppendFrameResult, HostedExecutionOperationsError>
   readonly readFrames: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
-  ) => Effect.Effect<ReadonlyArray<CellLifecycleFrameValue>, HostedExecutionOperationsError>
+  ) => Effect.Effect<ReadonlyArray<ToolOperationLifecycleFrameValue>, HostedExecutionOperationsError>
   readonly terminalFrame: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
   ) => Effect.Effect<
-    Extract<CellLifecycleFrameValue, { readonly _tag: "Terminal" }> | undefined,
+    Extract<ToolOperationLifecycleFrameValue, { readonly _tag: "Terminal" }> | undefined,
     HostedExecutionOperationsError
   >
   readonly terminalRecoveryScan: Effect.Effect<
@@ -118,7 +119,7 @@ export interface HostedExecutionOperationsService {
       readonly assignmentId: string
       readonly operationKey: string
       readonly attempt: number
-      readonly frame: Extract<CellLifecycleFrameValue, { readonly _tag: "Terminal" }>
+      readonly frame: Extract<ToolOperationLifecycleFrameValue, { readonly _tag: "Terminal" }>
     }>,
     HostedExecutionOperationsError
   >
@@ -131,15 +132,15 @@ export interface HostedExecutionOperationsService {
   readonly complete: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
     fence: Omit<DispatchFence, "providerInstanceId">,
-    response: CellResponseValue,
-    outcome: OperationRecord["terminalOutcome"],
+    response: ToolOperationResponseValue,
+    outcome: ToolOperationTerminalOutcomeValue,
   ) => Effect.Effect<boolean, HostedExecutionOperationsError>
   readonly finalizeOperation: (
     input: FinalizeOperationInput,
   ) => Effect.Effect<FinalizeOperationResult, HostedExecutionOperationsError>
   readonly terminalizeAccepted: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
-    response: CellResponseValue,
+    response: ToolOperationResponseValue,
     outcome: "failed" | "cancelled",
     onTerminalize?: (result: {
       readonly operation: OperationRecord

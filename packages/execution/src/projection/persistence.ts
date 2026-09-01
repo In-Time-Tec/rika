@@ -1,5 +1,5 @@
 import * as Projection from "@rika/product/execution-projection"
-import type { Card, CellState, Node, ToolState } from "./model"
+import type { Card, Node, ToolState } from "./model"
 
 export interface AuthorizationState {
   readonly unitKey: string
@@ -55,7 +55,6 @@ export interface PersistedProjector {
     readonly started: boolean
     readonly attempt?: number
     readonly tools: ReadonlyArray<readonly [string, ToolState]>
-    readonly cells: ReadonlyArray<readonly [string, CellState]>
   }>
   readonly cards: ReadonlyArray<PersistedCard>
   readonly authorizations: ReadonlyArray<readonly [string, AuthorizationState]>

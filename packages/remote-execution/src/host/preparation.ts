@@ -2,7 +2,6 @@ import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignm
 import { Crypto, Effect, FileSystem, Queue, Redacted, Ref, Semaphore, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type * as Socket from "effect/unstable/socket/Socket"
-import type { Interface as KernelInterface } from "./kernel"
 import { Runtime } from "./runtime"
 import { HostError } from "./error"
 import type { Config, Identity } from "./identity"
@@ -15,7 +14,7 @@ import {
   type RepositoryCheckoutWire,
   type WorkspaceSeedRestore,
 } from "../protocol/messages"
-import { prepare as prepareWorkspace, WorkspaceError, type KernelIdentity } from "../workspace/service"
+import { prepare as prepareWorkspace, WorkspaceError, type NativeToolRuntimeIdentity } from "../workspace/service"
 
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 
@@ -25,8 +24,6 @@ type ApplyPhaseGrant = (
   message: PhaseGrant,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
   executionEnvironment: Record<string, string>,
-  appliedEnvironment: Ref.Ref<Map<string, string>>,
-  cells: KernelInterface,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string>,
 ) => Effect.Effect<void, HostError>
@@ -75,8 +72,7 @@ const sameFence = (left: Fence, right: Fence) =>
 
 const prepare = (
   config: Config,
-  kernelProfileDigest: string,
-  bindingContractDigest: Ref.Ref<string | undefined>,
+  nativeToolRuntimeDigest: string,
   identity: Identity,
   seed: WorkspaceSeedRestore | null,
   restore: CheckpointRestore | null,
@@ -86,8 +82,6 @@ const prepare = (
   store: SessionStore,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
   executionEnvironment: Record<string, string>,
-  appliedEnvironment: Ref.Ref<Map<string, string>>,
-  cells: KernelInterface,
   inspectCapabilities: Effect.Effect<WorkspaceCapabilitySnapshot, never, Crypto.Crypto | FileSystem.FileSystem>,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string>,
@@ -120,15 +114,7 @@ const prepare = (
             return yield* HostError.make({
               message: "Workspace environment authorization does not match its bootstrap",
             })
-          yield* applyPhaseGrant(
-            message,
-            grants,
-            executionEnvironment,
-            appliedEnvironment,
-            cells,
-            environmentAccess,
-            redactedValues,
-          )
+          yield* applyPhaseGrant(message, grants, executionEnvironment, environmentAccess, redactedValues)
         }
         const accepted = accept(message)
         return accepted === undefined ? yield* receive(accept) : accepted
@@ -165,11 +151,9 @@ const prepare = (
             ? message
             : undefined,
         )
-        yield* Ref.set(bindingContractDigest, assigned.bindingContractDigest)
-        const kernel = {
-          profileDigest: kernelProfileDigest,
-          bindingContractDigest: assigned.bindingContractDigest,
-        } satisfies KernelIdentity
+        const nativeToolRuntime = {
+          digest: nativeToolRuntimeDigest,
+        } satisfies NativeToolRuntimeIdentity
         const send = (message: Parameters<typeof encodeExecutorMessage>[0]) =>
           writer(encodeExecutorMessage(message)).pipe(
             Effect.mapError(() =>
@@ -307,7 +291,7 @@ const prepare = (
         yield* reporter.started("checkout")
         const workspaceOptions = {
           stateDirectory: config.stateDirectory,
-          kernel,
+          nativeToolRuntime,
           assignment: assigned,
           reporter,
           credential,

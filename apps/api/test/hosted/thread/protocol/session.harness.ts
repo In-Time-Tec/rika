@@ -23,7 +23,6 @@ import { makeHostedPreviewBus } from "../../../../src/hosted/thread/previews"
 import { deviceId, ownerId, snapshot, threadId, timestamp } from "./memory.fixture"
 
 const firstPayload = <A>(messages: ReadonlyArray<{ readonly payload: A }>) => messages[0]?.payload
-
 it.effect("derives personal authority, admits a retried submission once, and resyncs stale controllers", () => {
   const {
     store,
@@ -42,8 +41,11 @@ it.effect("derives personal authority, admits a retried submission once, and res
       const previews = yield* makeHostedPreviewBus()
       const commandWakeups = yield* Ref.make(0)
       const wakeCommand = Ref.update(commandWakeups, (current) => current + 1)
-      const protocolLayer = hostedThreadProtocolLayerWithOptions({ notifications, previews: previews.bus, wakeCommand })
-        .pipe(Layer.provide(dependencies))
+      const protocolLayer = hostedThreadProtocolLayerWithOptions({
+        notifications,
+        previews: previews.bus,
+        wakeCommand,
+      }).pipe(Layer.provide(dependencies))
       const protocol = Context.get(yield* Layer.build(protocolLayer), HostedThreadProtocol)
       const first = yield* protocol.connect("ticket", "/api/v1/threads/socket")
       const created = yield* first.receive({

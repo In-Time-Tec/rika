@@ -23,10 +23,10 @@ describe("checkout machine operations", () => {
         const written = yield* machine.execute({
           machineId: "write-1",
           requestDigest: "write-digest",
-          request: { _tag: "CodingTool", request: { _tag: "Write", path: "checkout.txt", content: "local" } },
+          request: { _tag: "NativeTool", request: { _tag: "Bash", command: "printf local > checkout.txt" } },
         })
         const command = {
-          _tag: "CodingTool" as const,
+          _tag: "NativeTool" as const,
           request: { _tag: "Bash" as const, command: 'printf "once" >> process.txt' },
         }
         const first = yield* machine.execute({
@@ -42,7 +42,7 @@ describe("checkout machine operations", () => {
         const fenced = yield* machine.execute({
           machineId: "process-1",
           requestDigest: "different-digest",
-          request: { _tag: "CodingTool", request: { _tag: "Bash", command: 'printf "twice" >> process.txt' } },
+          request: { _tag: "NativeTool", request: { _tag: "Bash", command: 'printf "twice" >> process.txt' } },
         })
         const restarted = yield* build()
         const replayed = yield* restarted.execute({
@@ -83,17 +83,38 @@ describe("checkout machine operations", () => {
         const failure = yield* machine.execute({
           machineId: "read-1",
           requestDigest: "read-digest",
-          request: { _tag: "CodingTool", request: { _tag: "Read", path: "missing.txt" } },
+          request: { _tag: "NativeTool", request: { _tag: "Read", path: "missing.txt" } },
         })
         const unknown = yield* machine.execute({
           machineId: "crossed-1",
           requestDigest: "crossed-digest",
-          request: { _tag: "CodingTool", request: { _tag: "Read", path: "missing.txt" } },
+          request: { _tag: "NativeTool", request: { _tag: "Read", path: "missing.txt" } },
+        })
+        const missingCancellation = yield* machine.cancel({
+          machineId: "missing-1",
+          requestDigest: "missing-digest",
+        })
+        const admittedCancellation = yield* machine.cancel({
+          machineId: "admitted-1",
+          requestDigest: "admitted-digest",
+          admitted: true,
+        })
+        const cancelledReplay = yield* machine.execute({
+          machineId: "admitted-1",
+          requestDigest: "admitted-digest",
+          request: { _tag: "NativeTool", request: { _tag: "Bash", command: "printf forbidden > forbidden.txt" } },
         })
 
         expect(failure._tag).toBe("Failure")
         if (failure._tag === "Failure") expect(failure.failure._tag).toBe("ToolError")
         expect(unknown).toEqual({ _tag: "Unknown", message: "machine call outcome is unknown after executor restart" })
+        expect(missingCancellation).toEqual({
+          _tag: "Unknown",
+          message: "machine call was not retained before cancellation",
+        })
+        expect(admittedCancellation).toEqual({ _tag: "Cancelled" })
+        expect(cancelledReplay).toEqual(admittedCancellation)
+        expect(yield* fileSystem.exists(`${root}/forbidden.txt`)).toBe(false)
       }).pipe(provideLayer(BunServices.layer)),
     ),
   )

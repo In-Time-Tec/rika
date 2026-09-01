@@ -8,7 +8,7 @@ import {
   WorkspaceRequest,
   WorkspaceResponse,
 } from "@rika/product/workspace-capability"
-import { Crypto, Effect, Encoding, Redacted, Schema } from "effect"
+import { Redacted, Schema } from "effect"
 import { MaximumArchiveBytes, RepositoryIdentity } from "../workspace/artifact/archive"
 
 export const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
@@ -119,9 +119,6 @@ export const Frame = Schema.Struct({
 })
 export type Frame = typeof Frame.Type
 
-export const OperationReplayPolicy = Schema.Literals(["pure", "provider-idempotent", "never"])
-export type OperationReplayPolicy = typeof OperationReplayPolicy.Type
-
 export const PtyGap = Schema.Struct({
   fromCursor: Sequence,
   toCursor: Sequence,
@@ -139,7 +136,7 @@ export const Fence = Schema.Struct({
 export type Fence = typeof Fence.Type
 
 export const Capabilities = Schema.Struct({
-  cells: Schema.Boolean,
+  nativeTools: Schema.Boolean,
   checkpoints: Schema.Boolean,
   pty: Schema.Boolean,
 })
@@ -200,66 +197,3 @@ export const redactAccess = (access: AccessWire): Access => ({
   ...access,
   sessionToken: Redacted.make(access.sessionToken, { label: "executor-session" }),
 })
-
-export const BindingDescriptor = Schema.Struct({
-  module: Identifier,
-  operations: Schema.Array(Identifier),
-})
-export type BindingDescriptor = typeof BindingDescriptor.Type
-
-export const BindingContractDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
-export type BindingContractDigest = typeof BindingContractDigest.Type
-
-export const BindingManifest = Schema.Struct({
-  digest: BindingContractDigest,
-  descriptors: Schema.Array(BindingDescriptor),
-})
-export type BindingManifest = typeof BindingManifest.Type
-
-const encodeBindingDescriptors = Schema.encodeSync(Schema.fromJsonString(Schema.Array(BindingDescriptor)))
-
-export const bindingManifest = Effect.fn("RemoteExecution.bindingManifest")(function* (
-  descriptors: ReadonlyArray<BindingDescriptor>,
-) {
-  const crypto = yield* Crypto.Crypto
-  const digest = Encoding.encodeHex(
-    yield* crypto.digest("SHA-256", new TextEncoder().encode(encodeBindingDescriptors(descriptors))).pipe(Effect.orDie),
-  )
-  return BindingManifest.make({ digest, descriptors })
-})
-
-export const BindingRequest = Schema.Struct({
-  module: Identifier,
-  operation: Identifier,
-  input: Schema.optionalKey(Schema.Json),
-  sessionId: Schema.optionalKey(Identifier),
-  cellId: Schema.optionalKey(Identifier),
-})
-export type BindingRequest = typeof BindingRequest.Type
-
-export const BindingResponse = Schema.Union([
-  Schema.TaggedStruct("Success", { output: Schema.optionalKey(Schema.Json) }),
-  Schema.TaggedStruct("Failure", { failure: Schema.Json }),
-])
-export type BindingResponse = typeof BindingResponse.Type
-
-export const BindingBoundaryFailure = Schema.Union([
-  Schema.TaggedStruct("generalist/repl/HostModuleNotFound", {
-    module: Identifier,
-    operation: Schema.optionalKey(Identifier),
-  }),
-  Schema.TaggedStruct("generalist/repl/HostModuleSchemaFailure", {
-    module: Identifier,
-    operation: Identifier,
-    stage: Schema.Literals(["decode-input", "encode-output", "encode-failure"]),
-    message: Schema.String,
-  }),
-])
-
-export const BindingOutcome = Schema.Union([
-  Schema.TaggedStruct("Returned", { response: BindingResponse }),
-  Schema.TaggedStruct("Rejected", { failure: BindingBoundaryFailure }),
-  Schema.TaggedStruct("Suspend", { token: Identifier }),
-  Schema.TaggedStruct("Unknown", { message: Schema.String }),
-])
-export type BindingOutcome = typeof BindingOutcome.Type

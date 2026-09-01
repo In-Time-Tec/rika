@@ -1,14 +1,13 @@
 import type {
   AccessWire,
-  BindingOutcome,
   BranchPushOutcome,
   MachineOutcome,
   MachineRequest,
   WorkspaceRequest,
   WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
-import type { Deferred, Ref, Semaphore } from "effect"
-import type { BindingAuthority, ExecuteInput, ExecutionResult, GatewayError, Socket } from "../contract"
+import type { Deferred } from "effect"
+import type { ExecuteInput, ExecutionResult, GatewayError, Socket } from "../contract"
 
 export interface GatewaySession {
   readonly socket: Socket
@@ -16,11 +15,6 @@ export interface GatewaySession {
   readonly leaseExpiresAt: number
   readonly ready: boolean
   readonly environmentDigest: string | null
-}
-
-export interface BindingCall {
-  readonly requestDigest: string
-  readonly result: Deferred.Deferred<BindingOutcome>
 }
 
 export interface PendingOperation {
@@ -32,10 +26,6 @@ export interface PendingOperation {
   readonly access: AccessWire
   readonly result: Deferred.Deferred<ExecutionResult, GatewayError>
   readonly waiters: number
-  readonly bindings: BindingAuthority
-  readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
-  readonly bindingAccess: Semaphore.Semaphore
-  readonly nextMachineOrdinal: Ref.Ref<number>
 }
 
 export interface MachineCall {
@@ -48,6 +38,7 @@ export interface MachineCall {
   readonly socket: Socket
   readonly access: AccessWire
   readonly deadlineAtMillis: number
+  readonly cancelling: boolean
   readonly result: Deferred.Deferred<MachineOutcome>
 }
 

@@ -284,8 +284,7 @@ const reduceTurnExecution = (model: Model, message: Message): Model | undefined 
       const item: TranscriptItem = { _tag: "Block", index: model.blocks.length }
       const items = [...model.items, item]
       const activityForAddedBlock = (): Activity => {
-        if (message.block._tag === "ToolCall" || message.block._tag === "Cell")
-          return runningToolsActivity({ ...model, blocks, items })
+        if (message.block._tag === "ToolCall") return runningToolsActivity({ ...model, blocks, items })
         if (message.block._tag === "ToolResult") return { _tag: "Waiting" }
         if (message.block._tag === "Compaction") {
           return message.block.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }

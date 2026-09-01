@@ -11,14 +11,13 @@ const {
   makeGateway,
   fence,
   access,
-  cellIdentity,
   socket,
   controller,
   workspaceReady,
 } = GatewayTestHarness
 
 describe("executor gateway: protocol-fencing", () => {
-  it.effect("rejects a quiesce barrier that omits active work and fails it when the socket disconnects", () =>
+  it.effect("accepts a checkpoint-only quiesce barrier", () =>
     Effect.gen(function* () {
       const target = socket()
       const gateway = yield* makeGateway(controller())
@@ -33,7 +32,7 @@ describe("executor gateway: protocol-fencing", () => {
             maximumVersion: 1,
             fence,
             templateBuildId: "build-1",
-            capabilities: { cells: true, checkpoints: true, pty: false },
+            capabilities: { nativeTools: true, checkpoints: true, pty: false },
             workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
@@ -42,40 +41,22 @@ describe("executor gateway: protocol-fencing", () => {
         }),
       )
       yield* workspaceReady(gateway, target)
-      const running = yield* Effect.forkChild(
-        gateway.execute({
-          assignmentId: "assignment-1",
-          operationKey: "operation-omitted",
-          workspaceId: "workspace-1",
-          sessionId: "thread-1",
-          ...cellIdentity,
-          code: "await never",
-        }),
-      )
-      yield* Effect.yieldNow
       const barrier = yield* Effect.forkChild(gateway.quiesce("assignment-1"))
       yield* Effect.yieldNow
       const request = decode(target.sent.at(-1)!)
       if (request._tag !== "Quiesce") return yield* Effect.die("quiesce request missing")
+      const checkpoint = {
+        version: 1 as const,
+        checkpointId: "checkpoint-ready",
+        archive: { content: "eA==", contentDigest: `sha256:${"c".repeat(64)}`, sizeBytes: 1 },
+        cursor: { sequence: 0, value: "" },
+      }
       yield* gateway.receive(
         target,
-        encode({
-          _tag: "ExecutorQuiesced",
-          access,
-          requestId: request.requestId,
-          operations: [],
-          checkpoint: {
-            version: 1,
-            checkpointId: "checkpoint-omitted",
-            archive: { content: "eA==", contentDigest: `sha256:${"c".repeat(64)}`, sizeBytes: 1 },
-            cursor: { sequence: 0, value: "" },
-          },
-        }),
+        encode({ _tag: "ExecutorQuiesced", access, requestId: request.requestId, checkpoint }),
       )
-      expect(target.closed).toEqual([[1008, "fenced"]])
-      yield* gateway.disconnected(target)
-      expect(yield* Effect.flip(Fiber.join(barrier))).toMatchObject({ kind: "disconnected" })
-      yield* Fiber.interrupt(running)
+      expect(yield* Fiber.join(barrier)).toMatchObject({ checkpoint })
+      expect(target.closed).toEqual([])
     }),
   )
 
@@ -100,7 +81,7 @@ describe("executor gateway: protocol-fencing", () => {
             maximumVersion: 1,
             fence,
             templateBuildId: "build-1",
-            capabilities: { cells: true, checkpoints: true, pty: false },
+            capabilities: { nativeTools: true, checkpoints: true, pty: false },
             workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,

@@ -1,5 +1,5 @@
 # Workspace edits
 
-Agents edit from a cell. `rika.workspace.replace` replaces exact text in an existing UTF-8 file, `rika.workspace.write` creates or overwrites a UTF-8 file anywhere the user running Rika can write, and `rika.edits.apply` applies between one and sixty-four replacements as one operation. A replace requires one unique match unless `replaceAll` is true.
+Agents use native `edit` to replace exact text in an existing UTF-8 file. Relative paths start at the selected Workspace; absolute paths are used as given, and relative `..` segments may leave the Workspace. A replacement requires one unique match unless `replace_all` is true. The tool refuses missing text, ambiguous matches, invalid UTF-8, and directories. A successful response includes the authoritative unified diff. The tool runs with the invoking OS user's filesystem authority and is not a sandbox.
 
-Symbolic links are followed. `replace` requires an existing regular file and `write` refuses an existing directory, device, or socket; missing or ambiguous matches and paths whose casing matches two on-disk spellings fail. `write` corrects the casing of existing parent directories but keeps the requested spelling for a new file. Workspace edits are allowed without confirmation. Edit and write calls are mutations and are not safe to retry when their result is unknown.
+`edit` is unsafe to replay across an ambiguous provider boundary. If its terminal result is unobserved, the operation remains unknown and the agent must read the file before deciding whether another edit is needed.

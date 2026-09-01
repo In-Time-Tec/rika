@@ -5,7 +5,7 @@
 
 
 
- Δ src/renamed.ts
+ ▾ Δ src/renamed.ts
     0  0  similarity index 92%
     1  1  rename from src/old.ts
     2  2  rename to src/renamed.ts

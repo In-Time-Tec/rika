@@ -7,7 +7,6 @@ import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -65,7 +64,7 @@ const sandbox = Effect.gen(function* () {
 let identifierSequence = 0
 
 const configServiceLayer = ConfigurationService.liveConfigurationLayer({
-  webProviders: WebSearchProvider.providerRegistry,
+  webProviders: [],
   global: {},
   workspace: {},
 }).pipe(Layer.provide(Layer.succeed(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} }))), Layer.orDie)

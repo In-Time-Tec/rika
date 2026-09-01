@@ -1,5 +1,6 @@
 export interface Migration {
   readonly id: string
+  readonly aliases?: ReadonlyArray<string>
   readonly url: URL
   readonly checksum: string
 }
@@ -152,6 +153,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0030_runtime_recovery_authority",
+    aliases: ["product/0030_tenetkit_recovery_authority"],
     checksum: "3417c332907c9ac4a137168559b1e93a4839d023fcb2b106771fc24e793d6895",
     url: new URL("../../migrations/postgres/0030-runtime-recovery-authority.sql", import.meta.url),
   },
@@ -204,5 +206,10 @@ export const migrations: ReadonlyArray<Migration> = [
     id: "product/0040_rika_worker_notifications",
     checksum: "67fcafb0053be9c6b143651a4c75da20469e337ff20a6da99c9232f47553161f",
     url: new URL("../../migrations/postgres/0040-rika-worker-notifications.sql", import.meta.url),
+  },
+  {
+    id: "product/0041_native_tool_runner_registration",
+    checksum: "66caa62dcb6faf2f42cd978c93ce6c4c1fe68c607a6b768e6f95b15ffa4dc8c5",
+    url: new URL("../../migrations/postgres/0041-native-tool-runner-registration.sql", import.meta.url),
   },
 ]

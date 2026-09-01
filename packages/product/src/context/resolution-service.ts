@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { Context, Effect, FileSystem, Layer, Path, PlatformError } from "effect"
-import * as LocalPath from "@rika/coding-tools/local-path"
+import * as LocalPath from "@rika/product/local-path"
 import * as ContextFileSystem from "./file-system"
 import { Diagnostic, Source, type Input, type Result } from "./resolved"
 export type { Input, Result } from "./resolved"

@@ -140,6 +140,7 @@ const clientQuery = <Row extends QueryResultRow = never>(
 export const runMigration = (input: {
   readonly pool: Pool
   readonly id: string
+  readonly aliases?: ReadonlyArray<string>
   readonly checksum: string
   readonly sql: string
 }) =>
@@ -163,13 +164,14 @@ export const runMigration = (input: {
           "add migration checksums",
           "alter table rika_api_migration add column if not exists checksum text",
         )
+        const migrationIds = [input.id, ...(input.aliases ?? [])]
         const applied = yield* clientQuery<{ readonly checksum: string }>(
           client,
           "check migration",
-          "select checksum from rika_api_migration where id = $1",
-          [input.id],
+          "select checksum from rika_api_migration where id = any($1::text[])",
+          [migrationIds],
         )
-        if (applied.rowCount !== 0 && applied.rows[0]?.checksum !== input.checksum) {
+        if (applied.rows.some(({ checksum }) => checksum !== input.checksum)) {
           return yield* PostgresAdapterError.make({ operation: `migration checksum mismatch: ${input.id}` })
         }
         if (applied.rowCount === 0) {

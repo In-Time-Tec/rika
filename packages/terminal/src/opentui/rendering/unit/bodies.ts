@@ -1,9 +1,5 @@
-import { Function, Schema } from "effect"
-import { bold, dim, fg, type StyledText, type TextChunk } from "@opentui/core"
-import { formatCellResult } from "@rika/transcript/cell-presentation"
-import stringWidth from "string-width"
-import { highlightLines } from "../../../presentation/markdown/syntax-highlighter"
-import { wrapBodyText } from "../window"
+import { Function } from "effect"
+import { bold, fg, underline, type StyledText, type TextChunk } from "@opentui/core"
 import type { TranscriptBlock } from "../../../state/transcript/model"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
@@ -12,18 +8,9 @@ import { isToolOutputDisplayed } from "../../../presentation/transcript/agent-re
 import { diffCounts } from "../tool/detail"
 import { completedCompactionIcon, renderBlock } from "../block"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
-import { toOpenChunk, wrapStyledLine } from "../text-adapter"
-import type { UnitLineRange } from "../transcript/window"
 
 type Append = (chunk: TextChunk | TerminalTextChunk) => void
 type AppendAll = (styled: StyledText) => void
-interface CellRenderContext {
-  readonly nestedRanges: Array<UnitLineRange>
-  readonly rowExpanded: (id: string) => boolean
-  readonly line: () => number
-  readonly finishHeader?: () => void
-}
-
 export const toolOutputDisplayed = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): boolean =>
   isToolOutputDisplayed(block)
 
@@ -36,19 +23,18 @@ const renderDiffBodyImpl = (
   appendAll: AppendAll,
 ): void => {
   if (expanded) {
-    append(bold(fg(selected ? colors.blue : colors.muted)(`Δ ${block.path}\n`)))
+    append(bold(fg(selected ? colors.blue : colors.muted)("Δ ")))
+    append(underline(bold(fg(selected ? colors.blue : colors.muted)(`${block.path}\n`))))
     appendAll(renderPierreDiff(block.patch, { width }) ?? renderDiffStyled(block.patch, { width }))
     return
   }
   const [added, removed] = diffCounts(block.patch)
   const verb = /^--- \/dev\/null$/m.test(block.patch) || /^new file mode /m.test(block.patch) ? "Created" : "Edited"
-  if (selected) append(bold(fg(colors.blue)(`✓ ${verb} ${block.path} +${added} -${removed}`)))
-  else {
-    append(fg(colors.green)("✓"))
-    append(fg(colors.text)(` ${verb} ${block.path}`))
-    append(fg(colors.green)(` +${added}`))
-    append(fg(colors.red)(` -${removed}`))
-  }
+  append(selected ? bold(fg(colors.blue)("✓")) : fg(colors.green)("✓"))
+  append(selected ? bold(fg(colors.blue)(` ${verb} `)) : fg(colors.text)(` ${verb} `))
+  append(underline(selected ? bold(fg(colors.blue)(block.path)) : fg(colors.muted)(block.path)))
+  append(fg(colors.green)(` +${added}`))
+  append(fg(colors.red)(` -${removed}`))
 }
 
 export const renderDiffBody: {
@@ -68,146 +54,6 @@ export const renderDiffBody: {
     arg5: Parameters<typeof renderDiffBodyImpl>[5],
   ): ReturnType<typeof renderDiffBodyImpl>
 } = Function.dual(6, renderDiffBodyImpl)
-
-const cellStatusColor = (status: Extract<TranscriptBlock, { _tag: "Cell" }>["status"]) => {
-  if (status === "running") return colors.blue
-  if (status === "complete") return colors.green
-  if (status === "cancelled") return colors.amber
-  return colors.red
-}
-
-const HostCallPath = Schema.fromJsonString(Schema.Struct({ path: Schema.String }))
-
-const hostCallLabel = (operation: string, inputSummary: string): string => {
-  const action = operation.length === 0 ? "Call" : `${operation[0]!.toUpperCase()}${operation.slice(1)}`
-  const input = Schema.decodeOption(HostCallPath)(inputSummary)
-  return input._tag === "Some" ? `${action} ${input.value.path}` : action
-}
-
-type CellBlock = Extract<TranscriptBlock, { _tag: "Cell" }>
-
-const cellStatusIcon = (status: CellBlock["status"], spinnerFrame: string): string => {
-  if (status === "running") return spinnerFrame
-  if (status === "complete") return "✓"
-  if (status === "cancelled") return "⊘"
-  if (status === "unknown") return "?"
-  return "✕"
-}
-
-const renderCellHeader = (
-  block: CellBlock,
-  selected: boolean,
-  width: number,
-  spinnerFrame: string,
-  append: Append,
-): void => {
-  const header: Array<TextChunk> = [fg(cellStatusColor(block.status))(cellStatusIcon(block.status, spinnerFrame))]
-  if (block.visual === "shell") header.push(fg(colors.subtle)(" $"))
-  for (const chunk of header) append(selected ? bold(chunk) : chunk)
-  const headerWidth = header.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-  let firstRow = true
-  for (const line of highlightLines(block.source.text, "typescript")) {
-    const rowWidth = firstRow ? Math.max(1, width - headerWidth - 1) : Math.max(1, width - 2)
-    for (const row of wrapStyledLine(line.map(toOpenChunk), rowWidth)) {
-      append(fg(colors.text)(firstRow ? " " : "\n  "))
-      for (const chunk of row) append(chunk)
-      firstRow = false
-    }
-  }
-  if (block.calls.length > 0)
-    append(dim(fg(colors.subtle)(`\n  ${block.calls.length} ${block.calls.length === 1 ? "call" : "calls"}`)))
-}
-
-const renderCellOutputs = (block: CellBlock, width: number, append: Append): void => {
-  if (block.output.stdout.length > 0)
-    append(dim(fg(colors.text)(`\n  stdout\n${wrapBodyText(block.output.stdout, width, "    ")}`)))
-  if (block.output.stderr.length > 0)
-    append(dim(fg(colors.red)(`\n  stderr\n${wrapBodyText(block.output.stderr, width, "    ")}`)))
-  if (block.result !== undefined)
-    append(fg(colors.text)(`\n  result\n${wrapBodyText(formatCellResult(block.result), width, "    ")}`))
-}
-
-const renderCellError = (block: CellBlock, width: number, append: Append, context?: CellRenderContext): void => {
-  if (block.error === undefined) return
-  append(fg(colors.red)(`\n  error\n${wrapBodyText(`${block.error.name}: ${block.error.message}`, width, "    ")}`))
-  if (block.error.stack === undefined || block.error.stack.length === 0) return
-  const id = `cell-stack:${block.id}`
-  const start = context?.line() ?? 0
-  const shown = context?.rowExpanded(id) ?? false
-  append(dim(fg(colors.subtle)("\n    stack")))
-  const headerEnd = context?.line() ?? start
-  if (shown) append(dim(fg(colors.red)(`\n${wrapBodyText(block.error.stack, width, "      ")}`)))
-  context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
-}
-
-const cellCallIcon = (status: CellBlock["calls"][number]["status"], spinnerFrame: string): string => {
-  if (status === "started") return spinnerFrame
-  return status === "failed" ? "✕" : "✓"
-}
-
-const renderCellCalls = (
-  block: CellBlock,
-  width: number,
-  spinnerFrame: string,
-  append: Append,
-  context?: CellRenderContext,
-): void => {
-  for (const call of block.calls) {
-    const id = `cell-call:${block.id}:${call.id}`
-    const start = context?.line() ?? 0
-    const shown = context?.rowExpanded(id) ?? false
-    const callIcon = cellCallIcon(call.status, spinnerFrame)
-    append(
-      fg(call.status === "failed" ? colors.red : colors.text)(
-        `\n  ${callIcon} ${hostCallLabel(call.operation, call.inputSummary)}`,
-      ),
-    )
-    const headerEnd = context?.line() ?? start
-    if (shown) {
-      append(dim(fg(colors.text)(`\n${wrapBodyText(call.inputSummary, width, "    ")}`)))
-      if (call.message !== undefined) append(dim(fg(colors.text)(`\n${wrapBodyText(call.message, width, "    ")}`)))
-    }
-    context?.nestedRanges.push({ start, end: context.line(), headerEnd, unit: id, expandable: true })
-  }
-}
-
-const renderCellBodyImpl = (
-  block: CellBlock,
-  selected: boolean,
-  expanded: boolean,
-  width: number,
-  spinnerFrame: string,
-  append: Append,
-  context?: CellRenderContext,
-): void => {
-  renderCellHeader(block, selected, width, spinnerFrame, append)
-  context?.finishHeader?.()
-  if (!expanded) return
-  renderCellOutputs(block, width, append)
-  renderCellError(block, width, append, context)
-  renderCellCalls(block, width, spinnerFrame, append, context)
-  for (const notice of block.notices) append(dim(fg(colors.amber)(`\n${wrapBodyText(notice.detail, width, "  ")}`)))
-}
-
-export const renderCellBody: {
-  (
-    arg1: Parameters<typeof renderCellBodyImpl>[1],
-    arg2: Parameters<typeof renderCellBodyImpl>[2],
-    arg3: Parameters<typeof renderCellBodyImpl>[3],
-    arg4: Parameters<typeof renderCellBodyImpl>[4],
-    arg5: Parameters<typeof renderCellBodyImpl>[5],
-    arg6?: Parameters<typeof renderCellBodyImpl>[6],
-  ): (arg0: Parameters<typeof renderCellBodyImpl>[0]) => ReturnType<typeof renderCellBodyImpl>
-  (
-    arg0: Parameters<typeof renderCellBodyImpl>[0],
-    arg1: Parameters<typeof renderCellBodyImpl>[1],
-    arg2: Parameters<typeof renderCellBodyImpl>[2],
-    arg3: Parameters<typeof renderCellBodyImpl>[3],
-    arg4: Parameters<typeof renderCellBodyImpl>[4],
-    arg5: Parameters<typeof renderCellBodyImpl>[5],
-    arg6?: Parameters<typeof renderCellBodyImpl>[6],
-  ): ReturnType<typeof renderCellBodyImpl>
-} = Function.dual((args) => args.length >= 6, renderCellBodyImpl)
 
 const compactionRainbow = ["#ff5f6d", "#ff9f43", "#ffd166", "#7bd389", "#5bc0eb", "#8c7ae6", "#d980fa"] as const
 

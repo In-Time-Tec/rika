@@ -13,6 +13,7 @@ const layoutChanged = (previous: Model | undefined, model: Model): boolean =>
     previous.entries !== model.entries ||
     previous.blocks !== model.blocks ||
     previous.expandedRowKeys !== model.expandedRowKeys ||
+    previous.explicitlyCollapsedRowKeys !== model.explicitlyCollapsedRowKeys ||
     previous.width !== model.width ||
     previous.height !== model.height)
 

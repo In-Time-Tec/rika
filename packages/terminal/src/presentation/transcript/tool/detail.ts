@@ -1,4 +1,3 @@
-import { partialInputRecord } from "@rika/transcript/partial-tool-input"
 import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../../terminal/format"
@@ -15,19 +14,23 @@ const shellToolNames = new Set(["bash", "run_command"])
 const ToolInput = Schema.Struct({
   cmd: Schema.optionalKey(Schema.String),
   command: Schema.optionalKey(Schema.String),
+  cwd: Schema.optionalKey(Schema.String),
   file: Schema.optionalKey(Schema.String),
   file_path: Schema.optionalKey(Schema.String),
   glob: Schema.optionalKey(Schema.String),
   name: Schema.optionalKey(Schema.String),
   offset: Schema.optionalKey(Schema.Finite),
   path: Schema.optionalKey(Schema.String),
+  processId: Schema.optionalKey(Schema.String),
   pattern: Schema.optionalKey(Schema.String),
   query: Schema.optionalKey(Schema.String),
   script: Schema.optionalKey(Schema.String),
+  timeout_ms: Schema.optionalKey(Schema.Finite),
+  waitMillis: Schema.optionalKey(Schema.Finite),
+  workdir: Schema.optionalKey(Schema.String),
 })
 type ToolInput = typeof ToolInput.Type
 const ToolInputJson = Schema.fromJsonString(ToolInput)
-const decodeToolInput = Schema.decodeUnknownOption(ToolInput)
 const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
 
 const summary = (primary: string, secondary?: string): ToolSummary => {
@@ -62,9 +65,7 @@ export const agentToolSummary = (label: string): ToolSummary => {
 export const escapePathTarget = escapeControlCharacters
 
 export const inputValue = (input: string): ToolInput =>
-  Option.getOrElse(Schema.decodeOption(ToolInputJson)(input), () =>
-    Option.getOrElse(decodeToolInput(partialInputRecord(input)), () => ({})),
-  )
+  Option.getOrElse(Schema.decodeOption(ToolInputJson)(input), () => ({}))
 
 const stringValue = (values: ReadonlyArray<string | undefined>): string | undefined => {
   for (const value of values) if (value !== undefined && value.length > 0) return value
@@ -118,6 +119,12 @@ const shellDetail = (block: number, call: ToolCall, input: ToolInput): ToolDetai
   return withLabel(block, summary("$", command || (call.input.trimStart().startsWith("{") ? "" : call.input)))
 }
 
+const statusDetail = (block: number, call: ToolCall, input: ToolInput): ToolDetail => {
+  const processId = call.process?.processId ?? input.processId
+  const check = call.process?.checks?.at(-1)
+  return withLabel(block, summary("Checked", check?.processId ?? processId ?? (call.detail || "process")))
+}
+
 const otherDetail = (block: number, call: ToolCall): ToolDetail => {
   let label = call.presentation.completeLabel
   if (call.status === "running") label = call.presentation.activeLabel
@@ -139,6 +146,7 @@ export const toolDetail: {
   if (kind === "read") return readDetail(block, call, path, target)
   if (kind === "search") return searchDetail(block, call, input, target)
   if (kind === "edit") return withTarget(withLabel(block, summary("Edit", displayPath ?? call.detail)), target)
+  if (call.presentation.action === "status") return statusDetail(block, call, input)
   return kind === "shell" ? shellDetail(block, call, input) : otherDetail(block, call)
 })
 

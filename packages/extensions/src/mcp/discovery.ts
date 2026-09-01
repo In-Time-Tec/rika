@@ -34,9 +34,9 @@ const invalid = (configPath: string, message: string) => ConfigError.make({ sour
 /**
  * Read the Workspace MCP configuration and every activated skill's `mcp.json` into one server set.
  *
- * A configured server has never reached an executing Agent: the Workspace file was only ever read by
- * the `rika mcp` CLI. This is the discovery an Execution mounts into the `mcp` binding, so a missing
- * file is an empty set rather than a failure and a malformed one fails typed.
+ * A configured server does not become a model tool. This discovery supports configuration and
+ * capability snapshots only, so a missing file is an empty set rather than a failure and a malformed
+ * one fails typed.
  */
 export const discover = Effect.fn("McpDiscovery.discover")(function* (options: Options) {
   const fileSystem = yield* FileSystem.FileSystem

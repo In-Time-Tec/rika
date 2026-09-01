@@ -94,7 +94,6 @@ const program = Effect.scoped(
       directory: makePostgresIdentityDirectory(identityDatabase),
       devices: makePostgresCliDeviceDirectory(identityDatabase),
       product: application.product,
-      toolPolicy: application.toolPolicy,
       threads: application.threadProtocol,
       threadApplication: application.threadApplication,
       credentials: application.credentials,

@@ -8,7 +8,6 @@ import {
   type IdentityPrincipal,
 } from "@rika/identity"
 import { handleRequest, type HttpDependencies } from "../../src/server/http"
-import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 import { HostedProductError } from "../../src/hosted/product"
 import type { HostedProviderCredentialsService } from "../../src/hosted/environment/provider-credentials"
 import type { HostedPublicationService } from "../../src/hosted/publication"
@@ -74,7 +73,6 @@ describe("api HTTP", () => {
         devices,
         product: { ...product, ready: Effect.fail(HostedProductError.make({ message: "product readiness" })) },
         recovery,
-        toolPolicy: testToolPolicy,
         executor,
         execution,
         production: true,

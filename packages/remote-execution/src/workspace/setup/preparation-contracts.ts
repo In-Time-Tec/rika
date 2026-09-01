@@ -20,9 +20,8 @@ export interface Assignment {
   readonly checkout: RepositoryCheckoutWire | null
 }
 
-export interface KernelIdentity {
-  readonly profileDigest: string
-  readonly bindingContractDigest: string
+export interface NativeToolRuntimeIdentity {
+  readonly digest: string
 }
 
 export interface Reporter {
@@ -43,7 +42,7 @@ export interface Options {
   readonly resumeTimeout?: number
   readonly resumeBlockingWindow?: number
   readonly stateDirectory: string
-  readonly kernel: KernelIdentity
+  readonly nativeToolRuntime: NativeToolRuntimeIdentity
   readonly assignment: Assignment
   readonly reporter: Reporter
   readonly credential: (purpose: "git-read" | "github-read") => Effect.Effect<Credential, WorkspaceError, never>
@@ -76,8 +75,7 @@ export const Marker = Schema.Struct({
   assignmentGeneration: Schema.Int,
   workspaceId: Schema.String,
   templateBuildId: Schema.String,
-  kernelProfileDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-  bindingContractDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  nativeToolRuntimeDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   repositoryId: Schema.NullOr(Schema.String),
   commitSha: Schema.NullOr(Schema.String),
   setupState: Schema.Literals(["completed", "failed"]),

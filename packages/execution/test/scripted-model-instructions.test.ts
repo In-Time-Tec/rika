@@ -6,8 +6,6 @@ import { Effect } from "effect"
 import { profileInstructions } from "../src/routing/route"
 import { configure } from "./support/adapters"
 
-const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
-
 type Configured = Effect.Success<ReturnType<typeof configure>>
 
 const agentEntries = (configured: Configured) =>
@@ -39,14 +37,14 @@ it.effect("carries a harness refinement into the instructions the root agent is 
         ],
       },
     }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel, harnessSnapshot })
+    const configured = yield* configure({ executionRoute, workspace: "/workspace", harnessSnapshot })
     const root = configured.resolverEntries[0]!
     const rootSupplemental = "agent" in root ? root.agent.open((agent) => agent.supplemental ?? "") : ""
     expect(rootSupplemental).toContain("PROOF_OF_A_CARRIED_REFINEMENT")
     const conversational = configured.resolverEntries.filter(
       (entry) => "agent" in entry && entry.agent.name !== "rika-title",
     )
-    expect(conversational).toHaveLength(8)
+    expect(conversational).toHaveLength(7)
     expect(
       conversational.every((entry) =>
         entry.agent.open((agent) => (agent.supplemental ?? "").includes("PROOF_OF_A_CARRIED_REFINEMENT")),
@@ -56,12 +54,11 @@ it.effect("carries a harness refinement into the instructions the root agent is 
   }),
 )
 
-it("documents flat child groups and refuses local work delegated to web-only Librarians", () => {
+it("documents blocking flat child groups and routes local evidence to capable roles", () => {
   for (const prompt of [profileInstructions.root, profileInstructions.Task]) {
     expect(prompt).toContain("Before spawning a child")
-    expect(prompt).toContain("Librarian is web-only")
-    expect(prompt).toContain("Refuse a mismatched Librarian spawn")
-    expect(prompt).toContain("select Task or Oracle")
+    expect(prompt).toContain("same native workspace tools")
+    expect(prompt).toContain("Use Task or Oracle")
     expect(prompt).toContain("{ members: [{ key, selection, label?, prompt }], concurrency }")
     expect(prompt).toContain("run_child_group")
     expect(prompt).toContain("resume this same Run")
@@ -69,10 +66,26 @@ it("documents flat child groups and refuses local work delegated to web-only Lib
   }
   expect(profileInstructions.Task).toContain("delegate recursively")
   expect(profileInstructions.Task).toContain("pinned tree policy")
-  expect(profileInstructions.Librarian).toContain("Your tools are web-only")
-  expect(profileInstructions.Librarian).toContain("refuse and tell the parent")
-  expect(profileInstructions.Librarian).toContain("local-capable Task or Oracle child")
+  expect(profileInstructions.Librarian).toContain("same native workspace tools")
 })
+
+it.effect("gives every conversational agent the native inspect-edit-run contract", () =>
+  configure({ executionRoute: testExecutionRoute(), workspace: "/actual/workspace" }).pipe(
+    Effect.map((configured) => {
+      const conversational = configured.resolverEntries.filter(
+        (entry) => "agent" in entry && entry.agent.name !== "rika-title",
+      )
+      for (const entry of conversational) {
+        const instructions = entry.agent.open((agent) => agent.instructions)
+        expect(instructions).toContain("exactly four native workspace tools")
+        expect(instructions).toContain('Workspace: "/actual/workspace"')
+        expect(instructions).toContain("call shell_command_status explicitly")
+        expect(instructions).toContain("completion is never pushed")
+        expect(instructions).toContain("Never repeat an unchanged bash or edit after an unknown outcome")
+      }
+    }),
+  ),
+)
 
 const budgetDimensions = [
   "modelCalls",
@@ -90,7 +103,6 @@ it.effect(
     configure({
       executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
       workspace: "/workspace",
-      kernel,
     }).pipe(
       Effect.map((configured) => {
         expect(configured.resolverEntries.length).toBeGreaterThan(0)
@@ -114,7 +126,6 @@ it.effect(
     configure({
       executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
       workspace: "/workspace",
-      kernel,
     }).pipe(
       Effect.map((configured) => {
         const entries = agentEntries(configured)
@@ -132,7 +143,7 @@ it.effect(
 )
 
 it.effect("pins every agent with an unbounded turn policy so no framework turn cap can stop a run", () =>
-  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel }).pipe(
+  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace" }).pipe(
     Effect.map((configured) => {
       for (const entry of agentEntries(configured)) {
         expect(entry.manifest.policy._tag, `${profileNameOf(entry)} must pin a portable policy`).toBe("Portable")
@@ -143,8 +154,26 @@ it.effect("pins every agent with an unbounded turn policy so no framework turn c
   ),
 )
 
+it.effect("pins only the four native workspace tools on every conversational agent", () =>
+  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace" }).pipe(
+    Effect.map((configured) => {
+      const conversational = agentEntries(configured).filter((entry) => profileNameOf(entry) !== "title")
+      expect(conversational).toHaveLength(7)
+      for (const entry of conversational) {
+        expect(
+          entry.manifest.tools.map((tool) => tool.name).toSorted(),
+          `${profileNameOf(entry)} must use the native workspace toolkit`,
+        ).toEqual(["bash", "edit", "read", "shell_command_status"])
+      }
+      const title = agentEntries(configured).filter((entry) => profileNameOf(entry) === "title")
+      expect(title).toHaveLength(1)
+      expect(title[0]?.manifest.tools).toEqual([])
+    }),
+  ),
+)
+
 it.effect("keeps subagent depth and fan-out as the only pinned execution limits", () =>
-  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace", kernel }).pipe(
+  configure({ executionRoute: testExecutionRoute(), workspace: "/workspace" }).pipe(
     Effect.map(() => {
       expect(testExecutionRoute().subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     }),
@@ -159,13 +188,11 @@ it.effect("registers the harness pin the resolver expects for the same workspace
     const one = yield* configure({
       executionRoute,
       workspace: "/one",
-      kernel,
       harnessSnapshot: snapshotFor("workspace:one"),
     })
     const another = yield* configure({
       executionRoute,
       workspace: "/another",
-      kernel,
       harnessSnapshot: snapshotFor("workspace:another"),
     })
     const harnessPinOf = (configured: Configured) =>

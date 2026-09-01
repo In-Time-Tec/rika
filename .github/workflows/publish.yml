@@ -133,15 +133,15 @@ jobs:
         include:
           - runner: blacksmith-6vcpu-macos-15
             target: darwin-arm64
-            kernel: Darwin
+            os: Darwin
             architecture: arm64
           - runner: blacksmith-4vcpu-ubuntu-2404-arm
             target: linux-arm64
-            kernel: Linux
+            os: Linux
             architecture: aarch64
           - runner: blacksmith-4vcpu-ubuntu-2404
             target: linux-x64
-            kernel: Linux
+            os: Linux
             architecture: x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -187,12 +187,12 @@ jobs:
           echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
       - name: Verify native runner
         env:
-          EXPECTED_KERNEL: ${{ matrix.kernel }}
+          EXPECTED_OS: ${{ matrix.os }}
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          test "$(uname -s)" = "$EXPECTED_KERNEL"
+          test "$(uname -s)" = "$EXPECTED_OS"
           test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
-          if [ "$EXPECTED_KERNEL" = Darwin ]; then
+          if [ "$EXPECTED_OS" = Darwin ]; then
             test "$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)" = 0
           fi
       - name: Package
@@ -212,13 +212,12 @@ jobs:
         run: |
           directory="$(mktemp -d)"
           tar -xzf "$ARCHIVE" -C "$directory"
-          file "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime
-          for executable in "$directory"/rika-*/bin/rika "$directory"/rika-*/bin/.rika-kernel-runtime; do
-            case "$EXPECTED_ARCHITECTURE" in
-              x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
-              arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
-            esac
-          done
+          executable="$directory/$(basename "$ARCHIVE" .tar.gz)/bin/rika"
+          file "$executable"
+          case "$EXPECTED_ARCHITECTURE" in
+            x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
+            arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
+          esac
       - name: Smoke extracted release
         env:
           ARCHIVE: ${{ steps.package.outputs.archive }}
@@ -234,7 +233,6 @@ jobs:
           tar -xzf "$ARCHIVE" -C "$directory"
           binary="$directory/$root/bin/rika"
           test -x "$binary"
-          test -x "$directory/$root/bin/.rika-kernel-runtime"
           version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
           env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version | grep -Fq "$version"
           help="$(env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --help)"
@@ -243,7 +241,6 @@ jobs:
             echo "obsolete relay command found in release help" >&2
             exit 1
           fi
-          HOME="$home" bun scripts/packaging/kernel-runtime-smoke.ts "$directory/$root/bin" | grep -Fq PACKAGE_KERNEL_OK
       - name: Attest archive
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
@@ -353,14 +350,14 @@ jobs:
             (cd "$directory" && npm pack)
           done
           test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 4
-      - name: Verify every platform package carries the kernel-capable runtime
+      - name: Verify every platform package matches the binary inventory
         run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
             entries="$(tar -tzf "$archive")"
             while IFS= read -r required; do
               printf '%s\n' "$entries" | grep -qx "$required"
             done < <(bun -e 'import { packageBinEntries } from "./scripts/packaging/package-contract"; for (const entry of packageBinEntries) console.log(`package/bin/${entry}`)')
-            if printf '%s\n' "$entries" | grep -Eq 'package/bin/(\.rika-client-runtime|\.rika-interactive|\.rika-performance|rika-server)'; then
+            if printf '%s\n' "$entries" | grep -Eq 'package/bin/(\.rika-kernel-runtime|\.rika-kernel-worker\.js|\.rika-client-runtime|\.rika-interactive|\.rika-performance|rika-server)'; then
               echo "obsolete runtime artifact found in $archive" >&2
               exit 1
             fi

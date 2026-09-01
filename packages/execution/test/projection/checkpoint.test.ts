@@ -18,7 +18,6 @@ const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEv
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({
-    dataRoot: filename,
     modelServices: ModelRegistry.layer([
       Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
     ]),

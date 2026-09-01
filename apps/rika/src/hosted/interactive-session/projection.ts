@@ -88,8 +88,7 @@ const validateAttachmentEvents = (
     if (BigInt(event.cursor) !== expectedCursor)
       return { _tag: "Invalid", message: "Thread attachment replay was not contiguous" }
     const eventVersion = BigInt(event.threadVersion)
-    if (eventVersion < representedVersion)
-      return { _tag: "Invalid", message: "Thread attachment version regressed" }
+    if (eventVersion < representedVersion) return { _tag: "Invalid", message: "Thread attachment version regressed" }
     representedVersion = eventVersion
     expectedCursor += 1n
   }

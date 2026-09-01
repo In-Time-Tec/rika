@@ -1,5 +1,4 @@
 import { AiError, ModelRegistry, Response as AiResponse } from "generalist"
-import { CellTool } from "generalist/repl"
 import { TestModel } from "generalist/test"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
@@ -14,7 +13,6 @@ export type Profile =
   | "Oracle"
   | "Librarian"
   | "Painter"
-  | "ReadThread"
   | "Review"
   | "Surgeon"
   | "Task"
@@ -40,7 +38,6 @@ const profiles: ReadonlyArray<Profile> = [
   "Oracle",
   "Librarian",
   "Painter",
-  "ReadThread",
   "Review",
   "Surgeon",
   "Task",
@@ -72,13 +69,6 @@ const usage = (input: {
   })
 }
 
-/** One `rika.<module>.<operation>(input)` call a scripted cell makes. */
-interface BindingCall {
-  readonly module: string
-  readonly operation: string
-  readonly input?: unknown
-}
-
 interface SpawnRequest {
   readonly profile: Profile
   readonly prompt: string
@@ -94,15 +84,6 @@ interface ChildRequest {
 interface ChildGroupMember extends ChildRequest {
   key: string
 }
-
-/**
- * A cell that awaits one binding and returns its value. The model can only act through the cell, so
- * a scripted tool call is scripted cell source, and the source is what the transcript projects.
- */
-const callSource = (call: BindingCall): string =>
-  `rika.${call.module}.${call.operation}(${JSON.stringify(call.input ?? {})})`
-
-const bindingSource = (call: BindingCall): string => `await ${callSource(call)}`
 
 export const step = {
   text: (value: string, delayMillis?: number): Step =>
@@ -133,9 +114,23 @@ export const step = {
   },
   part: (value: string): Part => TestModel.text(value),
   reasoning: (value: string): Part => TestModel.reasoning(value),
-  cell: (code: string, id: string): Part => TestModel.toolCall(CellTool.name, { code }, { id }),
-  binding: (call: BindingCall, id: string): Part => step.cell(bindingSource(call), id),
-  bindings: (calls: ReadonlyArray<BindingCall>, id: string): Part => step.cell(calls.map(bindingSource).join("\n"), id),
+  read: (input: { readonly path: string; readonly read_range?: readonly [number, number] }, id: string): Part =>
+    TestModel.toolCall("read", input, { id }),
+  edit: (
+    input: {
+      readonly path: string
+      readonly old_str: string
+      readonly new_str: string
+      readonly replace_all?: boolean
+    },
+    id: string,
+  ): Part => TestModel.toolCall("edit", input, { id }),
+  bash: (
+    input: { readonly command: string; readonly workdir?: string; readonly timeout_ms?: number },
+    id: string,
+  ): Part => TestModel.toolCall("bash", input, { id }),
+  shellCommandStatus: (input: { readonly processId: string; readonly waitMillis?: number }, id: string): Part =>
+    TestModel.toolCall("shell_command_status", input, { id }),
   spawn: (children: ReadonlyArray<SpawnRequest>, id: string): Part => {
     if (children.length === 1) {
       const child = children[0]!
@@ -202,7 +197,6 @@ export const laneExecutionRoute = (mode = "test"): ExecutionRouteSnapshot.Execut
     agents: {
       librarian: withLaneIdentity(route.agents.librarian, "Librarian"),
       painter: withLaneIdentity(route.agents.painter, "Painter"),
-      readThread: withLaneIdentity(route.agents.readThread, "ReadThread"),
       review: withLaneIdentity(route.agents.review, "Review"),
       surgeon: withLaneIdentity(route.agents.surgeon, "Surgeon"),
       task: withLaneIdentity(route.agents.task, "Task"),

@@ -1,7 +1,7 @@
 import type { Interface as Controller } from "@rika/e2b-executor/controller"
 import type { ExecutorMessage } from "@rika/remote-execution/protocol"
 import { Effect, Ref } from "effect"
-import type { GatewayError, PreparationStore, Socket } from "../../contract"
+import type { PreparationStore, Socket } from "../../contract"
 import { gatewayCredentialPreparationHandler } from "./preparation"
 import { gatewayCredentialRequestHandler } from "./request"
 import { gatewayCredentialRevocationHandler } from "./revocation"
@@ -27,7 +27,6 @@ export interface GatewayCredentialMessageDependencies {
   readonly controller: Controller
   readonly preparation: PreparationStore
   readonly branchPushCalls: Ref.Ref<Map<string, BranchPushCall>>
-  readonly bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>
   readonly send: (socket: Socket, message: Parameters<typeof gatewayProtocol.encode>[0]) => void
 }
 

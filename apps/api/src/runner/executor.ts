@@ -124,8 +124,8 @@ const runnerExecutorLayer = Layer.effect(
           deviceId: input.fence.instanceId,
           processIncarnation: input.fence.processIncarnation,
         })
-        .pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
-      if (principal === undefined) return yield* failure("authentication", "Runner admission binding is unavailable")
+        .pipe(Effect.mapError(() => failure("repository", "Runner admission authority is unavailable")))
+      if (principal === undefined) return yield* failure("authentication", "Runner admission authority is unavailable")
       return principal satisfies AuthenticatedPrincipal
     })
     const access = Effect.fn("RunnerExecutor.access")(function* (
@@ -148,7 +148,7 @@ const runnerExecutorLayer = Layer.effect(
           deviceId: principal.deviceId,
           clientId: principal.clientId,
         })
-        .pipe(Effect.mapError(() => failure("repository", "Runner admission binding is unavailable")))
+        .pipe(Effect.mapError(() => failure("repository", "Runner admission authority is unavailable")))
       if (!admitted) return yield* failure("authentication", "Authenticated client has no consumed Runner admission")
       return {
         assignmentId: ExecutorAssignmentId.make(input.fence.assignmentId),
@@ -277,7 +277,7 @@ const runnerExecutorLayer = Layer.effect(
             const assignment = yield* load(admission.assignmentId)
             const placement = yield* local(assignment, principal)
             if (assignment.ownerId !== admission.ownerId)
-              return yield* failure("fenced", "Runner admission owner binding is no longer current")
+              return yield* failure("fenced", "Runner admission owner authority is no longer current")
             yield* verifyPrincipal(principal, assignment.ownerId)
             if (
               number(assignment.generation) !== admission.generation ||
@@ -285,7 +285,7 @@ const runnerExecutorLayer = Layer.effect(
             )
               return yield* failure("fenced", "Runner admission assignment is no longer current")
             if (assignment.lifecycle.providerInstanceId !== placement.deviceId)
-              return yield* failure("fenced", "Runner admission device binding is no longer current")
+              return yield* failure("fenced", "Runner admission device authority is no longer current")
             const session = yield* secret("runner-session")
             const active = yield* assignments
               .openSession({

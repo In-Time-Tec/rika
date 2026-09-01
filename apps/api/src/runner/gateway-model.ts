@@ -1,22 +1,14 @@
-import type * as MachineBindings from "@rika/kernel/machine-bindings"
 import type { FinalizeOperationInput } from "@rika/product-store/executor-operations"
+import type { ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
 import {
   ApiMessage,
-  BindingRequest,
   MachineRequest,
   RunnerMessage,
   type AccessWire,
-  type BindingOutcome,
-  type CellResponse,
+  type MachineOutcome,
 } from "@rika/remote-execution/protocol"
-import { Deferred, Ref, Schema, Semaphore } from "effect"
-import {
-  GatewayError,
-  type BindingAuthority,
-  type ExecutionOutcome,
-  type OperationInput,
-  type Socket,
-} from "../executor/gateway"
+import { Deferred, Schema } from "effect"
+import { GatewayError, type OperationInput, type Socket } from "../executor/gateway"
 
 export interface Session {
   readonly socket: Socket
@@ -26,9 +18,15 @@ export interface Session {
 
 export interface FinalResult {
   readonly access?: AccessWire
-  readonly response: CellResponse
+  readonly response: ToolOperationResponse
   readonly outcome: ExecutionOutcome
   readonly eventPersisted: boolean
+}
+
+export type ExecutionOutcome = "completed" | "failed" | "cancelled" | "unknown"
+
+export interface LocalExecuteInput extends OperationInput {
+  readonly machineRequest: MachineRequest
 }
 
 export interface Pending {
@@ -41,16 +39,6 @@ export interface Pending {
   readonly socket: Socket
   readonly access: AccessWire
   readonly result: Deferred.Deferred<FinalResult, GatewayError>
-  readonly acknowledged: Deferred.Deferred<void>
-  readonly bindings: BindingAuthority
-  readonly bindingCalls: Ref.Ref<Map<string, BindingCall>>
-  readonly bindingLock: Semaphore.Semaphore
-  readonly nextMachineOrdinal: Ref.Ref<number>
-}
-
-export interface BindingCall {
-  readonly requestDigest: string
-  readonly result: Deferred.Deferred<BindingOutcome>
 }
 
 export interface MachineCall {
@@ -59,15 +47,12 @@ export interface MachineCall {
   readonly attempt: number
   readonly machineId: string
   readonly requestDigest: string
-  readonly request: MachineBindings.Request
+  readonly request: MachineRequest
   readonly socket: Socket
   readonly access: AccessWire
   readonly deadlineAtMillis: number
-  readonly result: Deferred.Deferred<MachineBindings.Outcome>
-}
-
-export type LocalExecuteInput = OperationInput & {
-  readonly bindings: BindingAuthority
+  readonly cancelling: boolean
+  readonly result: Deferred.Deferred<MachineOutcome>
 }
 
 export type MutableFinalizeOperationInput = {
@@ -91,7 +76,6 @@ const OperationIdentitySchema = Schema.Struct({
 })
 
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentitySchema))
-const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
 
 const operationKey = (assignmentId: string, key: string, attempt: number) =>
@@ -102,10 +86,9 @@ const machineKey = (assignmentId: string, key: string, attempt: number, machineI
 
 const failure = (kind: GatewayError["kind"], message: string): GatewayError => GatewayError.make({ kind, message })
 
-const finalResult = (response: CellResponse, outcome: ExecutionOutcome, access?: AccessWire): FinalResult => {
+const finalResult = (response: ToolOperationResponse, outcome: ExecutionOutcome, access?: AccessWire): FinalResult => {
   const result: FinalResult = { response, outcome, eventPersisted: true }
-  if (access !== undefined) return { ...result, access }
-  return result
+  return access === undefined ? result : { ...result, access }
 }
 
 const sameFence = (left: AccessWire, right: AccessWire) =>
@@ -118,20 +101,19 @@ const sameFence = (left: AccessWire, right: AccessWire) =>
   left.fence.executorId === right.fence.executorId &&
   left.fence.processIncarnation === right.fence.processIncarnation
 
-const unknownResponse: CellResponse = {
+const unknownResponse: ToolOperationResponse = {
   _tag: "DomainFailure",
-  failure: { kind: "unknown", message: "Local operation outcome is unknown after executor disconnect" },
+  failure: { kind: "unknown", message: "Local tool outcome is unknown after executor disconnect" },
 }
 
-const timeoutResponse: CellResponse = {
+const timeoutResponse: ToolOperationResponse = {
   _tag: "DomainFailure",
-  failure: { kind: "timeout", message: "Cell operation deadline exceeded" },
+  failure: { kind: "timeout", message: "Tool operation deadline exceeded" },
 }
 
 export const gatewayModel = {
   decode,
   encode,
-  encodeBindingRequest,
   encodeMachineRequest,
   encodeOperationIdentity,
   failure,

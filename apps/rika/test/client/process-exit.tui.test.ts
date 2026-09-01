@@ -42,6 +42,10 @@ test(
         yield* Effect.tryPromise(() => app.type("Run the deduplicated group."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_DEDUPE_COMPLETE")
+        // A terminal group collapses to its neutral summary. Expand it before checking member rows.
+        yield* app.waitFrame("2 agents · 2/2 complete", 40_000)
+        app.pressKey("\t")
+        app.pressEnter()
         const settled = yield* app.waitFrameMatch(
           (frame) => frame.includes("Oracle has spoken") && frame.includes("Surgeon closed up"),
           40_000,

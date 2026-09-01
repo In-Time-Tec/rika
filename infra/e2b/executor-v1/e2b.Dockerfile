@@ -103,7 +103,6 @@ RUN npm install --global --force "pnpm@${PNPM_VERSION}" "yarn@${YARN_VERSION}" \
 
 WORKDIR /opt/rika
 COPY package.json bun.lock ./
-COPY packages/coding-tools ./packages/coding-tools
 COPY packages/configuration ./packages/configuration
 COPY packages/credential-vault ./packages/credential-vault
 COPY packages/e2b-executor ./packages/e2b-executor
@@ -111,7 +110,6 @@ COPY packages/execution ./packages/execution
 COPY packages/extensions ./packages/extensions
 COPY packages/github-app ./packages/github-app
 COPY packages/identity ./packages/identity
-COPY packages/kernel ./packages/kernel
 COPY packages/product ./packages/product
 COPY packages/product-store ./packages/product-store
 COPY packages/remote-execution ./packages/remote-execution
@@ -123,13 +121,10 @@ COPY apps/rika ./apps/rika
 COPY apps/web ./apps/web
 RUN bun install --production --frozen-lockfile --ignore-scripts \
   && test -f node_modules/generalist/package.json \
-  && test -f packages/kernel/src/executor-runtime.ts \
-  && bun -e 'import { workerModule } from "generalist/repl/bun"; if (!(await Bun.file(workerModule).exists())) process.exit(1)' \
   && rm -rf node_modules/.bun/@typescript+typescript-* /root/.bun
 COPY infra/e2b/executor-v1/start.sh ./start.sh
 COPY infra/e2b/executor-v1/tool-manifest.json ./tool-manifest.json
 COPY infra/e2b/executor-v1/doctor.ts ./doctor.ts
-COPY infra/e2b/executor-v1/kernel-doctor.ts ./kernel-doctor.ts
 COPY infra/e2b/executor-v1/rika ./rika
 RUN chmod 0555 /opt/rika/start.sh /opt/rika/rika \
   && ln -s /opt/rika/rika /usr/local/bin/rika \

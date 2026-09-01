@@ -8,9 +8,7 @@ import { commandControlFailure } from "../../../src/hosted/thread/command-worker
 import { commandApplication } from "../../../src/hosted/thread/command-application"
 import { HostedProduct, HostedProductError } from "../../../src/hosted/product"
 import { HostedThreadApplication } from "../../../src/hosted/thread/application"
-import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../src/hosted/environment/workspace"
-import { testToolPolicy } from "../execution/tool-policy.fixture"
 import { command } from "./protocol/commands.harness"
 import { fakeApplication, fakeProduct, fakeWorkspace } from "./protocol/fakes.harness"
 import { memoryStore } from "./protocol/memory.fixture"
@@ -72,7 +70,6 @@ it.effect("leaves an unavailable command claimed until its durable retry lease e
           ),
           Layer.succeed(HostedThreadApplication, fakeApplication()),
           Layer.succeed(HostedWorkspace, fakeWorkspace()),
-          Layer.succeed(HostedToolPolicy, testToolPolicy),
         ),
       )
       const execute = yield* commandApplication({ claimMillis: 10_000 }).pipe(Effect.provide(services))

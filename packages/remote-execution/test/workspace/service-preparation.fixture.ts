@@ -6,7 +6,7 @@ import { createArchive, encodeArchive } from "../../src/workspace/artifact/archi
 import { provideLayer } from "../support/layer"
 
 const platform = BunServices.layer
-const kernel = { profileDigest: "1".repeat(64), bindingContractDigest: "2".repeat(64) } as const
+const nativeToolRuntime = { digest: "1".repeat(64) } as const
 const JsonRecord = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const decodeJsonRecord = Schema.decodeUnknownEffect(JsonRecord)
 const encodeJsonRecord = Schema.encodeEffect(JsonRecord)
@@ -53,7 +53,7 @@ exec "$@"
         root,
         workspaceCommandPrefix: [command],
         stateDirectory,
-        kernel,
+        nativeToolRuntime,
         reporter,
         credential: () =>
           Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),
@@ -161,7 +161,7 @@ it.effect("restores a local seed into a fresh projectless Orb before running its
         root,
         workspaceCommandPrefix: [],
         stateDirectory: `${parent}/state`,
-        kernel,
+        nativeToolRuntime,
         reporter: { started: () => Effect.void, output: () => Effect.void },
         credential: () =>
           Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),
@@ -198,7 +198,7 @@ it.effect("rejects a fresh workspace directory without its durable preparation m
           root,
           workspaceCommandPrefix: [],
           stateDirectory: `${parent}/state`,
-          kernel,
+          nativeToolRuntime,
           reporter: { started: () => Effect.void, output: () => Effect.void },
           credential: () =>
             Effect.fail(WorkspaceError.make({ phase: "checkout", message: "unexpected credential", retryable: false })),

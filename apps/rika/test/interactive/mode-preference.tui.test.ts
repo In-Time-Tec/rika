@@ -17,7 +17,7 @@ const spinnerChanged = (frame: string, marker: string, previous: string | undefi
 }
 
 test(
-  "settles repeated process waits while the launching cell owns process liveness",
+  "settles repeated process waits on the launching bash tool",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -30,66 +30,61 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           script: [
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "start", input: { command, timeoutMillis: 0 } },
-                "bash-wait",
-              ),
-            ]),
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 0 } },
-                "wait-immediate",
-              ),
-            ]),
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "status", input: { processId: "1", waitMillis: 10_000 } },
-                "wait-final",
-              ),
-            ]),
+            model.turn([model.tool("bash", { command, timeout_ms: 0 }, "bash-wait")]),
+            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
+            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
             model.text("SHELL_WAIT_COMPLETE"),
           ],
         })
 
         yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
-        const running = yield* app.waitFrame('"waitMillis":10000', 20_000)
-        const collapsedGlyph = spinnerFor(running, '"waitMillis":10000')
+        const running = yield* app.waitFrameMatch(
+          (frame) => frame.includes("process 1 · detached") && spinnerFor(frame, command) !== undefined,
+          20_000,
+        )
+        const collapsedGlyph = spinnerFor(running, command)
         expect(collapsedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', collapsedGlyph), 5_000)
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, collapsedGlyph), 5_000)
 
-        yield* app.clickText('"waitMillis":10000')
-        const expanded = yield* app.waitFrame('"waitMillis":10000')
-        const expandedGlyph = spinnerFor(expanded, '"waitMillis":10000')
+        yield* app.clickText(command)
+        const expanded = yield* app.waitFrame("EARLY_OUTPUT")
+        const expandedGlyph = spinnerFor(expanded, command)
         expect(expandedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', expandedGlyph), 5_000)
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, expandedGlyph), 5_000)
 
-        yield* app.clickText('"waitMillis":10000')
-        const recollapsed = yield* app.waitFrame('"waitMillis":10000')
-        const recollapsedGlyph = spinnerFor(recollapsed, '"waitMillis":10000')
+        yield* app.clickText(command)
+        const recollapsed = yield* app.waitFrame("process 1 · detached")
+        const recollapsedGlyph = spinnerFor(recollapsed, command)
         expect(recollapsedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, '"waitMillis":10000', recollapsedGlyph), 5_000)
+        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, recollapsedGlyph), 5_000)
         yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
         yield* app.settled
 
-        const cells = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
-          unit.content._tag === "Block" && unit.content.block._tag === "Cell" ? [unit.content.block] : [],
+        const tools = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
         )
-        expect(cells?.map(({ source }) => source.text)).toEqual([
-          `await rika.processes.start({ command: "${command}", timeoutMillis: 0 })\n`,
-          'await rika.processes.status({ processId: "1", waitMillis: 0 })\n',
-          'await rika.processes.status({ processId: "1", waitMillis: 10000 })\n',
-        ])
-        expect(cells?.at(0)?.result).toMatchObject({ processId: "1", running: true })
-        expect(cells?.at(1)?.result).toMatchObject({ running: true })
-        const completedResult = yield* Schema.decodeUnknownEffect(
-          Schema.Struct({ text: Schema.String, running: Schema.Boolean, exitCode: Schema.Finite }),
-        )(cells?.at(2)?.result).pipe(Effect.orDie)
-        expect(completedResult.running).toBe(false)
-        expect(completedResult.exitCode).toBe(0)
+        expect(tools).toHaveLength(1)
+        const bash = tools?.[0]
+        expect(bash).toMatchObject({
+          name: "bash",
+          status: "complete",
+          process: {
+            processId: "1",
+            running: false,
+            exitCode: 0,
+            command,
+            background: true,
+            checks: [
+              { toolCallId: "wait-immediate", processId: "1", waitMillis: 0 },
+              { toolCallId: "wait-final", processId: "1", waitMillis: 10_000 },
+            ],
+          },
+        })
+        const completedResult = yield* Schema.decodeUnknownEffect(Schema.Struct({ text: Schema.String }))(
+          bash?.result,
+        ).pipe(Effect.orDie)
         expect(completedResult.text).toContain("FINAL_OUTPUT")
-        expect(cells?.every(({ status }) => status === "complete")).toBe(true)
 
         app.pressKey("\t")
         app.pressEnter()

@@ -77,7 +77,6 @@ export const transcriptAnimationActive = (model: Model): boolean => {
   const active = model.blocks.some((candidate) => {
     const block = decodeBlock(candidate)
     if (block._tag === "SubagentCard") return runningCardStatuses.has(block.status)
-    if (block._tag === "Cell") return block.status === "running"
     return block._tag === "ToolCall" && block.status === "running"
   })
   transcriptAnimationByBlocks.set(model.blocks, active)
@@ -122,11 +121,6 @@ export const runningToolsActivity = (model: Model): Extract<Activity, { readonly
     if (block._tag === "SubagentCard") {
       const item = itemByIndex.get(index)
       if (runningCardStatuses.has(block.status) && (item === undefined || !ownedByCard(item))) subagents += 1
-      continue
-    }
-    if (block._tag === "Cell") {
-      const item = itemByIndex.get(index)
-      if (block.status === "running" && (item === undefined || !ownedByCard(item))) tools += 1
       continue
     }
     if (block._tag !== "ToolCall" || block.status !== "running") continue

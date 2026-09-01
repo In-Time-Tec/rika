@@ -1,4 +1,3 @@
-import { defaultWorkerModules } from "@rika/kernel/kernel-composition"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
@@ -7,8 +6,6 @@ import {
   archiveName,
   archiveRoot,
   isPackageTarget,
-  kernelRuntime,
-  kernelWorker,
   ownedTargetEntries,
   packageExecutable,
   targetNames,
@@ -182,31 +179,6 @@ const program = Effect.gen(function* () {
       ),
   )
 
-  const bundleWorker = Effect.fn("Package.bundleWorker")((outfile: string) =>
-    Effect.tryPromise({
-      try: () =>
-        Bun.build({
-          entrypoints: [defaultWorkerModules.worker],
-          outdir: path.dirname(outfile),
-          naming: path.basename(outfile),
-          target: "bun",
-          format: "esm",
-          minify: true,
-        }),
-      catch: (cause) => packageError("build", `bundle kernel worker failed: ${buildFailure(cause)}`, cause),
-    }).pipe(
-      Effect.flatMap((result) => {
-        if (!result.success)
-          return Effect.fail(
-            packageError("build", `bundle kernel worker failed:\n${result.logs.map(String).join("\n")}`),
-          )
-        if (result.outputs.length !== 1)
-          return Effect.fail(packageError("build", "bundle kernel worker emitted unexpected assets"))
-        return Effect.void
-      }),
-    ),
-  )
-
   const buildTarget = Effect.fn("Package.buildTarget")((target: PackageTarget) =>
     Effect.gen(function* () {
       yield* fileSystem.makeDirectory(artifacts, { recursive: true })
@@ -226,19 +198,12 @@ const program = Effect.gen(function* () {
             yield* assertInstalledDependencies()
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, packageExecutable), target, identity)
-            yield* bundleWorker(path.join(bin, kernelWorker))
-            const runtime = path.join(bin, kernelRuntime)
-            yield* fileSystem.copyFile(process.execPath, runtime)
-            yield* fileSystem.chmod(runtime, 0o755)
-            yield* fileSystem.writeFileString(
-              path.join(stage, "INSTALL"),
-              "Install bin/rika on PATH. Keep the private kernel runtime and worker in bin beside it.\n",
-            )
+            yield* fileSystem.writeFileString(path.join(stage, "INSTALL"), "Install bin/rika on PATH.\n")
             const exitCode = yield* spawner.exitCode(
               ChildProcess.make(
                 "tar",
                 ["-czf", path.join(artifacts, archiveName(manifest.version, target)), stageName],
-                { cwd: artifacts },
+                { cwd: artifacts, env: { COPYFILE_DISABLE: "1" }, extendEnv: true },
               ),
             )
             if (Number(exitCode) !== 0)

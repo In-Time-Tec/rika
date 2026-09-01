@@ -1,4 +1,4 @@
-import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
+import { Catalog } from "@rika/product/native-tool-catalog"
 import { Function, Option, Schema } from "effect"
 import type { Block } from "@rika/product/execution-transcript-contract"
 
@@ -17,6 +17,10 @@ const ToolInput = Schema.Struct({
   cmd: Schema.optionalKey(Schema.String),
   script: Schema.optionalKey(Schema.String),
   args: Schema.optionalKey(Schema.Array(Schema.String)),
+  workdir: Schema.optionalKey(Schema.String),
+  timeout_ms: Schema.optionalKey(Schema.Finite),
+  waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  wait_millis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
   processId: Schema.optionalKey(Schema.String),
   process_id: Schema.optionalKey(Schema.String),
   objective: Schema.optionalKey(Schema.String),
@@ -38,6 +42,7 @@ const ToolOutput = Schema.Struct({
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
   exitCode: Schema.optionalKey(Schema.Finite),
+  elapsedMillis: Schema.optionalKey(Schema.Finite),
   stdout: Schema.optionalKey(Schema.String),
   stderr: Schema.optionalKey(Schema.String),
   truncated: Schema.optionalKey(Schema.Boolean),
@@ -130,31 +135,63 @@ const files = (id: string, name: string, encodedInput: string): ReadonlyArray<To
   ]
 }
 
-const makeToolImpl = (id: string, name: string, input: string, previous?: Tool): Tool => {
+const processCheckFromInput = (toolCallId: string, encodedInput: string) => {
+  const input = inputRecord(encodedInput)
+  const processId = field(input, ["processId", "process_id"])
+  if (processId === undefined) return undefined
+  const wait = input.waitMillis ?? input.wait_millis
+  return wait == null ? { toolCallId, processId } : { toolCallId, processId, waitMillis: wait }
+}
+
+const initialProcess = (name: string, input: ToolInput): Tool["process"] => {
+  const command = field(input, ["command", "cmd", "script"])
+  if (name.toLowerCase() !== "bash" || command === undefined) return undefined
+  const process: NonNullable<Tool["process"]> = { command }
+  if (input.workdir !== undefined) Object.assign(process, { workdir: input.workdir })
+  if (input.timeout_ms === 0) Object.assign(process, { background: true })
+  return process
+}
+
+const restorePrevious = (base: Tool, process: Tool["process"], previous?: Tool): Tool => {
+  if (previous === undefined) return base
+  let tool = base
+  if (previous.result !== undefined) tool = { ...tool, result: previous.result }
+  if (previous.process !== undefined) tool = { ...tool, process: { ...process, ...previous.process } }
+  if (previous.operationId !== undefined) tool = { ...tool, operationId: previous.operationId }
+  if (previous.truncated !== undefined) tool = { ...tool, truncated: previous.truncated }
+  if (previous.parentId !== undefined) tool = { ...tool, parentId: previous.parentId }
+  return tool
+}
+
+const makeToolImpl = (id: string, rawId: string, name: string, input: string, previous?: Tool): Tool => {
+  const decodedInput = inputRecord(input)
+  const process = initialProcess(name, decodedInput)
   let tool: Tool = {
     _tag: "ToolCall",
     id,
     name,
     input,
+    toolCallId: previous?.toolCallId ?? rawId,
     status: previous?.status ?? "running",
     presentation:
       previous === undefined || previous.name !== name ? Catalog.resolvePresentation(name) : previous.presentation,
     detail: detail(name, input),
     files: files(id, name, input),
   }
-  if (previous?.result !== undefined) tool = { ...tool, result: previous.result }
-  if (previous?.process !== undefined) tool = { ...tool, process: previous.process }
-  if (previous?.parentId !== undefined) tool = { ...tool, parentId: previous.parentId }
-  return tool
+  if (name.toLowerCase() === "read" && decodedInput.read_range !== undefined)
+    tool = { ...tool, readRange: decodedInput.read_range }
+  if (process !== undefined) tool = { ...tool, process }
+  return restorePrevious(tool, process, previous)
 }
 
 const processFrom = (value: typeof ToolOutput.Type): NonNullable<Tool["process"]> => {
-  const { status: _status, ...process } = value
+  const { status: _status, diff: _diff, ...process } = value
   return process
 }
 
 const completionStatus = (statusText: string, process: NonNullable<Tool["process"]>, isFailure: boolean) => {
   const failed = isFailure || statusText === "failed" || (process.exitCode !== undefined && process.exitCode !== 0)
+  if (statusText === "rejected") return { tool: "rejected", file: "failed" } as const
   if (failed) return { tool: "failed", file: "failed" } as const
   if (statusText === "cancelled" || statusText === "canceled") return { tool: "cancelled", file: "complete" } as const
   if (process.running === true) return { tool: "running", file: "running" } as const
@@ -179,7 +216,21 @@ const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean
       return { ...file, ...applied, preview: false, status: status.file }
     }),
   }
-  if (Object.keys(process).length > 0) completed = { ...completed, process }
+  const { stderr, stdout } = process
+  const hasProcess =
+    tool.process !== undefined ||
+    process.running !== undefined ||
+    process.processId !== undefined ||
+    process.exitCode !== undefined ||
+    process.elapsedMillis !== undefined ||
+    stdout !== undefined ||
+    stderr !== undefined
+  if (hasProcess) {
+    const mergedProcess = { ...tool.process, ...process }
+    if (tool.name === "bash" && process.running === true) Object.assign(mergedProcess, { background: true })
+    completed = { ...completed, process: mergedProcess }
+  }
+  if (value.truncated !== undefined) completed = { ...completed, truncated: value.truncated }
   return completed
 }
 
@@ -189,13 +240,17 @@ export const makeTool: {
     arg1: Parameters<typeof makeToolImpl>[1],
     arg2: Parameters<typeof makeToolImpl>[2],
     arg3: Parameters<typeof makeToolImpl>[3],
+    arg4: Parameters<typeof makeToolImpl>[4],
   ): ReturnType<typeof makeToolImpl>
   (
     arg1: Parameters<typeof makeToolImpl>[1],
     arg2: Parameters<typeof makeToolImpl>[2],
     arg3: Parameters<typeof makeToolImpl>[3],
+    arg4: Parameters<typeof makeToolImpl>[4],
   ): (arg0: Parameters<typeof makeToolImpl>[0]) => ReturnType<typeof makeToolImpl>
-} = Function.dual((args) => args.length >= 3, makeToolImpl)
+} = Function.dual((args) => args.length >= 4, makeToolImpl)
+
+export const Input = { processCheckFromInput }
 
 export const completeTool: {
   (

@@ -77,17 +77,16 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "server", version: "1", pid: 42 })),
             (logging) =>
-              Effect.andThen(Logging.start, Effect.logInfo("hosted.cell_execution.success")).pipe(
+              Effect.andThen(Logging.start, Effect.logInfo("hosted.tool_execution.success")).pipe(
                 Effect.annotateLogs({
-                  "rika.hosted.stage": "cell_execution",
+                  "rika.hosted.stage": "tool_execution",
                   "rika.hosted.outcome": "success",
                   "rika.duration.millis": 321,
                   "rika.thread.id": "thread-01",
                   "rika.turn.id": "turn:02",
                   "rika.run.id": "run-03",
                   "rika.operation.id": "operation.04",
-                  "rika.cell.id": "cell_05",
-                  "rika.binding.id": "binding-06",
+                  "rika.tool_call.id": "tool-call-05",
                   "rika.model_attempt.id": "attempt:07",
                   "rika.failure.message": sensitive,
                   owner: sensitive,
@@ -108,15 +107,14 @@ describe("Logging", () => {
         const { content, records } = yield* writtenRecords(root)
         assert.notInclude(content, sensitive)
         assert.deepStrictEqual(records[0]?.annotations, {
-          "rika.hosted.stage": "cell_execution",
+          "rika.hosted.stage": "tool_execution",
           "rika.hosted.outcome": "success",
           "rika.duration.millis": 321,
           "rika.thread.id": "thread-01",
           "rika.turn.id": "turn:02",
           "rika.run.id": "run-03",
           "rika.operation.id": "operation.04",
-          "rika.cell.id": "cell_05",
-          "rika.binding.id": "binding-06",
+          "rika.tool_call.id": "tool-call-05",
           "rika.model_attempt.id": "attempt:07",
         })
       }),
@@ -140,8 +138,7 @@ describe("Logging", () => {
                   "rika.turn.id": "turn id with spaces",
                   "rika.run.id": "run/with/path",
                   "rika.operation.id": "x".repeat(129),
-                  "rika.cell.id": "cell\nuser-text",
-                  "rika.binding.id": "",
+                  "rika.tool_call.id": "not a valid call id",
                   "rika.model_attempt.id": { prompt: sentinel },
                 }),
                 Effect.provide(logging),

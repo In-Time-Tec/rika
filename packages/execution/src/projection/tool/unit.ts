@@ -12,12 +12,17 @@ export interface ToolUnitProjection {
     name: string,
     input: string,
     mutate?: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
+    operationActive?: boolean,
   ) => void
   readonly updateTool: (
     node: Node,
     rawId: string,
     mutate: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
+    operationActive?: boolean,
   ) => void
+  readonly linkProcessCheck: (node: Node, rawId: string, input: string, operationActive: boolean) => void
+  readonly settleUnknown: (node: Node, rawId: string, operationId: string) => void
+  readonly runningToolIds: (node: Node) => ReadonlyArray<string>
 }
 
 export interface ToolUnitProjectionInput {
@@ -57,25 +62,116 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     name: string,
     input: string,
     mutate?: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
+    operationActive?: boolean,
   ) => {
     if (node.hidden) return
     const identity = toolState(node, rawId)
     const previous = toolBlock(node, rawId)
-    const base = ToolBlock.makeTool(identity.blockId, name, bounded(input, toolTextLimit), previous)
+    const base = ToolBlock.makeTool(identity.blockId, rawId, name, bounded(input, toolTextLimit), previous)
     const block = mutate === undefined ? base : mutate(base)
     put(unit(node, identity.key, { _tag: "Block", block }))
-    recover(node, identity, block.status === "running")
+    if (operationActive !== undefined) recover(node, identity, operationActive)
   }
 
   const updateTool = (
     node: Node,
     rawId: string,
     mutate: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
+    operationActive?: boolean,
   ) => {
     const current = toolBlock(node, rawId)
     if (current === undefined) return
-    putTool(node, rawId, current.name, current.input, mutate)
+    putTool(node, rawId, current.name, current.input, mutate, operationActive)
   }
 
-  return { toolState, toolBlock, putTool, updateTool }
+  const linkProcessCheck = (node: Node, rawId: string, encodedInput: string, operationActive: boolean) => {
+    const check = ToolBlock.Input.processCheckFromInput(rawId, encodedInput)
+    let origin =
+      check === undefined
+        ? undefined
+        : [...node.tools.entries()].find(([candidateRawId]) => {
+            const block = toolBlock(node, candidateRawId)
+            return (
+              block?.name === "bash" &&
+              block.toolCallId === candidateRawId &&
+              block.process?.processId === check.processId
+            )
+          })
+    if (origin === undefined && check !== undefined) {
+      const recovered = [...units.values()].find(
+        (candidate) =>
+          candidate.parentId === node.parentBlockId &&
+          candidate.content._tag === "Block" &&
+          candidate.content.block._tag === "ToolCall" &&
+          candidate.content.block.name === "bash" &&
+          candidate.content.block.process?.processId === check.processId &&
+          candidate.content.block.toolCallId !== undefined,
+      )
+      if (
+        recovered?.content._tag === "Block" &&
+        recovered.content.block._tag === "ToolCall" &&
+        recovered.content.block.toolCallId !== undefined
+      ) {
+        const recoveredState: ToolState = {
+          rawId: recovered.content.block.toolCallId,
+          key: recovered.key,
+          blockId: recovered.content.block.id,
+        }
+        node.tools.set(recoveredState.rawId, recoveredState)
+        origin = [recoveredState.rawId, recoveredState]
+      }
+    }
+    if (origin === undefined || check === undefined) {
+      putTool(node, rawId, "shell_command_status", encodedInput, undefined, operationActive)
+      return
+    }
+    const [originRawId, originState] = origin
+    const alias: ToolState = { rawId, key: originState.key, blockId: originState.blockId }
+    node.tools.set(rawId, alias)
+    updateTool(node, originRawId, (tool) => {
+      const checks = [...(tool.process?.checks ?? []).filter((candidate) => candidate.toolCallId !== rawId), check]
+      return { ...tool, status: "running", process: { ...tool.process, checks } }
+    })
+    recover(node, alias, operationActive)
+  }
+
+  const settleUnknown = (node: Node, rawId: string, operationId: string) => {
+    const current = toolBlock(node, rawId)
+    if (current === undefined) return
+    updateTool(
+      node,
+      rawId,
+      (tool) => {
+        if (tool.toolCallId === rawId) return { ...tool, operationId, status: "unknown" }
+        const checks = tool.process?.checks?.map((check) =>
+          check.toolCallId === rawId ? { ...check, operationId } : check,
+        )
+        if (checks === undefined) return { ...tool, status: "unknown" }
+        return { ...tool, status: "unknown", process: { ...tool.process, checks } }
+      },
+      false,
+    )
+  }
+
+  const runningToolIds = (node: Node): ReadonlyArray<string> => {
+    const ids = new Set<string>()
+    for (const [rawId] of node.tools) if (toolBlock(node, rawId)?.status === "running") ids.add(rawId)
+    for (const candidate of units.values()) {
+      if (
+        candidate.parentId === node.parentBlockId &&
+        candidate.content._tag === "Block" &&
+        candidate.content.block._tag === "ToolCall" &&
+        candidate.content.block.status === "running" &&
+        candidate.content.block.toolCallId !== undefined
+      ) {
+        const rawId = candidate.content.block.toolCallId
+        ids.add(rawId)
+        if (!node.tools.has(rawId))
+          node.tools.set(rawId, { rawId, key: candidate.key, blockId: candidate.content.block.id })
+      }
+    }
+    return [...ids]
+  }
+
+  return { toolState, toolBlock, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds }
 }

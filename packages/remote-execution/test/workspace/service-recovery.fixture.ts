@@ -7,7 +7,7 @@ import { createArchive, encodeArchive } from "../../src/workspace/artifact/archi
 import { provideLayer } from "../support/layer"
 
 const platform = BunServices.layer
-const kernel = { profileDigest: "1".repeat(64), bindingContractDigest: "2".repeat(64) } as const
+const nativeToolRuntime = { digest: "1".repeat(64) } as const
 const JsonRecord = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const decodeJsonRecord = Schema.decodeUnknownEffect(JsonRecord)
 const encodeJsonRecord = Schema.encodeEffect(JsonRecord)
@@ -36,7 +36,7 @@ it.effect("blocks non-executable, failed, and timed-out setup until an explicit 
         root,
         workspaceCommandPrefix: [],
         stateDirectory,
-        kernel,
+        nativeToolRuntime,
         setupTimeout: 20,
         reporter: { started: () => Effect.void, output: () => Effect.void },
         credential: () =>
@@ -106,7 +106,7 @@ it.effect("blocks an early resume failure and supervises continuation after the 
         root,
         workspaceCommandPrefix: [],
         stateDirectory,
-        kernel,
+        nativeToolRuntime,
         resumeBlockingWindow: 20,
         resumeTimeout: 1_000,
         reporter: { started: () => Effect.void, output: () => Effect.void },
@@ -167,7 +167,7 @@ it.effect("blocks an early resume failure and supervises continuation after the 
   ).pipe(provideLayer(platform)),
 )
 
-it.effect("rejects stale cold kernel identity and generation without changing workspace files", () =>
+it.effect("rejects stale cold native tool runtime identity and generation without changing workspace files", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -178,7 +178,7 @@ it.effect("rejects stale cold kernel identity and generation without changing wo
         root,
         workspaceCommandPrefix: [],
         stateDirectory,
-        kernel,
+        nativeToolRuntime,
         reporter: { started: () => Effect.void, output: () => Effect.void },
         credential: () =>
           Clock.currentTimeMillis.pipe(
@@ -205,10 +205,10 @@ it.effect("rejects stale cold kernel identity and generation without changing wo
         },
       })
       yield* fileSystem.writeFileString(`${root}/untracked`, "keep")
-      const kernelError = yield* Effect.flip(
+      const runtimeError = yield* Effect.flip(
         prepare({
           ...base,
-          kernel: { ...kernel, profileDigest: "2".repeat(64) },
+          nativeToolRuntime: { ...nativeToolRuntime, digest: "2".repeat(64) },
           assignment: {
             access: { ...access, leaseEpoch: 2 },
             workspaceId: "workspace-1",
@@ -221,25 +221,7 @@ it.effect("rejects stale cold kernel identity and generation without changing wo
           },
         }),
       )
-      expect(kernelError.message).toContain("Cold workspace identity")
-      expect(yield* fileSystem.readFileString(`${root}/untracked`)).toBe("keep")
-      const bindingError = yield* Effect.flip(
-        prepare({
-          ...base,
-          kernel: { ...kernel, bindingContractDigest: "3".repeat(64) },
-          assignment: {
-            access: { ...access, leaseEpoch: 2 },
-            workspaceId: "workspace-1",
-            wakeId: "wake-2",
-            cold: true,
-            attempt: 1,
-            retry: false,
-            templateBuildId: "build-1",
-            checkout: null,
-          },
-        }),
-      )
-      expect(bindingError.message).toContain("Cold workspace identity")
+      expect(runtimeError.message).toContain("Cold workspace identity")
       expect(yield* fileSystem.readFileString(`${root}/untracked`)).toBe("keep")
       const error = yield* Effect.flip(
         prepare({
@@ -284,7 +266,7 @@ it.effect("restores a verified replacement archive into a clean empty workspace 
         root,
         workspaceCommandPrefix: [],
         stateDirectory: `${parent}/state`,
-        kernel,
+        nativeToolRuntime,
         environmentDigest: `sha256:${"3".repeat(64)}`,
         reporter: { started: () => Effect.void, output: () => Effect.void },
         credential: () =>

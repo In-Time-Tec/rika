@@ -155,7 +155,7 @@ const roleRoute = (
     : { provider: override.provider, model: override.model, effort, fast }
 }
 
-const agentIds: ReadonlyArray<ModelRoute.AgentId> = ["librarian", "painter", "readThread", "review", "surgeon", "task"]
+const agentIds: ReadonlyArray<ModelRoute.AgentId> = ["librarian", "painter", "review", "surgeon", "task"]
 
 const modes = (
   global: ConfigurationSettingsInput,

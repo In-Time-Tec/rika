@@ -18,17 +18,14 @@
 - **Mode:** a user-named behavior profile that selects model routes and reasoning behavior.
 - **Provider:** an API-owned connection to a model service. Each admitted route pins the model definition, authentication kind, and non-secret owner-scoped credential identity; Railway resolves the credential only when constructing the Generalist model resource.
 - **Resolved Context:** the guidance, mentions, skills, memory, and Thread references selected for an Execution.
-- **Cell:** one `typescript` tool call and the TypeScript source it evaluates in the Session's kernel.
-- **Kernel:** the persistent Bun REPL process one Generalist Session evaluates its cells in. Its namespace is working memory, never durable authority.
-- **Kernel Epoch:** one identified kernel profile — runtime, workspace, limits, trust mode, and bindings digest. A changed surface starts a new epoch.
-- **Binding:** one Schema-validated `rika.*` operation mounted into the kernel.
+- **Native Tool Operation:** one Generalist-owned call to `bash`, `edit`, `read`, or `shell_command_status`, identified by a durable outer operation and tool-call identity.
+- **Background Process:** a scoped shell process started by `bash` and observed explicitly with `shell_command_status` through the same process registry.
 - **Continual Harness:** the scoped, versioned memories, skills, subagent specs, and prompt notes an Execution is pinned to.
-- **Goal:** one durable per-Thread objective with a status, an optional budget, and accumulated usage.
 - **Thread Projection:** disposable Rika read state derived from product metadata and Generalist Run events. It is not execution truth.
 - **API:** the private hosted Rika service that owns identity integration, Organizations, Projects, Thread access, command order, executor assignment, and shared projections.
 - **Web:** the private hosted FoldKit Thread control and review client plus browser identity pages. It calls the API and owns no identity, product, execution, or Workspace authority.
 - **Proxy:** the only public hosted ingress. It routes same-origin browser, API, OAuth, health, and executor traffic to private services and owns no product authority.
-- **Executor:** the process that owns one Workspace's filesystem, kernels, tools, and processes while it holds a fenced assignment. It does not own Thread or Generalist authority.
+- **Executor:** the process that owns one Workspace's filesystem, native tool effects, PTYs, and processes while it holds a fenced assignment. It does not own Thread or Generalist authority.
 - **Runner:** a registered user-controlled process that executes assigned Threads in an approved checkout. The interactive CLI registers its current Runner; `rika --no-tui` runs it headlessly.
 - **Orb:** a Rika-managed remote Executor in an E2B sandbox lineage, created only for a Thread explicitly targeting an Orb.
 - **Execution Target:** the immutable `runner` or `orb` placement selected when a Thread is created.
@@ -44,11 +41,11 @@
 - **Rika API** owns Hosted Owners, Projects, Thread and Project grants, Clients, Threads, Turns, execution placement, command order, executor leases and fencing, shared projections, presence, terminal-control leases, audit records, model routing, and encrypted provider credential use.
 - **Rika Web** owns FoldKit browser rendering and local browser interaction state only; it depends on the API for authenticated Thread and account state.
 - **Rika Proxy** owns public route selection and transport forwarding only.
-- **Rika Executors** own Workspace access, kernels, coding tools, Workspace extensions, and executor-private operation receipts.
-- **Generalist** owns durable Runs, children, cancellation, replay, model turns, tool-call protocol, nested durable operations, the cell tool and kernel pool, harness state and refinement, steering, compaction, skills integration, and Run events.
+- **Rika Executors** own Workspace access, native tool effects, Workspace extensions, and executor-private operation receipts.
+- **Generalist** owns durable Runs, children, cancellation, replay, model turns, tool-call protocol, nested durable operations, waits, harness state and refinement, steering, compaction, skills integration, and Run events.
 - **PostgreSQL** is authoritative for hosted Rika product state and stores Generalist's authority in Generalist-owned tables through its released PostgreSQL runtime. Executors never receive direct database authority.
 - **E2B** owns remote sandbox lifecycle and isolation. An E2B sandbox identifier or snapshot is never identity or product authority.
 - **OpenTUI** renders the terminal only through the TUI adapter.
 - **TUI** owns presentation, local selection, and control input only. It never owns product state, Runs, Workspace side effects, or executor lifecycle, and disconnecting it never cancels hosted work.
 
-Do not call a Thread a session, chat, or Agent in product contracts, a Child Run an actor, a Thread Projection canonical execution state, an E2B sandbox a Thread, or the kernel namespace durable state.
+Do not call a Thread a session, chat, or Agent in product contracts, a Child Run an actor, a Thread Projection canonical execution state, an E2B sandbox a Thread.

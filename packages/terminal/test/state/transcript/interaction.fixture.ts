@@ -3,6 +3,7 @@ import { applyQueueDelta, replaceQueue, resetQueue } from "../../../src/state/qu
 import { initial, type Model } from "../../../src/state/model"
 import type { TranscriptBlock } from "../../../src/state/transcript/model"
 import { canSubmit, update } from "../../../src/state/reducer/model"
+import { isTranscriptUnitExpanded, transcriptUnits, transcriptUnitId } from "../../../src/presentation/transcript/row"
 
 import { key, thread, readCall, editFile, busyQueueModel } from "./model.fixture"
 test("navigates and controls the queue while idle after the active turn failed", () => {
@@ -281,7 +282,7 @@ test("navigates transcript detail units with Tab and toggles the selected unit",
     ...initial("/work"),
     blocks: [
       { _tag: "Reasoning", text: "why" },
-      readCall("1", "a", "complete"),
+      { ...readCall("1", "a", "complete"), result: { text: "a" } },
       { _tag: "Diff", path: "a", patch: "+a" },
     ],
   }
@@ -306,8 +307,9 @@ test("navigates transcript detail units with Tab and toggles the selected unit",
 })
 test("keeps an expanded streamed tool group open as new children arrive", () => {
   let model = update(initial("/work"), { _tag: "BlockAdded", block: readCall("1", "a") })
+  model = update(model, { _tag: "BlockAdded", block: readCall("2", "b") })
   model = update(model, { _tag: "DetailToggled", id: "tool:1" })
-  for (let index = 2; index <= 5; index += 1)
+  for (let index = 3; index <= 5; index += 1)
     model = update(model, {
       _tag: "BlockAdded",
       block: readCall(String(index), String.fromCharCode(96 + index)),
@@ -318,13 +320,68 @@ test("keeps an expanded streamed tool group open as new children arrive", () => 
   expect(collapsed.expandedRowKeys).not.toContain("tool:1")
 })
 test("click toggles do not move the Tab detail selection", () => {
-  const base = { ...initial("/work"), blocks: [readCall("1", "a", "complete")] }
+  const base = {
+    ...initial("/work"),
+    blocks: [{ ...readCall("1", "a", "complete"), result: { text: "a" } }],
+  }
   const clicked = update(base, { _tag: "DetailToggled", id: "tool:1" })
   expect(clicked).toMatchObject({ detailSelection: undefined, expandedRowKeys: ["tool:1"] })
 
   const tabbed = update(clicked, { _tag: "KeyPressed", key: key({ name: "tab" }) })
   expect(tabbed.detailSelection).toBe("tool:1")
 })
+test("keeps an explicit collapse sticky while a running edit revises in place", () => {
+  const block: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall",
+    id: "running-edit",
+    name: "edit",
+    input: JSON.stringify({ path: "src/a.ts" }),
+    status: "running",
+    presentation: {
+      family: "edit",
+      action: "edit",
+      activeLabel: "Editing",
+      completeLabel: "Edited",
+    },
+    detail: "src/a.ts",
+    files: [editFile("running-edit:0", "src/a.ts")],
+  }
+  let model: Model = { ...initial("/work"), blocks: [block] }
+  let unit = transcriptUnits(model)[0]!
+  const id = transcriptUnitId(model, unit)
+  expect(isTranscriptUnitExpanded(model, unit)).toBe(true)
+  model = update(model, { _tag: "DetailToggled", id })
+  expect(model.explicitlyCollapsedRowKeys).toContain(id)
+  unit = transcriptUnits(model)[0]!
+  expect(isTranscriptUnitExpanded(model, unit)).toBe(false)
+
+  model = { ...model, blocks: [{ ...block, detail: "src/a.ts L1-2" }] }
+  unit = transcriptUnits(model)[0]!
+  expect(isTranscriptUnitExpanded(model, unit)).toBe(false)
+})
+
+test("keeps an explicit collapse sticky while a running SubagentCard reports activity", () => {
+  const card: Extract<TranscriptBlock, { _tag: "SubagentCard" }> = {
+    _tag: "SubagentCard",
+    id: "child",
+    name: "Task",
+    prompt: "Inspect the terminal",
+    promptTruncated: false,
+    summary: "",
+    status: "running",
+    activity: ["Reading packages/terminal"],
+  }
+  let model: Model = { ...initial("/work"), blocks: [card] }
+  let unit = transcriptUnits(model)[0]!
+  const id = transcriptUnitId(model, unit)
+  expect(isTranscriptUnitExpanded(model, unit)).toBe(true)
+  model = update(model, { _tag: "DetailToggled", id })
+  model = { ...model, blocks: [{ ...card, activity: [...card.activity, "Running tests"] }] }
+  unit = transcriptUnits(model)[0]!
+  expect(isTranscriptUnitExpanded(model, unit)).toBe(false)
+  expect(model.explicitlyCollapsedRowKeys).toContain(id)
+})
+
 test("toggles an expanded edit group's file rows independently", () => {
   const call: Extract<TranscriptBlock, { _tag: "ToolCall" }> = {
     _tag: "ToolCall",

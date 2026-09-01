@@ -12,7 +12,6 @@ import { recoveryHandlers } from "./http-api/recovery/controller"
 import { publicationHandlers } from "./http-api/publication/controller"
 import { modelsHandlers } from "./http-api/models/controller"
 import { environmentHandlers } from "./http-api/environment/controller"
-import { auditHandlers } from "./http-api/audit/controller"
 import { workspaceSeedsHandlers } from "./http-api/workspace-seeds/controller"
 
 export { RikaApi } from "./http-api/contract"
@@ -30,7 +29,6 @@ export const makeRikaApiHandler = (dependencies: HttpDependencies) => {
     publicationHandlers(dependencies),
     modelsHandlers(dependencies),
     environmentHandlers(dependencies),
-    auditHandlers(dependencies),
   ).pipe(Layer.provide(authorizationLayer(dependencies)))
   return HttpRouter.toWebHandler(
     HttpApiBuilder.layer(RikaApi).pipe(

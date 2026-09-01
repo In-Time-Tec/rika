@@ -50,6 +50,7 @@ export interface TranscriptRenderInput {
   readonly blocks: Model["blocks"]
   readonly items: Model["items"]
   readonly expandedRowKeys: Model["expandedRowKeys"]
+  readonly explicitlyCollapsedRowKeys: Model["explicitlyCollapsedRowKeys"]
   readonly detailSelection: Model["detailSelection"]
   readonly width: number
   readonly windowEnd: number

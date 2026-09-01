@@ -17,12 +17,7 @@ test(
           workspaceFiles: { "src/alpha.ts": "alpha", "src/beta.ts": "beta", "README.md": "readme" },
           script: [
             model.text("HARNESS_RESPONSE"),
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "start", input: { command: "printf TOOL_OK" } },
-                "ordinary-tool",
-              ),
-            ]),
+            model.turn([model.tool("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
             model.text("ORDINARY_COMPLETE"),
             model.text("MENTION_COMPLETE"),
           ],
@@ -41,17 +36,18 @@ test(
         expect(ordinary).not.toContain("[pending]")
         yield* app.settled
         const ordinaryTranscript = yield* app.transcript(Turn.TurnId.make("tui-turn-1"))
-        const ordinaryCell = ordinaryTranscript?.units.find(
-          (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell",
+        const ordinaryTool = ordinaryTranscript?.units.find(
+          (unit) =>
+            unit.content._tag === "Block" &&
+            unit.content.block._tag === "ToolCall" &&
+            unit.content.block.name === "bash",
         )
-        expect(
-          ordinaryCell?.content._tag === "Block" && ordinaryCell.content.block._tag === "Cell"
-            ? ordinaryCell.content.block.notices
-            : undefined,
-        ).toEqual([])
+        expect(ordinaryTool?.content._tag === "Block" ? ordinaryTool.content.block : undefined).not.toHaveProperty(
+          "notices",
+        )
         app.pressKey("\t")
         app.pressEnter()
-        const expandedTool = yield* app.waitFrame("processId")
+        const expandedTool = yield* app.waitFrame("TOOL_OK")
         expect(expandedTool).not.toContain("rika.tool.context.current")
         expect(expandedTool).not.toContain("rika.tool.processes.start running")
         expect(expandedTool).not.toContain("rika.tool.processes.start succeeded")

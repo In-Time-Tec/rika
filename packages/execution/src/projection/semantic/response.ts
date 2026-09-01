@@ -1,6 +1,5 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { modelResponseId } from "@rika/product/execution-gateway"
-import { cellToolName } from "../cell/state"
 import type { SemanticModelResponseEvent } from "./event"
 import type { Card, Node } from "../model"
 import { encoded } from "../decoding"
@@ -12,11 +11,11 @@ export interface SemanticResponseProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
-  readonly openCell: (node: Node, rawId: string, source: string) => void
   readonly cardFor: (node: Node, rawId: string, selection: string, prompt: string, label?: string) => Card
   readonly groupCards: (node: Node, rawId: string, input: SubagentGroupInput) => ReadonlyArray<Card>
   readonly removeTool: (node: Node, rawId: string) => void
   readonly putTool: (node: Node, rawId: string, name: string, input: string) => void
+  readonly linkProcessCheck: (node: Node, rawId: string, input: string, operationActive: boolean) => void
   readonly notice: (node: Node, family: string, title: string, detail: string, discriminator: string | number) => void
   readonly beginOrderedResponse: () => void
   readonly endOrderedResponse: () => void
@@ -54,7 +53,6 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
     node: Node,
     part: Extract<SemanticModelResponseEvent["response"]["content"][number], { type: "tool-call" }>,
   ) => {
-    if (part.name === cellToolName) return input.openCell(node, part.id, string(record(part.params).code, ""))
     if (part.name === projectorNames.runChild) {
       const toolInput = record(part.params)
       input.cardFor(
@@ -71,7 +69,8 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
       if (Option.isSome(params)) input.groupCards(node, part.id, params.value)
       return input.removeTool(node, part.id)
     }
-    input.putTool(node, part.id, part.name, encoded(part.params))
+    if (part.name === "shell_command_status") input.linkProcessCheck(node, part.id, encoded(part.params), false)
+    else input.putTool(node, part.id, part.name, encoded(part.params))
   }
 
   const apply = (node: Node, event: SemanticModelResponseEvent) => {

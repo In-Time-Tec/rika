@@ -5,22 +5,17 @@ import { model } from "../../../support/tui-model.fixture"
 
 const tuiTestTimeout = 60_000
 test(
-  "shows a running cell as running work on the activity line",
+  "shows a running bash tool as running work on the activity line",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        // The activity line is the only thing telling a reader a cell is still working. Every gate
+        // The activity line is the only thing telling a reader a tool is still working. Every gate
         // we run reads a model or a projection, so a client that computes the line correctly and
         // never renders it stays green everywhere; this reads the frame a user sees.
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "slow.txt": "SLOW_BODY" },
           script: [
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "start", input: { command: "sleep 2", timeoutMillis: 8_000 } },
-                "slow-cell",
-              ),
-            ]),
+            model.turn([model.tool("bash", { command: "sleep 2", timeout_ms: 8_000 }, "slow-bash")]),
             model.text("ACTIVITY_LANE_COMPLETE"),
           ],
         })

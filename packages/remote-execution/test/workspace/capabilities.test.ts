@@ -15,7 +15,7 @@ it.effect("recognizes an accessible workspace directory with Bun FileSystem", ()
       const snapshot = yield* inspectWorkspaceCapabilities({
         target: "orb",
         workspacePath,
-        typescriptKernel: true,
+        nativeTools: true,
         pty: true,
       })
       expect(snapshot.filesystem).toEqual({ _tag: "Ready", detail: "workspace filesystem available" })

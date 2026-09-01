@@ -150,11 +150,10 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
         ),
       { concurrency: "unbounded", discard: true },
     )
-    yield* Effect.forEach(
-      packageExecutables,
-      (entry) => fileSystem.chmod(path.join(directory, "bin", entry), 0o755),
-      { concurrency: "unbounded", discard: true },
-    )
+    yield* Effect.forEach(packageExecutables, (entry) => fileSystem.chmod(path.join(directory, "bin", entry), 0o755), {
+      concurrency: "unbounded",
+      discard: true,
+    })
     yield* writeJson(path.join(directory, "package.json"), platformManifest(target, version))
     yield* fileSystem.writeFileString(path.join(directory, "LICENSE"), license)
     built.push(target)

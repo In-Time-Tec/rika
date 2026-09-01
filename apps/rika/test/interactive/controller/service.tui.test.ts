@@ -15,13 +15,7 @@ test(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           script: [
-            model.turn([
-              model.part(answer),
-              model.binding(
-                { module: "processes", operation: "start", input: { command: "sleep 2" } },
-                "handoff-sleep",
-              ),
-            ]),
+            model.turn([model.part(answer), model.tool("bash", { command: "sleep 2" }, "handoff-sleep")]),
             model.text("HANDOFF_FINAL_ONCE"),
           ],
         })
@@ -63,20 +57,9 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "notes.txt": "APPROVAL_NOTES" },
           script: [
-            model.turn([
-              model.binding({ module: "workspace", operation: "read", input: { path: "notes.txt" } }, "approved-read"),
-            ]),
+            model.turn([model.tool("read", { path: "notes.txt" }, "approved-read")]),
             model.turn([model.part("APPROVAL_COMPLETE")], { inputTokens: 10_000, outputTokens: 100 }),
-            model.turn([
-              model.binding(
-                {
-                  module: "processes",
-                  operation: "start",
-                  input: { command: "printf CANCEL_PROOF > cancel-proof.txt" },
-                },
-                "cancelled-tool",
-              ),
-            ]),
+            model.turn([model.tool("bash", { command: "printf CANCEL_PROOF > cancel-proof.txt" }, "cancelled-tool")]),
             model.text("BASH_COMPLETE"),
           ],
         })
@@ -118,7 +101,7 @@ test(
 // and no authorization can reach the transcript. See docs/tradeoffs/declared-capabilities-that-do-not-act.md;
 // this describes the behaviour that lane would have and runs when it is connected.
 test.fails(
-  "approves a pending write authorization from the transcript and denies the next one",
+  "approves a pending edit authorization from the transcript and denies the next one",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -127,28 +110,27 @@ test.fails(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           height: 44,
+          workspaceFiles: { "approved.txt": "ORIGINAL", "denied.txt": "ORIGINAL" },
           script: [
             model.turn([
-              model.binding(
-                { module: "workspace", operation: "write", input: { path: "approved.txt", content: "APPROVED_BODY" } },
-                "write-approved",
+              model.tool(
+                "edit",
+                { path: "approved.txt", old_str: "ORIGINAL", new_str: "APPROVED_BODY" },
+                "edit-approved",
               ),
             ]),
             model.text("APPROVED_WRITE_COMPLETE"),
             model.turn([
-              model.binding(
-                { module: "workspace", operation: "write", input: { path: "denied.txt", content: "DENIED_BODY" } },
-                "write-denied",
-              ),
+              model.tool("edit", { path: "denied.txt", old_str: "ORIGINAL", new_str: "DENIED_BODY" }, "edit-denied"),
             ]),
             model.text("DENIED_WRITE_COMPLETE"),
           ],
         })
 
-        yield* Effect.tryPromise(() => app.type("Write the approved file."))
+        yield* Effect.tryPromise(() => app.type("Edit the approved file."))
         app.pressEnter()
         const pending = yield* app.waitFrame("Authorization pending", 3_000)
-        expect(pending).toContain("write")
+        expect(pending).toContain("edit")
         expect(pending, "controls stay hidden until the card is selected").not.toContain("[a] Approve")
 
         app.pressKey("\t")
@@ -159,11 +141,11 @@ test.fails(
         app.pressKey("a")
         yield* app.waitFrame("APPROVED_WRITE_COMPLETE", 20_000)
         yield* app.settled
-        expect(yield* fileSystem.exists(path.join(app.workspace, "approved.txt"))).toBe(true)
+        expect(yield* fileSystem.readFileString(path.join(app.workspace, "approved.txt"))).toBe("APPROVED_BODY")
         expect(app.frame()).toContain("Authorization approved")
 
         yield* app.clickComposer
-        yield* Effect.tryPromise(() => app.type("Write the denied file."))
+        yield* Effect.tryPromise(() => app.type("Edit the denied file."))
         app.pressEnter()
         yield* app.waitFrame("Authorization pending", 3_000)
         app.pressKey("\t")
@@ -172,7 +154,7 @@ test.fails(
         app.pressKey("d")
         yield* app.waitFrame("Authorization denied", 20_000)
         yield* app.settled
-        expect(yield* fileSystem.exists(path.join(app.workspace, "denied.txt"))).toBe(false)
+        expect(yield* fileSystem.readFileString(path.join(app.workspace, "denied.txt"))).toBe("ORIGINAL")
         yield* app.quit
       }),
     ),

@@ -1,7 +1,6 @@
 import { Effect, Schema, Stream } from "effect"
 import { IdentityDirectoryError, type Account, type CliDeviceDirectory, type IdentityRuntime } from "@rika/identity"
 import type { HttpDependencies } from "../../../src/server/http"
-import { testToolPolicy } from "../../hosted/execution/tool-policy.fixture"
 import { HostedProductError, type HostedProductService } from "../../../src/hosted/product"
 import type { Runtime as Executor } from "../../../src/executor/service"
 import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
@@ -99,7 +98,6 @@ const unusedGateway: Gateway = {
   active: () => Effect.die("unused"),
   execute: () => Effect.die("unused"),
   cancel: () => Effect.die("unused"),
-  machine: () => Effect.die("unused"),
   workspace: () => Effect.die("unused"),
   sendPty: () => Effect.die("unused"),
   ptyEvents: () => Stream.empty,
@@ -113,7 +111,6 @@ const unusedRunnerGateway: RunnerGateway = {
   active: () => Effect.die("unused"),
   execute: () => Effect.die("unused"),
   cancel: () => Effect.die("unused"),
-  machine: () => Effect.die("unused"),
 }
 
 const executor: Executor = {
@@ -122,8 +119,8 @@ const executor: Executor = {
   runnerGateway: unusedRunnerGateway,
   admitRunner: () => Effect.die("unused"),
   admitRun: () => Effect.die("unused"),
-  run: () => Effect.die("unused"),
-  cancel: () => Effect.die("unused"),
+  runTool: () => Effect.die("unused"),
+  cancelTool: () => Effect.die("unused"),
   pause: () => Effect.die("unused"),
   resume: () => Effect.die("unused"),
   replace: () => Effect.die("unused"),
@@ -167,7 +164,6 @@ const dependencies = (
   devices,
   product,
   recovery,
-  toolPolicy: testToolPolicy,
   executor,
   execution,
   production: true,

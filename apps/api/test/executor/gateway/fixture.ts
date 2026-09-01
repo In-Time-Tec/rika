@@ -1,33 +1,21 @@
-import type { Interface as Controller } from "@rika/e2b-executor/controller"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import {
-  ApiMessage,
-  BindingRequest,
-  ExecutorMessage,
-  type CellLifecycleFrame,
-  type CellResponse,
-} from "@rika/remote-execution/protocol"
-import { HostBindings } from "generalist/repl"
+import type { Interface as Controller } from "@rika/e2b-executor/controller"
+import type { ToolOperationLifecycleFrame, ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
+import { ApiMessage, ExecutorMessage } from "@rika/remote-execution/protocol"
 import { Context, Crypto, Effect, Layer, Logger, Redacted, Schema } from "effect"
 import * as GatewayModule from "../../../src/executor/gateway"
 import {
   cancelledResponse,
   GatewayError,
-  type BindingAuthority,
   type Gateway,
   type LifecycleStore,
   type PreparationStore,
   type Socket,
 } from "../../../src/executor/gateway"
-import { testToolPolicy } from "../../hosted/execution/tool-policy.fixture"
-import * as CellAuthority from "@rika/kernel/test-cell-authority"
 
 const encode = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
 const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
-const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
 const encodeUnknown = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const bindingRequestDigest = (request: BindingRequest) =>
-  new Bun.CryptoHasher("sha256").update(encodeBindingRequest(request)).digest("hex")
 const milestone = (observability: ReadonlyArray<ReturnType<typeof Logger.formatStructured.log>>, message: string) =>
   observability.filter((record) => record.message === message)
 const ready = (detail: string) => ({ _tag: "Ready" as const, detail })
@@ -35,7 +23,7 @@ const workspaceCapabilities = {
   environmentDigest: `sha256:${"0".repeat(64)}`,
   capturedAt: "2026-08-21T00:00:00.000Z",
   filesystem: ready("filesystem ready"),
-  typescriptKernel: ready("TypeScript kernel ready"),
+  nativeTools: ready("native tools ready"),
   git: ready("Git ready"),
   process: ready("process ready"),
   pty: ready("PTY ready"),
@@ -53,14 +41,15 @@ const lifecycleStore = (
     {
       state: "accepted" | "dispatched" | "completed" | "unknown"
       started: boolean
-      response?: CellResponse
+      response?: ToolOperationResponse
       outcome?: "completed" | "failed" | "cancelled" | "unknown"
+      deadlineAt: string
       dispatchedGeneration?: number
       dispatchedExecutorInstanceId?: string
       dispatchedProcessIncarnation?: string
     }
   >()
-  const persistedFrames = new Map<string, ReadonlyArray<CellLifecycleFrame>>()
+  const persistedFrames = new Map<string, ReadonlyArray<ToolOperationLifecycleFrame>>()
   const operationalWindows = new Map<string, { admittedAt: string | null; deadlineAt: string }>()
   const operation = (input: {
     readonly assignmentId: string
@@ -79,9 +68,12 @@ const lifecycleStore = (
   return {
     append: (access, frame) =>
       Effect.gen(function* () {
-        const assignmentId = access.fence.assignmentId
-        const operationKey = `${assignmentId}\u0000${frame.attribution.operationKey}\u0000${frame.attribution.attempt}`
-        const current = operations.get(operationKey)
+        const operationId = operation({
+          assignmentId: access.fence.assignmentId,
+          operationKey: frame.attribution.operationKey,
+          attempt: frame.attribution.attempt,
+        })
+        const current = operations.get(operationId)
         if (
           (current?.state === "completed" || current?.state === "unknown") &&
           current.response !== undefined &&
@@ -91,10 +83,12 @@ const lifecycleStore = (
         const disposition = yield* append(access, frame)
         if (disposition._tag === "AlreadyTerminal" || disposition._tag === "AlreadyAppended" || current === undefined)
           return disposition
-        persistedFrames.set(operationKey, [...(persistedFrames.get(operationKey) ?? []), frame])
-        if (frame._tag === "Started") operations.set(operationKey, { ...current, started: true })
+        const known = persistedFrames.get(operationId) ?? []
+        if (!known.some((retained) => retained.cursor === frame.cursor))
+          persistedFrames.set(operationId, [...known, frame])
+        if (frame._tag === "Started") operations.set(operationId, { ...current, started: true })
         if (frame._tag === "Terminal")
-          operations.set(operationKey, {
+          operations.set(operationId, {
             ...current,
             state: frame.outcome === "unknown" ? "unknown" : "completed",
             response: frame.response,
@@ -103,21 +97,6 @@ const lifecycleStore = (
         return disposition
       }),
     load: readFrames,
-    replay: (assignmentId) =>
-      Effect.sync(() =>
-        [...operations.entries()].flatMap(([operationId, current]) => {
-          const [knownAssignmentId, operationKey, attempt] = operationId.split("\u0000")
-          return knownAssignmentId === assignmentId && current.state === "dispatched"
-            ? [
-                {
-                  operationKey: operationKey!,
-                  attempt: Number(attempt),
-                  afterCursor: persistedFrames.get(operationId)?.at(-1)?.cursor ?? 0,
-                },
-              ]
-            : []
-        }),
-      ),
     prepare: (input) =>
       readFrames(input.assignmentId, input.operationKey, input.attempt).pipe(
         Effect.flatMap((frames) =>
@@ -126,15 +105,17 @@ const lifecycleStore = (
             const terminal = frames.find((frame) => frame._tag === "Terminal")
             if (terminal?._tag === "Terminal")
               operations.set(operationId, {
-                state: "completed",
+                state: terminal.outcome === "unknown" ? "unknown" : "completed",
                 started: true,
                 response: terminal.response,
                 outcome: terminal.outcome,
+                deadlineAt: input.deadlineAt,
               })
             else if (!operations.has(operationId))
               operations.set(operationId, {
                 state: "accepted",
                 started: frames.some((frame) => frame._tag === "Started"),
+                deadlineAt: input.deadlineAt,
               })
             const operationalWindow = operationalWindows.get(operationId) ?? {
               admittedAt: input.admittedAt,
@@ -145,13 +126,22 @@ const lifecycleStore = (
           }),
         ),
       ),
-    inspect: (input) => Effect.sync(() => operations.get(operation(input)) ?? { state: "accepted", started: false }),
+    inspect: (input) =>
+      Effect.sync(
+        () =>
+          operations.get(operation(input)) ?? {
+            state: "accepted" as const,
+            started: false,
+            deadlineAt: "2999-01-01T00:00:00.000Z",
+          },
+      ),
     dispatch: (input, access) =>
       Effect.sync(
         () =>
           void operations.set(operation(input), {
             state: "dispatched",
             started: false,
+            deadlineAt: input.deadlineAt,
             dispatchedGeneration: access.fence.assignmentGeneration,
             dispatchedExecutorInstanceId: access.fence.executorId,
             dispatchedProcessIncarnation: access.fence.processIncarnation,
@@ -160,17 +150,18 @@ const lifecycleStore = (
     cancel: (input) =>
       Effect.sync(() => {
         const operationId = operation(input)
-        const current = operations.get(operationId) ?? { state: "accepted" as const, started: false }
+        const current = operations.get(operationId) ?? {
+          state: "accepted" as const,
+          started: false,
+          deadlineAt: "2999-01-01T00:00:00.000Z",
+        }
         if (
           (current.state === "completed" || current.state === "unknown") &&
           current.response !== undefined &&
           current.outcome !== undefined
         )
-          return {
-            _tag: "AlreadyTerminal" as const,
-            result: { response: current.response, outcome: current.outcome },
-          }
-        if (current.state === "dispatched") return { _tag: "Dispatched" as const }
+          return { _tag: "AlreadyTerminal" as const, result: { response: current.response, outcome: current.outcome } }
+        if (current.state === "dispatched") return { _tag: "Dispatched" as const, deadlineAt: current.deadlineAt }
         operations.set(operationId, {
           ...current,
           state: "completed",
@@ -184,28 +175,32 @@ const lifecycleStore = (
       }),
     resolveDeadline: (input) =>
       Effect.sync(() => {
-        const current = operations.get(operation(input)) ?? { state: "accepted" as const, started: false }
+        const operationId = operation(input)
+        const current = operations.get(operationId) ?? {
+          state: "accepted" as const,
+          started: false,
+          deadlineAt: operationalWindows.get(operationId)?.deadlineAt ?? "2999-01-01T00:00:00.000Z",
+        }
+        if (
+          (current.state === "completed" || current.state === "unknown") &&
+          current.response !== undefined &&
+          current.outcome !== undefined
+        )
+          return { _tag: "AlreadyTerminal" as const, result: { response: current.response, outcome: current.outcome } }
         const unknown = current.state === "dispatched"
         const response = {
           _tag: "DomainFailure" as const,
           failure: unknown
             ? { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" }
-            : { kind: "timeout", message: "Cell operation deadline exceeded" },
+            : { kind: "timeout", message: "Tool operation deadline exceeded" },
         }
-        if (!unknown)
-          operations.set(operation(input), {
-            ...current,
-            state: "completed",
-            response,
-            outcome: "failed",
-          })
-        return {
-          _tag: "Resolved" as const,
-          result: { response, outcome: unknown ? ("unknown" as const) : ("failed" as const) },
-        }
+        const outcome = unknown ? ("unknown" as const) : ("failed" as const)
+        operations.set(operationId, { ...current, state: unknown ? "unknown" : "completed", response, outcome })
+        return { _tag: "Resolved" as const, result: { response, outcome } }
       }),
   }
 }
+
 const readyPreparation: PreparationStore = {
   start: () => Effect.void,
   output: () => Effect.void,
@@ -229,45 +224,18 @@ const makeGateway = (
       activate: (_access, _phase, use) => use({ digest: environmentDigest, values: {}, redactedNames: [] }),
       publication: (_access, use) => use(),
       replace: (key) =>
-        service
-          .replace(key, {
-            egress: { phase: "runtime", allow: ["api.example.test"] },
-            environmentDigest,
-          })
-          .pipe(
-            Effect.asVoid,
-            Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
-          ),
+        service.replace(key, { egress: { phase: "runtime", allow: ["api.example.test"] }, environmentDigest }).pipe(
+          Effect.asVoid,
+          Effect.mapError((error) => GatewayError.make({ kind: "fenced", message: error.message })),
+        ),
     },
     preparation,
-    () => Effect.succeed("a".repeat(64)),
-    testToolPolicy,
   ).pipe(
     Effect.provideServiceEffect(
       Crypto.Crypto,
       Effect.scoped(Layer.build(BunCrypto.layer)).pipe(Effect.map((context) => Context.get(context, Crypto.Crypto))),
     ),
   )
-
-const bindings: BindingAuthority = {
-  registry: HostBindings.HostBindings.of({
-    descriptors: [],
-    resolve: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
-    invoke: (request) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: request.module })),
-  }),
-  context: Effect.runSync(CellAuthority.capture()),
-  manifest: { digest: "a".repeat(64), descriptors: [] },
-}
-
-const bindingAuthority = (
-  registry: HostBindings.Service,
-  context: Context.Context<never>,
-  digest: string,
-): BindingAuthority => ({
-  registry,
-  context: Effect.runSync(CellAuthority.capture(context)),
-  manifest: { digest, descriptors: registry.descriptors },
-})
 
 const fence = {
   target: "orb" as const,
@@ -277,31 +245,19 @@ const fence = {
   executorId: "executor-1",
   processIncarnation: "process-1",
 }
-
 const access = { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session-token" }
-const cellIdentity = {
+const nativeToolIdentity = {
   threadId: "thread-1",
   turnId: "turn-1",
   runId: "run-1",
   rootRunId: "run-1",
   toolCallId: "call-1",
   attempt: 0,
-  replayPolicy: "pure",
+  replayPolicy: "pure" as const,
   admittedAt: null,
   deadlineAt: "2999-01-01T00:00:00.000Z",
-  bindings,
-} as const
-const attribution = (operationKey: string) => ({
-  operationKey,
-  workspaceId: "workspace-1",
-  sessionId: "thread-1",
-  threadId: cellIdentity.threadId,
-  turnId: cellIdentity.turnId,
-  runId: cellIdentity.runId,
-  rootRunId: cellIdentity.rootRunId,
-  toolCallId: cellIdentity.toolCallId,
-  attempt: cellIdentity.attempt,
-})
+  machineRequest: { _tag: "NativeTool" as const, request: { _tag: "Read" as const, path: "README.md" } },
+}
 
 const socket = (): Socket & {
   readonly sent: Array<string>
@@ -383,9 +339,7 @@ const workspaceReady = (gateway: Gateway, target: ReturnType<typeof socket>, cur
 export const GatewayTestHarness = {
   encode,
   decode,
-  encodeBindingRequest,
   encodeUnknown,
-  bindingRequestDigest,
   milestone,
   ready,
   workspaceCapabilities,
@@ -393,12 +347,9 @@ export const GatewayTestHarness = {
   readyPreparation,
   environmentDigest,
   makeGateway,
-  bindings,
-  bindingAuthority,
   fence,
   access,
-  cellIdentity,
-  attribution,
+  nativeToolIdentity,
   socket,
   controller,
   workspaceReady,

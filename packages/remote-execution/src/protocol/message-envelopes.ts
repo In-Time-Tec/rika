@@ -5,9 +5,6 @@ import { Schema } from "effect"
 import { SetupCacheKey } from "../workspace/artifact/archive"
 import {
   AccessWire,
-  BindingContractDigest,
-  BindingOutcome,
-  BindingRequest,
   EncodedArchive,
   EnvironmentDigest,
   EnvironmentName,
@@ -22,15 +19,7 @@ import {
   Sequence,
   Sha256,
 } from "./message-core"
-import {
-  CellLifecycleFrame,
-  CellRequest,
-  CellResponse,
-  CellTerminalOutcome,
-  HeartbeatWire,
-  MachineOutcome,
-  MachineRequest,
-} from "./message-execution"
+import { HeartbeatWire, MachineOutcome, MachineRequest } from "./message-execution"
 import {
   BranchPushOutcome,
   BranchPushRequest,
@@ -41,7 +30,6 @@ import {
   PtyReconnect,
   PtyResize,
   PtyTranscriptChunk,
-  QuiescedOperation,
   ReceiptWire,
   ReconnectWelcomeWire,
   RepositoryCheckoutWire,
@@ -60,21 +48,6 @@ export const RunnerMessage = Schema.Union([
   }),
   Schema.TaggedStruct("ExecutorHeartbeat", { heartbeat: HeartbeatWire }),
   Schema.TaggedStruct("RunnerGoodbye", { access: AccessWire }),
-  Schema.TaggedStruct("LocalCellResult", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    response: CellResponse,
-  }),
-  Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
-  Schema.TaggedStruct("BindingInvoke", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    callId: Identifier,
-    requestDigest: RequestDigest,
-    request: BindingRequest,
-  }),
   Schema.TaggedStruct("MachineResult", {
     access: AccessWire,
     operationKey: Identifier,
@@ -175,7 +148,6 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("ExecutorQuiesced", {
     access: AccessWire,
     requestId: Identifier,
-    operations: Schema.Array(QuiescedOperation),
     checkpoint: CheckpointProposal,
   }),
   Schema.TaggedStruct("SetupCacheLookup", {
@@ -202,21 +174,6 @@ export const ExecutorMessage = Schema.Union([
   Schema.TaggedStruct("PtyDisconnected", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
   Schema.TaggedStruct("PtyTerminated", { access: AccessWire, ptyId: Identifier, cursor: Sequence }),
   Schema.TaggedStruct("WorkspaceResponse", { access: AccessWire, response: WorkspaceResponse }),
-  Schema.TaggedStruct("CellResult", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    response: CellResponse,
-  }),
-  Schema.TaggedStruct("CellLifecycle", { access: AccessWire, frame: CellLifecycleFrame }),
-  Schema.TaggedStruct("BindingInvoke", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    callId: Identifier,
-    requestDigest: RequestDigest,
-    request: BindingRequest,
-  }),
   Schema.TaggedStruct("MachineResult", {
     access: AccessWire,
     operationKey: Identifier,
@@ -239,7 +196,6 @@ export const ApiMessage = Schema.Union([
     redactedNames: Schema.Array(EnvironmentName),
   }),
   Schema.TaggedStruct("LeaseReceipt", { receipt: ReceiptWire }),
-  Schema.TaggedStruct("LocalCellReceipt", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
   Schema.TaggedStruct("CheckpointAccepted", { checkpointId: Identifier, contentDigest: Sha256 }),
   Schema.TaggedStruct("RepositoryCredential", { credential: CredentialWire }),
   Schema.TaggedStruct("WorkspacePreparationAssigned", {
@@ -250,7 +206,6 @@ export const ApiMessage = Schema.Union([
     attempt: Generation,
     retry: Schema.Boolean,
     templateBuildId: Identifier,
-    bindingContractDigest: BindingContractDigest,
     checkout: Schema.NullOr(RepositoryCheckoutWire),
   }),
   Schema.TaggedStruct("WorkspacePreparationRetry", { fence: Fence, attempt: Generation }),
@@ -269,36 +224,6 @@ export const ApiMessage = Schema.Union([
   Schema.TaggedStruct("PtyReconnect", { fence: Fence, request: PtyReconnect }),
   Schema.TaggedStruct("PtyTerminate", { fence: Fence, ptyId: Identifier }),
   Schema.TaggedStruct("WorkspaceRequest", { fence: Fence, request: WorkspaceRequest }),
-  Schema.TaggedStruct("CellExecute", { request: CellRequest }),
-  Schema.TaggedStruct("CellCancel", { access: AccessWire, operationKey: Identifier, attempt: Sequence }),
-  Schema.TaggedStruct("CellReplay", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    afterCursor: Sequence,
-  }),
-  Schema.TaggedStruct("CellTerminalReceipt", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    cursor: Sequence,
-  }),
-  Schema.TaggedStruct("CellTerminalSuperseded", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    cursor: Sequence,
-    outcome: CellTerminalOutcome,
-    response: CellResponse,
-  }),
-  Schema.TaggedStruct("BindingResult", {
-    access: AccessWire,
-    operationKey: Identifier,
-    attempt: Sequence,
-    callId: Identifier,
-    requestDigest: RequestDigest,
-    outcome: BindingOutcome,
-  }),
   Schema.TaggedStruct("MachineExecute", {
     access: AccessWire,
     operationKey: Identifier,
@@ -306,6 +231,13 @@ export const ApiMessage = Schema.Union([
     machineId: Identifier,
     requestDigest: RequestDigest,
     request: MachineRequest,
+  }),
+  Schema.TaggedStruct("MachineCancel", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
   }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])

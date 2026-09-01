@@ -38,9 +38,7 @@ test(
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "timer.txt": "TIMER" },
           script: [
-            model.turn([
-              model.binding({ module: "workspace", operation: "read", input: { path: "timer.txt" } }, "timer-read"),
-            ]),
+            model.turn([model.tool("read", { path: "timer.txt" }, "timer-read")]),
             model.text("PERSISTED_TIMER_COMPLETE", 1_500),
           ],
         })

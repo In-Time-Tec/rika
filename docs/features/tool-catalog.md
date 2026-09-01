@@ -1,5 +1,5 @@
-# Built-in tool catalog
+# Native tool catalog
 
-`rika tools list` prints Rika's static built-in tool definitions. `rika tools show <name>` prints one built-in definition, including its description, timeout, output limit, and presentation metadata.
+The admitted toolkit is a closed, provider-neutral catalog containing exactly `bash`, `edit`, `read`, and `shell_command_status`. Each entry combines the Effect AI tool schema, replay policy, side-effect class, deadline, output bound, and presentation metadata. Agent instructions derive exact input shapes and numeric or tuple bounds from those same schemas, so prompt guidance cannot drift from runtime validation.
 
-The catalog is inspection-only and returns bounded, secret-safe output. It describes the typed hosts underneath the `rika.*` bindings, not the model-facing surface, which is the single `typescript` cell. It does not resolve mode, specialist, extension, MCP, or Workspace policy into an effective execution toolkit. An unknown tool name or invalid mode fails explicitly rather than returning an empty tool description.
+Execution owns live implementations. Product owns the contracts. Local and remote routes expose the same catalog, and an unknown name or invalid request fails explicitly.

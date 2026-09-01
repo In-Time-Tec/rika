@@ -1,7 +1,10 @@
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { Effect, Schema } from "effect"
-import { CellLifecycleFrame, type CellLifecycleFrame as CellLifecycleFrameValue } from "@rika/remote-execution/protocol"
+import {
+  ToolOperationLifecycleFrame,
+  type ToolOperationLifecycleFrame as ToolOperationLifecycleFrameValue,
+} from "@rika/product/tool-operation-lifecycle"
 import { rikaHostedExecutorOperationFrames, rikaHostedExecutorOperations } from "../../database/schema/product"
 import type { HostedExecutionOperationsService, OperationIdentity } from "./operation-contract"
 import { failure, operationKey, operationRows, query } from "./operation-row"
@@ -11,7 +14,7 @@ const attributionMatches = (
     OperationIdentity,
     "workspaceId" | "sessionId" | "threadId" | "turnId" | "runId" | "rootRunId" | "toolCallId"
   >,
-  frame: CellLifecycleFrameValue,
+  frame: ToolOperationLifecycleFrameValue,
 ) => {
   const attribution = frame.attribution
   return (
@@ -25,7 +28,10 @@ const attributionMatches = (
   )
 }
 
-const frameFollows = (known: ReadonlyArray<CellLifecycleFrameValue>, frame: CellLifecycleFrameValue) => {
+const frameFollows = (
+  known: ReadonlyArray<ToolOperationLifecycleFrameValue>,
+  frame: ToolOperationLifecycleFrameValue,
+) => {
   if (frame.cursor !== known.length + 1 || known.some((value) => value._tag === "Terminal")) return false
   if (frame.cursor === 1) return frame._tag === "Accepted"
   if (frame.cursor === 2) return frame._tag === "Started"
@@ -50,7 +56,7 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
     ).pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
-          Schema.decodeUnknownEffect(CellLifecycleFrame)(row.frame).pipe(Effect.mapError(failure)),
+          Schema.decodeUnknownEffect(ToolOperationLifecycleFrame)(row.frame).pipe(Effect.mapError(failure)),
         ),
       ),
     )
@@ -81,11 +87,11 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
               .orderBy(asc(rikaHostedExecutorOperationFrames.cursor)),
           )
           const known = yield* Effect.forEach(rows, (row) =>
-            Schema.decodeUnknownEffect(CellLifecycleFrame)(row.frame).pipe(Effect.mapError(failure)),
+            Schema.decodeUnknownEffect(ToolOperationLifecycleFrame)(row.frame).pipe(Effect.mapError(failure)),
           )
           const existing = known.find((value) => value.cursor === frame.cursor)
           if (existing !== undefined)
-            return Schema.toEquivalence(CellLifecycleFrame)(existing, frame) ? "duplicate" : "invalid-sequence"
+            return Schema.toEquivalence(ToolOperationLifecycleFrame)(existing, frame) ? "duplicate" : "invalid-sequence"
           if (operation.state === "completed" || operation.state === "unknown") return "already-terminal"
           if (operation.state !== "dispatched" || !frameFollows(known, frame)) return "invalid-sequence"
           yield* query(
@@ -130,9 +136,11 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
       Effect.flatMap((rows) =>
         rows[0] === undefined
           ? Effect.void.pipe(
-              Effect.as<Extract<CellLifecycleFrameValue, { readonly _tag: "Terminal" }> | undefined>(undefined),
+              Effect.as<Extract<ToolOperationLifecycleFrameValue, { readonly _tag: "Terminal" }> | undefined>(
+                undefined,
+              ),
             )
-          : Schema.decodeUnknownEffect(CellLifecycleFrame)(rows[0].frame).pipe(
+          : Schema.decodeUnknownEffect(ToolOperationLifecycleFrame)(rows[0].frame).pipe(
               Effect.mapError(failure),
               Effect.flatMap((frame) =>
                 frame._tag === "Terminal"
@@ -166,7 +174,7 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
   ).pipe(
     Effect.flatMap((rows) =>
       Effect.forEach(rows, (row) =>
-        Schema.decodeUnknownEffect(CellLifecycleFrame)(row.frame).pipe(
+        Schema.decodeUnknownEffect(ToolOperationLifecycleFrame)(row.frame).pipe(
           Effect.mapError(failure),
           Effect.flatMap((frame) =>
             frame._tag === "Terminal"

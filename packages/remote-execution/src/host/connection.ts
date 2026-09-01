@@ -11,7 +11,6 @@ import {
   type ApiMessage as IncomingMessage,
   WorkspaceSeedRestore,
 } from "../protocol/messages"
-import * as HostedKernel from "./kernel"
 import type { Config, Identity } from "./identity"
 import type { SessionStore } from "./persistence"
 import { HostError } from "./error"
@@ -36,22 +35,14 @@ const applyGrant = (
   message: PhaseGrant,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
   executionEnvironment: Record<string, string>,
-  appliedEnvironment: Ref.Ref<Map<string, string>>,
-  cells: HostedKernel.Interface,
   environmentAccess: Semaphore.Semaphore,
   redactedValues: Set<string> = new Set(),
 ) =>
   applyPhaseGrant(
     message,
     grants,
-    executionEnvironment,
-    appliedEnvironment,
-    cells,
     environmentAccess,
-    (values) => {
-      replaceExecutionEnvironment(executionEnvironment)(values)
-      Object.assign(executionEnvironment, values)
-    },
+    (values) => replaceExecutionEnvironment(executionEnvironment)(values),
     redactedValues,
   )
 const consumeApi = apiDispatch.consume({
@@ -66,21 +57,18 @@ const consumeApi = apiDispatch.consume({
 
 export interface ConnectionOptions {
   readonly config: Config
-  readonly kernelProfileDigest: string
-  readonly bindingContractDigest: Ref.Ref<string | undefined>
+  readonly nativeToolRuntimeDigest: string
   readonly identity: Identity
   readonly seed: WorkspaceSeedRestore | null
   readonly restore: CheckpointRestore | null
   readonly store: SessionStore
   readonly quiesced: Ref.Ref<boolean>
-  readonly cells: HostedKernel.Interface
   readonly operationLifecycle: Operations.Interface
   readonly inspectCapabilities: Effect.Effect<WorkspaceCapabilitySnapshot, never, Crypto.Crypto | FileSystem.FileSystem>
   readonly ptyDelivery: Semaphore.Semaphore
   readonly activeWriter: Ref.Ref<Writer | undefined>
   readonly grants: Ref.Ref<Map<string, PhaseGrant>>
   readonly executionEnvironment: Record<string, string>
-  readonly appliedEnvironment: Ref.Ref<Map<string, string>>
   readonly environmentAccess: Semaphore.Semaphore
   readonly redactedValues: Set<string>
   readonly connected?: Effect.Effect<void>
@@ -135,8 +123,7 @@ const connect = Effect.fn("Host.connect")(function* (options: ConnectionOptions)
     correlation,
     prepare(
       config,
-      options.kernelProfileDigest,
-      options.bindingContractDigest,
+      options.nativeToolRuntimeDigest,
       options.identity,
       options.seed,
       options.restore,
@@ -146,8 +133,6 @@ const connect = Effect.fn("Host.connect")(function* (options: ConnectionOptions)
       options.store,
       options.grants,
       options.executionEnvironment,
-      options.appliedEnvironment,
-      options.cells,
       options.inspectCapabilities,
       options.environmentAccess,
       options.redactedValues,
@@ -156,10 +141,6 @@ const connect = Effect.fn("Host.connect")(function* (options: ConnectionOptions)
   )
   yield* RepositoryServices.pipe(
     Effect.flatMap((services) => services.resume),
-    Effect.mapError((error) => HostError.make({ message: error.message })),
-  )
-  yield* runtime.access.pipe(
-    Effect.flatMap(options.cells.replayBindings),
     Effect.mapError((error) => HostError.make({ message: error.message })),
   )
   yield* options.connected ?? Effect.void

@@ -5,7 +5,6 @@ import type { Key } from "../presentation/terminal/keymap"
 import type { TranscriptBlock, TranscriptItem } from "./transcript/model"
 import type { ChangedFile } from "./changed-file"
 import type { ContextUsage } from "./context/usage"
-import type { GoalIndicator } from "./goal"
 import type { ThreadItem } from "./thread/model"
 import type { ConnectionState } from "./model"
 
@@ -32,7 +31,6 @@ type Message =
   | { readonly _tag: "ModeHovered"; readonly selected: number }
   | { readonly _tag: "ContextUsageReplaced"; readonly contextUsage: ContextUsage }
   | { readonly _tag: "ConnectionStateChanged"; readonly state: ConnectionState }
-  | { readonly _tag: "GoalChanged"; readonly goal?: GoalIndicator }
   | { readonly _tag: "CompactionChanged"; readonly status: "running" | "complete" | "failed" | "cancelled" }
   | { readonly _tag: "AnimationTicked" }
   | { readonly _tag: "Pasted"; readonly text: string }

@@ -329,7 +329,7 @@ test("toggles every transcript detail as one reducer action", () => {
     ...initial("/work"),
     blocks: [
       { _tag: "Reasoning", text: "why" },
-      readCall("read", "src/a.ts", "complete"),
+      { ...readCall("read", "src/a.ts", "complete"), result: { text: "source" } },
       { _tag: "Diff", path: "src/a.ts", patch: "+a" },
     ],
   }

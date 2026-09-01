@@ -3,7 +3,6 @@ import * as BunPath from "@effect/platform-bun/BunPath"
 import * as os from "node:os"
 import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { defineConfig } from "vitest/config"
-import { CompletionReporter } from "./test/support/vitest-run-completeness-reporter"
 
 /**
  * Half the machine's cores, bounded so a laptop gets real parallelism while a four-core CI
@@ -49,7 +48,7 @@ export default defineConfig({
     },
   ],
   test: {
-    reporters: ["default", new CompletionReporter()],
+    reporters: ["default"],
     projects: [
       {
         extends: true,
@@ -62,7 +61,6 @@ export default defineConfig({
             "apps/*/src/**/*.test.ts",
             "apps/*/test/**/*.test.ts",
             "tooling/*/src/**/*.test.ts",
-            "test/**/*.test.ts",
           ],
           exclude: ["**/*.native.test.ts", "**/*.journey.test.ts", "**/*.tui.test.ts", "**/*.proc.test.ts"],
         },
@@ -83,12 +81,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "proc",
-          include: [
-            "packages/*/test/**/*.proc.test.ts",
-            "apps/*/test/**/*.proc.test.ts",
-            "test/process/**/*.proc.test.ts",
-            "test/release/**/*.proc.test.ts",
-          ],
+          include: ["packages/*/test/**/*.proc.test.ts", "apps/*/test/**/*.proc.test.ts"],
           fileParallelism: true,
           maxWorkers: laneWorkers(6),
           sequence: { groupOrder: 2 },

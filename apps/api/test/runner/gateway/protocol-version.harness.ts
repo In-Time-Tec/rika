@@ -24,7 +24,7 @@ it.effect.skipIf(!live)("rejects obsolete Runner hello and reconnect frames befo
               admissionId: "legacy-admission",
               ticket: "legacy-ticket",
               processIncarnation: "legacy-process",
-              capabilities: { cells: true, checkpoints: false, pty: false },
+              capabilities: { nativeTools: true, checkpoints: false, pty: false },
               workspaceCapabilities,
               cursors: { command: 0, event: 0, pty: 0 },
             },

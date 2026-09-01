@@ -1,7 +1,6 @@
 import type { HostedExecutionOperationsService } from "@rika/product-store/executor-operations"
 import { HostedExecutionOperationsError } from "@rika/product-store/executor-operations"
-import { CellTerminalSettlementGraceMillis } from "@rika/remote-execution/cells"
-import { redactAccess, type CellResponse } from "@rika/remote-execution/protocol"
+import type { ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
 import {
   AssignmentLeaseEpoch,
   EventId,
@@ -11,23 +10,17 @@ import {
   Sequence,
 } from "@rika/product/hosted-model"
 import type { HostedThreadEventStore } from "@rika/product/hosted-thread-event-store"
-import { Cause, Clock, DateTime, Deferred, Effect, Exit, FiberSet, Ref, Semaphore } from "effect"
-import {
-  cancelledResponse,
-  type GatewayError,
-  type OperationIdentity,
-  type OperationInput,
-  type Socket,
-} from "../executor/gateway"
+import { redactAccess } from "@rika/remote-execution/protocol"
+import { Cause, Clock, DateTime, Deferred, Effect, Exit, Ref, Semaphore } from "effect"
+import type { GatewayError, OperationIdentity, OperationInput } from "../executor/gateway"
 import type { RunnerExecutorAuthority } from "./executor"
-import {
-  gatewayModel,
-  type BindingCall,
-  type FinalResult,
-  type LocalExecuteInput,
-  type Pending,
-  type Session,
-} from "./gateway-model"
+import { gatewayModel, type FinalResult, type LocalExecuteInput, type Pending, type Session } from "./gateway-model"
+
+const terminalSettlementGraceMillis = 6_000
+const cancelledResponse: ToolOperationResponse = {
+  _tag: "DomainFailure",
+  failure: { kind: "cancelled", message: "Tool operation cancelled" },
+}
 
 interface OperationDependencies {
   readonly authority: RunnerExecutorAuthority
@@ -54,7 +47,7 @@ interface OperationDependencies {
     readonly assignmentId?: string
     readonly operationKey: string
     readonly attempt: number
-    readonly response: CellResponse
+    readonly response: ToolOperationResponse
     readonly state: "completed" | "unknown"
   }) => Effect.Effect<FinalResult, GatewayError>
   readonly settlePending: (
@@ -69,37 +62,13 @@ interface OperationDependencies {
     attempt: number,
     expected?: Pending,
   ) => Effect.Effect<Pending | undefined>
-  readonly sendCancel: (assignmentId: string, operationKey: string, attempt: number) => Effect.Effect<void>
-  readonly redeliveries: FiberSet.FiberSet<void>
+  readonly runNative: (operation: Pending) => Effect.Effect<void>
+  readonly cancelNative: (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+  ) => Effect.Effect<void, GatewayError>
 }
-
-export const sendCellExecute = (operation: Pending) =>
-  Effect.try({
-    try: () =>
-      operation.socket.send(
-        gatewayModel.encode({
-          _tag: "CellExecute",
-          request: {
-            access: operation.access,
-            operationKey: operation.operationKey,
-            workspaceId: operation.workspaceId,
-            sessionId: operation.request.sessionId,
-            threadId: operation.request.threadId,
-            turnId: operation.request.turnId,
-            runId: operation.request.runId,
-            toolCallId: operation.request.toolCallId,
-            code: operation.code,
-            rootRunId: operation.request.rootRunId,
-            attempt: operation.attempt,
-            replayPolicy: operation.request.replayPolicy,
-            admittedAt: operation.request.admittedAt,
-            deadlineAt: operation.request.deadlineAt,
-            bindings: operation.bindings.manifest,
-          },
-        }),
-      ),
-    catch: () => undefined,
-  }).pipe(Effect.ignore)
 
 export const runnerGatewayOperations = (dependencies: OperationDependencies) => {
   const {
@@ -116,33 +85,11 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
     finalize,
     settlePending,
     retirePending,
-    sendCancel,
-    redeliveries,
+    runNative,
+    cancelNative,
   } = dependencies
-  const { encode, failure, finalResult, operationKey: key, sameFence: same, timeoutResponse, unknownResponse } =
-    gatewayModel
-  const startRedelivery = (operation: Pending) =>
-    FiberSet.run(
-      redeliveries,
-      Deferred.await(operation.acknowledged).pipe(
-        Effect.raceFirst(
-          Effect.forever(
-            Effect.sleep("250 millis").pipe(
-              Effect.andThen(
-                Ref.get(pending).pipe(
-                  Effect.map((current) =>
-                    current.get(key(operation.assignmentId, operation.operationKey, operation.attempt)),
-                  ),
-                  Effect.flatMap((current) =>
-                    current?.result === operation.result ? sendCellExecute(current) : Effect.void,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    ).pipe(Effect.asVoid)
+  const { failure, finalResult, operationKey: key, sameFence: same, timeoutResponse, unknownResponse } = gatewayModel
+
   const recoverTerminals = Effect.fn("RunnerGateway.recoverTerminals")(function* () {
     const rows = yield* operations.terminalRecoveryScan.pipe(
       Effect.mapError(() => failure("transport", "Could not inspect Runner terminal receipts")),
@@ -161,9 +108,10 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
       ),
     )
   })
+
   const terminalizeAccepted = Effect.fn("RunnerGateway.terminalizeAccepted")(function* (
     input: OperationIdentity,
-    terminalResponse: CellResponse,
+    terminalResponse: ToolOperationResponse,
     outcome: "failed" | "cancelled",
   ) {
     const current = yield* operations
@@ -186,7 +134,7 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
             assignmentGeneration: FencingGeneration.make(String(result.assignmentGeneration)),
             leaseEpoch: AssignmentLeaseEpoch.make(String(result.leaseEpoch)),
             commandSequence: Sequence.make(String(result.commandSequence)),
-            event: { _tag: "CellResult", operationKey: input.operationKey, response: terminalResponse },
+            event: { _tag: "ToolResult", operationKey: input.operationKey, response: terminalResponse },
           })
           .pipe(Effect.mapError((cause) => HostedExecutionOperationsError.make({ message: cause.message }))),
       )
@@ -204,8 +152,6 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
     return undefined
   })
 
-  const timeoutAccepted = (input: OperationInput) => terminalizeAccepted(input, timeoutResponse, "failed")
-
   const waitForTerminal = (input: LocalExecuteInput): Effect.Effect<FinalResult, GatewayError> =>
     Effect.gen(function* () {
       yield* recoverTerminals().pipe(Effect.ignore)
@@ -220,15 +166,21 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
         return finalResult(row.response, row.terminalOutcome, session?.access)
       }
       const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(input.deadlineAt))
-      const settlementDeadlineAtMillis = deadlineAtMillis + CellTerminalSettlementGraceMillis
+      const settlementDeadlineAtMillis = deadlineAtMillis + terminalSettlementGraceMillis
       const now = yield* Clock.currentTimeMillis
       if (now >= deadlineAtMillis && row.state === "accepted") {
-        const timedOut = yield* timeoutAccepted(input)
+        const timedOut = yield* terminalizeAccepted(input, timeoutResponse, "failed")
         if (timedOut !== undefined) return timedOut
       }
       if (now >= settlementDeadlineAtMillis) {
-        yield* sendCancel(input.assignmentId, input.operationKey, input.attempt)
-        return { response: unknownResponse, outcome: "unknown", eventPersisted: false }
+        yield* cancelNative(input.assignmentId, input.operationKey, input.attempt)
+        return yield* finalize({
+          assignmentId: input.assignmentId,
+          operationKey: input.operationKey,
+          attempt: input.attempt,
+          response: unknownResponse,
+          state: "unknown",
+        })
       }
       const nextBoundary = now < deadlineAtMillis ? deadlineAtMillis : settlementDeadlineAtMillis
       return yield* Effect.sleep(Math.min(100, nextBoundary - now)).pipe(Effect.andThen(waitForTerminal(input)))
@@ -259,34 +211,22 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
   const execute = Effect.fn("RunnerGateway.execute")(function* (input: LocalExecuteInput) {
     yield* recoverTerminals().pipe(Effect.ignore)
     const durable = yield* prepare(input)
-    const request = {
-      ...input,
-      admittedAt: durable.admittedAt,
-      deadlineAt: durable.deadlineAt,
-    }
+    const request: LocalExecuteInput = { ...input, admittedAt: durable.admittedAt, deadlineAt: durable.deadlineAt }
     const pendingKey = key(request.assignmentId, request.operationKey, request.attempt)
     const existingPending = yield* gatewayLock.withPermits(1)(
       Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey))),
     )
     if (existingPending !== undefined) {
       if (existingPending.code !== request.code)
-        return yield* failure("fenced", "Runner operation identity conflicts with different code")
+        return yield* failure("fenced", "Runner operation identity conflicts with a different tool request")
       return yield* awaitResult(existingPending.result, request)
     }
-
     if (durable.state === "completed" || durable.state === "unknown") {
       if (durable.response === null || durable.terminalOutcome === null)
         return yield* failure("transport", "Persisted Runner terminal outcome is missing")
       const session = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(request.assignmentId)))
-      const result: FinalResult = {
-        response: durable.response,
-        outcome: durable.terminalOutcome,
-        eventPersisted: true as const,
-      }
-      if (session !== undefined) return { ...result, access: session.access }
-      return result
+      return finalResult(durable.response, durable.terminalOutcome, session?.access)
     }
-
     const session = yield* awaitSession(request)
     if (session === undefined) return yield* waitForTerminal(request)
     const workspace = yield* authority
@@ -294,13 +234,13 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
       .pipe(Effect.mapError((error) => failure("fenced", error.message)))
     const setup = yield* gatewayLock.withPermits(1)(
       Effect.gen(function* () {
-        const currentPending = yield* Ref.get(pending).pipe(Effect.map((current) => current.get(pendingKey)))
+        const currentPending = (yield* Ref.get(pending)).get(pendingKey)
         if (currentPending !== undefined) {
           if (currentPending.code !== request.code)
-            return yield* failure("fenced", "Runner operation identity conflicts with different code")
+            return yield* failure("fenced", "Runner operation identity conflicts with a different tool request")
           return { existing: currentPending } as const
         }
-        const currentSession = yield* Ref.get(sessions).pipe(Effect.map((current) => current.get(request.assignmentId)))
+        const currentSession = (yield* Ref.get(sessions)).get(request.assignmentId)
         if (
           currentSession === undefined ||
           currentSession.socket !== session.socket ||
@@ -324,7 +264,6 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
           currentOperation.dispatchedProcessIncarnation !== currentSession.access.fence.processIncarnation
         )
           return yield* failure("fenced", "Runner operation was dispatched to a different executor")
-        const result = yield* Deferred.make<FinalResult, GatewayError>()
         const current: Pending = {
           assignmentId: request.assignmentId,
           operationKey: request.operationKey,
@@ -334,16 +273,10 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
           request,
           socket: currentSession.socket,
           access: currentSession.access,
-          result,
-          acknowledged: yield* Deferred.make<void>(),
-          bindings: request.bindings,
-          bindingCalls: yield* Ref.make(new Map<string, BindingCall>()),
-          bindingLock: yield* Semaphore.make(1),
-          nextMachineOrdinal: yield* Ref.make(0),
+          result: yield* Deferred.make<FinalResult, GatewayError>(),
         }
         yield* Ref.update(pending, (values) => new Map(values).set(pendingKey, current))
-        yield* sendCellExecute(current)
-        yield* startRedelivery(current)
+        yield* runNative(current)
         return { current } as const
       }),
     )
@@ -370,7 +303,9 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
     const accepted = yield* terminalizeAccepted(input, cancelledResponse, "cancelled")
     if (accepted !== undefined) return accepted
     const pendingKey = key(input.assignmentId, input.operationKey, input.attempt)
-    const awaitTerminal = (sentTo?: Socket): Effect.Effect<FinalResult, GatewayError> =>
+    const cancellationDeadlineAtMillis =
+      DateTime.toEpochMillis(DateTime.makeUnsafe(row.deadlineAt)) + terminalSettlementGraceMillis
+    const awaitTerminal = (): Effect.Effect<FinalResult, GatewayError> =>
       Effect.gen(function* () {
         yield* recoverTerminals().pipe(Effect.ignore)
         const current = yield* operations
@@ -381,42 +316,40 @@ export const runnerGatewayOperations = (dependencies: OperationDependencies) => 
           if (current.response === null || current.terminalOutcome === null)
             return yield* failure("transport", "Persisted Runner terminal outcome is missing")
           const session = (yield* Ref.get(sessions)).get(input.assignmentId)
-          return finalResult(current.response, current.terminalOutcome, session?.access)
+          const result = finalResult(current.response, current.terminalOutcome, session?.access)
+          yield* settlePending(input.assignmentId, input.operationKey, input.attempt, result)
+          return result
+        }
+        const now = yield* Clock.currentTimeMillis
+        if (now >= cancellationDeadlineAtMillis) {
+          yield* cancelNative(input.assignmentId, input.operationKey, input.attempt).pipe(Effect.ignore)
+          const result = yield* finalize({
+            assignmentId: input.assignmentId,
+            operationKey: input.operationKey,
+            attempt: input.attempt,
+            response: unknownResponse,
+            state: "unknown",
+          })
+          yield* settlePending(input.assignmentId, input.operationKey, input.attempt, result)
+          return result
         }
         if (current.state === "accepted") {
           const terminal = yield* terminalizeAccepted(input, cancelledResponse, "cancelled")
           if (terminal !== undefined) return terminal
         }
-        const session = (yield* Ref.get(sessions)).get(input.assignmentId)
-        const nextSocket = session?.socket ?? sentTo
-        if (session !== undefined && session.socket !== sentTo) {
-          yield* authority
-            .validateAccess(redactAccess(session.access))
-            .pipe(Effect.mapError((error) => failure("fenced", error.message)))
-          yield* Effect.try({
-            try: () =>
-              session.socket.send(
-                encode({
-                  _tag: "CellCancel",
-                  access: session.access,
-                  operationKey: input.operationKey,
-                  attempt: input.attempt,
-                }),
-              ),
-            catch: () => failure("transport", "Could not cancel Runner operation"),
-          })
-        }
+        yield* cancelNative(input.assignmentId, input.operationKey, input.attempt).pipe(Effect.ignore)
+        const remaining = Math.max(0, cancellationDeadlineAtMillis - now)
         const pendingOperation = (yield* Ref.get(pending)).get(pendingKey)
         if (pendingOperation !== undefined) {
           const completed = yield* Effect.raceFirst(
             Deferred.await(pendingOperation.result).pipe(
               Effect.map((result) => ({ _tag: "Completed" as const, result })),
             ),
-            Effect.sleep("100 millis").pipe(Effect.as({ _tag: "Polling" as const })),
+            Effect.sleep(Math.min(100, remaining)).pipe(Effect.as({ _tag: "Polling" as const })),
           )
           if (completed._tag === "Completed") return completed.result
-        } else yield* Effect.sleep("100 millis")
-        return yield* awaitTerminal(nextSocket)
+        } else yield* Effect.sleep(Math.min(100, remaining))
+        return yield* awaitTerminal()
       })
     return yield* awaitTerminal()
   })

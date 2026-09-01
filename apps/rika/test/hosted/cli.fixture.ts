@@ -37,7 +37,7 @@ export const workspaceCapabilities = {
   environmentDigest: `sha256:${"1".repeat(64)}`,
   capturedAt: "2026-01-01T00:00:00.000Z",
   filesystem: { _tag: "Ready", detail: "available" },
-  typescriptKernel: { _tag: "Ready", detail: "available" },
+  nativeTools: { _tag: "Ready", detail: "available" },
   git: { _tag: "Ready", detail: "available" },
   process: { _tag: "Ready", detail: "available" },
   pty: { _tag: "Unavailable", reason: "not required" },

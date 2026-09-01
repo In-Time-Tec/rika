@@ -2,7 +2,7 @@ import { dim, fg, type TextChunk } from "@opentui/core"
 import { colors } from "../../../presentation/terminal/theme"
 import { toolResultText } from "../../../presentation/transcript/tool/body"
 import { toolDetail } from "../../../presentation/transcript/tool/detail"
-import { cancelledAgentLabel, failedAgentLabel, iconChar, wrapBodyText } from "../window"
+import { cancelledAgentLabel, failedAgentLabel, wrapBodyText, type RowStatus } from "../window"
 import { renderToolSummary } from "../diff-text-adapter"
 import { renderMarkdownLines } from "../text-adapter"
 import { shellExitCode, type ToolUnit } from "../tool/detail"
@@ -12,7 +12,7 @@ type FallbackContent = {
   readonly append: (chunk: TextChunk) => void
   readonly highlight: (text: string) => void
   readonly renderAgentPrompt: (text: string, prefix: string) => void
-  readonly statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk
+  readonly statusIcon: (status: RowStatus) => TextChunk
   readonly width: number
   readonly spinnerFrame: string
 }
@@ -30,19 +30,18 @@ const failureSuffix = (unit: ToolUnit): string =>
     ? ` (exit code: ${shellExitCode(unit.block) ?? 1})`
     : ""
 
-const renderSummary = (content: FallbackContent, unit: ToolUnit, label: string, failure: string) => {
-  content.append(
-    content.statusIcon(
-      unit.block.status === "failed",
-      unit.block.status === "running",
-      unit.block.status === "cancelled",
-    ),
-  )
-  const summary = toolDetail(unit.index, {
+const renderSummary = (content: FallbackContent, unit: ToolUnit, label: string, failure: string, selected: boolean) => {
+  content.append(selected ? dim(content.statusIcon(unit.block.status)) : content.statusIcon(unit.block.status))
+  const detail = toolDetail(unit.index, {
     ...unit.block,
     presentation: { ...unit.block.presentation, activeLabel: label, completeLabel: label },
-  }).summary
-  for (const chunk of renderToolSummary(summary, { leading: " " })[0]!) content.append(chunk)
+  })
+  for (const chunk of renderToolSummary(detail.summary, {
+    leading: " ",
+    selected,
+    underlineSecondary: detail.target !== undefined,
+  })[0]!)
+    content.append(chunk)
   if (failure.length > 0) content.append(fg(colors.red)(failure))
 }
 
@@ -62,18 +61,10 @@ const renderOutput = (content: FallbackContent, unit: ToolUnit, output: string) 
 }
 
 const renderFallbackToolBody = (content: FallbackContent, unit: ToolUnit, selected: boolean, expanded: boolean) => {
-  const failed = unit.block.status === "failed"
-  const running = unit.block.status === "running"
-  const cancelled = unit.block.status === "cancelled"
   const label = displayedLabel(unit)
   const agent = unit.block.presentation.family === "agent"
-  const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
   const failure = failureSuffix(unit)
-  if (selected)
-    content.highlight(
-      `${iconChar(failed, running, content.spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${failure}`,
-    )
-  else renderSummary(content, unit, label, failure)
+  renderSummary(content, unit, label, failure, selected)
   if (!expanded) return
   if (agent && unit.block.detail.length > 0) content.renderAgentPrompt(unit.block.detail, "  ")
   else if (!agent && toolOutputDisplayed(unit.block)) {

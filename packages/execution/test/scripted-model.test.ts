@@ -1,7 +1,7 @@
 import "./support/root-fragments/scripted-model-policy.fixture"
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "generalist"
-import { CellTool } from "generalist/repl"
+import * as NativeTools from "../src/tool/registry"
 import { ExecutableRegistration } from "generalist/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
@@ -11,9 +11,7 @@ import { Cause, ConfigProvider, Effect, Exit, Schema } from "effect"
 import * as Registration from "../src/registration"
 import { configure } from "./support/adapters"
 
-const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
-
-const conversationalProfiles = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+const conversationalProfiles = ["Oracle", "Librarian", "Painter", "Review", "Surgeon", "Task"] as const
 
 type Configured = Effect.Success<ReturnType<typeof configure>>
 
@@ -25,6 +23,9 @@ const agentEntries = (configured: Configured) =>
 const profileNameOf = (entry: ReturnType<typeof agentEntries>[number]) => entry.manifest.name.replace("rika-", "")
 
 const modelCandidates = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
+const nativeToolNames = Object.values(NativeTools.toolkit.tools)
+  .map(({ name }) => name)
+  .toSorted()
 
 /**
  * Values a host holds as credentials. A registration that carried any of these would leak it into
@@ -38,11 +39,11 @@ const encodeRegistrations = Schema.encodeSync(Schema.fromJsonString(Schema.Unkno
 const assertProfileTools = (configured: Configured) => {
   for (const profile of Object.values(configured.profiles)) expect(profile.manifest.budget).toEqual({})
   for (const name of conversationalProfiles) {
-    expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual([CellTool.name])
+    expect(configured.profiles[name]!.manifest.tools.map(({ name: toolName }) => toolName)).toEqual(nativeToolNames)
   }
   for (const entry of agentEntries(configured)) {
     const names = entry.manifest.tools.map(({ name }) => name)
-    expect(names).toEqual(profileNameOf(entry) === "title" ? [] : [CellTool.name])
+    expect(names).toEqual(profileNameOf(entry) === "title" ? [] : nativeToolNames)
     expect(entry.manifest.toolScheduling).toEqual({ maxConcurrency: 1, parallelSafe: [] })
   }
 }
@@ -128,18 +129,17 @@ it.effect("builds exact closed root and title executables with role-specific too
         registrationIdentity: modelRegistrationIdentity("test-compaction-route"),
       },
     }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel })
+    const configured = yield* configure({ executionRoute, workspace: "/workspace" })
     expect(Object.keys(configured.profiles)).toEqual([
       "Title",
       "Oracle",
       "Librarian",
       "Painter",
-      "ReadThread",
       "Review",
       "Surgeon",
       "Task",
     ])
-    expect(configured.resolverEntries).toHaveLength(9)
+    expect(configured.resolverEntries).toHaveLength(8)
     const rootResolution = configured.resolverEntries[0]!
     expect("agent" in rootResolution ? rootResolution.agent.model : undefined).toMatchObject({
       provider: "generalist/ai",
@@ -153,20 +153,18 @@ it.effect("builds exact closed root and title executables with role-specific too
       "Librarian",
       "Oracle",
       "Painter",
-      "ReadThread",
       "Review",
       "Surgeon",
       "Task",
     ])
     const rootToolNames = rootAgentEntry.manifest.tools.map(({ name }) => name)
-    expect(rootToolNames).toEqual([CellTool.name])
+    expect(rootToolNames).toEqual(nativeToolNames)
     expect(configured.profiles.Title!.manifest.tools).toEqual([])
     assertProfileTools(configured)
     expect(configured.profiles.Task!.manifest.children.map(({ selection }) => selection)).toEqual([
       "Librarian",
       "Oracle",
       "Painter",
-      "ReadThread",
       "Review",
       "Surgeon",
       "Task",
@@ -175,7 +173,6 @@ it.effect("builds exact closed root and title executables with role-specific too
       "Librarian",
       "Oracle",
       "Painter",
-      "ReadThread",
       "Review",
       "Surgeon",
       "Task",
@@ -226,11 +223,11 @@ it.effect("builds exact closed root and title executables with role-specific too
       configured.registrations
         .filter(({ codec }) => codec === "rika-tool")
         .map(({ payload }) => Schema.decodeUnknownSync(Registration.codecs.tool.payload)(payload).name),
-    ).toContain(CellTool.name)
+    ).toEqual(expect.arrayContaining(nativeToolNames))
     const advertised = new Set(
       agentEntries(configured).flatMap((entry) => entry.manifest.tools.map(({ name }) => name)),
     )
-    expect([...advertised]).toEqual([CellTool.name])
+    expect([...advertised].toSorted()).toEqual(nativeToolNames.toSorted())
     assertRegistrationPins(configured, registrationPins)
   }),
 )
@@ -254,7 +251,7 @@ it.effect("delegates persisted provider-option decoding to Generalist", () =>
       },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel })
+    const configured = yield* configure({ executionRoute, workspace: "/workspace" })
     const root = configured.resolverEntries[0]!
     const selection = "agent" in root ? root.agent.model : undefined
     expect(modelCandidates(selection?.registrationKey ?? "[]")).toEqual([
@@ -267,7 +264,6 @@ it.effect("delegates persisted provider-option decoding to Generalist", () =>
         main: { ...executionRoute.main, candidates: [{ ...candidate, providerOptions: { max_tokens: 4_096 } }] },
       },
       workspace: "/workspace",
-      kernel,
     }).pipe(Effect.exit)
     expect(Exit.isFailure(invalid)).toBe(true)
     if (Exit.isFailure(invalid)) expect(Cause.pretty(invalid.cause)).toContain("max_tokens")
@@ -284,9 +280,9 @@ it.effect("changes executable identity for candidate order and workspace", () =>
     }
     const ordered = { ...first, main: { ...first.main, candidates: [first.main.candidates[0]!, secondCandidate] } }
     const reversed = { ...ordered, main: { ...ordered.main, candidates: ordered.main.candidates.toReversed() } }
-    const orderedExecutable = yield* configure({ executionRoute: ordered, workspace: "/one", kernel })
-    const reversedExecutable = yield* configure({ executionRoute: reversed, workspace: "/one", kernel })
-    const otherWorkspace = yield* configure({ executionRoute: ordered, workspace: "/two", kernel })
+    const orderedExecutable = yield* configure({ executionRoute: ordered, workspace: "/one" })
+    const reversedExecutable = yield* configure({ executionRoute: reversed, workspace: "/one" })
+    const otherWorkspace = yield* configure({ executionRoute: ordered, workspace: "/two" })
     const orderedRoot = orderedExecutable.resolverEntries[0]!
     const orderedSelection = "agent" in orderedRoot ? orderedRoot.agent.model : undefined
     expect(modelCandidates(orderedSelection?.registrationKey ?? "[]")).toEqual([
@@ -303,7 +299,6 @@ it.effect("never pins a routed token budget into an Agent manifest", () =>
     const executable = yield* configure({
       executionRoute: { ...testExecutionRoute(), tokenBudget: 12_000 },
       workspace: "/workspace",
-      kernel,
     })
     expect(
       executable.executable.manifest.entries.every(
@@ -330,7 +325,7 @@ it.effect("resolves an openai candidate through its configured api key environme
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
+    const configured = yield* configure({ executionRoute, workspace: "/workspace" }).pipe(
       Effect.provideService(
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromEnv({ env: { SWITCHBOARD_API_KEY: "switchboard-secret" } }),
@@ -363,7 +358,7 @@ it.effect("routes an OpenAI Chat Completions candidate through the released comp
       providerOptions: { max_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const configured = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
+    const configured = yield* configure({ executionRoute, workspace: "/workspace" }).pipe(
       Effect.provideService(
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromEnv({ env: { CHAT_COMPATIBLE_API_KEY: "switchboard-secret" } }),
@@ -394,7 +389,7 @@ it.effect("reports the missing api key environment variable by name instead of a
       providerOptions: { max_output_tokens: 4_096 },
     }
     const executionRoute = { ...route, main: { ...route.main, candidates: [candidate] } }
-    const failed = yield* configure({ executionRoute, workspace: "/workspace", kernel }).pipe(
+    const failed = yield* configure({ executionRoute, workspace: "/workspace" }).pipe(
       Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} })),
       Effect.exit,
     )

@@ -10,7 +10,6 @@ const ModelRouteRole = Schema.Literals([
   "compaction",
   "librarian",
   "painter",
-  "readThread",
   "review",
   "surgeon",
   "task",
@@ -59,7 +58,6 @@ export const ExecutionRouteSnapshot = Schema.Struct({
   agents: Schema.Struct({
     librarian: ExecutionRouteModelSnapshot,
     painter: ExecutionRouteModelSnapshot,
-    readThread: ExecutionRouteModelSnapshot,
     review: ExecutionRouteModelSnapshot,
     surgeon: ExecutionRouteModelSnapshot,
     task: ExecutionRouteModelSnapshot,
@@ -98,7 +96,6 @@ export const testExecutionRoute = (mode = "test"): ExecutionRouteSnapshot => {
     agents: {
       librarian: { ...route, role: "librarian" },
       painter: { ...route, role: "painter" },
-      readThread: { ...route, role: "readThread" },
       review: { ...route, role: "review" },
       surgeon: { ...route, role: "surgeon" },
       task: { ...route, role: "task" },
@@ -204,12 +201,7 @@ export const toExecutionRouteSnapshot = <A extends object>(routeValue: A): Execu
   const compaction = requireRecord(route.compaction, "Malformed execution route compaction intent")
   requireKeys(compaction, ["strategy", "summaryPrompt"], "Unsupported execution route compaction intent field")
   const agents = requireRecord(route.agents, "Malformed execution route agents")
-  requireKeys(
-    agents,
-    ["librarian", "painter", "readThread", "review", "surgeon", "task"],
-    "Unsupported execution route agent",
-  )
-  for (const role of ["librarian", "painter", "readThread", "review", "surgeon", "task"] as const)
-    validateModel(agents[role], role)
+  requireKeys(agents, ["librarian", "painter", "review", "surgeon", "task"], "Unsupported execution route agent")
+  for (const role of ["librarian", "painter", "review", "surgeon", "task"] as const) validateModel(agents[role], role)
   return Schema.decodeUnknownSync(ExecutionRouteSnapshot, { onExcessProperty: "error" })(route)
 }

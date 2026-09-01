@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm"
 import { Effect, Schema } from "effect"
-import { CellResponse } from "@rika/remote-execution/protocol"
+import { ToolOperationResponse, ToolOperationTerminalOutcome } from "@rika/product/tool-operation-lifecycle"
 import { rikaHostedExecutorOperations } from "../../database/schema/product"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import {
@@ -39,7 +39,8 @@ export const decodeOperation = (
   row: typeof rikaHostedExecutorOperations.$inferSelect,
 ): Effect.Effect<OperationRecord, HostedExecutionOperationsError> =>
   Effect.gen(function* () {
-    const response = row.response === null ? null : yield* Schema.decodeUnknownEffect(CellResponse)(row.response)
+    const response =
+      row.response === null ? null : yield* Schema.decodeUnknownEffect(ToolOperationResponse)(row.response)
     return {
       assignmentId: row.assignmentId,
       ownerId: row.ownerId,
@@ -67,8 +68,6 @@ export const decodeOperation = (
       terminalOutcome:
         row.terminalOutcome === null
           ? null
-          : yield* Schema.decodeUnknownEffect(Schema.Literals(["completed", "failed", "cancelled", "unknown"]))(
-              row.terminalOutcome,
-            ),
+          : yield* Schema.decodeUnknownEffect(ToolOperationTerminalOutcome)(row.terminalOutcome),
     }
   }).pipe(Effect.mapError(failure))

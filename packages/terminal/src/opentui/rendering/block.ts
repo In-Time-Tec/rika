@@ -1,7 +1,6 @@
 import { bg, dim, fg, StyledText, underline, type ColorInput, type TextChunk } from "@opentui/core"
 import { Function, Schema } from "effect"
 import { subagentPhrase } from "@rika/transcript/subagent-presentation"
-import { cellBodyText } from "@rika/transcript/cell-presentation"
 import stringWidth from "string-width"
 import type { TranscriptBlock } from "../../state/transcript/model"
 import type { ChangedFile } from "../../state/changed-file"
@@ -95,18 +94,8 @@ const renderImageAttachment = (block: Extract<TranscriptBlock, { _tag: "ImageAtt
   const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
   return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
 }
-const renderCell = (block: Extract<TranscriptBlock, { _tag: "Cell" }>, body: (text: string) => string): string => {
-  const running = block.status === "running"
-  const icon = iconChar(
-    block.status === "failed" || block.status === "unknown",
-    running,
-    "⠿",
-    block.status === "cancelled",
-  )
-  const output = cellBodyText(block)
-  const glyph = block.visual === "shell" ? " $" : ""
-  return `${icon}${glyph}${output.length === 0 ? "" : `\n${body(output)}`}`
-}
+const renderContextUsage = (block: Extract<TranscriptBlock, { _tag: "ContextUsage" }>): string =>
+  `◷ Context ${block.text}${block.cost === undefined ? "" : ` · ${block.cost}`}`
 const renderHeading = (text: string, width: number, body: (text: string) => string): string => {
   const lines = wrapTextToWidth(text, Math.max(1, width))
   const rest = lines.slice(1).join(" ")
@@ -138,7 +127,7 @@ export const renderBlock: {
       case "Diff":
         return `Δ ${block.path}\n${renderDiff(block.patch, width)}`
       case "ContextUsage":
-        return `◷ Context ${block.text}${block.cost === undefined ? "" : ` · ${block.cost}`}`
+        return renderContextUsage(block)
       case "Compaction":
         return renderCompaction(block, body)
       case "Notification":
@@ -148,13 +137,13 @@ export const renderBlock: {
       case "SubagentCard": {
         return renderCardBlock(block, body)
       }
+      case "SubagentGroup":
+        return `${block.name || "Subagents"} · ${block.counts.complete}/${block.counts.total} complete`
       case "AuthorizationCard": {
         return renderCardBlock(block, body)
       }
       case "ImageAttachment":
         return renderImageAttachment(block)
-      case "Cell":
-        return renderCell(block, body)
     }
   },
 )

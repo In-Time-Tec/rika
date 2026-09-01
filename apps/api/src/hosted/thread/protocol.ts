@@ -223,7 +223,7 @@ export const layerWithOptions = (
               .pipe(Effect.mapError(storeFailure), (effect) =>
                 HostedObservability.observe("target_resolution", { ownerId: authority.ownerId, threadId }, effect),
               )
-            if (admission._tag === "Admitted") yield* (options.wakeCommand ?? Effect.void)
+            if (admission._tag === "Admitted") yield* options.wakeCommand ?? Effect.void
             if (admission.command.state === "completed")
               return [frame(commandResult(admission.command, message.requestId))]
             pendingCommands.set(String(admission.command.commandId), {
@@ -392,7 +392,7 @@ export const layerWithOptions = (
                   effect,
                 ),
               )
-            if (admission._tag === "Admitted") yield* (options.wakeCommand ?? Effect.void)
+            if (admission._tag === "Admitted") yield* options.wakeCommand ?? Effect.void
             if (admission._tag === "Duplicate") {
               if (admission.command.state === "completed")
                 return [frame(commandResult(admission.command, message.requestId))]

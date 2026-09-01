@@ -20,6 +20,7 @@ export class TranscriptVirtualDocument {
   private entries: unknown
   private blocks: unknown
   private expandedRowKeys: unknown
+  private explicitlyCollapsedRowKeys: unknown
   private width = 0
   private indexValue: TranscriptVirtualIndex | undefined
 
@@ -52,12 +53,14 @@ export class TranscriptVirtualDocument {
       this.entries !== model.entries ||
       this.blocks !== model.blocks ||
       this.expandedRowKeys !== model.expandedRowKeys ||
+      this.explicitlyCollapsedRowKeys !== model.explicitlyCollapsedRowKeys ||
       this.width !== model.width
     ) {
       this.items = model.items
       this.entries = model.entries
       this.blocks = model.blocks
       this.expandedRowKeys = model.expandedRowKeys
+      this.explicitlyCollapsedRowKeys = model.explicitlyCollapsedRowKeys
       this.width = model.width
       this.indexValue = transcriptVirtualIndex(model, model.width)
     }

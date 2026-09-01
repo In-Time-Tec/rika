@@ -255,6 +255,7 @@ const transcriptRenderInputChanged = (
   previous.blocks !== input.blocks ||
   previous.items !== input.items ||
   previous.expandedRowKeys !== input.expandedRowKeys ||
+  previous.explicitlyCollapsedRowKeys !== input.explicitlyCollapsedRowKeys ||
   previous.detailSelection !== input.detailSelection ||
   previous.width !== input.width ||
   previous.windowEnd !== input.windowEnd ||
@@ -416,6 +417,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     blocks: model.blocks,
     items: model.items,
     expandedRowKeys: model.expandedRowKeys,
+    explicitlyCollapsedRowKeys: model.explicitlyCollapsedRowKeys,
     detailSelection: model.detailSelection,
     width: model.width,
     windowEnd: options.windowEnd,

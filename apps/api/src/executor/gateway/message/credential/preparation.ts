@@ -26,7 +26,6 @@ export const gatewayCredentialPreparationHandler = (dependencies: GatewayCredent
           attempt: message.attempt,
           retry: message.retry,
           templateBuildId,
-          bindingContractDigest: yield* dependencies.bindingContract(message.workspaceId),
           checkout: assignment.checkout,
         })
         return true

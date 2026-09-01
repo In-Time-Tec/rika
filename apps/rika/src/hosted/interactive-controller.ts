@@ -156,9 +156,7 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
               )
             : undefined
         const commandId = yield* crypto.randomUUIDv4.pipe(
-          Effect.mapError(() =>
-            HostedError.make({ kind: "host", message: "Could not create a Thread identifier" }),
-          ),
+          Effect.mapError(() => HostedError.make({ kind: "host", message: "Could not create a Thread identifier" })),
         )
         const created = yield* authenticated(profile, (session) =>
           Effect.gen(function* () {

@@ -1,13 +1,13 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import {
   Context,
   Crypto,
   Deferred,
   Effect,
+  Encoding,
   Fiber,
   FileSystem,
   Layer,
@@ -20,10 +20,7 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
-import { BindingProxyError } from "../protocol/binding-proxy"
-import { CellError } from "../protocol/cells"
 import * as Operations from "../protocol/operations"
-import * as HostedKernel from "./kernel"
 import { Machine, workspaceLayer as machineLayer } from "./machinery/machine"
 import {
   Manager as PtyManager,
@@ -39,45 +36,30 @@ import {
 } from "../workspace/repositories"
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import { layer as workspaceFilesLayer } from "../workspace/files"
-import {
-  type CheckpointRestore,
-  type WorkspaceSeedRestore,
-  ExecutorMessage,
-  SessionWire,
-  type CellRequest,
-} from "../protocol/messages"
+import { type CheckpointRestore, type WorkspaceSeedRestore, ExecutorMessage, SessionWire } from "../protocol/messages"
 import { inspectWorkspaceCapabilities } from "../workspace/capabilities"
 import { mutableExecutionEnvironment } from "./execution-environment"
 import { HostError } from "./error"
 import { hostIdentity, type Identity } from "./identity"
-import { persistence, sessionStore } from "./persistence"
+import { sessionStore } from "./persistence"
 import { preparation } from "./preparation"
 import type { PhaseGrant } from "./dispatch-pty-workspace"
 import { connection } from "./connection"
 import { program as hostProgram } from "./program"
 
 export { HostError } from "./error"
-export { sessionStore, type OperationReceiptStore, type SessionStore } from "./persistence"
+export { sessionStore, type SessionStore } from "./persistence"
 
 const { configuration, executorIdentity, restores, workspaceRoot, workspaceUser } = hostIdentity
-const { operationReceiptStore } = persistence
 const { sameFence } = preparation
 const { applyGrant, connect, dispatchPty, dispatchWorkspace } = connection
 const { receiveBootstrap, statePersistence } = hostProgram
 const encodeExecutorMessage = Schema.encodeSync(Schema.fromJsonString(ExecutorMessage))
-const cellCorrelation = (request: CellRequest) => ({
-  threadId: request.threadId,
-  turnId: request.turnId,
-  runId: request.runId,
-  operationId: request.operationKey,
-  cellId: request.toolCallId,
-})
 
 export const testing = {
   applyPhaseGrant: applyGrant,
   dispatchPty,
   dispatchWorkspace,
-  operationReceiptStore,
   receiveBootstrap,
   sameFence,
 } as const
@@ -103,11 +85,7 @@ const host = Effect.scoped(
     }
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
-    const { readState, writeState, readMachine, writeMachine } = statePersistence(
-      environmentIdentity.stateDirectory,
-      crypto,
-      fileSystem,
-    )
+    const { readMachine, writeMachine } = statePersistence(environmentIdentity.stateDirectory, crypto, fileSystem)
     const run = (
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
@@ -118,22 +96,8 @@ const host = Effect.scoped(
     ) =>
       Effect.gen(function* () {
         const config = yield* configuration(identity, bootstrapToken, restoredSession)
-        const kernelOptions = {
-          workspace: root,
-          workspaceDigest: config.workspaceId,
-          dataRoot: config.stateDirectory,
-          runtimeVersion: process.versions.bun,
-          trustMode: "trusted-local" as const,
-          servers: [],
-        }
-        const kernelProfileDigest = KernelProfileRegistration.digest(
-          KernelProfileRegistration.make({ ...kernelOptions, environment: { servers: kernelOptions.servers } }),
-        )
-        const bindingContractDigest = yield* Ref.make<string | undefined>(undefined)
-        const receipts = yield* operationReceiptStore(
-          config.stateDirectory,
-          config.fence.assignmentId,
-          config.fence.assignmentGeneration,
+        const nativeToolRuntimeDigest = Encoding.encodeHex(
+          yield* crypto.digest("SHA-256", new TextEncoder().encode("rika-native-tools-v1")).pipe(Effect.orDie),
         )
         const ptyContext = yield* Layer.build(
           ptyLayer.pipe(
@@ -173,7 +137,7 @@ const host = Effect.scoped(
         const inspectCapabilities = inspectWorkspaceCapabilities({
           target: config.fence.target,
           workspacePath: root,
-          typescriptKernel: true,
+          nativeTools: true,
           pty: ptyReady,
           browser: capabilities.browser,
           services: capabilities.services,
@@ -184,7 +148,7 @@ const host = Effect.scoped(
           bootstrapToken: config.bootstrapToken,
           templateBuildId: config.templateBuildId,
           capabilities: {
-            cells: capabilities.cells,
+            nativeTools: capabilities.nativeTools,
             checkpoints: capabilities.checkpoints,
             pty: ptyReady,
           },
@@ -206,27 +170,6 @@ const host = Effect.scoped(
         const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
           undefined,
         )
-        const cells = yield* HostedKernel.make({
-          workspaceIdentity: config.workspaceId,
-          workspacePath: root,
-          dataRoot: config.stateDirectory,
-          bindingContractDigest,
-          read: readState,
-          write: writeState,
-          environment: executionEnvironment,
-          sendBinding: (message) =>
-            Effect.gen(function* () {
-              const writer = yield* Ref.get(activeWriter)
-              if (writer === undefined)
-                return yield* BindingProxyError.make({ message: "Executor binding transport is unavailable" })
-              const currentAccess = yield* executorRuntime.access.pipe(
-                Effect.mapError(() => BindingProxyError.make({ message: "Executor binding access is unavailable" })),
-              )
-              yield* writer(encodeExecutorMessage({ _tag: "BindingInvoke", ...message, access: currentAccess })).pipe(
-                Effect.mapError(() => BindingProxyError.make({ message: "Could not write executor binding request" })),
-              )
-            }),
-        })
         const hostScope = yield* Effect.scope
         const makeMachine = yield* Effect.cached(
           Layer.buildWithScope(
@@ -240,32 +183,15 @@ const host = Effect.scoped(
             hostScope,
           ).pipe(Effect.map((context) => Context.get(context, Machine))),
         )
-        const frames = yield* Ref.make(yield* receipts.load)
         const quiesced = yield* Ref.make(false)
         const ptyDelivery = yield* Semaphore.make(1)
         const grants = yield* Ref.make(new Map<string, PhaseGrant>())
-        const appliedEnvironment = yield* Ref.make(new Map<string, string>())
         const environmentAccess = yield* Semaphore.make(1)
         const redactedValues = new Set<string>()
-        const operationFailure = (error: CellError | BindingProxyError) =>
-          Operations.OperationError.make({
-            kind: error._tag === "CellError" ? error.kind : "execution",
-            message: error.message,
-          })
         const operationLifecycle = yield* Operations.make({
           access: executorRuntime.access.pipe(
             Effect.mapError((error) => Operations.OperationError.make({ kind: "execution", message: error.message })),
           ),
-          receipts: {
-            current: Ref.get(frames),
-            commit: (next) =>
-              receipts.save(next).pipe(
-                Effect.andThen(Ref.set(frames, next)),
-                Effect.mapError((error) =>
-                  Operations.OperationError.make({ kind: "persistence", message: error.message }),
-                ),
-              ),
-          },
           emit: (event) =>
             Ref.get(activeWriter).pipe(
               Effect.flatMap((writer) =>
@@ -286,65 +212,47 @@ const host = Effect.scoped(
                     ),
               ),
             ),
-          cell: {
-            prepare: (request) =>
+          machine: {
+            execute: (input) =>
               Effect.gen(function* () {
                 if (yield* Ref.get(quiesced))
                   return yield* Operations.OperationError.make({
                     kind: "authorization",
-                    message: "Cell admission is closed while the executor is quiesced",
+                    message: "Native tool admission is closed while the executor is quiesced",
                   })
-                const phase = (yield* Ref.get(grants)).get(request.operationKey)
+                const phase = (yield* Ref.get(grants)).get(input.operationKey)
                 if (phase === undefined)
                   return yield* Operations.OperationError.make({
                     kind: "authorization",
-                    message: "Cell request has no runtime authorization",
+                    message: "Native tool request has no runtime authorization",
                   })
                 yield* Ref.update(grants, (current) => {
                   const next = new Map(current)
-                  next.delete(request.operationKey)
+                  next.delete(input.operationKey)
                   return next
                 })
-                const secrets = phase.redactedNames.flatMap((name) => {
-                  const value = phase.values[name]
-                  return value === undefined ? [] : [value]
-                })
-                return {
-                  secrets,
-                  execute: (output: Parameters<Operations.PreparedCell["execute"]>[0]) =>
-                    HostedObservability.observe(
-                      "cell_execution",
-                      cellCorrelation(request),
-                      environmentAccess.withPermits(1)(
-                        Effect.gen(function* () {
-                          const applied = yield* Ref.get(appliedEnvironment)
-                          const previousDigest = applied.get(request.sessionId)
-                          if (previousDigest !== phase.digest) {
-                            environment.replace(phase.values)
-                            if (previousDigest !== undefined) yield* cells.restart(request.sessionId)
-                            yield* Ref.set(appliedEnvironment, new Map(applied).set(request.sessionId, phase.digest))
-                          }
-                          return yield* cells.execute(request, output)
-                        }),
+                return yield* environmentAccess
+                  .withPermits(1)(
+                    Effect.sync(() => environment.replace(phase.values)).pipe(
+                      Effect.andThen(
+                        Effect.flatMap(makeMachine, (machine) =>
+                          machine.execute({
+                            machineId: input.machineId,
+                            requestDigest: input.requestDigest,
+                            request: input.request,
+                          }),
+                        ),
                       ),
-                      (response) => (response._tag === "DomainFailure" ? "failure" : "success"),
-                    ).pipe(Effect.mapError(operationFailure)),
-                }
+                    ),
+                  )
+                  .pipe(
+                    Effect.mapError((error) =>
+                      Operations.OperationError.make({ kind: "execution", message: error.message }),
+                    ),
+                  )
               }),
-            admit: (request) => cells.admit(request).pipe(Effect.mapError(operationFailure)),
-            cancel: (operationKey, attempt) =>
-              cells
-                .cancel(operationKey, attempt)
-                .pipe(
-                  Effect.mapError((error) =>
-                    Operations.OperationError.make({ kind: error.kind, message: error.message }),
-                  ),
-                ),
-            replayBindings: (access) => cells.replayBindings(access).pipe(Effect.mapError(operationFailure)),
-          },
-          machine: {
-            execute: (input) =>
-              Effect.flatMap(makeMachine, (machine) => machine.execute(input)).pipe(
+            cancel: (input) =>
+              Effect.flatMap(makeMachine, (machine) => machine.cancel(input)).pipe(
                 Effect.mapError((error) =>
                   Operations.OperationError.make({ kind: "execution", message: error.message }),
                 ),
@@ -354,21 +262,18 @@ const host = Effect.scoped(
         return yield* Effect.scoped(
           connect({
             config,
-            kernelProfileDigest,
-            bindingContractDigest,
+            nativeToolRuntimeDigest,
             identity,
             seed,
             restore,
             store,
             quiesced,
-            cells,
             operationLifecycle,
             inspectCapabilities,
             ptyDelivery,
             activeWriter,
             grants,
             executionEnvironment,
-            appliedEnvironment,
             environmentAccess,
             redactedValues,
             connected,

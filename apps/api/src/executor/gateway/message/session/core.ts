@@ -36,7 +36,6 @@ export interface GatewaySessionMessageDependencies {
       {
         readonly access: AccessWire
         readonly requestId: string
-        readonly expected: ReadonlySet<string>
         readonly result: Deferred.Deferred<Quiescence, GatewayError>
       }
     >

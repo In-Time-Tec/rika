@@ -22,20 +22,18 @@ import {
 import { testLayer as hostedModelRegistryTestLayer } from "../../src/hosted/environment/model-registry"
 import { HostedProduct, layer as hostedProductLayer, type AuthenticatedPrincipal } from "../../src/hosted/product"
 import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../src/hosted/repositories"
-import { HostedToolPolicy } from "../../src/hosted/execution/tool-policy"
 import { RunnerExecutor, layer as runnerExecutorLayer } from "../../src/runner/executor"
-import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
 const helloReadiness = {
   protocolVersion: runnerProtocolVersion,
-  capabilities: { cells: true, checkpoints: false, pty: true },
+  capabilities: { nativeTools: true, checkpoints: false, pty: true },
   workspaceCapabilities: {
     environmentDigest: `sha256:${"0".repeat(64)}`,
     capturedAt: "2026-08-21T00:00:00.000Z",
     filesystem: { _tag: "Ready", detail: "filesystem ready" },
-    typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel ready" },
+    nativeTools: { _tag: "Ready", detail: "Native tools ready" },
     git: { _tag: "Ready", detail: "Git ready" },
     process: { _tag: "Ready", detail: "process ready" },
     pty: { _tag: "Ready", detail: "PTY ready" },
@@ -170,12 +168,12 @@ const localConnection = (
           identity: `repository-${checkoutFingerprint}`,
           branch: "main",
         },
-        kernel: {
+        nativeToolRuntime: {
           runtime: "bun",
           runtimeVersion: Bun.version,
           trustMode: "trusted-local",
         },
-        capabilities: { cells: true, checkpoints: false, pty: false },
+        capabilities: { nativeTools: true, checkpoints: false, pty: false },
       },
     })
     const connection = yield* product.createConnection({
@@ -246,7 +244,6 @@ const isolated = <A, E, R>(
           ExecutionGateway.layerTest(),
           Layer.succeed(Controller, overrides?.controller ?? unusedController),
           Layer.succeed(HostedEnvironment, overrides?.environment ?? unusedHostedEnvironment),
-          Layer.succeed(HostedToolPolicy, testToolPolicy),
         )
         const runnerExecutor = runnerExecutorLayer.pipe(Layer.provide(base))
         const context = yield* Layer.build(

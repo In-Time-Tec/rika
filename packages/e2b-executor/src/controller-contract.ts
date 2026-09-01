@@ -9,7 +9,6 @@ import type {
   FilesystemCheckpoint,
   Heartbeat,
   Hello,
-  QuiescedOperation,
   WorkspaceProof,
 } from "@rika/remote-execution/protocol"
 import { encodeArchive, type SetupCacheKey } from "@rika/remote-execution/workspace-archive"
@@ -42,7 +41,6 @@ export interface VerifiedCheckpoint {
 
 export interface Quiescence {
   readonly access: ProtocolAccess
-  readonly operations: ReadonlyArray<QuiescedOperation>
   readonly checkpoint: CheckpointProposal
 }
 

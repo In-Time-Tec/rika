@@ -10,9 +10,7 @@ import {
   type OwnerSelection,
 } from "../../../../src/hosted/product"
 import { makeThreadProtocolNotifications } from "../../../../src/hosted/thread/notifications"
-import { HostedToolPolicy } from "../../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../../../../src/hosted/environment/workspace"
-import { testToolPolicy } from "../../execution/tool-policy.fixture"
 
 import { actor, assignmentId, memoryStore, ownerId, presenceLayer, snapshot, threadId } from "./memory.fixture"
 export const makeSessionFixture = () => {
@@ -138,7 +136,6 @@ export const makeSessionFixture = () => {
     ),
     Layer.succeed(ThreadProtocolStore, store),
     presenceLayer,
-    Layer.succeed(HostedToolPolicy, testToolPolicy),
     BunCrypto.layer,
   )
   return {

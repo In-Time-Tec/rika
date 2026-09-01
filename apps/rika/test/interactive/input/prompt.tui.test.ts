@@ -3,8 +3,8 @@ import { expect, test } from "vitest"
 import * as TuiApp from "../../support/tui-app.harness"
 import { model } from "../../support/tui-model.fixture"
 
-const childTools = ["run_child", "run_child_group", "typescript"]
-const leafTools = ["typescript"]
+const childTools = ["bash", "edit", "read", "run_child", "run_child_group", "shell_command_status"]
+const leafTools = ["bash", "edit", "read", "shell_command_status"]
 
 test.each([
   { name: "zero depth", subagents: { maxDepth: 0, maxSubagents: 4 } },

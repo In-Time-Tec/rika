@@ -37,13 +37,25 @@ export const ToolFile = Schema.Struct({
   previousPath: Schema.optionalKey(Schema.String),
 })
 
+export const ToolProcessCheck = Schema.Struct({
+  toolCallId: Schema.String,
+  operationId: Schema.optionalKey(Schema.String),
+  processId: Schema.String,
+  waitMillis: Schema.optionalKey(Schema.Finite),
+})
+
 export const ToolProcess = Schema.Struct({
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
   exitCode: Schema.optionalKey(Schema.Finite),
+  elapsedMillis: Schema.optionalKey(Schema.Finite),
   stdout: Schema.optionalKey(Schema.String),
   stderr: Schema.optionalKey(Schema.String),
   truncated: Schema.optionalKey(Schema.Boolean),
+  command: Schema.optionalKey(Schema.String),
+  workdir: Schema.optionalKey(Schema.String),
+  background: Schema.optionalKey(Schema.Boolean),
+  checks: Schema.optionalKey(Schema.Array(ToolProcessCheck)),
 })
 
 const Reasoning = Schema.TaggedStruct("Reasoning", { text: Schema.String })
@@ -51,9 +63,13 @@ const ToolCall = Schema.TaggedStruct("ToolCall", {
   id: Schema.String,
   name: Schema.String,
   input: Schema.String,
-  status: Schema.Literals(["running", "complete", "failed", "cancelled", "rejected"]),
+  status: Schema.Literals(["running", "complete", "failed", "cancelled", "rejected", "unknown"]),
   presentation: Presentation,
   detail: Schema.String,
+  operationId: Schema.optionalKey(Schema.String),
+  toolCallId: Schema.optionalKey(Schema.String),
+  readRange: Schema.optionalKey(Schema.Tuple([Schema.Finite, Schema.Finite])),
+  truncated: Schema.optionalKey(Schema.Boolean),
   result: Schema.optionalKey(Schema.Json),
   process: Schema.optionalKey(ToolProcess),
   files: Schema.Array(ToolFile),
@@ -91,6 +107,24 @@ const SubagentCard = Schema.TaggedStruct("SubagentCard", {
   status: Schema.Literals(["queued", "running", "waiting", "cancelling", "complete", "failed", "cancelled"]),
   activity: Schema.Array(Schema.String),
 })
+const SubagentGroupCounts = Schema.Struct({
+  total: Schema.Finite,
+  queued: Schema.Finite,
+  running: Schema.Finite,
+  waiting: Schema.Finite,
+  cancelling: Schema.Finite,
+  complete: Schema.Finite,
+  failed: Schema.Finite,
+  cancelled: Schema.Finite,
+})
+const SubagentGroup = Schema.TaggedStruct("SubagentGroup", {
+  id: Schema.String,
+  name: Schema.String,
+  status: Schema.Literals(["queued", "running", "cancelling", "complete", "failed", "cancelled"]),
+  settled: Schema.Boolean,
+  memberIds: Schema.Array(Schema.String),
+  counts: SubagentGroupCounts,
+})
 const AuthorizationCard = Schema.TaggedStruct("AuthorizationCard", {
   id: Schema.String,
   operation: Schema.String,
@@ -106,50 +140,6 @@ const ImageAttachment = Schema.TaggedStruct("ImageAttachment", {
   height: Schema.optionalKey(Schema.Finite),
   bytes: Schema.optionalKey(Schema.Finite),
 })
-const CellSource = Schema.Struct({
-  text: Schema.String,
-  lines: Schema.Finite,
-})
-const CellOutput = Schema.Struct({
-  stdout: Schema.String,
-  stderr: Schema.String,
-})
-const CellNotice = Schema.Struct({
-  kind: Schema.Literals(["restored", "lost", "restarted", "starting", "ready"]),
-  detail: Schema.String,
-})
-const CellHostCall = Schema.Struct({
-  id: Schema.String,
-  module: Schema.String,
-  operation: Schema.String,
-  inputSummary: Schema.String,
-  status: Schema.Literals(["started", "returned", "failed"]),
-  durationMillis: Schema.optionalKey(Schema.Finite),
-  message: Schema.optionalKey(Schema.String),
-})
-const Cell = Schema.TaggedStruct("Cell", {
-  id: Schema.String,
-  status: Schema.Literals(["running", "complete", "failed", "cancelled", "unknown"]),
-  visual: Schema.Literals(["ts", "shell"]),
-  source: CellSource,
-  output: CellOutput,
-  result: Schema.optionalKey(Schema.Json),
-  error: Schema.optionalKey(
-    Schema.Struct({
-      name: Schema.String,
-      message: Schema.String,
-      stack: Schema.optionalKey(Schema.String),
-    }),
-  ),
-  durationMillis: Schema.optionalKey(Schema.Finite),
-  epoch: Schema.Finite,
-  notices: Schema.Array(CellNotice),
-  calls: Schema.Array(CellHostCall),
-  files: Schema.Array(ToolFile),
-  process: Schema.optionalKey(ToolProcess),
-  parentId: Schema.optionalKey(Schema.String),
-})
-
 export const Block = Schema.Union([
   Reasoning,
   ToolCall,
@@ -160,9 +150,9 @@ export const Block = Schema.Union([
   Notification,
   ErrorBlock,
   SubagentCard,
+  SubagentGroup,
   AuthorizationCard,
   ImageAttachment,
-  Cell,
 ])
 export type Block = typeof Block.Type
 

@@ -35,7 +35,7 @@ export interface ProductLayerOptions<
   readonly toolRuntimeLayer?: (
     workspace: string,
   ) => import("effect").Layer.Layer<
-    import("@rika/coding-tools/coding-tool-runtime").Service,
+    import("@rika/product/native-tool-runtime").Service,
     import("../error").OperationError,
     never
   >
@@ -50,11 +50,6 @@ export interface ProductLayerOptions<
     >
     readonly mcpFingerprint: import("effect").Effect.Effect<string, never, never>
   }
-  /**
-   * The durable Goal a Thread pursues across Turns. Absent in hosts that do not persist goals, in
-   * which case no goal is ever published and the indicator stays hidden.
-   */
-  readonly goals?: import("@rika/product/goal-service").Interface
   readonly defaultWorkspace: string
   readonly recoveredWorkGrace?: import("effect").Duration.Input
   readonly pendingTurnCapacity?: number

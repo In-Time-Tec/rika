@@ -6,7 +6,7 @@ export const workspaceCapabilities: WorkspaceCapabilitySnapshot = {
   environmentDigest: `sha256:${"0".repeat(64)}`,
   capturedAt: "2026-08-21T00:00:00.000Z",
   filesystem: ready("filesystem ready"),
-  typescriptKernel: ready("TypeScript kernel ready"),
+  nativeTools: ready("Native tools ready"),
   git: ready("Git ready"),
   process: ready("process ready"),
   pty: ready("PTY ready"),

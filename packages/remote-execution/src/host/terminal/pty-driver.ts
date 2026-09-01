@@ -214,7 +214,7 @@ export const driverLayer = (options: {
 export const detectCapabilities = (
   check: (command: string, args: ReadonlyArray<string>) => Effect.Effect<boolean>,
 ): Effect.Effect<{
-  readonly cells: true
+  readonly nativeTools: true
   readonly checkpoints: false
   readonly pty: boolean
   readonly browser: boolean
@@ -228,7 +228,7 @@ export const detectCapabilities = (
       check("true", []),
     ])
     return {
-      cells: true,
+      nativeTools: true,
       checkpoints: false,
       pty: tmux,
       browser: chromium && agentBrowser,
@@ -240,7 +240,7 @@ export const liveCapabilities = (
   workspaceUser: string,
 ): Effect.Effect<
   {
-    readonly cells: true
+    readonly nativeTools: true
     readonly checkpoints: false
     readonly pty: boolean
     readonly browser: boolean

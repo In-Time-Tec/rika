@@ -17,7 +17,7 @@ export {
 } from "./branch-publication"
 export type { Credential } from "./credential-broker"
 export { WorkspaceError } from "./error"
-export type { Assignment, KernelIdentity, Options, Reporter } from "./setup/preparation-contracts"
+export type { Assignment, NativeToolRuntimeIdentity, Options, Reporter } from "./setup/preparation-contracts"
 
 const make = Effect.fn("Workspace.make")(function* (options: Options) {
   const context = yield* preparationContext(options)

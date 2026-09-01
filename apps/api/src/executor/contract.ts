@@ -1,10 +1,10 @@
 import type { AssignmentKey, ControllerError, Interface as ControllerService } from "@rika/e2b-executor/controller"
-import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
+import type * as RemoteTools from "@rika/execution/remote-tools"
 import type { AuthenticatedPrincipal } from "../hosted/product"
 import type { RunnerAdmission } from "../runner/executor"
 import type { RunnerGateway } from "../runner/gateway"
 import { Context, Duration, Effect, Function } from "effect"
-import type { ExecutionResult, Gateway, GatewayError, OperationIdentity } from "./gateway"
+import type { ExecutionResult, Gateway, GatewayError } from "./gateway"
 
 export interface Runtime {
   readonly controller: ControllerService
@@ -21,32 +21,11 @@ export interface Runtime {
     readonly turnId: string
     readonly workspaceId: string
   }) => Effect.Effect<void, ControllerError>
-  readonly run: (input: {
-    readonly threadId: string
-    readonly turnId: string
-    readonly runId: string
-    readonly sessionId: string
-    readonly workspaceId: string
-    readonly toolCallId: string
-    readonly operationKey: string
-    readonly code: string
-    readonly rootRunId: string
-    readonly attempt: number
-    readonly replayPolicy: "pure" | "provider-idempotent" | "never"
-    readonly admittedAt: string | null
-    readonly deadlineAt: string
-    readonly authority: Context.Context<ExecutorRuntime.CapturedServices>
-  }) => Effect.Effect<
-    {
-      readonly access?: import("@rika/remote-execution/protocol").AccessWire
-      readonly response: import("@rika/remote-execution/protocol").CellResponse
-      readonly outcome: "completed" | "failed" | "cancelled" | "unknown"
-      readonly eventPersisted: boolean
-    },
-    ControllerError | GatewayError
-  >
-  readonly cancel: (
-    input: Omit<OperationIdentity, "assignmentId">,
+  readonly runTool: (
+    input: RemoteTools.Request,
+  ) => Effect.Effect<ExecutionResult & { readonly eventPersisted: boolean }, ControllerError | GatewayError>
+  readonly cancelTool: (
+    input: RemoteTools.CancellationRequest,
   ) => Effect.Effect<ExecutionResult, ControllerError | GatewayError>
   readonly ready: Effect.Effect<void, ControllerError>
   readonly pause: (key: AssignmentKey) => Effect.Effect<void, ControllerError | GatewayError>

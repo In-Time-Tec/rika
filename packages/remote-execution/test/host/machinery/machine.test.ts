@@ -15,7 +15,7 @@ const fence: Fence = {
 
 const options = {
   templateBuildId: "build-3",
-  capabilities: { cells: true, checkpoints: true, pty: true },
+  capabilities: { nativeTools: true, checkpoints: true, pty: true },
   workspaceCapabilities,
   cursors: { command: 0, event: 0, pty: 0 },
   latestCheckpointId: null,

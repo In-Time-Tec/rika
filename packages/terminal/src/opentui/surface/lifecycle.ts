@@ -1,7 +1,7 @@
 import { CliRenderEvents } from "@opentui/core"
 import type { Model } from "../../state/model"
 import { idleSpinnerFrame, spinnerInterval } from "../rendering/spinner"
-import { animationActive, goalAnimationActive } from "./content"
+import { animationActive } from "./content"
 import { welcomeAnimationActive } from "./welcome/state"
 import { SurfaceLayout } from "./layout"
 
@@ -17,8 +17,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     if (enabled && welcomeAnimationActive(model))
       this.welcomeController.start(spinnerInterval, () => this.tickWelcome())
     else this.welcomeController.stop()
-    if (enabled && goalAnimationActive(model)) this.goalController.start(spinnerInterval, () => this.tickGoal())
-    else this.goalController.stop()
   }
 
   update(model: Model, preserveTranscriptAnchor = false): void {
@@ -50,7 +48,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
     this.destroyed = true
     this.loaderController.release()
     this.welcomeController.release()
-    this.goalController.release()
     if (this.loaderController.publishedFrame !== undefined) this.publishWorkingFrame(undefined)
     this.sidebarController.release()
     this.hoverController.release()
@@ -77,7 +74,6 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       this.main,
       this.modeLabel,
       this.statusLabel,
-      this.goalLabel,
       this.workspaceLabel,
       this.paletteBox,
       this.overlayHintOne,

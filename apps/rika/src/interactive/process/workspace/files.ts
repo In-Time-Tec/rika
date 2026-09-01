@@ -1,5 +1,4 @@
-import * as LocalPath from "@rika/coding-tools/local-path"
-import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
+import * as LocalPath from "@rika/product/local-path"
 import type { ChangedFile } from "@rika/terminal/terminal-state"
 import type { PathTarget } from "@rika/terminal/terminal-transcript-presentation"
 import { Config, Effect, FileSystem, Function, Option, Path, PlatformError, Schema } from "effect"
@@ -38,11 +37,20 @@ class WorkspaceFileError extends Schema.TaggedError<WorkspaceFileError>()("Works
   message: Schema.String,
 }) {}
 
+const ignoredWorkspaceSegments = new Set(["node_modules", ".git", "dist", ".rika", ".worktrees"])
 const workspaceGlobImpl = (workspace: string, pattern: string, maximumFiles: number) =>
-  WorkspaceIndex.globOnce({ workspace, pattern, options: { pageSize: maximumFiles } }).pipe(
-    Effect.map((result) => result.items.map((item) => item.relativePath)),
-    Effect.mapError((error) => workspaceGlobError(workspace, error.operation, error)),
-  )
+  Effect.try({
+    try: () => {
+      const files: Array<string> = []
+      for (const relativePath of new Bun.Glob(pattern).scanSync({ cwd: workspace, dot: false, onlyFiles: true })) {
+        if (relativePath.split(/[\\/]/u).some((segment) => ignoredWorkspaceSegments.has(segment))) continue
+        files.push(relativePath.replaceAll("\\", "/"))
+        if (files.length >= maximumFiles) break
+      }
+      return files.toSorted((left, right) => left.localeCompare(right))
+    },
+    catch: (cause) => workspaceGlobError(workspace, "glob", cause),
+  })
 export const workspaceGlob: {
   (pattern: string, maximumFiles: number): (workspace: string) => ReturnType<typeof workspaceGlobImpl>
   (workspace: string, pattern: string, maximumFiles: number): ReturnType<typeof workspaceGlobImpl>

@@ -1,7 +1,6 @@
-import type * as MachineBindings from "@rika/kernel/machine-bindings"
-import type { AccessWire, ApiMessage, MachineOutcome, MachineRequest } from "@rika/remote-execution/protocol"
+import { MachineRequest, type AccessWire, type ApiMessage, type MachineOutcome } from "@rika/remote-execution/protocol"
 import { Clock, DateTime, Deferred, Effect, Ref, type Semaphore } from "effect"
-import { GatewayError, type Gateway, type Socket } from "../contract"
+import { GatewayError, type Socket } from "../contract"
 import type { GatewaySession, MachineCall, PendingOperation } from "./model"
 import { gatewayProtocol } from "../protocol"
 
@@ -114,6 +113,7 @@ export const machineRpcFactory = (dependencies: MachineRpcDependencies) => {
       socket: session.socket,
       access: session.access,
       deadlineAtMillis,
+      cancelling: false,
       result: yield* Deferred.make<MachineOutcome>(),
     }
     const call = yield* dependencies.lock.withPermits(1)(
@@ -161,16 +161,66 @@ export const machineRpcFactory = (dependencies: MachineRpcDependencies) => {
     )
   })
 
-  const machine: Gateway["machine"] = (assignmentId, operationKey, attempt, request: MachineBindings.Request) =>
-    Effect.gen(function* () {
-      const operation = (yield* Ref.get(dependencies.pending)).get(
-        gatewayProtocol.key(assignmentId, operationKey, attempt),
-      )
-      if (operation === undefined)
-        return yield* GatewayError.make({ kind: "disconnected", message: "Cell authority is no longer available" })
-      const ordinal = yield* Ref.getAndUpdate(operation.nextMachineOrdinal, (current) => current + 1)
-      return yield* invoke(assignmentId, operationKey, attempt, `${operation.request.toolCallId}:${ordinal}`, request)
-    })
+  const cancel = Effect.fn("ExecutorGateway.machine.cancel")(function* (
+    assignmentId: string,
+    operationKey: string,
+    attempt: number,
+    machineId: string,
+    request: MachineRequest,
+    deadlineAt: string,
+  ) {
+    const requestDigest = yield* dependencies.digest(gatewayProtocol.encodeMachineRequest(request))
+    const session = (yield* Ref.get(dependencies.sessions)).get(assignmentId)
+    if (session === undefined)
+      return { _tag: "Unknown" as const, message: "The selected executor is no longer available" }
+    const mapKey = gatewayProtocol.machineKey(assignmentId, operationKey, attempt, machineId)
+    const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(deadlineAt))
+    const candidate: MachineCall = {
+      assignmentId,
+      operationKey,
+      attempt,
+      machineId,
+      requestDigest,
+      request,
+      socket: session.socket,
+      access: session.access,
+      deadlineAtMillis,
+      cancelling: true,
+      result: yield* Deferred.make<MachineOutcome>(),
+    }
+    const call = yield* dependencies.lock.withPermits(1)(
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(dependencies.calls)
+          const known = current.get(mapKey)
+          if (known !== undefined && known.requestDigest !== requestDigest) return known
+          const cancelling = known === undefined ? candidate : { ...known, cancelling: true }
+          yield* Ref.set(dependencies.calls, new Map(current).set(mapKey, cancelling))
+          yield* Effect.try({
+            try: () =>
+              dependencies.send(session.socket, {
+                _tag: "MachineCancel",
+                access: session.access,
+                operationKey,
+                attempt,
+                machineId,
+                requestDigest,
+              }),
+            catch: () => undefined,
+          }).pipe(Effect.ignore)
+          return cancelling
+        }),
+      ),
+    )
+    if (call.requestDigest !== requestDigest)
+      return { _tag: "Fenced" as const, message: "A machine call id was reused with a different request" }
+    return yield* Deferred.await(call.result).pipe(
+      Effect.timeoutOrElse({
+        duration: Math.max(0, call.deadlineAtMillis - (yield* Clock.currentTimeMillis)),
+        orElse: () => settle(mapKey, call, deadlineOutcome),
+      }),
+    )
+  })
 
-  return { deadlineOutcome, invoke, machine, receive, settle }
+  return { cancel, deadlineOutcome, invoke, receive, settle }
 }

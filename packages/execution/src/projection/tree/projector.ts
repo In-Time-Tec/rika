@@ -3,7 +3,6 @@ import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import * as Authorization from "../authorization"
-import * as Cell from "../cell/state"
 import * as Diagnostic from "../diagnostic"
 import * as SubagentCard from "../subagent/card"
 import * as SemanticResponse from "../semantic/response"
@@ -15,18 +14,14 @@ import * as Usage from "../usage"
 import type { Card, Node, Projector } from "../model"
 import type { AuthorizationState, ProjectorCore } from "../persistence"
 import * as ProjectorRecovery from "./projector-recovery"
-import type { CheckpointInstrumentation } from "./projector-recovery"
 import { projectorNames, textLimit } from "../values"
 import type { ProjectorEventContext, ProjectorEventHandler } from "./projector-event-context"
 import { RunLifecycleEvents } from "./projector-run-events"
-import { ToolCellSubagentEvents } from "./projector-tool-events"
+import { ToolSubagentEvents } from "./projector-tool-events"
 import { ModelUsageCompactionEvents } from "./projector-model-events"
 import { SteeringNoopEvents } from "./projector-steering-events"
 import { ProjectorSnapshot } from "./projector-snapshot"
-
 import { providerCostNanoUsd, scopedId, token } from "../decoding"
-import { Effect, Option } from "effect"
-import { format } from "prettier"
 
 export type { Projector }
 
@@ -37,7 +32,7 @@ const make = (
   baselineUnits: ReadonlyArray<Unit> = [],
   titleExpected = false,
   pricing: "included" | "metered" = "metered",
-  instrumentation?: CheckpointInstrumentation,
+  instrumentation?: ProjectorRecovery.CheckpointInstrumentation,
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
@@ -159,27 +154,16 @@ const make = (
     recover: recovery.authorizationChanged,
   })
 
-  const { toolState, putTool, updateTool } = ToolUnit.makeToolUnitProjection({
-    units,
-    localId,
-    put,
-    unit,
-    recover: recovery.toolChanged,
-  })
+  const { toolState, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds } =
+    ToolUnit.makeToolUnitProjection({
+      units,
+      localId,
+      put,
+      unit,
+      recover: recovery.toolChanged,
+    })
 
-  const { openCell, progressCell, completeCell, settleRunningCells } = Cell.makeCellProjection({
-    units,
-    localId,
-    put,
-    unit,
-    recover: recovery.cellChanged,
-    activeIds: recovery.activeCellIds,
-    notice,
-    error,
-  })
-  const formattedCellSources = new Map<string, string>()
-
-  const { cardFor, updateCard, groupCards, bindChild } = SubagentCard.makeSubagentCardProjection({
+  const { cardFor, updateCard, groupCards, settleGroup, bindChild } = SubagentCard.makeSubagentCardProjection({
     core,
     units,
     nodes,
@@ -197,11 +181,11 @@ const make = (
     localId,
     put,
     unit,
-    openCell,
     cardFor,
     groupCards,
     removeTool: (node, rawId) => remove(toolState(node, rawId).key),
     putTool,
+    linkProcessCheck,
     notice,
     beginOrderedResponse: () => {
       semanticOrderPart = 0
@@ -223,7 +207,6 @@ const make = (
         (input.parentRunId === undefined ? "root" : localId("subagent", turnId, input.invocationId ?? "orphan")),
       hidden,
       tools: new Map(),
-      cells: new Map(),
       phase: -1,
       status: "running",
       lifecycle: "unknown",
@@ -245,12 +228,15 @@ const make = (
 
   const settleNodeState = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
-    settleRunningCells(node, status === "completed" ? "cancelled" : status)
-    for (const rawId of recovery.activeToolIds(node))
-      updateTool(node, rawId, (tool) =>
-        tool.status === "running" && tool.process?.running !== true
-          ? { ...tool, status: status === "completed" ? "cancelled" : status }
-          : tool,
+    for (const rawId of runningToolIds(node))
+      updateTool(
+        node,
+        rawId,
+        (tool) =>
+          tool.status === "running" && tool.process?.running !== true
+            ? { ...tool, status: status === "completed" ? "cancelled" : status }
+            : tool,
+        false,
       )
     const card = cardsByChild.get(node.rawRunId)
     if (card !== undefined) updateCard(card, status === "completed" ? "complete" : status, detail)
@@ -291,7 +277,6 @@ const make = (
     nodes,
     cardsByInvocation,
     cardsByChild,
-    formattedCellSources,
     usage,
     recovery,
     semanticResponse,
@@ -302,14 +287,13 @@ const make = (
     unit,
     settleNode,
     authorization: { putAuthorization, resolveAuthorization, settleAuthorizations },
-    cells: { openCell, progressCell, completeCell },
     diagnostics: { notice, error, modelFailureError, executionFailureError },
-    subagents: { cardFor, updateCard, groupCards, bindChild },
-    tools: { toolState, putTool, updateTool },
+    subagents: { cardFor, updateCard, groupCards, settleGroup, bindChild },
+    tools: { toolState, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds },
   }
   const eventHandlers: ReadonlyArray<ProjectorEventHandler> = [
     RunLifecycleEvents.handle,
-    ToolCellSubagentEvents.handle,
+    ToolSubagentEvents.handle,
     ModelUsageCompactionEvents.handle,
     SteeringNoopEvents.handle,
   ]
@@ -365,7 +349,6 @@ const make = (
         publicId: "root",
         hidden: false,
         tools: new Map(),
-        cells: new Map(),
         phase: -1,
         status: "running",
         lifecycle: "unknown",
@@ -411,7 +394,6 @@ const make = (
       publicId: "title",
       hidden: true,
       tools: new Map(),
-      cells: new Map(),
       phase: 0,
       status: "completed",
       lifecycle: "terminal",
@@ -468,18 +450,6 @@ const make = (
     snapshot: () => ProjectorSnapshot.snapshot(units, core, projectionState),
     apply: (input) => applyAll([input]),
     applyAll: (inputs) => applyAll(inputs),
-    formatCellSource: Effect.fn("TreeProjector.formatCellSource")(function* (
-      runId: string,
-      id: string,
-      source: string,
-    ) {
-      const key = `${runId}\u0000${id}`
-      const formatted = yield* Effect.tryPromise(() =>
-        format(source, { parser: "typescript", printWidth: 120, semi: false }),
-      ).pipe(Effect.option)
-      if (Option.isSome(formatted)) formattedCellSources.set(key, formatted.value)
-      else formattedCellSources.delete(key)
-    }),
     previewRunIds: () =>
       [...cardsByChild].flatMap(([runId, card]) => {
         const candidate = units.get(card.unitKey)

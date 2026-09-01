@@ -7,7 +7,7 @@ import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { Context, Effect, Layer, Random, Stream } from "effect"
+import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
@@ -55,7 +55,6 @@ it.live(
   "starts the root turn without waiting for thread titling and still generates the title",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-nonblocking-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
         provider: "test",
         model: "test",
@@ -79,7 +78,6 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -124,7 +122,6 @@ it.live(
   "projects a completed title while the root turn is still running",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-first-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "3 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-first-root" },
@@ -138,7 +135,6 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -169,7 +165,6 @@ it.live(
   "cancelling a first turn while titling is in flight still delivered the user prompt and settles",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-cancel-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [TestModel.turn([TestModel.text("ROOT_ANSWER")], { delay: "10 seconds" })],
         { provider: "test", model: "test", registrationKey: "title-cancel-root" },
@@ -182,7 +177,6 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -232,7 +226,6 @@ it.live(
   "keeps a completed title out of the next root model request",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-isolation-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make(
         [
           TestModel.turn([TestModel.text("FIRST_ANSWER")]),
@@ -250,7 +243,6 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              dataRoot: filename,
               modelServices: registryLayer(rootFixture, titleFixture),
             }),
           )
@@ -289,7 +281,6 @@ it.live(
   "settles the projection when a recorded title run is unavailable",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-missing-${yield* Random.nextInt}.db`
       const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
         provider: "test",
         model: "test",
@@ -299,7 +290,6 @@ it.live(
         Effect.gen(function* () {
           const context = yield* Layer.build(
             testLayer({
-              dataRoot: filename,
               modelServices: registryLayer(rootFixture),
             }),
           )
@@ -327,7 +317,6 @@ it.live(
   "re-admits the same turn after a restart without duplicating the title run",
   () =>
     Effect.gen(function* () {
-      const filename = `/tmp/rika-generalist-title-restart-${yield* Random.nextInt}.db`
       const start = Effect.fn("titleRestart.start")(function* () {
         const rootFixture = yield* TestModel.make([TestModel.turn([TestModel.text("ROOT_ANSWER")])], {
           provider: "test",
@@ -341,7 +330,6 @@ it.live(
         })
         const context = yield* Layer.build(
           testLayer({
-            dataRoot: filename,
             modelServices: registryLayer(rootFixture, titleFixture),
           }),
         )

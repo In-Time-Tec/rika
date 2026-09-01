@@ -1,0 +1,6 @@
+ALTER TABLE rika_hosted_runner_registrations
+  RENAME COLUMN kernel_profile TO native_tool_runtime;
+
+ALTER TABLE rika_hosted_runner_registrations
+  RENAME CONSTRAINT rika_hosted_runner_registrations_kernel_profile_check
+  TO rika_hosted_runner_registrations_native_tool_runtime_check;

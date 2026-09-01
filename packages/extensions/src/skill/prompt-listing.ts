@@ -40,7 +40,7 @@ const formatImplementation = (input: Input, options?: Options): string => {
     sections.push(
       [
         "## Executable skills",
-        "Importable inside a cell by name.",
+        "Importable by name when supported.",
         ...lines,
         ...(omitted > 0 ? [`- (${omitted} more not listed)`] : []),
       ].join("\n"),

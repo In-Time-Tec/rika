@@ -209,7 +209,6 @@ it.effect("constructs the render tree and forwards key and resize events", () =>
       surface.main,
       surface.modeLabel,
       surface.statusLabel,
-      surface.goalLabel,
       surface.workspaceLabel,
       surface.paletteBox,
       surface.overlayHintOne,

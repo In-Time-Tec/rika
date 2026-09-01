@@ -33,8 +33,6 @@ tar -xzf "$archive" -C "$temporary"
 bin="$temporary/$archive_root/bin"
 binary="$bin/rika"
 test -x "$binary"
-test -x "$bin/.rika-kernel-runtime"
-test -f "$bin/.rika-kernel-worker.js"
 
 actual_version="$(env -i HOME="$clean_home" PATH="$PATH" TERM=dumb "$binary" --version)"
 test "$actual_version" = "rika v$version"
@@ -44,9 +42,7 @@ if grep -Fqi relay <<<"$help"; then
   printf 'Obsolete relay command found in packaged help\n' >&2
   exit 1
 fi
-HOME="$clean_home" bun --cwd "$root" scripts/packaging/kernel-runtime-smoke.ts "$bin" | grep -Fq PACKAGE_KERNEL_OK
-
-printf 'Packaged Rika %s (%s) passed inventory, CLI, and kernel smoke checks\n' "$version" "$target"
+printf 'Packaged Rika %s (%s) passed inventory and CLI smoke checks\n' "$version" "$target"
 
 if [[ "${1:-}" == "--" ]]; then shift; fi
 if (( $# > 0 )); then

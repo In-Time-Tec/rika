@@ -1,3 +1,4 @@
+import { formatResult } from "@rika/transcript/result-presentation"
 import type { TranscriptBlock } from "../../../state/transcript/model"
 import { isToolOutputDisplayed } from "../agent-response"
 import { Schema } from "effect"
@@ -16,7 +17,7 @@ export const toolResultText = (result: Schema.Json | undefined): string | undefi
   if (Schema.is(Schema.String)(result)) return result
   const decoded = Schema.decodeUnknownOption(TextResult)(result)
   if (decoded._tag === "Some") return decoded.value.text
-  return JSON.stringify(result, null, 2)
+  return formatResult(result)
 }
 
 export const toolBody = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolBody => {

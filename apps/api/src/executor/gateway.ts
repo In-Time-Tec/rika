@@ -3,14 +3,11 @@ import type { EnvironmentPhase } from "@rika/product/environment-policy"
 import {
   redactAccess,
   type AccessWire,
-  type CellLifecycleFrame,
   type ExecutorMessage as ExecutorMessageValue,
 } from "@rika/remote-execution/protocol"
 import { Context, Crypto, Deferred, Effect, Encoding, Layer, PubSub, Redacted, Ref, Semaphore } from "effect"
-import type { HostedToolPolicyService } from "../hosted/execution/tool-policy"
 import {
   GatewayError,
-  type ExecuteInput,
   type Gateway,
   type LifecycleStore,
   type PhaseAuthority,
@@ -19,11 +16,9 @@ import {
   type Socket,
   type SocketFrame,
 } from "./gateway/contract"
-import { bindingRpcFactory } from "./gateway/rpc/binding"
 import { branchPushRpcFactory } from "./gateway/rpc/branch-push"
 import { gatewayControlFactory } from "./gateway/control"
 import { gatewayExecutionFactory } from "./gateway/execution"
-import { gatewayLifecycleFactory } from "./gateway/lifecycle"
 import { gatewayMessageHandlerFactory } from "./gateway/message/handler"
 import { gatewayProtocol } from "./gateway/protocol"
 import { gatewaySessionAwaiter, gatewaySessionsFactory } from "./gateway/sessions"
@@ -60,8 +55,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   lifecycle: LifecycleStore,
   phases: PhaseAuthority,
   preparation: PreparationStore,
-  bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>,
-  toolPolicy: HostedToolPolicyService,
 ) {
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
@@ -69,8 +62,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const workspaceCalls = yield* Ref.make(new Map<string, WorkspaceCall>())
   const branchPushCalls = yield* Ref.make(new Map<string, BranchPushCall>())
-  const frames = yield* Ref.make(new Map<string, ReadonlyArray<CellLifecycleFrame>>())
-  const terminals = yield* Ref.make(new Map<string, Extract<CellLifecycleFrame, { readonly _tag: "Terminal" }>>())
   const quiescing = yield* Ref.make(new Set<string>())
   const quiescence = yield* Ref.make(
     new Map<
@@ -78,7 +69,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       {
         readonly access: AccessWire
         readonly requestId: string
-        readonly expected: ReadonlySet<string>
         readonly result: Deferred.Deferred<Quiescence, GatewayError>
       }
     >(),
@@ -87,6 +77,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const machineLock = yield* Semaphore.make(1)
   const ptyFrames = yield* PubSub.sliding<PtyEvent>(256)
   const crypto = yield* Crypto.Crypto
+  const scope = yield* Effect.scope
   const digest = Effect.fn("ExecutorGateway.digest")(function* (value: string) {
     return Encoding.encodeHex(
       yield* crypto
@@ -105,16 +96,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     lock: machineLock,
     admission,
     digest,
-    send: (socket, message) => socket.send(encode(message)),
-  })
-  const bindingRpc = bindingRpcFactory({
-    sessions,
-    assignments,
-    pending,
-    admission,
-    digest,
-    toolPolicy,
-    crypto,
     send: (socket, message) => socket.send(encode(message)),
   })
   const workspaceRpc = workspaceRpcFactory({
@@ -184,35 +165,21 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
       }),
     )
 
-  const hydrate = (request: ExecuteInput) => lifecycleGateway.hydrate(request)
   const execution = gatewayExecutionFactory({
     controller,
     lifecycle,
     preparation,
     sessions,
     pending,
-    frames,
-    terminals,
     quiescing,
-    machineCalls,
-    machineLock,
     admission,
     awaitSession,
     grant: (session, operationKey) => grant(session, "runtime", operationKey),
-    hydrate: () => hydrate,
-    send: (socket, message) => socket.send(encode(message)),
+    machineIdFor: (operationKey, attempt) => digest(`${attempt}\u0000${operationKey}`),
+    invokeMachine: machineRpc.invoke,
+    cancelMachine: machineRpc.cancel,
+    scope,
   })
-  const lifecycleGateway = gatewayLifecycleFactory({
-    lifecycle,
-    sessions,
-    assignments,
-    pending,
-    frames,
-    terminals,
-    admission,
-    settleCancelled: execution.settleCancelledOperation,
-  })
-  const persistLifecycle = lifecycleGateway.persistLifecycle
 
   const sessionRegistry = gatewaySessionsFactory({
     sessions,
@@ -220,15 +187,12 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     pending,
     machineCalls,
     workspaceCalls,
-    terminals,
     quiescence,
     admission,
     machineLock,
-    lifecycle,
     close,
     failBranchPush: branchPushRpc.fail,
     grantRuntime: (session, operationKey) => grant(session, "runtime", operationKey),
-    sendCellExecute: execution.sendCellExecute,
     send: (socket, message) => socket.send(encode(message)),
     machineDeadlineOutcome: machineRpc.deadlineOutcome,
   })
@@ -239,7 +203,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     preparation,
     sessions,
     assignments,
-    pending,
     quiescing,
     quiescence,
     admission,
@@ -283,20 +246,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     replayPending,
     preparation,
     branchPushCalls,
-    bindingContract,
     send: (socket, message) => socket.send(encode(message)),
-    complete: (socket, message) =>
-      execution.complete(socket, message.access, message.operationKey, message.attempt, message.response),
-    receiveBinding: (socket, message) =>
-      bindingRpc.receive(
-        socket,
-        message.access,
-        message.operationKey,
-        message.attempt,
-        message.callId,
-        message.requestDigest,
-        message.request,
-      ),
     receiveMachine: (socket, message) =>
       machineRpc.receive(
         socket,
@@ -317,7 +267,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         message.commitSha,
         message.outcome,
       ),
-    persistLifecycle: (socket, message) => persistLifecycle(socket, message.access, message.frame),
     publishPty,
   })
 
@@ -351,7 +300,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     active,
     execute: execution.execute,
     cancel: execution.cancel,
-    machine: machineRpc.machine,
     sendPty,
     ptyEvents,
     retryPreparation,
@@ -366,17 +314,5 @@ export const gatewayLayer = (options: {
   readonly lifecycle: LifecycleStore
   readonly phases: PhaseAuthority
   readonly preparation: PreparationStore
-  readonly bindingContract: (workspaceId: string) => Effect.Effect<string, GatewayError>
-  readonly toolPolicy: HostedToolPolicyService
 }) =>
-  Layer.effect(
-    ExecutorGateway,
-    makeGateway(
-      options.controller,
-      options.lifecycle,
-      options.phases,
-      options.preparation,
-      options.bindingContract,
-      options.toolPolicy,
-    ),
-  )
+  Layer.effect(ExecutorGateway, makeGateway(options.controller, options.lifecycle, options.phases, options.preparation))

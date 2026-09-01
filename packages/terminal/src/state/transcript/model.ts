@@ -54,10 +54,7 @@ export const decodeTranscriptItems = (input: ReadonlyArray<unknown>): ReadonlyAr
 export const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
   blocks.map((block) => {
     if (
-      (block._tag === "ToolCall" ||
-        block._tag === "SubagentCard" ||
-        block._tag === "Compaction" ||
-        block._tag === "Cell") &&
+      (block._tag === "ToolCall" || block._tag === "SubagentCard" || block._tag === "Compaction") &&
       block.status === "running"
     )
       return { ...block, status: "cancelled" as const }

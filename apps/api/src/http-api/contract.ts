@@ -1,5 +1,4 @@
 import { HttpApi } from "effect/unstable/httpapi"
-import { AuditGroup } from "./audit/routes"
 import { EnvironmentGroup } from "./environment/routes"
 import { IdentityGroup, PublicIdentityGroup } from "./identity/routes"
 import { ModelsGroup } from "./models/routes"
@@ -20,5 +19,4 @@ export class RikaApi extends HttpApi.make("rika-api")
   .add(RecoveryGroup)
   .add(PublicationGroup)
   .add(ModelsGroup)
-  .add(EnvironmentGroup)
-  .add(AuditGroup) {}
+  .add(EnvironmentGroup) {}

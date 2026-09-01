@@ -3,7 +3,6 @@ import { TestModel } from "generalist/test"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
-import { randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer } from "../support/adapters"
 
@@ -23,7 +22,6 @@ it.live("projects provider-reported output usage beside the matching live previe
       )
       const context = yield* Layer.build(
         memoryLayer({
-          dataRoot: `/tmp/rika-preview-usage-${randomUUID()}.db`,
           modelServices: ModelRegistry.layer([
             Effect.succeed({ ...fixture.registration, isAvailabilityFailure: () => false }),
           ]),

@@ -167,7 +167,7 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         ),
       ).toEqual([
         {
-          required_capabilities: ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"],
+          required_capabilities: ["filesystem", "nativeTools", "git", "process", "workspaceLifecycle"],
         },
       ])
     }),
@@ -351,7 +351,7 @@ it.effect.skipIf(!live)("fences organization access immediately while preserving
 )
 
 it.effect.skipIf(!live)("rejects cross-owner and cross-device admissions before issuing usable tickets", () =>
-  isolated("cross_binding", (databaseClient) =>
+  isolated("cross_authority", (databaseClient) =>
     Effect.gen(function* () {
       const owner = principal("owner-user", "owner-client", "30000000-0000-4000-8000-000000000003")
       const stranger = principal("stranger-user", "stranger-client", "40000000-0000-4000-8000-000000000004")

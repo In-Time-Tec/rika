@@ -205,15 +205,6 @@
       }
     },
     {
-      "files": ["packages/kernel/test/kernel-bootstrap.test.ts"],
-      "rules": {
-        "no-new-func": "off",
-        "typescript/no-implied-eval": "off",
-        "typescript/no-unsafe-call": "off",
-        "typescript/no-unsafe-return": "off"
-      }
-    },
-    {
       "files": ["**/test/**"],
       "rules": {
         "anti-slop-effect/no-service-constructor-imports": "off",

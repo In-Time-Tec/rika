@@ -1,22 +1,12 @@
-import {
-  ApiMessage,
-  BindingRequest,
-  RunnerMessage,
-  type AccessWire,
-  type CellResponse,
-} from "@rika/remote-execution/protocol"
-import { HostBindings } from "generalist/repl"
-import { Effect, Config, Schema } from "effect"
+import { ApiMessage, RunnerMessage, type AccessWire } from "@rika/remote-execution/protocol"
+import { Config, Effect, Schema } from "effect"
 import { createHash } from "node:crypto"
-import { makeRunnerGateway as makeRunnerGatewayService, type RunnerGateway } from "../../../src/runner/gateway"
+import type { Socket } from "../../../src/executor/gateway"
 import type { RunnerExecutorAuthority } from "../../../src/runner/executor"
-import type { BindingAuthority, Socket } from "../../../src/executor/gateway"
-import { testToolPolicy } from "../../hosted/execution/tool-policy.fixture"
-import * as CellAuthority from "@rika/kernel/test-cell-authority"
+import { makeRunnerGateway as makeRunnerGatewayService } from "../../../src/runner/gateway"
 
-export const makeRunnerGateway: (authority: RunnerExecutorAuthority) => ReturnType<typeof makeRunnerGatewayService> = (
-  authority,
-) => makeRunnerGatewayService(authority, testToolPolicy)
+export const makeRunnerGateway: (authority: RunnerExecutorAuthority) => ReturnType<typeof makeRunnerGatewayService> =
+  makeRunnerGatewayService
 
 export const databaseUrl = Effect.runSync(
   Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")),
@@ -24,26 +14,13 @@ export const databaseUrl = Effect.runSync(
 export const live = databaseUrl !== ""
 export const encode = Schema.encodeSync(Schema.fromJsonString(RunnerMessage))
 export const decode = Schema.decodeSync(Schema.fromJsonString(ApiMessage))
-export const encodeBindingRequest = Schema.encodeSync(Schema.fromJsonString(BindingRequest))
-export const bindingRequestDigest = (request: BindingRequest) =>
-  createHash("sha256").update(encodeBindingRequest(request)).digest("hex")
-export const code = 'printf "restart"'
-export const emptyCellContext = Effect.runSync(CellAuthority.capture())
-export const bindings: BindingAuthority = {
-  registry: HostBindings.HostBindings.of({
-    descriptors: [],
-    resolve: (input) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: input.module })),
-    invoke: (input) => Effect.fail(HostBindings.HostModuleNotFound.make({ module: input.module })),
-  }),
-  context: emptyCellContext,
-  manifest: { digest: "a".repeat(64), descriptors: [] },
-}
+export const nativeCode = JSON.stringify({ toolName: "read", request: { _tag: "Read", path: "README.md" } })
 export const sessionToken = "session-local-gateway"
 export const sessionDigest = createHash("sha256").update(sessionToken).digest("hex")
 export const deviceId = "11111111-1111-4111-8111-111111111111"
 export const assignmentId = "assignment-local-gateway"
 export const threadId = "thread-local-gateway"
-export const cellRequest = (operationKey: string, deadlineAt = "2999-01-01T00:00:00.000Z") => ({
+export const toolRequest = (operationKey: string, deadlineAt = "2999-01-01T00:00:00.000Z") => ({
   assignmentId,
   operationKey,
   workspaceId: "workspace-local-gateway",
@@ -53,14 +30,27 @@ export const cellRequest = (operationKey: string, deadlineAt = "2999-01-01T00:00
   runId: "run-local-gateway",
   rootRunId: "run-local-gateway",
   toolCallId: "call-local-gateway",
-  code,
+  code: nativeCode,
   attempt: 0,
   replayPolicy: "pure" as const,
   admittedAt: null,
   deadlineAt,
-  bindings,
+  machineRequest: { _tag: "NativeTool" as const, request: { _tag: "Read" as const, path: "README.md" } },
 })
-export const operationDigest = (request: ReturnType<typeof cellRequest>) =>
+type OperationDigestInput = Pick<
+  ReturnType<typeof toolRequest>,
+  | "workspaceId"
+  | "sessionId"
+  | "threadId"
+  | "turnId"
+  | "runId"
+  | "rootRunId"
+  | "toolCallId"
+  | "code"
+  | "attempt"
+  | "replayPolicy"
+>
+export const operationDigest = (request: OperationDigestInput) =>
   createHash("sha256")
     .update(
       JSON.stringify({
@@ -94,18 +84,18 @@ export const access: AccessWire = {
 
 export const response = {
   _tag: "Success" as const,
-  result: { stdout: "restart", stderr: "", exitCode: 0 },
+  result: { text: "native result", truncated: false },
 }
 export const cancelledResponse = {
   _tag: "DomainFailure" as const,
-  failure: { kind: "cancelled" as const, message: "Cell operation was cancelled" },
+  failure: { kind: "cancelled" as const, message: "Tool operation cancelled" },
 }
 export const environmentDigest = `sha256:${"0".repeat(64)}`
 export const workspaceCapabilities = {
   environmentDigest,
   capturedAt: "2026-08-21T00:00:00.000Z",
   filesystem: { _tag: "Ready", detail: "filesystem ready" },
-  typescriptKernel: { _tag: "Ready", detail: "TypeScript kernel ready" },
+  nativeTools: { _tag: "Ready", detail: "TypeScript runtime ready" },
   git: { _tag: "Ready", detail: "Git ready" },
   process: { _tag: "Ready", detail: "process ready" },
   pty: { _tag: "Ready", detail: "PTY ready" },
@@ -113,45 +103,6 @@ export const workspaceCapabilities = {
   services: { _tag: "Unavailable", reason: "repository services unavailable" },
   workspaceLifecycle: { _tag: "Ready", detail: "workspace lifecycle ready" },
 }
-
-export const operationAttribution = (operationKey: string) => {
-  const operation = cellRequest(operationKey)
-  return {
-    operationKey,
-    workspaceId: operation.workspaceId,
-    sessionId: operation.sessionId,
-    threadId: operation.threadId,
-    turnId: operation.turnId,
-    runId: operation.runId,
-    rootRunId: operation.rootRunId,
-    toolCallId: operation.toolCallId,
-    attempt: operation.attempt,
-  }
-}
-
-export const persistTerminal = (
-  gateway: RunnerGateway,
-  target: Socket,
-  presented: AccessWire,
-  operationKey: string,
-  terminalResponse: CellResponse = response,
-  terminalOutcome: "completed" | "failed" | "cancelled" | "unknown" = "completed",
-) =>
-  Effect.gen(function* () {
-    const attribution = operationAttribution(operationKey)
-    for (const frame of [
-      { _tag: "Accepted" as const, attribution, cursor: 1 },
-      { _tag: "Started" as const, attribution, cursor: 2 },
-      {
-        _tag: "Terminal" as const,
-        attribution,
-        cursor: 3,
-        outcome: terminalOutcome,
-        response: terminalResponse,
-      },
-    ])
-      yield* gateway.receive(target, encode({ _tag: "CellLifecycle", access: presented, frame }))
-  })
 
 export const socket = (): Socket & {
   failSend: boolean

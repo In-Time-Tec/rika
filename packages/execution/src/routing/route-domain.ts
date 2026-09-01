@@ -2,67 +2,35 @@ import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "g
 import * as ModelRoute from "generalist/ai/model-route"
 import { Errors, ExecutableRegistration, ExecutableResolver } from "generalist/runtime"
 import type { State } from "generalist/instructions"
-import { CellTool, KernelPool, type KernelProfile } from "generalist/repl"
-import * as ExecutorRuntime from "@rika/kernel/executor-runtime"
-import * as HarnessPromptSections from "@rika/kernel/harness-prompt-sections"
-import * as ExecutionPins from "@rika/kernel/execution-pins"
+import * as NativeTools from "../tool/registry"
+import * as HarnessPromptSections from "../harness/prompt-sections"
+import * as ExecutionPins from "../harness/execution-pins"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import type { ProviderCredentialStoreService } from "@rika/product/provider-credential-store"
 import type * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Context, Effect, Function, Layer } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import { profileInstructions } from "../agent-instructions"
+import { nativeToolInstructions, profileInstructions } from "../agent-instructions"
 import * as Models from "../models"
 import * as Registration from "../registration"
-import * as RemoteCells from "../remote-cells"
+import * as RemoteTools from "../remote-tools"
 
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
 
-export interface KernelOptions {
-  readonly runtimeVersion: string
-  readonly dataRoot: string
-  readonly limits?: KernelProfile.Limits
-  /** Rika-owned policy surfaced to cells; Generalist's physical KernelProfile intentionally excludes it. */
-  readonly trustMode?: string
-}
-
-export type LocalCellServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
-
-export interface LocalCellRoute {
-  readonly _tag: "Local"
-  readonly services: Context.Context<LocalCellServices>
-}
-
-export interface RemoteCellRoute {
+export interface RemoteToolRoute {
   readonly _tag: "Remote"
-  readonly cells: Layer.Layer<RemoteCells.Service>
+  readonly tools: Layer.Layer<RemoteTools.Service>
   readonly admit: (input: {
     readonly threadId: string
     readonly turnId: string
     readonly workspaceId: string
-  }) => Effect.Effect<void, RemoteCells.AdmissionFailure>
+  }) => Effect.Effect<void, RemoteTools.AdmissionFailure>
 }
 
-export type CellRoute = LocalCellRoute | RemoteCellRoute
+export type ToolRoute = { readonly _tag: "Local" } | RemoteToolRoute
 
-export interface LocalCellResolver {
-  readonly _tag: "Local"
-  readonly forWorkspace: (workspace: string) => Effect.Effect<Context.Context<LocalCellServices>>
-}
-
-export type CellResolver = LocalCellResolver | RemoteCellRoute
-
-export const resolveCellRoute: {
-  (workspace: string): (resolver: CellResolver) => Effect.Effect<CellRoute>
-  (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute>
-} = Function.dual(
-  2,
-  (resolver: CellResolver, workspace: string): Effect.Effect<CellRoute> =>
-    resolver._tag === "Remote"
-      ? Effect.succeed(resolver)
-      : resolver.forWorkspace(workspace).pipe(Effect.map((services) => ({ _tag: "Local" as const, services }))),
-)
+export const resolveToolRoute = (route: RemoteToolRoute | undefined): ToolRoute => route ?? { _tag: "Local" }
 
 export interface ConfigureOptions {
   readonly executionRoute: RouteSnapshot
@@ -71,8 +39,7 @@ export interface ConfigureOptions {
     readonly threadId: string
     readonly turnId: string
   }
-  readonly kernel: KernelOptions
-  readonly cell?: CellRoute
+  readonly tools?: ToolRoute
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: State.GuidanceState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
@@ -87,12 +54,10 @@ export interface ConfiguredExecutable {
   readonly titleRegistrations: ReadonlyArray<ExecutableRegistration.ExecutableRegistration>
   readonly resolverEntries: ReadonlyArray<ExecutableResolver.StaticAgentExecutable>
   readonly profiles: Readonly<Record<string, AgentManifest.PinnedAgent>>
-  readonly kernelProfile: KernelProfile.KernelProfile
 }
 
 export interface ResolverOptions {
-  readonly kernel: KernelOptions
-  readonly cell?: CellResolver
+  readonly tools?: RemoteToolRoute
   readonly capabilities?: (workspace: string) => Effect.Effect<{
     readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
     readonly harnessSnapshot: State.GuidanceState
@@ -113,15 +78,11 @@ type ResolvedAgent = ExecutableResolver.StaticAgentExecutable["agent"]
  */
 const unlimitedBudget = {} as const satisfies AgentManifest.AgentManifest["budget"]
 
-/**
- * The exact values the Session's kernel is built from. The admitted profile pin is derived from
- * these and from nothing else, so a pin can never describe a kernel the host did not run.
- */
 export { profileInstructions }
 
 /**
- * An agent that runs cells is told what its cell can reach. The Title agent carries no tool, so it
- * keeps the one sentence it was given rather than a description of a surface it cannot use.
+ * Every conversational agent receives the native workspace surface. The Title agent carries no tools,
+ * so it keeps the one sentence it was given rather than a surface it cannot use.
  */
 /**
  * What one Execution's harness adds to the prompt every agent in it reads. An absent harness adds
@@ -136,7 +97,6 @@ const harnessSupplement = (
     : HarnessPromptSections.block({
         harness,
         skillListings: skills.map((skill) => `- ${skill.name}`).join("\n"),
-        mcpServers: [],
       })
 
 export const agentInstructionsWith: {
@@ -268,7 +228,6 @@ const agentDefinition = (
   children: AgentManifest.AgentManifest["children"],
   applicationContextPin: ReturnType<typeof applicationPin>,
   compaction: AgentManifest.CompactionIdentity | undefined,
-  kernelProfilePin: Pins.CapabilityPin | undefined,
   capabilities: {
     readonly skills: ReadonlyArray<AgentManifest.NamedCapability>
     readonly services: ReadonlyArray<AgentManifest.NamedCapability>
@@ -278,7 +237,7 @@ const agentDefinition = (
     name: `rika-${name.toLowerCase()}`,
     instructions: agentInstructions,
     model: routed.selection,
-    toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : CellTool.scheduling,
+    toolScheduling: tools.length === 0 ? { maxConcurrency: 1, parallelSafe: [] } : NativeTools.scheduling,
     metadata: { productProfile: name },
     budget: unlimitedBudget,
   }
@@ -296,7 +255,6 @@ const agentDefinition = (
       { name: "model-registry", pin: modelRegistryPin(route) },
       { name: "rika-application-context", pin: applicationContextPin },
       ...(compaction === undefined ? [] : [{ name: "compaction", pin: compaction.service }]),
-      ...(kernelProfilePin === undefined ? [] : [{ name: "rika-kernel-profile", pin: kernelProfilePin }]),
       ...capabilities.services,
     ],
     policy,
@@ -308,7 +266,7 @@ const agentDefinition = (
   return { agent: Agent.close(agent, environment), pinned }
 }
 
-const rootChildNames = ["Oracle", "Librarian", "Painter", "ReadThread", "Review", "Surgeon", "Task"] as const
+const rootChildNames = ["Oracle", "Librarian", "Painter", "Review", "Surgeon", "Task"] as const
 type ChildProfileName = (typeof rootChildNames)[number]
 
 export const routeDomain = {
@@ -320,6 +278,7 @@ export const routeDomain = {
   harnessSupplement,
   modelPin,
   modelRegistryPin,
+  nativeToolInstructions,
   profileInstructions,
   rootChildNames,
   routedModel,

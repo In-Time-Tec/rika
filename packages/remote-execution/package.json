@@ -9,8 +9,6 @@
     "./runtime": "./src/host/runtime.ts",
     "./workspace": "./src/workspace/service.ts",
     "./operations": "./src/protocol/operations.ts",
-    "./cells": "./src/protocol/cells.ts",
-    "./binding-proxy": "./src/protocol/binding-proxy.ts",
     "./machine": "./src/host/machinery/machine.ts",
     "./protocol": "./src/protocol/messages.ts",
     "./pty": "./src/host/terminal/pty.ts",
@@ -22,11 +20,8 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@rika/coding-tools": "workspace:*",
-    "@rika/extensions": "workspace:*",
-    "@rika/kernel": "workspace:*",
+    "@rika/execution": "workspace:*",
     "@rika/product": "workspace:*",
-    "generalist": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -3,9 +3,6 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
-import type { TranscriptBlock } from "../../../../src/state/transcript/model"
-import { renderCellBody } from "../../../../src/opentui/rendering/unit/bodies"
-import { transcriptUnitBuilder } from "../../../../src/opentui/rendering/unit/content"
 import {
   openTui,
   _insertText,
@@ -14,129 +11,6 @@ import {
   _giantSubagentModel,
   _collapsedSubagentModel,
 } from "./bodies.fixture"
-
-test("renders complete output without a truncation marker", () => {
-  const chunks: Array<string> = []
-  renderCellBody(
-    {
-      _tag: "Cell",
-      id: "bounded-cell",
-      status: "complete",
-      visual: "ts",
-      source: { text: "const value = 42", lines: 1 },
-      output: { stdout: "42", stderr: "" },
-      epoch: 1,
-      notices: [{ kind: "restored", detail: "Restored value." }],
-      calls: [],
-      files: [],
-    },
-    false,
-    true,
-    80,
-    "⠿",
-    (chunk) => chunks.push(chunk.text),
-  )
-  const rendered = chunks.join("")
-  expect(rendered).not.toContain("truncated")
-  expect(rendered).toContain("Restored value.")
-})
-
-test("shows all authored source while collapsed without an expansion indicator", () => {
-  const chunks: Array<string> = []
-  const source = Array.from({ length: 18 }, (_, index) => `const value${index + 1} = ${index + 1}`).join("\n")
-  renderCellBody(
-    {
-      _tag: "Cell",
-      id: "long-cell",
-      status: "running",
-      visual: "ts",
-      source: { text: source, lines: 18 },
-      output: { stdout: "hidden while collapsed", stderr: "" },
-      epoch: 0,
-      notices: [],
-      calls: [],
-      files: [],
-    },
-    false,
-    false,
-    80,
-    "⠿",
-    (chunk) => chunks.push(chunk.text),
-  )
-  const rendered = chunks.join("")
-  expect(rendered).toContain("⠿ const value1 = 1")
-  expect(rendered).not.toContain("⠿\n  const value1 = 1")
-  expect(rendered).toContain("const value15 = 15")
-  expect(rendered).toContain("const value18 = 18")
-  expect(rendered).not.toContain("more lines")
-  expect(rendered).not.toMatch(/[▸▾]/u)
-  expect(rendered).not.toContain("hidden while collapsed")
-  expect(rendered).not.toContain("ts")
-})
-
-test("renders typed cell result zones and the host-call ledger", () => {
-  const chunks: Array<string> = []
-  renderCellBody(
-    {
-      _tag: "Cell",
-      id: "typed-cell",
-      status: "complete",
-      visual: "ts",
-      source: { text: "await rika.workspace.read({ path: 'a.ts' })", lines: 1 },
-      output: { stdout: "printed", stderr: "warned" },
-      result: { content: "first\nsecond" },
-      durationMillis: 1_240,
-      epoch: 1,
-      notices: [],
-      calls: [
-        {
-          id: "read-1",
-          module: "workspace",
-          operation: "read",
-          inputSummary: '{"path":"a.ts"}',
-          status: "returned",
-          durationMillis: 4,
-          message: "two lines",
-        },
-      ],
-      files: [],
-    },
-    false,
-    true,
-    80,
-    "⠿",
-    (chunk) => chunks.push(chunk.text),
-  )
-  const rendered = chunks.join("")
-  expect(rendered).toContain("stdout\n    printed")
-  expect(rendered).toContain("stderr\n    warned")
-  expect(rendered).toContain('result\n    {\n      "content": first\n      second')
-  expect(rendered).toContain("1 call")
-  expect(rendered).toContain("✓ Read a.ts")
-  expect(rendered).not.toMatch(/[▸▾]/u)
-  expect(rendered).not.toContain("4ms")
-  expect(rendered).not.toContain("1.2s")
-})
-
-test("makes every collapsed source row part of the expandable cell header", () => {
-  const block: Extract<TranscriptBlock, { _tag: "Cell" }> = {
-    _tag: "Cell",
-    id: "clickable-cell",
-    status: "complete",
-    visual: "ts",
-    source: { text: "const first = 1\nconst second = 2", lines: 2 },
-    output: { stdout: "", stderr: "" },
-    result: 2,
-    epoch: 1,
-    notices: [],
-    calls: [],
-    files: [],
-  }
-  const model: Model = { ...initial("/work", "high"), blocks: [block] }
-  const built = transcriptUnitBuilder(model, "⠿").renderUnit({ kind: "cell", block: 0 })
-  expect(built.root.expandable).toBe(true)
-  expect(built.root.headerEnd).toBe(built.root.end)
-})
 
 test("ticks status and running-tool spinners every 100ms without rebuilding transcript bodies", () =>
   Effect.runPromise(
@@ -187,7 +61,9 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
         clock.advance(1)
         expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking")
-        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
+        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(
+          /[⠀-⣿] \$ sleep 5/u,
+        )
         expect(body.content).toBe(firstBodyContent)
 
         clock.advance(100)

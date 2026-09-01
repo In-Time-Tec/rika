@@ -171,15 +171,6 @@ export type InteractiveEvent =
       readonly agentResponseArrived?: boolean
     }
   | { readonly _tag: "ThreadTitled"; readonly threadId: string; readonly title: string }
-  | {
-      readonly _tag: "GoalChanged"
-      readonly threadId: string
-      readonly goal?: {
-        readonly objective: string
-        readonly status: "active" | "paused" | "complete" | "errored"
-        readonly startedAtMillis: number
-      }
-    }
   | { readonly _tag: "ThreadActivated"; readonly threadId: string; readonly title: string }
   | {
       readonly _tag: "ThreadPreviewLoaded"
@@ -371,17 +362,6 @@ export const InteractiveEventSchema = Schema.Union([
     steeringRequestId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),
-  Schema.Struct({
-    _tag: Schema.tag("GoalChanged"),
-    threadId: Schema.String,
-    goal: Schema.optionalKey(
-      Schema.Struct({
-        objective: Schema.String,
-        status: Schema.Literals(["active", "paused", "complete", "errored"]),
-        startedAtMillis: Schema.Finite,
-      }),
-    ),
-  }),
   Schema.Struct({ _tag: Schema.tag("ThreadActivated"), threadId: Schema.String, title: Schema.String }),
   Schema.Struct({
     _tag: Schema.tag("ThreadPreviewLoaded"),

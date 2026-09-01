@@ -12,9 +12,7 @@ import {
   layerWithOptions as hostedThreadProtocolLayerWithOptions,
 } from "../../../../src/hosted/thread/protocol"
 import { makeThreadProtocolNotifications } from "../../../../src/hosted/thread/notifications"
-import { HostedToolPolicy } from "../../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../../src/hosted/environment/workspace"
-import { testToolPolicy } from "../../execution/tool-policy.fixture"
 
 import { actor, memoryStore, ownerId, presenceLayer, snapshot, threadId, timestamp } from "./memory.fixture"
 
@@ -60,7 +58,6 @@ it.effect("streams a contiguous tail and resets compacted cursors from a durable
     ),
     Layer.succeed(ThreadProtocolStore, store),
     presenceLayer,
-    Layer.succeed(HostedToolPolicy, testToolPolicy),
     BunCrypto.layer,
   )
   const snapshotWithTitle = (title: string): HostedThreadSnapshot => ({

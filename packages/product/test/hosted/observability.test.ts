@@ -68,8 +68,7 @@ describe("HostedObservability", () => {
       turnId: "turn_01",
       runId: "run-01",
       operationId: "operation.01",
-      cellId: "cell-01",
-      bindingId: "binding-01",
+      toolCallId: "tool-call-01",
       modelAttemptId: "attempt-01",
     }
     const unsafe = {
@@ -103,10 +102,7 @@ describe("HostedObservability", () => {
       yield* Observability.event("model_start", "success", correlation)
       yield* Observability.modelObserved(correlation, "failure", 25, { inputTokens: 5, outputTokens: 3 })
       yield* Observability.modelObserved(correlation, "interrupted", 0)
-      yield* Observability.event("cell_admission", "success", correlation)
-      yield* Observability.observe("cell_execution", correlation, Effect.void)
-      yield* Observability.event("binding_send", "success", correlation)
-      yield* Observability.observe("binding_terminal", correlation, Effect.fail("private failure")).pipe(Effect.exit)
+      yield* Observability.observe("tool_execution", correlation, Effect.void)
       yield* Observability.event("terminal", "failure", unsafe)
 
       assert.deepStrictEqual(Observability.annotations(correlation), {
@@ -114,15 +110,13 @@ describe("HostedObservability", () => {
         "rika.turn.id": "turn_01",
         "rika.run.id": "run-01",
         "rika.operation.id": "operation.01",
-        "rika.cell.id": "cell-01",
-        "rika.binding.id": "binding-01",
+        "rika.tool_call.id": "tool-call-01",
         "rika.model_attempt.id": "attempt-01",
       })
       assert.deepStrictEqual(Observability.annotations(unsafe), {
         "rika.thread.id": "Thread:01",
         "rika.run.id": "run-01",
-        "rika.cell.id": "cell-01",
-        "rika.binding.id": "binding-01",
+        "rika.tool_call.id": "tool-call-01",
         "rika.model_attempt.id": "attempt-01",
       })
 
@@ -139,8 +133,6 @@ describe("HostedObservability", () => {
         "hosted.run_created.success",
         "hosted.run_claim.success",
         "hosted.model_start.success",
-        "hosted.cell_admission.success",
-        "hosted.binding_send.success",
         "hosted.terminal.failure",
       ]
       const completionNames = [
@@ -154,8 +146,7 @@ describe("HostedObservability", () => {
         "hosted.attach_ack.success",
         "hosted.model_terminal.failure",
         "hosted.model_terminal.interrupted",
-        "hosted.cell_execution.success",
-        "hosted.binding_terminal.failure",
+        "hosted.tool_execution.success",
       ]
       for (const name of [...immediateNames, ...completionNames]) assert.include(rendered, name)
       for (const stage of [
@@ -168,8 +159,7 @@ describe("HostedObservability", () => {
         "attach_refresh",
         "attach_ack",
         "model_terminal",
-        "cell_execution",
-        "binding_terminal",
+        "tool_execution",
       ])
         assert.isNumber(
           spans.find((span) => span.name === `rika.hosted.${stage}`)?.attributes.get("rika.duration.millis"),
@@ -215,10 +205,7 @@ describe("HostedObservability", () => {
         "run_claim",
         "model_start",
         "model_terminal",
-        "cell_admission",
-        "cell_execution",
-        "binding_send",
-        "binding_terminal",
+        "tool_execution",
         "terminal",
       ])
     }).pipe(

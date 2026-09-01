@@ -219,7 +219,7 @@ test(
           workspaceFiles: { "fixture.txt": "steer fixture body" },
           script: [
             model.turn(
-              [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "steer-read")],
+              [model.tool("read", { path: "fixture.txt" }, "steer-read")],
               // Keep the active Turn open under a heavily parallel TUI run. Idle queued rows
               // intentionally do not advertise a steering action that cannot succeed.
               { delayMillis: 10_000 },
@@ -271,15 +271,7 @@ test(
           inspectTranscript: true,
           workspaceFiles: { "fixture.txt": "direct steering fixture" },
           script: [
-            model.turn(
-              [
-                model.binding(
-                  { module: "workspace", operation: "read", input: { path: "fixture.txt" } },
-                  "direct-read",
-                ),
-              ],
-              { delayMillis: 4_000 },
-            ),
+            model.turn([model.tool("read", { path: "fixture.txt" }, "direct-read")], { delayMillis: 4_000 }),
             model.text("DIRECT_STEER_COMPLETE"),
           ],
         })

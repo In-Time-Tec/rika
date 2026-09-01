@@ -6,12 +6,8 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { MediaAnalysisError, analyzerTestLayer } from "@rika/coding-tools/media-view-service"
-import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
-import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as LocalTools from "@rika/execution/local-tools"
 import { Config, Context, Deferred, Effect, FileSystem, Layer, Path, Stream } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
 import {
   executionSessionLifecycleLayerTest,
   productLayer,
@@ -70,17 +66,7 @@ export const startShellOperation = Effect.fn("ShellSession.startOperation")(func
     turnRepositoryLayer: sharedRepositories,
     transcriptRepositoryLayer: sharedRepositories,
     backendLayer: Layer.succeed(ExecutionGateway.Service, backend),
-    toolRuntimeLayer: (directory) =>
-      ToolRuntime.layer(directory).pipe(
-        Layer.provide(
-          analyzerTestLayer(() => Effect.fail(MediaAnalysisError.make({ message: "Media analysis is unavailable" }))),
-        ),
-        Layer.provide(
-          Layer.merge(WebSearch.factoryLayer([]), ReadWebPage.layer({})).pipe(Layer.provide(FetchHttpClient.layer)),
-        ),
-        Layer.provide(BunServices.layer),
-        Layer.orDie,
-      ),
+    toolRuntimeLayer: (directory) => LocalTools.layer(directory).pipe(Layer.provide(BunServices.layer), Layer.orDie),
     defaultWorkspace: workspace,
     makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-thread")),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${nextTurn++}`)),

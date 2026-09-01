@@ -24,7 +24,7 @@ export const RunnerProfile = strict(
     workspaceIdentity: WorkspaceId,
     projectId: Schema.optionalKey(ProjectId),
     repository: SanitizedRepositoryMetadata,
-    kernel: strict(
+    nativeToolRuntime: strict(
       Schema.Struct({
         runtime: Schema.Literal("bun"),
         runtimeVersion: Schema.NonEmptyString,
@@ -33,7 +33,7 @@ export const RunnerProfile = strict(
     ),
     capabilities: strict(
       Schema.Struct({
-        cells: Schema.Literal(true),
+        nativeTools: Schema.Literal(true),
         checkpoints: Schema.Boolean,
         pty: Schema.Boolean,
       }),

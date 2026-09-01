@@ -10,7 +10,7 @@ import { createArchive, encodeArchive } from "../../src/workspace/artifact/archi
 import { provideLayer } from "../support/layer"
 
 const platform = BunServices.layer
-const kernel = { profileDigest: "1".repeat(64), bindingContractDigest: "2".repeat(64) } as const
+const nativeToolRuntime = { digest: "1".repeat(64) } as const
 const JsonRecord = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 const _decodeJsonRecord = Schema.decodeUnknownEffect(JsonRecord)
 const _encodeJsonRecord = Schema.encodeEffect(JsonRecord)
@@ -266,7 +266,7 @@ fi
         workspaceCommandPrefix: [command],
         credentialRoot,
         stateDirectory,
-        kernel,
+        nativeToolRuntime,
         assignment,
         seed,
         reporter: {
@@ -298,8 +298,7 @@ fi
           expect(evidence).toMatchObject({
             repositoryId: "repository-1",
             commitSha,
-            kernelProfileDigest: kernel.profileDigest,
-            bindingContractDigest: kernel.bindingContractDigest,
+            nativeToolRuntimeDigest: nativeToolRuntime.digest,
           })
           expect(yield* fileSystem.readFileString(`${root}/.head`)).toBe(commitSha)
           expect(yield* fileSystem.readFileString(`${root}/.remote`)).toBe(repositoryUrl)

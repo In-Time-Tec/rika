@@ -4,7 +4,7 @@ import { FencingGeneration, OwnerId, WorkspaceId } from "../model"
 
 const Identifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512))
 const Digest = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/))
-const KernelProfileDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
+const ToolDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Output = Schema.String.check(Schema.isMaxLength(16_384))
 
 export const WorkspacePreparationPhase = Schema.Literals(["checkout", "setup", "resume", "capabilities"])
@@ -28,8 +28,7 @@ export const WorkspacePreparationEvidence = Schema.Struct({
   workspaceId: WorkspaceId,
   repositoryId: Schema.NullOr(Identifier),
   commitSha: Schema.NullOr(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
-  kernelProfileDigest: KernelProfileDigest,
-  bindingContractDigest: KernelProfileDigest,
+  nativeToolRuntimeDigest: ToolDigest,
   setup: HookEvidence,
   resume: Schema.NullOr(HookEvidence),
   capabilities: Schema.Array(Identifier).check(Schema.isMaxLength(32)),

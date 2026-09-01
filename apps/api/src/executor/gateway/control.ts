@@ -10,7 +10,7 @@ import {
   type Socket,
 } from "./contract"
 import { gatewayProtocol } from "./protocol"
-import type { GatewaySession as Session, PendingOperation as Pending } from "./rpc/model"
+import type { GatewaySession as Session } from "./rpc/model"
 
 const { accessFailure, expired, sameAccess } = gatewayProtocol
 
@@ -19,7 +19,6 @@ export const gatewayControlFactory = (options: {
   readonly preparation: PreparationStore
   readonly sessions: Ref.Ref<Map<string, Session>>
   readonly assignments: Ref.Ref<Map<Socket, string>>
-  readonly pending: Ref.Ref<Map<string, Pending>>
   readonly quiescing: Ref.Ref<Set<string>>
   readonly quiescence: Ref.Ref<
     Map<
@@ -27,7 +26,6 @@ export const gatewayControlFactory = (options: {
       {
         readonly access: AccessWire
         readonly requestId: string
-        readonly expected: ReadonlySet<string>
         readonly result: Deferred.Deferred<Quiescence, GatewayError>
       }
     >
@@ -121,11 +119,6 @@ export const gatewayControlFactory = (options: {
         if (session === undefined || !session.ready)
           return yield* GatewayError.make({ kind: "disconnected", message: "Executor workspace is not ready" })
         yield* options.controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
-        const expected = new Set(
-          [...(yield* Ref.get(options.pending)).values()]
-            .filter((operation) => operation.assignmentId === assignmentId && operation.socket === session.socket)
-            .map((operation) => operation.operationKey),
-        )
         const result = yield* Deferred.make<Quiescence, GatewayError>()
         const requestId = yield* options.crypto.randomUUIDv4.pipe(
           Effect.mapError(() =>
@@ -134,7 +127,7 @@ export const gatewayControlFactory = (options: {
         )
         yield* Ref.update(options.quiescing, (current) => new Set(current).add(assignmentId))
         yield* Ref.update(options.quiescence, (current) =>
-          new Map(current).set(assignmentId, { access: session.access, requestId, expected, result }),
+          new Map(current).set(assignmentId, { access: session.access, requestId, result }),
         )
         yield* Effect.try({
           try: () => options.send(session.socket, { _tag: "Quiesce", fence: session.access.fence, requestId }),

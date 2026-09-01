@@ -274,8 +274,7 @@ export const preparationContext = (options: Options) =>
         marker.assignmentGeneration !== assignment.access.fence.assignmentGeneration ||
         marker.workspaceId !== assignment.workspaceId ||
         marker.templateBuildId !== assignment.templateBuildId ||
-        marker.kernelProfileDigest !== options.kernel.profileDigest ||
-        marker.bindingContractDigest !== options.kernel.bindingContractDigest ||
+        marker.nativeToolRuntimeDigest !== options.nativeToolRuntime.digest ||
         marker.repositoryId !== (checkout?.repositoryId ?? null) ||
         marker.commitSha !== (checkout?.commitSha ?? null) ||
         marker.setup.buildDigest !== buildDigest ||

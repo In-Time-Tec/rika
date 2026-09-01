@@ -169,8 +169,6 @@ const reduceWorkspaceData = (model: Model, message: Message): Model | undefined 
     }
     case "BranchDetected":
       return { ...model, branch: message.branch }
-    case "GoalChanged":
-      return { ...model, goal: message.goal }
     case "WorkspaceFilesToggled":
       return { ...model, workspaceFilesOpen: !model.workspaceFilesOpen, changedFilesOpen: false }
   }
@@ -252,7 +250,7 @@ const replayedActivity = (
   items: ReadonlyArray<Model["items"][number]>,
   incoming: TranscriptPresentationModel.Block,
 ): Activity => {
-  if (incoming._tag === "ToolCall" || incoming._tag === "Cell") return runningToolsActivity({ ...model, blocks, items })
+  if (incoming._tag === "ToolCall") return runningToolsActivity({ ...model, blocks, items })
   if (incoming._tag === "ToolResult") return { _tag: "Waiting" }
   if (incoming._tag === "Compaction")
     return incoming.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }

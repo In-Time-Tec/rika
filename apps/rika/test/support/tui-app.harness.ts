@@ -7,8 +7,7 @@ import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
-import * as ThreadQuery from "@rika/product/thread-query-service"
-import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
+import * as ToolRuntime from "@rika/product/native-tool-runtime"
 import type { ModeConfiguration } from "@rika/terminal/terminal-state"
 import {
   Clock,
@@ -27,7 +26,7 @@ import {
 import { interactiveTui } from "../../src/interactive/process/lifecycle/loop"
 import * as TuiRepositories from "./tui-repositories.harness"
 import { tuiToolRuntimeLayer } from "./tui-tool-runtime.harness"
-import { backendLayer, kernelPoolFor, prepareTuiRuntimeState } from "./tui-backend.harness"
+import { backendLayer, prepareTuiRuntimeState } from "./tui-backend.harness"
 import * as TuiModel from "./tui-model.fixture"
 
 type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
@@ -35,7 +34,7 @@ type InteractiveConnectionState = InteractiveConnection["initialState"]
 
 /**
  * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
- * running-tools label the activity line produces — a cell, a subagent, or several of either — which
+ * running-tools label the activity line produces — a tool, a subagent, or several of either — which
  * an exact "Running 1 tool" misses the moment a turn delegates.
  */
 const activityMarkers = ["Waiting", "Streaming", "Finishing", "Running", "Thinking", "Sending"] as const
@@ -64,7 +63,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
   const workspace = path.join(root, "workspace")
   const resourceScope = yield* Scope.make()
   /**
-   * Teardown is awaited rather than forked. These resources include a pool of real kernel workers,
+   * Teardown is awaited rather than forked. These resources include live scoped processes,
    * and a fire-and-forget close returns before any of them dies, so the next test in the file starts
    * while the previous one's workers are still running and competing for the machine.
    */
@@ -112,24 +111,10 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       Effect.provide(repositoryContext),
     )
   const toolRuntimeContext = yield* Layer.buildWithScope(tuiToolRuntimeLayer(workspace), resourceScope)
-  const toolRuntimeLayer = Layer.succeedContext(toolRuntimeContext)
   const toolRuntime = Context.get(toolRuntimeContext, ToolRuntime.Service)
-  const queryFactoryLayer = Layer.succeedContext(
-    yield* Layer.buildWithScope(ThreadQuery.Runtime.factoryLayer.pipe(Layer.provide(repositories)), resourceScope),
-  )
-  const kernelPool = yield* kernelPoolFor({
-    workspace,
-    dataRoot: root,
-    queryFactoryLayer,
-    toolRuntimeLayer,
-  })
   const executionBackendContext = yield* Layer.buildWithScope(
     backendLayer({
-      dataRoot: root,
-      kernelPool,
       registryLayer: laneModels.registryLayer,
-      toolRuntimeLayer,
-      queryFactoryLayer,
     }),
     resourceScope,
   )

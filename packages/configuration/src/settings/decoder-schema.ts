@@ -72,7 +72,6 @@ const RoleRoute = Schema.Union([AliasRoute, DirectRoute])
 const Agents = Schema.Struct({
   librarian: Schema.optionalKey(RoleRoute),
   painter: Schema.optionalKey(RoleRoute),
-  readThread: Schema.optionalKey(RoleRoute),
   review: Schema.optionalKey(RoleRoute),
   surgeon: Schema.optionalKey(RoleRoute),
   task: Schema.optionalKey(RoleRoute),

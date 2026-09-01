@@ -1,5 +1,5 @@
 import * as ExecutionGateway from "@rika/product/execution-gateway"
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { Errors, Run, RunTree, Runtime } from "generalist/runtime"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "../projection/semantic/event"
 import { TreeProjector } from "../projection/tree/projector"
@@ -101,14 +101,6 @@ const applyTitle = (projector: Projector, snapshot: Run.RunSnapshot | null | und
   return change === undefined ? [] : [{ change }]
 }
 
-const formatCell = (projector: Projector, event: SemanticTreeEvent) => {
-  if (event.event._tag !== "ToolExecutionCompleted" || event.event.call.name !== "typescript") return Effect.void
-  const decoded = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }))(event.event.call.params)
-  return Option.isNone(decoded)
-    ? Effect.void
-    : projector.formatCellSource(event.runId, event.event.call.id, decoded.value.code)
-}
-
 const modelPreviewUsage = (
   projector: Projector,
   treeEvent: SemanticTreeEvent,
@@ -148,9 +140,8 @@ const projectEvents = (projector: Projector, input: WatchInput) => {
       }
       return Effect.succeed(applyTitle(projector, event.snapshot))
     }
-    return Effect.gen(function* () {
+    return Effect.sync(() => {
       rootProjected = true
-      yield* formatCell(projector, event.event)
       const change = projector.apply(event.event)
       const projected: Projection =
         event.event.event._tag === "ChildLinked" ? { change, childRunId: event.event.event.childRunId } : { change }

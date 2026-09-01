@@ -11,7 +11,6 @@ import type { HostedProductService } from "../../src/hosted/product"
 import type { HttpDependencies } from "../../src/server/http"
 import type { RunnerGateway } from "../../src/runner/gateway"
 import { serveApi } from "../../src/server/bun"
-import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 
 const config: IdentityConfig = {
   production: false,
@@ -91,13 +90,12 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
       disconnected: gateway.disconnected,
       active: gateway.active,
       execute: () => Effect.die("unused"),
-      cancel: gateway.cancel,
-      machine: gateway.machine,
+      cancel: (input) => gateway.cancel(input).pipe(Effect.map((result) => ({ ...result, eventPersisted: true }))),
     } satisfies RunnerGateway,
     admitRunner: () => Effect.die("unused"),
     admitRun: () => Effect.die("unused"),
-    run: () => Effect.die("unused"),
-    cancel: () => Effect.die("unused"),
+    runTool: () => Effect.die("unused"),
+    cancelTool: () => Effect.die("unused"),
     pause: () => Effect.die("unused"),
     resume: () => Effect.die("unused"),
     replace: () => Effect.die("unused"),
@@ -108,7 +106,6 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     directory,
     devices,
     product,
-    toolPolicy: testToolPolicy,
     executor,
     recovery: {
       inspect: () => Effect.die("unused"),
@@ -174,33 +171,27 @@ const tag = (message: string | Uint8Array<ArrayBufferLike>) => {
 
 const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
   Effect.gen(function* () {
-    const bindingStarted = yield* Deferred.make<void>()
     const machineStarted = yield* Deferred.make<void>()
-    const bindingCompleted = yield* Deferred.make<void>()
     const machineCompleted = yield* Deferred.make<void>()
     const releaseReverse = yield* Deferred.make<void>()
     const oldDisconnected = yield* Deferred.make<void>()
     const disconnected: Array<Socket> = []
     let oldSocket: Socket | undefined
     let interrupted = false
-    const reverseReceive = (started: Deferred.Deferred<void>, completed: Deferred.Deferred<void>) =>
-      Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Deferred.await(releaseReverse)),
-        Effect.andThen(Deferred.succeed(completed, undefined)),
-        Effect.onInterrupt(() =>
-          Effect.sync(() => {
-            interrupted = true
-          }),
-        ),
-      )
     const gateway: Gateway = {
       receive: (socket, message) => {
-        const current = tag(message)
-        if (current === "BindingInvoke") {
+        if (tag(message) === "MachineResult") {
           oldSocket ??= socket
-          return reverseReceive(bindingStarted, bindingCompleted)
+          return Deferred.succeed(machineStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseReverse)),
+            Effect.andThen(Deferred.succeed(machineCompleted, undefined)),
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                interrupted = true
+              }),
+            ),
+          )
         }
-        if (current === "MachineResult") return reverseReceive(machineStarted, machineCompleted)
         return Effect.sync(() => socket.send("replacement-active"))
       },
       disconnected: (socket) =>
@@ -210,7 +201,6 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
-      machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),
       ptyEvents: () => Stream.empty,
@@ -224,14 +214,11 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
     )
     const url = `ws://127.0.0.1:${running.server.port}/api/v1/${endpoint}`
     const original = yield* connect(url)
-    yield* original.send('{"_tag":"BindingInvoke"}')
     yield* original.send('{"_tag":"MachineResult"}')
-    yield* Deferred.await(bindingStarted)
     yield* Deferred.await(machineStarted)
     yield* original.close
     yield* Deferred.await(oldDisconnected)
     expect(interrupted).toBe(false)
-    expect((yield* Deferred.poll(bindingCompleted))._tag).toBe("None")
     expect((yield* Deferred.poll(machineCompleted))._tag).toBe("None")
 
     const replacement = yield* connect(url)
@@ -240,7 +227,6 @@ const verifiesSessionReplacement = (endpoint: "executors" | "runners") =>
     expect(replacement.messages).toEqual(["replacement-active"])
 
     yield* Deferred.succeed(releaseReverse, undefined)
-    yield* Deferred.await(bindingCompleted)
     yield* Deferred.await(machineCompleted)
     expect(interrupted).toBe(false)
     expect(disconnected).toEqual([oldSocket])
@@ -256,67 +242,6 @@ it.effect("keeps executor reverse receives alive after their WebSocket disconnec
 
 it.effect("keeps Runner reverse receives alive after their WebSocket disconnects", () =>
   verifiesSessionReplacement("runners"),
-)
-
-const verifiesDurableReceive = (frame: "CellLifecycle" | "CellResult") =>
-  Effect.gen(function* () {
-    const started = yield* Deferred.make<void>()
-    const release = yield* Deferred.make<void>()
-    const completed = yield* Deferred.make<void>()
-    const disconnected = yield* Deferred.make<void>()
-    let interrupted = false
-    const gateway: Gateway = {
-      receive: () =>
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(Deferred.await(release)),
-          Effect.andThen(Deferred.succeed(completed, undefined)),
-          Effect.onInterrupt(() =>
-            Effect.sync(() => {
-              interrupted = true
-            }),
-          ),
-        ),
-      disconnected: () => Deferred.succeed(disconnected, undefined),
-      active: () => Effect.succeed(true),
-      execute: () => Effect.die("unused"),
-      cancel: () => Effect.die("unused"),
-      machine: () => Effect.die("unused"),
-      workspace: () => Effect.die("unused"),
-      sendPty: () => Effect.die("unused"),
-      ptyEvents: () => Stream.empty,
-      retryPreparation: () => Effect.void,
-      quiesce: () => Effect.die("unused"),
-      pushBranch: () => Effect.die("unused"),
-    }
-    const resourceScope = yield* Scope.make()
-    const running = yield* serveApi({ config, dependencies: dependencies(gateway) }).pipe(
-      Effect.provideService(Scope.Scope, resourceScope),
-    )
-    const connected = yield* connect(`ws://127.0.0.1:${running.server.port}/api/v1/executors`)
-    const message = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Struct({ _tag: Schema.String })))({
-      _tag: frame,
-    })
-    yield* connected.send(message)
-    yield* Deferred.await(started)
-    yield* connected.close
-    yield* Effect.yieldNow
-
-    expect(interrupted).toBe(false)
-    expect((yield* Deferred.poll(disconnected))._tag).toBe("None")
-
-    yield* Deferred.succeed(release, undefined)
-    yield* Deferred.await(completed)
-    yield* Deferred.await(disconnected)
-    expect(interrupted).toBe(false)
-    yield* Scope.close(resourceScope, Exit.void)
-  })
-
-it.effect("finishes Cell lifecycle persistence before disconnecting its WebSocket session", () =>
-  verifiesDurableReceive("CellLifecycle"),
-)
-
-it.effect("finishes Cell result delivery before disconnecting its WebSocket session", () =>
-  verifiesDurableReceive("CellResult"),
 )
 
 it.effect("gives reverse-channel receives a bounded graceful server shutdown", () =>
@@ -339,7 +264,6 @@ it.effect("gives reverse-channel receives a bounded graceful server shutdown", (
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
-      machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),
       ptyEvents: () => Stream.empty,
@@ -352,7 +276,7 @@ it.effect("gives reverse-channel receives a bounded graceful server shutdown", (
       Effect.provideService(Scope.Scope, resourceScope),
     )
     const connected = yield* connect(`ws://127.0.0.1:${running.server.port}/api/v1/executors`)
-    yield* connected.send('{"_tag":"BindingInvoke"}')
+    yield* connected.send('{"_tag":"MachineResult"}')
     yield* Deferred.await(terminalized)
 
     const closing = yield* Scope.close(resourceScope, Exit.void).pipe(
@@ -399,7 +323,7 @@ it.effect("race-closes admission and forces bounded shutdown after session clean
     const gateway: Gateway = {
       receive: (_, message) => {
         const current = tag(message)
-        if (current === "BindingInvoke") return receive(reverseStarted, reverseCleanup)
+        if (current === "MachineResult") return receive(reverseStarted, reverseCleanup)
         if (current === "Serialized") return receive(serialStarted, serialCleanup)
         return Effect.sync(() => {
           queuedSerialStarted = true
@@ -409,7 +333,6 @@ it.effect("race-closes admission and forces bounded shutdown after session clean
       active: () => Effect.succeed(true),
       execute: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
-      machine: () => Effect.die("unused"),
       workspace: () => Effect.die("unused"),
       sendPty: () => Effect.die("unused"),
       ptyEvents: () => Stream.empty,
@@ -426,7 +349,7 @@ it.effect("race-closes admission and forces bounded shutdown after session clean
     const connected = yield* connect(`${baseUrl.replace("http", "ws")}/api/v1/executors`)
     yield* connected.send('{"_tag":"Serialized"}')
     yield* connected.send('{"_tag":"QueuedSerialized"}')
-    yield* connected.send('{"_tag":"BindingInvoke"}')
+    yield* connected.send('{"_tag":"MachineResult"}')
     const request = yield* Effect.tryPromise(() => Bun.fetch(`${baseUrl}/readyz`)).pipe(Effect.forkChild)
     yield* Deferred.await(serialStarted)
     yield* Deferred.await(reverseStarted)

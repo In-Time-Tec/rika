@@ -72,7 +72,8 @@ describe("renderPierreDiff", () => {
   test("aligns hunk ellipsis rows with the number column", () => {
     const twoDigit = patch.replace("@@ -1,3 +1,3 @@", "@@ -10,3 +10,3 @@")
     const twoDigitLines = splitLines(renderPierreDiff(twoDigit, { width: 100 })!.chunks)
-    expect(lineText(twoDigitLines[0]!)).toBe("  ..")
+    expect(lineText(twoDigitLines[0]!)).toBe("  ...")
+    expect(twoDigitLines[0]![0]!.fg).toEqual(colors.muted)
     const threeDigit = patch.replace("@@ -1,3 +1,3 @@", "@@ -100,3 +100,3 @@")
     const threeDigitLines = splitLines(renderPierreDiff(threeDigit, { width: 100 })!.chunks)
     expect(lineText(threeDigitLines[0]!)).toBe("  ...")

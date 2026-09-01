@@ -21,7 +21,7 @@ test(
           workspaceFiles: { "fixture.txt": "deterministic queue fixture" },
           script: [
             model.turn(
-              [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "queue-read")],
+              [model.tool("read", { path: "fixture.txt" }, "queue-read")],
               // Filling and steering the queue measures ~0.5s; this keeps several times that
               // margin without the test sitting out the remainder of the answer.
               { delayMillis: 4_000 },
@@ -118,10 +118,7 @@ test(
           inspectTranscript: true,
           workspaceFiles: { "fixture.txt": "deterministic steering fixture" },
           script: [
-            model.turn(
-              [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "hi-read")],
-              { delayMillis: 4_000 },
-            ),
+            model.turn([model.tool("read", { path: "fixture.txt" }, "hi-read")], { delayMillis: 4_000 }),
             model.text("HI_COMPLETE"),
           ],
         })
@@ -185,15 +182,7 @@ test(
           inspectTranscript: true,
           workspaceFiles: { "recovery.txt": "durable recovery fixture" },
           script: [
-            model.turn(
-              [
-                model.binding(
-                  { module: "workspace", operation: "read", input: { path: "recovery.txt" } },
-                  "recovery-read",
-                ),
-              ],
-              { delayMillis: 2_000 },
-            ),
+            model.turn([model.tool("read", { path: "recovery.txt" }, "recovery-read")], { delayMillis: 2_000 }),
             model.text("RECOVERED_STEERING_COMPLETE"),
             model.text("RECOVERED_FOLLOW_UP_COMPLETE"),
           ],

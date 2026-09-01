@@ -7,20 +7,20 @@
   "exports": {
     ".": "./src/engine/runtime.ts",
     "./route": "./src/routing/route.ts",
+    "./local-tools": "./src/tool/local.ts",
+    "./remote-tools": "./src/remote-tools.ts",
     "./postgres": "./src/postgres.ts",
-    "./remote-cells": "./src/remote-cells.ts",
     "./scripted-model": "./src/scripted-model.ts",
-    "./test-harness": "./src/test-harness.ts"
+    "./test-harness": "./src/test-harness.ts",
+    "./terminal-unknown": "./src/routing/terminal-unknown.ts"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",
+    "@effect/platform-bun": "catalog:",
     "@aws-sdk/client-bedrock-runtime": "catalog:",
     "@aws-sdk/credential-provider-node": "catalog:",
-    "@rika/coding-tools": "workspace:*",
-    "@rika/kernel": "workspace:*",
     "@rika/product": "workspace:*",
     "effect": "catalog:",
-    "prettier": "catalog:",
     "generalist": "catalog:"
   },
   "devDependencies": {

@@ -191,8 +191,8 @@ it.effect("uses Better Auth DPoP and the canonical hosted Thread and runner endp
           protocolVersion: runnerProtocolVersion,
           workspaceIdentity: WorkspaceId.make("workspace-1"),
           repository: { identity: "repository-1" },
-          kernel: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
-          capabilities: { cells: true, checkpoints: false, pty: false },
+          nativeToolRuntime: { runtime: "bun", runtimeVersion: "1.3.14", trustMode: "trusted-local" },
+          capabilities: { nativeTools: true, checkpoints: false, pty: false },
         },
         session,
       )

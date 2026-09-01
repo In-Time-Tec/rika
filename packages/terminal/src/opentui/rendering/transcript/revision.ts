@@ -37,7 +37,9 @@ const transcriptUnitRevisionImpl = (
 ): string => {
   const ids: Array<number> = []
   const bits: Array<string> = []
-  const pushExpanded = (id: string) => bits.push(expandedSet.has(id) ? "1" : "0")
+  const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
+  const pushExpanded = (id: string) =>
+    bits.push(`${expandedSet.has(id) ? "1" : "0"}${explicitlyCollapsed.has(id) ? "c" : "o"}`)
   const walkTool = (tool: ToolTranscriptUnit) => {
     for (const index of tool.blocks) {
       const block = blockAt(model, index)
@@ -61,14 +63,14 @@ const transcriptUnitRevisionImpl = (
     ids.push(identityRevision(block))
     if (block._tag === "Compaction" && block.status === "complete")
       bits.push(`rainbow:${model.compactionShimmer?.tick ?? 0}`)
-    if (block._tag === "Cell") {
-      pushExpanded(`cell:${block.id}`)
-      for (const file of block.files) pushExpanded(`file:${file.key}`)
-    }
   }
   const walkNested = (nested: NestedTranscriptUnit) => {
-    if (nested.kind === "cell") walkBlock(nested.block)
-    else if (nested.kind === "subagent") {
+    if (nested.kind === "subagent-group") {
+      walkBlock(nested.block)
+      const block = blockAt(model, nested.block)
+      if (block._tag === "SubagentGroup") pushExpanded(`subagent-group:${block.id}`)
+      for (const child of nested.children) walkNested(child)
+    } else if (nested.kind === "subagent") {
       walkBlock(nested.block)
       const block = blockAt(model, nested.block)
       if (block._tag === "SubagentCard") pushExpanded(`subagent:${block.id}`)
@@ -93,6 +95,10 @@ const transcriptUnitRevisionImpl = (
     case "tool":
       walkTool(unit)
       break
+    case "subagent-group":
+      walkBlock(unit.block)
+      for (const child of unit.children) walkNested(child)
+      break
     case "subagent":
       walkBlock(unit.block)
       for (const child of unit.children) walkNested(child)
@@ -100,7 +106,6 @@ const transcriptUnitRevisionImpl = (
       break
     case "reasoning":
     case "diff":
-    case "cell":
     case "block":
       walkBlock(unit.block)
       break

@@ -1,3 +1,4 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
 import {
   AgentManifest,
   Approvals,
@@ -11,11 +12,10 @@ import {
 } from "generalist"
 import * as ModelRoute from "generalist/ai/model-route"
 import { Errors, ExecutableRegistration } from "generalist/runtime"
-import { CellTool } from "generalist/repl"
-import * as BindingModules from "@rika/kernel/binding-modules"
-import * as ExecutionPins from "@rika/kernel/execution-pins"
-import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
-import { Effect, Layer, Ref, Schema } from "effect"
+import * as LocalTools from "../tool/local"
+import * as NativeTools from "../tool/registry"
+import * as ExecutionPins from "../harness/execution-pins"
+import { Effect, Layer, Ref } from "effect"
 import { routeDomain } from "./route-domain"
 import type {
   AgentDefinition,
@@ -25,7 +25,7 @@ import type {
   ConfiguredExecutable,
   ModelSnapshot,
 } from "./route-domain"
-import { cellRouting } from "./route-cells"
+import { remoteToolExecutor } from "./route-tools"
 import * as Registration from "../registration"
 
 const {
@@ -37,37 +37,24 @@ const {
   harnessSupplement,
   modelPin,
   modelRegistryPin,
+  nativeToolInstructions,
   profileInstructions,
   rootChildNames,
   routedModel,
 } = routeDomain
-const { cellExecutor, remoteCellExecutor, unavailableCellExecutor } = cellRouting
-
-const kernelProfileFor = (options: ConfigureOptions) =>
-  KernelProfileRegistration.make(
-    Object.assign(
-      {
-        runtimeVersion: options.kernel.runtimeVersion,
-        workspace: options.workspace,
-        dataRoot: options.kernel.dataRoot,
-      },
-      options.kernel.limits === undefined ? undefined : { limits: options.kernel.limits },
-    ),
-  )
-
 const harnessPinsFor = (options: ConfigureOptions) =>
   options.harnessSnapshot === undefined
     ? { capabilities: [], registrations: [] }
     : ExecutionPins.harness(options.harnessSnapshot)
 
-const cellLayerFor = (options: ConfigureOptions) => {
-  const deadline =
-    options.kernel.limits?.cellDeadlineMillis ?? KernelProfileRegistration.defaultLimits.cellDeadlineMillis
-  if (options.cell?._tag === "Local") return cellExecutor(options.cell.services, deadline)
-  if (options.cell?._tag === "Remote")
-    return remoteCellExecutor(options.cell, options.workspace, options.executionIdentity, deadline)
-  return unavailableCellExecutor
-}
+const toolLayerFor = (options: ConfigureOptions) =>
+  options.tools?._tag === "Remote"
+    ? remoteToolExecutor({
+        route: options.tools.tools,
+        workspace: options.workspace,
+        executionIdentity: options.executionIdentity,
+      })
+    : LocalTools.layer(options.workspace).pipe(Layer.provide(BunServices.layer))
 
 /**
  * Rika's tool authorization policy: permission rules allow every call, and every
@@ -75,10 +62,8 @@ const cellLayerFor = (options: ConfigureOptions) => {
  * through ExecutionGateway approve/deny. Generalist requires an explicit policy, and
  * this declares exactly the authorizer its pre-0.46 default built implicitly.
  *
- * It is provided as a ToolAuthorizer rather than as Permissions/Approvals services on
- * purpose: Generalist's nested-operation executor falls back to auto-approving cell
- * operations only when no Approvals service is in scope, and Rika's cell flow depends
- * on that fallback. Providing Approvals here would suspend every cell forever.
+ * It is provided as a ToolAuthorizer rather than as separate Permissions and Approvals
+ * services so Generalist owns one explicit authorization decision path for native tools.
  */
 const authorizationLayer: Layer.Layer<ToolAuthorization.ToolAuthorizer> = Layer.unwrap(
   Effect.gen(function* () {
@@ -98,16 +83,6 @@ const authorizationLayer: Layer.Layer<ToolAuthorization.ToolAuthorizer> = Layer.
   }),
 )
 
-const mountedModulesFor = (options: ConfigureOptions) =>
-  options.cell === undefined
-    ? []
-    : BindingModules.make({
-        workspace: options.workspace,
-        workspaceDigest: "",
-        trustMode: options.kernel.trustMode ?? "trusted-local",
-        servers: [],
-      })
-
 const optionalSupplement = (supplement: string) => (supplement === "" ? undefined : supplement)
 
 export const configure = (
@@ -126,7 +101,6 @@ export const configure = (
       Oracle: route.oracle,
       Librarian: route.agents.librarian,
       Painter: route.agents.painter,
-      ReadThread: route.agents.readThread,
       Review: route.agents.review,
       Surgeon: route.agents.surgeon,
       Task: route.agents.task,
@@ -140,7 +114,6 @@ export const configure = (
       Oracle: routeModel(routes.Oracle),
       Librarian: routeModel(routes.Librarian),
       Painter: routeModel(routes.Painter),
-      ReadThread: routeModel(routes.ReadThread),
       Review: routeModel(routes.Review),
       Surgeon: routeModel(routes.Surgeon),
       Task: routeModel(routes.Task),
@@ -167,33 +140,22 @@ export const configure = (
       summaryPrompt: route.compaction.summaryPrompt,
       summaryModel: Layer.orDie(summaryModel),
     })
-    const kernelProfile = kernelProfileFor(options)
-    const kernelProfilePin = yield* Schema.decodeEffect(Pins.CapabilityPin)(
-      KernelProfileRegistration.pin(kernelProfile),
-    ).pipe(Effect.mapError((cause) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })))
     const skillPins = ExecutionPins.skills(options.skills ?? [])
     const harnessPins = harnessPinsFor(options)
     const pinnedCapabilities = { skills: skillPins.capabilities, services: harnessPins.capabilities }
-    const cellLayer = cellLayerFor(options)
+    const toolLayer = toolLayerFor(options)
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
-      return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer, authorizationLayer))
+      return Layer.orDie(Layer.mergeAll(model, compactionLayer, toolLayer, authorizationLayer))
     }
     const supplemental = harnessSupplement(options.harnessSnapshot, options.skills ?? [])
-    const mountedModules = mountedModulesFor(options)
-    const limits = options.kernel.limits ?? KernelProfileRegistration.defaultLimits
-    const cellSurface = BindingModules.cellInstructions({
-      modules: mountedModules,
-      workspace: options.workspace,
-      cellDeadlineMillis: limits.cellDeadlineMillis,
-    })
-    const withSurface = (own: string) => agentInstructionsWith(cellSurface, own)
+    const nativeSurface = nativeToolInstructions(options.tools?._tag === "Remote" ? undefined : options.workspace)
+    const withSurface = (own: string) => agentInstructionsWith(nativeSurface, own)
     const roleInstructions = {
       Oracle: profileInstructions.Oracle,
       Librarian: profileInstructions.Librarian,
       Painter: profileInstructions.Painter,
-      ReadThread: profileInstructions.ReadThread,
       Review: profileInstructions.Review,
       Surgeon: profileInstructions.Surgeon,
       Task: profileInstructions.Task,
@@ -206,12 +168,11 @@ export const configure = (
         name,
         withSurface(roleInstructions[name]),
         optionalSupplement(supplemental),
-        [CellTool.tool],
+        Object.values(NativeTools.toolkit.tools),
         environment(name),
         childSelections,
         contextPin,
         compactionIdentity,
-        kernelProfilePin,
         pinnedCapabilities,
       )
     const title = agentDefinition(
@@ -225,14 +186,12 @@ export const configure = (
       [],
       contextPin,
       undefined,
-      undefined,
       { skills: [], services: [] },
     )
     const childDefinitions = {
       Oracle: childDefinitionFor("Oracle"),
       Librarian: childDefinitionFor("Librarian"),
       Painter: childDefinitionFor("Painter"),
-      ReadThread: childDefinitionFor("ReadThread"),
       Review: childDefinitionFor("Review"),
       Surgeon: childDefinitionFor("Surgeon"),
       Task: childDefinitionFor("Task"),
@@ -243,12 +202,11 @@ export const configure = (
       "Root",
       withSurface(profileInstructions.root),
       optionalSupplement(supplemental),
-      [CellTool.tool],
+      Object.values(NativeTools.toolkit.tools),
       environment("Root"),
       childSelections,
       contextPin,
       compactionIdentity,
-      kernelProfilePin,
       pinnedCapabilities,
     )
     const children = rootChildNames.map((name) => childDefinitions[name])
@@ -266,7 +224,6 @@ export const configure = (
       routes.Oracle,
       routes.Librarian,
       routes.Painter,
-      routes.ReadThread,
       routes.Review,
       routes.Surgeon,
       routes.Task,
@@ -304,14 +261,10 @@ export const configure = (
         ),
       ),
     )
-    registrationMap.set(
-      kernelProfilePin,
-      Registration.make(Registration.codecs.kernelProfile, kernelProfilePin, kernelProfile),
-    )
     for (const registration of [...skillPins.registrations, ...harnessPins.registrations]) {
       registrationMap.set(registration.pin, registration)
     }
-    const registeredTools = [CellTool.tool]
+    const registeredTools = Object.values(NativeTools.toolkit.tools)
     for (const tool of registeredTools) {
       registrationMap.set(
         Registration.toolPin(tool),
@@ -331,7 +284,6 @@ export const configure = (
         : Effect.succeed(registration)
     })
     return {
-      kernelProfile,
       executable,
       titleExecutable,
       registrations,

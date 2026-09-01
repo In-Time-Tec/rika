@@ -55,18 +55,17 @@
     "./migrations/postgres/0038-authoritative-thread-command-ledger.sql": "./migrations/postgres/0038-authoritative-thread-command-ledger.sql",
     "./migrations/postgres/0039-bounded-thread-checkpoints.sql": "./migrations/postgres/0039-bounded-thread-checkpoints.sql",
     "./product-repositories": "./src/database/product-repositories.ts",
-    "./goal-repository": "./src/goal/repository.ts",
     "./thread-search-index": "./src/search/process-local-index.ts",
     "./thread-summary-repository": "./src/summary/repository.ts",
     "./thread-repository": "./src/thread/repository.ts",
     "./transcript-repository": "./src/transcript/repository.ts",
-    "./turn-repository": "./src/turn/postgres/repository.ts"
+    "./turn-repository": "./src/turn/postgres/repository.ts",
+    "./migrations/postgres/0041-native-tool-runner-registration.sql": "./migrations/postgres/0041-native-tool-runner-registration.sql"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",
     "@rika/identity": "workspace:*",
     "@rika/product": "workspace:*",
-    "@rika/remote-execution": "workspace:*",
     "@rika/transcript": "workspace:*",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
@@ -75,7 +74,6 @@
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
-    "@rika/coding-tools": "workspace:*",
     "@rika/configuration": "workspace:*",
     "@rika/extensions": "workspace:*",
     "@types/bun": "catalog:",

@@ -37,8 +37,7 @@ import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import {
   assignmentId,
-  cellRequest,
-  code,
+  toolRequest,
   databaseUrl,
   deviceId,
   environmentDigest,
@@ -69,12 +68,14 @@ export const seed = (
     readonly deadlineAt?: string
     readonly state?: "accepted" | "dispatched"
     readonly leaseExpires?: "past" | "future"
+    readonly request?: Parameters<typeof operationDigest>[0]
   },
 ) =>
   Effect.gen(function* () {
     const state = options?.state ?? "dispatched"
     const deadlineAt = options?.deadlineAt ?? "2999-01-01T00:00:00.000Z"
-    const digest = operationDigest(cellRequest(operationKey, deadlineAt))
+    const request = options?.request ?? toolRequest(operationKey, deadlineAt)
+    const digest = operationDigest(request)
     const ownerKind = options?.ownerKind ?? "organization"
     const ownerId = `${ownerKind}-owner-local-gateway`
     const now = sql`transaction_timestamp()`
@@ -250,7 +251,7 @@ export const seed = (
         userId: "user-local-gateway",
         processIncarnation: "process-local-gateway",
         generation: 1,
-        workspaceFingerprint: "workspace-binding",
+        workspaceFingerprint: "workspace-local",
         ticketDigest: "ticket-digest",
         expiresAt: future,
         consumedAt: now,
@@ -264,7 +265,7 @@ export const seed = (
         workspaceId: "workspace-local-gateway",
         assignmentGeneration: 1,
         environmentDigest,
-        requiredCapabilities: ["filesystem", "typescriptKernel", "git", "process", "workspaceLifecycle"],
+        requiredCapabilities: ["filesystem", "nativeTools", "git", "process", "workspaceLifecycle"],
       }),
     )
     yield* Effect.tryPromise(() =>
@@ -313,16 +314,16 @@ export const seed = (
       ownerId,
       operationKey,
       requestDigest: digest,
-      workspaceId: "workspace-local-gateway",
-      sessionId: assignmentId,
-      threadId,
-      turnId: "turn-local-gateway",
-      runId: "run-local-gateway",
-      rootRunId: "run-local-gateway",
-      toolCallId: "call-local-gateway",
-      code,
-      attempt: 0,
-      replayPolicy: "pure",
+      workspaceId: request.workspaceId,
+      sessionId: request.sessionId,
+      threadId: request.threadId,
+      turnId: request.turnId,
+      runId: request.runId,
+      rootRunId: request.rootRunId,
+      toolCallId: request.toolCallId,
+      code: request.code,
+      attempt: request.attempt,
+      replayPolicy: request.replayPolicy,
       deadlineAt: sql`${deadlineAt}::timestamptz`,
       updatedAt: now,
     }
@@ -343,6 +344,45 @@ export const seed = (
       }),
     )
   })
+
+export const seedOperation = (
+  databaseClient: NodePgDatabase,
+  request: ReturnType<typeof toolRequest>,
+  state: "accepted" | "dispatched" = "accepted",
+) => {
+  const operation: PgInsertValue<typeof rikaHostedExecutorOperations> = {
+    assignmentId,
+    ownerId: "organization-owner-local-gateway",
+    operationKey: request.operationKey,
+    requestDigest: operationDigest(request),
+    workspaceId: request.workspaceId,
+    sessionId: request.sessionId,
+    threadId: request.threadId,
+    turnId: request.turnId,
+    runId: request.runId,
+    rootRunId: request.rootRunId,
+    toolCallId: request.toolCallId,
+    code: request.code,
+    attempt: request.attempt,
+    replayPolicy: request.replayPolicy,
+    deadlineAt: sql`${request.deadlineAt}::timestamptz`,
+    updatedAt: sql`transaction_timestamp()`,
+  }
+  return Effect.tryPromise(() =>
+    databaseClient.insert(rikaHostedExecutorOperations).values(
+      state === "accepted"
+        ? { ...operation, state }
+        : {
+            ...operation,
+            state,
+            dispatchedGeneration: 1,
+            dispatchedLeaseEpoch: 1,
+            dispatchedExecutorInstanceId: "executor-local-gateway",
+            dispatchedProcessIncarnation: "process-local-gateway",
+          },
+    ),
+  ).pipe(Effect.asVoid)
+}
 
 export const operationState = (databaseClient: NodePgDatabase, operationKey: string) =>
   Effect.tryPromise(() =>

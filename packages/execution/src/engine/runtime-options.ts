@@ -1,29 +1,15 @@
 import { ModelRegistry } from "generalist"
 import type { State } from "generalist/instructions"
-import { KernelPool, KernelSnapshotStore } from "generalist/repl"
-import type * as ExecutionPins from "@rika/kernel/execution-pins"
-import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
+import type * as ExecutionPins from "../harness/execution-pins"
 import type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
-import type { Context, Effect, Layer } from "effect"
+import type { Effect, Layer } from "effect"
 import type { Runtime } from "generalist/runtime"
 import type * as Postgres from "../postgres"
-import type { KernelOptions, RemoteCellRoute } from "../routing/route"
-import type * as Route from "../routing/route"
-
-export type KernelPoolServices = KernelPool.KernelPool | ExecutorRuntime.CellContext
-
-export interface LocalCells extends Route.LocalCellResolver {
-  readonly built: Effect.Effect<
-    ReadonlyArray<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
-  >
-}
-
-export type Cells = LocalCells | RemoteCellRoute
+import type { RemoteToolRoute } from "../routing/route"
 
 export interface CommonOptions {
-  readonly kernel: KernelOptions
-  readonly cells?: Cells
+  readonly tools?: RemoteToolRoute
   readonly capabilities?: (workspace: string) => Effect.Effect<{
     readonly skills: ReadonlyArray<ExecutionPins.SkillPin>
     readonly harnessSnapshot: State.GuidanceState
@@ -36,20 +22,8 @@ export interface CommonOptions {
 }
 
 export interface HostedOptions extends CommonOptions {
-  readonly cells: Cells
+  readonly tools: RemoteToolRoute
   readonly postgres: Postgres.Options
 }
 
-export interface MemoryOptions extends Omit<CommonOptions, "kernel"> {
-  readonly dataRoot: string
-  readonly kernel?: KernelOptions
-}
-
-export interface LocalCellsOptions {
-  readonly forWorkspace: (
-    workspace: string,
-  ) => Effect.Effect<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
-  readonly built: Effect.Effect<
-    ReadonlyArray<Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>>
-  >
-}
+export type MemoryOptions = CommonOptions

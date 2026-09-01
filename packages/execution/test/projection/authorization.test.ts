@@ -4,7 +4,7 @@ import { TestModel } from "generalist/test"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
-import { Context, Effect, Layer, Random, Stream } from "effect"
+import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
@@ -27,7 +27,6 @@ it.live(
   () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const filename = `/tmp/rika-run-budget-${yield* Random.nextInt}.db`
         const rootFixture = yield* TestModel.make(
           [
             TestModel.turn([TestModel.text("DONE")], {
@@ -45,7 +44,7 @@ it.live(
           { provider: "test", model: "test", registrationKey: "budget-root" },
         )
         const route = testExecutionRoute()
-        const context = yield* Layer.build(layer({ dataRoot: filename, modelServices: registryLayer(rootFixture) }))
+        const context = yield* Layer.build(layer({ modelServices: registryLayer(rootFixture) }))
         const gateway = Context.get(context, ExecutionGateway.Service)
 
         const receipt = yield* gateway.startTurn({

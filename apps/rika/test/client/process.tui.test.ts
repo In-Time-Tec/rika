@@ -127,8 +127,9 @@ test(
         yield* Effect.tryPromise(() => app.type("Stream the child answer."))
         app.pressEnter()
         yield* app.waitFrame("Subagent working")
+        // Running subagents auto-expand. Select the row without toggling it closed so the streamed
+        // preview remains visible; the Enter presses below still exercise collapse and re-expand.
         app.pressKey("\t")
-        app.pressEnter()
 
         const partial = yield* app.waitFrame("CHILD_PREVIEW_FIRST", 20_000)
         expect(partial).not.toContain("CHILD_PREVIEW_LAST")

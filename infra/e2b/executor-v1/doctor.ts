@@ -177,10 +177,6 @@ const program = Effect.gen(function* () {
       return output
     }),
   )
-  yield* check(
-    "kernel:persistence",
-    command(["bun", "run", "/opt/rika/kernel-doctor.ts", temp, path.join(temp, "kernel")]),
-  )
   yield* check("typescript:execute", command(["bun", "-e", "const value: number = 42; console.log(value)"]))
   yield* check("python:pillow", command(["python", "-c", "from PIL import Image; print(Image.new('RGB',(1,1)).size)"]))
   yield* check(
@@ -279,7 +275,7 @@ const program = Effect.gen(function* () {
   yield* check(
     "workspace:cleanup",
     fileSystem
-      .remove(path.join(temp, "kernel"), { force: true, recursive: true })
+      .remove(path.join(temp, "native-tools"), { force: true, recursive: true })
       .pipe(
         Effect.andThen(command(["sudo", "-n", "-u", "rika-workspace", "rm", "-rf", temp])),
         Effect.as("workspace probe removed"),

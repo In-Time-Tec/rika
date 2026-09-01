@@ -5,7 +5,6 @@ import type { WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignm
 import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import {
   Clock,
-  Config,
   Context,
   Crypto,
   Deferred,
@@ -19,11 +18,8 @@ import {
   Semaphore,
 } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import { BindingProxyError, type Transport as BindingTransport } from "../../protocol/binding-proxy"
-import { CellError, type State as CellState } from "../../protocol/cells"
 import * as Operations from "../../protocol/operations"
 import { consumeFailureKind, messageCorrelation, runnerEvent, runnerWarning } from "../../protocol/telemetry"
-import * as HostedKernel from "../kernel"
 import { Machine, MachineError, workspaceLayer as machineLayer } from "../machinery/machine"
 import {
   ApiMessage,
@@ -38,61 +34,20 @@ import { ForegroundSession, type LocalSession } from "./foreground-session"
 
 export * from "./foreground-contract"
 
-const {
-  access,
-  applyLeaseReceipt,
-  failure,
-  initialSessionFor,
-  runnerUrl,
-  sameAccess,
-  waitForReconnect,
-  waitForWelcome,
-} = ForegroundSession
+const { access, applyLeaseReceipt, failure, initialSessionFor, runnerUrl, waitForReconnect, waitForWelcome } =
+  ForegroundSession
 
 const decodeApiMessage = Schema.decodeUnknownEffect(Schema.fromJsonString(ApiMessage))
 const encodeRunnerMessage = Schema.encodeSync(Schema.fromJsonString(RunnerMessage))
-const localCapabilities = { cells: true, checkpoints: false, pty: false } as const
+const localCapabilities = { nativeTools: true, checkpoints: false, pty: false } as const
 const initialCursors: ResumeCursors = { command: 0, event: 0, pty: 0 }
 
-const inMemoryCells = (
-  workspaceIdentity: string,
-  workspacePath: string,
-  states: Ref.Ref<Map<string, CellState>>,
-  persist: () => Effect.Effect<void, ForegroundRunnerError>,
-  sendBinding: BindingTransport["send"],
-) =>
-  Effect.gen(function* () {
-    const temporaryDirectory = yield* Config.string("TMPDIR").pipe(
-      Config.withDefault("/tmp"),
-      Effect.mapError(() => failure("Temporary directory configuration is invalid")),
-    )
-    return yield* HostedKernel.make({
-      workspaceIdentity,
-      workspacePath,
-      dataRoot: `${temporaryDirectory}/rika-kernel/${encodeURIComponent(workspaceIdentity)}`,
-      read: (operationKey) => Effect.map(Ref.get(states), (values) => values.get(operationKey)),
-      write: (operationKey, state) =>
-        Ref.update(states, (values) => new Map(values).set(operationKey, state)).pipe(
-          Effect.andThen(persist()),
-          Effect.mapError((error) => CellError.make({ kind: "execution", message: error.message })),
-        ),
-      sendBinding,
-    })
-  })
-
 const isOperationMessage = (message: IncomingMessage): message is Parameters<Operations.Interface["dispatch"]>[0] =>
-  message._tag === "CellCancel" ||
-  message._tag === "CellExecute" ||
-  message._tag === "CellReplay" ||
-  message._tag === "CellTerminalReceipt" ||
-  message._tag === "CellTerminalSuperseded" ||
-  message._tag === "LocalCellReceipt" ||
-  message._tag === "MachineExecute"
+  message._tag === "MachineExecute" || message._tag === "MachineCancel"
 
 const consumeApi = (
   incoming: Queue.Queue<IncomingMessage>,
   session: Ref.Ref<LocalSession | undefined>,
-  cells: HostedKernel.Interface,
   operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
 ) =>
@@ -104,14 +59,6 @@ const consumeApi = (
       return yield* failure(message.message)
     }
     if (message._tag === "LeaseReceipt") yield* applyLeaseReceipt(message, session, persist)
-    if (message._tag === "BindingResult") {
-      const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access)) {
-        yield* runnerWarning("runner.binding.result_stale", messageCorrelation(message))
-        return yield* failure("Local binding result has a stale session")
-      }
-      yield* cells.completeBinding(message).pipe(Effect.mapError((error) => failure(error.message)))
-    }
     if (isOperationMessage(message))
       yield* operations.dispatch(message).pipe(Effect.mapError((error) => failure(error.message)))
   }).pipe(
@@ -128,7 +75,6 @@ const connected = (
   workspaceCapabilities: WorkspaceCapabilitySnapshot,
   sessions: Ref.Ref<LocalSession | undefined>,
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
-  cells: HostedKernel.Interface,
   operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
 ) =>
@@ -214,7 +160,6 @@ const connected = (
       yield* Ref.set(sessions, session)
       yield* Ref.set(activeWriter, writer)
       yield* runnerEvent(previous === undefined ? "runner.socket.welcome" : "runner.socket.reconnected", {})
-      yield* cells.replayBindings(access(session)).pipe(Effect.mapError((error) => failure(error.message)))
       yield* persist()
       if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
       const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
@@ -252,7 +197,7 @@ const connected = (
           Effect.mapError(() => failure("Runner controller connection closed")),
         ),
         Effect.raceFirst(
-          consumeApi(incoming, sessions, cells, operations, persist),
+          consumeApi(incoming, sessions, operations, persist),
           Effect.raceFirst(heartbeat, leaseWatchdog),
         ),
       )
@@ -268,17 +213,8 @@ export const foregroundRunnerLayer = Layer.mergeAll(
 const runnerSource = (options: ForegroundRunnerOptions) => options.resume?.executorUrl ?? options.admission?.executorUrl
 const workspaceIdentityFor = (options: ForegroundRunnerOptions) =>
   options.resume?.workspaceIdentity ?? options.admission?.workspaceIdentity
-const initialCellStates = (resume: ForegroundRunnerSnapshot | undefined) =>
-  new Map((resume?.cells ?? []).map(({ executionKey, state }) => [executionKey, state] as const))
 const initialMachineStates = (resume: ForegroundRunnerSnapshot | undefined) =>
   new Map((resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const))
-const initialOperationReceipts = (resume: ForegroundRunnerSnapshot | undefined) =>
-  new Map<string, ReadonlyArray<import("../../protocol/messages").CellLifecycleFrame>>(
-    (resume?.receipts ?? []).map((receipt) => [
-      Operations.executionKey(receipt.operationKey, receipt.frames[0].attribution.attempt),
-      receipt.frames,
-    ]),
-  )
 
 export const runForegroundRunner = (
   options: ForegroundRunnerOptions,
@@ -299,8 +235,6 @@ export const runForegroundRunner = (
           Effect.mapError(() => failure("Could not create the local process incarnation")),
         ))
       const sessions = yield* Ref.make<LocalSession | undefined>(initialSessionFor(options.resume))
-      const receipts = yield* Ref.make(initialOperationReceipts(options.resume))
-      const cellStates = yield* Ref.make(initialCellStates(options.resume))
       const machineStates = yield* Ref.make(initialMachineStates(options.resume))
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
@@ -310,23 +244,12 @@ export const runForegroundRunner = (
       const receiptStore = options.receiptStore
       const receiptScope = options.receiptScope
       const persistLock = yield* Semaphore.make(1)
-      const saveSnapshot = (operationReceipts: Operations.ReceiptMap) =>
+      const saveSnapshot = () =>
         receiptStore === undefined || receiptScope === undefined
           ? Effect.void
           : Effect.gen(function* () {
               const session = yield* Ref.get(sessions)
               if (session === undefined) return
-              const storedReceipts = [...operationReceipts.values()].flatMap((frames) => {
-                const first = frames[0]
-                return first === undefined
-                  ? []
-                  : [
-                      Operations.OperationReceipt.make({
-                        operationKey: first.attribution.operationKey,
-                        frames: [first, ...frames.slice(1)],
-                      }),
-                    ]
-              })
               yield* receiptStore.save(receiptScope, {
                 version: 1,
                 workspaceIdentity,
@@ -335,27 +258,10 @@ export const runForegroundRunner = (
                 leaseExpiresAt: session.leaseExpiresAt,
                 heartbeatIntervalMillis: session.heartbeatIntervalMillis,
                 cursor: session.cursor,
-                receipts: storedReceipts,
-                cells: Array.from(yield* Ref.get(cellStates), ([key, state]) => ({ executionKey: key, state })),
                 machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
               })
             })
-      const persist = () => persistLock.withPermits(1)(Effect.flatMap(Ref.get(receipts), saveSnapshot))
-      const commitReceipts = (next: Operations.ReceiptMap) =>
-        persistLock.withPermits(1)(saveSnapshot(next).pipe(Effect.andThen(Ref.set(receipts, next))))
-      const cells = yield* inMemoryCells(workspaceIdentity, options.workspacePath, cellStates, persist, (message) =>
-        Effect.gen(function* () {
-          const session = yield* Ref.get(sessions)
-          const writer = yield* Ref.get(activeWriter)
-          if (session === undefined || writer === undefined)
-            return yield* BindingProxyError.make({
-              message: "Local binding transport is unavailable",
-            })
-          yield* writer(encodeRunnerMessage({ _tag: "BindingInvoke", ...message, access: access(session) })).pipe(
-            Effect.mapError(() => BindingProxyError.make({ message: "Could not write local binding request" })),
-          )
-        }),
-      )
+      const persist = () => persistLock.withPermits(1)(saveSnapshot())
       const machineContext = yield* Layer.build(
         machineLayer({
           workspace: options.workspacePath,
@@ -368,11 +274,6 @@ export const runForegroundRunner = (
         }),
       )
       const machine = Context.get(machineContext, Machine)
-      const cellOperationFailure = (error: CellError | BindingProxyError) =>
-        Operations.OperationError.make({
-          kind: error._tag === "CellError" ? error.kind : "execution",
-          message: error.message,
-        })
       const currentAccess = Ref.get(sessions).pipe(
         Effect.flatMap((session) =>
           session === undefined
@@ -384,15 +285,6 @@ export const runForegroundRunner = (
       )
       const operations = yield* Operations.make({
         access: currentAccess,
-        receipts: {
-          current: Ref.get(receipts),
-          commit: (next) =>
-            commitReceipts(next).pipe(
-              Effect.mapError((error) =>
-                Operations.OperationError.make({ kind: "persistence", message: error.message }),
-              ),
-            ),
-        },
         emit: (event) =>
           Ref.get(activeWriter).pipe(
             Effect.flatMap((writer) =>
@@ -400,11 +292,7 @@ export const runForegroundRunner = (
                 ? Effect.fail(
                     Operations.OperationError.make({ kind: "transport", message: "Runner transport is unavailable" }),
                   )
-                : writer(
-                    encodeRunnerMessage(
-                      event._tag === "CellResult" ? { ...event, _tag: "LocalCellResult" as const } : event,
-                    ),
-                  ).pipe(
+                : writer(encodeRunnerMessage(event)).pipe(
                     Effect.mapError(() =>
                       Operations.OperationError.make({
                         kind: "transport",
@@ -414,27 +302,22 @@ export const runForegroundRunner = (
                   ),
             ),
           ),
-        cell: {
-          prepare: (request) =>
-            Effect.succeed({
-              secrets: [],
-              execute: (output) => cells.execute(request, output).pipe(Effect.mapError(cellOperationFailure)),
-            }),
-          admit: (request) => cells.admit(request).pipe(Effect.mapError(cellOperationFailure)),
-          cancel: (operationKey, attempt) =>
-            cells
-              .cancel(operationKey, attempt)
-              .pipe(
-                Effect.mapError((error) =>
-                  Operations.OperationError.make({ kind: error.kind, message: error.message }),
-                ),
-              ),
-          replayBindings: (current) => cells.replayBindings(current).pipe(Effect.mapError(cellOperationFailure)),
-        },
         machine: {
           execute: (input) =>
             machine
-              .execute(input)
+              .execute({
+                machineId: input.machineId,
+                requestDigest: input.requestDigest,
+                request: input.request,
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  Operations.OperationError.make({ kind: "execution", message: error.message }),
+                ),
+              ),
+          cancel: (input) =>
+            machine
+              .cancel(input)
               .pipe(
                 Effect.mapError((error) =>
                   Operations.OperationError.make({ kind: "execution", message: error.message }),
@@ -445,7 +328,7 @@ export const runForegroundRunner = (
       const workspaceCapabilities = yield* inspectWorkspaceCapabilities({
         target: "runner",
         workspacePath: options.workspacePath,
-        typescriptKernel: true,
+        nativeTools: true,
         pty: false,
       })
       const connection = connected(
@@ -455,7 +338,6 @@ export const runForegroundRunner = (
         workspaceCapabilities,
         sessions,
         activeWriter,
-        cells,
         operations,
         persist,
       ).pipe(

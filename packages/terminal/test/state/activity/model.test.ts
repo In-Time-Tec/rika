@@ -3,16 +3,19 @@ import { formatActivity, runningToolsActivity } from "../../../src/state/activit
 import { initial, type Model } from "../../../src/state/model"
 import type { TranscriptItem } from "../../../src/state/transcript/model"
 
-const cell = (id: string, status: string) => ({
-  _tag: "Cell",
+const tool = (id: string, status: "running" | "complete") => ({
+  _tag: "ToolCall" as const,
   id,
+  name: "status",
+  input: "{}",
   status,
-  visual: "ts",
-  source: { text: "await work()", lines: 1 },
-  output: { stdout: "", stderr: "" },
-  epoch: 0,
-  notices: [],
-  calls: [],
+  presentation: {
+    family: "explore" as const,
+    action: "status",
+    activeLabel: "Checking",
+    completeLabel: "Checked",
+  },
+  detail: "workspace",
   files: [],
 })
 
@@ -27,7 +30,7 @@ const card = (id: string, status: string) => ({
   activity: [],
 })
 
-type ActivityBlock = ReturnType<typeof cell> | ReturnType<typeof card>
+type ActivityBlock = ReturnType<typeof tool> | ReturnType<typeof card>
 
 const model = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<TranscriptItem>): Model => ({
   ...initial("/work"),
@@ -48,7 +51,7 @@ const activityOf = (blocks: ReadonlyArray<ActivityBlock>, items: ReadonlyArray<T
 
 describe("running subagent activity", () => {
   test("counts a running subagent card", () => {
-    expect(activityOf([cell("k", "complete"), card("c", "running")], [block(0, "k"), block(1, "c", "k")])).toBe(
+    expect(activityOf([tool("k", "complete"), card("c", "running")], [block(0, "k"), block(1, "c", "k")])).toBe(
       "Running 1 subagent",
     )
   })
@@ -56,14 +59,14 @@ describe("running subagent activity", () => {
   test("counts each concurrently admitted child once", () => {
     expect(
       activityOf(
-        [cell("k", "complete"), card("a", "running"), card("b", "running")],
+        [tool("k", "complete"), card("a", "running"), card("b", "running")],
         [block(0, "k"), block(1, "a", "k"), block(2, "b", "k")],
       ),
     ).toBe("Running 2 subagents")
   })
 
   test("does not count a queued child as running", () => {
-    expect(activityOf([cell("k", "complete"), card("c", "queued")], [block(0, "k"), block(1, "c", "k")])).toBe(
+    expect(activityOf([tool("k", "complete"), card("c", "queued")], [block(0, "k"), block(1, "c", "k")])).toBe(
       "Running tools",
     )
   })
@@ -71,11 +74,11 @@ describe("running subagent activity", () => {
   test("leaves a nested child to the subagent that owns it", () => {
     expect(
       activityOf(
-        [cell("k", "complete"), card("task", "running"), cell("tk", "running"), card("oracle", "running")],
+        [tool("k", "complete"), card("task", "running"), tool("tk", "running"), card("oracle", "running")],
         [
-          block(0, "root-cell-unit"),
+          block(0, "root-tool-unit"),
           block(1, "task-card-unit", "k"),
-          block(2, "task-cell-unit", "task"),
+          block(2, "task-tool-unit", "task"),
           block(3, "oracle-card-unit", "task"),
         ],
       ),
@@ -83,12 +86,12 @@ describe("running subagent activity", () => {
   })
 
   test("stops counting a card once it settles", () => {
-    expect(activityOf([cell("k", "complete"), card("c", "complete")], [block(0, "k"), block(1, "c", "k")])).toBe(
+    expect(activityOf([tool("k", "complete"), card("c", "complete")], [block(0, "k"), block(1, "c", "k")])).toBe(
       "Running tools",
     )
   })
 
-  test("still counts a running cell as a tool", () => {
-    expect(activityOf([cell("k", "running")], [block(0, "k")])).toBe("Running 1 tool")
+  test("still counts a running native tool", () => {
+    expect(activityOf([tool("k", "running")], [block(0, "k")])).toBe("Running 1 tool")
   })
 })

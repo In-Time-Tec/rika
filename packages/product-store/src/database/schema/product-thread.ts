@@ -12,41 +12,6 @@ import {
 import { sql } from "drizzle-orm"
 import { SchemaReference } from "../reference"
 
-export const rikaGoals = pgTable(
-  "rika_goals",
-  {
-    threadId: text("thread_id")
-      .primaryKey()
-      .references(() => rikaThreads.id, { onDelete: "cascade" }),
-    objective: text().notNull(),
-    status: text().notNull(),
-    budgetTokens: integer("budget_tokens"),
-    budgetWallClockMillis: doublePrecision("budget_wall_clock_millis"),
-    usageTokens: integer("usage_tokens").default(0).notNull(),
-    usageElapsedMillis: doublePrecision("usage_elapsed_millis").default(0).notNull(),
-    usageTurns: integer("usage_turns").default(0).notNull(),
-    startedAt: doublePrecision("started_at").notNull(),
-    updatedAt: doublePrecision("updated_at").notNull(),
-    completedAt: doublePrecision("completed_at"),
-    summary: text(),
-  },
-  (_table) => [
-    check("rika_goals_budget_tokens_check", sql`((budget_tokens IS NULL) OR (budget_tokens > 0))`),
-    check(
-      "rika_goals_budget_wall_clock_millis_check",
-      sql`((budget_wall_clock_millis IS NULL) OR (budget_wall_clock_millis > (0)::double precision))`,
-    ),
-    check("rika_goals_check", sql`((status = 'complete'::text) = (completed_at IS NOT NULL))`),
-    check("rika_goals_objective_check", sql`((length(objective) > 0) AND (length(objective) <= 4096))`),
-    check(
-      "rika_goals_status_check",
-      sql`(status = ANY (ARRAY['active'::text, 'paused'::text, 'complete'::text, 'errored'::text]))`,
-    ),
-    check("rika_goals_usage_elapsed_millis_check", sql`(usage_elapsed_millis >= (0)::double precision)`),
-    check("rika_goals_usage_tokens_check", sql`(usage_tokens >= 0)`),
-    check("rika_goals_usage_turns_check", sql`(usage_turns >= 0)`),
-  ],
-)
 export const rikaThreadDeletionOutbox = pgTable("rika_thread_deletion_outbox", {
   threadId: text("thread_id")
     .primaryKey()

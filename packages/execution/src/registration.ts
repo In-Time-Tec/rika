@@ -1,5 +1,4 @@
 import { Pins } from "generalist"
-import { KernelProfile } from "generalist/repl"
 import { Errors, ExecutableRegistration } from "generalist/runtime"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Effect, Function, Schema } from "effect"
@@ -45,7 +44,6 @@ export const codecs = {
   modelRoute: codec("rika-model-route", "1", ExecutionRoute.ExecutionRouteModelSnapshot),
   modelRegistryRoute: codec("rika-model-registry-route", "1", ModelRegistryRoutePayload),
   compaction: codec("rika-compaction", "1", ExecutableRegistration.CompactionPolicy),
-  kernelProfile: codec("rika-kernel-profile", "1", KernelProfile.KernelProfile),
   tool: codec("rika-tool", "1", ToolPayload),
 }
 

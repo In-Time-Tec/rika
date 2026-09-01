@@ -289,26 +289,6 @@ describe("tentative model preview overlay", () => {
       previewReasoning: "tentative thought",
     },
     {
-      name: "cell",
-      content: {
-        _tag: "Block",
-        block: {
-          _tag: "Cell",
-          id: "cell",
-          status: "running",
-          visual: "ts",
-          source: { text: "1 + 1", lines: 1 },
-          output: { stdout: "", stderr: "" },
-          calls: [],
-          epoch: 1,
-          notices: [],
-          files: [],
-        },
-      } as const,
-      previewText: "tentative text",
-      previewReasoning: "tentative thought",
-    },
-    {
       name: "subagent card",
       content: {
         _tag: "Block",

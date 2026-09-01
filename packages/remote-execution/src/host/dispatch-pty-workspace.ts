@@ -1,6 +1,5 @@
 import { Effect, Ref, Semaphore, Stream } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
-import type { Interface as HostedKernel } from "./kernel"
 import { Manager as PtyManager, type Connection as PtyConnection } from "./terminal/pty"
 import { Runtime } from "./runtime"
 import { RepositoryServices } from "../workspace/repositories"
@@ -115,9 +114,6 @@ const makeConsumePtyEvents = (encode: Encoder) => (writer: Writer, delivery: Sem
 export const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
   message: PhaseGrant,
   grants: Ref.Ref<Map<string, PhaseGrant>>,
-  executionEnvironment: Record<string, string>,
-  appliedEnvironment: Ref.Ref<Map<string, string>>,
-  cells: HostedKernel,
   environmentAccess: Semaphore.Semaphore,
   replaceEnvironment: (values: Record<string, string>) => void,
   redactedValues: Set<string> = new Set(),
@@ -131,15 +127,7 @@ export const applyPhaseGrant = Effect.fn("Host.applyPhaseGrant")(function* (
     yield* Ref.update(grants, (current) => new Map(current).set(message.operationKey!, message))
     return
   }
-  yield* environmentAccess.withPermits(1)(
-    Effect.gen(function* () {
-      replaceEnvironment(message.values)
-      if (message.phase !== "runtime") return
-      const applied = yield* Ref.get(appliedEnvironment)
-      for (const [sessionId, digest] of applied) if (digest !== message.digest) yield* cells.restart(sessionId)
-      yield* Ref.set(appliedEnvironment, new Map([...applied.keys()].map((sessionId) => [sessionId, message.digest])))
-    }),
-  )
+  yield* environmentAccess.withPermits(1)(Effect.sync(() => replaceEnvironment(message.values)))
 })
 
 const makeWorkspaceDispatch = (encode: Encoder, sameFence: SameFence) =>

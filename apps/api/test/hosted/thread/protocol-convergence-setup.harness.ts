@@ -24,10 +24,8 @@ import {
   layer as hostedThreadProtocolLayer,
   threadWebSocketAudience,
 } from "../../../src/hosted/thread/protocol"
-import { HostedToolPolicy } from "../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../src/hosted/environment/workspace"
 import { layerTest as hostedWorkerRuntimeLayerTest } from "../../../src/hosted/worker-runtime"
-import { testToolPolicy } from "../execution/tool-policy.fixture"
 import { attachedPayload, completeMockPrompt } from "./protocol/commands.harness"
 import { setup } from "./protocol/database.harness"
 import { fakeApplication, fakeProduct, fakeWorkspace } from "./protocol/fakes.harness"
@@ -129,7 +127,6 @@ export const setupConvergence = (pool: Pool) =>
       Layer.succeed(HostedThreadApplication, operations),
       Layer.succeed(HostedWorkspace, fakeWorkspace(Effect.void, Effect.void)),
       Layer.succeed(ThreadProtocolStore, protocolStore),
-      Layer.succeed(HostedToolPolicy, testToolPolicy),
       BunCrypto.layer,
     )
     yield* Layer.build(

@@ -1,5 +1,4 @@
 import { Controller } from "@rika/e2b-executor/controller"
-import * as BindingModules from "@rika/kernel/binding-modules"
 import {
   AssignmentLeaseEpoch,
   ExecutorAssignmentId,
@@ -8,10 +7,8 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
-import { bindingManifest } from "@rika/remote-execution/protocol"
 import { Clock, Context, Crypto, Effect, Encoding, Layer, Redacted, Schema, Scope } from "effect"
 import { HostedEnvironment } from "../hosted/environment/runtime"
-import { HostedToolPolicy } from "../hosted/execution/tool-policy"
 import { ExecutorGateway, GatewayError, gatewayLayer, type LifecycleStore } from "./gateway"
 
 export const HostedGateway = {
@@ -23,7 +20,6 @@ export const HostedGateway = {
     const controller = yield* Controller
     const environment = yield* HostedEnvironment
     const preparations = yield* WorkspacePreparations
-    const toolPolicy = yield* HostedToolPolicy
     const preparationAccess = Effect.fn("Executor.preparationAccess")(function* (
       input: import("@rika/remote-execution/protocol").AccessWire,
     ) {
@@ -53,23 +49,6 @@ export const HostedGateway = {
             kind: error.reason === "database" ? "transport" : "fenced",
             message: error.message,
           })
-    const hostedBindingModules = (workspace: string) =>
-      BindingModules.make({
-        workspace,
-        workspaceDigest: workspace,
-        trustMode: "hosted",
-        servers: [],
-      })
-    const bindingContract = (workspace: string) =>
-      bindingManifest(
-        hostedBindingModules(workspace).map((module) => ({
-          module: module.name,
-          operations: module.operations.map((operation) => operation.name),
-        })),
-      ).pipe(
-        Effect.provideService(Crypto.Crypto, crypto),
-        Effect.map((manifest) => manifest.digest),
-      )
     const gatewayContext = yield* Layer.buildWithScope(
       gatewayLayer({
         controller,
@@ -207,8 +186,6 @@ export const HostedGateway = {
               Effect.mapError(preparationFailure),
             ),
         },
-        bindingContract,
-        toolPolicy,
       }),
       scope,
     )

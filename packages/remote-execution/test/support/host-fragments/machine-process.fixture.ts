@@ -21,42 +21,42 @@ describe("workspace machine process", () => {
             environment: { RIKA_MACHINE_TEST: "delegated-environment" },
           })
           const written = yield* machine.execute({
-            _tag: "CodingTool",
-            request: { _tag: "Write", path: "delegated.txt", content: "delegated-content" },
+            _tag: "NativeTool",
+            request: { _tag: "Bash", command: "printf delegated-content > delegated.txt" },
           })
           expect(written._tag).toBe("Success")
           expect(yield* fileSystem.readFileString(`${workspace}/delegated.txt`)).toBe("delegated-content")
 
           const environment = yield* machine.execute({
-            _tag: "CodingTool",
+            _tag: "NativeTool",
             request: { _tag: "Bash", command: 'printf "%s" "$RIKA_MACHINE_TEST"' },
           })
           expect(
-            environment._tag === "Success" && environment.value._tag === "CodingTool"
+            environment._tag === "Success" && environment.value._tag === "NativeTool"
               ? environment.value.result.text
               : "",
           ).toBe("delegated-environment")
 
           const started = yield* machine.execute({
-            _tag: "CodingTool",
+            _tag: "NativeTool",
             request: { _tag: "Bash", command: "sleep 0.1; printf background-complete", timeoutMillis: 0 },
           })
           const processId =
-            started._tag === "Success" && started.value._tag === "CodingTool"
+            started._tag === "Success" && started.value._tag === "NativeTool"
               ? (started.value.result.processId ?? "")
               : ""
           expect(processId).not.toBe("")
           const completed = yield* machine.execute({
-            _tag: "CodingTool",
+            _tag: "NativeTool",
             request: { _tag: "ShellCommandStatus", processId, waitMillis: 1_000 },
           })
           expect(
-            completed._tag === "Success" && completed.value._tag === "CodingTool" ? completed.value.result.text : "",
+            completed._tag === "Success" && completed.value._tag === "NativeTool" ? completed.value.result.text : "",
           ).toContain("background-complete")
 
           const interrupted = yield* Effect.forkChild(
             machine.execute({
-              _tag: "CodingTool",
+              _tag: "NativeTool",
               request: {
                 _tag: "Bash",
                 command: "sleep 1; printf late > interrupted.txt",
@@ -69,22 +69,22 @@ describe("workspace machine process", () => {
           yield* Effect.sleep("1200 millis")
           expect(yield* fileSystem.exists(`${workspace}/interrupted.txt`)).toBe(false)
           const afterCancellation = yield* machine.execute({
-            _tag: "CodingTool",
-            request: { _tag: "Write", path: "after-cancellation.txt", content: "still-ready" },
+            _tag: "NativeTool",
+            request: { _tag: "Bash", command: "printf still-ready > after-cancellation.txt" },
           })
           expect(afterCancellation._tag).toBe("Success")
           expect(yield* fileSystem.readFileString(`${workspace}/after-cancellation.txt`)).toBe("still-ready")
 
           const crashed = yield* Effect.result(
             machine.execute({
-              _tag: "CodingTool",
+              _tag: "NativeTool",
               request: { _tag: "Bash", command: 'kill -KILL "$PPID" "$$"', timeoutMillis: 5_000 },
             }),
           )
           expect(crashed._tag).toBe("Failure")
           const recovered = yield* machine.execute({
-            _tag: "CodingTool",
-            request: { _tag: "Write", path: "recovered.txt", content: "recovered" },
+            _tag: "NativeTool",
+            request: { _tag: "Bash", command: "printf recovered > recovered.txt" },
           })
           expect(recovered._tag).toBe("Success")
           expect(yield* fileSystem.readFileString(`${workspace}/recovered.txt`)).toBe("recovered")

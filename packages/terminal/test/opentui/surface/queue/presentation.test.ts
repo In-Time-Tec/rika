@@ -133,10 +133,10 @@ test("renders a subagent tool tree and expands each child independently", () =>
         const collapsed = setup.captureCharFrame()
         expect(collapsed).toContain("Oracle has spoken")
         expect(collapsed).toContain("Review the code")
-        expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4")
-        expect(collapsed).toContain("├ ✓ Subagent finished")
-        expect(collapsed).toContain("├ ✓ $ bun test")
-        expect(collapsed).not.toMatch(/[▸▾]/u)
+        expect(collapsed).toContain("├ ▸ ✓ Read src/a.ts L2-4")
+        expect(collapsed).toContain("├ ▸ ✓ Subagent finished")
+        expect(collapsed).toContain("├ ▸ ✓ $ bun test")
+        expect(collapsed).toMatch(/[▸▾]/u)
         expect(collapsed).toContain("Review complete")
         expect(collapsed).toContain("No defects found.")
         expect(collapsed).not.toContain("##")
@@ -189,7 +189,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(setup.captureCharFrame()).toContain("read child output")
         expect(setup.captureCharFrame()).not.toContain("shell child output")
 
-        yield* openTui(() => setup.mockMouse.click(read.screenX + 12, read.screenY))
+        yield* openTui(() => setup.mockMouse.click(read.screenX + 14, read.screenY))
         expect(opened).toEqual([{ path: "src/a.ts", line: 3, column: 1 }])
         expect(model.expandedRowKeys).toContain("tool:child-read")
 

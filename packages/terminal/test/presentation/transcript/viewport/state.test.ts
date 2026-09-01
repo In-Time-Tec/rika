@@ -103,30 +103,6 @@ const detailCases = [
         "block:detail-item",
       ),
   ],
-  [
-    "cell output",
-    "cell-output",
-    () =>
-      detailModel(
-        {
-          _tag: "Cell",
-          id: "cell-detail",
-          status: "complete",
-          visual: "shell",
-          source: { text: "echo cell-output", lines: 1 },
-          output: {
-            stdout: "cell-output\n".repeat(50),
-            stderr: "",
-          },
-          durationMillis: 1,
-          epoch: 1,
-          notices: [],
-          calls: [],
-          files: [],
-        },
-        "cell:cell-detail",
-      ),
-  ],
 ] as const
 
 it.effect("publishes an expanded transcript as one settled frame", () =>

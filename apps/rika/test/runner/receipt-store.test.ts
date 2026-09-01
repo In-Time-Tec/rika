@@ -26,8 +26,6 @@ const snapshot: ForegroundRunnerSnapshot = {
   leaseExpiresAt: 2_000_000_000_000,
   heartbeatIntervalMillis: 20_000,
   cursor: { sequence: 3, value: "cursor-3" },
-  receipts: [],
-  cells: [],
   machines: [],
 }
 

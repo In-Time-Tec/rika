@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { isExpandableBody, toolBody } from "../../../../src/presentation/transcript/tool/body"
+import { isExpandableBody, toolBody, toolResultText } from "../../../../src/presentation/transcript/tool/body"
 import type { TranscriptBlock } from "../../../../src/state/transcript/model"
 
 const call = (
@@ -66,5 +66,12 @@ describe("tool body contract", () => {
     const body = toolBody(call({ action: "shell", result: { text: "hello" } }))
     expect(body).toMatchObject({ _tag: "Text", text: "hello" })
     expect(isExpandableBody(body)).toBe(true)
+  })
+
+  test("formats a native typed result through the neutral result presentation", () => {
+    expect(toolResultText({ status: "complete", count: 2 })).toBe(`{
+  "status": "complete",
+  "count": 2
+}`)
   })
 })

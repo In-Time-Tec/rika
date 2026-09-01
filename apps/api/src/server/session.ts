@@ -155,23 +155,13 @@ const ownedSession = (handler: {
 
 const ReverseMessage = Schema.fromJsonString(
   Schema.Struct({
-    _tag: Schema.Literals(["BindingInvoke", "MachineResult", "ExecutorConnectionFailed"]),
+    _tag: Schema.Literals(["MachineResult", "ExecutorConnectionFailed"]),
     payload: Schema.optional(Schema.Unknown),
   }),
 )
 const decodeReverseMessage = Schema.decodeUnknownExit(ReverseMessage)
 const reverse = (message: WebSocketMessage) =>
   Exit.isSuccess(decodeReverseMessage(Buffer.from(message).toString("utf8")))
-
-const DurableMessage = Schema.fromJsonString(
-  Schema.Struct({
-    _tag: Schema.Literals(["CellLifecycle", "CellResult", "ExecutorConnectionFailed"]),
-    payload: Schema.optional(Schema.Unknown),
-  }),
-)
-const decodeDurableMessage = Schema.decodeUnknownExit(DurableMessage)
-const durable = (message: WebSocketMessage) =>
-  Exit.isSuccess(decodeDurableMessage(Buffer.from(message).toString("utf8")))
 
 const gatewaySession = (
   kind: "executor" | "runner",
@@ -183,7 +173,7 @@ const gatewaySession = (
     receive: gateway.receive,
     disconnected: (socket) => (socket === undefined ? Effect.void : gateway.disconnected(socket)),
     active: gateway.active,
-    durable,
+    durable: () => false,
     concurrent: reverse,
     runConcurrent,
   })

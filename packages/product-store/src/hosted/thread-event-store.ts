@@ -15,7 +15,7 @@ import {
   ThreadId,
 } from "@rika/product/hosted-model"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
-import { and, eq, gt, or, sql, type SQLWrapper } from "drizzle-orm"
+import { and, eq, gt, inArray, or, sql, type SQLWrapper } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Layer, Schema } from "effect"
 import type { Row as SqlRow } from "effect/unstable/sql/SqlConnection"
@@ -215,7 +215,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedThreadEventStoreSer
                 and(
                   eq(rikaHostedExecutorOperations.assignmentId, input.assignmentId),
                   eq(rikaHostedExecutorOperations.operationKey, input.idempotencyKey),
-                  eq(rikaHostedExecutorOperations.state, "unknown"),
+                  inArray(rikaHostedExecutorOperations.state, ["completed", "unknown"]),
                   eq(
                     rikaHostedExecutorOperations.dispatchedGeneration,
                     sql<number>`${input.assignmentGeneration}::bigint`,

@@ -71,45 +71,6 @@ test("renders every transcript block variant and sidebar state", () => {
     { _tag: "ImageAttachment", name: "a.png", mediaType: "image/png" },
     { _tag: "ImageAttachment", name: "partial.png", mediaType: "image/png", width: 2 },
     { _tag: "ImageAttachment", name: "b.png", mediaType: "image/png", width: 2, height: 3, bytes: 4 },
-    {
-      _tag: "Cell",
-      id: "cell-running",
-      status: "running",
-      visual: "ts",
-      source: { text: 'await rika.workspace.read({ path: "a.ts" })', lines: 1 },
-      output: { stdout: "", stderr: "" },
-      epoch: 0,
-      notices: [],
-      calls: [],
-      files: [],
-    },
-    {
-      _tag: "Cell",
-      id: "cell-complete",
-      status: "complete",
-      visual: "shell",
-      source: { text: "await Bun.$`bun test`", lines: 1 },
-      output: { stdout: "pass\n", stderr: "" },
-      result: "0",
-      durationMillis: 1_240,
-      epoch: 1,
-      notices: [{ kind: "restored", detail: "Restored total." }],
-      calls: [],
-      files: [],
-    },
-    {
-      _tag: "Cell",
-      id: "cell-failed",
-      status: "failed",
-      visual: "ts",
-      source: { text: 'throw new Error("boom")', lines: 1 },
-      output: { stdout: "", stderr: "trace\n" },
-      error: { name: "Error", message: "boom" },
-      epoch: 1,
-      notices: [],
-      calls: [],
-      files: [],
-    },
   ] as const
   const renderedBlocks = blocks.map((block) => renderBlock(block)).join("\n")
   expect(renderedBlocks).toContain("✕ Result")
@@ -119,9 +80,6 @@ test("renders every transcript block variant and sidebar state", () => {
   expect(renderedBlocks).not.toContain(" at 42")
   expect(renderedBlocks).toContain("ERROR\n  Execution failed: Model unavailable")
   expect(renderedBlocks).toContain("2×3 · 4 B")
-  expect(renderedBlocks).toContain('⠿\n  await rika.workspace.read({ path: "a.ts" })')
-  expect(renderedBlocks).toContain("✓ $\n  await Bun.$`bun test`")
-  expect(renderedBlocks).toContain('✕\n  throw new Error("boom")')
   const state = model({
     blocks: [...blocks],
     currentThreadId: "a",

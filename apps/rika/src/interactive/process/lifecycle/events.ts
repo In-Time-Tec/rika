@@ -30,7 +30,7 @@ type SubmissionEvent = EventWithTag<"SubmissionAdmitted" | "SubmissionRejected" 
 type ExecutionOutcomeEvent = EventWithTag<
   "ExecutionFailed" | "TurnRetryScheduled" | "ShellCompleted" | "AssistantCompleted"
 >
-type ThreadDataEvent = EventWithTag<"ThreadsListed" | "ContextDiagnostics" | "GoalChanged">
+type ThreadDataEvent = EventWithTag<"ThreadsListed" | "ContextDiagnostics">
 type ThreadIdentityEvent = EventWithTag<"ThreadTitled" | "ThreadActivated">
 type ThreadPreviewEvent = EventWithTag<"ThreadPreviewLoaded" | "ThreadPreviewFailed">
 
@@ -51,7 +51,7 @@ const isExecutionOutcomeEvent = (event: InteractiveEventType): event is Executio
   event._tag === "AssistantCompleted"
 
 const isThreadDataEvent = (event: InteractiveEventType): event is ThreadDataEvent =>
-  event._tag === "ThreadsListed" || event._tag === "ContextDiagnostics" || event._tag === "GoalChanged"
+  event._tag === "ThreadsListed" || event._tag === "ContextDiagnostics"
 
 const isThreadIdentityEvent = (event: InteractiveEventType): event is ThreadIdentityEvent =>
   event._tag === "ThreadTitled" || event._tag === "ThreadActivated"
@@ -251,11 +251,6 @@ export const makeEventRouter = (runtime: Runtime) => {
         _tag: "BlockAdded",
         block: { _tag: "Notification", title: "Context resolution", detail: event.messages.join("\n") },
       })
-    } else if (event._tag === "GoalChanged") {
-      if (loop.model.currentThreadId !== event.threadId) return false
-      const action: TerminalMessage = { _tag: "GoalChanged" }
-      if (event.goal !== undefined) action.goal = event.goal
-      loop.model = update(loop.model, action)
     }
     return true
   }

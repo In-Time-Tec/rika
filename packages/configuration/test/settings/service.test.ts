@@ -130,7 +130,7 @@ describe("ConfigService", () => {
         oracle: { alias: "bedrock-terra", effort: "medium" },
         agents: {
           task: { alias: "bedrock-fable", effort: "xhigh" },
-          readThread: { alias: "bedrock-terra", effort: "medium" },
+          review: { alias: "bedrock-terra", effort: "medium" },
         },
       })
       expect(config.settings.compaction).toEqual({
@@ -174,7 +174,7 @@ describe("ConfigService", () => {
             modes: {
               medium: {
                 oracle: { alias: "bedrock-terra", effort: "medium" },
-                agents: { readThread: { alias: "bedrock-terra" } },
+                agents: { review: { alias: "bedrock-terra" } },
               },
             },
           },

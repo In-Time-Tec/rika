@@ -1,4 +1,4 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import stringWidth from "string-width"
 import { idleSpinnerFrame } from "./spinner"
 
@@ -53,10 +53,52 @@ export const wrapBodyText: {
     arg2: Parameters<typeof wrapBodyTextImpl>[2],
   ): ReturnType<typeof wrapBodyTextImpl>
 } = Function.dual(3, wrapBodyTextImpl)
+const RowStatus = Schema.Literals([
+  "queued",
+  "running",
+  "waiting",
+  "cancelling",
+  "complete",
+  "failed",
+  "rejected",
+  "cancelled",
+  "unknown",
+])
+export type RowStatus = typeof RowStatus.Type
+
+const rowStatusIconImpl = (status: RowStatus, frame = idleSpinnerFrame): string => {
+  if (status === "running" || status === "waiting" || status === "cancelling") return frame
+  if (status === "failed") return "✕"
+  if (status === "rejected" || status === "cancelled") return "⊘"
+  if (status === "unknown") return "?"
+  if (status === "queued") return "◷"
+  return "✓"
+}
+
+export const rowStatusIcon: {
+  (status: RowStatus, frame?: string): string
+  (frame?: string): (status: RowStatus) => string
+} = Function.dual((args) => args.length > 1 || Schema.is(RowStatus)(args[0]), rowStatusIconImpl)
+
+const statusPrecedence: ReadonlyArray<RowStatus> = [
+  "failed",
+  "rejected",
+  "unknown",
+  "cancelled",
+  "cancelling",
+  "running",
+  "waiting",
+  "queued",
+  "complete",
+]
+
+export const aggregateRowStatus = (statuses: ReadonlyArray<RowStatus>): RowStatus =>
+  statusPrecedence.find((status) => statuses.includes(status)) ?? "unknown"
+
 const iconCharImpl = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
-  if (running) return frame
-  if (cancelled) return "⊘"
-  return failed ? "✕" : "✓"
+  if (failed) return rowStatusIcon("failed", frame)
+  if (cancelled) return rowStatusIcon("cancelled", frame)
+  return rowStatusIcon(running ? "running" : "complete", frame)
 }
 
 export const iconChar: {

@@ -11,7 +11,6 @@ import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import { InteractiveCommand } from "@rika/product/interactive-command"
 import { HostedProduct, HostedProductError, type ThreadAuthority } from "../product"
 import { HostedThreadApplication, HostedThreadApplicationError } from "./application"
-import { HostedToolPolicy, HostedToolPolicyError } from "../execution/tool-policy"
 import { HostedWorkspace, HostedWorkspaceError } from "../environment/workspace"
 
 class CommandApplicationError extends Schema.TaggedError<CommandApplicationError>()("CommandApplicationError", {
@@ -31,7 +30,6 @@ type CommandFailure =
   | HostedPersistenceError
   | HostedProductError
   | HostedWorkspaceError
-  | HostedToolPolicyError
   | HostedThreadApplicationError
 
 const expectedControlAction = (command: Pick<InteractiveMutatingCommand, "_tag">) => {
@@ -79,14 +77,6 @@ const productFailure = (error: HostedProductError) => {
   return CommandApplicationError.make({ kind, message: error.message })
 }
 
-const policyFailure = (error: HostedToolPolicyError) => {
-  let kind: CommandApplicationError["kind"] = "unavailable"
-  if (error.kind === "forbidden") kind = "forbidden"
-  else if (error.kind === "conflict") kind = "conflict"
-  else if (error.kind === "unknown-tool") kind = "invalid"
-  return CommandApplicationError.make({ kind, message: error.message })
-}
-
 const commandFailure = (error: CommandFailure) => {
   if (Schema.is(CommandApplicationError)(error)) return error
   if (Schema.is(HostedPersistenceError)(error)) return persistenceFailure(error)
@@ -96,7 +86,6 @@ const commandFailure = (error: CommandFailure) => {
       kind: error.kind === "unsupported" ? "invalid" : "unavailable",
       message: error.message,
     })
-  if (Schema.is(HostedToolPolicyError)(error)) return policyFailure(error)
   return CommandApplicationError.make({
     kind: "unavailable",
     message: Schema.is(HostedThreadApplicationError)(error) ? error.message : "Thread command application failed",
@@ -192,7 +181,6 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
     const product = yield* HostedProduct
     const operations = yield* HostedThreadApplication
     const workspace = yield* HostedWorkspace
-    const toolPolicy = yield* HostedToolPolicy
 
     const complete = Effect.fn("HostedThreadCommandWorker.complete")(function* (
       record: ThreadProtocolCommand,
@@ -265,29 +253,18 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
       return yield* complete(record, claimToken, { _tag: "Applied" }, [])
     })
 
-    const recordAuthorization = Effect.fn("HostedThreadCommandWorker.recordAuthorization")(function* (
+    const hasPendingAuthorization = Effect.fn("HostedThreadCommandWorker.hasPendingAuthorization")(function* (
       record: ThreadProtocolCommand,
       command: Extract<Command, { readonly _tag: "Approve" | "Deny" }>,
     ) {
       const snapshot = yield* operations.snapshot(record.ownerId, ProductThreadId.make(record.threadId))
-      const pending = snapshot.pendingAuthorizations.find(
+      return snapshot.pendingAuthorizations.some(
         (authorization) =>
           authorization.threadId === record.threadId &&
           authorization.turnId === command.turnId &&
           authorization.authorizationId === command.authorizationId &&
           checkpointEquivalent(authorization.checkpoint, command.checkpoint),
       )
-      if (pending === undefined) return false
-      yield* toolPolicy.recordDecision({
-        ownerId: record.ownerId,
-        threadId: record.threadId,
-        turnId: command.turnId,
-        actor: record.actor,
-        authorizationId: command.authorizationId,
-        checkpoint: command.checkpoint,
-        decision: command._tag === "Approve" ? "approved" : "denied",
-      })
-      return true
     })
 
     const resolveCancellation = (
@@ -324,7 +301,7 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
       authority: ThreadAuthority,
     ) {
       if (command._tag === "Approve" || command._tag === "Deny") {
-        const pending = yield* recordAuthorization(record, command)
+        const pending = yield* hasPendingAuthorization(record, command)
         if (!pending)
           return yield* complete(
             record,
@@ -459,9 +436,7 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
           ).pipe(Effect.mapError(commandFailure))
         }),
         Effect.raceFirst(renew(record, claimToken)),
-        Effect.onExit((exit) =>
-          Exit.isSuccess(exit) || Cause.hasInterrupts(exit.cause) ? release : Effect.void,
-        ),
+        Effect.onExit((exit) => (Exit.isSuccess(exit) || Cause.hasInterrupts(exit.cause) ? release : Effect.void)),
       )
     }
   })

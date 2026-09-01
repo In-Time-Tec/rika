@@ -8,9 +8,10 @@ import { ready, loading } from "../loadable"
 import { streamActivity } from "../activity/model"
 import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from "../queue/model"
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../submission"
-import { expandableRowIds, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/row"
 import { changedFiles } from "../changed-file"
+import { isTranscriptUnitExpanded, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/row"
 import { cancelTranscriptBlocks } from "../transcript/model"
+import { detailOverlay } from "./detail-overlay"
 
 const TranscriptItemSchema = Schema.Struct({
   _tag: Schema.Literals(["Entry", "Block"]),
@@ -79,9 +80,19 @@ const toggleReasoning = (model: Model, index: number): Model => {
   if (unit === undefined) return model
   const id = transcriptUnitId(model, unit)
   const expanded = new Set(model.expandedRowKeys)
-  if (expanded.has(id)) expanded.delete(id)
-  else expanded.add(id)
-  return { ...model, expandedRowKeys: [...expanded] }
+  const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
+  if (isTranscriptUnitExpanded(model, unit)) {
+    expanded.delete(id)
+    explicitlyCollapsed.add(id)
+  } else {
+    expanded.add(id)
+    explicitlyCollapsed.delete(id)
+  }
+  return {
+    ...model,
+    expandedRowKeys: [...expanded],
+    explicitlyCollapsedRowKeys: [...explicitlyCollapsed],
+  }
 }
 
 const reduceReasoningOverlay = (model: Model, message: Message): Model | undefined => {
@@ -336,42 +347,6 @@ const reduceCancelledExecutionOverlay = (model: Model, message: Message): Model 
   return undefined
 }
 
-const reduceDetailOverlay = (model: Model, message: Message): Model | undefined => {
-  switch (message._tag) {
-    case "DetailMoved": {
-      const ids = expandableRowIds(model)
-      const count = ids.length
-      if (count === 0) return model
-      const current = ids.indexOf(model.detailSelection ?? "")
-      let nextIndex: number
-      if (current < 0) nextIndex = message.offset < 0 ? count - 1 : 0
-      else nextIndex = (((current + message.offset) % count) + count) % count
-      return { ...model, detailSelection: ids[nextIndex]! }
-    }
-    case "DetailToggled": {
-      const id = message.id ?? model.detailSelection
-      if (id === undefined) return model
-      if (!expandableRowIds(model).includes(id)) return model
-      const expanded = new Set(model.expandedRowKeys)
-      if (expanded.has(id)) expanded.delete(id)
-      else expanded.add(id)
-      return {
-        ...model,
-        detailSelection: message.id === undefined ? id : model.detailSelection,
-        expandedRowKeys: [...expanded],
-      }
-    }
-    case "AllDetailsToggled": {
-      const roots = expandableRowIds({ ...model, expandedRowKeys: [] })
-      if (roots.length === 0) return model
-      const all = expandableRowIds({ ...model, expandedRowKeys: roots })
-      const expanded = new Set(model.expandedRowKeys)
-      return { ...model, expandedRowKeys: all.every((id) => expanded.has(id)) ? [] : [...all] }
-    }
-  }
-  return undefined
-}
-
 const reduceLocalOverlay = (model: Model, message: Message): Model | undefined => {
   const sameChangedFiles = changedFiles.same
   switch (message._tag) {
@@ -455,7 +430,7 @@ const reduceOverlayImpl = (
   reduceExecutionOverlay(model, message) ??
   reduceFailedExecutionOverlay(model, message) ??
   reduceCancelledExecutionOverlay(model, message) ??
-  reduceDetailOverlay(model, message) ??
+  detailOverlay.reduce(model, message) ??
   reduceLocalOverlay(model, message) ??
   reduceThreadOverlay(model, message)
 

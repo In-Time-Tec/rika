@@ -77,8 +77,12 @@ export const inspectRunnerCheckout = Effect.fn("RunnerCheckout.inspect")(functio
       checkoutFingerprint: CheckoutFingerprint.make(checkoutFingerprint),
       repository,
       workspaceIdentity: WorkspaceId.make(workspaceIdentity),
-      kernel: { runtime: "bun", runtimeVersion: process.versions.bun ?? "unknown", trustMode: "trusted-local" },
-      capabilities: { cells: true, checkpoints: false, pty: false },
+      nativeToolRuntime: {
+        runtime: "bun",
+        runtimeVersion: process.versions.bun ?? "unknown",
+        trustMode: "trusted-local",
+      },
+      capabilities: { nativeTools: true, checkpoints: false, pty: false },
       remoteThreadCreation: input.remoteThreadCreation,
     },
   } satisfies RunnerCheckout

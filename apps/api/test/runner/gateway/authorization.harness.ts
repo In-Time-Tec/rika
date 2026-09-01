@@ -7,29 +7,26 @@ import {
   rikaHostedClients,
   rikaHostedDevices,
   rikaHostedExecutorAssignments,
-  rikaHostedExecutorOperations,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
 } from "@rika/product-store/database-schema"
 import * as HostedPostgres from "@rika/product-store/layer"
 import { count, eq, sql } from "drizzle-orm"
-import { Effect, Fiber, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted } from "effect"
 import {
   access,
   assignmentId,
   authority,
-  cellRequest,
+  toolRequest,
   decode,
   deviceId,
   encode,
   live,
   makeRunnerGateway,
-  persistTerminal,
-  response,
   socket,
   workspaceCapabilities,
 } from "./harness"
-import { eventually, isolated, operationState, seed } from "./database.harness"
+import { isolated, operationState, seed } from "./database.harness"
 
 it.effect.skipIf(!live)("fences organization dispatch immediately after membership deletion", () =>
   isolated(({ url, databaseClient }) =>
@@ -48,7 +45,7 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
         yield* Effect.tryPromise(() =>
           databaseClient.delete(identityMember).where(eq(identityMember.id, "member-local-gateway")),
         )
-        const error = yield* gateway.execute(cellRequest("operation-revoked-membership")).pipe(Effect.flip)
+        const error = yield* gateway.execute(toolRequest("operation-revoked-membership")).pipe(Effect.flip)
         expect(error).toMatchObject({
           kind: "fenced",
           message: "Runner fence is no longer current",
@@ -73,7 +70,7 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
             checkoutFingerprint: "checkout-local-gateway",
             workspaceId: "workspace-local-gateway",
             repository: {},
-            kernelProfile: {},
+            nativeToolRuntime: {},
             capabilities: {},
           }),
         )
@@ -107,11 +104,13 @@ it.effect.skipIf(!live)("durably revokes a Runner immediately after device revoc
         yield* gateway.receive(
           target,
           encode({
-            _tag: "LocalCellResult",
+            _tag: "MachineResult",
             access,
             operationKey: "operation-revoked-device",
             attempt: 0,
-            response,
+            machineId: "revoked-machine",
+            requestDigest: "a".repeat(64),
+            outcome: { _tag: "Unknown", message: "revoked" },
           }),
         )
         yield* Effect.yieldNow
@@ -181,7 +180,7 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
           target,
           encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
         )
-        expect(yield* gateway.execute(cellRequest("operation-environment-changed")).pipe(Effect.flip)).toMatchObject({
+        expect(yield* gateway.execute(toolRequest("operation-environment-changed")).pipe(Effect.flip)).toMatchObject({
           kind: "fenced",
           message: "Runner fence is no longer current",
         })
@@ -193,11 +192,13 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
   ),
 )
 
-it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay", () =>
+it.effect.skipIf(!live)("records an uncertain native delivery as unknown", () =>
   isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        yield* seed(databaseClient, "operation-personal", { ownerKind: "personal", state: "accepted" })
+        const operationKey = "operation-personal"
+        const request = toolRequest(operationKey)
+        yield* seed(databaseClient, operationKey, { ownerKind: "personal", request, state: "accepted" })
         expect(yield* Effect.tryPromise(() => databaseClient.select({ count: count() }).from(identityMember))).toEqual([
           { count: 0 },
         ])
@@ -211,48 +212,16 @@ it.effect.skipIf(!live)("keeps uncertain delivery dispatched for receipt replay"
           encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
         )
         target.failSend = true
-        const running = yield* Effect.forkChild(gateway.execute(cellRequest("operation-personal")))
-        yield* eventually(() =>
-          target.sent.map((value) => decode(value)).find((message) => message._tag === "CellExecute"),
+        expect(yield* gateway.execute(request)).toMatchObject({
+          response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
+          outcome: "unknown",
+          eventPersisted: true,
+        })
+        expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "MachineExecute")).toBe(
+          true,
         )
-        yield* Fiber.interrupt(running)
-        expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "CellCancel")).toBe(false)
-        expect(yield* operationState(databaseClient, "operation-personal")).toEqual([
-          { state: "dispatched", events: 0 },
-        ])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "unknown", events: 1 }])
       }),
     ),
   ),
-)
-
-it.effect.skipIf(!live)(
-  "rejects a completion whose current assignment lease does not match the presented session",
-  () =>
-    isolated(({ url, databaseClient }) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* seed(databaseClient, "operation-stale", { leaseEpoch: 1 })
-          const context = yield* Layer.build(
-            Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
-          )
-          const gateway = yield* makeRunnerGateway(authority({ renewedLeaseEpoch: 2 })).pipe(Effect.provide(context))
-          const target = socket()
-          const renewed = { ...access, leaseEpoch: 2 }
-          yield* gateway.receive(
-            target,
-            encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access: renewed }),
-          )
-          yield* persistTerminal(gateway, target, renewed, "operation-stale")
-          expect(target.closed).toEqual([[1008, "fenced"]])
-          expect(
-            yield* Effect.tryPromise(() =>
-              databaseClient
-                .select({ state: rikaHostedExecutorOperations.state })
-                .from(rikaHostedExecutorOperations)
-                .where(eq(rikaHostedExecutorOperations.operationKey, "operation-stale")),
-            ),
-          ).toEqual([{ state: "dispatched" }])
-        }),
-      ),
-    ),
 )

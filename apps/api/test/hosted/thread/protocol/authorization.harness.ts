@@ -10,15 +10,12 @@ import { TurnId } from "@rika/product/turn-record"
 import { HostedThreadApplication, type HostedThreadApplicationService } from "../../../../src/hosted/thread/application"
 import { HostedProduct, type HostedProductService } from "../../../../src/hosted/product"
 import { HostedThreadProtocol, layer as hostedThreadProtocolLayer } from "../../../../src/hosted/thread/protocol"
-import { HostedToolPolicy } from "../../../../src/hosted/execution/tool-policy"
 import { HostedWorkspace } from "../../../../src/hosted/environment/workspace"
-import { testToolPolicy } from "../../execution/tool-policy.fixture"
 
 import { actor, assignmentId, memoryStore, ownerId, presenceLayer, snapshot, threadId } from "./memory.fixture"
 
 it.effect("admits authorization decisions without applying them in the socket session", () => {
   const store = memoryStore()
-  const decisions: Array<Parameters<typeof testToolPolicy.recordDecision>[0]> = []
   const checkpoint = {
     version: ExecutionProjection.projectionVersion,
     cursor: "authorization-cursor",
@@ -94,10 +91,6 @@ it.effect("admits authorization decisions without applying them in the socket se
     ),
     Layer.succeed(ThreadProtocolStore, store),
     presenceLayer,
-    Layer.succeed(HostedToolPolicy, {
-      ...testToolPolicy,
-      recordDecision: (input) => Effect.sync(() => void decisions.push(input)),
-    }),
     BunCrypto.layer,
   )
   return Effect.scoped(
@@ -149,7 +142,6 @@ it.effect("admits authorization decisions without applying them in the socket se
       ])
       expect(delivered).toEqual([])
       expect(store.command("approve-command")?.result).toBeUndefined()
-      expect(decisions).toEqual([])
       const repaired = yield* protocol.connect("ticket-repaired", "/api/v1/threads/socket")
       expect(
         yield* repaired.receive({

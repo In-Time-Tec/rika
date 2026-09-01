@@ -6,7 +6,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { rikaHostedEnvironmentValues, rikaHostedOwners } from "@rika/product-store/database-schema"
 import * as HostedStore from "@rika/product-store/layer"
-import { ApiMessage, type CellResponse } from "@rika/remote-execution/protocol"
+import { ApiMessage, type MachineOutcome } from "@rika/remote-execution/protocol"
 import { asc, eq, inArray } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { Clock, Context, DateTime, Effect, Layer, Option, Random, Redacted, Ref, Schema } from "effect"
@@ -24,7 +24,6 @@ import { HostedProduct, layer as hostedProductLayer } from "../../../api/src/hos
 import { testLayer as hostedModelRegistryTestLayer } from "../../../api/src/hosted/environment/model-registry"
 import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../../api/src/hosted/repositories"
 import { layer as runnerExecutorLayer } from "../../../api/src/runner/executor"
-import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "../../../api/src/hosted/execution/tool-policy"
 import { makeRikaApiHandler } from "../../../api/src/api"
 import type { HttpDependencies } from "../../../api/src/server/http"
 import * as HostedCommand from "../../src/command/root/hosted"
@@ -90,27 +89,38 @@ it.layer(bunLayer)((test) => {
           let helloAccepted = 0
           const creates: Array<CreateRequest> = []
           const bootstraps: Array<BootstrapRequest> = []
-          const operations: Array<Extract<ApiMessage, { readonly _tag: "CellExecute" }>> = []
+          const operations: Array<Extract<ApiMessage, { readonly _tag: "MachineExecute" }>> = []
           const closes: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
-          const response: CellResponse = {
+          const outcome: MachineOutcome = {
             _tag: "Success",
-            result: { exitCode: 0, stdout: "hosted-mvp\n", stderr: "" },
+            value: {
+              _tag: "NativeTool",
+              result: {
+                text: "hosted-mvp\n",
+                truncated: false,
+                exitCode: 0,
+                stdout: "hosted-mvp\n",
+                stderr: "",
+              },
+            },
           }
           const socket: Socket = {
             send: (frame) => {
               const message = Schema.decodeSync(Schema.fromJsonString(ApiMessage))(frame)
               if (message._tag === "ExecutorWelcome") helloAccepted += 1
-              if (message._tag === "CellExecute") {
+              if (message._tag === "MachineExecute") {
                 operations.push(message)
                 runFork(
                   gateway.current!.receive(
                     socket,
                     encodeExecutorMessage({
-                      _tag: "CellResult",
-                      access: message.request.access,
-                      operationKey: message.request.operationKey,
-                      attempt: message.request.attempt,
-                      response,
+                      _tag: "MachineResult",
+                      access: message.access,
+                      operationKey: message.operationKey,
+                      attempt: message.attempt,
+                      machineId: message.machineId,
+                      requestDigest: message.requestDigest,
+                      outcome,
                     }),
                   ),
                 )
@@ -147,7 +157,7 @@ it.layer(bunLayer)((test) => {
                             processIncarnation: "fake-e2b-host-1",
                           },
                           templateBuildId: creates[0]!.templateBuildId,
-                          capabilities: { cells: true, checkpoints: false, pty: false },
+                          capabilities: { nativeTools: true, checkpoints: false, pty: false },
                           workspaceCapabilities,
                           cursors: { command: 0, event: 0, pty: 0 },
                           latestCheckpointId: null,
@@ -217,20 +227,17 @@ it.layer(bunLayer)((test) => {
             encryptionKey: Redacted.make(Buffer.alloc(32, 1).toString("base64")),
             protectedEgressHosts: new Set([new URL(url).hostname]),
           }).pipe(Layer.provide(shared))
-          const toolPolicyLayer = hostedToolPolicyLayer.pipe(Layer.provide(shared))
           const executorLayer = executorService.pipe(
             Layer.provide(controller),
             Layer.provide(environmentLayer),
-            Layer.provide(toolPolicyLayer),
             Layer.provideMerge(runnerExecutorLayer.pipe(Layer.provide(shared))),
             Layer.provide(shared),
           )
           yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
           const context = yield* Layer.build(
-            Layer.mergeAll(productLayer, executorLayer, toolPolicyLayer).pipe(Layer.provideMerge(shared)),
+            Layer.mergeAll(productLayer, executorLayer).pipe(Layer.provideMerge(shared)),
           )
           const product = Context.get(context, HostedProduct)
-          const toolPolicy = Context.get(context, HostedToolPolicy)
           const executor = Context.get(context, Executor)
           gateway.current = executor.gateway
           const connection = yield* product.createConnection({
@@ -294,7 +301,6 @@ it.layer(bunLayer)((test) => {
               revokeAll: () => Effect.void,
             } satisfies CliDeviceDirectory,
             product,
-            toolPolicy,
             threads: {
               issueTicket: () =>
                 Effect.succeed({

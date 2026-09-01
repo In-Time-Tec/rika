@@ -1,4 +1,3 @@
-import { KernelPool, KernelSnapshotStore } from "generalist/repl"
 import {
   Approval,
   ExecutableManifest,
@@ -15,15 +14,9 @@ import * as ExecutionSessionLifecycle from "@rika/product/execution-session-life
 import { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type { ProviderCredentialStore } from "@rika/product/provider-credential-store"
 export type ProviderCredentialStoreService = ProviderCredentialStore["Service"]
-import { Cause, Context, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
-import {
-  type ConfigureOptions,
-  type KernelOptions,
-  type RemoteCellRoute,
-  configure,
-  resolveCellRoute,
-} from "../routing/route"
+import { type ConfigureOptions, type RemoteToolRoute, configure } from "../routing/route"
 import * as Route from "../routing/route"
 import * as Postgres from "../postgres"
 import { TreeProjector } from "../projection/tree/projector"
@@ -40,37 +33,12 @@ import {
   titlePrompt,
   titleRunId,
 } from "./runtime-support"
-import type {
-  Cells,
-  CommonOptions,
-  HostedOptions,
-  KernelPoolServices,
-  LocalCells,
-  LocalCellsOptions,
-  MemoryOptions,
-} from "./runtime-options"
+import type { CommonOptions, HostedOptions, MemoryOptions } from "./runtime-options"
 export { makeHostedModelObserver, makeModelTerminalTelemetry } from "./runtime-telemetry"
 export type { ModelTerminalObservation } from "./runtime-telemetry"
-export type {
-  Cells,
-  CommonOptions,
-  HostedOptions,
-  KernelPoolServices,
-  LocalCells,
-  LocalCellsOptions,
-  MemoryOptions,
-} from "./runtime-options"
+export type { CommonOptions, HostedOptions, MemoryOptions } from "./runtime-options"
 export const approvalTarget = TreeProjector.authorizationTarget
-const derivedKernelOptions = (dataRoot: string): KernelOptions => ({ runtimeVersion: Bun.version, dataRoot })
-export const localCells = (options: LocalCellsOptions): LocalCells => ({ _tag: "Local", ...options })
-export const remoteCells = (options: Omit<RemoteCellRoute, "_tag">): RemoteCellRoute => ({ _tag: "Remote", ...options })
-const resolveCells = (cells: Cells | undefined): Route.CellResolver | undefined => {
-  if (cells === undefined || cells._tag === "Remote") return cells
-  return {
-    _tag: "Local",
-    forWorkspace: cells.forWorkspace,
-  }
-}
+export const remoteTools = (options: Omit<RemoteToolRoute, "_tag">): RemoteToolRoute => ({ _tag: "Remote", ...options })
 const RuntimeAdmission = Schema.Struct({
   runId: Schema.String,
   treePolicy: Schema.optionalKey(TreePolicy.TreePolicy),
@@ -115,19 +83,18 @@ const make = (
     const prepareTurn: ExecutionGateway.Interface["prepareTurn"] = Effect.fn("ExecutionGateway.prepareTurn")(function* (
       input,
     ) {
-      const resolver = resolveCells(options.cells)
-      const cell = resolver === undefined ? undefined : yield* resolveCellRoute(resolver, input.workspaceId)
-      if (cell?._tag === "Remote")
-        yield* cell.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
+      if (options.tools?._tag === "Remote")
+        yield* options.tools.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
       const turnCapabilities =
         options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
       const configureOptions: ConfigureOptions = {
         executionRoute: input.executionRoute,
         workspace: input.workspaceId,
         executionIdentity: { threadId: input.threadId, turnId: input.turnId },
-        kernel: options.kernel,
       }
-      if (cell !== undefined) Object.assign(configureOptions, { cell })
+      Object.assign(configureOptions, {
+        tools: options.tools === undefined ? { _tag: "Local" as const } : options.tools,
+      })
       if (turnCapabilities !== undefined)
         Object.assign(configureOptions, {
           skills: turnCapabilities.skills,
@@ -319,31 +286,9 @@ const make = (
         ),
     })
     const unavailable = (cause: unknown) => ExecutionSessionLifecycle.Unavailable.make({ message: message(cause) })
-    const builtPools: Effect.Effect<
-      ReadonlyArray<
-        | Context.Context<KernelPoolServices>
-        | Context.Context<KernelPoolServices | KernelSnapshotStore.KernelSnapshotStore>
-      >
-    > = options.cells?._tag === "Local" ? options.cells.built : Effect.succeed([])
     const lifecycle = ExecutionSessionLifecycle.Service.of({
       requestCancellation: (input) => runtime.cancelSession(input).pipe(Effect.mapError(unavailable)),
       awaitTerminal: (input) => runtime.awaitSessionTerminal(input).pipe(Effect.mapError(unavailable)),
-      closeKernel: ({ sessionId }) =>
-        Effect.flatMap(builtPools, (pools) =>
-          Effect.forEach(
-            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelPool.KernelPool))),
-            (service) => service.close(sessionId).pipe(Effect.mapError(unavailable)),
-            { discard: true },
-          ),
-        ),
-      dropKernelState: ({ sessionId }) =>
-        Effect.flatMap(builtPools, (pools) =>
-          Effect.forEach(
-            pools.flatMap((pool) => Option.toArray(Context.getOption(pool, KernelSnapshotStore.KernelSnapshotStore))),
-            (service) => service.drop(sessionId).pipe(Effect.mapError(unavailable)),
-            { discard: true },
-          ),
-        ),
     })
     return Context.make(ExecutionGateway.Service, gateway).pipe(
       Context.add(ExecutionSessionLifecycle.Service, lifecycle),
@@ -374,9 +319,8 @@ const executionLayer = <E>(
     }),
   )
 const resolverFor = (options: CommonOptions, credentialStore: ProviderCredentialStore["Service"] | undefined) => {
-  const cell = resolveCells(options.cells)
-  let resolverOptions: Route.ResolverOptions = { kernel: options.kernel }
-  if (cell !== undefined) resolverOptions = { ...resolverOptions, cell }
+  let resolverOptions: Route.ResolverOptions = {}
+  if (options.tools !== undefined) resolverOptions = { ...resolverOptions, tools: options.tools }
   if (options.capabilities !== undefined) resolverOptions = { ...resolverOptions, capabilities: options.capabilities }
   if (credentialStore !== undefined) resolverOptions = { ...resolverOptions, credentialStore }
   if (options.openAiAccountAccess !== undefined)
@@ -428,10 +372,7 @@ export const layerMemory = (
   ExecutionGateway.Service | ExecutionSessionLifecycle.Service | Runtime.Runtime,
   ExecutionGateway.StartTurnFailure
 > => {
-  const shared: CommonOptions = {
-    ...options,
-    kernel: options.kernel ?? derivedKernelOptions(options.dataRoot),
-  }
+  const shared: CommonOptions = options
   return executionLayer(shared, (credentialStore) => {
     const resolver = resolverFor(shared, credentialStore)
     let runtimeOptions: Parameters<typeof Runtime.layerMemory>[0] = {

@@ -57,7 +57,6 @@ const criticalTags: ReadonlySet<InteractiveEvent["_tag"]> = new Set([
   "ShellCompleted",
   "ExecutionControlled",
   "ThreadTitled",
-  "GoalChanged",
   "ThreadPreviewLoaded",
   "ThreadPreviewFailed",
   "TurnSettled",

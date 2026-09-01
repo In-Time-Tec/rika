@@ -14,7 +14,7 @@ const encodeIdentity = Schema.encodeSync(
       agentBrowserExecutable: Schema.NullOr(Schema.String),
       states: Schema.Struct({
         filesystem: WorkspaceCapability,
-        typescriptKernel: WorkspaceCapability,
+        nativeTools: WorkspaceCapability,
         git: WorkspaceCapability,
         process: WorkspaceCapability,
         pty: WorkspaceCapability,
@@ -29,7 +29,7 @@ const encodeIdentity = Schema.encodeSync(
 export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.inspect")(function* (input: {
   readonly target: "runner" | "orb"
   readonly workspacePath: string
-  readonly typescriptKernel: boolean
+  readonly nativeTools: boolean
   readonly pty: boolean
   readonly browser?: boolean
   readonly services?: boolean
@@ -50,9 +50,7 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
     filesystem: workspaceExists
       ? ready("workspace filesystem available")
       : unavailable("workspace root is unavailable"),
-    typescriptKernel: input.typescriptKernel
-      ? ready("persistent Bun TypeScript kernel available")
-      : unavailable("TypeScript kernel is unavailable"),
+    nativeTools: input.nativeTools ? ready("native tools available") : unavailable("native tools are unavailable"),
     git: gitExecutable === null ? unavailable("Git executable is unavailable") : ready("Git executable available"),
     process: ready("Bun process operations available"),
     pty: input.pty ? ready("durable PTY available") : unavailable("durable PTY is unavailable"),

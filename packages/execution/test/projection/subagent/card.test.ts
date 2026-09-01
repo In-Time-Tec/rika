@@ -1,4 +1,5 @@
 import "./card-lifecycle.fixture"
+import "./card-group.fixture"
 import { describe, expect, it } from "@effect/vitest"
 import { Prompt, Response } from "generalist"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -178,7 +179,7 @@ describe("Generalist subagent card projection", () => {
     ).toEqual(["Review", "Review correctness", "queued"])
   })
 
-  it("materializes four distinctly labelled group members without exposing group plumbing", () => {
+  it("materializes a stable neutral aggregate with four ordered group members", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-group", "fan out")
     const members = Array.from({ length: 4 }, (_, index) => ({
@@ -201,8 +202,30 @@ describe("Generalist subagent card projection", () => {
       (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard",
     )
     expect(cards).toHaveLength(4)
-    expect(patch.upsert).toHaveLength(4)
+    expect(patch.upsert).toHaveLength(5)
     expect(JSON.stringify(patch.upsert)).not.toContain("run_child_group")
+    const group = patch.upsert.find(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup",
+    )
+    expect(group?.content).toMatchObject({
+      _tag: "Block",
+      block: {
+        name: "4 agents",
+        status: "queued",
+        settled: false,
+        memberIds: cards.map((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.id : "",
+        ),
+        counts: { total: 4, queued: 4 },
+      },
+    })
+    expect(cards.map((unit) => unit.parentId)).toEqual(
+      Array.from({ length: 4 }, () =>
+        group?.content._tag === "Block" && group.content.block._tag === "SubagentGroup"
+          ? group.content.block.id
+          : undefined,
+      ),
+    )
     expect(
       cards.map((unit) =>
         unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard"
@@ -277,6 +300,14 @@ describe("Generalist subagent card projection", () => {
       ),
     ).toEqual(Array.from({ length: 4 }, () => ({ status: "failed", summary: "direct child limit exceeded" })))
     expect(failed.state.status).toBe("running")
+    expect(
+      projector
+        .snapshot()
+        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup")?.content,
+    ).toMatchObject({
+      _tag: "Block",
+      block: { status: "failed", settled: true, counts: { total: 4, failed: 4 } },
+    })
   })
 
   it("keeps repeated group lifecycle events correlated to their own child cards", () => {

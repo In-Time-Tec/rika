@@ -71,6 +71,10 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0038_authoritative_thread_command_ledger",
       "product/0039_bounded_thread_checkpoints",
       "product/0040_rika_worker_notifications",
+      "product/0041_native_tool_runner_registration",
+    ])
+    expect(migrations.find(({ id }) => id === "product/0030_runtime_recovery_authority")?.aliases).toEqual([
+      "product/0030_tenetkit_recovery_authority",
     ])
     for (const migration of migrations) {
       const sql = yield* readFile(migration.url)

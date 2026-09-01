@@ -20,10 +20,7 @@ test(
          * a small runner has.
          */
         const toolCalls = Array.from({ length: 16 }, (_, index) =>
-          model.binding(
-            { module: "workspace", operation: "read", input: { path: "volume.txt" } },
-            `volume-read-${index}`,
-          ),
+          model.tool("read", { path: "volume.txt" }, `volume-read-${index}`),
         )
         let reloadTurnIds: ReadonlyArray<string> = []
         const fixturePageCursors: Array<string> = []

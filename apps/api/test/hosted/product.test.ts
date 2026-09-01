@@ -63,8 +63,8 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
           protocolVersion: runnerProtocolVersion,
           workspaceIdentity: WorkspaceId.make("atomic-run-workspace"),
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
-          kernel: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
-          capabilities: { cells: true, checkpoints: false, pty: false },
+          nativeToolRuntime: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+          capabilities: { nativeTools: true, checkpoints: false, pty: false },
         },
       })
       const connection = yield* product.createConnection({

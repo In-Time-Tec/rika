@@ -8,7 +8,6 @@ import { Timestamp } from "@rika/product/hosted-model"
 import type { Interface as ControllerService } from "@rika/e2b-executor/controller"
 import type { HttpDependencies } from "../../../src/server/http"
 import { pollAuthority, sendThreadFrames, serveApi } from "../../../src/server/bun"
-import { testToolPolicy } from "../../hosted/execution/tool-policy.fixture"
 
 const config: IdentityConfig = {
   production: false,
@@ -135,7 +134,6 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       },
-      toolPolicy: testToolPolicy,
       threads: {
         issueTicket: () => Effect.die("unused"),
         connect: (ticket, audience) => {
@@ -189,7 +187,6 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
           active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.die("unused"),
-          machine: () => Effect.die("unused"),
           workspace: () => Effect.die("unused"),
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
@@ -203,12 +200,11 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
           active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.die("unused"),
-          machine: () => Effect.die("unused"),
         },
         admitRunner: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
-        run: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
+        runTool: () => Effect.die("unused"),
+        cancelTool: () => Effect.die("unused"),
         pause: () => Effect.die("unused"),
         resume: () => Effect.die("unused"),
         replace: () => Effect.die("unused"),

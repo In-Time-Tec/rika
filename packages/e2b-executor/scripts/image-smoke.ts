@@ -21,7 +21,7 @@ const DoctorResult = Schema.Struct({
 const SmokeArtifact = Schema.Struct({ ...DoctorResult.fields, sandboxId: Schema.String })
 const requiredChecks = [
   "workspace:ready",
-  "kernel:persistence",
+  "machine:workspace-user",
   "browser:headless",
   "network:outbound",
   "credentials:absent",

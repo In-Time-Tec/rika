@@ -2,9 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { Effect, Schema } from "effect"
 import {
-  CellRequest,
   ApiMessage,
-  CellLifecycleFrame,
   FilesystemCheckpoint,
   ExecutorMessage,
   BranchPushRequest,
@@ -23,7 +21,7 @@ const fence = {
 }
 
 describe("executor protocol v1", () => {
-  it.effect("represents a machine call definitively cancelled with its parent Cell", () =>
+  it.effect("represents a machine call definitively cancelled through the native protocol", () =>
     Effect.gen(function* () {
       expect(yield* Schema.decodeEffect(MachineOutcome)({ _tag: "Cancelled" })).toEqual({ _tag: "Cancelled" })
     }),
@@ -43,7 +41,7 @@ describe("executor protocol v1", () => {
               maximumVersion: 1,
               fence: { ...fence, target },
               templateBuildId: target === "orb" ? "build-1" : null,
-              capabilities: { cells: true, checkpoints: true, pty: true },
+              capabilities: { nativeTools: true, checkpoints: true, pty: true },
               workspaceCapabilities,
               cursors: { command: 0, event: 0, pty: 0 },
               latestCheckpointId: null,
@@ -63,7 +61,7 @@ describe("executor protocol v1", () => {
             maximumVersion: 2,
             fence,
             templateBuildId: "build-1",
-            capabilities: { cells: true, checkpoints: true, pty: true },
+            capabilities: { nativeTools: true, checkpoints: true, pty: true },
             workspaceCapabilities,
             cursors: { command: 0, event: 0, pty: 0 },
             latestCheckpointId: null,
@@ -134,57 +132,41 @@ describe("executor protocol v1", () => {
     }),
   )
 
-  it.effect("accepts a schema-validated operation-keyed cell request", () =>
+  it.effect("round trips native machine execute, cancel, and result frames", () =>
     Effect.gen(function* () {
-      const request = CellRequest.make({
-        access: { version: 1, fence, leaseEpoch: 1, sessionToken: "session" },
-        operationKey: "run:1:cell:1",
-        workspaceId: "workspace-1",
-        sessionId: "session-1",
-        threadId: "thread-1",
-        turnId: "turn-1",
-        runId: "run-1",
-        rootRunId: "run-1",
-        toolCallId: "call-1",
-        code: "console.log('hello')",
+      const access = { version: 1 as const, fence, leaseEpoch: 1, sessionToken: "session" }
+      const execute = {
+        _tag: "MachineExecute" as const,
+        access,
+        operationKey: "operation-1",
         attempt: 0,
-        replayPolicy: "pure",
-        admittedAt: null,
-        deadlineAt: "2999-01-01T00:00:00.000Z",
-        bindings: { digest: "a".repeat(64), descriptors: [] },
-      })
-      expect(yield* Schema.decodeEffect(ApiMessage)({ _tag: "CellExecute", request })).toEqual({
-        _tag: "CellExecute",
-        request,
-      })
-      expect(
-        yield* Schema.decodeEffect(ApiMessage)({
-          _tag: "CellTerminalSuperseded",
-          access: request.access,
-          operationKey: request.operationKey,
-          attempt: request.attempt,
-          cursor: 3,
-          outcome: "unknown",
-          response: {
-            _tag: "DomainFailure",
-            failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
-          },
-        }),
-      ).toMatchObject({ _tag: "CellTerminalSuperseded", cursor: 3, outcome: "unknown" })
-      for (const identity of [
-        "workspaceId",
-        "sessionId",
-        "threadId",
-        "turnId",
-        "runId",
-        "rootRunId",
-        "toolCallId",
-      ] as const) {
-        const { [identity]: _, ...incomplete } = request
-        expect((yield* Effect.flip(Schema.decodeUnknownEffect(CellRequest)(incomplete))).issue).toBeDefined()
+        machineId: "machine-1",
+        requestDigest: "a".repeat(64),
+        request: { _tag: "NativeTool" as const, request: { _tag: "Read" as const, path: "src/main.ts" } },
       }
+      const cancel = {
+        _tag: "MachineCancel" as const,
+        access,
+        operationKey: execute.operationKey,
+        attempt: execute.attempt,
+        machineId: execute.machineId,
+        requestDigest: execute.requestDigest,
+      }
+      const result = {
+        _tag: "MachineResult" as const,
+        access,
+        operationKey: execute.operationKey,
+        attempt: execute.attempt,
+        machineId: execute.machineId,
+        requestDigest: execute.requestDigest,
+        outcome: { _tag: "Cancelled" as const },
+      }
+      expect(yield* Schema.decodeEffect(ApiMessage)(execute)).toEqual(execute)
+      expect(yield* Schema.decodeEffect(ApiMessage)(cancel)).toEqual(cancel)
+      expect(yield* Schema.decodeEffect(ExecutorMessage)(result)).toEqual(result)
+      expect(yield* Schema.decodeEffect(RunnerMessage)(result)).toEqual(result)
       expect(
-        (yield* Effect.flip(Schema.decodeEffect(CellRequest)({ ...request, operationKey: "" }))).issue,
+        (yield* Effect.flip(Schema.decodeEffect(ApiMessage)({ ...execute, requestDigest: "invalid" }))).issue,
       ).toBeDefined()
     }),
   )
@@ -196,7 +178,7 @@ describe("executor protocol v1", () => {
         _tag: "ExecutorConnectionFailed" as const,
         access,
         stage: "api" as const,
-        message: "Cell request has no runtime authorization",
+        message: "Native tool request has no runtime authorization",
       }
       expect(yield* Schema.decodeEffect(ExecutorMessage)(report)).toEqual(report)
       expect(
@@ -212,7 +194,7 @@ describe("executor protocol v1", () => {
         admissionId: "admission-1",
         ticket: "one-use-ticket",
         processIncarnation: "process-1",
-        capabilities: { cells: true, checkpoints: false, pty: false },
+        capabilities: { nativeTools: true, checkpoints: false, pty: false },
         workspaceCapabilities,
         cursors: { command: 0, event: 0, pty: 0 },
       } as const
@@ -252,39 +234,7 @@ describe("executor protocol v1", () => {
     }),
   )
 
-  it.effect("decodes attributed lifecycle frames and bounds redacted output", () =>
-    Effect.gen(function* () {
-      const attribution = {
-        operationKey: "operation-1",
-        workspaceId: "workspace-1",
-        sessionId: "session-1",
-        threadId: "thread-1",
-        turnId: "turn-1",
-        runId: "run-1",
-        rootRunId: "run-1",
-        toolCallId: "call-1",
-        attempt: 0,
-      }
-      const output = {
-        _tag: "Output" as const,
-        attribution,
-        cursor: 3,
-        stream: "stdout" as const,
-        text: "safe output",
-        redacted: true as const,
-        truncated: false,
-      }
-      expect(yield* Schema.decodeEffect(CellLifecycleFrame)(output)).toEqual(output)
-      expect(
-        (yield* Effect.flip(Schema.decodeEffect(CellLifecycleFrame)({ ...output, text: "x".repeat(16_385) }))).issue,
-      ).toBeDefined()
-      expect(
-        (yield* Effect.flip(Schema.decodeUnknownEffect(CellLifecycleFrame)({ ...output, redacted: false }))).issue,
-      ).toBeDefined()
-    }),
-  )
-
-  it.effect("accepts local goodbye and receipt frames and rejects PTY frames on the local decoder", () =>
+  it.effect("accepts local goodbye frames and rejects PTY frames on the local decoder", () =>
     Effect.gen(function* () {
       const localAccess = {
         version: 1 as const,
@@ -296,14 +246,7 @@ describe("executor protocol v1", () => {
         _tag: "RunnerGoodbye" as const,
         access: localAccess,
       }
-      const receipt = {
-        _tag: "LocalCellReceipt" as const,
-        access: localAccess,
-        operationKey: "operation-1",
-        attempt: 0,
-      }
       expect(yield* Schema.decodeEffect(RunnerMessage)(goodbye)).toEqual(goodbye)
-      expect(yield* Schema.decodeEffect(ApiMessage)(receipt)).toEqual(receipt)
       expect(
         (yield* Effect.flip(
           Schema.decodeUnknownEffect(RunnerMessage)({

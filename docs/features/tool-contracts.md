@@ -1,7 +1,14 @@
 # Tool contracts
 
-The one model-visible tool is `typescript`. The capabilities behind it are `rika.*` bindings, which use Schema inputs, typed success and failure results, and bounded output. Calls run through Effect scopes so timeout or Execution cancellation interrupts work and releases owned resources.
+Rika exposes exactly four native execution tools beside Generalist's built-in child delegation:
 
-The canonical local contract is `rika.workspace.read`, `rika.workspace.write`, `rika.workspace.replace`, and `rika.processes.start`. `read` accepts an optional inclusive two-element `range` and returns numbered lines. `write` creates or overwrites a file. `replace` swaps `oldStr` for `newStr`, with optional `replaceAll`. `processes.start` runs a shell command string with optional `workdir` and `timeoutMillis`.
+- `bash({ command, workdir?, timeout_ms? })`
+- `edit({ path, old_str, new_str, replace_all? })`
+- `read({ path, read_range? })`
+- `shell_command_status({ processId, waitMillis? })`
 
-Each contract states whether repeating a call is safe. Read-only calls may be retried against current local state; writes and process calls are not assumed idempotent, and callers must not repeat a mutation whose outcome is unknown.
+Provider-neutral Effect schemas live in `packages/product`; live local and remote behavior lives in `packages/execution`. The schemas bound input and output sizes, produce typed failures, and generate the model-facing surface description so instructions cannot drift from runtime validation.
+
+`bash` runs a recorded command in the shared scoped process registry. A command that outlives its foreground wait returns a process ID. The model must call `shell_command_status` explicitly to observe later output and settlement. `read` returns bounded numbered lines. `edit` requires an exact old string, applies an optional all-occurrences replacement, and returns the authoritative diff.
+
+Read and status calls may be repeated against current state. A timed-out or disconnected `bash` or `edit` can have an unknown outcome and is never replayed blindly. Runner and Orb execution place the native request inside one durable outer operation with stable operation, attempt, tool-call, and machine identities.

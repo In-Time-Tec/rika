@@ -55,7 +55,7 @@ describe("subagent unit revision", () => {
     expect(subagentRevision(after)).not.toBe(subagentRevision(before))
   })
 
-  test("changes when the streamed answer entry changes", () => {
+  test("changes when a running SubagentCard answer streams", () => {
     const before = model('{"command":"ls"}', "working")
     const after = { ...before, entries: [{ role: "assistant" as const, text: "done", turnId: "turn" }] }
     expect(subagentRevision(after)).not.toBe(subagentRevision(before))
@@ -91,8 +91,8 @@ describe("subagent unit revision", () => {
 })
 
 describe("shell command text", () => {
-  test("renders a partially streamed command", () => {
-    expect(shellCommandText(nested('{"command":"git sta'))).toBe("git sta")
+  test("does not parse an incomplete command payload", () => {
+    expect(shellCommandText(nested('{"command":"git sta'))).toBe("")
   })
 
   test("renders a complete command", () => {

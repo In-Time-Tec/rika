@@ -25,7 +25,7 @@ const runnerProfile = (registration: Parameters<RunnerAdmission["Service"]["awai
     protocolVersion: registration.protocolVersion,
     workspaceIdentity: registration.workspaceIdentity,
     repository: registration.repository,
-    kernel: registration.kernel,
+    nativeToolRuntime: registration.nativeToolRuntime,
     capabilities: registration.capabilities,
   }
   return profile.project === undefined ? result : { ...result, projectId: ProjectId.make(profile.project) }

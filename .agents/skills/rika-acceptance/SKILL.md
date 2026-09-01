@@ -15,7 +15,7 @@ From the repository root, run:
 .agents/skills/rika-acceptance/scripts/with-packaged-rika.sh
 ```
 
-The script selects the current supported host target, builds its archive, verifies the exact inventory from `scripts/packaging/package-contract.ts`, runs `--version` and `--help` in a clean home, and exercises the packaged kernel runtime. Pass arguments after `--` to launch the packaged binary after those checks:
+The script selects the current supported host target, builds its archive, verifies the exact inventory from `scripts/packaging/package-contract.ts`, and runs `--version` and `--help` in a clean home. Pass arguments after `--` to launch the packaged binary after those checks:
 
 ```bash
 .agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- --workspace "$PWD"
@@ -46,4 +46,4 @@ Use `testing-with-pilotty` for quick semantic snapshots or `testing-with-agent-t
 
 ## Evidence
 
-Report the package-smoke result, development origin kind, Thread IDs, Runner checkout assertion, Orb-side file evidence, queue result, reconnect result, cancellation result, and any OpenRouter or E2B failure. Save reviewer-requested recordings under `.amp/in/artifacts/`. Follow `VERIFICATION.md` when full release evidence is requested; do not claim full acceptance from a package smoke or screenshot alone.
+Report the package-smoke result, development origin kind, Thread IDs, Runner checkout assertion, Orb-side file evidence, queue result, reconnect result, cancellation result, and any OpenRouter or E2B failure. Save reviewer-requested recordings under `.amp/in/artifacts/`. Do not claim full acceptance from a package smoke or screenshot alone.

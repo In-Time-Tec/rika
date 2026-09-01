@@ -74,8 +74,8 @@ export const sessionOperations = ({
 
   const hello = Effect.fn("Controller.hello")(function* (input: Hello) {
     if (input.fence.target !== "orb") return yield* failure("fenced", "Executor target is not E2B")
-    if (!input.capabilities.cells)
-      return yield* failure("protocol", "Executor transport does not support cell execution")
+    if (!input.capabilities.nativeTools)
+      return yield* failure("protocol", "Executor transport does not support native tool execution")
     const assignment = yield* current({
       assignmentId: input.fence.assignmentId,
       generation: input.fence.assignmentGeneration,

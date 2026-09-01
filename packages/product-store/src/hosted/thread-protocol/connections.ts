@@ -1,4 +1,11 @@
-import { BetterAuthUserId, ClientId, DeviceId, ThreadEventCursor, ThreadVersion, Timestamp } from "@rika/product/hosted-model"
+import {
+  BetterAuthUserId,
+  ClientId,
+  DeviceId,
+  ThreadEventCursor,
+  ThreadVersion,
+  Timestamp,
+} from "@rika/product/hosted-model"
 import type { ThreadProtocolStoreService } from "@rika/product/thread-protocol-store"
 import { and, eq, gt, gte, isNull, lt, lte, max, min, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"

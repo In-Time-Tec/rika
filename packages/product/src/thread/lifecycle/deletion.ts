@@ -12,18 +12,17 @@ export interface Interface {
 }
 
 export const make = (input: {
-  readonly threads: ThreadRepository.Interface
-  readonly turns: TurnRepository.Interface
+  readonly threads: Pick<ThreadRepository.Interface, "requestDeletion" | "pendingDeletions" | "completeDeletion">
+  readonly turns: Pick<TurnRepository.Interface, "list">
   readonly sessions: ExecutionSessionLifecycle.Interface
-  readonly rootTurns: RootTurnOwner.Interface
+  readonly rootTurns: Pick<RootTurnOwner.Interface, "quiesceThread">
   readonly withThreadMutation: <A, E, R>(
     threadId: Thread.ThreadId,
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>
 }): Interface => {
   // Title Runs live in their own isolated Sessions (one per ExecutionLink), so thread deletion
-  // must cancel and await each persisted title session as well; they have no kernel of their own,
-  // so closeKernel/dropKernelState stay scoped to the thread Session.
+  // must cancel and await each persisted title session as well.
   const settleTitleSessions = Effect.fn("ThreadDeletion.settleTitleSessions")(function* (threadId: Thread.ThreadId) {
     const turns = yield* input.turns.list(threadId)
     const titleSessionIds = [
@@ -49,8 +48,6 @@ export const make = (input: {
     yield* input.sessions.requestCancellation({ sessionId: String(threadId), reason: "Thread deleted" })
     yield* settleTitleSessions(threadId)
     yield* input.sessions.awaitTerminal({ sessionId: String(threadId) })
-    yield* input.sessions.closeKernel({ sessionId: String(threadId) })
-    yield* input.sessions.dropKernelState({ sessionId: String(threadId) })
     yield* input.threads.completeDeletion(threadId)
   })
   const request = Effect.fn("ThreadDeletion.request")(function* (threadId: Thread.ThreadId) {

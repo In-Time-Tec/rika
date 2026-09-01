@@ -1,7 +1,6 @@
 import { Controller, ControllerError, DefaultOrphanGraceMillis } from "@rika/e2b-executor/controller"
-import * as BindingModules from "@rika/kernel/binding-modules"
-import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
-import * as MachineBindings from "@rika/kernel/machine-bindings"
+import * as RemoteTools from "@rika/execution/remote-tools"
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import {
   HostedExecutionOperations,
@@ -10,33 +9,23 @@ import {
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import type { ExecutorAssignment } from "@rika/product/executor-assignment"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import { type OwnerId, ThreadId } from "@rika/product/hosted-model"
+import { ThreadId } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
-import { bindingManifest } from "@rika/remote-execution/protocol"
-import { HostBindings } from "generalist/repl"
-import { Clock, Config, Context, Crypto, Effect, Layer, LayerMap, Schema, Scope } from "effect"
+import { Clock, Context, Crypto, Effect, Layer, Schema } from "effect"
 import { HostedEnvironment } from "../hosted/environment/runtime"
 import { RunnerExecutor } from "../runner/executor"
 import * as RunnerGatewayModule from "../runner/gateway"
 import type { RunnerGateway } from "../runner/gateway"
-import { HostedToolPolicy } from "../hosted/execution/tool-policy"
-import * as ApiBindings from "./api-bindings"
 import { LifecycleStores } from "./lifecycle-store"
 import { HostedGateway } from "./hosted-gateway"
 
 export { Executor, orphanReaper } from "./contract"
-import { Executor, orphanReaper, type Runtime } from "./contract"
+import { Executor, orphanReaper } from "./contract"
 
-const requiredWorkspaceCapabilities = [
-  "filesystem",
-  "typescriptKernel",
-  "git",
-  "process",
-  "workspaceLifecycle",
-] as const
+const requiredWorkspaceCapabilities = ["filesystem", "nativeTools", "git", "process", "workspaceLifecycle"] as const
 
-const hostedBindingModules = (workspace: string) =>
-  BindingModules.make({ workspace, workspaceDigest: workspace, trustMode: "hosted", servers: [] })
+const NativeToolPayload = Schema.Struct({ toolName: Schema.String, request: NativeToolRuntime.Request })
+const encodeNativeToolPayload = Schema.encodeSync(Schema.fromJsonString(NativeToolPayload))
 
 class HostedRunnerGateway extends Context.Service<HostedRunnerGateway, RunnerGateway>()(
   "@rika/api/executor/runtime-service/HostedRunnerGateway",
@@ -49,16 +38,9 @@ export const service = Layer.effect(
     const assignments = yield* ExecutorAssignments
     const environment = yield* HostedEnvironment
     const preparations = yield* WorkspacePreparations
-    const toolPolicy = yield* HostedToolPolicy
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
     const scope = yield* Effect.scope
-    const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
-    const apiBindings = yield* LayerMap.make((ownerId: OwnerId) =>
-      ApiBindings.layer({ ownerId, dataRoot: `${temporaryDirectory}/rika-hosted` }).pipe(
-        Layer.provide(Layer.succeed(PgClient.PgClient, sql)),
-      ),
-    )
     const operationsContext = yield* Layer.buildWithScope(
       hostedExecutionOperationsLayer.pipe(Layer.provide(Layer.succeed(PgClient.PgClient, sql))),
       scope,
@@ -87,37 +69,10 @@ export const service = Layer.effect(
     const gateway = yield* HostedGateway.build(lifecycle, crypto, scope)
     const runner = yield* RunnerExecutor
     const runnerGatewayContext = yield* Layer.buildWithScope(
-      Layer.effect(HostedRunnerGateway, RunnerGatewayModule.makeRunnerGateway(runner, toolPolicy)),
+      Layer.effect(HostedRunnerGateway, RunnerGatewayModule.makeRunnerGateway(runner)),
       scope,
     )
     const runnerGateway = Context.get(runnerGatewayContext, HostedRunnerGateway)
-    const bindings = Effect.fn("Executor.bindings")(function* (
-      input: Parameters<Runtime["run"]>[0],
-      assignmentId: string,
-      ownerId: OwnerId,
-      machine: typeof gateway.machine,
-    ) {
-      const machineContext = yield* Layer.buildWithScope(
-        MachineBindings.layer({
-          execute: (request) =>
-            machine(assignmentId, input.operationKey, input.attempt, request).pipe(
-              Effect.mapError((error) => new MachineBindings.Unavailable({ message: error.message })),
-            ),
-        }),
-        scope,
-      )
-      const apiContext = yield* apiBindings.contextEffect(ownerId).pipe(Effect.provideService(Scope.Scope, scope))
-      const context: Context.Context<ExecutorRuntime.CellServices> = Context.merge(
-        Context.merge(input.authority, apiContext),
-        machineContext,
-      )
-      const registry = yield* HostBindings.make(hostedBindingModules(input.workspaceId)).pipe(
-        Effect.provideContext(context),
-        Effect.orDie,
-      )
-      const manifest = yield* bindingManifest(registry.descriptors).pipe(Effect.provideService(Crypto.Crypto, crypto))
-      return { registry, context, manifest }
-    })
     return {
       controller,
       gateway,
@@ -240,7 +195,7 @@ export const service = Layer.effect(
           }),
         )
       }),
-      run: Effect.fn("Executor.run")(function* (input) {
+      runTool: Effect.fn("Executor.runTool")(function* (input) {
         const assignment = yield* assignments
           .getForThread(ThreadId.make(input.threadId))
           .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
@@ -284,35 +239,32 @@ export const service = Layer.effect(
           operationId: input.operationKey,
           assignmentId: assignment.id,
         }
-        if (assignment.placement._tag === "RunnerPlacement") {
-          return yield* HostedObservability.observe(
-            "cell_execution",
-            correlation,
-            Effect.gen(function* () {
-              const authority = yield* bindings(input, assignment.id, assignment.ownerId, runnerGateway.machine)
-              return yield* runnerGateway.execute({
-                assignmentId: assignment.id,
-                ...input,
-                bindings: authority,
-              })
-            }),
-          )
+        const request = {
+          assignmentId: assignment.id,
+          operationKey: input.operationKey,
+          workspaceId: input.workspaceId,
+          sessionId: input.sessionId,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          runId: input.runId,
+          rootRunId: input.rootRunId,
+          toolCallId: input.toolCallId,
+          code: encodeNativeToolPayload({ toolName: input.toolName, request: input.request }),
+          attempt: input.attempt,
+          replayPolicy: input.replayPolicy,
+          admittedAt: input.admittedAt,
+          deadlineAt: input.deadlineAt,
+          machineRequest: { _tag: "NativeTool" as const, request: input.request },
         }
-        return yield* HostedObservability.observe(
-          "cell_execution",
+        const result = yield* HostedObservability.observe(
+          "tool_execution",
           correlation,
-          Effect.gen(function* () {
-            const authority = yield* bindings(input, assignment.id, assignment.ownerId, gateway.machine)
-            const result = yield* gateway.execute({
-              assignmentId: assignment.id,
-              ...input,
-              bindings: authority,
-            })
-            return { ...result, eventPersisted: false as const }
-          }),
+          assignment.placement._tag === "RunnerPlacement" ? runnerGateway.execute(request) : gateway.execute(request),
         )
+        const response = yield* Schema.decodeEffect(RemoteTools.Response)(result.response).pipe(Effect.orDie)
+        return { ...result, response, eventPersisted: assignment.placement._tag === "RunnerPlacement" }
       }),
-      cancel: Effect.fn("Executor.cancel")(function* (input) {
+      cancelTool: Effect.fn("Executor.cancelTool")(function* (input) {
         const assignment = yield* assignments
           .getForThread(ThreadId.make(input.threadId))
           .pipe(Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })))
@@ -326,7 +278,21 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Executor workspace identity does not match the assignment",
           })
-        const request = { assignmentId: assignment.id, ...input }
+        const request = {
+          assignmentId: assignment.id,
+          operationKey: input.operationKey,
+          workspaceId: input.workspaceId,
+          sessionId: input.sessionId,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          runId: input.runId,
+          rootRunId: input.rootRunId,
+          toolCallId: input.toolCallId,
+          code: encodeNativeToolPayload({ toolName: input.toolName, request: input.request }),
+          attempt: input.attempt,
+          replayPolicy: input.replayPolicy,
+          machineRequest: { _tag: "NativeTool" as const, request: input.request },
+        }
         return assignment.placement._tag === "RunnerPlacement"
           ? yield* runnerGateway.cancel(request)
           : yield* gateway.cancel(request)

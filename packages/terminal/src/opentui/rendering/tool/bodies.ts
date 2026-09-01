@@ -3,17 +3,18 @@ import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import { decodeTranscriptBlocks } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
-import { plural } from "../../../presentation/terminal/format"
+import { escapeControlCharacters, plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
 import { renderDiffStyled, renderPartialDiffStyled, renderPierreDiff, renderToolSummary } from "../diff-text-adapter"
 import { transcriptWrapWidth } from "../transcript/window"
-import { wrapTextToWidth, wrapBodyText, iconChar } from "../window"
+import { aggregateRowStatus, rowStatusIcon, wrapTextToWidth, wrapBodyText, type RowStatus } from "../window"
 import {
   inputString,
   toolInputValue,
   diffCounts,
   shellCommandText,
   shellExitCode,
+  shellMetadata,
   exploreChildLabel,
   type ToolUnit,
 } from "./detail"
@@ -21,6 +22,11 @@ import { toolDetails } from "../../../presentation/transcript/tool/detail"
 import { isToolOutputDisplayed } from "../../../presentation/transcript/agent-response"
 import { isExpandableBody, toolBody, toolResultText } from "../../../presentation/transcript/tool/body"
 import type { UnitLineRange } from "../transcript/window"
+
+const disclosureIcon = (expandable: boolean, expanded: boolean): string => {
+  if (!expandable) return "  "
+  return expanded ? "▾ " : "▸ "
+}
 
 export interface ToolBodyContext {
   readonly model: Model
@@ -30,28 +36,28 @@ export interface ToolBodyContext {
   readonly line: () => number
   readonly nestedRanges: Array<UnitLineRange>
   readonly rowExpanded: (id: string) => boolean
+  readonly rowExplicitlyCollapsed: (id: string) => boolean
   readonly highlight: (text: string) => void
-  readonly statusIcon: (failed: boolean, running: boolean, cancelled?: boolean) => TextChunk
+  readonly statusIcon: (status: RowStatus) => TextChunk
 }
 
 const exploreBodyState = (units: ReadonlyArray<ToolUnit>) => {
-  const running = units.some((unit) => unit.block.status === "running")
-  const complete = units.some((unit) => unit.block.status === "complete")
-  const failed = !running && !complete && units.some((unit) => unit.block.status === "failed")
-  const cancelled = !running && !complete && !failed && units.some((unit) => unit.block.status === "cancelled")
+  const status = aggregateRowStatus(units.map((unit) => unit.block.status))
+  const running = status === "running"
   const counters = new Map<string, number>()
   for (const unit of units) {
     const counter = unit.block.presentation.counter ?? (unit.kind === "read" ? "file" : "search")
     counters.set(counter, (counters.get(counter) ?? 0) + 1)
   }
   const counts = [...counters].map(([counter, count]) => plural(count, counter)).join(", ")
-  return { running, failed, cancelled, subject: counts.length > 0 ? counts : "workspace" }
+  return { status, running, subject: counts.length > 0 ? counts : "workspace" }
 }
 
 const editBodyState = (model: Model, units: ReadonlyArray<ToolUnit>, diffs: ReadonlyArray<number>) => {
-  const failed = units.some((unit) => unit.block.status === "failed")
-  const running = units.some((unit) => unit.block.status === "running")
-  const cancelled = units.some((unit) => unit.block.status === "cancelled")
+  const status = aggregateRowStatus(units.map((unit) => unit.block.status))
+  const failed = status === "failed" || status === "rejected" || status === "unknown"
+  const running = status === "running"
+  const cancelled = status === "cancelled"
   const paths = [
     ...new Set(
       units.flatMap((unit) =>
@@ -77,6 +83,7 @@ const editBodyState = (model: Model, units: ReadonlyArray<ToolUnit>, diffs: Read
   else if (paths.length === 1 && units.length === 1)
     verb = running ? units[0]!.block.presentation.activeLabel : units[0]!.block.presentation.completeLabel
   return {
+    status,
     failed,
     running,
     cancelled,
@@ -89,39 +96,52 @@ const editBodyState = (model: Model, units: ReadonlyArray<ToolUnit>, diffs: Read
 }
 
 const shellGroupState = (units: ReadonlyArray<ToolUnit>) => ({
-  failedCount: units.filter((unit) => unit.block.status === "failed").length,
+  status: aggregateRowStatus(units.map((unit) => unit.block.status)),
+  failedCount: units.filter(
+    (unit) => unit.block.status === "failed" || unit.block.status === "rejected" || unit.block.status === "unknown",
+  ).length,
   cancelledCount: units.filter((unit) => unit.block.status === "cancelled").length,
-  running: units.some((unit) => unit.block.status === "running"),
 })
 
 export const createToolBodyRenderer = (context: ToolBodyContext) => {
-  const { model, spinnerFrame, append, appendAll, rowExpanded, highlight, statusIcon } = context
-  const renderExploreChild = (unit: ToolUnit) => {
-    append(fg(colors.text)("\n "))
-    const start = context.line()
-    append(
-      statusIcon(unit.block.status === "failed", unit.block.status === "running", unit.block.status === "cancelled"),
-    )
+  const { model, spinnerFrame, append, appendAll, rowExpanded, rowExplicitlyCollapsed, highlight, statusIcon } = context
+  const exploreSummary = (unit: ToolUnit) => {
     const detail = toolDetails(model, { kind: "tool", group: "explore", blocks: [unit.index], diffs: [] })[0]!
     let summary = detail.summary
     if (unit.block.presentation.action === "skill") summary = { primary: exploreChildLabel(unit) }
-    else if (unit.block.presentation.action === "git-status")
-      summary = { primary: "Checked", secondary: ` ${unit.block.detail || "workspace"}` }
+    else if (unit.block.presentation.action === "git-status" || unit.block.presentation.action === "status")
+      summary = {
+        primary: "Checked",
+        secondary: ` ${unit.block.detail || unit.block.process?.processId || "workspace"}`,
+      }
+    return { detail, summary }
+  }
+  const renderExploreChild = (unit: ToolUnit) => {
     const childId = `tool-child:${unit.block.id}`
-    for (const chunk of renderToolSummary(summary, { leading: " " })[0]!) append(chunk)
+    const childOutput = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
+    const childExpandable = isExpandableBody(toolBody(unit.block))
+    append(fg(colors.text)("\n "))
+    append(dim(fg(colors.subtle)(disclosureIcon(childExpandable, rowExpanded(childId)))))
+    const start = context.line()
+    append(statusIcon(unit.block.status))
+    const { detail, summary } = exploreSummary(unit)
+    for (const chunk of renderToolSummary(summary, {
+      leading: " ",
+      underlineSecondary: detail.target !== undefined,
+    })[0]!)
+      append(chunk)
     const output =
-      unit.block.status === "failed" && isToolOutputDisplayed(unit.block)
+      (unit.block.status === "failed" || unit.block.status === "rejected" || unit.block.status === "unknown") &&
+      isToolOutputDisplayed(unit.block)
         ? toolResultText(unit.block.result)
             ?.split("\n")
             .find((value) => value.length > 0)
         : undefined
     if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
-    const childOutput = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
-    const childExpandable = isExpandableBody(toolBody(unit.block))
     const headerEnd = context.line()
     if (childExpandable && rowExpanded(childId)) {
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "    "))))
+      append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "      "))))
     }
     const nestedRange = {
       start,
@@ -133,14 +153,30 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     }
     context.nestedRanges.push(detail.target === undefined ? nestedRange : { ...nestedRange, targets: [detail.target] })
   }
+  const renderSingleExploreBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
+    const { detail, summary } = exploreSummary(unit)
+    append(selected ? bold(statusIcon(unit.block.status)) : statusIcon(unit.block.status))
+    for (const chunk of renderToolSummary(summary, {
+      leading: " ",
+      selected,
+      underlineSecondary: detail.target !== undefined,
+    })[0]!)
+      append(chunk)
+    const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
+    if (expanded && output !== undefined && output.length > 0) {
+      append(fg(colors.text)("\n"))
+      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
+    }
+  }
   const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
-    const { running, failed, cancelled, subject } = exploreBodyState(units)
-    if (selected)
-      highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${subject}`,
-      )
+    if (units.length === 1) {
+      renderSingleExploreBody(units[0]!, selected, expanded)
+      return
+    }
+    const { status, running, subject } = exploreBodyState(units)
+    if (selected) highlight(`${rowStatusIcon(status, spinnerFrame)} ${running ? "Exploring" : "Explored"} ${subject}`)
     else {
-      append(statusIcon(failed, running, cancelled))
+      append(statusIcon(status))
       for (const chunk of renderToolSummary(
         { primary: running ? "Exploring" : "Explored", secondary: ` ${subject}` },
         { leading: " " },
@@ -159,16 +195,23 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
         renderDiffStyled(file.patch, { width: transcriptWrapWidth(model.width) }),
     )
   }
+  const editFileExpanded = (file: EditFile, running: boolean): boolean =>
+    rowExpanded(`file:${file.key}`) || (running && !rowExplicitlyCollapsed(`file:${file.key}`))
+  const editFileStatus = (file: EditFile, running: boolean, cancelled: boolean): RowStatus => {
+    if (cancelled && file.status === "running") return "cancelled"
+    return running && file.status === "running" ? "running" : file.status
+  }
   const renderEditFileChild = (file: EditFile, running: boolean, cancelled: boolean) => {
     append(fg(colors.text)("\n  "))
     const start = context.line()
     const childId = `file:${file.key}`
-    const childExpanded = rowExpanded(childId) || running
+    const childExpanded = editFileExpanded(file, running)
     const fileRunning = running && file.status === "running"
-    append(statusIcon(file.status === "failed", fileRunning, cancelled && file.status === "running"))
+    append(dim(fg(colors.subtle)(childExpanded ? "▾ " : "▸ ")))
+    append(statusIcon(editFileStatus(file, running, cancelled)))
     for (const chunk of renderToolSummary(
       { primary: file.kind === "add" ? "Create" : "Edit", secondary: ` ${file.path}` },
-      { leading: " " },
+      { leading: " ", underlineSecondary: true },
     )[0]!)
       append(chunk)
     if (file.additions > 0) append(fg(colors.green)(` +${file.additions}`))
@@ -226,116 +269,113 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     expanded: boolean,
   ) => {
     const state = editBodyState(model, units, diffs)
-    const { failed, running, cancelled, added, removed, verb, label } = state
-    const counts = `${added > 0 ? ` +${added}` : ""}${removed > 0 ? ` -${removed}` : ""}`
-    if (selected) highlight(`${iconChar(failed, running, spinnerFrame, cancelled)} ${verb} ${label}${counts}`)
-    else {
-      append(statusIcon(failed, running, cancelled))
-      for (const chunk of renderToolSummary({ primary: verb, secondary: ` ${label}` }, { leading: " " })[0]!)
-        append(chunk)
-      if (added > 0) append(fg(colors.green)(` +${added}`))
-      if (removed > 0) append(fg(colors.red)(` -${removed}`))
-    }
+    const { status, added, removed, verb, label } = state
+    append(selected ? bold(statusIcon(status)) : statusIcon(status))
+    for (const chunk of renderToolSummary(
+      { primary: verb, secondary: ` ${label}` },
+      {
+        leading: " ",
+        selected,
+        underlineSecondary: label !== "file" && label !== "files",
+      },
+    )[0]!)
+      append(chunk)
+    if (added > 0) append(fg(colors.green)(` +${added}`))
+    if (removed > 0) append(fg(colors.red)(` -${removed}`))
     if (expanded) {
       renderEditFiles(state)
       renderEditDiffs(diffs)
     }
   }
-  const renderShellSingleBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
+  const shellFailureSuffix = (unit: ToolUnit): string => {
+    if (unit.block.status === "failed") return ` (exit code: ${shellExitCode(unit.block) ?? 1})`
+    if (unit.block.status === "rejected") return " (rejected)"
+    if (unit.block.status === "cancelled") return " (cancelled)"
+    if (unit.block.status === "unknown") return " (unknown)"
+    return ""
+  }
+  const renderShellMetadata = (unit: ToolUnit, indent: string) => {
+    const metadata = shellMetadata(unit.block).map(escapeControlCharacters)
+    if (metadata.length === 0) return
+    append(fg(colors.text)("\n"))
+    append(dim(fg(colors.muted)(wrapBodyText(metadata.join(" · "), transcriptWrapWidth(model.width), indent))))
+  }
+  const renderShellCommand = (unit: ToolUnit, continuationIndent: string, prefixWidth: number, selected = false) => {
     const command = shellCommandText(unit.block)
-    const failed = unit.block.status === "failed"
-    const running = unit.block.status === "running"
-    const cancelled = unit.block.status === "cancelled"
-    const lines = command.split("\n")
+    const stopped = unit.block.status === "cancelled" || unit.block.status === "rejected"
+    const suffix = shellFailureSuffix(unit)
+    const commandWidth = Math.max(1, transcriptWrapWidth(model.width) - prefixWidth - stringWidth(suffix))
+    const highlighted = stopped ? undefined : highlightShellCommand(command)
+    const sourceLines = command.split("\n")
+    for (const [lineIndex, current] of sourceLines.entries()) {
+      if (lineIndex > 0) {
+        append(fg(colors.text)("\n"))
+        append(fg(colors.text)(continuationIndent))
+      }
+      if (stopped) {
+        append(strikethrough(fg(colors.text)(wrapTextToWidth(current, commandWidth).join(`\n${continuationIndent}`))))
+        continue
+      }
+      for (const [rowIndex, row] of wrapStyledLine(highlighted?.[lineIndex] ?? [], commandWidth).entries()) {
+        if (rowIndex > 0) {
+          append(fg(colors.text)("\n"))
+          append(fg(colors.text)(continuationIndent))
+        }
+        if (selected) append(bold(fg(colors.blue)(row.map((chunk) => chunk.text).join(""))))
+        else for (const chunk of row) append(chunk)
+      }
+    }
+    if (suffix.length > 0) {
+      const tone = unit.block.status === "cancelled" ? colors.amber : colors.red
+      append(italic(fg(tone)(suffix)))
+    }
+  }
+  const renderShellSingleBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
     const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const inlineOutput = unit.block.presentation.outputDisplay === "inline"
-    const exitCode = shellExitCode(unit.block)
-    if (selected) {
-      const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
-      const cancellation = cancelled ? " (cancelled)" : ""
-      highlight(`${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}`)
-    } else {
-      const highlighted = cancelled ? undefined : highlightShellCommand(command)
-      const commandWidth = Math.max(8, transcriptWrapWidth(model.width) - 4)
-      lines.forEach((current, lineIndex) => {
-        if (lineIndex === 0) {
-          if (running) {
-            append(statusIcon(false, true))
-            append(fg(colors.text)(" "))
-          } else if (cancelled) append(bold(fg(colors.amber)("$ ")))
-          else append(dim(fg(colors.text)("$ ")))
-          if (cancelled) append(strikethrough(fg(colors.text)(wrapTextToWidth(current, commandWidth).join("\n    "))))
-          else
-            for (const [rowIndex, row] of wrapStyledLine(highlighted?.[lineIndex] ?? [], commandWidth).entries()) {
-              if (rowIndex > 0) append(fg(colors.text)("\n    "))
-              for (const chunk of row) append(chunk)
-            }
-        } else if (cancelled)
-          append(strikethrough(fg(colors.text)(`\n    ${wrapTextToWidth(current, commandWidth).join("\n    ")}`)))
-        else
-          for (const row of wrapStyledLine(highlighted?.[lineIndex] ?? [], commandWidth)) {
-            append(fg(colors.text)("\n    "))
-            for (const chunk of row) append(chunk)
-          }
-      })
-      if (failed) append(fg(colors.red)(` (exit code: ${exitCode ?? 1})`))
-      if (cancelled) append(italic(fg(colors.amber)(" (cancelled)")))
-    }
+    append(selected ? bold(statusIcon(unit.block.status)) : statusIcon(unit.block.status))
+    append(fg(colors.text)(" "))
+    append(bold(fg(colors.gold)("$")))
+    append(fg(colors.text)(" "))
+    renderShellCommand(unit, "    ", 4, selected)
+    renderShellMetadata(unit, "  ")
     if ((expanded || inlineOutput) && output !== undefined && output.length > 0) {
       append(fg(colors.text)("\n"))
       append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
     }
   }
   const renderShellGroupChild = (unit: ToolUnit) => {
-    append(fg(colors.text)("\n   "))
-    const start = context.line()
     const childId = `tool-child:${unit.block.id}`
-    const childExpanded = rowExpanded(childId)
     const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const expandable = output !== undefined && output.length > 0
-    const cancelled = unit.block.status === "cancelled"
-    const failed = unit.block.status === "failed"
-    const failure = failed ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
-    const cancellation = cancelled ? " (cancelled)" : ""
-    const commandWidth = Math.max(
-      1,
-      transcriptWrapWidth(model.width) - 5 - stringWidth(failure) - stringWidth(cancellation),
-    )
-    if (cancelled) {
-      append(bold(fg(colors.amber)("$ ")))
-      append(
-        strikethrough(fg(colors.text)(wrapTextToWidth(shellCommandText(unit.block), commandWidth).join("\n     "))),
-      )
-      append(italic(fg(colors.amber)(" (cancelled)")))
-    } else {
-      append(dim(fg(colors.text)("$ ")))
-      const rows = shellCommandText(unit.block)
-        .split("\n")
-        .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
-      for (const [rowIndex, row] of rows.entries()) {
-        if (rowIndex > 0) append(fg(colors.text)("\n     "))
-        for (const chunk of row) append(chunk)
-      }
-    }
-    if (failure.length > 0) append(fg(colors.red)(failure))
+    const childExpanded = rowExpanded(childId)
+    append(fg(colors.text)("\n  "))
+    append(dim(fg(colors.subtle)(disclosureIcon(expandable, childExpanded))))
+    const start = context.line()
+    append(statusIcon(unit.block.status))
+    append(fg(colors.text)(" "))
+    append(bold(fg(colors.gold)("$")))
+    append(fg(colors.text)(" "))
+    renderShellCommand(unit, "        ", 8)
+    renderShellMetadata(unit, "        ")
+    const headerEnd = context.line()
     if (expandable && childExpanded) {
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "     "))))
+      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "        "))))
     }
-    context.nestedRanges.push({ start, end: context.line(), unit: childId, expandable })
+    context.nestedRanges.push({ start, end: context.line(), headerEnd, unit: childId, expandable })
   }
   const renderShellBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
     if (units.length === 1) {
       renderShellSingleBody(units[0]!, selected, expanded)
       return
     }
-    const { failedCount, cancelledCount, running } = shellGroupState(units)
-    if (selected)
-      highlight(
-        `${iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}`,
-      )
+    const { status, failedCount, cancelledCount } = shellGroupState(units)
+    const running = status === "running"
+    const summary = `${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}`
+    if (selected) highlight(`${rowStatusIcon(status, spinnerFrame)} ${summary}`)
     else {
-      append(statusIcon(failedCount > 0, running, cancelledCount > 0))
+      append(statusIcon(status))
       for (const chunk of renderToolSummary(
         { primary: running ? "Running" : "Ran", secondary: ` ${plural(units.length, "command")}` },
         { leading: " " },

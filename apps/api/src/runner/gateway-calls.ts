@@ -1,26 +1,19 @@
-import type * as MachineBindings from "@rika/kernel/machine-bindings"
-import type { AccessWire, BindingOutcome, BindingRequest, MachineOutcome } from "@rika/remote-execution/protocol"
-import { Clock, Crypto, DateTime, Deferred, Effect, Ref, Semaphore } from "effect"
+import type { AccessWire, MachineOutcome, MachineRequest } from "@rika/remote-execution/protocol"
+import { Clock, DateTime, Deferred, Effect, Ref, Semaphore } from "effect"
 import type { GatewayError, Socket } from "../executor/gateway"
-import { invokeAdmittedTool, type HostedToolPolicyService } from "../hosted/execution/tool-policy"
 import { gatewayModel, type MachineCall, type Pending, type Session } from "./gateway-model"
-
-const { encode, encodeBindingRequest, encodeMachineRequest, failure, machineKey, operationKey, sameFence } =
-  gatewayModel
 
 interface CallState {
   readonly sessions: Ref.Ref<Map<string, Session>>
   readonly assignments: Ref.Ref<Map<Socket, string>>
   readonly pending: Ref.Ref<Map<string, Pending>>
   readonly machineCalls: Ref.Ref<Map<string, MachineCall>>
-  readonly gatewayLock: Semaphore.Semaphore
   readonly machineLock: Semaphore.Semaphore
 }
 
 interface CallDependencies {
-  readonly crypto: Crypto.Crypto
-  readonly toolPolicy: HostedToolPolicyService
   readonly requestDigest: (value: string) => Effect.Effect<string, GatewayError>
+  readonly machineIdFor: (operationKey: string, attempt: number) => Effect.Effect<string, GatewayError>
   readonly send: (socket: Socket, frame: string) => void
   readonly state: CallState
 }
@@ -31,8 +24,15 @@ const machineDeadlineOutcome: MachineOutcome = {
 }
 
 export const runnerGatewayCalls = (dependencies: CallDependencies) => {
-  const { crypto, requestDigest, send, state, toolPolicy } = dependencies
-  const { assignments, gatewayLock, machineCalls, machineLock, pending, sessions } = state
+  const { encode, encodeMachineRequest, failure, machineKey, operationKey, sameFence } = gatewayModel
+  const { requestDigest, machineIdFor, send, state } = dependencies
+  const { assignments, machineCalls, machineLock, pending, sessions } = state
+
+  const deliver = (socket: Socket, frame: string) =>
+    Effect.try({ try: () => send(socket, frame), catch: () => false }).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    )
 
   const settleMachine = Effect.fn("RunnerGateway.settleMachine")(function* (
     mapKey: string,
@@ -84,17 +84,20 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
               })
               continue
             }
+            const correlation = {
+              access: session.access,
+              operationKey: call.operationKey,
+              attempt: call.attempt,
+              machineId: call.machineId,
+              requestDigest: call.requestDigest,
+            }
             send(
               session.socket,
-              encode({
-                _tag: "MachineExecute",
-                access: session.access,
-                operationKey: call.operationKey,
-                attempt: call.attempt,
-                machineId: call.machineId,
-                requestDigest: call.requestDigest,
-                request: call.request,
-              }),
+              encode(
+                call.cancelling
+                  ? { _tag: "MachineCancel", ...correlation }
+                  : { _tag: "MachineExecute", ...correlation, request: call.request },
+              ),
             )
           }
         }),
@@ -102,140 +105,73 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
     )
   })
 
-  const receiveBinding = Effect.fn("RunnerGateway.receiveBinding")(function* (
-    socket: Socket,
-    access: AccessWire,
-    operationKeyValue: string,
-    attempt: number,
-    callId: string,
-    digest: string,
-    request: BindingRequest,
-  ) {
-    const assignmentId = (yield* Ref.get(assignments)).get(socket)
-    const pendingOperation =
-      assignmentId === undefined
-        ? undefined
-        : (yield* Ref.get(pending)).get(operationKey(assignmentId, operationKeyValue, attempt))
-    if (assignmentId === undefined) return yield* failure("fenced", "Local binding call has no executor")
-    if (pendingOperation === undefined || (yield* Deferred.isDone(pendingOperation.result))) return
-    if (
-      pendingOperation.socket !== socket ||
-      pendingOperation.attempt !== attempt ||
-      !sameFence(pendingOperation.access, access) ||
-      request.sessionId !== pendingOperation.request.sessionId ||
-      request.cellId !== pendingOperation.request.toolCallId
-    )
-      return yield* failure("fenced", "Local binding call has a stale cell identity")
-    return yield* pendingOperation.bindingLock.withPermits(1)(
-      Effect.gen(function* () {
-        const expected = yield* requestDigest(encodeBindingRequest(request))
-        if (expected !== digest) return yield* failure("fenced", "Local binding request digest is invalid")
-        const candidate = yield* Deferred.make<BindingOutcome>()
-        const call = yield* Ref.modify(pendingOperation.bindingCalls, (current) => {
-          const known = current.get(callId)
-          if (known !== undefined) return [known, current] as const
-          const created = { requestDigest: digest, result: candidate }
-          return [created, new Map(current).set(callId, created)] as const
-        })
-        if (call.requestDigest !== digest)
-          return yield* failure("fenced", "Local binding call id conflicts with a different request")
-        const remaining = Math.max(
-          0,
-          DateTime.toEpochMillis(DateTime.makeUnsafe(pendingOperation.request.deadlineAt)) -
-            (yield* Clock.currentTimeMillis),
-        )
-        const deadlineOutcome = {
-          _tag: "Unknown" as const,
-          message: "Cell binding outcome is unknown at the operation deadline",
-        }
-        if (call.result === candidate) {
-          const outcome = yield* invokeAdmittedTool({
-            policyService: toolPolicy,
-            threadId: pendingOperation.request.threadId,
-            turnId: pendingOperation.request.turnId,
-            workspaceId: pendingOperation.request.workspaceId,
-            operationKey: operationKeyValue,
-            callId,
-            request,
-            access,
-            invoke: pendingOperation.bindings.registry.invoke({ ...request, input: request.input }),
-          }).pipe(
-            Effect.provideContext(pendingOperation.bindings.context),
-            Effect.provideService(Crypto.Crypto, crypto),
-            Effect.timeoutOrElse({ duration: remaining, orElse: () => Effect.succeed(deadlineOutcome) }),
-            Effect.orElseSucceed(
-              (): BindingOutcome => ({
-                _tag: "Unknown",
-                message: "Tool admission could not durably record its decision",
-              }),
-            ),
-            Effect.onInterrupt(() => Deferred.succeed(candidate, deadlineOutcome).pipe(Effect.asVoid)),
-          )
-          yield* Deferred.succeed(candidate, outcome)
-        }
-        const outcome = yield* Deferred.await(call.result).pipe(
-          Effect.timeoutOrElse({
-            duration: remaining,
-            orElse: () =>
-              Deferred.succeed(call.result, deadlineOutcome).pipe(Effect.andThen(Deferred.await(call.result))),
-          }),
-        )
-        yield* gatewayLock.withPermits(1)(
-          Effect.gen(function* () {
-            const assigned = (yield* Ref.get(assignments)).get(socket)
-            const current = (yield* Ref.get(sessions)).get(pendingOperation.assignmentId)
-            if (
-              assigned !== pendingOperation.assignmentId ||
-              current?.socket !== socket ||
-              !sameFence(current.access, access)
-            )
-              return yield* failure("disconnected", "Local binding result has no executor")
-            send(
-              socket,
-              encode({
-                _tag: "BindingResult",
-                access,
-                operationKey: operationKeyValue,
-                attempt,
-                callId,
-                requestDigest: digest,
-                outcome,
-              }),
-            )
-          }),
-        )
-      }),
-    )
-  })
-
-  const settleCancelledOperation = Effect.fn("RunnerGateway.settleCancelledOperation")(function* (
+  const cancelMachineOperation = Effect.fn("RunnerGateway.cancelMachineOperation")(function* (
     assignmentId: string,
     operationKeyValue: string,
     attempt: number,
   ) {
+    const operation = (yield* Ref.get(pending)).get(operationKey(assignmentId, operationKeyValue, attempt))
+    if (operation === undefined) return
+    const session = (yield* Ref.get(sessions)).get(assignmentId)
+    const machineId = yield* machineIdFor(operationKeyValue, attempt)
+    const digest = yield* requestDigest(encodeMachineRequest(operation.request.machineRequest))
+    const mapKey = machineKey(assignmentId, operationKeyValue, attempt, machineId)
+    const candidate: MachineCall = {
+      assignmentId,
+      operationKey: operationKeyValue,
+      attempt,
+      machineId,
+      requestDigest: digest,
+      request: operation.request.machineRequest,
+      socket: session?.socket ?? operation.socket,
+      access: session?.access ?? operation.access,
+      deadlineAtMillis: DateTime.toEpochMillis(DateTime.makeUnsafe(operation.request.deadlineAt)),
+      cancelling: true,
+      result: yield* Deferred.make<MachineOutcome>(),
+    }
     yield* machineLock.withPermits(1)(
       Effect.uninterruptible(
         Effect.gen(function* () {
           const current = yield* Ref.get(machineCalls)
-          const next = new Map(current)
-          for (const [mapKey, call] of current) {
-            if (
-              call.assignmentId !== assignmentId ||
-              call.operationKey !== operationKeyValue ||
-              call.attempt !== attempt
-            )
-              continue
-            yield* Deferred.succeed(call.result, { _tag: "Cancelled" })
-            next.delete(mapKey)
+          const known = current.get(mapKey)
+          if (known !== undefined && known.requestDigest !== digest) {
+            yield* Deferred.succeed(known.result, {
+              _tag: "Fenced",
+              message: "Local machine call id conflicts with a different request",
+            })
+            return
           }
-          yield* Ref.set(machineCalls, next)
+          const alreadySent = known?.cancelling === true && session?.socket === known.socket
+          const call = known === undefined ? candidate : { ...known, cancelling: true }
+          const retained =
+            session === undefined ? call : { ...call, socket: session.socket, access: session.access, cancelling: true }
+          yield* Ref.set(machineCalls, new Map(current).set(mapKey, retained))
+          if (session === undefined || alreadySent) return
+          const sent = yield* deliver(
+            session.socket,
+            encode({
+              _tag: "MachineCancel",
+              access: session.access,
+              operationKey: operationKeyValue,
+              attempt,
+              machineId,
+              requestDigest: digest,
+            }),
+          )
+          if (sent) return
+          yield* Deferred.succeed(retained.result, {
+            _tag: "Unknown",
+            message: "Local machine cancellation delivery is uncertain",
+          })
+          yield* Ref.update(machineCalls, (calls) => {
+            if (calls.get(mapKey)?.result !== retained.result) return calls
+            const next = new Map(calls)
+            next.delete(mapKey)
+            return next
+          })
         }),
       ),
     )
-    const pendingOperation = (yield* Ref.get(pending)).get(operationKey(assignmentId, operationKeyValue, attempt))
-    if (pendingOperation === undefined) return
-    const calls = [...(yield* Ref.get(pendingOperation.bindingCalls)).values()]
-    yield* Effect.forEach(calls, (call) => Deferred.await(call.result), { concurrency: "unbounded", discard: true })
   })
 
   const receiveMachine = Effect.fn("RunnerGateway.receiveMachine")(function* (
@@ -247,28 +183,24 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
     digest: string,
     outcome: MachineOutcome,
   ) {
-    yield* gatewayLock.withPermits(1)(
-      Effect.gen(function* () {
-        const assignmentId = (yield* Ref.get(assignments)).get(socket)
-        const current = assignmentId === undefined ? undefined : (yield* Ref.get(sessions)).get(assignmentId)
-        if (assignmentId === undefined || current?.socket !== socket || !sameFence(current.access, access))
-          return yield* failure("fenced", "Local machine result has no executor")
-        const mapKey = machineKey(assignmentId, operationKeyValue, attempt, machineId)
-        const call = (yield* Ref.get(machineCalls)).get(mapKey)
-        if (call === undefined) return
-        if (
-          call.socket !== socket ||
-          call.attempt !== attempt ||
-          call.requestDigest !== digest ||
-          !sameFence(call.access, access)
-        )
-          return yield* failure("fenced", "Local machine result conflicts with its request")
-        yield* settleMachine(
-          mapKey,
-          call,
-          (yield* Clock.currentTimeMillis) >= call.deadlineAtMillis ? machineDeadlineOutcome : outcome,
-        )
-      }),
+    const assignmentId = (yield* Ref.get(assignments)).get(socket)
+    const current = assignmentId === undefined ? undefined : (yield* Ref.get(sessions)).get(assignmentId)
+    if (assignmentId === undefined || current?.socket !== socket || !sameFence(current.access, access))
+      return yield* failure("fenced", "Local machine result has no executor")
+    const mapKey = machineKey(assignmentId, operationKeyValue, attempt, machineId)
+    const call = (yield* Ref.get(machineCalls)).get(mapKey)
+    if (call === undefined) return
+    if (
+      call.socket !== socket ||
+      call.attempt !== attempt ||
+      call.requestDigest !== digest ||
+      !sameFence(call.access, access)
+    )
+      return yield* failure("fenced", "Local machine result conflicts with its request")
+    yield* settleMachine(
+      mapKey,
+      call,
+      (yield* Clock.currentTimeMillis) >= call.deadlineAtMillis ? machineDeadlineOutcome : outcome,
     )
   })
 
@@ -285,20 +217,18 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
     )
   })
 
-  const machine = Effect.fn("RunnerGateway.machine")(function* (
+  const invokeMachine = Effect.fn("RunnerGateway.invokeMachine")(function* (
     assignmentId: string,
     operationKeyValue: string,
     attempt: number,
-    request: MachineBindings.Request,
+    machineId: string,
+    request: MachineRequest,
   ) {
     const pendingOperation = (yield* Ref.get(pending)).get(operationKey(assignmentId, operationKeyValue, attempt))
     const session = (yield* Ref.get(sessions)).get(assignmentId)
     if (pendingOperation === undefined || session === undefined)
-      return yield* failure("disconnected", "Local cell authority is no longer available")
-    const ordinal = yield* Ref.getAndUpdate(pendingOperation.nextMachineOrdinal, (current) => current + 1)
-    const machineId = `${pendingOperation.request.toolCallId}:${ordinal}`
+      return yield* failure("disconnected", "Local operation authority is no longer available")
     const digest = yield* requestDigest(encodeMachineRequest(request))
-    const result = yield* Deferred.make<MachineBindings.Outcome>()
     const mapKey = machineKey(assignmentId, operationKeyValue, attempt, machineId)
     const deadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(pendingOperation.request.deadlineAt))
     const candidate: MachineCall = {
@@ -311,7 +241,8 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
       socket: session.socket,
       access: session.access,
       deadlineAtMillis,
-      result,
+      cancelling: false,
+      result: yield* Deferred.make<MachineOutcome>(),
     }
     const admitted = yield* machineLock.withPermits(1)(
       Effect.uninterruptible(
@@ -319,33 +250,24 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
           const current = yield* Ref.get(machineCalls)
           const known = current.get(mapKey)
           if ((yield* Clock.currentTimeMillis) >= deadlineAtMillis) {
-            if (known !== undefined) {
-              yield* Deferred.succeed(known.result, machineDeadlineOutcome)
-              yield* Ref.set(machineCalls, new Map(Array.from(current).filter(([currentKey]) => currentKey !== mapKey)))
-            }
+            if (known !== undefined) yield* Deferred.succeed(known.result, machineDeadlineOutcome)
+            yield* Ref.set(machineCalls, new Map(Array.from(current).filter(([key]) => key !== mapKey)))
             return { call: undefined, sent: true } as const
           }
           const call = known ?? candidate
           if (known !== undefined) return { call, sent: true } as const
           yield* Ref.set(machineCalls, new Map(current).set(mapKey, candidate))
-          const sent = yield* Effect.try({
-            try: () =>
-              send(
-                session.socket,
-                encode({
-                  _tag: "MachineExecute",
-                  access: session.access,
-                  operationKey: operationKeyValue,
-                  attempt,
-                  machineId,
-                  requestDigest: digest,
-                  request,
-                }),
-              ),
-            catch: () => false,
-          }).pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
+          const sent = yield* deliver(
+            session.socket,
+            encode({
+              _tag: "MachineExecute",
+              access: session.access,
+              operationKey: operationKeyValue,
+              attempt,
+              machineId,
+              requestDigest: digest,
+              request,
+            }),
           )
           return { call, sent } as const
         }),
@@ -362,20 +284,16 @@ export const runnerGatewayCalls = (dependencies: CallDependencies) => {
       })
     const remaining = Math.max(0, call.deadlineAtMillis - (yield* Clock.currentTimeMillis))
     return yield* Deferred.await(call.result).pipe(
-      Effect.timeoutOrElse({
-        duration: remaining,
-        orElse: () => settleMachine(mapKey, call, machineDeadlineOutcome),
-      }),
+      Effect.timeoutOrElse({ duration: remaining, orElse: () => settleMachine(mapKey, call, machineDeadlineOutcome) }),
     )
   })
 
   return {
-    machine,
-    receiveBinding,
+    cancelMachineOperation,
+    invokeMachine,
     receiveMachine,
     replayMachineCalls,
     retireOperation,
     sessionRegistered,
-    settleCancelledOperation,
   }
 }

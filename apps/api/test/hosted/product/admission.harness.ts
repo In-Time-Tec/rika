@@ -312,12 +312,8 @@ it.effect.skipIf(!live)("admits a current local Thread without recovering an unr
           protocolVersion: runnerProtocolVersion,
           workspaceIdentity,
           repository: { identity: "In-Time-Tec/rika", branch: "main" },
-          kernel: {
-            runtime: "bun",
-            runtimeVersion: Bun.version,
-            trustMode: "trusted-local",
-          },
-          capabilities: { cells: true, checkpoints: false, pty: false },
+          nativeToolRuntime: { runtime: "bun", runtimeVersion: Bun.version, trustMode: "trusted-local" },
+          capabilities: { nativeTools: true, checkpoints: false, pty: false },
         },
       })
       const deviceId = yield* Schema.decodeEffect(DeviceId)(authenticated.deviceId)

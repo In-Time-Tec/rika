@@ -147,20 +147,14 @@ test(
             model.turn(
               [
                 model.reasoning("FIRST_CALL_REASONING"),
-                model.binding(
-                  { module: "processes", operation: "start", input: { command: "printf THINKING_COUNT_OK" } },
-                  "thinking-tool",
-                ),
+                model.tool("bash", { command: "printf THINKING_COUNT_OK" }, "thinking-tool"),
               ],
               { streamPartDelayMillis: 250, outputTokens: 7, outputReasoningTokens: 7 },
             ),
             model.turn(
               [
                 model.part("FIRST_CALL_STREAMED"),
-                model.binding(
-                  { module: "processes", operation: "start", input: { command: "printf TOOL_CONTINUATION_OK" } },
-                  "streaming-tool",
-                ),
+                model.tool("bash", { command: "printf TOOL_CONTINUATION_OK" }, "streaming-tool"),
               ],
               { delayMillis: 2_000, streamPartDelayMillis: 250, outputTokens: 5, outputTextTokens: 5 },
             ),

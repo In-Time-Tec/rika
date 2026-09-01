@@ -6,7 +6,6 @@ import type { HostedProductService } from "../../src/hosted/product"
 import type { Runtime as ExecutorRuntime } from "../../src/executor/service"
 import type { HttpDependencies } from "../../src/server/http"
 import { canonicalPublicRequest, serveApi } from "../../src/server/bun"
-import { testToolPolicy } from "../hosted/execution/tool-policy.fixture"
 import "./bun/sessions.harness"
 
 const config: IdentityConfig = {
@@ -96,7 +95,6 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         active: () => Effect.succeed(true),
         execute: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        machine: () => Effect.die("unused"),
         workspace: () => Effect.die("unused"),
         sendPty: () => Effect.die("unused"),
         ptyEvents: () => Stream.empty,
@@ -110,12 +108,11 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
         active: () => Effect.succeed(true),
         execute: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
-        machine: () => Effect.die("unused"),
       },
       admitRunner: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
-      run: () => Effect.die("unused"),
-      cancel: () => Effect.die("unused"),
+      runTool: () => Effect.die("unused"),
+      cancelTool: () => Effect.die("unused"),
       pause: () => Effect.die("unused"),
       resume: () => Effect.die("unused"),
       replace: () => Effect.die("unused"),
@@ -127,7 +124,6 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       devices,
       product,
       recovery,
-      toolPolicy: testToolPolicy,
       executor,
       execution: {
         check: Effect.succeed({
@@ -259,7 +255,6 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         cancelRunAdmission: () => Effect.die("unused"),
         cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       },
-      toolPolicy: testToolPolicy,
       executor: {
         controller: unusedController,
         gateway: {
@@ -268,7 +263,6 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.die("unused"),
-          machine: () => Effect.die("unused"),
           workspace: () => Effect.die("unused"),
           sendPty: () => Effect.die("unused"),
           ptyEvents: () => Stream.empty,
@@ -282,12 +276,11 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           active: () => Effect.succeed(true),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.die("unused"),
-          machine: () => Effect.die("unused"),
         },
         admitRunner: () => Effect.die("unused"),
         admitRun: () => Effect.die("unused"),
-        run: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
+        runTool: () => Effect.die("unused"),
+        cancelTool: () => Effect.die("unused"),
         pause: () => Effect.die("unused"),
         resume: () => Effect.die("unused"),
         replace: () => Effect.die("unused"),

@@ -70,7 +70,7 @@ const make = Effect.gen(function* () {
           workspaceId: input.profile.workspaceIdentity,
           projectId: input.profile.projectId ?? null,
           repository: input.profile.repository,
-          kernelProfile: input.profile.kernel,
+          nativeToolRuntime: input.profile.nativeToolRuntime,
           capabilities: input.profile.capabilities,
         })
         .onConflictDoUpdate({
@@ -79,7 +79,7 @@ const make = Effect.gen(function* () {
             workspaceId: input.profile.workspaceIdentity,
             projectId: input.profile.projectId ?? null,
             repository: input.profile.repository,
-            kernelProfile: input.profile.kernel,
+            nativeToolRuntime: input.profile.nativeToolRuntime,
             capabilities: input.profile.capabilities,
             updatedAt: sql`transaction_timestamp()`,
           },

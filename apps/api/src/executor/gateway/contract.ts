@@ -1,13 +1,15 @@
 import type { Quiescence } from "@rika/e2b-executor/controller"
-import type * as ExecutorRuntime from "@rika/kernel/executor-runtime"
-import type * as MachineBindings from "@rika/kernel/machine-bindings"
+import type { EnvironmentPhase } from "@rika/product/environment-policy"
+import type {
+  ToolOperationLifecycleFrame,
+  ToolOperationResponse,
+  ToolOperationTerminalOutcome,
+} from "@rika/product/tool-operation-lifecycle"
 import type {
   AccessWire,
-  BindingManifest,
   BranchPushOutcome,
-  CellLifecycleFrame,
-  CellResponse,
   ExecutorMessage,
+  MachineRequest,
   PtyCreate,
   PtyInput,
   PtyReconnect,
@@ -17,9 +19,7 @@ import type {
   WorkspaceRequest,
   WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
-import { Context, Effect, Redacted, Schema, Stream } from "effect"
-import { HostBindings } from "generalist/repl"
-import type { EnvironmentPhase } from "@rika/product/environment-policy"
+import { Effect, Redacted, Schema, Stream } from "effect"
 
 export interface Socket {
   readonly send: (message: string) => void
@@ -31,11 +31,11 @@ export type SocketFrame = string | Uint8Array<ArrayBufferLike>
 
 export interface ExecutionResult {
   readonly access?: AccessWire
-  readonly response: CellResponse
+  readonly response: ToolOperationResponse
   readonly outcome: ExecutionOutcome
 }
 
-export type ExecutionOutcome = "completed" | "failed" | "cancelled" | "unknown"
+export type ExecutionOutcome = ToolOperationTerminalOutcome
 
 export type LifecycleAppendDisposition =
   | { readonly _tag: "Appended" }
@@ -72,12 +72,6 @@ export interface BranchPushInput {
   readonly commitSha: string
 }
 
-export interface BindingAuthority {
-  readonly registry: HostBindings.Service
-  readonly context: Context.Context<ExecutorRuntime.CellServices>
-  readonly manifest: BindingManifest
-}
-
 export class GatewayError extends Schema.TaggedError<GatewayError>()("ExecutorGatewayError", {
   kind: Schema.Literals(["disconnected", "fenced", "timeout", "transport"]),
   message: Schema.String,
@@ -96,32 +90,26 @@ export interface OperationIdentity {
   readonly rootRunId: string
   readonly attempt: number
   readonly replayPolicy: "pure" | "provider-idempotent" | "never"
+  readonly machineRequest: MachineRequest
 }
 
-export interface OperationInput extends OperationIdentity {
+export interface ToolExecuteInput extends OperationIdentity {
   readonly admittedAt: string | null
   readonly deadlineAt: string
 }
+
+export type OperationInput = ToolExecuteInput
+export type ExecuteInput = ToolExecuteInput
 
 export interface ExecutorDataPlane {
   readonly receive: (socket: Socket, frame: SocketFrame) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
   readonly cancel: (input: OperationIdentity) => Effect.Effect<ExecutionResult, GatewayError>
-  readonly machine: (
-    assignmentId: string,
-    operationKey: string,
-    attempt: number,
-    request: MachineBindings.Request,
-  ) => Effect.Effect<MachineBindings.Outcome, GatewayError>
-}
-
-export interface ExecuteInput extends OperationInput {
-  readonly bindings: BindingAuthority
 }
 
 export interface Gateway extends ExecutorDataPlane {
-  readonly execute: (input: ExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
+  readonly execute: (input: ToolExecuteInput) => Effect.Effect<ExecutionResult, GatewayError>
   readonly sendPty: (assignmentId: string, request: PtyRequest) => Effect.Effect<void, GatewayError>
   readonly ptyEvents: (assignmentId: string) => Stream.Stream<PtyEvent>
   readonly retryPreparation: (assignmentId: string) => Effect.Effect<void, GatewayError>
@@ -136,21 +124,13 @@ export interface Gateway extends ExecutorDataPlane {
 export interface LifecycleStore {
   readonly append: (
     access: AccessWire,
-    frame: CellLifecycleFrame,
+    frame: ToolOperationLifecycleFrame,
   ) => Effect.Effect<LifecycleAppendDisposition, GatewayError>
   readonly load: (
     assignmentId: string,
     operationKey: string,
     attempt: number,
-  ) => Effect.Effect<ReadonlyArray<CellLifecycleFrame>, GatewayError>
-  readonly replay: (assignmentId: string) => Effect.Effect<
-    ReadonlyArray<{
-      readonly operationKey: string
-      readonly attempt: number
-      readonly afterCursor: number
-    }>,
-    GatewayError
-  >
+  ) => Effect.Effect<ReadonlyArray<ToolOperationLifecycleFrame>, GatewayError>
   readonly prepare: (input: OperationInput) => Effect.Effect<
     {
       readonly admittedAt: string | null
@@ -162,7 +142,7 @@ export interface LifecycleStore {
     {
       readonly state: "accepted" | "dispatched" | "completed" | "unknown"
       readonly started: boolean
-      readonly response?: CellResponse
+      readonly response?: ToolOperationResponse
       readonly dispatchedGeneration?: number
       readonly dispatchedExecutorInstanceId?: string
       readonly dispatchedProcessIncarnation?: string
@@ -175,11 +155,16 @@ export interface LifecycleStore {
     input: OperationIdentity,
   ) => Effect.Effect<
     | { readonly _tag: "Cancelled"; readonly result: ExecutionResult }
-    | { readonly _tag: "Dispatched" }
+    | { readonly _tag: "Dispatched"; readonly deadlineAt: string }
     | { readonly _tag: "AlreadyTerminal"; readonly result: ExecutionResult },
     GatewayError
   >
-  readonly resolveDeadline: (input: OperationInput) => Effect.Effect<DeadlineResolution, GatewayError>
+  readonly resolveDeadline: (input: OperationIdentity) => Effect.Effect<DeadlineResolution, GatewayError>
+}
+
+export const cancelledResponse: ToolOperationResponse = {
+  _tag: "DomainFailure",
+  failure: { kind: "cancelled", message: "Tool operation cancelled" },
 }
 
 export interface PhaseEnvironmentGrant {
@@ -238,9 +223,4 @@ export interface PreparationStore {
   }) => Effect.Effect<void, GatewayError>
   readonly retry: (access: AccessWire) => Effect.Effect<number, GatewayError>
   readonly ready: (access: AccessWire) => Effect.Effect<void, GatewayError>
-}
-
-export const cancelledResponse: CellResponse = {
-  _tag: "DomainFailure",
-  failure: { kind: "cancelled", message: "Cell operation cancelled" },
 }

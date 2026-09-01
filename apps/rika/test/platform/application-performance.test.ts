@@ -43,7 +43,7 @@ describe("performance process observation", () => {
       { pid: 11, parent: 10, rss: 200_000, cpu: 0, cpuSeconds: 0, command: "/install/bin/rika" },
     ]
     expect(matchesClientProcess({ command: "/install/bin/rika", runtime })).toBe(true)
-    expect(matchesClientProcess({ command: "/install/bin/.rika-kernel-runtime", runtime })).toBe(false)
+    expect(matchesClientProcess({ command: "/install/bin/unrelated-worker", runtime })).toBe(false)
     expect(observedClientRow(rows, 10, runtime)?.pid).toBe(11)
   })
 

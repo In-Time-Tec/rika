@@ -8,7 +8,6 @@ import { colors, modeColor, spacing } from "../../presentation/terminal/theme"
 import { formatActivity, transcriptAnimationActive } from "../../state/activity/model"
 import { loaderFrame } from "../rendering/spinner"
 import { toOpenColor } from "../rendering/text-adapter"
-import { contentColumnWidth } from "../../state/layout/model"
 import { homeRelativePath } from "../../presentation/terminal/format"
 import { orbGeometry, orbRows, type OrbImpulse } from "./welcome/orb"
 export const panelLoading = (model: Model): string | undefined => {
@@ -119,16 +118,6 @@ const detailAnimationActive = (model: Model): boolean =>
   (model.threadSidebar.open && model.threads.some((thread) => thread.status !== "idle" && thread.status !== "error"))
 
 export const animationActive = (model: Model): boolean => primaryAnimationActive(model) || detailAnimationActive(model)
-
-/**
- * Gates the goal timer's EXISTENCE. `model.goal !== undefined` would pin the timer on forever after
- * any goal is ever set; only an active goal animates.
- */
-export const goalAnimationActive = (model: Model): boolean => model.goal?.status === "active"
-
-/** The goal indicator shares the context meter's width threshold so narrow terminals stay legible. */
-export const goalIndicatorVisible = (model: Model): boolean =>
-  goalAnimationActive(model) && contentColumnWidth(model) >= 24
 
 export const compactWorkspace = (workspace: string): string => {
   const home = homeRelativePath(workspace)

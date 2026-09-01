@@ -1,26 +1,18 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Ref, Semaphore } from "effect"
+import { mutableExecutionEnvironment } from "../../src/host/execution-environment"
 import { testing } from "../../src/host/service"
 import type { IncomingMessage } from "../../src/protocol/messages"
 
 type PhaseGrant = Extract<IncomingMessage, { readonly _tag: "PhaseEnvironmentGranted" }>
 
 describe("hosted phase environment", () => {
-  it.effect("keeps phase values in memory and restarts kernels when runtime authorization changes", () =>
+  it.effect("replaces ambient native tool values and retains operation-scoped grants", () =>
     Effect.gen(function* () {
       const grants = yield* Ref.make(new Map<string, PhaseGrant>())
-      const applied = yield* Ref.make(new Map([["session-1", `sha256:${"a".repeat(64)}`]]))
       const access = yield* Semaphore.make(1)
-      const environment = { SETUP_TOKEN: "setup-value" }
-      const restarts: Array<string> = []
-      const executor = {
-        admit: () => Effect.die("unused"),
-        execute: () => Effect.die("unused"),
-        cancel: () => Effect.die("unused"),
-        completeBinding: () => Effect.die("unused"),
-        replayBindings: () => Effect.die("unused"),
-        restart: (sessionId: string) => Effect.sync(() => restarts.push(sessionId)).pipe(Effect.asVoid),
-      }
+      const environment = mutableExecutionEnvironment()
+      environment.replace({ SETUP_TOKEN: "setup-value" })
       yield* testing.applyPhaseGrant(
         {
           _tag: "PhaseEnvironmentGranted",
@@ -31,15 +23,21 @@ describe("hosted phase environment", () => {
           redactedNames: ["RUNTIME_TOKEN"],
         },
         grants,
-        environment,
-        applied,
-        executor,
+        environment.values,
         access,
       )
-      expect(environment).toEqual({ SETUP_TOKEN: "setup-value", RUNTIME_TOKEN: "runtime-value" })
-      expect(restarts).toEqual(["session-1"])
-      expect(yield* Ref.get(applied)).toEqual(new Map([["session-1", `sha256:${"b".repeat(64)}`]]))
-      expect(yield* Ref.get(grants)).toEqual(new Map())
+      expect({ ...environment.values }).toEqual({ RUNTIME_TOKEN: "runtime-value" })
+      const operation = {
+        _tag: "PhaseEnvironmentGranted" as const,
+        phase: "runtime" as const,
+        digest: `sha256:${"c".repeat(64)}`,
+        operationKey: "operation-1",
+        values: { OPERATION_TOKEN: "operation-value" },
+        redactedNames: ["OPERATION_TOKEN"],
+      }
+      yield* testing.applyPhaseGrant(operation, grants, environment.values, access)
+      expect((yield* Ref.get(grants)).get("operation-1")).toEqual(operation)
+      expect({ ...environment.values }).toEqual({ RUNTIME_TOKEN: "runtime-value" })
     }),
   )
 })

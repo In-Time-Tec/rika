@@ -9,7 +9,7 @@ import { modelResponse, resetEventPosition, treeEvent } from "../../support/proj
 const CheckpointState = Schema.Struct({
   nodes: Schema.Array(
     Schema.Struct({
-      cells: Schema.Array(Schema.Tuple([Schema.String, Schema.Unknown])),
+      tools: Schema.Array(Schema.Tuple([Schema.String, Schema.Unknown])),
     }),
   ),
   runningCompactions: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -45,9 +45,9 @@ describe("Generalist tree projector indexed recovery", () => {
     }
     const call = {
       type: "tool-call" as const,
-      id: "active-cell",
-      name: "typescript",
-      params: { code: "await activeWork" },
+      id: "active-tool",
+      name: "bash",
+      params: { command: "bun test" },
       providerExecuted: false,
       metadata: {},
     }
@@ -67,15 +67,16 @@ describe("Generalist tree projector indexed recovery", () => {
       treeEvent("raw-root-run", {
         _tag: "ToolProgress",
         turn: 1_000,
-        toolCallId: "active-cell",
-        data: { _tag: "Stdout", cellId: "active-cell", sequence: 0, text: "one" },
+        toolCallId: "active-tool",
+        message: "one",
+        data: {},
       }),
     )
     expect(active.revision).toBeGreaterThan(2_000)
-    expect(active.upsert).toMatchObject([{ content: { _tag: "Block", block: { _tag: "Cell" } } }])
-    expect(Object.fromEntries(visits)).toMatchObject({ node: 1, cell: 1, compaction: 1 })
+    expect(active.upsert).toMatchObject([{ content: { _tag: "Block", block: { _tag: "ToolCall" } } }])
+    expect(Object.fromEntries(visits)).toMatchObject({ node: 1, tool: 1, compaction: 1 })
     const persisted = Schema.decodeSync(Schema.fromJsonString(CheckpointState))(active.checkpoint.state)
-    expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toMatchObject(["active-cell"])
+    expect(persisted.nodes.flatMap((node) => node.tools.map(([rawId]) => rawId))).toMatchObject(["active-tool"])
     expect(persisted.runningCompactions).toHaveLength(1)
 
     const resumed = TreeProjector.make(
@@ -87,8 +88,9 @@ describe("Generalist tree projector indexed recovery", () => {
     const next = treeEvent("raw-root-run", {
       _tag: "ToolProgress",
       turn: 1_000,
-      toolCallId: "active-cell",
-      data: { _tag: "Stdout", cellId: "active-cell", sequence: 1, text: "two" },
+      toolCallId: "active-tool",
+      message: "two",
+      data: {},
     })
     const livePatch = projector.apply(next)
     const resumedPatch = resumed.apply(next)

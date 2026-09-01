@@ -1,42 +1,26 @@
-import {
-  redactAccess,
-  redactHeartbeat,
-  type AccessWire,
-  type CellLifecycleFrame,
-} from "@rika/remote-execution/protocol"
+import { redactAccess, redactHeartbeat } from "@rika/remote-execution/protocol"
 import { Effect, Redacted } from "effect"
 import type { Socket, SocketFrame } from "../executor/gateway"
 import type { RunnerExecutorAuthority } from "./executor"
-import { gatewayModel, type FinalResult, type Session } from "./gateway-model"
 import type { runnerGatewayCalls } from "./gateway-calls"
+import { gatewayModel, type Session } from "./gateway-model"
 
 type Calls = ReturnType<typeof runnerGatewayCalls>
 interface MessageDependencies {
   readonly authority: RunnerExecutorAuthority
   readonly register: (session: Session) => Effect.Effect<void>
   readonly replayPending: (session: Session) => Effect.Effect<void, import("../executor/gateway").GatewayError>
-  readonly persistLifecycle: (
-    socket: Socket,
-    access: AccessWire,
-    frame: CellLifecycleFrame,
-  ) => Effect.Effect<void, import("../executor/gateway").GatewayError>
   readonly shutdown: (
     socket: Socket,
-    access: AccessWire,
+    access: Session["access"],
   ) => Effect.Effect<void, import("../executor/gateway").GatewayError>
-  readonly complete: (
-    socket: Socket,
-    access: AccessWire,
-    operationKey: string,
-    attempt: number,
-    response: import("@rika/remote-execution/protocol").CellResponse,
-  ) => Effect.Effect<FinalResult, import("../executor/gateway").GatewayError>
-  readonly calls: Pick<Calls, "receiveBinding" | "receiveMachine">
+  readonly calls: Pick<Calls, "receiveMachine">
 }
+
 export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
-  const { authority, register, replayPending, persistLifecycle, shutdown, complete, calls } = dependencies
+  const { authority, register, replayPending, shutdown, calls } = dependencies
   const { decode, encode } = gatewayModel
-  const receive = (socket: Socket, frame: SocketFrame) =>
+  return (socket: Socket, frame: SocketFrame) =>
     decode(frame).pipe(
       Effect.matchEffect({
         onFailure: () => Effect.sync(() => socket.close(1007, "malformed")),
@@ -77,10 +61,7 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                 }
                 return Effect.sync(() => {
                   socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
-                }).pipe(
-                  Effect.andThen(register(session)),
-                  Effect.andThen(replayPending(session)),
-                )
+                }).pipe(Effect.andThen(register(session)), Effect.andThen(replayPending(session)))
               }),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
@@ -97,26 +78,6 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                 Effect.sync(() => {
                   socket.send(encode({ _tag: "LeaseReceipt", receipt }))
                 }),
-              ),
-              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
-            )
-          if (message._tag === "CellLifecycle")
-            return authority.validateAccess(redactAccess(message.access)).pipe(
-              Effect.andThen(persistLifecycle(socket, message.access, message.frame)),
-              Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
-            )
-          if (message._tag === "BindingInvoke")
-            return authority.validateAccess(redactAccess(message.access)).pipe(
-              Effect.andThen(
-                calls.receiveBinding(
-                  socket,
-                  message.access,
-                  message.operationKey,
-                  message.attempt,
-                  message.callId,
-                  message.requestDigest,
-                  message.request,
-                ),
               ),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
@@ -140,27 +101,9 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
               Effect.tap(() => Effect.sync(() => socket.close(1000, "shutdown"))),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
-          if (message._tag !== "LocalCellResult") return Effect.void
-          return authority.validateAccess(redactAccess(message.access)).pipe(
-            Effect.andThen(complete(socket, message.access, message.operationKey, message.attempt, message.response)),
-            Effect.tap((result) =>
-              Effect.sync(() =>
-                socket.send(
-                  encode({
-                    _tag: "LocalCellReceipt",
-                    access: result.access ?? message.access,
-                    operationKey: message.operationKey,
-                    attempt: message.attempt,
-                  }),
-                ),
-              ),
-            ),
-            Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
-          )
+          return Effect.void
         },
       }),
       Effect.asVoid,
     )
-
-  return receive
 }

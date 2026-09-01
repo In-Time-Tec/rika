@@ -13,7 +13,6 @@ import type {
 import { encodeArchive } from "../workspace/artifact/archive"
 import { createArchive } from "../workspace/artifact/archive-upload"
 import { pushApprovedBranch } from "../workspace/service"
-import type { Interface as HostedKernel } from "./kernel"
 import { HostError } from "./error"
 import type { Config } from "./identity"
 import type { SessionStore } from "./persistence"
@@ -40,12 +39,10 @@ export interface ApiDispatchDependencies {
   readonly writer: Writer
   readonly store: SessionStore
   readonly quiesced: Ref.Ref<boolean>
-  readonly cells: HostedKernel
   readonly operationLifecycle: Operations.Interface
   readonly ptyDelivery: Semaphore.Semaphore
   readonly grants: Ref.Ref<Map<string, PhaseGrant>>
   readonly executionEnvironment: Record<string, string>
-  readonly appliedEnvironment: Ref.Ref<Map<string, string>>
   readonly environmentAccess: Semaphore.Semaphore
   readonly redactedValues: Set<string>
 }
@@ -64,8 +61,6 @@ interface ApiDispatchFunctions {
     message: PhaseGrant,
     grants: Ref.Ref<Map<string, PhaseGrant>>,
     environment: Record<string, string>,
-    applied: Ref.Ref<Map<string, string>>,
-    cells: HostedKernel,
     access: Semaphore.Semaphore,
     redacted: Set<string>,
   ) => Effect.Effect<void, HostError>
@@ -74,13 +69,7 @@ interface ApiDispatchFunctions {
 
 const hostFailure = (error: { readonly message: string }) => HostError.make({ message: error.message })
 const operationMessage = (message: IncomingMessage): message is Parameters<Operations.Interface["dispatch"]>[0] =>
-  message._tag === "CellCancel" ||
-  message._tag === "CellExecute" ||
-  message._tag === "CellReplay" ||
-  message._tag === "CellTerminalReceipt" ||
-  message._tag === "CellTerminalSuperseded" ||
-  message._tag === "LocalCellReceipt" ||
-  message._tag === "MachineExecute"
+  message._tag === "MachineExecute" || message._tag === "MachineCancel"
 
 const consumeReceipt = Effect.fn("Host.consumeReceipt")(function* (
   message: IncomingMessage,
@@ -91,19 +80,6 @@ const consumeReceipt = Effect.fn("Host.consumeReceipt")(function* (
   const runtime = yield* Runtime
   yield* runtime.receipt(message.receipt).pipe(Effect.mapError(hostFailure))
   yield* functions.persistSession(dependencies.store)
-})
-
-const consumeBinding = Effect.fn("Host.consumeBinding")(function* (
-  message: IncomingMessage,
-  dependencies: ApiDispatchDependencies,
-  functions: ApiDispatchFunctions,
-) {
-  if (message._tag !== "BindingResult") return
-  const runtime = yield* Runtime
-  const access = yield* runtime.access.pipe(Effect.mapError(hostFailure))
-  if (!functions.sameAccess(access, message.access))
-    return yield* HostError.make({ message: "Binding result has a stale executor fence" })
-  yield* dependencies.cells.completeBinding(message).pipe(Effect.mapError(hostFailure))
 })
 
 const assignmentCurrent = (dependencies: ApiDispatchDependencies, access: AccessWire, request: BranchPushRequest) => {
@@ -218,12 +194,7 @@ const consumeQuiesce = Effect.fn("Host.consumeQuiesce")(function* (
   )
     return yield* HostError.make({ message: "Quiesce request has a stale executor fence" })
   yield* Ref.set(dependencies.quiesced, true)
-  const operations = yield* dependencies.operationLifecycle
-    .terminalizeOpen({
-      _tag: "DomainFailure",
-      failure: { kind: "unknown", message: "Cell operation outcome is unknown after quiesce" },
-    })
-    .pipe(Effect.mapError(hostFailure))
+  yield* dependencies.operationLifecycle.quiesce.pipe(Effect.mapError(hostFailure))
   const checkpointId = yield* crypto.randomUUIDv4.pipe(Effect.mapError(hostFailure))
   const archive = encodeArchive(
     yield* createArchive(yield* functions.workspaceRoot, dependencies.redactedValues).pipe(
@@ -237,7 +208,6 @@ const consumeQuiesce = Effect.fn("Host.consumeQuiesce")(function* (
         _tag: "ExecutorQuiesced",
         access,
         requestId: message.requestId,
-        operations,
         checkpoint: { version: 1, checkpointId, archive, cursor },
       }),
     )
@@ -251,7 +221,6 @@ const consumeMessage = Effect.fn("Host.consumeApiMessage")(function* (
 ) {
   if (message._tag === "Fenced") return yield* HostError.make({ message: message.message })
   yield* consumeReceipt(message, dependencies, functions)
-  yield* consumeBinding(message, dependencies, functions)
   if (yield* functions.dispatchPty(message, dependencies.writer, dependencies.ptyDelivery)) return
   if (yield* functions.dispatchWorkspace(message, dependencies.writer)) return
   if (message._tag === "PhaseEnvironmentGranted")
@@ -259,8 +228,6 @@ const consumeMessage = Effect.fn("Host.consumeApiMessage")(function* (
       message,
       dependencies.grants,
       dependencies.executionEnvironment,
-      dependencies.appliedEnvironment,
-      dependencies.cells,
       dependencies.environmentAccess,
       dependencies.redactedValues,
     )

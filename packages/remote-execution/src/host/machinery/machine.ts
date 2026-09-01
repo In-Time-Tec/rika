@@ -25,6 +25,11 @@ export interface Interface {
     readonly requestDigest: string
     readonly request: MachineRequest
   }) => Effect.Effect<MachineOutcomeValue, MachineError>
+  readonly cancel: (input: {
+    readonly machineId: string
+    readonly requestDigest: string
+    readonly admitted?: boolean
+  }) => Effect.Effect<MachineOutcomeValue, MachineError>
 }
 
 export class Machine extends Context.Service<Machine, Interface>()("@rika/remote-execution/host/machinery/machine") {}
@@ -80,7 +85,30 @@ const layerWith = <R>(
         }
         return yield* Deferred.await(entry.result)
       })
-      return Machine.of({ execute })
+      const cancel: Interface["cancel"] = Effect.fn("Machine.cancel")(function* (input) {
+        const entry = (yield* Ref.get(entries)).get(input.machineId)
+        if (entry !== undefined && entry.requestDigest !== input.requestDigest)
+          return { _tag: "Fenced", message: "machine call id conflicts with a different request" }
+        const stored = yield* options.read(input.machineId)
+        if (stored === undefined) {
+          if (entry === undefined && input.admitted !== true)
+            return { _tag: "Unknown", message: "machine call was not retained before cancellation" }
+          const outcome = { _tag: "Cancelled" as const }
+          yield* options.write(input.machineId, { _tag: "Completed", requestDigest: input.requestDigest, outcome })
+          if (entry !== undefined) yield* Deferred.succeed(entry.result, outcome)
+          return outcome
+        }
+        if (stored.requestDigest !== input.requestDigest)
+          return { _tag: "Fenced", message: "machine call id conflicts with a persisted request" }
+        if (stored._tag === "Completed") return stored.outcome
+        if (entry === undefined)
+          return { _tag: "Unknown", message: "machine call outcome is unknown after executor restart" }
+        const outcome = { _tag: "Cancelled" as const }
+        yield* options.write(input.machineId, { _tag: "Completed", requestDigest: input.requestDigest, outcome })
+        yield* Deferred.succeed(entry.result, outcome)
+        return outcome
+      })
+      return Machine.of({ execute, cancel })
     }),
   )
 
@@ -95,26 +123,27 @@ export const workspaceLayer = (
   },
 ): Layer.Layer<Machine> => {
   const workspaceUser = options.workspaceUser
-  return (
-    workspaceUser === undefined
-      ? layer(options).pipe(Layer.provide(MachineExecution.layer(options.workspace)))
-      : Layer.effect(
-          Machine,
-          Effect.gen(function* () {
-            const process = yield* MachineProcess.make({
-              workspace: options.workspace,
-              workspaceUser,
-              environment: options.environment ?? {},
-            }).pipe(Effect.orDie)
-            const context = yield* Layer.build(
-              layerWith(options, (request) =>
-                process
-                  .execute(request)
-                  .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
-              ),
-            )
-            return Context.get(context, Machine)
-          }),
-        )
+  if (workspaceUser === undefined)
+    return layer(options).pipe(
+      Layer.provide(MachineExecution.layer(options.workspace)),
+      Layer.provide(BunServices.layer),
+    )
+  return Layer.effect(
+    Machine,
+    Effect.gen(function* () {
+      const process = yield* MachineProcess.make({
+        workspace: options.workspace,
+        workspaceUser,
+        environment: options.environment ?? {},
+      }).pipe(Effect.orDie)
+      const context = yield* Layer.build(
+        layerWith(options, (request) =>
+          process
+            .execute(request)
+            .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
+        ),
+      )
+      return Context.get(context, Machine)
+    }),
   ).pipe(Layer.provide(BunServices.layer))
 }

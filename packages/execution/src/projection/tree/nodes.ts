@@ -30,7 +30,6 @@ const compactNodeImpl = (node: Node, retained: ReadonlySet<string>): PersistedPr
     lifecycle: node.lifecycle,
     started: node.started,
     tools: [...node.tools].filter(([, tool]) => retained.has(tool.key)),
-    cells: [...node.cells].filter(([, cell]) => retained.has(cell.key)),
   }
   if (node.parentRawRunId !== undefined) Object.assign(persisted, { parentRawRunId: node.parentRawRunId })
   if (node.parentUnitKey !== undefined) Object.assign(persisted, { parentUnitKey: node.parentUnitKey })

@@ -133,7 +133,7 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
   rows.forEach((row, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
     if ("ellipsis" in row) {
-      chunks.push(fg(colors.muted)(`${indent}${".".repeat(Math.min(3, numberWidth)).padStart(numberWidth)}`))
+      chunks.push(fg(colors.muted)(`${indent}...`))
       return
     }
     const gutter = `${indent}${String(row.number).padStart(numberWidth)} ${row.marker} `

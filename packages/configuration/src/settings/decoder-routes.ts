@@ -27,7 +27,7 @@ const validateRoleRoute = (path: string, owner: string, input: Decoded) => {
 const validateAgents = (path: string, mode: string, agents: Decoded) => {
   if (agents === undefined) return
   if (!isObject(agents)) fail(path, `Mode ${mode} agents must be an object`)
-  exactKeys(path, `Mode ${mode} agents`, agents, ["librarian", "painter", "readThread", "review", "surgeon", "task"])
+  exactKeys(path, `Mode ${mode} agents`, agents, ["librarian", "painter", "review", "surgeon", "task"])
   for (const [agent, route] of Object.entries(agents)) validateRoleRoute(path, `Mode ${mode} agent ${agent}`, route)
 }
 

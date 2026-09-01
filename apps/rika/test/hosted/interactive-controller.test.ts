@@ -243,7 +243,7 @@ it.effect("deferred commands wait while unavailable and synchronous projections 
       usage: { state: ExecutionProjection.emptyUsageState() },
     })
     const checkpoint = yield* Schema.decodeEffect(ExecutionProjection.Checkpoint)({
-      version: 6,
+      version: 7,
       cursor: "7",
       state: "{}",
     })

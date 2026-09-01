@@ -11,7 +11,6 @@ import { Effect, type Fiber } from "effect"
 import type { Key } from "../../presentation/terminal/keymap"
 import type { Model } from "../../state/model"
 import type { WelcomeController } from "./welcome/controller"
-import type { GoalController } from "./goal/controller"
 import type { LoaderController } from "./loader/controller"
 import type { HoverController } from "./hover/controller"
 import { PointerController } from "./pointer/controller"
@@ -90,7 +89,6 @@ export class SurfaceState {
   }
   public changedFilesText!: TextRenderable
   public statusLabel!: TextRenderable
-  public goalLabel!: TextRenderable
   public toastBox!: BoxRenderable
   public toast!: TextRenderable
   public ctrlCMenuBox!: BoxRenderable
@@ -98,7 +96,6 @@ export class SurfaceState {
   public ctrlCMenu!: TextRenderable
   protected lastPaste: { readonly text: string; readonly at: number } | undefined
   protected welcomeController!: WelcomeController
-  protected goalController!: GoalController
   protected loaderController!: LoaderController
   protected hoverController!: HoverController
   protected readonly pointerController = new PointerController()
@@ -120,10 +117,8 @@ export class SurfaceState {
     return {
       loaderRunning: this.loaderController.running,
       welcomeRunning: this.welcomeController.running,
-      goalRunning: this.goalController.running,
       loaderPhase: this.loaderController.phase,
       welcomePhase: this.welcomeController.phase,
-      goalPhase: this.goalController.phase,
     }
   }
   public transcriptDiagnostics(): TranscriptPaneDiagnostics {

@@ -82,6 +82,7 @@ const continuationIsFolded = (
   blocks: Model["blocks"],
 ): boolean =>
   block.presentation.rowDisplay === "continuation" &&
+  block.presentation.action !== "status" &&
   (block.status !== "failed" ||
     (block.parentId !== undefined &&
       blocks.some((value) => {
@@ -89,19 +90,10 @@ const continuationIsFolded = (
         return candidate._tag === "ToolCall" && candidate.id === block.parentId && candidate.status === "failed"
       })))
 
-const cellHasDetail = (block: Extract<TranscriptBlock, { _tag: "Cell" }>): boolean =>
-  block.source.text.length > 0 ||
-  block.output.stdout.length > 0 ||
-  block.output.stderr.length > 0 ||
-  block.result !== undefined ||
-  block.error !== undefined ||
-  block.calls.length > 0 ||
-  block.notices.length > 0
-
 const toolUnitHasStructuralDetail = (unit: Extract<TranscriptUnit, { kind: "tool" }>): boolean =>
   (unit.children?.length ?? 0) > 0 ||
   unit.agentResponse !== undefined ||
-  unit.group === "explore" ||
+  (unit.group === "explore" && unit.blocks.length > 1) ||
   unit.group === "edit" ||
   (unit.group === "shell" && unit.blocks.length > 1)
 
@@ -114,13 +106,6 @@ const toolIsStandalone = (
 const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const units: Array<TranscriptUnit> = []
   const childItems = new Map<string, Array<TranscriptItem>>()
-  const cellBlockIds = new Set(
-    orderedTranscriptItems(model).flatMap((item) => {
-      if (item._tag !== "Block") return []
-      const block = decodeTranscriptBlock(model.blocks[item.index])
-      return block._tag === "Cell" ? [block.id] : []
-    }),
-  )
   for (const item of orderedTranscriptItems(model)) {
     if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
@@ -159,7 +144,8 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     (childItems.get(parentId) ?? []).flatMap((item): ReadonlyArray<NestedTranscriptUnit> => {
       if (item._tag !== "Block") return []
       const block = decodeTranscriptBlock(model.blocks[item.index])
-      if (block._tag === "Cell") return [{ kind: "cell", block: item.index }]
+      if (block._tag === "SubagentGroup")
+        return [{ kind: "subagent-group", block: item.index, children: nestedUnits(block.id) }]
       if (block._tag === "SubagentCard") {
         const children = nestedUnits(block.id)
         const agentResponse = subagentResponseFor(block)
@@ -204,7 +190,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     toolRun = []
   }
   const appendTopLevelItem = (item: TranscriptItem) => {
-    if (item.parentId !== undefined && !cellBlockIds.has(item.parentId)) return
+    if (item.parentId !== undefined) return
     if (item._tag === "Entry") {
       flush()
       units.push({ kind: "entry", entry: item.index })
@@ -240,6 +226,8 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   }
   const appendPresentedBlock = (index: number, block: TranscriptBlock) => {
     if (block._tag === "Reasoning") units.push({ kind: "reasoning", block: index })
+    else if (block._tag === "SubagentGroup")
+      units.push({ kind: "subagent-group", block: index, children: nestedUnits(block.id) })
     else if (block._tag === "SubagentCard") {
       const agentResponse = subagentResponseFor(block)
       const children = nestedUnits(block.id)
@@ -249,13 +237,47 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
           : { kind: "subagent", block: index, children, agentResponse },
       )
     } else if (block._tag === "Diff") units.push({ kind: "diff", block: index })
-    else if (block._tag === "Cell") units.push({ kind: "cell", block: index })
     else units.push({ kind: "block", block: index })
   }
   for (const item of orderedTranscriptItems(model)) appendTopLevelItem(item)
   flush()
   return units
 }
+
+const isAutoExpandedUnitImpl = (model: Model, unit: TranscriptUnit): boolean => {
+  if (unit.kind === "subagent-group") {
+    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    return block._tag === "SubagentGroup" && (block.status === "running" || block.status === "cancelling")
+  }
+  if (unit.kind === "subagent") {
+    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    return (
+      block._tag === "SubagentCard" &&
+      (block.status === "running" || block.status === "waiting" || block.status === "cancelling")
+    )
+  }
+  if (unit.kind !== "tool") return false
+  return unit.blocks.some((index) => {
+    const block = decodeTranscriptBlock(model.blocks[index])
+    return block._tag === "ToolCall" && block.status === "running" && unit.group === "edit"
+  })
+}
+
+export const isAutoExpandedUnit: {
+  (unit: TranscriptUnit): (model: Model) => boolean
+  (model: Model, unit: TranscriptUnit): boolean
+} = Function.dual(2, isAutoExpandedUnitImpl)
+
+const isTranscriptUnitExpandedImpl = (model: Model, unit: TranscriptUnit): boolean => {
+  const id = transcriptUnitId(model, unit)
+  if (model.explicitlyCollapsedRowKeys.includes(id)) return false
+  return model.expandedRowKeys.includes(id) || isAutoExpandedUnit(model, unit)
+}
+
+export const isTranscriptUnitExpanded: {
+  (unit: TranscriptUnit): (model: Model) => boolean
+  (model: Model, unit: TranscriptUnit): boolean
+} = Function.dual(2, isTranscriptUnitExpandedImpl)
 
 export const isExpandableUnit: {
   (model: Model, unit: TranscriptUnit): boolean
@@ -266,12 +288,9 @@ export const isExpandableUnit: {
       const block = decodeTranscriptBlock(model.blocks[unit.block])
       return block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0)
     }
-    if (unit.kind === "cell") {
-      const block = decodeTranscriptBlock(model.blocks[unit.block])
-      if (block._tag !== "Cell") return false
-      return cellHasDetail(block)
-    }
-    return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "subagent"
+    return (
+      unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "subagent" || unit.kind === "subagent-group"
+    )
   }
   if (toolUnitHasStructuralDetail(unit)) return true
   return unit.blocks.some((index) => {
@@ -289,17 +308,6 @@ export const isExpandableUnit: {
 export const expandableUnits = (model: Model): ReadonlyArray<TranscriptUnit> =>
   transcriptUnits(model).filter((unit) => isExpandableUnit(model, unit))
 
-const appendCellRowIds = (
-  model: Model,
-  unit: Extract<NestedTranscriptUnit, { kind: "cell" }>,
-  ids: Array<TranscriptUnitId>,
-) => {
-  const block = decodeTranscriptBlock(model.blocks[unit.block])
-  if (block._tag !== "Cell") return
-  if (block.error?.stack !== undefined) ids.push(`cell-stack:${block.id}`)
-  for (const call of block.calls) ids.push(`cell-call:${block.id}:${call.id}`)
-}
-
 const appendToolChildRowIds = (
   model: Model,
   unit: Extract<NestedTranscriptUnit, { kind: "tool" }>,
@@ -313,7 +321,8 @@ const appendToolChildRowIds = (
     if (files.length > 1) for (const file of files) ids.push(`file:${file.key}`)
     return
   }
-  if (!((unit.group === "shell" && unit.blocks.length > 1) || unit.group === "explore")) return
+  if (!((unit.group === "shell" && unit.blocks.length > 1) || (unit.group === "explore" && unit.blocks.length > 1)))
+    return
   for (const index of unit.blocks) {
     const block = decodeTranscriptBlock(model.blocks[index])
     if (block._tag !== "ToolCall") continue
@@ -324,18 +333,13 @@ const appendToolChildRowIds = (
 
 export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> => {
   const ids: Array<TranscriptUnitId> = []
-  const expanded = new Set(model.expandedRowKeys)
   const appendNested = (unit: NestedTranscriptUnit) => {
     if (!isExpandableUnit(model, unit)) return
     const id = transcriptUnitId(model, unit)
     ids.push(id)
-    if (!expanded.has(id)) return
-    if (unit.kind === "cell") {
-      appendCellRowIds(model, unit, ids)
-      return
-    }
+    if (!isTranscriptUnitExpanded(model, unit)) return
     for (const child of unit.children ?? []) appendNested(child)
-    if (unit.kind === "subagent") return
+    if (unit.kind === "subagent" || unit.kind === "subagent-group") return
     appendToolChildRowIds(model, unit, ids)
   }
   for (const unit of expandableUnits(model)) {
@@ -343,7 +347,8 @@ export const expandableRowIds = (model: Model): ReadonlyArray<TranscriptUnitId> 
     else {
       const id = transcriptUnitId(model, unit)
       ids.push(id)
-      if (unit.kind === "subagent" && expanded.has(id)) for (const child of unit.children) appendNested(child)
+      if ((unit.kind === "subagent" || unit.kind === "subagent-group") && isTranscriptUnitExpanded(model, unit))
+        for (const child of unit.children) appendNested(child)
     }
   }
   return ids
@@ -379,13 +384,13 @@ export const transcriptUnitId: {
 } = Function.dual(2, (model: Model, unit: TranscriptUnit): TranscriptUnitId => {
   const cache = rowsCacheFor(model)
   if (unit.kind === "entry") return entryUnitId(model, unit, cache)
+  if (unit.kind === "subagent-group") {
+    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    return block._tag === "SubagentGroup" ? `subagent-group:${block.id}` : `subagent-group:missing:${unit.block}`
+  }
   if (unit.kind === "subagent") {
     const block = decodeTranscriptBlock(model.blocks[unit.block])
     return block._tag === "SubagentCard" ? `subagent:${block.id}` : `subagent:missing:${unit.block}`
-  }
-  if (unit.kind === "cell") {
-    const block = decodeTranscriptBlock(model.blocks[unit.block])
-    return block._tag === "Cell" ? `cell:${block.id}` : `cell:missing:${unit.block}`
   }
   if (unit.kind === "tool") {
     const first = unit.blocks[0]
@@ -398,6 +403,6 @@ export const transcriptUnitId: {
 
 export const unitToggleTargets = (unit: TranscriptUnit): ReadonlyArray<number> => {
   if (unit.kind === "tool") return unit.blocks
-  if (unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "cell") return [unit.block]
+  if (unit.kind === "reasoning" || unit.kind === "diff") return [unit.block]
   return []
 }

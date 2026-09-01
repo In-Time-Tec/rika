@@ -4,7 +4,7 @@ import { appJwtJoseLayer } from "@rika/github-app/app-jwt"
 import { installationLayer } from "@rika/github-app/installation-service"
 import { installationTokenLayer } from "@rika/github-app/installation-token"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
-import { Config, Context, Effect, Layer, Redacted } from "effect"
+import { Context, Effect, Layer, Redacted } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { Runtime as GeneralistRuntime } from "generalist/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -17,7 +17,7 @@ import * as ProductRepositories from "@rika/product-store/product-repositories"
 import * as HostedTurnWorkerStore from "@rika/product-store/turn-worker-store"
 import * as HostedExecution from "@rika/execution"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import * as RemoteCells from "@rika/execution/remote-cells"
+import * as RemoteTools from "@rika/execution/remote-tools"
 import {
   type ExecutorConfig,
   Executor,
@@ -50,7 +50,6 @@ import { HostedTurnWorker, layer as hostedTurnWorkerLayer } from "./thread/turn-
 import { layer as hostedWorkspaceLayer } from "./environment/workspace"
 import { workspacePlacement } from "./environment/placement"
 import { layer as runnerExecutorLayer } from "../runner/executor"
-import { HostedToolPolicy, layer as hostedToolPolicyLayer } from "./execution/tool-policy"
 import { HostedPreviewBus, postgresHostedPreviewBusLayer } from "./thread/previews"
 import { HostedWorkspaceSeeds, layer as hostedWorkspaceSeedsLayer } from "./workspace-seeds"
 import { layer as hostedWorkerListenerLayer } from "./worker-listener"
@@ -62,7 +61,6 @@ export interface HostedApplicationService {
   readonly product: HostedProduct["Service"]
   readonly threadApplication: HostedThreadApplication["Service"]
   readonly threadProtocol: HostedThreadProtocol["Service"]
-  readonly toolPolicy: HostedToolPolicy["Service"]
   readonly credentials: HostedProviderCredentials["Service"]
   readonly environment: HostedEnvironment["Service"]
   readonly models: HostedModelRegistry["Service"]
@@ -103,7 +101,6 @@ export const layer = (options: {
     HostedApplication,
     Effect.gen(function* () {
       const httpClient = yield* HttpClient.HttpClient
-      const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
       const httpLayer = Layer.succeed(HttpClient.HttpClient, httpClient)
       const data = yield* Layer.build(
         Layer.mergeAll(postgresLayer(options.database), AuthorizationPolicy.layer, BunCrypto.layer),
@@ -150,7 +147,6 @@ export const layer = (options: {
               Layer.provide(retainedData),
             ),
       )
-      const toolPolicyContext = yield* Layer.build(hostedToolPolicyLayer.pipe(Layer.provide(retainedData)))
       const workspaceSeedsContext =
         options.executor === undefined
           ? undefined
@@ -169,12 +165,7 @@ export const layer = (options: {
             ),
           ),
           Layer.provide(
-            Layer.succeedContext(
-              Context.merge(
-                Context.merge(Context.merge(data, environmentContext), repositoryContext),
-                toolPolicyContext,
-              ),
-            ),
+            Layer.succeedContext(Context.merge(Context.merge(data, environmentContext), repositoryContext)),
           ),
         ),
       )
@@ -186,37 +177,41 @@ export const layer = (options: {
       )
       const executionContext = yield* Layer.build(
         HostedExecution.layerHosted({
-          kernel: { runtimeVersion: Bun.version, dataRoot: `${temporaryDirectory}/rika-hosted` },
           openAiAccountAccess: Context.get(credentialContext, HostedProviderCredentials).openAiAccountAccess,
           credentialStore: Layer.succeed(
             ProviderCredentialStore,
             Context.get(credentialContext, ProviderCredentialStore),
           ),
-          cells: HostedExecution.remoteCells({
-            cells: RemoteCells.layer({
-              execute: (request, authority) =>
-                executor.run({ ...request, authority }).pipe(
-                  Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
+          tools: HostedExecution.remoteTools({
+            tools: RemoteTools.layer({
+              execute: (request) =>
+                executor.runTool(request).pipe(
+                  Effect.mapError((error) => RemoteTools.Unavailable.make({ message: error.message })),
                   Effect.flatMap((result) =>
                     result.outcome === "unknown"
-                      ? RemoteCells.UnknownOutcome.make({ message: "Remote operation outcome is unknown" })
+                      ? RemoteTools.UnknownOutcome.make({ message: "Remote tool outcome is unknown" })
                       : Effect.succeed(result.response),
                   ),
                 ),
               cancel: (request) =>
-                executor.cancel(request).pipe(
-                  Effect.mapError((error) => RemoteCells.Unavailable.make({ message: error.message })),
-                  Effect.flatMap((result) =>
-                    result.outcome === "unknown"
-                      ? RemoteCells.UnknownOutcome.make({ message: "Remote operation outcome is unknown" })
-                      : Effect.succeed(result.response),
-                  ),
-                ),
+                Effect.gen(function* () {
+                  const result = yield* executor
+                    .cancelTool(request)
+                    .pipe(Effect.mapError((error) => RemoteTools.Unavailable.make({ message: error.message })))
+                  if (result.outcome === "unknown")
+                    return yield* RemoteTools.UnknownOutcome.make({ message: "Remote tool outcome is unknown" })
+                  if (result.outcome === "cancelled") return { _tag: "Cancelled" as const }
+                  if (result.response._tag === "Suspend")
+                    return yield* RemoteTools.UnknownOutcome.make({
+                      message: "Remote tool cancellation did not reach a terminal result",
+                    })
+                  return { _tag: "AlreadyTerminal" as const, response: result.response }
+                }),
             }),
             admit: (input) =>
               executor
                 .admitRun(input)
-                .pipe(Effect.mapError((error) => RemoteCells.AdmissionFailure.make({ message: error.message }))),
+                .pipe(Effect.mapError((error) => RemoteTools.AdmissionFailure.make({ message: error.message }))),
           }),
           postgres: {
             url: Redacted.value(options.databaseUrl),
@@ -234,7 +229,7 @@ export const layer = (options: {
       )
       const hostedContext = Context.merge(
         Context.merge(
-          Context.merge(Context.merge(Context.merge(data, executionContext), environmentContext), toolPolicyContext),
+          Context.merge(Context.merge(data, executionContext), environmentContext),
           Context.merge(Context.merge(credentialContext, modelContext), repositoryContext),
         ),
         previewContext,
@@ -358,7 +353,6 @@ export const layer = (options: {
         product: Context.get(productContext, HostedProduct),
         threadApplication: Context.get(threadApplicationContext, HostedThreadApplication),
         threadProtocol: Context.get(threadProtocolContext, HostedThreadProtocol),
-        toolPolicy: Context.get(toolPolicyContext, HostedToolPolicy),
         credentials: Context.get(credentialContext, HostedProviderCredentials),
         environment: Context.get(environmentContext, HostedEnvironment),
         models: Context.get(modelContext, HostedModelRegistry),

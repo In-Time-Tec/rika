@@ -76,10 +76,10 @@ test("shows a nested agent title and renders its prompt once in the expanded bod
     .split("\n")
 
   const text = lines.join("\n")
-  expect(lines.some((line) => line.startsWith("  ├ ✓ Subagent finished"))).toBe(true)
+  expect(lines.some((line) => line.startsWith("  ├ ▾ ✓ Subagent finished"))).toBe(true)
   expect(lines.some((line) => line.startsWith("  │   Read-only explore"))).toBe(true)
-  expect(lines.some((line) => line.startsWith("  │   ├ ✓ $ git status"))).toBe(true)
-  expect(lines.some((line) => line.startsWith("  │   ╰   Nested summary"))).toBe(true)
+  expect(lines.some((line) => line.includes("├") && line.includes("✓ $ git status"))).toBe(true)
+  expect(lines.some((line) => line.includes("╰") && line.includes("Nested summary"))).toBe(true)
   expect(text.match(/Read-only explore/g)).toHaveLength(1)
   expect(lines.every((line) => stringWidth(line) <= 44)).toBe(true)
 })
@@ -119,7 +119,7 @@ test("keeps deep nested agent headers within a narrow terminal with wide text", 
 
   expect(headers.some((line) => line.includes("界"))).toBe(false)
   expect(headers.every((line) => stringWidth(line) <= 16)).toBe(true)
-  expect(headers.every((line) => !/[▸▾]/u.test(line))).toBe(true)
+  expect(headers.some((line) => /[▸▾]/u.test(line))).toBe(true)
 })
 test("labels a new-file patch Create and an existing-file patch Edit", () => {
   const createBlock = {
@@ -225,7 +225,7 @@ test("connects and aligns the subagent response after two blank timeline rows", 
   const childRow = lines.findIndex((line) => line.includes("bun test"))
   const responseRow = lines.findIndex((line) => line.includes("Architectural overview"))
   expect(childRow).toBeGreaterThan(-1)
-  expect(lines[childRow]!.startsWith("  ├ ✓ $ bun test")).toBe(true)
+  expect(lines[childRow]!.includes("├") && lines[childRow]!.includes("✓ $ bun test")).toBe(true)
   expect(responseRow).toBe(childRow + 3)
   expect(lines[childRow + 1]).toBe("  │")
   expect(lines[childRow + 2]).toBe("  │")

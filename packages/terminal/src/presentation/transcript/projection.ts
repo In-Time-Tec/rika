@@ -382,6 +382,7 @@ const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
     items.push(index === item.index ? item : { ...item, index })
   }
   const expandedRowKeys = updatedModel.expandedRowKeys.filter((key) => !removedRowKeys.has(key))
+  const explicitlyCollapsedRowKeys = updatedModel.explicitlyCollapsedRowKeys.filter((key) => !removedRowKeys.has(key))
   const detailSelection =
     updatedModel.detailSelection === undefined || !removedRowKeys.has(updatedModel.detailSelection)
       ? updatedModel.detailSelection
@@ -392,6 +393,7 @@ const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
     blocks: removedBlockIndexes.size === 0 ? updatedModel.blocks : blocks,
     items,
     expandedRowKeys,
+    explicitlyCollapsedRowKeys,
     detailSelection,
   }
 }

@@ -14,9 +14,7 @@ test(
           inspectTranscript: true,
           workspaceFiles: { "restart.txt": "RESTART_FIXTURE" },
           script: [
-            model.turn([
-              model.binding({ module: "workspace", operation: "read", input: { path: "restart.txt" } }, "restart-read"),
-            ]),
+            model.turn([model.tool("read", { path: "restart.txt" }, "restart-read")]),
             model.text("RESTART_TURN_COMPLETE"),
           ],
         })

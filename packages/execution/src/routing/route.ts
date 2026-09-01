@@ -2,24 +2,17 @@ import { ExecutableResolver, Errors, ExecutableRegistration } from "generalist/r
 import { Effect } from "effect"
 import * as Registration from "../registration"
 import { configure } from "./route-configuration"
-import { resolveCellRoute } from "./route-domain"
+import { resolveToolRoute } from "./route-domain"
 import type { ConfigureOptions, ResolverOptions } from "./route-domain"
 
-export { agentInstructionsWith, profileInstructions, resolveCellRoute } from "./route-domain"
+export { agentInstructionsWith, profileInstructions } from "./route-domain"
 export type {
-  CellResolver,
-  CellRoute,
   ConfiguredExecutable,
   ConfigureOptions,
-  KernelOptions,
-  LocalCellResolver,
-  LocalCellRoute,
-  LocalCellServices,
-  RemoteCellRoute,
+  RemoteToolRoute,
   ResolverOptions,
+  ToolRoute,
 } from "./route-domain"
-export { remoteCellOperationOutcome } from "./route-cells"
-export type { RemoteCellOperationOutcome } from "./route-cells"
 export { configure } from "./route-configuration"
 
 const invalid = (cause: unknown) => Errors.ExecutableRegistrationInvalid.make({ message: String(cause) })
@@ -31,17 +24,15 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Servi
         const active = input.manifest.entries.find((entry) => entry.pin === input.ref.active)
         if (active === undefined) return yield* Errors.ExecutablePinMissing.make({ runId: input.runId, ref: input.ref })
         const context = yield* Registration.read(Registration.codecs.applicationContext, input.registrations)
-        const cell = options.cell === undefined ? undefined : yield* resolveCellRoute(options.cell, context.workspace)
         const capabilities =
           options.capabilities === undefined ? undefined : yield* options.capabilities(context.workspace)
         const configureOptions: ConfigureOptions = {
           executionRoute: context.executionRoute,
           workspace: context.workspace,
-          kernel: options.kernel,
         }
         if (context.executionIdentity !== undefined)
           Object.assign(configureOptions, { executionIdentity: context.executionIdentity })
-        if (cell !== undefined) Object.assign(configureOptions, { cell })
+        Object.assign(configureOptions, { tools: resolveToolRoute(options.tools) })
         if (capabilities !== undefined)
           Object.assign(configureOptions, {
             skills: capabilities.skills,

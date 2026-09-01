@@ -18,10 +18,7 @@ export const stages = [
   "run_claim",
   "model_start",
   "model_terminal",
-  "cell_admission",
-  "cell_execution",
-  "binding_send",
-  "binding_terminal",
+  "tool_execution",
   "terminal",
 ] as const
 
@@ -35,8 +32,6 @@ export type ImmediateStage =
   | "run_created"
   | "run_claim"
   | "model_start"
-  | "cell_admission"
-  | "binding_send"
   | "terminal"
 export type CompletionStage =
   | "connection_ticket"
@@ -48,8 +43,7 @@ export type CompletionStage =
   | "attach_refresh"
   | "attach_ack"
   | "model_terminal"
-  | "cell_execution"
-  | "binding_terminal"
+  | "tool_execution"
 export const outcomes = ["success", "failure", "interrupted", "unknown"] as const
 export type Outcome = (typeof outcomes)[number]
 export const tokenKinds = ["input", "output"] as const
@@ -69,8 +63,7 @@ export interface Correlation {
   readonly turnId?: string
   readonly runId?: string
   readonly operationId?: string
-  readonly cellId?: string
-  readonly bindingId?: string
+  readonly toolCallId?: string
   readonly modelAttemptId?: string
   readonly ownerId?: string
   readonly assignmentId?: string
@@ -125,8 +118,7 @@ export const annotations = (correlation: Correlation): HostedAnnotations => {
   add("rika.turn.id", correlation.turnId)
   add("rika.run.id", correlation.runId)
   add("rika.operation.id", correlation.operationId)
-  add("rika.cell.id", correlation.cellId)
-  add("rika.binding.id", correlation.bindingId)
+  add("rika.tool_call.id", correlation.toolCallId)
   add("rika.model_attempt.id", correlation.modelAttemptId)
   return values
 }

@@ -212,10 +212,10 @@ describe("PTY durable state and image capabilities", () => {
           calls.push(`${command} ${args.join(" ")}`)
           return Effect.succeed(true)
         }),
-      ).toEqual({ cells: true, checkpoints: false, pty: true, browser: true, services: true })
+      ).toEqual({ nativeTools: true, checkpoints: false, pty: true, browser: true, services: true })
       expect(calls).toEqual(["tmux -V", "chromium --version", "agent-browser --version", "true "])
       expect(yield* detectCapabilities((command) => Effect.succeed(command === "tmux" || command === "true"))).toEqual({
-        cells: true,
+        nativeTools: true,
         checkpoints: false,
         pty: true,
         browser: false,
@@ -223,7 +223,7 @@ describe("PTY durable state and image capabilities", () => {
       })
       expect(
         yield* detectCapabilities((command) => Effect.succeed(command === "chromium" || command === "agent-browser")),
-      ).toEqual({ cells: true, checkpoints: false, pty: false, browser: true, services: false })
+      ).toEqual({ nativeTools: true, checkpoints: false, pty: false, browser: true, services: false })
     }),
   )
 

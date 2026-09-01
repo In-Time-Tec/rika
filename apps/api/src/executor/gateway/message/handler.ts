@@ -23,8 +23,7 @@ export const gatewayMessageHandlerFactory = (dependencies: Dependencies) => {
   const operation = gatewayOperationMessageHandler(dependencies)
 
   const handle = Effect.fn("ExecutorGateway.handle")(function* (socket: Socket, message: ExecutorMessage) {
-    if (message._tag === "CellResult" || message._tag === "CellLifecycle" || message._tag === "BranchPushResult")
-      yield* dependencies.controller.validateAccess(redactAccess(message.access))
+    if (message._tag === "BranchPushResult") yield* dependencies.controller.validateAccess(redactAccess(message.access))
     if (isGatewaySessionMessage(message)) return yield* session(socket, message)
     if (isGatewayCredentialMessage(message)) return yield* credential(socket, message)
     return yield* operation(socket, message)

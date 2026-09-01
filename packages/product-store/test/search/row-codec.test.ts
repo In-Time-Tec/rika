@@ -108,42 +108,17 @@ describe("ThreadQuery", () => {
       yield* storeProjection(transcripts, storedTurn, { units, revision: 21 })
 
       const query = yield* ThreadQuery.Service
-      type Selection = NonNullable<(typeof Fixtures.ThreadRead.ThreadContract.ReadThreadInput.Type)["selection"]>
-      const selector = (selection: Selection) => {
-        if (selection.mode !== "subtree") return { _tag: "overview" as const }
-        if (selection.cursor === undefined) return { _tag: "subtree" as const, subagentId: selection.subagentId }
-        if ("before" in selection.cursor)
-          return {
-            _tag: "subtree" as const,
-            subagentId: selection.subagentId,
-            before: {
-              ...selection.cursor.before,
-              turnId: Fixtures.Turn.TurnId.make(selection.cursor.before.turnId),
-            },
-          }
-        return { _tag: "subtree" as const, subagentId: selection.subagentId, offset: selection.cursor.offset }
-      }
-      const read = (selection: Selection) =>
-        query
-          .read({
-            threadId: storedThread.id,
-            selector: selector(selection),
-          })
-          .pipe(Effect.map(ThreadToolHandlers.publicReadResult))
-      const pages = [yield* read({ mode: "subtree", subagentId: "root-agent" })]
+      type Selector = Parameters<typeof query.read>[0]["selector"]
+      const read = (selector: Selector) => query.read({ threadId: storedThread.id, selector })
+      const pages = [yield* read({ _tag: "subtree", subagentId: "root-agent" })]
       const continuations = new Set<string>()
       while (pages.at(-1)?.omissions[0] !== undefined) {
         const continuation = pages.at(-1)!.omissions[0]!.continuation
         const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(continuation)
         expect(continuations.has(encoded)).toBe(false)
         continuations.add(encoded)
-        const next = yield* Schema.decodeEffect(Fixtures.ThreadRead.ThreadContract.ReadThreadInput)({
-          threadId: storedThread.id,
-          selection: continuation,
-        })
-        if (!("selection" in next) || next.selection.mode !== "subtree")
-          return yield* Effect.die("missing structured continuation")
-        pages.push(yield* read(next.selection))
+        if (continuation._tag !== "subtree") return yield* Effect.die("missing structured continuation")
+        pages.push(yield* read(continuation))
         if (pages.length > units.length + 2) return yield* Effect.die("subtree continuation did not terminate")
       }
       const rendered = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(pages)

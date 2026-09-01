@@ -4,57 +4,17 @@ import { Config, Crypto, Deferred, Effect, Encoding, FileSystem, Layer, Option, 
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ExecutorBootstrapWire } from "../protocol/messages"
 import { hostIdentity, type Bootstrap } from "./identity"
-import { CellError, State as CellState, type State as CellStateValue } from "../protocol/cells"
 import { MachineError, State as MachineState, type State as MachineStateValue } from "./machinery/machine"
 
 const statePersistence = (stateDirectory: string, crypto: Crypto.Crypto, fileSystem: FileSystem.FileSystem) => {
-  const cellDirectory = `${stateDirectory}/cells`
   const machineDirectory = `${stateDirectory}/machines`
-  const decodeCell = Schema.decodeUnknownEffect(Schema.fromJsonString(CellState))
-  const encodeCell = Schema.encodeEffect(Schema.fromJsonString(CellState))
   const decodeMachine = Schema.decodeUnknownEffect(Schema.fromJsonString(MachineState))
   const encodeMachine = Schema.encodeEffect(Schema.fromJsonString(MachineState))
-  const path = (directory: string, message: string) =>
-    Effect.fn("Host.statePath")(function* (key: string) {
-      const digest = yield* crypto
-        .digest("SHA-256", new TextEncoder().encode(key))
-        .pipe(Effect.mapError(() => CellError.make({ kind: "execution", message })))
-      return `${directory}/${Encoding.encodeHex(digest)}.json`
-    })
-  const cellPath = path(cellDirectory, "Could not identify cell state")
   const machinePath = Effect.fn("Host.machineStatePath")(function* (machineId: string) {
     const digest = yield* crypto
       .digest("SHA-256", new TextEncoder().encode(machineId))
       .pipe(Effect.mapError(() => MachineError.make({ message: "Could not identify machine state" })))
     return `${machineDirectory}/${Encoding.encodeHex(digest)}.json`
-  })
-  const readState = Effect.fn("Host.readCellState")(function* (operationKey: string) {
-    const filename = yield* cellPath(operationKey)
-    const exists = yield* fileSystem
-      .exists(filename)
-      .pipe(Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not inspect cell state" })))
-    if (!exists) return undefined
-    const text = yield* fileSystem
-      .readFileString(filename)
-      .pipe(Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not read cell state" })))
-    return yield* decodeCell(text).pipe(
-      Effect.mapError(() => CellError.make({ kind: "execution", message: "Cell state is invalid" })),
-    )
-  })
-  const writeState = Effect.fn("Host.writeCellState")(function* (operationKey: string, state: CellStateValue) {
-    const filename = yield* cellPath(operationKey)
-    const temporary = `${filename}.tmp-${process.pid}`
-    const text = yield* encodeCell(state).pipe(
-      Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not encode cell state" })),
-    )
-    yield* fileSystem
-      .makeDirectory(cellDirectory, { recursive: true, mode: 0o700 })
-      .pipe(Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not create cell state" })))
-    yield* fileSystem.writeFileString(temporary, text, { mode: 0o600 }).pipe(
-      Effect.flatMap(() => fileSystem.rename(temporary, filename)),
-      Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
-      Effect.mapError(() => CellError.make({ kind: "execution", message: "Could not persist cell state" })),
-    )
   })
   const readMachine = Effect.fn("Host.readMachineState")(function* (machineId: string) {
     const filename = yield* machinePath(machineId)
@@ -84,7 +44,7 @@ const statePersistence = (stateDirectory: string, crypto: Crypto.Crypto, fileSys
       Effect.mapError(() => MachineError.make({ message: "Could not persist machine state" })),
     )
   })
-  return { readState, writeState, readMachine, writeMachine }
+  return { readMachine, writeMachine }
 }
 
 export const receiveBootstrap = Effect.scoped(

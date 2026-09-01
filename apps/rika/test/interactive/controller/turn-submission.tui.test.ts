@@ -24,12 +24,7 @@ test(
             {
               profile: "Task",
               steps: [
-                model.turn([
-                  model.binding(
-                    { module: "workspace", operation: "read", input: { path: "nested.txt" } },
-                    "nested-read",
-                  ),
-                ]),
+                model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
                 model.text("PARENT_AGENT_FINAL"),
               ],
             },
@@ -78,13 +73,14 @@ test(
           units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes(text))?.parentId
         expect(owner("PARENT_AGENT_FINAL")).toBe(parentId)
         expect(owner("ROOT_AGENT_FINAL")).toBeUndefined()
-        const nestedReadCell = units.find(
+        const nestedRead = units.find(
           (unit) =>
             unit.content._tag === "Block" &&
-            unit.content.block._tag === "Cell" &&
-            unit.content.block.source.text.includes("nested.txt"),
+            unit.content.block._tag === "ToolCall" &&
+            unit.content.block.name === "read" &&
+            unit.content.block.input.includes("nested.txt"),
         )
-        expect(nestedReadCell?.parentId).toBe(parentId)
+        expect(nestedRead?.parentId).toBe(parentId)
 
         app.pressKey("\t")
         app.pressEnter()

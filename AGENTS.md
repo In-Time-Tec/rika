@@ -39,7 +39,7 @@ In an Amp orb, `.amp/services.yaml` owns the Docker daemon, secret service, deve
 
 ## Real product flows
 
-Use a published install from [README.md](README.md), or run the current checkout through the `rika-acceptance` skill. Its script packages the current host target, checks the release inventory, version, help, and kernel runtime, then can launch that packaged binary.
+Use a published install from [README.md](README.md), or run the current checkout through the `rika-acceptance` skill. Its script packages the current host target, checks the release inventory, version, and help, then can launch that packaged binary.
 
 - **Local Runner:** `rika --workspace "$PWD"` opens the TUI and creates a Runner Thread by default. The same process registers that checkout as its Runner. See [Runner and Orb execution](docs/features/execution-placement.md).
 - **Headless Runner:** `rika --no-tui --workspace "$PWD" --allow-remote-thread-creation` keeps the checkout available for remotely created Runner Threads. Use `--deny-remote-thread-creation` when that must be forbidden explicitly.
@@ -57,7 +57,7 @@ The exhaustive local Runner, Orb, restart, cancellation, and recovery acceptance
 - `apps/web` owns browser rendering and browser-local interaction only. `apps/proxy` is the only public Railway ingress.
 - `packages/product` owns Rika product contracts and rules. `packages/product-store` owns their PostgreSQL persistence and migrations.
 - `packages/execution` is Rika's Generalist boundary. Generalist remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
-- `packages/kernel` owns the `rika.*` cell bindings and Executor runtime. Kernel variables are working memory, not durable state; see [kernel state](docs/decisions/kernel-state-is-not-authority.md).
+- `packages/execution` owns the four native workspace tool implementations (`bash`, `edit`, `read`, and `shell_command_status`) and routes remote calls through durable outer operation identities.
 - `packages/terminal` owns terminal state and presentation. Keep OpenTUI imports behind that adapter.
 - `packages/e2b-executor`, `packages/remote-execution`, and `infra/e2b` own Orb execution. E2B is the only remote workspace provider; see [the E2B decision](docs/decisions/e2b-remote-execution.md).
 - `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract.

@@ -26,10 +26,11 @@ const blockAt = (model: Model, index: number) =>
 
 const animated = (model: Model, unit: TranscriptUnit): boolean => {
   if (unit.kind === "tool") return toolUnitsFor(model, unit.blocks).some((tool) => tool.block.status === "running")
-  const block = unit.kind === "subagent" || unit.kind === "cell" ? blockAt(model, unit.block) : undefined
+  const block = unit.kind === "subagent" || unit.kind === "subagent-group" ? blockAt(model, unit.block) : undefined
   if (block?._tag === "SubagentCard")
     return block.status === "running" || block.status === "waiting" || block.status === "cancelling"
-  return block?._tag === "Cell" && block.status === "running"
+  if (block?._tag === "SubagentGroup") return block.status === "running" || block.status === "cancelling"
+  return false
 }
 
 const targets = (model: Model, unit: TranscriptUnit) => {

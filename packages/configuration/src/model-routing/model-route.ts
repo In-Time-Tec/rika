@@ -2,7 +2,7 @@ import type { Schema } from "effect"
 
 export namespace ModelRoute {
   export type Role = "main" | "oracle"
-  export type AgentId = "librarian" | "painter" | "readThread" | "review" | "surgeon" | "task"
+  export type AgentId = "librarian" | "painter" | "review" | "surgeon" | "task"
   export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
   export type ProviderId = "openai" | "anthropic" | "bedrock" | "openrouter"
   export type HttpProtocol = "openai-responses" | "openai-chat-completions" | "anthropic" | "openrouter"

@@ -42,10 +42,7 @@ const patch = (changes: Partial<ThreadView.ThreadViewPatch> = {}): ThreadView.Th
 })
 
 describe("interactive ThreadView controller", () => {
-  it("reports a running cell as running work rather than leaving the line at Waiting", () => {
-    // A cell is how a turn does work now. Counting only the tool call it replaced left the activity
-    // line saying "Waiting" for the whole of a long cell, with nothing telling the reader it is live.
-    const source = 'await rika.processes.start({"command":"sleep 10"})'
+  it("reports a running tool as running work rather than leaving the line at Waiting", () => {
     const loaded = InteractiveController.update(state(), {
       _tag: "ThreadViewSnapshot",
       snapshot: {
@@ -67,22 +64,26 @@ describe("interactive ThreadView controller", () => {
             usage: ExecutionProjection.emptyUsageState(),
             units: [
               {
-                key: "turn:cell",
+                key: "turn:tool",
                 turnId: "turn",
-                order: TranscriptOrdering.unitOrder("turn:cell", 1),
+                order: TranscriptOrdering.unitOrder("turn:tool", 1),
                 revision: 1,
                 content: {
                   _tag: "Block",
                   block: {
-                    _tag: "Cell",
-                    id: "cell",
+                    _tag: "ToolCall",
+                    id: "tool",
+                    name: "bash",
+                    input: '{"command":"sleep 10"}',
                     status: "running",
-                    visual: "ts",
-                    source: { text: source, lines: 1 },
-                    output: { stdout: "", stderr: "" },
-                    epoch: 0,
-                    notices: [],
-                    calls: [],
+                    presentation: {
+                      family: "shell",
+                      action: "command",
+                      activeLabel: "Running",
+                      completeLabel: "Ran",
+                    },
+                    detail: "sleep 10",
+                    process: { command: "sleep 10", running: true },
                     files: [],
                   },
                 },

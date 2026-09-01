@@ -9,8 +9,6 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import * as Models from "../src/models"
 import { configure } from "./support/adapters"
 
-const kernel = { runtimeVersion: "1.3.14", dataRoot: "/data" } as const
-
 const credential = {
   accessToken: Redacted.make("oauth-access-token"),
   idToken: Redacted.make("oauth-id-token"),
@@ -83,9 +81,7 @@ it("pins native OpenAI account authentication and account-compatible request opt
 
 it.effect("fails recovered account routes through the typed registration channel when host authority is absent", () =>
   Effect.gen(function* () {
-    const failed = yield* configure({ executionRoute: accountRoute(), workspace: "/workspace", kernel }).pipe(
-      Effect.exit,
-    )
+    const failed = yield* configure({ executionRoute: accountRoute(), workspace: "/workspace" }).pipe(Effect.exit)
     expect(Exit.isFailure(failed)).toBe(true)
     if (Exit.isFailure(failed)) {
       const reason = failed.cause.reasons.find((candidate) => candidate._tag === "Fail")
@@ -134,7 +130,6 @@ it.effect("executes a valid account route through the Codex endpoint without an 
       const configured = yield* configure({
         executionRoute: route,
         workspace: "/workspace",
-        kernel,
         openAiAccountAccess: () => auth,
       }).pipe(Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: {} })))
       const encoded = encodeRegistrations(configured.registrations)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "roles": ["main", "oracle", "title", "compaction", "librarian", "painter", "review", "readThread", "surgeon", "task"],
+  "roles": ["main", "oracle", "title", "compaction", "librarian", "painter", "review", "surgeon", "task"],
   "forbiddenFields": [
     "registrationKey",
     "providerRuntime",

@@ -54,7 +54,7 @@ test(
 )
 
 test(
-  "one blocking group creates exactly four distinct direct cards and resumes its parent",
+  "one blocking group creates exactly four distinct member cards and resumes its parent",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -92,7 +92,15 @@ test(
         expect(cards.map((card) => card?.name)).toEqual(children.map(({ name }) => name))
         expect(new Set(cards.map((card) => card?.id)).size).toBe(4)
         expect(cards.map((card) => card?.status)).toEqual(["complete", "complete", "complete", "complete"])
-        expect(cardUnits.every((unit) => unit.parentId === undefined)).toBe(true)
+        const group = (durable?.units ?? []).find(
+          (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup",
+        )
+        const groupId =
+          group?.content._tag === "Block" && group.content.block._tag === "SubagentGroup"
+            ? group.content.block.id
+            : undefined
+        expect(groupId).toBeDefined()
+        expect(cardUnits.every((unit) => unit.parentId === groupId)).toBe(true)
         yield* app.quit
       }),
     ),

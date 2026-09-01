@@ -55,29 +55,6 @@ const runningTool = (): Model => {
   }
 }
 
-const runningCell = (): Model => {
-  const block: Extract<TranscriptBlock, { _tag: "Cell" }> = {
-    _tag: "Cell",
-    id: "selected-cell",
-    status: "running",
-    visual: "ts",
-    source: { text: "await work()\nreturn 42", lines: 2 },
-    output: { stdout: "", stderr: "" },
-    epoch: 0,
-    notices: [],
-    calls: [],
-    files: [],
-  }
-  return {
-    ...settled(),
-    entries: [],
-    blocks: [block],
-    items: [{ _tag: "Block", index: 0, id: "selected-cell", turnId: "turn-1" }],
-    detailSelection: "cell:selected-cell",
-    expandedRowKeys: ["cell:selected-cell"],
-  }
-}
-
 const streamingSubagent = (status: "running" | "complete" | "failed" = "running"): Model => ({
   ...settled(),
   entries: [{ role: "assistant", text: "partial child answer", turnId: "turn-1" }],
@@ -221,17 +198,13 @@ test("advances loader frames only while the model is animating and stops when it
     }),
   ))
 
-test.each([
-  ["selected expanded tool", runningTool(), "tool:selected-tool:header", "tool:selected-tool:body"],
-  ["selected expanded cell", runningCell(), "cell:selected-cell:header", undefined],
-])("updates the spinner inside a styled %s header without replacing its rows", (_label, model, key, bodyKey) =>
+test("updates the spinner inside a styled tool header without replacing its rows", () =>
   Effect.runPromise(
-    withSurface(model, ({ surface, animationClock }) => {
+    withSurface(runningTool(), ({ surface, animationClock }) => {
       expect(surface.animationDiagnostics().loaderRunning).toBe(true)
-      expectSpinnerAdvance(surface, animationClock, key, bodyKey)
+      expectSpinnerAdvance(surface, animationClock, "tool:selected-tool:header", "tool:selected-tool:body")
     }),
-  ),
-)
+  ))
 
 test("keeps a streaming subagent spinner active after the root turn becomes idle until terminal status", () =>
   Effect.runPromise(
@@ -327,78 +300,5 @@ test("keeps one welcome timer across ordinary model updates", () =>
       animationClock.advance(spinnerInterval * 10)
       expect(surface.animationDiagnostics().welcomePhase).toBe(beforeUpdate.welcomePhase + 10)
       expect(animationRenders()).toBeGreaterThan(renders)
-    }),
-  ))
-
-const goaling = (startedAtMillis = 0): Model => ({
-  ...settled(),
-  goal: { objective: "land R4", status: "active", startedAtMillis },
-})
-
-test("runs no goal timer and requests no frame while no goal exists", () =>
-  Effect.runPromise(
-    withSurface(settled(), ({ surface, animationClock, animationRenders }) => {
-      const before = surface.animationDiagnostics()
-      expect(before.goalRunning).toBe(false)
-      animationClock.advance(spinnerInterval * 1_000)
-      const after = surface.animationDiagnostics()
-      expect(after.goalRunning).toBe(false)
-      expect(after.goalPhase).toBe(before.goalPhase)
-      expect(animationRenders()).toBe(0)
-    }),
-  ))
-
-test("animates the goal icon only while a goal is active and freezes the moment it completes", () =>
-  Effect.runPromise(
-    withSurface(settled(), ({ surface, animationClock, animationRenders }) => {
-      surface.update(goaling())
-      expect(surface.animationDiagnostics().goalRunning).toBe(true)
-
-      animationClock.advance(spinnerInterval * 10)
-      const active = surface.animationDiagnostics()
-      expect(active.goalPhase).toBe(10)
-      expect(animationRenders()).toBeGreaterThan(0)
-
-      surface.update({ ...goaling(), goal: { objective: "land R4", status: "complete", startedAtMillis: 0 } })
-      expect(surface.animationDiagnostics().goalRunning).toBe(false)
-      const completedRenders = animationRenders()
-      animationClock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().goalPhase).toBe(active.goalPhase)
-      expect(animationRenders()).toBe(completedRenders)
-    }),
-  ))
-
-test("keeps the goal timer stopped for a paused goal that is still present in the model", () =>
-  Effect.runPromise(
-    withSurface(settled(), ({ surface, animationClock, animationRenders }) => {
-      surface.update({ ...goaling(), goal: { objective: "bounded", status: "paused", startedAtMillis: 0 } })
-      expect(surface.animationDiagnostics().goalRunning).toBe(false)
-      const pausedRenders = animationRenders()
-      animationClock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().goalPhase).toBe(0)
-      expect(animationRenders()).toBe(pausedRenders)
-    }),
-  ))
-
-test("releases the goal timer on destroy", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const rendererClock = new ManualClock()
-      const animationClock = new ManualClock()
-      const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40, clock: rendererClock }))
-      const surface = new Surface(
-        setup.renderer,
-        { key: () => undefined, resize: () => undefined },
-        { clock: animationClock },
-      )
-      surface.update(goaling())
-      expect(surface.animationDiagnostics().goalRunning).toBe(true)
-
-      surface.destroy()
-      const released = surface.animationDiagnostics()
-      expect(released.goalRunning).toBe(false)
-      animationClock.advance(spinnerInterval * 1_000)
-      expect(surface.animationDiagnostics().goalPhase).toBe(released.goalPhase)
-      setup.renderer.destroy()
     }),
   ))

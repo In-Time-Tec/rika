@@ -229,11 +229,6 @@ export const resolve: {
         "painter",
         authentication,
       ),
-      readThread: snapshot(
-        ModelRouteResolution.resolveAgentRoute(settings, mode, "readThread", tuning),
-        "readThread",
-        authentication,
-      ),
       review: snapshot(
         ModelRouteResolution.resolveAgentRoute(settings, mode, "review", tuning),
         "review",

@@ -4,18 +4,9 @@ import { describe, expect, it } from "@effect/vitest"
 import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
-import { Effect, Schema } from "effect"
 import { Prompt, Response } from "effect/unstable/ai"
 import { block, modelResponse, occurredAt, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
-const CheckpointState = Schema.Struct({
-  nodes: Schema.Array(
-    Schema.Struct({
-      cells: Schema.Array(Schema.Tuple([Schema.String, Schema.Unknown])),
-    }),
-  ),
-  runningCompactions: Schema.optionalKey(Schema.Array(Schema.String)),
-})
 type RunEventInput = {
   [Tag in RunEvent.RunEvent["_tag"]]: Partial<Extract<RunEvent.RunEvent, { readonly _tag: Tag }>> & {
     readonly _tag: Tag
@@ -128,7 +119,34 @@ describe("Generalist tree projector", () => {
     )
     expect(block(read, "ToolCall")).toMatchObject({
       _tag: "Block",
-      block: { detail: "src/a.ts L2-7", status: "running" },
+      block: { detail: "src/a.ts L2-7", readRange: [2, 7], status: "running" },
+    })
+    const readCompleted = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: Response.toolCallPart({
+          id: "read-call",
+          name: "read",
+          params: { path: "src/a.ts", read_range: [2, 7] },
+          providerExecuted: false,
+          metadata: {},
+        }),
+        result: Response.toolResultPart({
+          id: "read-call",
+          name: "read",
+          isFailure: false,
+          result: { text: "2: line", truncated: true },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    expect(block(readCompleted, "ToolCall")).toMatchObject({
+      _tag: "Block",
+      block: { status: "complete", readRange: [2, 7], truncated: true },
     })
     const edit = projector.apply(
       modelResponse("raw-root-run", {
@@ -144,6 +162,37 @@ describe("Generalist tree projector", () => {
     expect(
       editBlock?._tag === "Block" && editBlock.block._tag === "ToolCall" ? editBlock.block.files : [],
     ).toMatchObject([{ path: "src/a.ts", additions: 2, deletions: 1, preview: true }])
+    const appliedDiff = "--- a/src/a.ts\n+++ b/src/a.ts\n-old\n+new\n+line"
+    const editCompleted = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: Response.toolCallPart({
+          id: "edit-call",
+          name: "edit",
+          params: { path: "src/a.ts", old_str: "old", new_str: "new\nline" },
+          providerExecuted: false,
+          metadata: {},
+        }),
+        result: Response.toolResultPart({
+          id: "edit-call",
+          name: "edit",
+          isFailure: false,
+          result: { text: "edited", truncated: false, diff: appliedDiff },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    expect(block(editCompleted, "ToolCall")).toMatchObject({
+      _tag: "Block",
+      block: {
+        status: "complete",
+        files: [{ path: "src/a.ts", patch: appliedDiff, additions: 2, deletions: 1, preview: false }],
+      },
+    })
     projector.apply(
       modelResponse("raw-root-run", {
         type: "tool-call",
@@ -189,164 +238,6 @@ describe("Generalist tree projector", () => {
         process: { processId: "p1", exitCode: 0, stdout },
       },
     })
-  })
-
-  it.effect("formats completed cell source identically live and after a checkpoint reload", () =>
-    Effect.gen(function* () {
-      resetEventPosition()
-      const source = "const answer={value:6*7};answer"
-      const call = {
-        type: "tool-call" as const,
-        id: "cell-resume",
-        name: "typescript",
-        params: { code: source },
-        providerExecuted: false,
-        metadata: {},
-      }
-      const live = TreeProjector.make("turn-cell-resume", "run a cell")
-      live.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-      live.apply(
-        treeEvent(
-          "raw-root-run",
-          runEvent({ _tag: "ToolExecutionStarted", turn: 0, call: Response.toolCallPart(call) }),
-        ),
-      )
-      const patch = live.apply(
-        treeEvent(
-          "raw-root-run",
-          runEvent({
-            _tag: "ToolProgress",
-            turn: 0,
-            toolCallId: "cell-resume",
-            message: "Stdout",
-            data: { _tag: "Stdout", cellId: "cell-resume", sequence: 0, text: "partial output" },
-          }),
-        ),
-      )
-      const reloaded = TreeProjector.make("turn-cell-resume", "run a cell", patch.checkpoint, live.snapshot().units)
-      expect(reloaded.snapshot().units).toMatchObject(live.snapshot().units)
-      const completion = (projector: ReturnType<typeof TreeProjector.make>) =>
-        projector.apply(
-          treeEvent(
-            "raw-root-run",
-            runEvent({
-              _tag: "ToolExecutionCompleted",
-              turn: 0,
-              call: Response.toolCallPart(call),
-              result: Response.makePart("tool-result", {
-                id: "cell-resume",
-                name: "typescript",
-                result: {
-                  cellId: "cell-resume",
-                  epoch: 1,
-                  sequence: 2,
-                  value: "42",
-                  stdout: "partial output",
-                  stderr: "",
-                  durationMillis: 8,
-                },
-                encodedResult: {},
-                isFailure: false,
-                providerExecuted: false,
-                preliminary: false,
-                metadata: {},
-              }),
-            }),
-          ),
-        )
-      yield* Effect.all([
-        live.formatCellSource("raw-root-run", "cell-resume", source),
-        reloaded.formatCellSource("raw-root-run", "cell-resume", source),
-      ])
-      resetEventPosition()
-      const livePosition = completion(live)
-      resetEventPosition()
-      const reloadedPosition = completion(reloaded)
-      expect(reloadedPosition.upsert).toMatchObject(livePosition.upsert)
-      expect(reloaded.snapshot().units).toMatchObject(live.snapshot().units)
-      expect(
-        reloaded.snapshot().units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")
-          ?.content,
-      ).toMatchObject({
-        _tag: "Block",
-        block: {
-          status: "complete",
-          source: { text: "const answer = { value: 6 * 7 }\nanswer\n", lines: 3 },
-          result: 42,
-          durationMillis: 8,
-          epoch: 1,
-        },
-      })
-    }),
-  )
-
-  it("keeps a running cell across a Server restart and drops a settled one from the checkpoint", () => {
-    resetEventPosition()
-    const cellCall = (id: string, code: string) => ({
-      type: "tool-call" as const,
-      id,
-      name: "typescript",
-      params: { code },
-      providerExecuted: false,
-      metadata: {},
-    })
-    const projector = TreeProjector.make("turn-cell-retention", "retain")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
-      treeEvent(
-        "raw-root-run",
-        runEvent({
-          _tag: "ToolExecutionStarted",
-          turn: 0,
-          call: Response.toolCallPart(cellCall("done", "1")),
-        }),
-      ),
-    )
-    projector.apply(
-      treeEvent(
-        "raw-root-run",
-        runEvent({
-          _tag: "ToolExecutionCompleted",
-          turn: 0,
-          call: Response.toolCallPart(cellCall("done", "1")),
-          result: Response.makePart("tool-result", {
-            id: "done",
-            name: "typescript",
-            result: {
-              cellId: "done",
-              epoch: 0,
-              sequence: 1,
-              value: "1",
-              stdout: "",
-              stderr: "",
-              durationMillis: 1,
-            },
-            encodedResult: {},
-            isFailure: false,
-            providerExecuted: false,
-            preliminary: false,
-            metadata: {},
-          }),
-        }),
-      ),
-    )
-    const patch = projector.apply(
-      treeEvent(
-        "raw-root-run",
-        runEvent({
-          _tag: "ToolExecutionStarted",
-          turn: 0,
-          call: Response.toolCallPart(cellCall("live", "await forever()")),
-        }),
-      ),
-    )
-    const persisted = Schema.decodeSync(Schema.fromJsonString(CheckpointState))(patch.checkpoint.state)
-    expect(persisted.nodes.flatMap((node) => node.cells.map(([rawId]) => rawId))).toMatchObject(["live"])
-    const resumed = TreeProjector.make("turn-cell-retention", "retain", patch.checkpoint, projector.snapshot().units)
-    const settled = resumed.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "restarted" }))
-    expect(
-      settled.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Cell")?.content,
-    ).toMatchObject({ _tag: "Block", block: { status: "cancelled" } })
   })
 
   it("restores a committed model response and topology from one opaque checkpoint", () => {

@@ -12,7 +12,6 @@ import { QueueItem as QueueItemSchema } from "./queue/item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./message"
 import { ContextUsage } from "./context/usage"
-import { GoalIndicator } from "./goal"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -166,7 +165,6 @@ export const Model = Schema.Struct({
   activity: Schema.optional(Activity),
   connection: Schema.optional(ConnectionState),
   contextUsage: Schema.optional(ContextUsage),
-  goal: Schema.optional(GoalIndicator),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
   retryCountdown: Schema.Finite,
@@ -218,6 +216,7 @@ export const Model = Schema.Struct({
   editReturn: Schema.optional(ComposerDraftSchema),
   detailSelection: Schema.optional(Schema.String),
   expandedRowKeys: Schema.Array(Schema.String),
+  explicitlyCollapsedRowKeys: Schema.Array(Schema.String),
   seenEventIds: Schema.Array(Schema.String),
   childExecutionOutcomes: Schema.Record(Schema.String, Schema.Unknown),
   activeTurnId: Schema.optional(Schema.String),
@@ -254,7 +253,6 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   busy: false,
   connection: undefined,
   contextUsage: { _tag: "Loading" },
-  goal: undefined,
   contextAnimation: { munchTick: 0, flashTicks: 0, flashed75: false, flashed90: false },
   animationTick: 0,
   retryCountdown: 0,
@@ -279,6 +277,7 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   queueSelection: undefined,
   queue: [],
   expandedRowKeys: [],
+  explicitlyCollapsedRowKeys: [],
   seenEventIds: [],
   childExecutionOutcomes: {},
   activeTurnId: undefined,

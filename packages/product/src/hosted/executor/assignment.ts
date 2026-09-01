@@ -38,7 +38,7 @@ export const WorkspaceCapabilitySnapshot = Schema.Struct({
   environmentDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
   capturedAt: Timestamp,
   filesystem: WorkspaceCapability,
-  typescriptKernel: WorkspaceCapability,
+  nativeTools: WorkspaceCapability,
   git: WorkspaceCapability,
   process: WorkspaceCapability,
   pty: WorkspaceCapability,

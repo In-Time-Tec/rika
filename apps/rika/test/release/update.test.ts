@@ -3,6 +3,16 @@ import { expect, it } from "@effect/vitest"
 import { ConfigProvider, Crypto, Effect, Encoding, FileSystem, Layer, Path } from "effect"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
 import * as ReleaseUpdate from "../../src/release/update"
+import {
+  archiveName,
+  archiveRoot,
+  expectedArchiveNames,
+  isPackageTarget,
+  ownedTargetEntries,
+  packageBinEntries,
+  targets,
+  validateArchiveSet,
+} from "../../../../scripts/packaging/package-contract"
 
 const digestOf = Effect.fn("ReleaseUpdateTest.digestOf")(function* (bytes: Uint8Array) {
   const crypto = yield* Crypto.Crypto
@@ -331,6 +341,51 @@ it.effect("refuses to replace an install this binary does not own", () =>
         expect(fromNpm.failure.message).toContain("npm install -g @rikafx/cli@latest")
       }
       expect(seen).toEqual([])
+    }),
+  ),
+)
+
+it("owns exactly one public executable for every supported release target", () => {
+  expect(Object.keys(targets)).toEqual(["darwin-arm64", "linux-arm64", "linux-x64"])
+  expect(packageBinEntries).toEqual(["rika"])
+  expect(isPackageTarget("linux-x64")).toBe(true)
+  expect(isPackageTarget("win32-x64")).toBe(false)
+  expect(isPackageTarget("__proto__")).toBe(false)
+  expect(archiveRoot("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64")
+  expect(archiveName("1.2.3", "linux-x64")).toBe("rika-1.2.3-linux-x64.tar.gz")
+  expect(ownedTargetEntries("1.2.3", "linux-x64")).toEqual(["rika-1.2.3-linux-x64", "rika-1.2.3-linux-x64.tar.gz"])
+})
+
+it("accepts only the exact supported archive set", () => {
+  const exact = expectedArchiveNames("1.2.3")
+  expect(validateArchiveSet("1.2.3", [...exact, "notes.txt"])).toEqual(exact)
+  expect(() => validateArchiveSet("1.2.3", exact.slice(1))).toThrow("Expected exact archive set")
+  expect(() => validateArchiveSet("1.2.3", [...exact, "rika-1.2.3-win32-x64.tar.gz"])).toThrow(
+    "Expected exact archive set",
+  )
+})
+
+it.effect("keeps package construction and publication on the binary-only contract", () =>
+  withPlatform(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const packaging = yield* fileSystem.readFileString(
+        new URL("../../../../scripts/packaging/package-target.ts", import.meta.url).pathname,
+      )
+      expect(packaging).toContain('checkedBuild("client-main.ts", path.join(bin, packageExecutable)')
+      expect(packaging).toContain('writeFileString(path.join(stage, "INSTALL")')
+      expect(packaging).toContain("Install bin/rika on PATH.")
+      expect(packaging).toContain('COPYFILE_DISABLE: "1"')
+      expect(packaging).not.toMatch(/kernel|worker\.js|interactive-main|performance-main/i)
+
+      const workflow = yield* fileSystem.readFileString(
+        new URL("../../../../.github/workflows/publish.yml", import.meta.url).pathname,
+      )
+      expect(workflow).toContain("scripts/packaging/package-contract")
+      expect(workflow).toContain("--version")
+      expect(workflow).toContain("--help")
+      expect(workflow).toContain("obsolete runtime artifact found")
+      expect(workflow).not.toContain("packages/kernel")
     }),
   ),
 )

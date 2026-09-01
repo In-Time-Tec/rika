@@ -1,7 +1,6 @@
 import type { RunEvent } from "generalist/runtime"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { AuthorizationProjection } from "../authorization"
-import type { CellProjection } from "../cell/state"
 import type { DiagnosticProjection } from "../diagnostic"
 import type { Card, Node } from "../model"
 import type { ProjectorCore } from "../persistence"
@@ -18,7 +17,6 @@ export interface ProjectorEventContext {
   readonly nodes: Map<string, Node>
   readonly cardsByInvocation: Map<string, Card>
   readonly cardsByChild: Map<string, Card>
-  readonly formattedCellSources: Map<string, string>
   readonly usage: UsageAccounting
   readonly recovery: ProjectorRecoveryIndex
   readonly semanticResponse: { readonly apply: (node: Node, event: SemanticModelResponseEvent) => void }
@@ -37,10 +35,15 @@ export interface ProjectorEventContext {
     AuthorizationProjection,
     "putAuthorization" | "resolveAuthorization" | "settleAuthorizations"
   >
-  readonly cells: Pick<CellProjection, "openCell" | "progressCell" | "completeCell">
   readonly diagnostics: Pick<DiagnosticProjection, "notice" | "error" | "modelFailureError" | "executionFailureError">
-  readonly subagents: Pick<SubagentCardProjection, "cardFor" | "updateCard" | "groupCards" | "bindChild">
-  readonly tools: Pick<ToolUnitProjection, "toolState" | "putTool" | "updateTool">
+  readonly subagents: Pick<
+    SubagentCardProjection,
+    "cardFor" | "updateCard" | "groupCards" | "settleGroup" | "bindChild"
+  >
+  readonly tools: Pick<
+    ToolUnitProjection,
+    "toolState" | "putTool" | "updateTool" | "linkProcessCheck" | "settleUnknown" | "runningToolIds"
+  >
 }
 
 export type ProjectorEventHandler = (

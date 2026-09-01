@@ -1,4 +1,4 @@
-import { bold, fg } from "../markdown/styled-text-effects"
+import { bold, fg, underline } from "../markdown/styled-text-effects"
 import type { TerminalTextChunk } from "../markdown/styled-text"
 import { Function, Schema } from "effect"
 import { colors } from "../terminal/theme"
@@ -7,7 +7,12 @@ import type { ToolSummary } from "../transcript/tool/detail-types"
 
 export const joinToolSummary = (summary: ToolSummary): string => summary.primary + (summary.secondary ?? "")
 
-type ToolSummaryOptions = { readonly leading?: string; readonly selected?: boolean; readonly width?: number }
+type ToolSummaryOptions = {
+  readonly leading?: string
+  readonly selected?: boolean
+  readonly underlineSecondary?: boolean
+  readonly width?: number
+}
 
 export const renderToolSummary: {
   (options?: ToolSummaryOptions): (summary: ToolSummary) => ReadonlyArray<ReadonlyArray<TerminalTextChunk>>
@@ -16,13 +21,18 @@ export const renderToolSummary: {
   (args) => Schema.is(Schema.Struct({ primary: Schema.String }))(args[0]),
   (summary: ToolSummary, options: ToolSummaryOptions = {}): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const leading = options.leading ?? ""
+    const secondary =
+      summary.secondary === undefined
+        ? []
+        : [
+            options.underlineSecondary === true
+              ? underline(fg(options.selected === true ? colors.blue : colors.muted)(summary.secondary))
+              : fg(options.selected === true ? colors.blue : colors.muted)(summary.secondary),
+          ]
     const chunks =
       options.selected === true
-        ? [bold(fg(colors.blue)(joinToolSummary(summary)))]
-        : [
-            fg(colors.text)(summary.primary),
-            ...(summary.secondary === undefined ? [] : [fg(colors.muted)(summary.secondary)]),
-          ]
+        ? [bold(fg(colors.blue)(summary.primary)), ...secondary.map(bold)]
+        : [fg(colors.text)(summary.primary), ...secondary]
     const lines = wrapStyledChunks(chunks, options.width ?? Number.MAX_SAFE_INTEGER)
     if (leading.length > 0 && lines[0]?.[0] !== undefined)
       lines[0][0] = { ...lines[0][0], text: leading + lines[0][0].text }

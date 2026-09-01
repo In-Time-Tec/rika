@@ -54,7 +54,7 @@ export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean 
   entry.unit.parentId === undefined &&
   (entry.unit.content._tag === "Entry" ||
     entry.unit.content.block._tag === "Compaction" ||
-    entry.unit.content.block._tag === "Cell" ||
+    entry.unit.content.block._tag === "ToolCall" ||
     entry.unit.executionOutcome !== undefined)
 
 const boundTurnEntriesImpl = (entries: ReadonlyArray<TranscriptPage.Entry>, detail: number): BoundedTurnEntries => {

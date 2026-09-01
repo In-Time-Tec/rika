@@ -2,10 +2,11 @@ import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { and, eq, isNotNull, sql } from "drizzle-orm"
 import { Effect, Schema } from "effect"
 import {
-  CellLifecycleFrame,
-  CellResponse,
-  type CellLifecycleFrame as CellLifecycleFrameValue,
-} from "@rika/remote-execution/protocol"
+  ToolOperationLifecycleFrame,
+  ToolOperationResponse,
+  ToolOperationTerminalOutcome,
+  type ToolOperationLifecycleFrame as ToolOperationLifecycleFrameValue,
+} from "@rika/product/tool-operation-lifecycle"
 import {
   rikaHostedExecutorAssignments,
   rikaHostedExecutorOperationFrames,
@@ -54,22 +55,24 @@ const dispatchedFence = (row: OperationRow): CompletionFence | undefined => {
 const existingResult = (row: OperationRow, input: FinalizeOperationInput) =>
   Effect.gen(function* () {
     if (row.response === null || row.terminalOutcome === null) return yield* failure("Terminal operation is incomplete")
-    const previous = yield* Schema.decodeUnknownEffect(CellResponse)(row.response).pipe(Effect.mapError(failure))
+    const previous = yield* Schema.decodeUnknownEffect(ToolOperationResponse)(row.response).pipe(
+      Effect.mapError(failure),
+    )
     if (
       every(
-        !Schema.toEquivalence(CellResponse)(previous, input.response),
+        !Schema.toEquivalence(ToolOperationResponse)(previous, input.response),
         input.state !== "unknown",
         row.state !== "unknown",
       )
     )
       return finalizeFailure("response-conflict")
-    const outcome = yield* Schema.decodeUnknownEffect(Schema.Literals(["completed", "failed", "cancelled", "unknown"]))(
-      row.terminalOutcome,
-    ).pipe(Effect.mapError(failure))
+    const outcome = yield* Schema.decodeUnknownEffect(ToolOperationTerminalOutcome)(row.terminalOutcome).pipe(
+      Effect.mapError(failure),
+    )
     return { _tag: "already-terminal", response: previous, outcome } as const
   })
 
-type TerminalFrame = Extract<CellLifecycleFrameValue, { readonly _tag: "Terminal" }>
+type TerminalFrame = Extract<ToolOperationLifecycleFrameValue, { readonly _tag: "Terminal" }>
 
 const resolveFinalization = (
   terminal: TerminalFrame | undefined,
@@ -80,7 +83,7 @@ const resolveFinalization = (
     every(
       terminal !== undefined,
       input.state === "completed",
-      terminal !== undefined && !Schema.toEquivalence(CellResponse)(terminal.response, input.response),
+      terminal !== undefined && !Schema.toEquivalence(ToolOperationResponse)(terminal.response, input.response),
     )
   )
     return finalizeFailure("response-conflict")
@@ -146,7 +149,7 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
           const terminal =
             receipts[0] === undefined
               ? undefined
-              : yield* Schema.decodeUnknownEffect(CellLifecycleFrame)(receipts[0].frame).pipe(
+              : yield* Schema.decodeUnknownEffect(ToolOperationLifecycleFrame)(receipts[0].frame).pipe(
                   Effect.mapError(failure),
                   Effect.flatMap((frame) =>
                     frame._tag === "Terminal"
@@ -194,11 +197,17 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
             commandSequence: commands[0].sequence,
             fence,
           }
-          if (input.onFinalize !== undefined) yield* input.onFinalize(result).pipe(Effect.mapError(failure))
           return result
         }),
       )
-      .pipe(Effect.mapError(failure))
+      .pipe(
+        Effect.mapError(failure),
+        Effect.tap((result) =>
+          result._tag === "finalized" && input.onFinalize !== undefined
+            ? input.onFinalize(result).pipe(Effect.mapError(failure))
+            : Effect.void,
+        ),
+      )
   const terminalizeAccepted: HostedExecutionOperationsService["terminalizeAccepted"] = (
     input,
     response,

@@ -15,7 +15,6 @@ import {
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
-import * as GoalService from "@rika/product/goal-service"
 import { ThreadId as HostedThreadId, type OwnerId } from "@rika/product/hosted-model"
 import type { InteractiveInvocation } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
@@ -112,15 +111,10 @@ const ownerLayer = (
   return Layer.unwrap(
     Effect.gen(function* () {
       const repositoryContext = yield* Layer.build(repositories)
-      const goals = Context.get(
-        yield* Layer.build(GoalService.layer.pipe(Layer.provide(Layer.succeedContext(repositoryContext)))),
-        GoalService.GoalService,
-      )
       const crypto = yield* Crypto.Crypto
       const gateway = yield* ExecutionGateway.Service
       const lifecycle = yield* ExecutionSessionLifecycle.Service
       const operations = ProductOperationService.productLayer({
-        goals,
         repositoryLayer: Layer.succeedContext(repositoryContext),
         turnRepositoryLayer: Layer.succeedContext(repositoryContext),
         threadSummaryRepositoryLayer: Layer.succeedContext(repositoryContext),

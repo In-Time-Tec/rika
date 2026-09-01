@@ -159,64 +159,6 @@ That is a 367× reduction for the observed cold wake. Evidence is in
 replay cursor already known at command application time and no longer issue an immediate second
 replay query.
 
-## Model and tool latency
-
-Provider-backed acceptance used a route manifest containing only OpenRouter
-`z-ai/glm-5.3-flash`. A final packaged marker flow with the former preview measured:
-
-- visible preview: 2.160 ms;
-- truthful `connection_ready`: 350.016 ms;
-- prompt to required marker: 7,154.952 ms.
-
-The record is `.amp/in/artifacts/glm-5.3-flash/packaged-final-glm-full-1.json`.
-
-Across repeated GLM 5.3 Flash samples, prompt completion tails included approximately 1.883 s,
-5.521 s, 7.155 s, 14.896 s, 20.372 s, 25.271 s, and one run beyond a 45-second test deadline.
-In the same controlled flows, durable queue waits were generally 77-108 ms and ordinary kernel
-tool cells 113-168 ms. The multi-second variance begins after durable claim and Generalist
-execution start, so it belongs to the OpenRouter/model boundary rather than a hidden client queue
-or kernel sleep. Rika preserves that time instead of manufacturing an early success state or
-speculatively duplicating model/tool work.
-
-## Runner version skew and unknown tool outcomes
-
-The reported `host-terminated` / `Cell operation deadline exceeded` failures were not a short
-client timeout. The live checkout was simultaneously owned by the current 0.11.6 TUI and a
-headless 0.11.2 Runner that had remained alive across an incompatible runtime upgrade. Its receipt
-store contained 25 cells: seven had reached the 120-second operation deadline,
-and one was still running with an accepted/started receipt but no terminal frame. A later snapshot
-contained 27 completed cells: nine deadline failures, 17 successes, and one ordinary command
-failure. The old process also showed repeated reconnect cycles. The 120-second default was already
-generous; increasing it would only keep an incompatible host authoritative for longer.
-
-The defect was admission, not replay: Runner registration, fresh hello, and reconnect did not
-carry a Runner implementation revision. The API could therefore admit an old installed Runner
-to current tool work. All three Runner boundaries now require the same explicit revision and
-reject a missing or obsolete process before session acquisition. The gate is Runner-only, so it
-does not change E2B Orb access. Unknown outcomes remain unknown and non-replayable work is still
-never guessed or duplicated.
-
-The database-backed gateway suite proves a legacy hello and reconnect both close as malformed
-before acquiring a session, while current reconnect, retained completion, cancellation, lease,
-and authorization cases continue to pass. The local checkout schema test proves a pre-revision
-HTTP registration cannot decode, and foreground Runner tests prove current hello and reconnect
-frames carry the revision.
-
-## Kernel execution
-
-Seven independent Bun processes each ran one cold cell and 50 warm cells through one
-`HostedKernel` session. The expression was `1 + 1`; percentiles use nearest rank.
-
-| Kernel boundary | Samples |       p50 |       p95 |   maximum |
-| --------------- | ------: | --------: | --------: | --------: |
-| Cold cell       |       7 | 57.880 ms | 61.401 ms | 61.401 ms |
-| Warm cell       |     350 |  1.300 ms |  3.326 ms |  5.767 ms |
-
-Generating the bootstrap text itself measured approximately 0.0012 ms per call across seven
-100,000-call loops. Caching it would add invalidation and lifecycle state to remove noise, not a
-measured bottleneck, so no cache was added. Raw methodology and all samples are in
-`.amp/in/artifacts/kernel-baseline/result.json`.
-
 ## Interactive memory boundary
 
 Ten packaged launches were stopped after the authenticated `connection_ready` boundary. macOS
@@ -348,22 +290,10 @@ GIT_CONFIG_COUNT=1 \
   bun --bun vitest run --project unit
 ```
 
-The historical full-pass archive is `artifacts/rika-0.11.5-darwin-arm64.tar.gz`:
+The acceptance script builds the current target serially, requires an archive containing only
+`INSTALL` and `bin/rika`, and checks the packaged binary's version and help output. Test counts and
+external-service results belong to the completion report for the exact source revision under review,
+not to this historical latency note.
 
-- size: 53,575,866 bytes;
-- SHA-256: `554d644a7608969db593898b0389471805f1b0c830fd3f420dcc08e361fba726`;
-- native launcher SHA-256: `a842b77e4bfdb0c60de3ca6a4121ad3d6be1eec7b491d08cdbca33bcae56e7cd`;
-- client runtime SHA-256: `6a0e6394dcba837d02154c4db9c927c7c862472ba0a01da814b7ab81ef977b77`.
-
-The serial packaged acceptance passed exact inventory, version, help, and packaged kernel smoke.
-The final unit run passed 310 files and 2,271 tests, with 15 files and 83 tests skipped only at
-their declared external-environment gates. The final E2B image contract built and passed its
-complete doctor.
-
-The full deterministic TUI suite passed 32 files and all 65 declared outcomes (64 ordinary
-passes and one intentional expected failure). The process suite passed 17 files and 42 tests,
-with one environment-specific process-table file skipped; it rebuilt the complete E2B image and
-ran its doctor contract. Text frames and style maps for queue, tools, cancellation, Markdown,
-diff, context, and welcome states are under `.amp/in/artifacts/tui-visual-rc112/`.
 No production deployment, package publication, template promotion, push, merge, or tag is part of
 this evidence.

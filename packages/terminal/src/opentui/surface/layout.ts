@@ -1,7 +1,7 @@
 import stringWidth from "string-width"
 import { StyledText, dim, fg, bold, type TextChunk } from "@opentui/core"
 import type { Model } from "../../state/model"
-import { boundedThreadSidebarWidth, contentColumnWidth, isNarrow } from "../../state/layout/model"
+import { boundedThreadSidebarWidth, isNarrow } from "../../state/layout/model"
 import { colors, modeColor } from "../../presentation/terminal/theme"
 import { toOpenColor } from "../rendering/text-adapter"
 import { shortcutsContent } from "./composer/region"
@@ -244,10 +244,6 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = statusContent(model, this.loaderController.phase, this.currentTimeMillis())
     }
-    const goalChanged =
-      modelFieldsChanged(previousModel, model, ["goal"]) ||
-      (previousModel !== undefined && contentColumnWidth(previousModel) !== contentColumnWidth(model))
-    if (goalChanged) this.renderGoalLabel(model)
     this.workspaceLabel.right = sidebarWidth + 2
     this.ctrlCMenuBox.bottom = renderedInputHeight + 1
     const ctrlCMenuWidth = Math.max(1, Math.min(33, model.width - 4))

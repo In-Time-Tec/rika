@@ -1,8 +1,8 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import * as HostedExecution from "@rika/execution"
+import * as RemoteTools from "@rika/execution/remote-tools"
 import * as ExecutionPostgres from "@rika/execution/postgres"
-import * as RemoteCells from "@rika/execution/remote-cells"
 import { identityMember, identityMigrations, identityOrganization, identityUser, runMigration } from "@rika/identity"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { PromptPart } from "@rika/product/execution-request"
@@ -129,14 +129,6 @@ const withDatabase = <A, E, R>(
     }),
   ).pipe(livePlatform)
 
-const remoteCells = HostedExecution.remoteCells({
-  cells: RemoteCells.layer({
-    execute: () => RemoteCells.Unavailable.make({ message: "Test remote cells are unavailable" }),
-    cancel: () => RemoteCells.Unavailable.make({ message: "Test remote cells are unavailable" }),
-  }),
-  admit: () => Effect.void,
-})
-
 const withAuthoritativeDatabase = <A, E>(
   label: string,
   use: (
@@ -181,12 +173,17 @@ const withAuthoritativeDatabase = <A, E>(
         const data = Layer.succeedContext(dataContext)
         const executionContext = yield* Layer.build(
           HostedExecution.layerHosted({
-            kernel: { runtimeVersion: Bun.version, dataRoot: `/tmp/rika-hosted-ledger-${suffix}` },
+            tools: HostedExecution.remoteTools({
+              tools: RemoteTools.layer({
+                execute: () => RemoteTools.Unavailable.make({ message: "Test remote tools are unavailable" }),
+                cancel: () => RemoteTools.Unavailable.make({ message: "Test remote tools are unavailable" }),
+              }),
+              admit: () => Effect.void,
+            }),
             openAiAccountAccess: () => ({
               acquire: Effect.die("The atomic admission test does not execute the model"),
               refreshRejected: () => Effect.die("The atomic admission test does not refresh model credentials"),
             }),
-            cells: remoteCells,
             postgres: {
               url,
               source: "hosted-thread-command-test",
@@ -228,7 +225,6 @@ export {
   it,
   HostedExecution,
   ExecutionPostgres,
-  RemoteCells,
   identityMember,
   identityMigrations,
   identityOrganization,
@@ -293,7 +289,6 @@ export {
   organization,
   failureKind,
   requireAdmitted,
-  remoteCells,
 }
 export type { AdmittedRun, AuthenticatedPrincipal, HostedProductError, NodePgDatabase }
 

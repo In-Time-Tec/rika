@@ -72,7 +72,7 @@ describe("semantic subagent and authorization transcript rows", () => {
       .split("\n")
       .find((line) => line.includes("Review working"))!
     expect(header).toContain("Review working")
-    expect(header).not.toMatch(/[▸▾]/u)
+    expect(header).toContain("▾")
     const expanded = { ...collapsed, expandedRowKeys: [transcriptUnitId(collapsed, subagent!)] }
     const output = rendered(expanded)
     expect(output).toContain("Review correctness")

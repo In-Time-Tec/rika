@@ -1,6 +1,5 @@
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import * as GoalRepository from "@rika/product/goal-repository"
 import { OwnerId } from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
@@ -161,7 +160,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           const turns = yield* TurnRepository.Service
           const summaries = yield* ThreadSummaryRepository.Service
           const transcripts = yield* TranscriptRepository.Service
-          const goals = yield* GoalRepository.Service
           const sql = yield* SqlClient
 
           const active = yield* createTurn(turns, {
@@ -410,18 +408,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           })
           expect((yield* transcripts.get(active.id))?.units.map((unit) => unit.key)).toEqual([key])
 
-          const goal = {
-            threadId,
-            objective: "prove PostgreSQL",
-            status: "active" as const,
-            budget: { tokens: 100 },
-            usage: { tokens: 10, elapsedMillis: 20, turns: 1 },
-            startedAtMillis: 1,
-            updatedAtMillis: 2,
-          }
-          expect(yield* goals.claim(goal)).toEqual(goal)
-          expect(yield* goals.claim({ ...goal, objective: "conflict" })).toBeUndefined()
-
           expect(yield* ThreadRepository.Service.pipe(Effect.provide(organization))).toEqual(
             expect.objectContaining({}),
           )
@@ -470,14 +456,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
                 .select({ id: schema.rikaTurns.id })
                 .from(schema.rikaTurns)
                 .where(eq(schema.rikaTurns.threadId, threadId)),
-            ),
-          ).toEqual([])
-          expect(
-            yield* Effect.tryPromise(() =>
-              db
-                .select({ threadId: schema.rikaGoals.threadId })
-                .from(schema.rikaGoals)
-                .where(eq(schema.rikaGoals.threadId, threadId)),
             ),
           ).toEqual([])
         }).pipe(Effect.provide(personal))
