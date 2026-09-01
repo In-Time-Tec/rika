@@ -61,6 +61,7 @@ export default defineConfig({
             "apps/*/src/**/*.test.ts",
             "apps/*/test/**/*.test.ts",
             "tooling/*/src/**/*.test.ts",
+            "scripts/**/*.test.ts",
           ],
           exclude: ["**/*.native.test.ts", "**/*.journey.test.ts", "**/*.tui.test.ts", "**/*.proc.test.ts"],
         },
@@ -81,7 +82,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "proc",
-          include: ["packages/*/test/**/*.proc.test.ts", "apps/*/test/**/*.proc.test.ts"],
+          include: ["packages/*/test/**/*.proc.test.ts", "apps/*/test/**/*.proc.test.ts", "scripts/**/*.proc.test.ts"],
           fileParallelism: true,
           maxWorkers: laneWorkers(6),
           sequence: { groupOrder: 2 },

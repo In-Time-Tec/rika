@@ -172,7 +172,7 @@ const execute = (operation: Operation) =>
       const exitCode =
         stage === undefined
           ? yield* runAlchemy(operation)
-          : yield* runAlchemy(operation, stage).pipe(Effect.ensuring(preserveRemoteState(stage)))
+          : yield* runAlchemy(operation, stage).pipe(Effect.onExit(() => preserveRemoteState(stage)))
       yield* Effect.sync(() => {
         process.exitCode = exitCode
       })
