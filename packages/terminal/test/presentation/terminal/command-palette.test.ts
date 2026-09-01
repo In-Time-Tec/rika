@@ -36,28 +36,27 @@ test("tracks turn activity states", () => {
   expect(formatActivity(model.activity)).toBe("Sending")
 
   model = update(model, { _tag: "TurnStarted", turnId: "turn", prompt: "run it" })
-  expect(formatActivity(model.activity)).toBe("Waiting for response")
+  expect(formatActivity(model.activity)).toBe("Waiting")
 
   model = update(model, { _tag: "ReasoningStreamed", text: "12345678🙂" })
-  expect(formatActivity(model.activity)).toBe("Thinking")
+  expect(formatActivity(model.activity)).toBe("Thinking ~3 tok")
   model = update(model, { _tag: "ReasoningStreamed", text: "abcd" })
-  expect(formatActivity(model.activity)).toBe("Thinking")
+  expect(formatActivity(model.activity)).toBe("Thinking ~4 tok")
   model = update(model, { _tag: "AssistantStreamed", text: "abcdefgh", turnId: "turn" })
-  expect(formatActivity(model.activity)).toBe("Streaming")
+  expect(formatActivity(model.activity)).toBe("Streaming ~2 tok")
   model = update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
   expect(formatActivity(model.activity)).toBe("Finishing")
   expect(formatActivity({ _tag: "Compacting" })).toBe("Auto-Compacting")
 
   model = update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
-  expect(formatActivity(model.activity)).toBe("Waiting for response")
+  expect(formatActivity(model.activity)).toBe("Waiting")
 })
-test("keeps approximate token counters out of user-visible activity", () => {
-  expect(formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking")
-  expect(formatActivity({ _tag: "Streaming", bytes: 4_000 })).toBe("Streaming")
-})
-test("shows only provider-reported token counters", () => {
-  expect(formatActivity({ _tag: "Thinking", bytes: 4_000, tokens: 17 })).toBe("Thinking 17 tok")
-  expect(formatActivity({ _tag: "Streaming", bytes: 4, tokens: 1_234 })).toBe("Streaming 1.2K tok")
+test("labels live byte-based token estimates and increases them with streamed content", () => {
+  expect(formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking ~0 tok")
+  expect(formatActivity({ _tag: "Thinking", bytes: 1 })).toBe("Thinking ~1 tok")
+  expect(formatActivity({ _tag: "Streaming", bytes: 4 })).toBe("Streaming ~1 tok")
+  expect(formatActivity({ _tag: "Streaming", bytes: 5 })).toBe("Streaming ~2 tok")
+  expect(formatActivity({ _tag: "Streaming", bytes: 4_000 })).toBe("Streaming ~1K tok")
 })
 test("summarizes direct subagents and tools without inflating them with descendants", () => {
   const rootAgent = {

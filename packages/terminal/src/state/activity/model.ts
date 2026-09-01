@@ -10,12 +10,10 @@ export const Activity = Schema.Union([
   Schema.TaggedStruct("Finishing", {}),
   Schema.TaggedStruct("Thinking", {
     bytes: Schema.Finite,
-    tokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     blockId: Schema.optionalKey(Schema.String),
   }),
   Schema.TaggedStruct("Streaming", {
     bytes: Schema.Finite,
-    tokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     blockId: Schema.optionalKey(Schema.String),
   }),
   Schema.TaggedStruct("RunningTools", {
@@ -58,9 +56,9 @@ const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: n
     return labels.length === 0 ? "Running tools" : `Running ${labels.join(", ")}`
   }
   if (activity._tag === "Compacting") return "Auto-Compacting"
-  if (activity._tag === "Waiting") return "Waiting for response"
+  if (activity._tag === "Waiting") return "Waiting"
   if (activity._tag === "Thinking" || activity._tag === "Streaming")
-    return activity.tokens === undefined ? activity._tag : `${activity._tag} ${formatTokens(activity.tokens)}`
+    return `${activity._tag} ~${formatTokens(Math.ceil(activity.bytes / 4))}`
   return activity._tag
 }
 

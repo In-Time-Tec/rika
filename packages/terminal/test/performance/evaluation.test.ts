@@ -475,11 +475,11 @@ test("keeps the status spinner moving across a tool-result lull without feed eve
       try {
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting for response")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting")
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting for response")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting for response")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

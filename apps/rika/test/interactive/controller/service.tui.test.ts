@@ -46,7 +46,7 @@ test(
         const completed = yield* app.waitFrame("HANDOFF_FINAL_ONCE", 20_000)
         expect(completed.match(/HANDOFF_FINAL_ONCE/g) ?? []).toHaveLength(1)
         const settled = yield* app.settled
-        expect(settled).not.toContain("Waiting for response")
+        expect(settled).not.toContain("Waiting")
         yield* app.quit
       }),
     ),

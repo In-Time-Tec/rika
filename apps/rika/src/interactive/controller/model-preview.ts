@@ -6,24 +6,11 @@ import { Function } from "effect"
 
 const retiredIdentityCapacity = 16
 const utf8Encoder = new TextEncoder()
-type TokenChannel = "reasoning" | "text"
-
-const selectTokenChannel = (
-  hasText: boolean,
-  hasReasoning: boolean,
-  fallback?: TokenChannel,
-): TokenChannel | undefined => {
-  if (hasText) return "text"
-  if (hasReasoning) return "reasoning"
-  return fallback
-}
 
 export interface RunOverlay {
   readonly preview: ExecutionGateway.ModelPreviewFrame | undefined
   readonly identity: string | undefined
   readonly responseId: string | undefined
-  readonly tokenUsage: ExecutionGateway.ModelPreviewUsage | undefined
-  readonly tokenChannel: TokenChannel | undefined
   readonly reasoning: string
   readonly text: string
   readonly reasoningLength: number
@@ -141,8 +128,6 @@ const clearRun = (
       preview: undefined,
       identity: undefined,
       responseId: undefined,
-      tokenUsage: undefined,
-      tokenChannel: undefined,
       ...cleared,
       sequence: -1,
       incomplete: true,
@@ -171,8 +156,6 @@ const initializeRun = (
     preview,
     identity: nextIdentity,
     responseId: ExecutionGateway.modelResponseId(preview),
-    tokenUsage: undefined,
-    tokenChannel: selectTokenChannel(content.textLength > 0, content.reasoningLength > 0),
     ...content,
     sequence: preview.sequence,
     incomplete: preview.sequence !== 0 || appended === undefined,
@@ -199,21 +182,8 @@ const appendFrame = (current: RunOverlay, preview: ExecutionGateway.ModelPreview
         ...current,
         preview,
         ...appended,
-        tokenChannel: selectTokenChannel(appended.textLength > 0, appended.reasoningLength > 0, current.tokenChannel),
         sequence: preview.sequence,
       }
-}
-
-const applyUsage = (
-  current: RunOverlay | undefined,
-  usage: ExecutionGateway.ModelPreviewUsage,
-): RunOverlay | undefined => {
-  if (current?.responseId !== ExecutionGateway.modelResponseId(usage)) return current
-  const tokenChannel =
-    current.tokenChannel ??
-    selectTokenChannel(usage.outputTokens.text !== undefined, usage.outputTokens.reasoning !== undefined)
-  if (tokenChannel === undefined || usage.outputTokens[tokenChannel] === undefined) return current
-  return { ...current, tokenUsage: usage, tokenChannel }
 }
 
 const replaceRun = (
@@ -221,7 +191,7 @@ const replaceRun = (
   incoming: ExecutionGateway.ModelPreviewEvent,
 ): RunOverlay | undefined => {
   if (incoming._tag === "ModelPreviewCleared") return clearRun(current, incoming)
-  if (incoming._tag === "ModelPreviewUsage") return applyUsage(current, incoming)
+  if (incoming._tag === "ModelPreviewUsage") return current
   const preview = incoming
   const nextIdentity = identity(preview)
   if ((current?.clearFence ?? Number.NEGATIVE_INFINITY) >= preview.attemptFence) return current
@@ -294,35 +264,21 @@ const activityImpl = (overlay: Overlay | undefined, turnId: string) => {
   const runs = [...overlay.byRun.values()]
   const text = runs.filter((run) => run.textBytes > 0)
   if (text.length > 0) {
-    const exact = text.every((run) => run.tokenUsage?.outputTokens.text !== undefined)
-    const tokens = exact ? text.reduce((total, run) => total + run.tokenUsage!.outputTokens.text!, 0) : undefined
-    const activity = { _tag: "Streaming" as const, bytes: text.reduce((total, run) => total + run.textBytes, 0) }
-    return tokens === undefined ? { ...activity, active: true } : { ...activity, active: true, tokens }
+    return {
+      _tag: "Streaming" as const,
+      bytes: text.reduce((total, run) => total + run.textBytes, 0),
+      active: true,
+    }
   }
   const reasoning = runs.filter((run) => run.reasoningBytes > 0)
   if (reasoning.length > 0) {
-    const exact = reasoning.every((run) => run.tokenUsage?.outputTokens.reasoning !== undefined)
-    const tokens = exact
-      ? reasoning.reduce((total, run) => total + run.tokenUsage!.outputTokens.reasoning!, 0)
-      : undefined
-    const activity = {
+    return {
       _tag: "Thinking" as const,
       bytes: reasoning.reduce((total, run) => total + run.reasoningBytes, 0),
+      active: true,
     }
-    return tokens === undefined ? { ...activity, active: true } : { ...activity, active: true, tokens }
   }
-  const settled = runs
-    .filter((run) => run.tokenUsage !== undefined && run.tokenChannel !== undefined)
-    .toSorted((left, right) => right.tokenUsage!.completedAt - left.tokenUsage!.completedAt)[0]
-  if (settled?.tokenUsage === undefined || settled.tokenChannel === undefined) return undefined
-  const tokens = settled.tokenUsage.outputTokens[settled.tokenChannel]
-  if (tokens === undefined) return undefined
-  return {
-    _tag: settled.tokenChannel === "text" ? ("Streaming" as const) : ("Thinking" as const),
-    bytes: 0,
-    tokens,
-    active: false,
-  }
+  return undefined
 }
 
 export const activity: {

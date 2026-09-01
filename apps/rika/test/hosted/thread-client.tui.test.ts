@@ -34,12 +34,12 @@ test(
         app.pressKey("c", { ctrl: true })
         const thinking = yield* app.waitFrame("Thinking", 30_000)
         expect(thinking).toContain("Promote me after the head.")
-        expect(thinking).not.toMatch(/Thinking \d+ tok/)
+        expect(thinking).toMatch(/Thinking ~\d+ tok/)
         expect(thinking).not.toContain("Execution failed")
 
         const streaming = yield* app.waitFrame("Streaming", 30_000)
         expect(streaming).toContain("Promote me after the head.")
-        expect(streaming).not.toMatch(/Streaming \d+ tok/)
+        expect(streaming).toMatch(/Streaming ~\d+ tok/)
         expect(streaming).not.toContain("Execution failed")
 
         const completed = yield* app.waitFrame("PROMOTED_ANSWER_COMPLETE", 30_000)
