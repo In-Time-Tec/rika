@@ -8,6 +8,9 @@ const manifest = await Effect.runPromise(
 )
 
 test("root operational commands point directly at their owners", () => {
+  expect(manifest.scripts.dev).toBe("bun run scripts/development/stack.ts local")
+  expect(manifest.scripts["dev:remote"]).toBe("bun run scripts/development/stack.ts remote")
+  expect(manifest.scripts["dev:remote:destroy"]).toBe("bun run scripts/development/stack.ts destroy")
   expect(manifest.scripts.package).toBe("bun run scripts/packaging/package-target.ts")
   expect(manifest.scripts["npm-package"]).toBe("bun run scripts/packaging/npm-package.ts")
 })

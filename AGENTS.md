@@ -13,6 +13,8 @@ This repository pins Bun 1.4.0 in `package.json`.
 | Install dependencies                  | `bun install --frozen-lockfile`                                                                                                  |
 | Build every workspace                 | `bun run build`                                                                                                                  |
 | Run the development stack             | `bun run dev`                                                                                                                    |
+| Deploy a personal Railway stack       | `bun run dev:remote`                                                                                                             |
+| Destroy that personal Railway stack   | `bun run dev:remote:destroy`                                                                                                     |
 | Run the source CLI                    | `bun run --cwd apps/rika start -- --workspace "$PWD"`                                                                            |
 | Lint                                  | `bun run lint`                                                                                                                   |
 | Type-check                            | `bun run typecheck`                                                                                                              |
@@ -75,5 +77,11 @@ Treat these paths as production-sensitive:
 - `.github/workflows/publish.yml`, `install.sh`, and `scripts/packaging` define release installation and publication.
 
 Do not print secrets or put credentials in source, logs, Executor payloads, snapshots, or artifacts. Do not run production migrations, deploy, promote an Executor image, publish packages, create a release, or push a tag unless the user explicitly requests that exact external action.
+
+`bun run dev:remote` is a live Railway mutation. It creates one isolated personal project using the ignored
+`.alchemy/rika-dev-stage` identity. Never replace that identity with `production`, `staging`, or `pr-*`, and never
+delete `.alchemy` while resources may remain. `bun run dev:remote:destroy` retains the identity and Alchemy state
+so failed cleanup can be retried. Railway provisioning credentials stay in the Alchemy process and must not be
+added to service variables. Set `RAILWAY_WORKSPACE_ID` explicitly before any personal deployment.
 
 CI has separate `quality`, `tui`, and `proc` jobs. A `v*` tag runs the publish workflow: the tag must equal `v` plus `apps/rika/package.json`'s version, the tagged commit must have green CI unless an explicit audited override is used, native archives are built for `darwin-arm64`, `linux-arm64`, and `linux-x64`, and the workflow verifies inventory, architecture, checksums, and provenance before publishing GitHub and npm artifacts. The Executor image is promoted only by its separate manual workflow with a new generation and `promote=true`.
