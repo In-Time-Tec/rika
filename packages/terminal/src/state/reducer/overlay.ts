@@ -147,7 +147,7 @@ const completedAssistant = (model: Model, text: string, id: string | undefined, 
     entries,
     items: index >= 0 ? model.items : [...model.items, identified],
     busy: model.busy,
-    activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Waiting" } : undefined,
+    activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Finishing" } : undefined,
   }
 }
 

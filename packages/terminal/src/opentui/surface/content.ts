@@ -77,6 +77,16 @@ export const lifecycleLabel: {
 } = Function.dual(2, lifecycleLabelImpl)
 
 const statusContentImpl = (model: Model, phase: number, currentTimeMillis: number): StyledText | string => {
+  if (model.editingTurnId !== undefined)
+    return new StyledText([
+      fg(toOpenColor(colors.text))(" "),
+      bold(fg(toOpenColor(colors.blue))("Editing queued")),
+      dim(fg(toOpenColor(colors.text))(" · ")),
+      fg(toOpenColor(colors.blue))("Enter"),
+      dim(fg(toOpenColor(colors.text))(" save · ")),
+      fg(toOpenColor(colors.blue))("Esc"),
+      dim(fg(toOpenColor(colors.text))(" cancel ")),
+    ])
   const lifecycle = lifecycleLabel(model, currentTimeMillis)
   if (lifecycle === undefined) return ""
   const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]

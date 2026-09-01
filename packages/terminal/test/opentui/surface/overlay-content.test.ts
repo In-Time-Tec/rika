@@ -31,7 +31,7 @@ test("reflows queued content and hint with stable queue identity", () =>
         const tallFrame = setup.captureCharFrame()
         expect(tallFrame).toContain("first queued prompt")
         expect(tallFrame).toContain("second queued prompt")
-        expect(tallFrame).toContain("selected queued…")
+        expect(tallFrame).toContain("selected queued prompt")
         expect(model.queue).toBe(queueIdentity)
 
         model = { ...model, height: 10 }
@@ -41,7 +41,7 @@ test("reflows queued content and hint with stable queue identity", () =>
         expect(model.queue).toBe(queueIdentity)
         expect(surface.queueText.content).not.toBe(tallText)
         expect(surface.queueHint.content).not.toBe(tallHint)
-        expect(shortFrame).toContain("selected queued…")
+        expect(shortFrame).toContain("selected queued prompt")
         expect(shortFrame).not.toContain("first queued prompt")
         expect(surface.queueBox.height).toBe(3)
 
@@ -61,7 +61,7 @@ test("reflows queued content and hint with stable queue identity", () =>
         expect(surface.queueText.content).not.toBe(tallText)
         expect(surface.queueHint.content).not.toBe(tallHint)
         expect(surface.inputBox.height).toBeGreaterThan(5)
-        expect(multilineFrame).toContain("selected queued…")
+        expect(multilineFrame).toContain("selected queued prompt")
         expect(multilineFrame).toContain("Pasted text #1 +2 lines")
       } finally {
         surface.destroy()

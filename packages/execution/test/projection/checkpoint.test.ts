@@ -11,7 +11,10 @@ import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
 const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
-  events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
+  events.filter(
+    (event): event is Change =>
+      event._tag !== "ModelPreview" && event._tag !== "ModelPreviewUsage" && event._tag !== "ModelPreviewCleared",
+  )
 
 const testLayer = (filename: string, fixture: TestModel.Fixture) =>
   layer({

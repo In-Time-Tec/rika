@@ -256,6 +256,7 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
   }
   const turnStarted = (event: Extract<RuntimeEvent, { readonly _tag: "TurnStarted" }>): ReadonlyArray<ClientEvent> => {
     if (current === undefined || event.threadId !== current.thread.id) return []
+    if (current.turn(String(event.turn.id)) !== undefined) return []
     if (current.hasNewer) {
       rememberProjection(String(event.turn.id), 0, ExecutionProjection.emptyUsageState())
       return []
@@ -323,6 +324,40 @@ export const makeThreadViewFeed = (now: () => number): ThreadViewFeed => {
       case "Removed":
         items = items.filter((item) => item.id !== change.turnId)
         break
+      case "Promoted": {
+        items = items.filter((item) => item.id !== change.turn.id)
+        const header = {
+          thread: current.thread,
+          source: current.source,
+          pending: items,
+          hasOlder: current.hasOlder,
+          hasNewer: current.hasNewer,
+          usage: current.usage,
+        }
+        if (current.hasNewer) {
+          rememberProjection(String(change.turn.id), 0, ExecutionProjection.emptyUsageState())
+          return nextPatch({ upsert: [], remove: [], turnChanges: [], header })
+        }
+        const seed = promptUnit(change.turn)
+        return nextPatch({
+          upsert: [seed],
+          remove: [],
+          turnChanges: [
+            {
+              _tag: "UpsertTurn",
+              turn: {
+                ...ThreadView.turnRecord(change.turn),
+                status: knownTerminalStatuses.get(String(change.turn.id)) ?? change.turn.status,
+              },
+              projectionRevision: 0,
+              usage: ExecutionProjection.emptyUsageState(),
+              pendingSteering: [],
+              settledSteering: [],
+            },
+          ],
+          header,
+        })
+      }
     }
     return nextPatch({
       upsert: [],

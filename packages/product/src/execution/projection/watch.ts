@@ -106,7 +106,7 @@ const runAttempt = (
     yield* backend.watchTurn(executionLink, watchRequest(turn, projection)).pipe(
       Stream.timeout(stallSilenceMs),
       Stream.runForEach((event) => {
-        if (event._tag === "ModelPreview" || event._tag === "ModelPreviewCleared")
+        if (event._tag === "ModelPreview" || event._tag === "ModelPreviewUsage" || event._tag === "ModelPreviewCleared")
           return notify(() => {
             signals.previewed = true
             onPreview?.(event)

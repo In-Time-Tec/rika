@@ -198,7 +198,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         ...base(),
         currentThreadId: "context-thread",
         busy: true,
-        activity: { _tag: "Streaming", bytes: 20 },
+        activity: { _tag: "Streaming", bytes: 20, tokens: 5 },
         contextUsage: {
           _tag: "Available",
           inputCacheRead: 0,
@@ -219,7 +219,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         busy: true,
         animationTick: 1,
         contextAnimation: { ...base().contextAnimation, munchTick: 1 },
-        activity: { _tag: "Streaming", bytes: 20 },
+        activity: { _tag: "Streaming", bytes: 20, tokens: 5 },
         contextUsage: {
           _tag: "Available",
           inputCacheRead: 0,

@@ -2,7 +2,7 @@ import { Option, Schema } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 import * as InteractiveController from "../../../../src/interactive/controller/service"
 import * as ExecutionProjection from "@rika/product/execution-projection"
-import type * as ExecutionGateway from "@rika/product/execution-gateway"
+import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as Thread from "@rika/product/thread-record"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as ThreadView from "@rika/product/thread-view"
@@ -111,13 +111,30 @@ const ids = (state: InteractiveController.State): ReadonlyArray<string> =>
   transcriptItems(state).flatMap((item) => (item.id === undefined ? [] : [item.id]))
 const runPreview = (state: InteractiveController.State, runId = "run") => state.modelPreview?.byRun.get(runId)
 
-const timelineUnit = (key: string, content: TranscriptUnit.Unit["content"], revision = 1): TranscriptUnit.Unit => ({
-  key,
-  turnId,
-  order: TranscriptOrdering.unitOrder(key, revision),
-  revision,
-  content,
-})
+const timelineUnit = (
+  key: string,
+  content: TranscriptUnit.Unit["content"],
+  revision = 1,
+  modelResponseId?: string,
+): TranscriptUnit.Unit => {
+  const unit: TranscriptUnit.Unit = {
+    key,
+    turnId,
+    order: TranscriptOrdering.unitOrder(key, revision),
+    revision,
+    content,
+  }
+  return modelResponseId === undefined ? unit : { ...unit, modelResponseId }
+}
+
+const responseId = (options: Partial<ExecutionGateway.ModelPreviewIdentity> = {}) =>
+  ExecutionGateway.modelResponseId({
+    runId: options.runId ?? "run",
+    turn: options.turn ?? 0,
+    modelCallId: options.modelCallId ?? "call",
+    modelAttemptId: options.modelAttemptId ?? "attempt-1",
+    attempt: options.attempt ?? 1,
+  })
 
 const toolCall = (status: "running" | "complete" = "running"): TranscriptUnit.Unit["content"] => ({
   _tag: "Block",
@@ -188,6 +205,35 @@ const applyPatch = (state: InteractiveController.State, options: PatchOptions): 
 }
 
 describe("tentative model preview overlay", () => {
+  it("replaces a matching preview with its durable response without rendering both", () => {
+    const text = "one visible answer"
+    let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
+
+    state = applyPatch(state, {
+      upsert: [timelineUnit("durable:answer", { _tag: "Entry", role: "assistant", text }, 1, responseId())],
+    })
+
+    expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
+    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
+    expect(runPreview(state)).toMatchObject({ preview: undefined, identity: undefined, text: "", reasoning: "" })
+  })
+
+  it("retires only the matching call when an older durable response arrives late", () => {
+    const secondIdentity = { turn: 1, modelCallId: "call-2", modelAttemptId: "attempt-2" }
+    let state = InteractiveController.update(loaded(), preview(1, "first answer", {}, "")).state
+    state = InteractiveController.update(state, preview(1, "second answer", secondIdentity, "")).state
+
+    state = applyPatch(state, {
+      upsert: [
+        timelineUnit("durable:first", { _tag: "Entry", role: "assistant", text: "first answer" }, 1, responseId()),
+      ],
+    })
+
+    expect(assistantText(state)).toBe("second answer")
+    expect(runPreview(state)?.text).toBe("second answer")
+    expect(ids(state).filter((id) => id.startsWith("tentative:"))).toHaveLength(1)
+  })
+
   it("keeps a second model-call preview across a delayed durable projection from the first call", () => {
     let state = InteractiveController.update(loaded(), preview(1, "first answer", {}, "first thought")).state
     state = InteractiveController.update(

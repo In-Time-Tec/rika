@@ -31,7 +31,7 @@ export const interactiveSessionEvents = (dependencies: {
     if (payload._tag === "ThreadPreviewReset") return dependencies.resetPreviews(threadId)
     const key = `${threadId}:${payload.turnId}:${payload.preview.runId}`
     if (payload.preview._tag === "ModelPreview") dependencies.activePreviews.set(key, payload)
-    else dependencies.activePreviews.delete(key)
+    else if (payload.preview._tag === "ModelPreviewCleared") dependencies.activePreviews.delete(key)
     dependencies.dispatch({
       _tag: "ExecutionModelPreviewChanged",
       threadId: ThreadId.make(payload.threadId),
@@ -114,6 +114,10 @@ export const interactivePreviewState = (dispatch: (event: InteractiveEvent) => v
   const resetPreviews = (threadId: string) => {
     for (const [key, payload] of activePreviews) {
       if (String(payload.threadId) !== threadId) continue
+      if (payload.preview._tag !== "ModelPreview") {
+        activePreviews.delete(key)
+        continue
+      }
       dispatch({
         _tag: "ExecutionModelPreviewChanged",
         threadId: ThreadId.make(payload.threadId),

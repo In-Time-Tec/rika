@@ -1,4 +1,5 @@
 import type { Unit } from "@rika/product/execution-transcript-contract"
+import { modelResponseId } from "@rika/product/execution-gateway"
 import { cellToolName } from "../cell/state"
 import type { SemanticModelResponseEvent } from "./event"
 import type { Card, Node } from "../model"
@@ -31,15 +32,22 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
   ) => {
     if (node.hidden || text.length === 0) return
     const key = input.localId(kind, node.publicId, node.phase, event.operationKey, contentIndex)
-    input.put(
-      input.unit(
+    input.put({
+      ...input.unit(
         node,
         key,
         kind === "assistant"
           ? { _tag: "Entry", role: "assistant", text }
           : { _tag: "Block", block: { _tag: "Reasoning", text } },
       ),
-    )
+      modelResponseId: modelResponseId({
+        runId: node.rawRunId,
+        turn: event.turn,
+        modelCallId: event.modelCallId,
+        modelAttemptId: event.modelAttemptId,
+        attempt: event.attempt,
+      }),
+    })
   }
 
   const putToolCall = (

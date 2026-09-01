@@ -20,6 +20,7 @@ export type QueueChange =
   | { readonly _tag: "Added"; readonly item: QueueItem; readonly position?: number }
   | { readonly _tag: "Updated"; readonly item: QueueItem }
   | { readonly _tag: "Removed"; readonly turnId: Turn.TurnId }
+  | { readonly _tag: "Promoted"; readonly turn: Turn.Turn }
 
 export type InteractiveEvent =
   | { readonly _tag: "ThreadsListed"; readonly threads: ReadonlyArray<ThreadSummary.ThreadSummary> }
@@ -270,6 +271,7 @@ export const InteractiveEventSchema = Schema.Union([
         }),
       }),
       Schema.Struct({ _tag: Schema.tag("Removed"), turnId: Turn.TurnId }),
+      Schema.Struct({ _tag: Schema.tag("Promoted"), turn: Turn.Turn }),
     ]),
   }),
   Schema.Struct({

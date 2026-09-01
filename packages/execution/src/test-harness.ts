@@ -46,16 +46,31 @@ const profiles: ReadonlyArray<Profile> = [
   "Task",
 ]
 
-const usage = (input: { readonly inputTokens?: number; readonly outputTokens?: number }) =>
-  AiResponse.Usage.make({
+const usage = (input: {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly outputTextTokens?: number
+  readonly outputReasoningTokens?: number
+}) => {
+  const outputTokens =
+    input.outputTokens ??
+    (input.outputTextTokens === undefined && input.outputReasoningTokens === undefined
+      ? undefined
+      : (input.outputTextTokens ?? 0) + (input.outputReasoningTokens ?? 0))
+  return AiResponse.Usage.make({
     inputTokens: {
       uncached: input.inputTokens,
       total: input.inputTokens,
       cacheRead: undefined,
       cacheWrite: undefined,
     },
-    outputTokens: { total: input.outputTokens, text: input.outputTokens, reasoning: undefined },
+    outputTokens: {
+      total: outputTokens,
+      text: input.outputTextTokens ?? (input.outputReasoningTokens === undefined ? input.outputTokens : undefined),
+      reasoning: input.outputReasoningTokens,
+    },
   })
+}
 
 /** One `rika.<module>.<operation>(input)` call a scripted cell makes. */
 interface BindingCall {
@@ -99,13 +114,20 @@ export const step = {
       readonly streamPartDelayMillis?: number
       readonly inputTokens?: number
       readonly outputTokens?: number
+      readonly outputTextTokens?: number
+      readonly outputReasoningTokens?: number
     } = {},
   ): Step => {
     const turnOptions: TestModel.StepOptions = {}
     if (options.delayMillis !== undefined) Object.assign(turnOptions, { delay: `${options.delayMillis} millis` })
     if (options.streamPartDelayMillis !== undefined)
       Object.assign(turnOptions, { streamPartDelay: `${options.streamPartDelayMillis} millis` })
-    if (options.inputTokens !== undefined || options.outputTokens !== undefined)
+    if (
+      options.inputTokens !== undefined ||
+      options.outputTokens !== undefined ||
+      options.outputTextTokens !== undefined ||
+      options.outputReasoningTokens !== undefined
+    )
       Object.assign(turnOptions, { usage: usage(options) })
     return TestModel.turn(parts, turnOptions)
   },

@@ -3,7 +3,7 @@ import { expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Duration, Effect } from "effect"
 import { commands, filter } from "../../../src/presentation/terminal/command-palette"
-import { formatActivity, formatActivityCounter, runningToolsActivity } from "../../../src/state/activity/model"
+import { formatActivity, runningToolsActivity } from "../../../src/state/activity/model"
 import { activeTimeAt } from "../../../src/state/activity/time"
 import { classifyPrompt, promptParts } from "../../../src/state/composer/model"
 import { composerHeight, inputRows, wrappedRowCount } from "../../../src/state/layout/composer"
@@ -15,7 +15,6 @@ import { initial } from "../../../src/state/model"
 import { filteredFiles } from "../../../src/state/thread/navigation"
 import { update } from "../../../src/state/reducer/model"
 
-import { formatTokens } from "../../../src/presentation/terminal/format"
 import { key, _thread, readCall, _editFile, _busyQueueModel } from "../../state/queue/model.fixture"
 test("adds only an open active interval to accumulated time", () => {
   expect(activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 }, 53_000)).toEqual(
@@ -23,7 +22,7 @@ test("adds only an open active interval to accumulated time", () => {
   )
   expect(activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000 }, 53_000)).toEqual(Duration.seconds(5))
 })
-test("tracks only the five turn activity states", () => {
+test("tracks turn activity states", () => {
   let model = { ...initial("/work", "medium"), input: "run it", cursor: 6 }
   model = update(model, { _tag: "Submitted", submissionId: "submission" })
   expect(model.activity).toEqual({ _tag: "Sending" })
@@ -37,30 +36,28 @@ test("tracks only the five turn activity states", () => {
   expect(formatActivity(model.activity)).toBe("Sending")
 
   model = update(model, { _tag: "TurnStarted", turnId: "turn", prompt: "run it" })
-  expect(formatActivity(model.activity)).toBe("Waiting")
+  expect(formatActivity(model.activity)).toBe("Waiting for response")
 
   model = update(model, { _tag: "ReasoningStreamed", text: "12345678🙂" })
-  expect(formatActivity(model.activity)).toBe("Thinking 3 tok")
+  expect(formatActivity(model.activity)).toBe("Thinking")
   model = update(model, { _tag: "ReasoningStreamed", text: "abcd" })
-  expect(formatActivity(model.activity)).toBe("Thinking 4 tok")
+  expect(formatActivity(model.activity)).toBe("Thinking")
   model = update(model, { _tag: "AssistantStreamed", text: "abcdefgh", turnId: "turn" })
-  expect(formatActivity(model.activity)).toBe("Streaming 2 tok")
+  expect(formatActivity(model.activity)).toBe("Streaming")
   model = update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
-  expect(formatActivity(model.activity)).toBe("Waiting")
+  expect(formatActivity(model.activity)).toBe("Finishing")
   expect(formatActivity({ _tag: "Compacting" })).toBe("Auto-Compacting")
 
   model = update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
-  expect(formatActivity(model.activity)).toBe("Waiting")
+  expect(formatActivity(model.activity)).toBe("Waiting for response")
 })
-test("formats Amp activity counters with the singular tok unit", () => {
-  expect(formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking 0 tok")
-  expect(formatActivityCounter(1)).toBe("1 tok")
-  expect(formatActivityCounter(999)).toBe("999 tok")
-  expect(formatActivityCounter(1_234)).toBe("1.2K tok")
-  expect(formatActivityCounter(2_000)).toBe("2K tok")
-  expect(formatActivityCounter(12_345)).toBe("12.3K tok")
-  expect(formatActivityCounter(1_234_567)).toBe("1.2M tok")
-  expect(formatActivityCounter(1_234)).toBe(formatTokens(1_234))
+test("keeps approximate token counters out of user-visible activity", () => {
+  expect(formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking")
+  expect(formatActivity({ _tag: "Streaming", bytes: 4_000 })).toBe("Streaming")
+})
+test("shows only provider-reported token counters", () => {
+  expect(formatActivity({ _tag: "Thinking", bytes: 4_000, tokens: 17 })).toBe("Thinking 17 tok")
+  expect(formatActivity({ _tag: "Streaming", bytes: 4, tokens: 1_234 })).toBe("Streaming 1.2K tok")
 })
 test("summarizes direct subagents and tools without inflating them with descendants", () => {
   const rootAgent = {
@@ -87,7 +84,7 @@ test("summarizes direct subagents and tools without inflating them with descenda
 
   expect(activity).toEqual({ _tag: "RunningTools", subagents: 1, tools: 1 })
   expect(formatActivity(activity)).toBe("Running 1 subagent, 1 tool")
-  expect(formatActivity({ _tag: "RunningTools", subagents: 5, tools: 3 })).toBe("Running 5 subagents, 3 tools")
+  expect(formatActivity({ _tag: "RunningTools", subagents: 4, tools: 3 })).toBe("Running 4 subagents, 3 tools")
 })
 test("exposes local and Orb Thread creation plus the current command controls", () => {
   expect(commands.map((command) => command.id)).toEqual([

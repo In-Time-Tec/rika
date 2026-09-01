@@ -202,6 +202,14 @@ describe("linked Turn settlement authority", () => {
       })
       expect(persisted.get("queued-second")).toMatchObject({ status: "queued" })
       expect(persisted.get("queued-second")).not.toHaveProperty("executionLink")
+      expect(events.slice(0, 2)).toMatchObject([
+        {
+          _tag: "QueueUpdated",
+          queuedCount: 1,
+          change: { _tag: "Promoted", turn: { id: "queued-first", status: "running" } },
+        },
+        { _tag: "TurnStarted", turn: { id: "queued-first", status: "running" } },
+      ])
       expect(events.filter((event) => event._tag === "ExecutionFailed")).toEqual([])
     }),
   )

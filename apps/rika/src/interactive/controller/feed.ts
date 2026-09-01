@@ -38,7 +38,10 @@ const applyPreview = (
   if (state.view === undefined || event.threadId !== state.view.thread.id) return unchanged(state)
   const turn = state.view.turn(String(event.turnId))
   if (turn === undefined || !ExecutionStatus.isActiveStatus(turn.turn.status)) return unchanged(state)
-  const modelPreview = ModelPreview.replace(state.modelPreview, String(event.turnId), event.preview)
+  const modelPreview = ModelPreview.reconcile(
+    ModelPreview.replace(state.modelPreview, String(event.turnId), event.preview),
+    state.view,
+  )
   if (modelPreview === state.modelPreview) return unchanged(state)
   const previous = ModelPreview.units(state.modelPreview, state.view)
   const next = ModelPreview.units(modelPreview, state.view)

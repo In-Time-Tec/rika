@@ -57,9 +57,11 @@ test(
 
         yield* selectQueue(app, remainingPrompts, remainingPrompts.indexOf("QUEUE_7"))
         app.pressKey("e", { ctrl: true })
-        yield* app.waitFrame("Editing queued")
+        const editing = yield* app.waitFrame("Editing queued")
+        expect(editing.split("\n").some((line) => line.includes("Queued · QUEUE_7"))).toBe(false)
         yield* Effect.tryPromise(() => app.type("_EDITED"))
         app.pressEnter()
+        yield* app.waitFrame("Queued · QUEUE_7_EDITED")
         const edited = yield* waitQueue(app, threadId, (queue) =>
           queue.turns.some((turn) => turn.prompt === "QUEUE_7_EDITED"),
         )

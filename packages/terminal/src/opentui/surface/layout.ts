@@ -14,9 +14,9 @@ import { displayInput } from "../../state/composer/model"
 import { readyOr } from "../../state/loadable"
 import {
   fittingQueueHint,
-  queueEditingHint,
   queueNavigationHint,
   queueHintWidth,
+  queueItemContent,
   queueItemLabel,
   displayCursorOffset,
 } from "./queue/presentation"
@@ -39,16 +39,19 @@ interface QueueRows {
 }
 
 const queueLabels = (
-  model: Model,
+  queue: Model["queue"],
   steeringTurnIds: ReadonlySet<string>,
   hintIndex: number,
   hintWidth: number,
   showHint: boolean,
   width: number,
 ): ReadonlyArray<string> =>
-  model.queue.map((item, index) => {
+  queue.map((item, index) => {
+    const content = queueItemContent(item)
     const itemLabel = queueItemLabel(item)
-    const label = steeringTurnIds.has(item.id) ? `steering: ${itemLabel}` : itemLabel
+    const firstLine = itemLabel.split("\n", 1)[0] ?? ""
+    const responsiveLabel = item.provisional !== true && stringWidth(firstLine) > width ? content : itemLabel
+    const label = steeringTurnIds.has(item.id) ? `steering: ${content}` : responsiveLabel
     if (index !== hintIndex || !showHint) return label
     const [first = "", ...remaining] = label.split("\n")
     const available = width - hintWidth
@@ -71,14 +74,15 @@ const workspaceTitle = (model: Model): string => {
   return ` ${compactWorkspace(model.workspace)}${branch} `
 }
 
-const queueHintSegments = (editing: boolean, hintIndex: number, width: number) => {
-  if (hintIndex < 0) return []
-  return fittingQueueHint(editing ? queueEditingHint : queueNavigationHint, width)
+const queueHintSegments = (item: Model["queue"][number] | undefined, canSteer: boolean, width: number) => {
+  if (item === undefined || item.provisional === true) return []
+  return fittingQueueHint(queueNavigationHint(canSteer), width)
 }
 
 export abstract class SurfaceLayout extends SurfaceTranscriptMount {
   private queueRowChunks(
     model: Model,
+    queue: Model["queue"],
     steeringLabels: ReadonlyArray<string>,
     labels: ReadonlyArray<string>,
     hintIndex: number,
@@ -95,10 +99,10 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       if (renderedRows >= availableRows) break
       chunks.push(fg(toOpenColor(colors.muted))(label))
       renderedRows += 1
-      if (index < steeringLabels.length - 1 || model.queue.length > 0) chunks.push(fg(toOpenColor(colors.text))("\n"))
+      if (index < steeringLabels.length - 1 || queue.length > 0) chunks.push(fg(toOpenColor(colors.text))("\n"))
     }
     hintTop = renderedRows
-    for (const [offset, item] of model.queue.slice(start, end).entries()) {
+    for (const [offset, item] of queue.slice(start, end).entries()) {
       const index = start + offset
       const source = labels[index]!
       const label =
@@ -124,6 +128,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     renderedInputHeight: number,
   ): void {
     const queue = model.queue
+    const visibleQueue =
+      model.editingTurnId === undefined ? queue : queue.filter((item) => item.id !== model.editingTurnId)
     const queuedTurnIds = new Set(queue.map((item) => item.id))
     const localSteeringByTurnId = new Map(
       model.steeringRequests.flatMap((request) =>
@@ -140,19 +146,17 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const margin = contentWidth <= 4 ? 0 : 1
     this.queueBox.marginLeft = margin
     this.queueBox.marginRight = margin
-    this.queueBox.visible = queue.length > 0 || steering.length > 0
+    this.queueBox.visible = visibleQueue.length > 0 || steering.length > 0
     const queueTextWidth = queueContentWidth(model)
-    const queueLength = queue.length
-    const selectedIndex = queue.findIndex(
+    const queueLength = visibleQueue.length
+    const selectedIndex = visibleQueue.findIndex(
       (item) => item.id === model.queueSelection && !localSteeringByTurnId.has(item.id),
     )
-    const editIndex = queue.findIndex((item) => item.id === model.editingTurnId)
-    const hintIndex = editIndex >= 0 ? editIndex : selectedIndex
-    const editing = model.editingTurnId !== undefined && editIndex >= 0
-    const hintSegments = queueHintSegments(editing, hintIndex, queueTextWidth)
+    const hintIndex = selectedIndex
+    const hintSegments = queueHintSegments(visibleQueue[hintIndex], model.activeTurnId !== undefined, queueTextWidth)
     const hintWidth = queueHintWidth(hintSegments)
     const labels = queueLabels(
-      model,
+      visibleQueue,
       new Set(localSteeringByTurnId.keys()),
       hintIndex,
       hintWidth,
@@ -178,6 +182,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const { start, end } = visibleQueueRange(heights, focusIndex, availableRows)
     const { chunks: queueChunks, hintTop } = this.queueRowChunks(
       model,
+      visibleQueue,
       steeringLabels,
       labels,
       hintIndex,
@@ -193,6 +198,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       "pendingSteering",
       "queueSelection",
       "editingTurnId",
+      "activeTurnId",
       "mode",
       "width",
       "height",
@@ -213,8 +219,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
     if (queueChanged) this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
-    this.queueLeftJoint.visible = queue.length > 0 || steering.length > 0
-    this.queueRightJoint.visible = queue.length > 0 || steering.length > 0
+    this.queueLeftJoint.visible = visibleQueue.length > 0 || steering.length > 0
+    this.queueRightJoint.visible = visibleQueue.length > 0 || steering.length > 0
   }
 
   private renderComposerChrome(
@@ -232,7 +238,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const title = workspaceTitle(model)
     const panelLoadingLabel = panelLoading(model)
     const statusChanged =
-      modelFieldsChanged(previousModel, model, ["activity", "connection", "retryCountdown", "busy"]) ||
+      modelFieldsChanged(previousModel, model, ["activity", "connection", "retryCountdown", "busy", "editingTurnId"]) ||
       (previousModel !== undefined && panelLoading(previousModel) !== panelLoadingLabel)
     if (statusChanged) {
       this.inputBox.bottomTitle = ""
@@ -252,7 +258,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const workspaceChanged = modelFieldsChanged(previousModel, model, ["workspace", "branch", "width"])
     if (workspaceChanged) this.workspaceLabel.content = new StyledText([dim(fg(toOpenColor(colors.text))(title))])
     this.inputBox.height = renderedInputHeight
-    const queueHeight = model.queue.length > 0 ? this.queueBox.height - 1 : 0
+    const queueHeight = this.queueBox.visible ? this.queueBox.height - 1 : 0
     this.modeLabel.top = model.height - renderedInputHeight
     this.queueLeftJoint.top = model.height - renderedInputHeight
     this.queueRightJoint.top = model.height - renderedInputHeight

@@ -41,7 +41,10 @@ const readTreeEvents = (runtime: Runtime.Service, rootRunId: string) =>
 const promptText = (prompt: TestModel.Request["prompt"] | undefined): string => JSON.stringify(prompt)
 
 const projectionChanges = (events: ReadonlyArray<ExecutionGateway.ModelPreviewEvent | Change>): ReadonlyArray<Change> =>
-  events.filter((event): event is Change => event._tag !== "ModelPreview" && event._tag !== "ModelPreviewCleared")
+  events.filter(
+    (event): event is Change =>
+      event._tag !== "ModelPreview" && event._tag !== "ModelPreviewUsage" && event._tag !== "ModelPreviewCleared",
+  )
 
 const assistantText = (units: ReadonlyArray<Unit>) =>
   units.flatMap((unit) =>

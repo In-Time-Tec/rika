@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { RunEvent, type RunTree, type Runtime } from "generalist/runtime"
 import { compareUnitOrder } from "@rika/product/execution-transcript-contract"
+import { modelResponseId } from "@rika/product/execution-gateway"
 import { Effect, Schema } from "effect"
 import { resolveSemanticTreeEvent } from "../../../src/projection/semantic/event"
 import { TreeProjector } from "../../../src/projection/tree/projector"
@@ -85,11 +86,59 @@ describe("Generalist semantic response projection", () => {
       projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
       const patch = projector.apply(interrupted)
       expect(patch.upsert).toContainEqual(
-        expect.objectContaining({ content: { _tag: "Entry", role: "assistant", text: "retained output" } }),
+        expect.objectContaining({
+          modelResponseId: modelResponseId({
+            runId: "raw-root-run",
+            turn: 0,
+            modelCallId: "call:ModelResponseInterrupted",
+            modelAttemptId: "attempt:ModelResponseInterrupted",
+            attempt: 0,
+          }),
+          content: { _tag: "Entry", role: "assistant", text: "retained output" },
+        }),
       )
       expect(tags).toEqual(["ModelResponseCommitted", "ModelResponseInterrupted"])
     }),
   )
+
+  it("correlates only assistant and reasoning units from the same exact model response", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-response-identity", "identity")
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    const patch = projector.apply(
+      modelResponseContent("raw-root-run", "identified-response", [
+        { type: "reasoning", text: "inspect", metadata: {} },
+        { type: "text", text: "answer", metadata: {} },
+        {
+          type: "tool-call",
+          id: "read-call",
+          name: "read",
+          params: { path: "src/a.ts" },
+          providerExecuted: false,
+          metadata: {},
+        },
+      ]),
+    )
+    const expected = modelResponseId({
+      runId: "raw-root-run",
+      turn: 0,
+      modelCallId: "identified-response:call",
+      modelAttemptId: "identified-response:attempt",
+      attempt: 0,
+    })
+    const responseUnits = patch.upsert.filter(
+      (unit) =>
+        unit.content._tag === "Entry" || (unit.content._tag === "Block" && unit.content.block._tag === "Reasoning"),
+    )
+    const toolUnits = patch.upsert.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+    )
+
+    expect(responseUnits).toHaveLength(2)
+    expect(responseUnits.every((unit) => unit.modelResponseId === expected)).toBe(true)
+    expect(toolUnits).toHaveLength(1)
+    expect(toolUnits[0]).not.toHaveProperty("modelResponseId")
+  })
 
   it("is invariant to one versus 10,000 half-empty upstream fragments", () => {
     const text = "chunk-invariant output"

@@ -3,11 +3,12 @@ import { Effect, Option, Schema, Stream } from "effect"
 import { Errors, Run, RunTree, Runtime } from "generalist/runtime"
 import { resolveSemanticTreeEvent, type SemanticTreeEvent } from "../projection/semantic/event"
 import { TreeProjector } from "../projection/tree/projector"
+import { token } from "../projection/decoding"
 import * as RuntimeTelemetry from "./runtime-telemetry"
 
 type WatchInput = Parameters<ExecutionGateway.Interface["watchTurn"]>[1]
 type Projector = ReturnType<typeof TreeProjector.make>
-type Projection = { readonly change: ReturnType<Projector["apply"]>; readonly childRunId?: string }
+type Projection = { readonly change: ExecutionGateway.WatchEvent; readonly childRunId?: string }
 type RootProjectionEvent = { readonly _tag: "root"; readonly event: SemanticTreeEvent }
 type TitleProjectionEvent = { readonly _tag: "title"; readonly snapshot: Run.RunSnapshot | undefined }
 type ProjectionEvent = RootProjectionEvent | TitleProjectionEvent
@@ -108,6 +109,34 @@ const formatCell = (projector: Projector, event: SemanticTreeEvent) => {
     : projector.formatCellSource(event.runId, event.event.call.id, decoded.value.code)
 }
 
+const modelPreviewUsage = (
+  projector: Projector,
+  treeEvent: SemanticTreeEvent,
+): ExecutionGateway.ModelPreviewUsage | undefined => {
+  const event = treeEvent.event
+  if (event._tag !== "ModelAttemptCompleted") return undefined
+  const total = token(event.usage.outputTokens.total)
+  const text = token(event.usage.outputTokens.text)
+  const reasoning = token(event.usage.outputTokens.reasoning)
+  if (total === undefined && text === undefined && reasoning === undefined) return undefined
+  const outputTokens: ExecutionGateway.ModelPreviewUsage["outputTokens"] = {}
+  if (total !== undefined) Object.assign(outputTokens, { total })
+  if (text !== undefined) Object.assign(outputTokens, { text })
+  if (reasoning !== undefined) Object.assign(outputTokens, { reasoning })
+  const usage: ExecutionGateway.ModelPreviewUsage = {
+    _tag: "ModelPreviewUsage",
+    runId: treeEvent.runId,
+    turn: event.turn,
+    modelCallId: event.modelCallId,
+    modelAttemptId: event.modelAttemptId,
+    attempt: event.attempt,
+    completedAt: event.completedAt,
+    outputTokens,
+  }
+  const parentId = projector.previewParentId(treeEvent.runId)
+  return parentId === undefined ? usage : { ...usage, parentId }
+}
+
 const projectEvents = (projector: Projector, input: WatchInput) => {
   let pendingTitle: Run.RunSnapshot | null | undefined
   let rootProjected = input?.checkpoint !== undefined
@@ -125,7 +154,8 @@ const projectEvents = (projector: Projector, input: WatchInput) => {
       const change = projector.apply(event.event)
       const projected: Projection =
         event.event.event._tag === "ChildLinked" ? { change, childRunId: event.event.event.childRunId } : { change }
-      const changes = [projected]
+      const usage = modelPreviewUsage(projector, event.event)
+      const changes: Array<Projection> = usage === undefined ? [projected] : [{ change: usage }, projected]
       if (pendingTitle !== undefined) {
         changes.push(...applyTitle(projector, pendingTitle))
         pendingTitle = undefined

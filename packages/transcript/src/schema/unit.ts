@@ -26,6 +26,7 @@ export const Unit = Schema.Struct({
   key: WellFormedNonEmptyString,
   turnId: WellFormedString,
   parentId: Schema.optionalKey(WellFormedString),
+  modelResponseId: Schema.optionalKey(WellFormedNonEmptyString),
   order: UnitOrder,
   revision: Schema.Finite,
   executionOutcome: Schema.optionalKey(

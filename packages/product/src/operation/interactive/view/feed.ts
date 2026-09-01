@@ -76,6 +76,7 @@ const rememberPreview = (
   state: State,
   event: Extract<InteractiveEvent, { readonly _tag: "ExecutionModelPreviewChanged" }>,
 ) => {
+  if (event.preview._tag === "ModelPreviewUsage") return
   const key = `${event.threadId}:${event.turnId}:${event.preview.runId}`
   if (!state.previewInvalidations.has(key) && state.previewInvalidations.size >= capacity) {
     state.criticalOverflowed = true

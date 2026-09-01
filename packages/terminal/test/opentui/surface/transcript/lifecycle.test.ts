@@ -17,7 +17,10 @@ test("renders an inline hint on the selected queued row as the queue window move
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 60, height: 14 }))
       const items = Array.from({ length: 8 }, (_, index) => ({ id: `q${index}`, prompt: `prompt number ${index}` }))
-      const base = replaceQueue({ ...initial("/work", "medium"), busy: true, width: 60, height: 14 }, items)
+      const base = replaceQueue(
+        { ...initial("/work", "medium"), busy: true, activeTurnId: "active", width: 60, height: 14 },
+        items,
+      )
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         surface.update({ ...base, queueSelection: "q0" })
@@ -26,14 +29,14 @@ test("renders an inline hint on the selected queued row as the queue window move
         const topRows = top.split("\n")
         expect(top).not.toContain("queued 1/8")
         const topHintRow = topRows.find((row) => row.includes("Enter to steer"))
-        expect(topHintRow).toContain("prompt")
+        expect(topHintRow).toContain("Queued ·")
         surface.update({ ...base, queueSelection: "q7" })
         yield* openTui(() => setup.renderOnce())
         const bottom = setup.captureCharFrame()
         const bottomRows = bottom.split("\n")
         expect(bottom).not.toContain("queued 8/8")
         const bottomHintRow = bottomRows.find((row) => row.includes("Enter to steer"))
-        expect(bottomHintRow).toContain("prompt")
+        expect(bottomHintRow).toContain("Queued ·")
         expect(bottom).not.toContain("prompt number 0")
       } finally {
         surface.destroy()
@@ -41,7 +44,7 @@ test("renders an inline hint on the selected queued row as the queue window move
       }
     }),
   ))
-test("shows the editing hint inline on the queued row being edited", () =>
+test("removes the edited row from the queue and shows edit controls on the composer", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
@@ -60,15 +63,46 @@ test("shows the editing hint inline on the queued row being edited", () =>
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         const frame = setup.captureCharFrame()
-        const rows = frame.split("\n")
         expect(frame).toContain("Editing queued")
-        expect(frame).not.toContain("2/2")
         expect(frame).toContain("Enter save")
         expect(frame).toContain("Esc cancel")
-        expect(rows.findIndex((row) => row.includes("Editing queued"))).toBe(
-          rows.findIndex((row) => row.includes("beta")),
-        )
-        expect(surface.queueBox.height).toBe(4)
+        expect(frame).toContain("Queued · alpha")
+        expect(surface.queueText.content.chunks.map((chunk) => chunk.text).join("")).not.toContain("beta")
+        expect(surface.queueBox.height).toBe(3)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+test("labels provisional and durable queue rows and only advertises steering for an active turn", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        const queued = replaceQueue({ ...initial("/work", "medium"), width: 80, height: 24 }, [
+          { id: "pending", prompt: "being admitted", provisional: true },
+          { id: "durable", prompt: "ready to run" },
+        ])
+        surface.update({ ...queued, queueSelection: "pending" })
+        yield* openTui(() => setup.renderOnce())
+        const provisional = setup.captureCharFrame()
+        expect(provisional).toContain("Queueing… being admitted")
+        expect(provisional).toContain("Queued · ready to run")
+        expect(provisional).not.toContain("Enter to steer")
+        expect(provisional).not.toContain("Backspace to dequeue")
+
+        surface.update({ ...queued, queueSelection: "durable" })
+        yield* openTui(() => setup.renderOnce())
+        const idle = setup.captureCharFrame()
+        expect(idle).not.toContain("Enter to steer")
+        expect(idle).toContain("Backspace to dequeue")
+        expect(idle).toContain("Ctrl+E to edit")
+
+        surface.update({ ...queued, activeTurnId: "active", busy: true, queueSelection: "durable" })
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).toContain("Enter to steer")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -184,7 +218,7 @@ test("clamps an oversized focused queued prompt to the queue box with an indicat
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 40, height: 12 }))
       const model = {
-        ...replaceQueue({ ...initial("/work", "medium"), busy: true, width: 40, height: 12 }, [
+        ...replaceQueue({ ...initial("/work", "medium"), busy: true, activeTurnId: "active", width: 40, height: 12 }, [
           { id: "big", prompt: "x".repeat(400) },
         ]),
         queueSelection: "big",

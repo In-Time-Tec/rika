@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as Overflow from "../../../../src/operation/interactive/view/feed"
@@ -53,5 +54,40 @@ describe("interactive runtime preview overflow", () => {
         event._tag === "ExecutionModelPreviewChanged" ? event.preview.runId : event._tag,
       ),
     ).toEqual(["child-a", "child-b"])
+  })
+
+  it("recovers a promoted queue transition with one authoritative Thread view resync", () => {
+    const state = Overflow.make()
+    Overflow.remember(state, {
+      _tag: "QueueUpdated",
+      selectionEpoch: 1,
+      threadId,
+      revision: 2,
+      queuedCount: 0,
+      change: {
+        _tag: "Promoted",
+        turn: {
+          _tag: "AgentExecution",
+          id: turnId,
+          threadId,
+          prompt: "promoted",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
+          executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+    })
+
+    expect(Overflow.events(state, 7, "overflow")).toEqual([
+      {
+        _tag: "ThreadViewResyncRequired",
+        selectionEpoch: 7,
+        threadId,
+        reason: "overflow",
+      },
+    ])
   })
 })

@@ -17,12 +17,19 @@ const activeUnitActivity = (
 ): Model["activity"] => {
   if (entry === undefined) return undefined
   const previewActivity = ModelPreview.activity(modelPreview, String(entry.turn.id))
-  if (previewActivity?.textBytes !== undefined && previewActivity.textBytes > 0)
-    return { _tag: "Streaming", bytes: previewActivity.textBytes }
-  if (previewActivity?.reasoningBytes !== undefined && previewActivity.reasoningBytes > 0)
-    return { _tag: "Thinking", bytes: previewActivity.reasoningBytes }
+  if (previewActivity?.active === true) {
+    const { active: _, ...activity } = previewActivity
+    return activity
+  }
   const activity = transcriptActivity(model)
-  return (activity.subagents ?? 0) === 0 && (activity.tools ?? 0) === 0 ? { _tag: "Waiting" } : activity
+  if ((activity.subagents ?? 0) !== 0 || (activity.tools ?? 0) !== 0) return activity
+  if (previewActivity !== undefined) {
+    const { active: _, ...settledPreviewActivity } = previewActivity
+    return settledPreviewActivity
+  }
+  const turnId = String(entry.turn.id)
+  const latest = model.entries.findLast((candidate) => candidate.turnId === turnId)
+  return latest?.role === "assistant" ? { _tag: "Finishing" } : { _tag: "Waiting" }
 }
 
 const clearTimeline = (model: Model): Model => ({

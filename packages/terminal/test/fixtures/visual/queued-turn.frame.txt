@@ -16,7 +16,7 @@
 
 
  ╭────────────────────────────────────────────────────────────────────────────╮
- │ Run verificatio… Enter to steer ── Backspace to dequeue ── Ctrl+E to edit  │
+ │ Queued · Run verification next     Backspace to dequeue ── Ctrl+E to edit  │
 ╭┴──────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ┴╮
 │                                                                              │
 │                                                                              │

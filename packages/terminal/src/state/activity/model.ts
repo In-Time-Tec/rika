@@ -7,8 +7,17 @@ import type { Model } from "../model"
 export const Activity = Schema.Union([
   Schema.TaggedStruct("Sending", {}),
   Schema.TaggedStruct("Waiting", {}),
-  Schema.TaggedStruct("Thinking", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
-  Schema.TaggedStruct("Streaming", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
+  Schema.TaggedStruct("Finishing", {}),
+  Schema.TaggedStruct("Thinking", {
+    bytes: Schema.Finite,
+    tokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    blockId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.TaggedStruct("Streaming", {
+    bytes: Schema.Finite,
+    tokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    blockId: Schema.optionalKey(Schema.String),
+  }),
   Schema.TaggedStruct("RunningTools", {
     subagents: Schema.optionalKey(Schema.Finite),
     tools: Schema.optionalKey(Schema.Finite),
@@ -35,8 +44,6 @@ export const utf8ByteLength = (value: string): number => {
   return bytes
 }
 
-export const formatActivityCounter = formatTokens
-
 const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: number): string | undefined => {
   if (activity === undefined) return undefined
   if (activity._tag === "Retrying") {
@@ -51,10 +58,9 @@ const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: n
     return labels.length === 0 ? "Running tools" : `Running ${labels.join(", ")}`
   }
   if (activity._tag === "Compacting") return "Auto-Compacting"
-  if (activity._tag === "Thinking" || activity._tag === "Streaming") {
-    const tokens = Math.floor(activity.bytes / 4)
-    return `${activity._tag} ${formatActivityCounter(tokens)}`
-  }
+  if (activity._tag === "Waiting") return "Waiting for response"
+  if (activity._tag === "Thinking" || activity._tag === "Streaming")
+    return activity.tokens === undefined ? activity._tag : `${activity._tag} ${formatTokens(activity.tokens)}`
   return activity._tag
 }
 

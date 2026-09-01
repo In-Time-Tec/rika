@@ -179,25 +179,25 @@ test("ticks status and running-tool spinners every 100ms without rebuilding tran
         yield* openTui(() => setup.renderOnce())
         const body = records().get("tool:long-running:body")!.renderable
         const firstBodyContent = body.content
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
 
         clock.advance(99)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
         clock.advance(1)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking")
         expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
         expect(body.content).toBe(firstBodyContent)
 
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking")
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking")
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking")
         clock.advance(100)
-        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking")
         expect(body.content).toBe(firstBodyContent)
       } finally {
         surface.destroy()

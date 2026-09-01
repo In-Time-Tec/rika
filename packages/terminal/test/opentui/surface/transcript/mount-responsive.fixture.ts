@@ -136,7 +136,12 @@ test("joins the durable queue to the composer like Amp", () =>
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       let model = replaceQueue(
-        { ...initial("/work", "medium"), busy: true, activity: { _tag: "Streaming", bytes: 40 } },
+        {
+          ...initial("/work", "medium"),
+          busy: true,
+          activeTurnId: "active",
+          activity: { _tag: "Streaming", bytes: 40 },
+        },
         [
           { id: "queued-1", prompt: "First queued prompt" },
           { id: "queued-2", prompt: "Selected queued prompt" },
@@ -156,14 +161,14 @@ test("joins the durable queue to the composer like Amp", () =>
         const frame = setup.captureCharFrame()
         const rows = frame.split("\n")
         expect(frame).toContain("First queued prompt")
-        expect(frame).toContain("Selected queued…")
+        expect(frame).toContain("Queued · Select…")
         expect(frame).not.toContain("queued 1/2")
         expect(frame).not.toContain("queued 2/2")
         expect(frame).toContain("Enter to steer")
         expect(frame).toContain("Backspace to dequeue")
         expect(frame).toContain("Ctrl+E to edit")
         expect(rows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          rows.findIndex((row) => row.includes("Selected queued…")),
+          rows.findIndex((row) => row.includes("Queued · Select…")),
         )
         expect(rows.find((row) => row.includes("Enter to steer"))).toMatch(/Ctrl\+E to edit {2}│ $/)
         expect(surface.queueBox.height).toBe(4)

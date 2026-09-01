@@ -377,8 +377,18 @@ export const promotePendingTurns = (input: {
           if (transition._tag === "Unavailable") return undefined
           yield* input.notifyThreadSummaries
           yield* input.notifyTurnChanged(transition.turn)
-          input.emit(input.dispatch, input.queueMutationEvent(transition.queue))
-          if (transition.turn.status !== "running") return undefined
+          if (transition.turn.status !== "running") {
+            input.emit(input.dispatch, input.queueMutationEvent(transition.queue))
+            return undefined
+          }
+          input.emit(input.dispatch, {
+            _tag: "QueueUpdated",
+            selectionEpoch: 0,
+            threadId: transition.queue.threadId,
+            revision: transition.queue.revision,
+            queuedCount: transition.queue.queuedCount,
+            change: { _tag: "Promoted", turn: transition.turn },
+          })
           input.emit(input.dispatch, {
             _tag: "TurnStarted",
             selectionEpoch: 0,

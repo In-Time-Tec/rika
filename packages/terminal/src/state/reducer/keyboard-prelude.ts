@@ -9,11 +9,12 @@ const reduceEditing = (model: Model, key: Key): Model | undefined => {
   if (model.editingTurnId === undefined) return undefined
   if (key.name === "escape") {
     const restore = model.editReturn ?? { input: "", attachments: [] }
+    const editingTurnId = model.editingTurnId
     return {
       ...model,
       editingTurnId: undefined,
       editReturn: undefined,
-      queueSelection: undefined,
+      queueSelection: editingTurnId,
       input: restore.input,
       cursor: restore.input.length,
       pastedText: [...restore.attachments],
@@ -21,13 +22,17 @@ const reduceEditing = (model: Model, key: Key): Model | undefined => {
   }
   if (key.name !== "return" || key.shift || (model.cursor > 0 && model.input[model.cursor - 1] === "\\"))
     return undefined
+  const editingTurnId = model.editingTurnId
+  const prompt = expandPastedText(model.input, model.pastedText)
   return {
     ...model,
     pendingAction: {
       _tag: "EditQueued",
-      id: model.editingTurnId,
-      prompt: expandPastedText(model.input, model.pastedText),
+      id: editingTurnId,
+      prompt,
     },
+    queue: model.queue.map((item) => (item.id === editingTurnId ? { ...item, prompt } : item)),
+    queueSelection: editingTurnId,
     editingTurnId: undefined,
     editReturn: undefined,
     input: "",

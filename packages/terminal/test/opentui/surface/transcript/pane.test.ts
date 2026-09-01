@@ -365,6 +365,7 @@ test("drops the inline queue hint before hiding message text in a very narrow te
         yield* openTui(() => setup.renderOnce())
         const frame = setup.captureCharFrame()
         expect(frame).toContain("message survives")
+        expect(frame).not.toContain("Queued ·")
         expect(frame).not.toContain("Enter to steer")
         expect(frame).not.toContain("Backspace to dequeue")
         expect(frame).not.toContain("Ctrl+E to edit")

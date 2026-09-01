@@ -1,9 +1,57 @@
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Path } from "effect"
+import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "../../support/tui-app.harness"
 import { model } from "../../support/tui-model.fixture"
 
 const tuiTestTimeout = 60_000
+
+test(
+  "renders one answer across the preview-to-durable handoff while the turn continues",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const answer = "HANDOFF_ANSWER_ONCE"
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          script: [
+            model.turn([
+              model.part(answer),
+              model.binding(
+                { module: "processes", operation: "start", input: { command: "sleep 2" } },
+                "handoff-sleep",
+              ),
+            ]),
+            model.text("HANDOFF_FINAL_ONCE"),
+          ],
+        })
+
+        yield* Effect.tryPromise(() => app.type("Exercise the model response handoff."))
+        app.pressEnter()
+        const durable = yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) =>
+          projection.units.some(
+            (unit) =>
+              unit.content._tag === "Entry" && unit.content.role === "assistant" && unit.content.text === answer,
+          ),
+        )
+        const duringTool = yield* app.waitFrame(answer)
+
+        expect(duringTool.match(new RegExp(answer, "g")) ?? []).toHaveLength(1)
+        expect(
+          durable.units.filter(
+            (unit) =>
+              unit.content._tag === "Entry" && unit.content.role === "assistant" && unit.content.text === answer,
+          ),
+        ).toHaveLength(1)
+        const completed = yield* app.waitFrame("HANDOFF_FINAL_ONCE", 20_000)
+        expect(completed.match(/HANDOFF_FINAL_ONCE/g) ?? []).toHaveLength(1)
+        const settled = yield* app.settled
+        expect(settled).not.toContain("Waiting for response")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
 
 test(
   "runs durable read and shell tools immediately without approval prompts",

@@ -1,4 +1,5 @@
 import { TextAttributes } from "@opentui/core"
+import * as Turn from "@rika/product/turn-record"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
 import * as TuiApp from "../../support/tui-app.harness"
@@ -13,15 +14,16 @@ const hasBoldText = (app: TuiApp.TuiApp, text: string): boolean =>
     .some((span) => span.text.includes(text) && (span.attributes & TextAttributes.BOLD) === TextAttributes.BOLD)
 
 test(
-  "shows live Thinking and Streaming activity for a fresh turn with the prompt always visible",
+  "shows live Thinking and Streaming activity with exact provider usage for a fresh turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
           script: [
             model.turn(
               [model.reasoning("Working through the reasoning trace."), model.part("LIVE_STREAM_ANSWER_COMPLETE")],
-              { streamPartDelayMillis: 250 },
+              { streamPartDelayMillis: 250, outputTokens: 23 },
             ),
           ],
         })
@@ -33,13 +35,13 @@ test(
         // Reasoning previews arrive before any durable answer unit; the footer must say Thinking.
         const thinking = yield* app.waitFrame("Thinking", 30_000)
         expect(thinking).toContain("LIVE_ACTIVITY_PROMPT")
-        expect(thinking).toMatch(/Thinking \d+ tok/)
+        expect(thinking).not.toMatch(/Thinking \d+ tok/)
         expect(thinking).not.toContain("Execution failed")
 
         // Once answer text streams, the footer must switch to Streaming before the durable unit lands.
         const streaming = yield* app.waitFrame("Streaming", 30_000)
         expect(streaming).toContain("LIVE_ACTIVITY_PROMPT")
-        expect(streaming).toMatch(/Streaming \d+ tok/)
+        expect(streaming).not.toMatch(/Streaming \d+ tok/)
         expect(streaming).not.toContain("Execution failed")
 
         // The durable answer lands exactly once and the echoed prompt is never duplicated.
@@ -47,6 +49,11 @@ test(
         expect(completed.match(/LIVE_ACTIVITY_PROMPT/g) ?? []).toHaveLength(1)
         expect(completed.match(/LIVE_STREAM_ANSWER_COMPLETE/g) ?? []).toHaveLength(1)
         expect(completed).not.toContain("Execution failed")
+        const durable = yield* app.waitTranscript(
+          Turn.TurnId.make("tui-turn-0"),
+          (projection) => projection.state.usage.tokens?.output.text === 23,
+        )
+        expect(durable.state.usage.tokens?.output).toMatchObject({ total: 23, text: 23 })
         yield* app.quit
       }),
     ),
@@ -129,13 +136,28 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           script: [
-            model.turn([
-              model.binding(
-                { module: "processes", operation: "start", input: { command: "printf TOOL_CONTINUATION_OK" } },
-                "streaming-tool",
-              ),
-            ]),
+            model.turn(
+              [
+                model.reasoning("FIRST_CALL_REASONING"),
+                model.binding(
+                  { module: "processes", operation: "start", input: { command: "printf THINKING_COUNT_OK" } },
+                  "thinking-tool",
+                ),
+              ],
+              { outputTokens: 7, outputReasoningTokens: 7 },
+            ),
+            model.turn(
+              [
+                model.part("FIRST_CALL_STREAMED"),
+                model.binding(
+                  { module: "processes", operation: "start", input: { command: "printf TOOL_CONTINUATION_OK" } },
+                  "streaming-tool",
+                ),
+              ],
+              { delayMillis: 2_000, outputTokens: 5, outputTextTokens: 5 },
+            ),
             model.turn([model.part("SECOND_CALL_STREAMING"), model.part("\nSECOND_CALL_FINAL")], {
+              delayMillis: 2_000,
               streamPartDelayMillis: 400,
             }),
           ],
@@ -143,6 +165,12 @@ test(
 
         yield* Effect.tryPromise(() => app.type("Use a tool, then stream the answer."))
         app.pressEnter()
+
+        const thought = yield* app.waitFrame("Thinking 7 tok", 30_000)
+        expect(thought).toContain("printf THINKING_COUNT_OK")
+
+        const counted = yield* app.waitFrame("Streaming 5 tok", 30_000)
+        expect(counted).toContain("FIRST_CALL_STREAMED")
 
         const live = yield* app.waitFrame("SECOND_CALL_STREAMING", 30_000)
         expect(live).toContain("Streaming")

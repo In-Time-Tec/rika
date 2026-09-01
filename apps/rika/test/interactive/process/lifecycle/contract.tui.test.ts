@@ -46,7 +46,7 @@ test(
         expect(admitted).toContain("HELD_ROOT_PROMPT")
         yield* app.waitFrame("ROOT_SETTLED_AFTER_HOLD")
         const final = yield* app.settled
-        for (const marker of ["Waiting", "Streaming", "Thinking", "Sending", "Running 1 subagent"])
+        for (const marker of ["Waiting", "Streaming", "Finishing", "Thinking", "Sending", "Running 1 subagent"])
           expect(final).not.toContain(marker)
 
         const durable = yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) =>

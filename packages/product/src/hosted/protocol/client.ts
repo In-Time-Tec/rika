@@ -22,7 +22,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 5 as const
+export const protocolVersion = 6 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 export const ClientProtocolVersion = Schema.Literal(protocolVersion)

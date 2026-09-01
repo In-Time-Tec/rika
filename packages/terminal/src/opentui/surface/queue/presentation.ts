@@ -3,21 +3,18 @@ import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import type { QueueItem } from "../../../state/queue/item"
 
-export const queueItemLabel = (item: QueueItem): string =>
+export const queueItemContent = (item: QueueItem): string =>
   `${item.prompt}${item.attachments?.map((path) => `\n  ▧ ${path}`).join("") ?? ""}`
+export const queueItemLabel = (item: QueueItem): string =>
+  `${item.provisional === true ? "Queueing…" : "Queued ·"} ${queueItemContent(item)}`
 interface QueueHintSegment {
   readonly accent: string
   readonly suffix: string
 }
-export const queueNavigationHint: ReadonlyArray<QueueHintSegment> = [
-  { accent: "Enter", suffix: " to steer" },
+export const queueNavigationHint = (canSteer: boolean): ReadonlyArray<QueueHintSegment> => [
+  ...(canSteer ? [{ accent: "Enter", suffix: " to steer" }] : []),
   { accent: "Backspace", suffix: " to dequeue" },
   { accent: "Ctrl+E", suffix: " to edit" },
-]
-export const queueEditingHint: ReadonlyArray<QueueHintSegment> = [
-  { accent: "Editing queued", suffix: "" },
-  { accent: "Enter", suffix: " save" },
-  { accent: "Esc", suffix: " cancel" },
 ]
 const minimumInlineQueueMessageWidth = 12
 export const queueHintWidth = (segments: ReadonlyArray<QueueHintSegment>): number =>

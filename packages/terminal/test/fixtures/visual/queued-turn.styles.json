@@ -3105,7 +3105,7 @@
           "width": 1
         },
         {
-          "text": "Run verificatio…",
+          "text": "Queued · Run verification next",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3123,7 +3123,28 @@
             }
           },
           "attributes": 1,
-          "width": 16
+          "width": 30
+        },
+        {
+          "text": "    ",
+          "fg": {
+            "buffer": {
+              "0": 255,
+              "1": 255,
+              "2": 255,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 0,
+              "2": 0,
+              "3": 0
+            }
+          },
+          "attributes": 0,
+          "width": 4
         },
         {
           "text": " ",
@@ -3145,48 +3166,6 @@
           },
           "attributes": 2,
           "width": 1
-        },
-        {
-          "text": "Enter",
-          "fg": {
-            "buffer": {
-              "0": 61,
-              "1": 212,
-              "2": 255,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 0,
-          "width": 5
-        },
-        {
-          "text": " to steer ── ",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 2,
-          "width": 13
         },
         {
           "text": "Backspace",

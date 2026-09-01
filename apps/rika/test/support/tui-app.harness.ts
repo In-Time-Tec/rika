@@ -38,7 +38,7 @@ type InteractiveConnectionState = InteractiveConnection["initialState"]
  * running-tools label the activity line produces — a cell, a subagent, or several of either — which
  * an exact "Running 1 tool" misses the moment a turn delegates.
  */
-const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking"] as const
+const activityMarkers = ["Waiting", "Streaming", "Finishing", "Running", "Thinking", "Sending"] as const
 
 export type { CapturedSpans, TuiApp, TuiAppOptions } from "./tui-app.capabilities"
 import type { TuiApp, TuiAppOptions } from "./tui-app.capabilities"

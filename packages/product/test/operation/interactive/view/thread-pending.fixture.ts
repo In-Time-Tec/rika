@@ -18,6 +18,54 @@ const state = (status: "running" | "waiting" | "completed" = "running") => ({
 })
 
 describe("interactive ThreadView feed", () => {
+  it("promotes a queued Turn into the transcript in one visible patch", () => {
+    const feed = makeThreadViewFeed(() => 2)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 1,
+      queue: [{ id: turnId, prompt: turn.prompt, createdAt: turn.createdAt }],
+    })
+
+    const promoted = { ...turn, status: "running" as const, updatedAt: 2 }
+    const events = feed.publish({
+      _tag: "QueueUpdated",
+      selectionEpoch: 1,
+      threadId,
+      revision: 2,
+      queuedCount: 0,
+      change: { _tag: "Promoted", turn: promoted },
+    })
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      _tag: "ThreadViewPatch",
+      patch: {
+        header: { pending: [] },
+        upsert: [{ content: { _tag: "Entry", role: "user", text: turn.prompt } }],
+        turnChanges: [{ _tag: "UpsertTurn", turn: { id: turnId, status: "running" } }],
+      },
+    })
+    expect(feed.current()?.pending).toEqual([])
+    expect(feed.current()?.turns).toMatchObject([
+      { turn: { id: turnId, status: "running" }, units: [{ content: { role: "user", text: turn.prompt } }] },
+    ])
+    expect(
+      feed.publish({
+        _tag: "TurnStarted",
+        selectionEpoch: 1,
+        activitySequence: 1,
+        threadId,
+        turn: promoted,
+      }),
+    ).toEqual([])
+  })
+
   it("keeps pending turns in canonical FIFO order across snapshots and middle restoration", () => {
     const feed = makeThreadViewFeed(() => 1)
     feed.publish({

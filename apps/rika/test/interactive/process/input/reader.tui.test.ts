@@ -220,9 +220,9 @@ test(
           script: [
             model.turn(
               [model.binding({ module: "workspace", operation: "read", input: { path: "fixture.txt" } }, "steer-read")],
-              // Selecting the queued row and steering it measures ~0.5s, so this holds the turn
-              // open with several times that margin rather than for a full twelve seconds.
-              { delayMillis: 4_000 },
+              // Keep the active Turn open under a heavily parallel TUI run. Idle queued rows
+              // intentionally do not advertise a steering action that cannot succeed.
+              { delayMillis: 10_000 },
             ),
             model.text("ACTIVE_STEER_COMPLETE"),
           ],
@@ -233,7 +233,7 @@ test(
         yield* app.waitFrame("Waiting")
         yield* Effect.tryPromise(() => app.type("Focus on the exact fixture text."))
         app.pressEnter()
-        yield* app.waitFrame("Focus on the exact fixture text.")
+        yield* app.waitFrame("Queued · Focus on the exact fixture")
         app.pressArrow("up")
         yield* app.waitFrame("Enter to steer")
         app.pressEnter()
