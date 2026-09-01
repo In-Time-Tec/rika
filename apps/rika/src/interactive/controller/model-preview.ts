@@ -6,13 +6,24 @@ import { Function } from "effect"
 
 const retiredIdentityCapacity = 16
 const utf8Encoder = new TextEncoder()
+type TokenChannel = "reasoning" | "text"
+
+const selectTokenChannel = (
+  hasText: boolean,
+  hasReasoning: boolean,
+  fallback?: TokenChannel,
+): TokenChannel | undefined => {
+  if (hasText) return "text"
+  if (hasReasoning) return "reasoning"
+  return fallback
+}
 
 export interface RunOverlay {
   readonly preview: ExecutionGateway.ModelPreviewFrame | undefined
   readonly identity: string | undefined
   readonly responseId: string | undefined
   readonly tokenUsage: ExecutionGateway.ModelPreviewUsage | undefined
-  readonly tokenChannel: "reasoning" | "text" | undefined
+  readonly tokenChannel: TokenChannel | undefined
   readonly reasoning: string
   readonly text: string
   readonly reasoningLength: number
@@ -161,7 +172,7 @@ const initializeRun = (
     identity: nextIdentity,
     responseId: ExecutionGateway.modelResponseId(preview),
     tokenUsage: undefined,
-    tokenChannel: content.textLength > 0 ? "text" : content.reasoningLength > 0 ? "reasoning" : undefined,
+    tokenChannel: selectTokenChannel(content.textLength > 0, content.reasoningLength > 0),
     ...content,
     sequence: preview.sequence,
     incomplete: preview.sequence !== 0 || appended === undefined,
@@ -188,8 +199,7 @@ const appendFrame = (current: RunOverlay, preview: ExecutionGateway.ModelPreview
         ...current,
         preview,
         ...appended,
-        tokenChannel:
-          appended.textLength > 0 ? "text" : appended.reasoningLength > 0 ? "reasoning" : current.tokenChannel,
+        tokenChannel: selectTokenChannel(appended.textLength > 0, appended.reasoningLength > 0, current.tokenChannel),
         sequence: preview.sequence,
       }
 }
@@ -201,11 +211,7 @@ const applyUsage = (
   if (current?.responseId !== ExecutionGateway.modelResponseId(usage)) return current
   const tokenChannel =
     current.tokenChannel ??
-    (usage.outputTokens.text !== undefined
-      ? "text"
-      : usage.outputTokens.reasoning !== undefined
-        ? "reasoning"
-        : undefined)
+    selectTokenChannel(usage.outputTokens.text !== undefined, usage.outputTokens.reasoning !== undefined)
   if (tokenChannel === undefined || usage.outputTokens[tokenChannel] === undefined) return current
   return { ...current, tokenUsage: usage, tokenChannel }
 }
@@ -226,20 +232,7 @@ const replaceRun = (
     return appendFrame(current, preview)
   }
   if (preview.attemptFence < current.preview.attemptFence) return current
-  const appended = appendChanges("", "", 0, 0, 0, 0, preview.changes)
-  const content = preview.sequence === 0 && appended !== undefined ? appended : cleared
-  return {
-    preview,
-    identity: nextIdentity,
-    responseId: ExecutionGateway.modelResponseId(preview),
-    tokenUsage: undefined,
-    tokenChannel: content.textLength > 0 ? "text" : content.reasoningLength > 0 ? "reasoning" : undefined,
-    ...content,
-    sequence: preview.sequence,
-    incomplete: preview.sequence !== 0 || appended === undefined,
-    retiredIdentities: retire(current),
-    clearFence: current.clearFence,
-  }
+  return initializeRun({ ...current, retiredIdentities: retire(current) }, preview, nextIdentity)
 }
 
 const replaceImpl = (
