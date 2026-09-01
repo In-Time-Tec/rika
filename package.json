@@ -13,7 +13,7 @@
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
-      "generalist": "0.45.1",
+      "generalist": "0.46.1",
       "@aws-sdk/client-bedrock-runtime": "3.859.0",
       "@aws-sdk/client-kms": "3.1094.0",
       "@aws-sdk/client-s3": "3.1094.0",

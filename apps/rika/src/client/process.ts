@@ -110,15 +110,18 @@ const dispatcherLayer = () =>
                   [
                     Effect.tryPromise({
                       try: () => import("../runner/service"),
-                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                      catch: () =>
+                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
                     }),
                     Effect.tryPromise({
                       try: () => import("../hosted/cli"),
-                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                      catch: () =>
+                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
                     }),
                     Effect.tryPromise({
                       try: () => import("../hosted/interactive-controller"),
-                      catch: () => ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                      catch: () =>
+                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
                     }),
                   ],
                   { concurrency: 3 },
@@ -141,16 +144,18 @@ const dispatcherLayer = () =>
                 const firstDrawContext = yield* Effect.context<never>()
                 const runFirstDraw = Effect.runSyncWith(firstDrawContext)
                 yield* Deferred.await(firstDraw).pipe(Effect.andThen(startLogging), Effect.orDie, Effect.forkScoped)
-                return yield* interactive.runHostedInteractive(input, {
-                  editor,
-                  onFirstDraw: () =>
-                    runFirstDraw(
-                      HostedObservability.event("first_draw", "success", {}).pipe(
-                        Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
+                return yield* interactive
+                  .runHostedInteractive(input, {
+                    editor,
+                    onFirstDraw: () =>
+                      runFirstDraw(
+                        HostedObservability.event("first_draw", "success", {}).pipe(
+                          Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
+                        ),
                       ),
-                    ),
-                  startRunner: (prepared, ready) => Runner.runRunner(runnerInput, prepared, ready),
-                }).pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
+                    startRunner: (prepared, ready) => Runner.runRunner(runnerInput, prepared, ready),
+                  })
+                  .pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
               }),
             )
           }).pipe(
@@ -203,6 +208,12 @@ const runnerCommandLayer = Layer.effect(
     return RunnerCommand.Service.of({
       run: (input) =>
         Effect.gen(function* () {
+          const persistence = yield* Effect.serviceOption(Logging.DiagnosticPersistence)
+          if (Option.isSome(persistence))
+            yield* Logging.start.pipe(
+              Effect.provideService(Logging.DiagnosticPersistence, persistence.value),
+              Effect.orDie,
+            )
           const unavailable = "Runner support could not be loaded"
           const [Runner, HostedCli] = yield* Effect.all(
             [

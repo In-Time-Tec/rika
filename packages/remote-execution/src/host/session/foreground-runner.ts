@@ -22,6 +22,7 @@ import * as Socket from "effect/unstable/socket/Socket"
 import { BindingProxyError, type Transport as BindingTransport } from "../../protocol/binding-proxy"
 import { CellError, type State as CellState } from "../../protocol/cells"
 import * as Operations from "../../protocol/operations"
+import { consumeFailureKind, messageCorrelation, runnerEvent, runnerWarning } from "../../protocol/telemetry"
 import * as HostedKernel from "../kernel"
 import { Machine, MachineError, workspaceLayer as machineLayer } from "../machinery/machine"
 import {
@@ -97,17 +98,28 @@ const consumeApi = (
 ) =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
-    if (message._tag === "Fenced") return yield* failure(message.message)
+    yield* runnerEvent("runner.message.received", messageCorrelation(message))
+    if (message._tag === "Fenced") {
+      yield* runnerWarning("runner.fenced", messageCorrelation(message))
+      return yield* failure(message.message)
+    }
     if (message._tag === "LeaseReceipt") yield* applyLeaseReceipt(message, session, persist)
     if (message._tag === "BindingResult") {
       const current = yield* Ref.get(session)
-      if (current === undefined || !sameAccess(access(current), message.access))
+      if (current === undefined || !sameAccess(access(current), message.access)) {
+        yield* runnerWarning("runner.binding.result_stale", messageCorrelation(message))
         return yield* failure("Local binding result has a stale session")
+      }
       yield* cells.completeBinding(message).pipe(Effect.mapError((error) => failure(error.message)))
     }
     if (isOperationMessage(message))
       yield* operations.dispatch(message).pipe(Effect.mapError((error) => failure(error.message)))
-  }).pipe(Effect.forever)
+  }).pipe(
+    Effect.forever,
+    Effect.tapError((error) =>
+      runnerWarning("runner.consume.failed", { "rika.outcome": consumeFailureKind(error.message) }),
+    ),
+  )
 
 const connected = (
   options: ForegroundRunnerOptions,
@@ -201,6 +213,7 @@ const connected = (
             )
       yield* Ref.set(sessions, session)
       yield* Ref.set(activeWriter, writer)
+      yield* runnerEvent(previous === undefined ? "runner.socket.welcome" : "runner.socket.reconnected", {})
       yield* cells.replayBindings(access(session)).pipe(Effect.mapError((error) => failure(error.message)))
       yield* persist()
       if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
@@ -214,7 +227,10 @@ const connected = (
                 _tag: "ExecutorHeartbeat",
                 heartbeat: { version: 1, access: access(current), cursor: current.cursor },
               }),
-            ).pipe(Effect.mapError(() => failure("Could not write Runner heartbeat")))
+            ).pipe(
+              Effect.tapError(() => runnerWarning("runner.heartbeat.failed", {})),
+              Effect.mapError(() => failure("Could not write Runner heartbeat")),
+            )
           }),
         ),
         Effect.forever,
@@ -226,9 +242,15 @@ const connected = (
         const delay = current.leaseExpiresAt - current.heartbeatIntervalMillis - now
         if (delay <= 0) return yield* failure("Runner controller stopped renewing the executor lease")
         yield* Effect.sleep(delay)
-      }).pipe(Effect.forever)
+      }).pipe(
+        Effect.forever,
+        Effect.tapError(() => runnerWarning("runner.lease.expired", {})),
+      )
       return yield* Effect.raceFirst(
-        Fiber.join(reader).pipe(Effect.mapError(() => failure("Runner controller connection closed"))),
+        Fiber.join(reader).pipe(
+          Effect.tapError(() => runnerWarning("runner.socket.closed", {})),
+          Effect.mapError(() => failure("Runner controller connection closed")),
+        ),
         Effect.raceFirst(
           consumeApi(incoming, sessions, cells, operations, persist),
           Effect.raceFirst(heartbeat, leaseWatchdog),
@@ -440,6 +462,9 @@ export const runForegroundRunner = (
         Effect.catch((error: ForegroundRunnerError) =>
           Effect.gen(function* () {
             if ((yield* Ref.get(sessions)) === undefined) return yield* error
+            yield* runnerWarning("runner.socket.reconnecting", {
+              "rika.outcome": consumeFailureKind(error.message),
+            })
             yield* Effect.sleep("250 millis")
           }),
         ),

@@ -2,6 +2,7 @@ import { HostBindings } from "generalist/repl"
 import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Schema } from "effect"
 import type { AccessWire, BindingManifest, BindingRequest, CellRequest } from "./messages"
 import { bindingManifest, BindingOutcome, BindingRequest as BindingRequestSchema } from "./messages"
+import { runnerEvent, runnerWarning, type RunnerAnnotations } from "./telemetry"
 
 export class BindingProxyError extends Schema.TaggedError<BindingProxyError>()("BindingProxyError", {
   message: Schema.String,
@@ -30,6 +31,9 @@ interface PendingCall {
 }
 
 type OutcomeResolution = { readonly _tag: "New" } | { readonly _tag: "Known"; readonly outcome: BindingOutcome }
+
+/** Awaited binding calls log once they outlive round-trip expectations so a silent stall is visible on disk. */
+const bindingSlowWarningMillis = 15_000
 
 export interface Transport {
   readonly send: (message: {
@@ -146,6 +150,15 @@ export const make: (options: {
           }),
         )
         const remaining = Math.max(0, cell.deadlineAtMillis - (yield* Clock.currentTimeMillis))
+        const correlation: RunnerAnnotations = {
+          "rika.binding.call.id": callId,
+          "rika.binding.module": request.module,
+          "rika.binding.operation": request.operation,
+          "rika.operation.key": cell.operationKey,
+          "rika.operation.attempt": cell.attempt,
+        }
+        yield* runnerEvent("runner.binding.send", correlation)
+        const sentAt = yield* Clock.currentTimeMillis
         const outcome = yield* transport
           .send({
             access: cell.access,
@@ -156,12 +169,32 @@ export const make: (options: {
             request: wireRequest,
           })
           .pipe(
+            Effect.tapError(() => runnerWarning("runner.binding.send_failed", correlation)),
             Effect.ignore,
             Effect.andThen(
               Deferred.await(result).pipe(
                 Effect.timeoutOrElse({
+                  duration: bindingSlowWarningMillis,
+                  orElse: () =>
+                    runnerWarning("runner.binding.slow", correlation).pipe(Effect.andThen(Deferred.await(result))),
+                }),
+                Effect.tap((settled) =>
+                  Clock.currentTimeMillis.pipe(
+                    Effect.flatMap((now) =>
+                      runnerEvent("runner.binding.completed", {
+                        ...correlation,
+                        "rika.outcome": settled._tag,
+                        "rika.duration.millis": Math.max(0, now - sentAt),
+                      }),
+                    ),
+                  ),
+                ),
+                Effect.timeoutOrElse({
                   duration: remaining,
-                  orElse: () => BindingProxyError.make({ message: "cell binding deadline exceeded" }),
+                  orElse: () =>
+                    runnerWarning("runner.binding.deadline", correlation).pipe(
+                      Effect.andThen(BindingProxyError.make({ message: "cell binding deadline exceeded" })),
+                    ),
                 }),
               ),
             ),
@@ -278,6 +311,10 @@ export const make: (options: {
       const calls = Array.from((yield* Ref.get(pending)).values()).toSorted(
         (left, right) => left.ordinal - right.ordinal,
       )
+      if (calls.length > 0)
+        yield* runnerEvent("runner.binding.replay", {
+          "rika.binding.pending": calls.length,
+        })
       yield* Effect.forEach(
         calls,
         (call) =>
@@ -305,6 +342,12 @@ export const make: (options: {
   const complete: Interface["complete"] = (input) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
+      const correlation: RunnerAnnotations = {
+        "rika.binding.call.id": input.callId,
+        "rika.operation.key": input.operationKey,
+        "rika.operation.attempt": input.attempt,
+        "rika.outcome": input.outcome._tag,
+      }
       const call = (yield* Ref.get(pending)).get(input.callId)
       if (
         call === undefined ||
@@ -312,17 +355,28 @@ export const make: (options: {
         call.attempt !== input.attempt ||
         call.requestDigest !== input.requestDigest ||
         call.deadlineAtMillis <= now
-      )
+      ) {
+        yield* runnerWarning("runner.binding.result_rejected", {
+          ...correlation,
+          "rika.error.kind": "fenced",
+        })
         return yield* BindingProxyError.make({ message: "binding result conflicts with its request identity" })
+      }
       const resolution = yield* Ref.modify(call.outcome, (current): readonly [OutcomeResolution, BindingOutcome] => {
         if (current !== undefined) return [{ _tag: "Known", outcome: current }, current]
         return [{ _tag: "New" }, input.outcome]
       })
       if (resolution._tag === "Known") {
-        if (!equivalentOutcome(resolution.outcome, input.outcome))
+        if (!equivalentOutcome(resolution.outcome, input.outcome)) {
+          yield* runnerWarning("runner.binding.result_rejected", {
+            ...correlation,
+            "rika.error.kind": "fenced",
+          })
           return yield* BindingProxyError.make({ message: "binding result conflicts with its recorded outcome" })
+        }
         return resolution.outcome
       }
+      yield* runnerEvent("runner.binding.result", correlation)
       yield* Deferred.succeed(call.result, input.outcome)
       if (input.outcome._tag === "Suspend") {
         const cell = Array.from((yield* Ref.get(active)).values()).find(

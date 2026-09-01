@@ -440,7 +440,7 @@
     "e2b": "2.41.0",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.148.2",
-    "generalist": "0.45.1",
+    "generalist": "0.46.1",
     "happy-dom": "20.10.6",
     "jose": "6.2.9",
     "marked": "17.0.1",
@@ -1523,7 +1523,7 @@
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
 
-    "generalist": ["generalist@0.45.1", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-mysql2": "4.0.0-rc.112", "@effect/sql-pg": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/sql-sqlite-do": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "pg": "8.23.0", "rivetkit": "2.3.10", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-mysql2", "@effect/sql-pg", "@effect/sql-sqlite-bun", "@effect/sql-sqlite-do", "@effect/vitest", "@modelcontextprotocol/sdk", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "pg", "rivetkit", "vitest"] }, "sha512-JckwMXBQUXKgqOhgN7h6MyMlQhsYH7IjCa3Nqi7QcAPEUsvQ2fo+dBinb/dWPG6N5ATo1TxGVDZiKQb5EO9n6g=="],
+    "generalist": ["generalist@0.46.1", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-mysql2": "4.0.0-rc.112", "@effect/sql-pg": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/sql-sqlite-do": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "pg": "8.23.0", "rivetkit": "2.3.10", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-mysql2", "@effect/sql-pg", "@effect/sql-sqlite-bun", "@effect/sql-sqlite-do", "@effect/vitest", "@modelcontextprotocol/sdk", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "pg", "rivetkit", "vitest"] }, "sha512-CY91vkGlD+EjdlZKenA5qOidJ9QbDMtGgoyz7PQbocT1hNW1jwYxNfE735RrdXaY54+ApiTWnn/5Gf8RF8zn2g=="],
 
     "get-caller-file": ["get-caller-file@2.0.5", "", {}, "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg=="],
 

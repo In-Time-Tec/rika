@@ -1,11 +1,21 @@
-import { AgentManifest, Compaction, ExecutableManifest, LanguageModel, ModelRegistry, Pins } from "generalist"
+import {
+  AgentManifest,
+  Approvals,
+  Compaction,
+  ExecutableManifest,
+  LanguageModel,
+  ModelRegistry,
+  Permissions,
+  Pins,
+  ToolAuthorization,
+} from "generalist"
 import * as ModelRoute from "generalist/ai/model-route"
 import { Errors, ExecutableRegistration } from "generalist/runtime"
 import { CellTool } from "generalist/repl"
 import * as BindingModules from "@rika/kernel/binding-modules"
 import * as ExecutionPins from "@rika/kernel/execution-pins"
 import * as KernelProfileRegistration from "@rika/kernel/kernel-profile-registration"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { routeDomain } from "./route-domain"
 import type {
   AgentDefinition,
@@ -58,6 +68,35 @@ const cellLayerFor = (options: ConfigureOptions) => {
     return remoteCellExecutor(options.cell, options.workspace, options.executionIdentity, deadline)
   return unavailableCellExecutor
 }
+
+/**
+ * Rika's tool authorization policy: permission rules allow every call, and every
+ * approval request stays Pending so the run suspends until the product resolves it
+ * through ExecutionGateway approve/deny. Generalist requires an explicit policy, and
+ * this declares exactly the authorizer its pre-0.46 default built implicitly.
+ *
+ * It is provided as a ToolAuthorizer rather than as Permissions/Approvals services on
+ * purpose: Generalist's nested-operation executor falls back to auto-approving cell
+ * operations only when no Approvals service is in scope, and Rika's cell flow depends
+ * on that fallback. Providing Approvals here would suspend every cell forever.
+ */
+const authorizationLayer: Layer.Layer<ToolAuthorization.ToolAuthorizer> = Layer.unwrap(
+  Effect.gen(function* () {
+    const remembered = yield* Ref.make<ReadonlyArray<Permissions.Rule>>([])
+    return Layer.succeed(
+      ToolAuthorization.ToolAuthorizer,
+      ToolAuthorization.make({
+        permissions: Permissions.Permissions.of({ evaluate: () => Effect.succeed({ _tag: "Allow" }) }),
+        approvals: Approvals.Approvals.of({ resolve: (pending) => Effect.succeed(pending) }),
+        ruleStore: Permissions.RuleStore.of({
+          rules: Ref.get(remembered),
+          remember: (rule) =>
+            Ref.update(remembered, (rules) => [...rules.filter((current) => current.pattern !== rule.pattern), rule]),
+        }),
+      }),
+    )
+  }),
+)
 
 const mountedModulesFor = (options: ConfigureOptions) =>
   options.cell === undefined
@@ -139,7 +178,7 @@ export const configure = (
     const environment = (name: keyof typeof routes): AgentEnvironment => {
       const model = routed[name].layer
       if (name === "Title" || name === "Compaction") return Layer.orDie(model)
-      return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer))
+      return Layer.orDie(Layer.mergeAll(model, compactionLayer, cellLayer, authorizationLayer))
     }
     const supplemental = harnessSupplement(options.harnessSnapshot, options.skills ?? [])
     const mountedModules = mountedModulesFor(options)

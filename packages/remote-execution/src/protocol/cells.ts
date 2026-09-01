@@ -14,6 +14,7 @@ import {
   Semaphore,
 } from "effect"
 import { CellResponse, type CellRequest, type CellResponse as CellResponseValue } from "./messages"
+import { runnerEvent, runnerWarning, type RunnerAnnotations } from "./telemetry"
 
 export class CellError extends Schema.TaggedError<CellError>()("CellError", {
   kind: Schema.Literals(["execution", "fenced", "workspace"]),
@@ -78,6 +79,11 @@ const unknown: CellResponseValue = {
   _tag: "DomainFailure",
   failure: { kind: "unknown", message: "Cell operation outcome is unknown" },
 }
+
+const cellCorrelation = (entry: Entry): RunnerAnnotations => ({
+  "rika.operation.key": entry.operationKey,
+  "rika.operation.attempt": entry.attempt,
+})
 
 const deadlineExceeded: CellResponseValue = {
   _tag: "DomainFailure",
@@ -169,6 +175,7 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
               if (!create)
                 return yield* CellError.make({ kind: "fenced", message: "Cell cancellation has no durable operation" })
               yield* restore(options.write(entry.executionKey, { _tag: "Running", attempt: entry.attempt }))
+              yield* runnerEvent("runner.cell.state.running", cellCorrelation(entry))
               yield* Ref.set(entry.initialization, "fresh")
               yield* promote(entry)
               return "fresh" as const
@@ -207,9 +214,19 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
                         orElse: () =>
                           CellError.make({ kind: "execution", message: "Cell terminal persistence deadline exceeded" }),
                       }),
+                      Effect.tapError(() =>
+                        runnerWarning("runner.cell.state.persistence_failed", cellCorrelation(entry)),
+                      ),
                       Effect.as(proposed.value),
                       Effect.exit,
-                      Effect.flatMap((committed) => Deferred.done(entry.result, committed)),
+                      Effect.flatMap((committed) =>
+                        Exit.isSuccess(committed)
+                          ? runnerEvent("runner.cell.state.completed", {
+                              ...cellCorrelation(entry),
+                              "rika.outcome": proposed.value._tag,
+                            }).pipe(Effect.andThen(Deferred.done(entry.result, committed)))
+                          : Deferred.done(entry.result, committed),
+                      ),
                       Effect.onInterrupt(() =>
                         Deferred.fail(
                           entry.result,
@@ -264,7 +281,10 @@ export const layer = (options: Options): Layer.Layer<Cells> =>
                         Effect.flatMap((completed) =>
                           completed._tag === "Some"
                             ? Effect.succeed(completed.value)
-                            : interrupt(execution).pipe(Effect.as(deadlineExceeded)),
+                            : runnerWarning("runner.cell.state.deadline", {
+                                ...cellCorrelation(entry),
+                                "rika.duration.millis": remaining,
+                              }).pipe(Effect.andThen(interrupt(execution)), Effect.as(deadlineExceeded)),
                         ),
                         Effect.onInterrupt(() => interrupt(execution)),
                       )

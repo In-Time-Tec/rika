@@ -1,7 +1,8 @@
 import * as Cause from "effect/Cause"
 import * as Exit from "effect/Exit"
-import { Deferred, Effect, Fiber, FiberSet, Option, Ref, Semaphore, type Scope } from "effect"
+import { Clock, Deferred, Effect, Fiber, FiberSet, Option, Ref, Semaphore, type Scope } from "effect"
 import { terminalOutcome } from "./cells"
+import { executionKeyParts, runnerEvent, runnerWarning, type RunnerAnnotations } from "./telemetry"
 import {
   OperationError,
   OutputLimit,
@@ -74,8 +75,28 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
             const frame = create(frames)
             if (frame === undefined || frame.cursor !== frames.length + 1) return false
             const next = new Map(current).set(key, [...frames, frame])
-            yield* options.receipts.commit(next)
-            yield* restore(emit({ _tag: "CellLifecycle", frame }))
+            yield* options.receipts.commit(next).pipe(
+              Effect.tapError((error) =>
+                runnerWarning("runner.lifecycle.commit_failed", {
+                  ...executionKeyParts(key),
+                  "rika.lifecycle.frame": frame._tag,
+                  "rika.error.kind": error.kind,
+                }),
+              ),
+            )
+            yield* runnerEvent("runner.lifecycle.frame", {
+              ...executionKeyParts(key),
+              "rika.lifecycle.frame": frame._tag,
+            })
+            yield* restore(emit({ _tag: "CellLifecycle", frame })).pipe(
+              Effect.tapError((error) =>
+                runnerWarning("runner.lifecycle.emit_failed", {
+                  ...executionKeyParts(key),
+                  "rika.lifecycle.frame": frame._tag,
+                  "rika.error.kind": error.kind,
+                }),
+              ),
+            )
             return true
           }),
         ),
@@ -126,6 +147,16 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       yield* requireAccess(request.access, "Cell request has a stale executor fence")
       const key = executionKey(request.operationKey, request.attempt)
       const identity = attribution(request)
+      const correlation: RunnerAnnotations = {
+        "rika.operation.key": request.operationKey,
+        "rika.operation.attempt": request.attempt,
+        "rika.cell.id": request.toolCallId,
+        "rika.session.id": request.sessionId,
+        "rika.thread.id": request.threadId,
+        "rika.turn.id": request.turnId,
+        "rika.run.id": request.runId,
+      }
+      yield* runnerEvent("runner.cell.received", correlation)
       const known = (yield* options.receipts.current).get(key)
       const retainedAccepted = known === undefined ? undefined : accepted(known)
       if (retainedAccepted !== undefined && !sameAttribution(retainedAccepted.attribution, identity))
@@ -135,6 +166,7 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
         })
       const prepared = yield* options.cell.prepare(request)
       if (known !== undefined && (terminal(known) !== undefined || (yield* Ref.get(active)).has(key))) {
+        yield* runnerEvent("runner.cell.replayed", correlation)
         yield* replayFrames(known)
         yield* options.access.pipe(Effect.flatMap(options.cell.replayBindings))
         return
@@ -142,6 +174,10 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       const retained = yield* ensureAccepted(request)
       const admission = yield* Effect.result(options.cell.admit(request))
       if (admission._tag === "Failure") {
+        yield* runnerWarning("runner.cell.admit_failed", {
+          ...correlation,
+          "rika.error.kind": admission.failure.kind,
+        })
         const response = cellFailure(admission.failure)
         yield* append(key, (frames) => ({
           _tag: "Terminal",
@@ -158,6 +194,7 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
           : { _tag: "Started", attribution: retained.attribution, cursor: frames.length + 1 },
       )
       const operation = Effect.gen(function* () {
+        const startedAt = yield* Clock.currentTimeMillis
         const response = yield* Effect.exit(
           prepared.execute((chunk) =>
             append(key, (frames) => {
@@ -187,6 +224,11 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
                 ),
           onSuccess: (value) => Effect.succeed(redactResponse(value, prepared.secrets)),
         })
+        yield* runnerEvent("runner.cell.settled", {
+          ...correlation,
+          "rika.outcome": terminalOutcome(completed),
+          "rika.duration.millis": Math.max(0, (yield* Clock.currentTimeMillis) - startedAt),
+        })
         yield* append(key, (frames) => ({
           _tag: "Terminal",
           attribution: retained.attribution,
@@ -203,6 +245,10 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
     ) {
       yield* requireAccess(command.access, "Cell cancellation has a stale executor fence")
       const key = executionKey(command.operationKey, command.attempt)
+      yield* runnerEvent("runner.cell.cancel", {
+        "rika.operation.key": command.operationKey,
+        "rika.operation.attempt": command.attempt,
+      })
       const frames = (yield* options.receipts.current).get(key)
       const retained = frames === undefined ? undefined : accepted(frames)
       if (retained === undefined || retained.attribution.attempt !== command.attempt)
@@ -240,6 +286,10 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       command: Extract<Command, { readonly _tag: "CellTerminalReceipt" }>,
     ) {
       yield* requireAccess(command.access, "Cell terminal receipt has a stale executor fence")
+      yield* runnerEvent("runner.cell.terminal_receipt", {
+        "rika.operation.key": command.operationKey,
+        "rika.operation.attempt": command.attempt,
+      })
       const frames = (yield* options.receipts.current).get(executionKey(command.operationKey, command.attempt)) ?? []
       const retained = terminal(frames)
       if (
@@ -261,6 +311,10 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
     ) {
       yield* requireAccess(command.access, "Cell result receipt has a stale executor fence")
       const key = executionKey(command.operationKey, command.attempt)
+      yield* runnerEvent("runner.cell.acknowledged", {
+        "rika.operation.key": command.operationKey,
+        "rika.operation.attempt": command.attempt,
+      })
       yield* lifecycle.withPermits(1)(
         Effect.uninterruptible(
           Effect.gen(function* () {
@@ -279,9 +333,16 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       command: Extract<Command, { readonly _tag: "MachineExecute" }>,
     ) {
       yield* requireAccess(command.access, "Machine request has a stale executor fence")
+      const correlation: RunnerAnnotations = {
+        "rika.operation.key": command.operationKey,
+        "rika.operation.attempt": command.attempt,
+        "rika.machine.id": command.machineId,
+      }
+      yield* runnerEvent("runner.machine.received", correlation)
       const parent = executionKey(command.operationKey, command.attempt)
       const parentFrames = (yield* options.receipts.current).get(parent)
       if (parentFrames === undefined || terminal(parentFrames) !== undefined) {
+        yield* runnerWarning("runner.machine.fenced", correlation)
         yield* emit({
           _tag: "MachineResult",
           operationKey: command.operationKey,
@@ -295,29 +356,44 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       const key = machineExecutionKey(command.operationKey, command.attempt, command.machineId)
       yield* start(
         key,
-        options.machine
-          .execute({
+        Effect.gen(function* () {
+          const startedAt = yield* Clock.currentTimeMillis
+          const outcome = yield* options.machine.execute({
             machineId: command.machineId,
             requestDigest: command.requestDigest,
             request: command.request,
           })
-          .pipe(
-            Effect.flatMap((outcome) =>
-              emit({
-                _tag: "MachineResult",
-                operationKey: command.operationKey,
-                attempt: command.attempt,
-                machineId: command.machineId,
-                requestDigest: command.requestDigest,
-                outcome,
-              }),
-            ),
-          ),
+          yield* runnerEvent("runner.machine.result", {
+            ...correlation,
+            "rika.outcome": outcome._tag,
+            "rika.duration.millis": Math.max(0, (yield* Clock.currentTimeMillis) - startedAt),
+          })
+          yield* emit({
+            _tag: "MachineResult",
+            operationKey: command.operationKey,
+            attempt: command.attempt,
+            machineId: command.machineId,
+            requestDigest: command.requestDigest,
+            outcome,
+          })
+        }),
         parent,
       )
     })
 
     const dispatch: Interface["dispatch"] = Effect.fn("Operations.dispatch")(function* (command) {
+      yield* runnerEvent("runner.operation.dispatch", {
+        "rika.runner.message": command._tag,
+        ...(command._tag === "CellExecute"
+          ? {
+              "rika.operation.key": command.request.operationKey,
+              "rika.operation.attempt": command.request.attempt,
+            }
+          : {
+              "rika.operation.key": command.operationKey,
+              "rika.operation.attempt": command.attempt,
+            }),
+      })
       if (command._tag === "CellExecute") return yield* executeCell(command.request)
       if (command._tag === "CellCancel") return yield* cancelCell(command)
       if (command._tag === "CellReplay") return yield* replayCell(command)
