@@ -133,12 +133,32 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
     return undefined
   })
 
+  // A native tool result can be persisted between the admission inspect and this claim, which the
+  // store reports as a fence. Recover the durable terminal instead of failing the waiter.
+  const claimDispatch = Effect.fn("ExecutorGateway.claimDispatch")(function* (
+    request: ExecuteInput,
+    session: Session,
+  ): Effect.fn.Return<ExecutionResult | undefined, GatewayError> {
+    return yield* lifecycle.dispatch(request, session.access).pipe(
+      Effect.as<ExecutionResult | undefined>(undefined),
+      Effect.catch((error) =>
+        error.kind !== "fenced"
+          ? Effect.fail(error)
+          : lifecycle.inspect(request).pipe(
+              Effect.flatMap(durableResult),
+              Effect.flatMap((restored) => (restored === undefined ? Effect.fail(error) : Effect.succeed(restored))),
+            ),
+      ),
+    )
+  })
+
   const dispatchAdmission = Effect.fn("ExecutorGateway.dispatchAdmission")(function* (
     request: ExecuteInput,
     session: Session,
     pendingKey: string,
   ) {
-    yield* lifecycle.dispatch(request, session.access)
+    const restored = yield* claimDispatch(request, session)
+    if (restored !== undefined) return yield* settledPending(request, session, restored)
     const known = (yield* Ref.get(pending)).get(pendingKey)
     if (known !== undefined && known.socket === session.socket && sameAccess(known.access, session.access)) {
       yield* Ref.update(pending, (current) =>

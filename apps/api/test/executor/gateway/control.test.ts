@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { MachineOutcome } from "@rika/remote-execution/protocol"
 import { Clock, DateTime, Effect, Fiber, Redacted } from "effect"
 import { TestClock } from "effect/testing"
+import { GatewayError, type LifecycleStore } from "../../../src/executor/gateway"
 import { GatewayTestHarness } from "./fixture"
 
 const {
@@ -9,6 +10,7 @@ const {
   decode,
   workspaceCapabilities,
   environmentDigest,
+  lifecycleStore,
   makeGateway,
   fence,
   access,
@@ -27,9 +29,10 @@ const eventually = <A>(read: () => A | undefined): Effect.Effect<A> => {
 
 const connect = Effect.fn("ExecutorGatewayTest.connect")(function* (
   service: ReturnType<typeof controller> = controller(),
+  lifecycle?: LifecycleStore,
 ) {
   const target = socket()
-  const gateway = yield* makeGateway(service)
+  const gateway = yield* makeGateway(service, undefined, undefined, undefined, lifecycle)
   yield* gateway.receive(
     target,
     encode({
@@ -120,6 +123,63 @@ describe("executor gateway native tools", () => {
         outcome: "completed",
       })
       expect(target.sent.filter((message) => decode(message)._tag === "MachineExecute")).toHaveLength(sentCount)
+    }),
+  )
+
+  it.effect("restores the durable terminal when a result lands between admission inspect and dispatch", () =>
+    Effect.gen(function* () {
+      const base = lifecycleStore()
+      const request = input("native-late-terminal", { _tag: "Read", path: "README.md" })
+      const result = { text: "contents", truncated: false }
+      let dispatches = 0
+      // Mirrors the PostgreSQL store: a claim against an already-terminal row is reported as fenced.
+      // The second claim first persists the terminal, standing in for the forked result fiber.
+      const racing: LifecycleStore = {
+        ...base,
+        dispatch: (identity, presented) =>
+          Effect.gen(function* () {
+            dispatches += 1
+            if (dispatches === 2)
+              yield* base.append(presented, {
+                _tag: "Terminal",
+                attribution: {
+                  operationKey: request.operationKey,
+                  workspaceId: request.workspaceId,
+                  sessionId: request.sessionId,
+                  threadId: request.threadId,
+                  turnId: request.turnId,
+                  runId: request.runId,
+                  rootRunId: request.rootRunId,
+                  toolCallId: request.toolCallId,
+                  attempt: request.attempt,
+                },
+                cursor: 3,
+                outcome: "completed",
+                response: { _tag: "Success", result },
+              })
+            const current = yield* base.inspect(identity)
+            if (current.state === "completed" || current.state === "unknown")
+              return yield* GatewayError.make({
+                kind: "fenced",
+                message: "Executor dispatch fence is no longer current",
+              })
+            return yield* base.dispatch(identity, presented)
+          }),
+      }
+      const { gateway, target } = yield* connect(controller(), racing)
+      const first = yield* Effect.forkChild(gateway.execute(request))
+      const sent = yield* delivery(target, request.operationKey)
+      expect(yield* gateway.execute(request)).toMatchObject({
+        response: { _tag: "Success", result },
+        outcome: "completed",
+      })
+      expect(dispatches).toBe(2)
+      yield* gateway.receive(
+        target,
+        machineResult(request.operationKey, sent, { _tag: "Success", value: { _tag: "NativeTool", result } }),
+      )
+      expect(yield* Fiber.join(first)).toMatchObject({ response: { _tag: "Success", result }, outcome: "completed" })
+      expect(target.sent.filter((message) => decode(message)._tag === "MachineExecute")).toHaveLength(1)
     }),
   )
 
