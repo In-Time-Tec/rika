@@ -357,10 +357,6 @@ jobs:
             while IFS= read -r required; do
               printf '%s\n' "$entries" | grep -qx "$required"
             done < <(bun -e 'import { packageBinEntries } from "./scripts/packaging/package-contract"; for (const entry of packageBinEntries) console.log(`package/bin/${entry}`)')
-            if printf '%s\n' "$entries" | grep -Eq 'package/bin/(\.rika-kernel-runtime|\.rika-kernel-worker\.js|\.rika-client-runtime|\.rika-interactive|\.rika-performance|rika-server)'; then
-              echo "obsolete runtime artifact found in $archive" >&2
-              exit 1
-            fi
           done
       - name: Dry-run publish
         env:

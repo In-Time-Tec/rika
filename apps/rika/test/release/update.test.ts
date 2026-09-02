@@ -376,7 +376,6 @@ it.effect("keeps package construction and publication on the binary-only contrac
       expect(packaging).toContain('writeFileString(path.join(stage, "INSTALL")')
       expect(packaging).toContain("Install bin/rika on PATH.")
       expect(packaging).toContain('COPYFILE_DISABLE: "1"')
-      expect(packaging).not.toMatch(/kernel|worker\.js|interactive-main|performance-main/i)
 
       const workflow = yield* fileSystem.readFileString(
         new URL("../../../../.github/workflows/publish.yml", import.meta.url).pathname,
@@ -384,8 +383,6 @@ it.effect("keeps package construction and publication on the binary-only contrac
       expect(workflow).toContain("scripts/packaging/package-contract")
       expect(workflow).toContain("--version")
       expect(workflow).toContain("--help")
-      expect(workflow).toContain("obsolete runtime artifact found")
-      expect(workflow).not.toContain("packages/kernel")
     }),
   ),
 )

@@ -1,11 +1,13 @@
-import { annotationSchemaMap } from "./file-logging-annotations"
+import { annotationSchemaMap, type DiagnosticAnnotation } from "./file-logging-annotations"
 import {
+  Cause,
   Clock,
   Context,
   DateTime,
   Duration,
   Effect,
   FileSystem,
+  Inspectable,
   Layer,
   Logger,
   Option,
@@ -34,29 +36,65 @@ const settlingSignals = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const
 /** bun-types 1.4 shadows process.removeListener with its memoryPressure overload; the EventEmitter surface still takes signals. */
 const processEvents: NodeJS.EventEmitter = process
 
-const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
+const detailLimit = 4_000
+
+const secretPatterns: ReadonlyArray<readonly [RegExp, string]> = [
+  [/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[jwt]"],
+  [/\b(Authorization|DPoP|Bearer)\b[:\s]+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [redacted]"],
+  [/("?[A-Za-z_]*(?:token|secret|password|api[_-]?key|private)[A-Za-z_]*"?\s*[:=]\s*"?)[^"',\s}]+/gi, "$1[redacted]"],
+  [/\b(?:sk|rk|ghp|gho|github_pat)[_-][A-Za-z0-9_-]{16,}\b/g, "[redacted]"],
+]
+
+/** Free text that goes to disk: obvious credentials removed, whitespace collapsed, length bounded. */
+export const redactDetail = (text: string): string => {
+  let value = text
+  for (const [pattern, replacement] of secretPatterns) value = value.replace(pattern, replacement)
+  value = value.replace(/[ \t]+/g, " ").trim()
+  return value.length > detailLimit ? `${value.slice(0, detailLimit - 1)}…` : value
+}
+
+const operationSchema = Schema.decodeUnknownOption(
+  Schema.String.check(Schema.isMaxLength(100), Schema.isPattern(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/)),
+)
+
+const decodeAnnotation = Schema.decodeUnknownOption(Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]))
+
+const Record_ = Schema.Struct({
+  message: Schema.String,
+  level: Schema.String,
+  timestamp: Schema.String,
+  annotations: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])),
+  detail: Schema.optionalKey(Schema.String),
+})
+type Record_ = typeof Record_.Type
+const encodeRecord = Schema.encodeSync(Schema.fromJsonString(Record_))
+const decodeRecord = Schema.decodeUnknownOption(Schema.fromJsonString(Record_))
+
+const structuredLogger = Logger.make(({ cause, date, fiber, logLevel, message }) => {
   const elements: ReadonlyArray<unknown> = Array.isArray(message) ? message : [message]
-  const [candidate] = elements
-  const operation = Option.getOrUndefined(
-    Schema.decodeUnknownOption(
-      Schema.String.check(Schema.isMaxLength(100), Schema.isPattern(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/)),
-    )(candidate),
-  )
+  const [candidate, ...rest] = elements
+  const operation = Option.getOrUndefined(operationSchema(candidate))
   const current = fiber.getRef(References.CurrentLogAnnotations)
-  const annotations: Record<string, string | number | boolean> = {}
+  const annotations: Record<string, DiagnosticAnnotation> = {}
   for (const [key, value] of Object.entries(current)) {
-    const decoded = Option.getOrUndefined(
-      Schema.decodeUnknownOption(Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]))(value),
-    )
+    const decoded = Option.getOrUndefined(decodeAnnotation(value))
     const safe = decoded === undefined ? undefined : annotationSchemaMap.get(key)?.(decoded)
     if (safe !== undefined) annotations[key] = safe
   }
-  return JSON.stringify({
+  const record: Record_ = {
     message: operation ?? "diagnostic.unstructured",
     level: logLevel.toUpperCase(),
     timestamp: date.toISOString(),
     annotations,
-  })
+  }
+  // WARN and above keep their text and cause, redacted; INFO and DEBUG stay whitelist-only to keep logs small.
+  if (logLevel === "Warn" || logLevel === "Error" || logLevel === "Fatal") {
+    const free = (operation === undefined ? elements : rest).map((part) => Inspectable.toStringUnknown(part, 0))
+    if (cause.reasons.length > 0) free.push(Cause.pretty(cause))
+    const detail = redactDetail(free.join("\n"))
+    return encodeRecord(detail === "" ? record : { ...record, detail })
+  }
+  return encodeRecord(record)
 })
 
 export const settleActiveLogs = Effect.suspend(() =>
@@ -311,4 +349,76 @@ export const exportLogs = Effect.fn("Logging.exportLogs")(function* (dataRoot: s
   yield* copyPass()
   yield* copyPass()
   return target
+})
+
+export interface RecentFailure {
+  readonly file: string
+  readonly timestamp: string
+  readonly level: string
+  readonly message: string
+  readonly detail: string | undefined
+  readonly annotations: Record_["annotations"]
+}
+
+export interface RecentRun {
+  readonly file: string
+  readonly version: string | undefined
+  readonly started: string | undefined
+  readonly lastRecord: string | undefined
+  readonly records: number
+  readonly stages: ReadonlyArray<string>
+  readonly failures: ReadonlyArray<RecentFailure>
+}
+
+/**
+ * Reads the newest client log files and extracts what a support conversation needs: which version ran, what
+ * lifecycle stages it reached, and every WARN/ERROR record with its detail. Records are already redacted on write.
+ */
+export const recentRuns = Effect.fn("Logging.recentRuns")(function* (dataRoot: string, limit: number) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const diagnostics = yield* directory(dataRoot)
+  if (!(yield* fs.exists(diagnostics))) return []
+  const files = (yield* availableLogFiles(diagnostics))
+    .filter(({ name }) => name.startsWith("client-") && name.endsWith(".jsonl"))
+    .map(({ name }) => name)
+    .toSorted()
+    .toReversed()
+    .slice(0, limit)
+  const runs: Array<RecentRun> = []
+  for (const name of files) {
+    const text = yield* fs.readFileString(path.join(diagnostics, name)).pipe(Effect.orElseSucceed(() => ""))
+    const failures: Array<RecentFailure> = []
+    const stages: Array<string> = []
+    let version: string | undefined
+    let started: string | undefined
+    let lastRecord: string | undefined
+    let records = 0
+    for (const line of text.split("\n")) {
+      const record = Option.getOrUndefined(decodeRecord(line))
+      if (record === undefined) continue
+      records += 1
+      started ??= record.timestamp
+      lastRecord = record.timestamp
+      const recordVersion = record.annotations["rika.version"]
+      if (recordVersion !== undefined) version ??= String(recordVersion)
+      if (
+        record.message.startsWith("hosted.") ||
+        record.message.startsWith("tui.") ||
+        record.message.startsWith("cli.")
+      )
+        stages.push(record.message)
+      if (record.level === "WARN" || record.level === "ERROR" || record.level === "FATAL")
+        failures.push({
+          file: name,
+          timestamp: record.timestamp,
+          level: record.level,
+          message: record.message,
+          detail: record.detail,
+          annotations: record.annotations,
+        })
+    }
+    runs.push({ file: name, version, started, lastRecord, records, stages, failures })
+  }
+  return runs
 })

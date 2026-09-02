@@ -4,6 +4,7 @@ import { Argument, CliError, Command, Flag } from "effect/unstable/cli"
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import { authCommand } from "../product/auth"
 import { credentialCommand } from "../product/credential"
+import { debugCommand } from "../product/debug"
 import { diagnosticsCommand } from "../product/diagnostics"
 import { organizationCommand } from "../product/organization"
 import { projectCommand } from "../product/project"
@@ -133,6 +134,7 @@ export const command = Command.make(
     credentialCommand,
     providerCommand,
     diagnosticsCommand,
+    debugCommand,
     updateCommand,
     Command.make("version", {}, () => Console.log(version)),
   ]),

@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { DeviceId, ExecutorAssignmentId, ProjectId, WorkspaceId } from "../model"
 
 const strict = <S extends Schema.Top>(schema: S) => schema.annotate({ parseOptions: { onExcessProperty: "error" } })
-export const runnerProtocolVersion = 1 as const
+export const runnerProtocolVersion = 2 as const
 export const CheckoutFingerprint = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]{1,512}$/)).pipe(
   Schema.brand("RunnerCheckoutFingerprint"),
 )

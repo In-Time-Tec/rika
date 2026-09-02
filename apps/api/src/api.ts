@@ -2,7 +2,7 @@ import { Layer } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { HttpDependencies } from "./server/http"
-import { authorizationLayer } from "./http-api/access"
+import { authorizationLayer, schemaErrorsLayer } from "./http-api/access"
 import { RikaApi } from "./http-api/contract"
 import { publicHandlers } from "./http-api/public/controller"
 import { identityHandlers, publicIdentityHandlers } from "./http-api/identity/controller"
@@ -32,7 +32,11 @@ export const makeRikaApiHandler = (dependencies: HttpDependencies) => {
   ).pipe(Layer.provide(authorizationLayer(dependencies)))
   return HttpRouter.toWebHandler(
     HttpApiBuilder.layer(RikaApi).pipe(
-      Layer.provide(Layer.mergeAll(publicHandlers(dependencies), publicIdentityHandlers(dependencies), authenticated)),
+      Layer.provide(
+        Layer.mergeAll(publicHandlers(dependencies), publicIdentityHandlers(dependencies), authenticated).pipe(
+          Layer.provide(schemaErrorsLayer),
+        ),
+      ),
       Layer.provide(HttpServer.layerServices),
     ),
     { disableLogger: true },

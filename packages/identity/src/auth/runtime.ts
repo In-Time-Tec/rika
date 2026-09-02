@@ -2,7 +2,7 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider"
 import { betterAuth, type BetterAuthPlugin } from "better-auth"
 import { jwt, organization } from "better-auth/plugins"
-import { Context, Effect, Layer, Redacted, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { runPromise } from "effect/Effect"
 import type { Pool } from "pg"
 import type { IdentityConfig } from "../config"
@@ -216,7 +216,10 @@ export const makeBetterAuthIdentityRuntime = (input: {
               requiredScopes: ["account"],
               jwksUrl: oauthResource.jwksUrl,
             }),
-          catch: () => IdentityRuntimeError.make({ kind: "invalid" }),
+          // Every verification failure becomes a 401 for the client; the real reason (expired, bad audience, JWKS
+          // fetch failure, ...) is only visible here, so record it before it is flattened.
+          catch: (cause) =>
+            new Cause.UnknownError(cause, cause instanceof Error ? cause.message : "Access token verification failed"),
         }).pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(AccessTokenPayload)),
           Effect.map((payload) => {
@@ -227,6 +230,7 @@ export const makeBetterAuthIdentityRuntime = (input: {
             if (payload.cnf?.jkt !== undefined) return { userId: payload.sub, dpopJkt: payload.cnf.jkt }
             return { userId: payload.sub }
           }),
+          Effect.tapError((cause) => Effect.logWarning("identity.access_token.rejected", cause.message)),
           Effect.mapError(() => IdentityRuntimeError.make({ kind: "invalid" })),
         )
       }

@@ -94,3 +94,27 @@ export const projectFailure = (error: { readonly kind?: string; readonly message
   if (error.kind === "invalid") return Unprocessable.make({ message: error.message })
   return ServiceUnavailable.make({ message: "Product service unavailable" })
 }
+
+/**
+ * Request decoding failures. The framework default is an empty 400, which leaves a client unable to say why the
+ * server refused. The most common cause is a Rika CLI older than the API's wire contract, so the message names
+ * the mismatched part and the fix.
+ */
+export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("@rika/api/api/SchemaErrors", {
+  error: BadRequest,
+}) {}
+const schemaIssueLimit = 400
+const schemaErrorMessage = (input: { readonly kind: string; readonly issue: string; readonly endpoint: string }) => {
+  const summary = input.issue.replace(/\s+/g, " ").trim()
+  const bounded = summary.length > schemaIssueLimit ? `${summary.slice(0, schemaIssueLimit - 1)}…` : summary
+  return `${input.kind} for ${input.endpoint} did not match this server's API (${bounded}). If this is the Rika CLI, run \`rika update\`.`
+}
+export const schemaErrorsLayer = HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrors, (error, context) =>
+  BadRequest.make({
+    message: schemaErrorMessage({
+      kind: error.kind,
+      issue: error.cause.message,
+      endpoint: `${context.endpoint.method} ${context.endpoint.path}`,
+    }),
+  }),
+)

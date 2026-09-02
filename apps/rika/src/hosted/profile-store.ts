@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { HostedError, ProfileStore, type Profile } from "./contract"
+import { writePrivateFile } from "../platform/private-file"
 
 const ProfileDisk = Schema.Struct({
   formatVersion: Schema.Literal(3),
@@ -34,14 +35,7 @@ export const layer = (options: { readonly home: string; readonly filename?: stri
         const text = yield* Schema.encodeEffect(Schema.fromJsonString(ProfileDisk))(diskProfile).pipe(
           Effect.mapError(() => failure("Profile could not be encoded")),
         )
-        const parent = path.dirname(target)
-        const temporary = `${target}.tmp-${process.pid}`
-        yield* fileSystem
-          .makeDirectory(parent, { recursive: true, mode: 0o700 })
-          .pipe(Effect.mapError(() => failure("Profile directory could not be created")))
-        yield* fileSystem.writeFileString(temporary, text, { mode: 0o600 }).pipe(
-          Effect.flatMap(() => fileSystem.rename(temporary, target)),
-          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+        yield* writePrivateFile(fileSystem, target, text).pipe(
           Effect.mapError(() => failure("Profile could not be saved")),
         )
       })

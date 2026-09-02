@@ -1,22 +1,11 @@
 #!/usr/bin/env bun
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Config, Context, Effect, Layer, Schema } from "effect"
+import { Config, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import * as Logging from "./diagnostics/file-logging"
 import { version } from "./platform/application-version"
+import { provideLayerScoped } from "./platform/provide"
 
-const provideLayerScoped =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.scopedWith((scope) =>
-      Effect.context<RIn | Exclude<R, ROut>>().pipe(
-        Effect.flatMap((parent) =>
-          Layer.buildWithScope(layer, scope).pipe(
-            Effect.flatMap((context) => effect.pipe(Effect.provideContext(Context.merge(parent, context)))),
-          ),
-        ),
-      ),
-    )
 import { clientProcessExitCode } from "./client/process-exit"
 import { installClientSigintHandler, run } from "./client/process"
 

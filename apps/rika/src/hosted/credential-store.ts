@@ -1,5 +1,6 @@
 import { Clock, Effect, FileSystem, Layer, Option, Path, PlatformError, Redacted, Schema, Semaphore } from "effect"
 import { CredentialStore, HostedError, PrivateJwk, type ActiveCredential, type Credential } from "./contract"
+import { writePrivateFile } from "../platform/private-file"
 
 const CredentialDiskV1 = Schema.Struct({
   formatVersion: Schema.Literal(1),
@@ -40,7 +41,6 @@ export const layer = (options: {
       const admission = yield* Semaphore.make(1)
       const parent = path.dirname(options.filename)
       const expectedUid = process.getuid?.()
-      let writeSequence = 0
       const storageFailure = (operation: string) => failure(`Credential file could not be ${operation}`)
       const directoryReady = Effect.fn("HostedCredentialStore.directoryReady")(function* (create: boolean) {
         const exists = yield* fileSystem.exists(parent).pipe(Effect.mapError(() => storageFailure("inspected")))
@@ -175,12 +175,7 @@ export const layer = (options: {
           accessToken: Redacted.value(credential.accessToken),
           accessTokenExpiresAt: credential.accessTokenExpiresAt,
         }).pipe(Effect.mapError(() => failure("Credentials could not be encoded")))
-        writeSequence += 1
-        const temporary = `${options.filename}.tmp-${process.pid}-${writeSequence}`
-        yield* fileSystem.writeFileString(temporary, value, { flag: "wx", mode: 0o600 }).pipe(
-          Effect.andThen(fileSystem.chmod(temporary, 0o600)),
-          Effect.andThen(fileSystem.rename(temporary, options.filename)),
-          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+        yield* writePrivateFile(fileSystem, options.filename, value).pipe(
           Effect.mapError(() => storageFailure("saved")),
         )
       })

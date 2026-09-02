@@ -8,6 +8,7 @@ import { RecoveryGroup } from "./recovery/routes"
 import { RunnersGroup } from "./runners/routes"
 import { ThreadsGroup } from "./threads/routes"
 import { WorkspaceSeedsGroup } from "./workspace-seeds/routes"
+import { SchemaErrors } from "./access"
 
 export class RikaApi extends HttpApi.make("rika-api")
   .add(PublicGroup)
@@ -19,4 +20,5 @@ export class RikaApi extends HttpApi.make("rika-api")
   .add(RecoveryGroup)
   .add(PublicationGroup)
   .add(ModelsGroup)
-  .add(EnvironmentGroup) {}
+  .add(EnvironmentGroup)
+  .middleware(SchemaErrors) {}

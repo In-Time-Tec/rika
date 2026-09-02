@@ -4,28 +4,29 @@ import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import { Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
+import {
+  Cause,
+  Config,
+  Console,
+  Crypto,
+  Deferred,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schema,
+  Stdio,
+} from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
-import { Command } from "effect/unstable/cli"
+import { CliError, Command } from "effect/unstable/cli"
 import { command, version } from "../command/root/rika"
 import * as HostedCommand from "../command/root/hosted"
 import * as RunnerCommand from "../command/root/runner"
 import * as Logging from "../diagnostics/file-logging"
+import { provideLayerScoped } from "../platform/provide"
 import { clientSigintOwnership, type SigintOwnership } from "./signal-ownership"
-
-const provideLayerScoped =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.scopedWith((scope) =>
-      Effect.context<RIn | Exclude<R, ROut>>().pipe(
-        Effect.flatMap((parent) =>
-          Layer.buildWithScope(layer, scope).pipe(
-            Effect.flatMap((context) => effect.pipe(Effect.provideContext(Context.merge(parent, context)))),
-          ),
-        ),
-      ),
-    )
 
 type OperationFailure = ProductOperation.OperationUnavailable | Error
 
@@ -139,6 +140,7 @@ const dispatcherLayer = () =>
                 const runnerInput = {
                   workspace: input.workspace ?? process.cwd(),
                   preferencePath: yield* Runner.preferencePath,
+                  onStatus: Runner.logStatus,
                 }
                 const firstDraw = yield* Deferred.make<void>()
                 const firstDrawContext = yield* Effect.context<never>()
@@ -233,11 +235,12 @@ const runnerCommandLayer = Layer.effect(
           const hosted = HostedCli.liveLayer(home)
           const runnerInput =
             input.remoteThreadCreation === undefined
-              ? { workspace: input.workspace ?? process.cwd(), preferencePath }
+              ? { workspace: input.workspace ?? process.cwd(), preferencePath, onStatus: Runner.printStatus }
               : {
                   workspace: input.workspace ?? process.cwd(),
                   preferencePath,
                   requestedPreference: input.remoteThreadCreation,
+                  onStatus: Runner.printStatus,
                 }
           return yield* Runner.runRunner(runnerInput).pipe(
             Effect.scoped,
@@ -253,17 +256,47 @@ const runnerCommandLayer = Layer.effect(
   }),
 )
 
+const printedCauseLimit = 2_000
+
+/**
+ * The last thing that runs before the process exits with a failure. Every failure lands in the diagnostics log at
+ * ERROR with its full cause. `Command.run` already prints `CliError.UserError`; anything else (defects, protocol
+ * failures, thrown errors) would otherwise exit 1 silently, so it is printed here after the TUI has been released.
+ */
+export const reportRootFailure = (cause: Cause.Cause<unknown>) => {
+  if (Cause.hasInterruptsOnly(cause)) return Effect.void
+  // Persistence may not have started yet (the TUI defers it to first draw); start it so buffered records reach disk.
+  const persist = Effect.serviceOption(Logging.DiagnosticPersistence).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (service) => Logging.start.pipe(Effect.provideService(Logging.DiagnosticPersistence, service)),
+      }),
+    ),
+    Effect.ignore,
+    Effect.andThen(Logging.settleActiveLogs),
+  )
+  const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+  if (CliError.isCliError(error) && error._tag === "ShowHelp") return Effect.void
+  if (CliError.isCliError(error) && error._tag === "UserError")
+    return Effect.logError("cli.exit.failure", error.userMessage, cause).pipe(Effect.andThen(persist))
+  const pretty = Logging.redactDetail(Cause.pretty(cause))
+  const shown = pretty.length > printedCauseLimit ? `${pretty.slice(0, printedCauseLimit - 1)}…` : pretty
+  return Effect.logError("cli.exit.defect", cause).pipe(
+    Effect.andThen(persist),
+    Effect.andThen(Console.error(`Rika stopped unexpectedly.\n${shown}\n\nRun \`rika debug\` and share its output.`)),
+  )
+}
+
 export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<string>) {
-  const program = (
-    argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
-  ).pipe(
+  const program = argv === undefined ? Command.run(command, { version }) : Command.runWith(command, { version })(argv)
+  return yield* program.pipe(
+    provideLayerScoped(Layer.mergeAll(dispatcherLayer(), hostedCommandLayer, runnerCommandLayer)),
+    Effect.tapCause(reportRootFailure),
     Effect.annotateLogs({
       "rika.process.role": "client",
       "rika.process.pid": process.pid,
       "rika.version": version,
     }),
-  )
-  return yield* program.pipe(
-    provideLayerScoped(Layer.mergeAll(dispatcherLayer(), hostedCommandLayer, runnerCommandLayer)),
   )
 })

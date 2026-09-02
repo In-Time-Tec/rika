@@ -26,11 +26,11 @@ const writtenRecords = (root: string) =>
 
 describe("Logging", () => {
   it.layer(BunServices.layer)((test) => {
-    test.effect("omits arbitrary message values, objects, and failure causes", () =>
+    test.effect("keeps redacted text and causes for warnings and errors, none for info", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-values-" })
-        const secret = "cause-secret-f839"
+        const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9.c2lnbmF0dXJlLXNlY3JldA"
         class CyclicValue {
           readonly value: string
           self?: CyclicValue
@@ -38,7 +38,7 @@ describe("Logging", () => {
             this.value = value
           }
         }
-        const cyclic = new CyclicValue(secret)
+        const cyclic = new CyclicValue("cyclic-value")
         cyclic.self = cyclic
         yield* Effect.scoped(
           Effect.flatMap(
@@ -48,23 +48,25 @@ describe("Logging", () => {
                 Logging.start,
                 Effect.all([
                   Effect.logWarning("usage repository refused an incomplete tree", cyclic),
-                  Effect.logInfo("execution.follow.started", cyclic),
-                  Effect.logWarning("usage-cost.read.failed", Cause.fail(secret)),
+                  Effect.logInfo("execution.follow.started", `Authorization: DPoP ${token}`),
+                  Effect.logWarning("usage-cost.read.failed", Cause.fail(`refresh failed with Bearer ${token}`)),
+                  Effect.logError("cli.exit.failure", "Runner registration failed (HTTP 400)"),
                 ]),
               ).pipe(Effect.provide(logging)),
           ),
         )
         const { content, records } = yield* writtenRecords(root)
-        assert.notInclude(content, secret)
+        assert.notInclude(content, token)
         assert.notInclude(content, "[object Object]")
         assert.deepStrictEqual(
           records.map((record) => record.message),
-          ["diagnostic.unstructured", "execution.follow.started", "diagnostic.unstructured"],
+          ["diagnostic.unstructured", "execution.follow.started", "diagnostic.unstructured", "cli.exit.failure"],
         )
-        for (const record of records) {
-          assert.strictEqual(record.detail, undefined)
-          assert.strictEqual(record.cause, undefined)
-        }
+        assert.include(records[0]!.detail, "usage repository refused an incomplete tree")
+        assert.strictEqual(records[1]!.detail, undefined)
+        assert.include(records[2]!.detail, "usage-cost.read.failed")
+        assert.include(records[2]!.detail, "refresh failed with Bearer [jwt]")
+        assert.strictEqual(records[3]!.detail, "Runner registration failed (HTTP 400)")
       }),
     )
 

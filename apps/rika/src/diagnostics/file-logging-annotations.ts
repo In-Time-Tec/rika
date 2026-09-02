@@ -100,6 +100,7 @@ const annotationSchemas = {
   "rika.operation.key": runnerOperationKey,
   "rika.outcome": matching(/^[A-Za-z][A-Za-z0-9_]{0,48}$/, 48),
   "rika.runner.message": runnerMessageTag,
+  "rika.runner.status": oneOf("Registering", "Ready", "Waiting", "Connecting", "Connected", "Stopped"),
   "rika.session.id": runnerOperationKey,
   "rika.process.instance": matching(/^\d{1,16}-\d{1,10}$/, 32),
   "rika.process.pid": boundedNumber,

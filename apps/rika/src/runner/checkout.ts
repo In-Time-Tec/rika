@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
 import { DeviceId, WorkspaceId } from "@rika/product/hosted-model"
 import { CheckoutFingerprint, runnerProtocolVersion } from "@rika/product/runner-registration"
-import { Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, FileSystem } from "effect"
+import { gitOutput } from "../platform/git"
 import type { RunnerRegistration, RemoteThreadCreation } from "./contract"
 import { RunnerError } from "./contract"
 
@@ -12,18 +12,6 @@ export interface RunnerCheckout {
 }
 
 const digest = (parts: ReadonlyArray<string>) => createHash("sha256").update(parts.join("\0")).digest("base64url")
-
-const runGit = Effect.fn("RunnerCheckout.git")(function* (workspace: string, arguments_: ReadonlyArray<string>) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const child = yield* spawner
-    .spawn(ChildProcess.make("git", ["-C", workspace, ...arguments_], { stdout: "pipe", stderr: "ignore" }))
-    .pipe(Effect.mapError(() => RunnerError.make({ message: "Could not inspect the local checkout" })))
-  const [text, exitCode] = yield* Effect.all([Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode], {
-    concurrency: 2,
-  }).pipe(Effect.mapError(() => RunnerError.make({ message: "Could not inspect the local checkout" })))
-  const trimmed = text.trim()
-  return Number(exitCode) === 0 && trimmed.length > 0 ? trimmed : undefined
-})
 
 const safeRemote = (value: string | undefined) => {
   if (value === undefined) return undefined
@@ -46,16 +34,16 @@ export const inspectRunnerCheckout = Effect.fn("RunnerCheckout.inspect")(functio
   const workspacePath = yield* fileSystem
     .realPath(input.workspace)
     .pipe(Effect.mapError(() => RunnerError.make({ message: "Could not inspect the local checkout" })))
-  const root = (yield* runGit(workspacePath, ["rev-parse", "--show-toplevel"])) ?? workspacePath
+  const root = (yield* gitOutput(workspacePath, ["rev-parse", "--show-toplevel"])) ?? workspacePath
   const checkoutPath = yield* fileSystem
     .realPath(root)
     .pipe(Effect.mapError(() => RunnerError.make({ message: "Could not inspect the local checkout" })))
   const [commonDirectoryValue, remoteUrlValue, headRevision, branch] = yield* Effect.all(
     [
-      runGit(checkoutPath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
-      runGit(checkoutPath, ["remote", "get-url", "origin"]),
-      runGit(checkoutPath, ["rev-parse", "HEAD"]),
-      runGit(checkoutPath, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
+      gitOutput(checkoutPath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      gitOutput(checkoutPath, ["remote", "get-url", "origin"]),
+      gitOutput(checkoutPath, ["rev-parse", "HEAD"]),
+      gitOutput(checkoutPath, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
     ],
     { concurrency: 4 },
   )

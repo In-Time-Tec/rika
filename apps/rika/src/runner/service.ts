@@ -10,7 +10,7 @@ import { CredentialStore, HostedError, Http, ProfileStore, type Profile } from "
 import { authenticated, selectedProfile } from "../hosted/account"
 import { reconnectDelay, retryableConnectionFailure } from "../hosted/reconnect-policy"
 
-const statusLine = (status: RunnerStatus) => {
+export const statusLine = (status: RunnerStatus) => {
   if (status._tag === "Registering")
     return `Registering Runner ${status.registration.workspaceIdentity} for device ${status.registration.deviceId}`
   if (status._tag === "Ready") return `Runner ready ${status.workspaceIdentity}`
@@ -229,11 +229,23 @@ export const withPreparedRunnerCheckout: {
   ): <A, E, R>(operation: Effect.Effect<A, E, R>) => ReturnType<typeof withPreparedRunnerCheckoutImpl<A, E, R>>
 } = Function.dual(2, withPreparedRunnerCheckoutImpl)
 
+/** Headless `--no-tui` Runner: status lines go to stdout. */
+export const printStatus = (status: RunnerStatus) => Console.log(statusLine(status))
+
+/** Runner inside the TUI: stdout belongs to the renderer, so status goes to the diagnostics log only. */
+export const logStatus = (status: RunnerStatus) =>
+  (status._tag === "Waiting"
+    ? Effect.logWarning("runner.status.waiting", status.message)
+    : Effect.logInfo(`runner.status.${status._tag.toLowerCase()}`)
+  ).pipe(Effect.annotateLogs("rika.runner.status", status._tag))
+
 export const runRunner = Effect.fn("Runner.run")(function* (
   input: {
     readonly workspace: string
     readonly preferencePath: string
     readonly requestedPreference?: RemoteThreadCreation | undefined
+    /** Where status changes go. Never print to stdout while the TUI owns the terminal. */
+    readonly onStatus: (status: RunnerStatus) => Effect.Effect<void>
   },
   prepared?: PreparedRunnerCheckout,
   firstConnection?: Deferred.Deferred<void>,
@@ -247,7 +259,7 @@ export const runRunner = Effect.fn("Runner.run")(function* (
     (status._tag === "Ready" && firstConnection !== undefined
       ? Deferred.succeed(firstConnection, undefined)
       : Effect.void
-    ).pipe(Effect.andThen(Console.log(statusLine(status))))
+    ).pipe(Effect.andThen(input.onStatus(status)))
   const receiptStore = yield* RunnerReceiptStore.makeRunnerReceiptStore({
     origin: profile.origin,
     deviceId: profile.deviceId,
