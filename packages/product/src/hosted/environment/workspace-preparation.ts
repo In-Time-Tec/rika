@@ -10,7 +10,7 @@ const Output = Schema.String.check(Schema.isMaxLength(16_384))
 export const WorkspacePreparationPhase = Schema.Literals(["checkout", "setup", "resume", "capabilities"])
 export type WorkspacePreparationPhase = typeof WorkspacePreparationPhase.Type
 
-export const HookOutcome = Schema.Literals(["missing", "completed", "continued"])
+export const HookOutcome = Schema.Literals(["missing", "completed", "continued", "failed"])
 export type HookOutcome = typeof HookOutcome.Type
 
 export const HookEvidence = Schema.Struct({
@@ -91,6 +91,11 @@ export interface WorkspacePreparationsService {
   ) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
   readonly retryAttempt: (access: Access) => Effect.Effect<number, WorkspacePreparationError>
   readonly requireReady: (access: Access) => Effect.Effect<WorkspacePreparation, WorkspacePreparationError>
+  /** The preparation record for one assignment generation, or undefined before its Executor reports a start. */
+  readonly find: (input: {
+    readonly assignmentId: string
+    readonly generation: FencingGeneration
+  }) => Effect.Effect<WorkspacePreparation | undefined, WorkspacePreparationError>
   readonly expireOverdue: (now: number) => Effect.Effect<number, WorkspacePreparationError>
 }
 

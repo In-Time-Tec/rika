@@ -37,7 +37,7 @@ import {
 import { Runtime, layer as runtimeLayer } from "./runtime"
 import { layer as workspaceFilesLayer } from "../workspace/files"
 import { type CheckpointRestore, type WorkspaceSeedRestore, ExecutorMessage, SessionWire } from "../protocol/messages"
-import { inspectWorkspaceCapabilities } from "../workspace/capabilities"
+import { directoryVisibleTo, inspectWorkspaceCapabilities } from "../workspace/capabilities"
 import { mutableExecutionEnvironment } from "./execution-environment"
 import { HostError } from "./error"
 import { hostIdentity, type Identity } from "./identity"
@@ -134,9 +134,12 @@ const host = Effect.scoped(
         yield* pty.disconnectAll.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyCursor = yield* pty.cursor.pipe(Effect.mapError((error) => HostError.make({ message: error.message })))
         const ptyReady = config.fence.target === "orb" && capabilities.pty
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const inspectCapabilities = inspectWorkspaceCapabilities({
           target: config.fence.target,
           workspacePath: root,
+          // The workspace parent is readable only by its owner; probe as that user when a direct stat fails.
+          workspaceVisible: directoryVisibleTo({ spawner, user: workspaceUser, path: root }),
           nativeTools: true,
           pty: ptyReady,
           browser: capabilities.browser,

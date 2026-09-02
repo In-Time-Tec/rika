@@ -66,7 +66,7 @@ export const HookEvidence = Schema.Struct({
   environmentDigest: Schema.String,
   startedAt: Schema.Int,
   finishedAt: Schema.Int,
-  outcome: Schema.Literals(["missing", "completed", "continued"]),
+  outcome: Schema.Literals(["missing", "completed", "continued", "failed"]),
 })
 
 export const Marker = Schema.Struct({

@@ -315,6 +315,11 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
     },
   )
 
+  const find: WorkspacePreparationsService["find"] = Effect.fn("WorkspacePreparations.find")(function* (input) {
+    const row = (yield* select(input.assignmentId, input.generation))[0]
+    return row === undefined ? undefined : yield* decode(row)
+  })
+
   const expireOverdue: WorkspacePreparationsService["expireOverdue"] = Effect.fn("WorkspacePreparations.expireOverdue")(
     function* (now) {
       const at = expression<Date>`to_timestamp(${now} / 1000.0)`
@@ -341,7 +346,16 @@ const make = Effect.gen(function* (): Effect.fn.Return<WorkspacePreparationsServ
     },
   )
 
-  return WorkspacePreparations.of({ start, appendOutput, complete, fail, retryAttempt, requireReady, expireOverdue })
+  return WorkspacePreparations.of({
+    start,
+    appendOutput,
+    complete,
+    fail,
+    retryAttempt,
+    requireReady,
+    find,
+    expireOverdue,
+  })
 })
 
 export const layer = Layer.effect(WorkspacePreparations, make)

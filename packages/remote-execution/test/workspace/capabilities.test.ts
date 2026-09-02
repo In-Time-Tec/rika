@@ -23,3 +23,30 @@ it.effect("recognizes an accessible workspace directory with Bun FileSystem", ()
     }),
   ).pipe(provideLayer(platform)),
 )
+
+it.effect("reports a missing workspace directory as unavailable", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* inspectWorkspaceCapabilities({
+      target: "orb",
+      workspacePath: "/nonexistent/rika-workspace-capabilities",
+      nativeTools: true,
+      pty: true,
+    })
+    expect(snapshot.filesystem).toEqual({ _tag: "Unavailable", reason: "workspace root is unavailable" })
+    expect(snapshot.workspaceLifecycle).toEqual({ _tag: "Unavailable", reason: "workspace lifecycle is not ready" })
+  }).pipe(provideLayer(platform)),
+)
+
+it.effect("trusts the fallback probe when the host cannot stat the workspace itself", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* inspectWorkspaceCapabilities({
+      target: "orb",
+      workspacePath: "/nonexistent/rika-workspace-capabilities",
+      workspaceVisible: Effect.succeed(true),
+      nativeTools: true,
+      pty: true,
+    })
+    expect(snapshot.filesystem).toEqual({ _tag: "Ready", detail: "workspace filesystem available" })
+    expect(snapshot.workspaceLifecycle).toEqual({ _tag: "Ready", detail: "workspace lifecycle ready" })
+  }).pipe(provideLayer(platform)),
+)

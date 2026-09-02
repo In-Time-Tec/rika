@@ -9,7 +9,7 @@ import {
 import { ExecutorAssignments } from "@rika/product/executor-assignments"
 import type { ExecutorAssignment } from "@rika/product/executor-assignment"
 import * as HostedObservability from "@rika/product/hosted-observability"
-import { ThreadId } from "@rika/product/hosted-model"
+import { FencingGeneration, ThreadId } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { Clock, Context, Crypto, Effect, Layer, Schema } from "effect"
 import { HostedEnvironment } from "../hosted/environment/runtime"
@@ -23,6 +23,10 @@ export { Executor, orphanReaper } from "./contract"
 import { Executor, orphanReaper } from "./contract"
 
 const requiredWorkspaceCapabilities = ["filesystem", "nativeTools", "git", "process", "workspaceLifecycle"] as const
+/** How long an Active Orb session may go without reporting a preparation start before admission fails. */
+const preparationStartDeadlineMillis = 60_000
+/** Retryable preparation failures (checkout, credentials) are retried up to this many attempts per generation. */
+const maxPreparationAttempts = 3
 
 const NativeToolPayload = Schema.Struct({ toolName: Schema.String, request: NativeToolRuntime.Request })
 const encodeNativeToolPayload = Schema.encodeSync(Schema.fromJsonString(NativeToolPayload))
@@ -96,10 +100,13 @@ export const service = Layer.effect(
           "attach",
           { ownerId: initial.ownerId, threadId: input.threadId, turnId: input.turnId, assignmentId: initial.id },
           Effect.gen(function* () {
+            // Provisioning may replace an unreachable Orb sandbox under a new generation; readiness
+            // must then be awaited for the provisioned generation, not the one read before provisioning.
+            let expectedGeneration = initial.generation
             if (initial.placement._tag === "OrbPlacement") {
               const phase =
                 initial.lifecycle._tag === "Paused" || initial.lifecycle._tag === "Active" ? "runtime" : "setup"
-              yield* environment
+              const provisioned = yield* environment
                 .usePhase({ assignmentId: initial.id, phase }, (resolved) =>
                   controller.provision(initial.id, {
                     egress: resolved.egress,
@@ -116,59 +123,115 @@ export const service = Layer.effect(
                         }),
                   ),
                 )
+              expectedGeneration = FencingGeneration.make(String(provisioned.generation))
             }
+            const repositoryFailure = (cause: { readonly message: string }) =>
+              ControllerError.make({ kind: "repository", message: cause.message })
+            const unavailableCapabilities = (capabilities: NonNullable<ExecutorAssignment["capabilities"]>) =>
+              requiredWorkspaceCapabilities.flatMap((name) => {
+                const capability = capabilities[name]
+                return capability._tag === "Ready" ? [] : [`${name}: ${capability.reason}`]
+              })
+            const activeSince = yield* Clock.currentTimeMillis
+            const retriedAttempts = new Set<number>()
+            // An Orb session opens with the capabilities its host saw before checkout and setup, so an
+            // Active assignment is ready only once the snapshot reports the required capabilities. Until
+            // then the durable preparation record says whether the host is still preparing, failed, or
+            // never started; a retryable failure is retried a bounded number of times from here because
+            // the host waits for that retry instruction.
+            const awaitOrbPreparation = Effect.fn("Executor.awaitOrbPreparation")(function* (
+              current: ExecutorAssignment,
+              unavailableFailure: ControllerError,
+            ) {
+              const preparation = yield* preparations
+                .find({ assignmentId: current.id, generation: current.generation })
+                .pipe(Effect.mapError(repositoryFailure))
+              if (preparation === undefined) {
+                if ((yield* Clock.currentTimeMillis) - activeSince > preparationStartDeadlineMillis)
+                  return yield* ControllerError.make({
+                    kind: "protocol",
+                    message: "Executor did not begin workspace preparation",
+                  })
+                return
+              }
+              if (preparation.state === "ready") return yield* unavailableFailure
+              if (preparation.state === "preparing") return
+              const failure = preparation.failure!
+              const retry =
+                failure.retryable &&
+                preparation.attempt < maxPreparationAttempts &&
+                !retriedAttempts.has(preparation.attempt)
+              if (!retry)
+                return yield* ControllerError.make({
+                  kind: "protocol",
+                  message: `Workspace preparation failed during ${preparation.phase} (attempt ${preparation.attempt}): ${failure.message}`,
+                })
+              retriedAttempts.add(preparation.attempt)
+              yield* Effect.logWarning("executor.workspace-preparation.retrying").pipe(
+                Effect.annotateLogs({
+                  "rika.executor.assignment.id": current.id,
+                  "rika.workspace.preparation.phase": preparation.phase,
+                  "rika.workspace.preparation.attempt": preparation.attempt,
+                  "rika.failure.message": failure.message,
+                }),
+              )
+              yield* gateway.retryPreparation(current.id).pipe(
+                Effect.mapError((error) =>
+                  ControllerError.make({
+                    kind: "protocol",
+                    message: `Workspace preparation failed during ${preparation.phase} and could not be retried: ${error.message}`,
+                  }),
+                ),
+              )
+            })
             const awaitActive = (): Effect.Effect<ExecutorAssignment, ControllerError> =>
               Effect.gen(function* () {
-                const current = yield* assignments
-                  .get(initial.id)
-                  .pipe(
-                    Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })),
-                  )
+                const current = yield* assignments.get(initial.id).pipe(Effect.mapError(repositoryFailure))
                 if (current === undefined)
                   return yield* ControllerError.make({
                     kind: "assignment-missing",
                     message: "Executor assignment disappeared while awaiting workspace readiness",
                   })
-                if (current.generation !== initial.generation)
+                if (current.generation !== expectedGeneration)
                   return yield* ControllerError.make({
                     kind: "fenced",
                     message: "Executor assignment was replaced while awaiting workspace readiness",
                   })
-                if (
-                  current.lifecycle._tag === "Active" &&
-                  current.capabilityGeneration === current.generation &&
-                  current.capabilities !== null
-                )
-                  return current
-                if (current.lifecycle._tag !== "Provisioning" && current.lifecycle._tag !== "AwaitingBootstrap")
-                  return yield* ControllerError.make({
-                    kind: "assignment-conflict",
-                    message: "Executor workspace stopped preparing before its capabilities became ready",
+                if (current.lifecycle._tag === "Active") {
+                  const snapshot = current.capabilityGeneration === current.generation ? current.capabilities : null
+                  if (snapshot === null)
+                    return yield* ControllerError.make({
+                      kind: "assignment-conflict",
+                      message: "Executor session has no capability snapshot for its generation",
+                    })
+                  const unavailable = unavailableCapabilities(snapshot)
+                  if (unavailable.length === 0) return current
+                  const unavailableFailure = ControllerError.make({
+                    kind: "protocol",
+                    message: `Run requires unavailable workspace capabilities: ${unavailable.join("; ")}`,
                   })
-                const bootstrapLive = yield* assignments
-                  .isBootstrapLive({ assignmentId: current.id, generation: current.generation })
-                  .pipe(
-                    Effect.mapError((cause) => ControllerError.make({ kind: "repository", message: cause.message })),
-                  )
-                if (!bootstrapLive)
-                  return yield* ControllerError.make({
-                    kind: "assignment-conflict",
-                    message: "Executor workspace preparation exceeded its durable bootstrap deadline",
-                  })
+                  if (current.placement._tag !== "OrbPlacement") return yield* unavailableFailure
+                  yield* awaitOrbPreparation(current, unavailableFailure)
+                } else {
+                  if (current.lifecycle._tag !== "Provisioning" && current.lifecycle._tag !== "AwaitingBootstrap")
+                    return yield* ControllerError.make({
+                      kind: "assignment-conflict",
+                      message: "Executor workspace stopped preparing before its capabilities became ready",
+                    })
+                  const bootstrapLive = yield* assignments
+                    .isBootstrapLive({ assignmentId: current.id, generation: current.generation })
+                    .pipe(Effect.mapError(repositoryFailure))
+                  if (!bootstrapLive)
+                    return yield* ControllerError.make({
+                      kind: "assignment-conflict",
+                      message: "Executor workspace preparation exceeded its durable bootstrap deadline",
+                    })
+                }
                 yield* Effect.sleep(100)
                 return yield* awaitActive()
               })
             const active = yield* awaitActive()
             const capabilities = active.capabilities!
-            const unavailable = requiredWorkspaceCapabilities.flatMap((name) => {
-              const capability = capabilities[name]
-              return capability._tag === "Ready" ? [] : [`${name}: ${capability.reason}`]
-            })
-            if (unavailable.length > 0)
-              return yield* ControllerError.make({
-                kind: "protocol",
-                message: `Run requires unavailable workspace capabilities: ${unavailable.join("; ")}`,
-              })
             const admitted = yield* operations
               .admitWorkspaceCapabilities({
                 threadId: input.threadId,

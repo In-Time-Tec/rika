@@ -19,12 +19,6 @@ const previousMarker = Effect.fn("Workspace.previousMarker")(function* (
       })
   } else if (known === undefined || known.lastWakeId !== assignment.wakeId) return undefined
   yield* context.verify(known)
-  if (known.setupState === "failed" && !assignment.retry)
-    return yield* WorkspaceError.make({
-      phase: "setup",
-      message: "Workspace setup failed previously; retry it explicitly",
-      retryable: true,
-    })
   return known
 })
 

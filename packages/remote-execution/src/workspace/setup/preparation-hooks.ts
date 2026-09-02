@@ -62,39 +62,35 @@ export const runHook = Effect.fn("Workspace.hook")(function* (
       ),
     )
   const fiber = yield* Effect.forkScoped(command)
+  const evidence = (outcome: "continued" | "completed" | "failed") =>
+    Effect.map(Clock.currentTimeMillis, (finishedAt) => ({
+      digest,
+      commitSha,
+      buildDigest: context.buildDigest,
+      environmentDigest: context.environmentDigest,
+      startedAt,
+      finishedAt,
+      outcome,
+    }))
+  // A hook that exits unsuccessfully leaves the workspace usable, like an Amp orb whose setup failed:
+  // the outcome is recorded as evidence and its output stays in the preparation log for the user.
+  const finished = (result: { readonly code: number }) =>
+    result.code === 0
+      ? evidence("completed")
+      : Effect.logWarning("workspace.hook.failed").pipe(
+          Effect.annotateLogs({ "rika.workspace.hook": name, "rika.workspace.hook.exit_code": result.code }),
+          Effect.andThen(evidence("failed")),
+        )
   if (blockingWindow !== undefined) {
     const early = yield* Fiber.await(fiber).pipe(Effect.timeoutOption(blockingWindow))
-    if (Option.isNone(early))
-      return {
-        digest,
-        commitSha,
-        buildDigest: context.buildDigest,
-        environmentDigest: context.environmentDigest,
-        startedAt,
-        finishedAt: yield* Clock.currentTimeMillis,
-        outcome: "continued" as const,
-      }
-    const result = yield* Exit.match(early.value, { onFailure: Effect.failCause, onSuccess: Effect.succeed })
-    if (result.code !== 0) return yield* hookFailure(name)
-  } else {
-    const result = yield* Fiber.join(fiber)
-    if (name === "setup")
-      yield* fileSystem.writeFileString(context.setupLog, context.redact(result.output), { mode: 0o600 })
-    if (result.code !== 0) return yield* hookFailure(name)
+    if (Option.isNone(early)) return yield* evidence("continued")
+    return yield* finished(yield* Exit.match(early.value, { onFailure: Effect.failCause, onSuccess: Effect.succeed }))
   }
-  return {
-    digest,
-    commitSha,
-    buildDigest: context.buildDigest,
-    environmentDigest: context.environmentDigest,
-    startedAt,
-    finishedAt: yield* Clock.currentTimeMillis,
-    outcome: "completed" as const,
-  }
+  const result = yield* Fiber.join(fiber)
+  if (name === "setup")
+    yield* fileSystem.writeFileString(context.setupLog, context.redact(result.output), { mode: 0o600 })
+  return yield* finished(result)
 })
-
-const hookFailure = (name: "setup" | "resume") =>
-  WorkspaceError.make({ phase: name, message: `.agents/${name} exited unsuccessfully`, retryable: true })
 
 export const inspectCapabilities = Effect.fn("Workspace.capabilities")(function* (
   context: PreparationContext,

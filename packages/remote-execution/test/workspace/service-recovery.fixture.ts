@@ -85,8 +85,11 @@ it.effect("blocks non-executable, failed, and timed-out setup until an explicit 
       yield* fileSystem.writeFileString(setup, "#!/bin/sh\nexit 7\n")
       yield* fileSystem.chmod(setup, 0o700)
       yield* fileSystem.writeFileString(`${markerDirectory}/setup.log`, "stale setup output")
-      expect((yield* Effect.flip(prepare({ ...base, assignment: retry }))).message).toContain("exited unsuccessfully")
+      const failedSetup = yield* prepare({ ...base, assignment: retry })
+      expect(failedSetup.setup.outcome).toBe("failed")
       expect(yield* fileSystem.readFileString(`${markerDirectory}/setup.log`)).not.toContain("stale setup output")
+      const failedMarker = yield* decodeJsonRecord(yield* fileSystem.readFileString(markerPath))
+      expect(failedMarker.setupState).toBe("failed")
       yield* fileSystem.writeFileString(setup, "#!/bin/sh\nwhile :; do sleep 1; done\n")
       expect((yield* Effect.flip(TestClock.withLive(prepare({ ...base, assignment: retry })))).message).toContain(
         "timed out",
@@ -95,7 +98,7 @@ it.effect("blocks non-executable, failed, and timed-out setup until an explicit 
   ).pipe(provideLayer(platform)),
 )
 
-it.effect("blocks an early resume failure and supervises continuation after the blocking window", () =>
+it.effect("records an early resume failure and supervises continuation after the blocking window", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -141,13 +144,14 @@ it.effect("blocks an early resume failure and supervises continuation after the 
         templateBuildId: "build-1",
         checkout: null,
       } as const
-      const failed = yield* Effect.flip(prepare({ ...base, assignment: cold }))
-      expect(failed).toMatchObject({ phase: "resume", retryable: true })
+      const failed = yield* prepare({ ...base, assignment: cold })
+      expect(failed.resume?.outcome).toBe("failed")
       yield* fileSystem.writeFileString(
         resume,
         `#!/bin/sh\nexport RIKA_CHILD_ONLY=value\nwhile [ ! -f "${root}/release" ]; do sleep 0.01; done\nprintf x >> "${root}/continued"\n`,
       )
-      const continued = yield* TestClock.withLive(prepare({ ...base, assignment: cold }))
+      const rewoken = { ...cold, wakeId: "wake-3" } as const
+      const continued = yield* TestClock.withLive(prepare({ ...base, assignment: rewoken }))
       expect(continued.resume?.outcome).toBe("continued")
       yield* fileSystem.writeFileString(`${root}/release`, "")
       const waitForContinuation: Effect.Effect<void, never, FileSystem.FileSystem> = Effect.suspend(() =>
@@ -161,7 +165,7 @@ it.effect("blocks an early resume failure and supervises continuation after the 
       yield* waitForContinuation
       expect(yield* fileSystem.readFileString(`${root}/continued`)).toBe("x")
       expect(yield* Config.option(Config.string("RIKA_CHILD_ONLY"))).toEqual(Option.none())
-      yield* prepare({ ...base, assignment: cold })
+      yield* prepare({ ...base, assignment: rewoken })
       expect(yield* fileSystem.readFileString(`${root}/continued`)).toBe("x")
     }),
   ).pipe(provideLayer(platform)),

@@ -183,7 +183,7 @@ const HookEvidenceWire = Schema.Struct({
   environmentDigest: Sha256,
   startedAt: Timestamp,
   finishedAt: Timestamp,
-  outcome: Schema.Literals(["missing", "completed", "continued"]),
+  outcome: Schema.Literals(["missing", "completed", "continued", "failed"]),
 })
 
 export const WorkspacePreparationEvidenceWire = Schema.Struct({

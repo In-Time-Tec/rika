@@ -116,9 +116,10 @@ const runSetup = Effect.fn("Workspace.runSetup")(function* (
     context.assignment.checkout?.commitSha ?? null,
     options.setupTimeout ?? 20 * 60 * 1_000,
   ).pipe(Effect.tapError(() => context.writeMarker({ ...marker, setupState: "failed" })))
-  const updated: Marker = { ...marker, setupState: "completed", setup }
+  const updated: Marker = { ...marker, setupState: setup.outcome === "failed" ? "failed" : "completed", setup }
   yield* context.writeMarker(updated)
-  yield* storeSetupCache(context, options, cacheKey)
+  // A failed setup is not cached: the next attempt reruns the hook instead of restoring its partial result.
+  if (updated.setupState === "completed") yield* storeSetupCache(context, options, cacheKey)
   return updated
 })
 

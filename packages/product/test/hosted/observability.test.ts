@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Inspectable, Logger, Metric, Tracer } from "effect"
+import { Cause, Effect, Exit, Inspectable, Logger, Metric, Schema, Tracer } from "effect"
 import * as Observability from "@rika/product/hosted-observability"
 
 describe("HostedObservability", () => {
@@ -50,6 +50,33 @@ describe("HostedObservability", () => {
       }
       assert.isTrue(Exit.isFailure(interruptionExit) && Cause.hasInterruptsOnly(interruptionExit.cause))
     }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([defectingLogger])))
+  })
+
+  it.effect("names the failure cause on a failed stage and warns", () => {
+    const logs: Array<ReturnType<typeof Logger.formatStructured.log>> = []
+    const logger = Logger.map(Logger.formatStructured, (record) => logs.push(record))
+    class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", { message: Schema.String }) {}
+    return Effect.gen(function* () {
+      yield* Effect.exit(
+        Observability.observe(
+          "attach",
+          { threadId: "thread-01" },
+          Effect.fail(ProviderError.make({ message: "sandbox   quota\nexceeded" })),
+        ),
+      )
+      yield* Effect.exit(Observability.observe("attach", {}, Effect.die("x".repeat(2_000))))
+      yield* Effect.exit(Observability.observe("attach", {}, Effect.interrupt))
+
+      const [failed, defected, interrupted] = logs
+      assert.strictEqual(failed?.message, "hosted.attach.failure")
+      assert.strictEqual(failed?.level, "WARN")
+      assert.strictEqual(failed?.annotations["rika.failure.message"], "ProviderError: sandbox quota exceeded")
+      assert.strictEqual(defected?.level, "WARN")
+      assert.isAtMost(String(defected?.annotations["rika.failure.message"]).length, 601)
+      assert.strictEqual(interrupted?.message, "hosted.attach.interrupted")
+      assert.strictEqual(interrupted?.level, "INFO")
+      assert.notProperty(interrupted?.annotations, "rika.failure.message")
+    }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
   })
 
   it.effect("separates immediate milestones from measured completion and redacts annotations", () => {

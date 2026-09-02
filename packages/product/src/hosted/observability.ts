@@ -123,7 +123,26 @@ export const annotations = (correlation: Correlation): HostedAnnotations => {
   return values
 }
 
-const record = (stage: Stage, outcome: Outcome, correlation: Correlation, durationMillis?: number) => {
+const failureMessageLimit = 600
+
+/** A bounded, single-line description of why a stage failed, so a failure log line names its cause. */
+export const failureMessage = (cause: Cause.Cause<unknown>): string => {
+  const squashed = Cause.squash(cause)
+  const text =
+    squashed instanceof Error
+      ? `${squashed.name}: ${squashed.message}`
+      : (Cause.pretty(cause).split("\n")[0] ?? "unknown failure")
+  const singleLine = text.replace(/\s+/g, " ").trim()
+  return singleLine.length > failureMessageLimit ? `${singleLine.slice(0, failureMessageLimit)}…` : singleLine
+}
+
+const record = (
+  stage: Stage,
+  outcome: Outcome,
+  correlation: Correlation,
+  durationMillis?: number,
+  failure?: Cause.Cause<unknown>,
+) => {
   const dimensions = { stage, outcome }
   const values: TelemetryAttributes = {
     ...annotations(correlation),
@@ -131,13 +150,15 @@ const record = (stage: Stage, outcome: Outcome, correlation: Correlation, durati
     "rika.hosted.outcome": outcome,
   }
   if (durationMillis !== undefined) values["rika.duration.millis"] = durationMillis
+  if (failure !== undefined) values["rika.failure.message"] = failureMessage(failure)
+  const log = outcome === "failure" ? Effect.logWarning : Effect.logInfo
   return Metric.update(Metric.withAttributes(operationCount, dimensions), 1).pipe(
     Effect.andThen(
       durationMillis === undefined
         ? Effect.void
         : Metric.update(Metric.withAttributes(operationDuration, dimensions), durationMillis),
     ),
-    Effect.andThen(Effect.logInfo(`hosted.${stage}.${outcome}`).pipe(Effect.annotateLogs(values))),
+    Effect.andThen(log(`hosted.${stage}.${outcome}`).pipe(Effect.annotateLogs(values))),
   )
 }
 
@@ -165,7 +186,13 @@ export const observe = Effect.fnUntraced(function* <A, E, R>(
         if (Exit.isSuccess(exit)) return outcomeOf?.(exit.value) ?? "success"
         return Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "failure"
       })
-      yield* record(stage, outcome, correlation, durationMillis)
+      yield* record(
+        stage,
+        outcome,
+        correlation,
+        durationMillis,
+        Exit.isFailure(exit) && outcome === "failure" ? exit.cause : undefined,
+      )
       yield* Effect.annotateCurrentSpan({ "rika.hosted.outcome": outcome, "rika.duration.millis": durationMillis })
     }).pipe(Effect.annotateLogs(values), Effect.withSpan(`rika.hosted.${stage}`, { attributes: values })),
   )
