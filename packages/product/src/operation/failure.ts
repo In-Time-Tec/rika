@@ -82,5 +82,3 @@ export const makeFailure = <ErrorValue>(error: ErrorValue): Failure => {
     return { tag, category: "operation", message, retryable: false, retry: "none", actor: "environment" }
   return { tag, category: "defect", message, retryable: false, retry: "none", actor: "rika" }
 }
-
-export const makeFailureFromError = makeFailure

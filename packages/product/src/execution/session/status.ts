@@ -37,10 +37,3 @@ export const isTerminalStatus = (status: Status): status is TerminalStatus => {
 export const isActiveStatus = (status: Status): boolean => !isTerminalStatus(status) && status !== "queued"
 
 export const occupiesQueue = (status: Status): boolean => !isTerminalStatus(status)
-
-export const terminalEventStatus = (eventType: string): Status | undefined => {
-  if (eventType === "execution.completed") return "completed"
-  if (eventType === "execution.failed") return "failed"
-  if (eventType === "execution.cancelled") return "cancelled"
-  return undefined
-}

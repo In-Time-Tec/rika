@@ -1,12 +1,13 @@
 import { Schema } from "effect"
+import { ThreadState } from "../model/state"
+
+export { ThreadState } from "../model/state"
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 const ListText = Schema.String.check(Schema.isMaxLength(128))
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 const FindLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(50))
 
-export const ThreadState = Schema.Literals(["idle", "queued", "running", "error"])
-export type ThreadState = typeof ThreadState.Type
 export const findDefaultLimit = 10
 export const findMaximumLimit = 50
 export const FindThreadInput = Schema.Struct({

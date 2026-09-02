@@ -7,9 +7,9 @@
 import { Duration } from "effect"
 
 export const turnRetryBudget = 3
-export const turnRetryInitialDelayMillis = 2_000
-export const turnRetryBackoffFactor = 2
-export const turnRetryMaxDelayMillis = 30_000
+const turnRetryInitialDelayMillis = 2_000
+const turnRetryBackoffFactor = 2
+const turnRetryMaxDelayMillis = 30_000
 
 export const turnRetryDelay = (input: {
   readonly attempt: number

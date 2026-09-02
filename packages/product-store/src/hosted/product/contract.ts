@@ -1,5 +1,6 @@
 import type { WorkspaceSeed as WorkspaceSeedValue } from "@rika/product/executor-assignment"
 import type { HostedOwner, JsonObject } from "@rika/product/hosted-model"
+import type { ProductProject } from "@rika/product/hosted-product"
 import { Effect, Schema } from "effect"
 
 export class ProductRepositoryError extends Schema.TaggedError<ProductRepositoryError>()("ProductRepositoryError", {
@@ -13,13 +14,7 @@ export interface OwnerAuthority {
   readonly userId: string
   readonly membershipId?: string
 }
-export interface ProductProject {
-  readonly id: string
-  readonly ownerId: string
-  readonly owner: HostedOwner
-  readonly name: string
-  readonly role: "viewer" | "controller" | "operator" | "owner"
-}
+export type { ProductProject } from "@rika/product/hosted-product"
 export interface ProjectAccess {
   readonly role: ProductProject["role"]
 }

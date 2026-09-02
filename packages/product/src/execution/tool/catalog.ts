@@ -12,7 +12,7 @@ export const Definition = Schema.Struct({
 })
 export type Definition = typeof Definition.Type
 
-export const makeDefinitions: {
+const makeDefinitions: {
   (
     registeredTools: ReadonlyArray<ToolPolicy.RegisteredTool>,
     registered: ReadonlyArray<ToolPolicy.Registration>,
@@ -188,4 +188,4 @@ export const resolvePresentation = (rawName: string): ToolPolicy.Presentation =>
   return { family: "generic", action: "tool", activeLabel: "Running tool", completeLabel: "Ran tool" }
 }
 
-export const Catalog = { Definition, definitions, makeDefinitions, get, resolvePresentation }
+export const Catalog = { Definition, definitions, get, resolvePresentation }

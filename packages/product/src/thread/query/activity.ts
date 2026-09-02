@@ -15,7 +15,7 @@ const resultDiff = (result: Schema.Json | undefined): string | undefined => {
   return diff !== undefined && diff.length > 0 ? diff : undefined
 }
 
-export const toolResultDiffs = (units: ReadonlyArray<Unit>): ReadonlyArray<string> =>
+const toolResultDiffs = (units: ReadonlyArray<Unit>): ReadonlyArray<string> =>
   units.flatMap((unit) => {
     if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall") return []
     const diff = resultDiff(unit.content.block.result)

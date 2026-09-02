@@ -1,19 +1,13 @@
 import { Function } from "effect"
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import { selectTranscriptWindow } from "./window-selection"
 
 export const transcriptPageEncoder = new TextEncoder()
-export const maximumTranscriptPageBytes = 32 * 1024 * 1024
+const maximumTranscriptPageBytes = 32 * 1024 * 1024
 export const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
 
 interface JsonEncoder {
   <Value>(value: Value): string
-}
-
-interface BoundedTurnEntries {
-  readonly entries: ReadonlyArray<TranscriptPage.Entry>
-  readonly contiguousFrom: number
 }
 
 interface BoundedTranscriptEntries {
@@ -22,24 +16,6 @@ interface BoundedTranscriptEntries {
   readonly truncated: boolean
   readonly oversizedEntry: boolean
 }
-
-const sameTranscriptCursorImpl = (
-  left: TranscriptPage.PageCursor | undefined,
-  right: TranscriptPage.PageCursor | undefined,
-  encodeJson: JsonEncoder,
-) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
-
-export const sameTranscriptCursor: {
-  (
-    arg1: TranscriptPage.PageCursor | undefined,
-    arg2: JsonEncoder,
-  ): (arg0: TranscriptPage.PageCursor | undefined) => ReturnType<typeof sameTranscriptCursorImpl>
-  (
-    arg0: TranscriptPage.PageCursor | undefined,
-    arg1: TranscriptPage.PageCursor | undefined,
-    arg2: JsonEncoder,
-  ): ReturnType<typeof sameTranscriptCursorImpl>
-} = Function.dual(3, sameTranscriptCursorImpl)
 
 export const transcriptCursorFor = (entry: TranscriptPage.Entry | undefined): TranscriptPage.PageCursor | undefined =>
   entry === undefined
@@ -50,38 +26,12 @@ export const transcriptCursorFor = (entry: TranscriptPage.Entry | undefined): Tr
         orderKey: TranscriptOrdering.encodeUnitOrder(entry.unit.order),
       }
 
-export const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean =>
+const isSemanticTranscriptEntry = (entry: TranscriptPage.Entry): boolean =>
   entry.unit.parentId === undefined &&
   (entry.unit.content._tag === "Entry" ||
     entry.unit.content.block._tag === "Compaction" ||
     entry.unit.content.block._tag === "ToolCall" ||
     entry.unit.executionOutcome !== undefined)
-
-const boundTurnEntriesImpl = (entries: ReadonlyArray<TranscriptPage.Entry>, detail: number): BoundedTurnEntries => {
-  if (detail >= entries.length) return { entries, contiguousFrom: 0 }
-  const semantic = entries.filter(isSemanticTranscriptEntry).length
-  const selection = selectTranscriptWindow({
-    values: entries,
-    unit: (entry) => entry.unit,
-    maximum: Math.max(0, detail - semantic),
-    focus: "newest",
-    retain: isSemanticTranscriptEntry,
-  })
-  const contiguousStart = selection.contiguousStart
-  const contiguousFrom =
-    contiguousStart === undefined
-      ? entries.length
-      : Math.max(
-          0,
-          entries.findIndex((entry) => entry.unit.key === contiguousStart.unit.key),
-        )
-  return { entries: selection.values, contiguousFrom }
-}
-
-export const boundTurnEntries: {
-  (arg1: number): (arg0: ReadonlyArray<TranscriptPage.Entry>) => ReturnType<typeof boundTurnEntriesImpl>
-  (arg0: ReadonlyArray<TranscriptPage.Entry>, arg1: number): ReturnType<typeof boundTurnEntriesImpl>
-} = Function.dual(2, boundTurnEntriesImpl)
 
 const boundTranscriptEntriesImpl = (
   sourceEntries: ReadonlyArray<TranscriptPage.Entry>,

@@ -6,7 +6,7 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import { Cause, Clock, Effect, Stream } from "effect"
 
-export const DefectMaxConsecutiveAttempts = 3
+const DefectMaxConsecutiveAttempts = 3
 export const StallMaxSilenceMs = 15 * 60_000
 
 interface WatchInput {

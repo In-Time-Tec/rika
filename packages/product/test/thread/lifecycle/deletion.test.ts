@@ -2,7 +2,7 @@ import { expect, it } from "@effect/vitest"
 import * as ExecutionSessionLifecycle from "@rika/product/execution-session-lifecycle"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as Thread from "@rika/product/thread-record"
-import * as ThreadDeletion from "@rika/product/thread-deletion"
+import * as ThreadDeletion from "../../../src/thread/lifecycle/deletion"
 import * as Turn from "@rika/product/turn-record"
 import { Effect } from "effect"
 

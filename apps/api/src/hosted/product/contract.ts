@@ -3,6 +3,7 @@ import type { AuthorizationAction } from "@rika/product/hosted-authorization"
 import type { ActorAttribution, HostedOwner, JsonObject, OwnerId, ThreadId } from "@rika/product/hosted-model"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import type { PromptPart } from "@rika/product/execution-request"
+import type { ProductProject } from "@rika/product/hosted-product"
 import type { RemoteThreadCreationPreference, RunnerProfile, RunnerTarget } from "@rika/product/runner-registration"
 import { ProductRepositoryError } from "@rika/product-store/product-repository"
 import { RunnerRegistrationsError } from "@rika/product-store/runner-registrations"
@@ -17,13 +18,7 @@ export interface AuthenticatedPrincipal {
 
 export type OwnerSelection = HostedOwner
 
-export interface ProjectContext {
-  readonly id: string
-  readonly ownerId: string
-  readonly owner: HostedOwner
-  readonly name: string
-  readonly role: "viewer" | "controller" | "operator" | "owner"
-}
+export type ProjectContext = ProductProject
 
 export type AdmittedRun =
   | {
