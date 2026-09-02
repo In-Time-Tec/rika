@@ -212,12 +212,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             now: 23,
           })
           expect(yield* summaries.list()).toMatchObject([
-            {
-              id: threadId,
-              status: "running",
-              turnCount: 3,
-              editTotals: { added: 3, modified: 2, removed: 1 },
-            },
+            { id: threadId, status: "running", turnCount: 3, editTotals: { added: 3, modified: 2, removed: 1 } },
           ])
 
           const key = "assistant:product-active"
