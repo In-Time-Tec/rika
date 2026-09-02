@@ -7,6 +7,7 @@ import { Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Semaphore } f
 import { GatewayError, type OperationIdentity, type Socket, type SocketFrame } from "../executor/gateway"
 import { gatewayExecutionFactory } from "../executor/gateway/execution"
 import { gatewayProtocol } from "../executor/gateway/protocol"
+import { sendFrame } from "../executor/gateway/send-frame"
 import { gatewaySessionAwaiter } from "../executor/gateway/sessions"
 import type { PendingOperation } from "../executor/gateway/rpc/model"
 import { LifecycleStores } from "../executor/lifecycle-store"
@@ -58,11 +59,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
         }),
       ),
     sameAccess: same,
-    send: (session, message) =>
-      Effect.try({
-        try: () => session.socket.send(gatewayModel.encode(message)),
-        catch: (cause) => failure("transport", `Could not deliver Runner native operation: ${String(cause)}`),
-      }),
+    send: (session, message) => sendFrame(session.socket, gatewayModel.encode(message), "Runner native operation"),
   })
   const calls = {
     receiveMachine: Effect.fn("RunnerGateway.receiveNativeOperation")(function* (

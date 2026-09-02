@@ -21,8 +21,12 @@ import type {
 } from "@rika/remote-execution/protocol"
 import { Effect, Redacted, Schema, Stream } from "effect"
 
+/**
+ * A Bun `ServerWebSocket.send` returns the byte count it wrote, `-1` when the frame was queued behind backpressure,
+ * and `0` when the frame was dropped. Test sockets may return nothing.
+ */
 export interface Socket {
-  readonly send: (message: string) => void
+  readonly send: (message: string) => number | undefined
   readonly close: (code?: number, reason?: string) => void
   readonly getBufferedAmount?: () => number
 }

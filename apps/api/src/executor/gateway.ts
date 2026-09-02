@@ -21,6 +21,7 @@ import { gatewayControlFactory } from "./gateway/control"
 import { gatewayExecutionFactory } from "./gateway/execution"
 import { gatewayMessageHandlerFactory } from "./gateway/message/handler"
 import { gatewayProtocol } from "./gateway/protocol"
+import { sendFrame } from "./gateway/send-frame"
 import { gatewaySessionAwaiter, gatewaySessionsFactory } from "./gateway/sessions"
 import { undecodableFrame } from "./gateway/undecodable-frame"
 import { workspaceRpcFactory } from "./gateway/rpc/workspace"
@@ -102,12 +103,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
         }),
       ),
     sameAccess: gatewayProtocol.sameAccess,
-    send: (session, message) =>
-      Effect.try({
-        try: () => session.socket.send(encode(message)),
-        catch: (cause) =>
-          GatewayError.make({ kind: "transport", message: `Could not deliver native operation: ${String(cause)}` }),
-      }),
+    send: (session, message) => sendFrame(session.socket, encode(message), "native operation"),
   })
   const workspaceRpc = workspaceRpcFactory({
     controller,

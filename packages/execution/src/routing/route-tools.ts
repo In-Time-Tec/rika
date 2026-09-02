@@ -19,11 +19,16 @@ const placementFailure = (tool: string, message: string) =>
 
 const cancellationFailure = (tool: string, message: string) => ToolExecutor.CancellationFailure.make({ tool, message })
 
+/**
+ * The gateway deadline starts at admission and must cover delivery to the Executor plus the tool's own runtime
+ * timeout (10 s for read and edit). A deadline equal to that timeout would fail an edit the Runner is still
+ * completing, so read and edit get three times their runtime budget.
+ */
 const timeoutFor = (toolName: string): number => {
   switch (toolName) {
     case "read":
     case "edit":
-      return 10_000
+      return 30_000
     case "shell_command_status":
       return 15_000
     default:

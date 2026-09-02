@@ -1,5 +1,5 @@
 import type { AccessWire, ApiMessage, MachineOutcome, MachineRequest } from "@rika/remote-execution/protocol"
-import { Clock, Deferred, Effect, Ref, Semaphore } from "effect"
+import { Clock, DateTime, Deferred, Effect, Ref, Semaphore } from "effect"
 import { GatewayError, type Socket } from "./gateway/contract"
 
 export interface NativeOperationSession {
@@ -96,6 +96,13 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
     return yield* Deferred.await(operation.result)
   })
 
+  const annotations = (operation: NativeOperationIdentity) => ({
+    "rika.assignment.id": operation.assignmentId,
+    "rika.operation.key": operation.operationKey,
+    "rika.operation.attempt": operation.attempt,
+    "rika.machine.id": operation.machineId,
+  })
+
   const deliver = (key: string, operation: PendingNativeOperation, session: NativeOperationSession) => {
     const correlation = {
       access: session.access,
@@ -104,41 +111,59 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
       machineId: operation.machineId,
       requestDigest: operation.requestDigest,
     }
-    return options
-      .send(
-        session,
-        operation.cancelling
-          ? { _tag: "MachineCancel", ...correlation }
-          : { _tag: "MachineExecute", ...correlation, request: operation.request },
-      )
-      .pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("native-operation.delivery-failed").pipe(
-            Effect.annotateLogs({
-              "rika.assignment.id": operation.assignmentId,
-              "rika.operation.key": operation.operationKey,
-              "rika.error.kind": error.kind,
-              "rika.error.message": error.message,
+    const message: ApiMessage = operation.cancelling
+      ? { _tag: "MachineCancel", ...correlation }
+      : { _tag: "MachineExecute", ...correlation, request: operation.request }
+    return options.send(session, message).pipe(
+      Effect.andThen(
+        Effect.logInfo("native-operation.delivered").pipe(
+          Effect.annotateLogs({
+            ...annotations(operation),
+            "rika.message.tag": message._tag,
+            "rika.operation.deadlineAt": DateTime.formatIso(DateTime.makeUnsafe(operation.deadlineAtMillis)),
+          }),
+        ),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("native-operation.delivery-failed").pipe(
+          Effect.annotateLogs({
+            ...annotations(operation),
+            "rika.error.kind": error.kind,
+            "rika.error.message": error.message,
+          }),
+          Effect.andThen(
+            Ref.update(pending, (current) => {
+              const known = current.get(key)
+              if (known?.result !== operation.result || known.session?.socket !== session.socket) return current
+              const next = new Map(current)
+              next.delete(key)
+              return next
             }),
-            Effect.andThen(
-              Ref.update(pending, (current) => {
-                const known = current.get(key)
-                if (known?.result !== operation.result || known.session?.socket !== session.socket) return current
-                const next = new Map(current)
-                next.delete(key)
-                return next
-              }),
-            ),
           ),
         ),
-      )
+      ),
+    )
   }
+
+  const expire = (key: string, operation: PendingNativeOperation) =>
+    Effect.gen(function* () {
+      const current = (yield* Ref.get(pending)).get(key) ?? operation
+      yield* Effect.logWarning("native-operation.deadline").pipe(
+        Effect.annotateLogs({
+          ...annotations(operation),
+          "rika.operation.deadlineAt": DateTime.formatIso(DateTime.makeUnsafe(operation.deadlineAtMillis)),
+          "rika.operation.connected": current.session !== undefined,
+          "rika.operation.cancelling": current.cancelling,
+        }),
+      )
+      return yield* fail(key, operation, deadline())
+    })
 
   const awaitOutcome = (key: string, operation: PendingNativeOperation) =>
     Effect.gen(function* () {
       const remaining = Math.max(0, operation.deadlineAtMillis - (yield* Clock.currentTimeMillis))
       return yield* Deferred.await(operation.result).pipe(
-        Effect.timeoutOrElse({ duration: remaining, orElse: () => fail(key, operation, deadline()) }),
+        Effect.timeoutOrElse({ duration: remaining, orElse: () => expire(key, operation) }),
       )
     })
 
@@ -222,7 +247,10 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
   ) {
     const key = callKey(input)
     const operation = (yield* Ref.get(pending)).get(key)
-    if (operation === undefined) return
+    if (operation === undefined)
+      return yield* Effect.logInfo("native-operation.result-unmatched").pipe(
+        Effect.annotateLogs({ ...annotations(input), "rika.outcome.tag": input.outcome._tag }),
+      )
     if (
       operation.requestDigest !== input.requestDigest ||
       operation.session?.socket !== session.socket ||
