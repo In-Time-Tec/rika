@@ -1,29 +1,9 @@
 import { createArchive } from "@rika/remote-execution/workspace-archive"
-import { Effect, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect } from "effect"
+import { gitOutput } from "../../platform/git"
 import { HostedError } from "../contract"
 
 const failure = (message: string) => HostedError.make({ kind: "invalid-input", message })
-
-const git = Effect.fn("HostedWorkspaceSeed.git")(function* (workspace: string, arguments_: ReadonlyArray<string>) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  return yield* Effect.scoped(
-    Effect.gen(function* () {
-      const child = yield* spawner
-        .spawn(ChildProcess.make("git", ["-C", workspace, ...arguments_], { stdout: "pipe", stderr: "ignore" }))
-        .pipe(Effect.option)
-      if (child._tag === "None") return undefined
-      const result = yield* Effect.all([Stream.mkString(Stream.decodeText(child.value.stdout)), child.value.exitCode], {
-        concurrency: 2,
-      }).pipe(Effect.option)
-      if (result._tag === "None") return undefined
-      const [output, exitCode] = result.value
-      if (Number(exitCode) !== 0) return undefined
-      const value = output.trim()
-      return value.length === 0 ? undefined : value
-    }),
-  )
-})
 
 export const sourceRepository = (remote: string | undefined) => {
   if (remote === undefined) return undefined
@@ -41,13 +21,13 @@ export const sourceRepository = (remote: string | undefined) => {
 }
 
 export const prepareWorkspaceSeed = Effect.fn("HostedWorkspaceSeed.prepare")(function* (workspace: string) {
-  const root = (yield* git(workspace, ["rev-parse", "--show-toplevel"])) ?? workspace
+  const root = (yield* gitOutput(workspace, ["rev-parse", "--show-toplevel"])) ?? workspace
   const [archive, remote] = yield* Effect.all(
     [
       createArchive(root).pipe(
         Effect.mapError((error) => failure(`Could not seed the local Workspace: ${error.message}`)),
       ),
-      git(root, ["remote", "get-url", "origin"]),
+      gitOutput(root, ["remote", "get-url", "origin"]),
     ],
     { concurrency: 2 },
   )

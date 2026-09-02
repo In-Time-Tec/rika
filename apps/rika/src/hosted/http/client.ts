@@ -6,6 +6,32 @@ import { OAuthErrorWire, TokenWire, tokensFrom } from "./schema"
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 
+const detailLimit = 240
+
+/** One line of the server's error body, preferring a JSON `message` field, bounded so it fits a status line. */
+const ErrorBody = Schema.fromJsonString(
+  Schema.Struct({
+    message: Schema.optionalKey(Schema.String),
+    error_description: Schema.optionalKey(Schema.String),
+    error: Schema.optionalKey(Schema.String),
+  }),
+)
+const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody)
+
+export const responseDetail = (body: string): string => {
+  const trimmed = body.trim()
+  if (trimmed === "") return ""
+  const detail = Option.match(decodeErrorBody(trimmed), {
+    onNone: () => trimmed,
+    onSome: (parsed) => {
+      const candidate = parsed.message ?? parsed.error_description ?? parsed.error
+      return candidate === undefined || candidate.trim() === "" ? trimmed : candidate
+    },
+  })
+  const line = detail.replace(/\s+/g, " ").trim()
+  return `: ${line.length > detailLimit ? `${line.slice(0, detailLimit - 1)}…` : line}`
+}
+
 export const clientOperations = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   const crypto = yield* Crypto.Crypto
@@ -25,26 +51,35 @@ export const clientOperations = Effect.gen(function* () {
     schema: S,
     message: string,
   ) => HttpClientResponse.schemaBodyJson(schema)(response).pipe(Effect.mapError(() => failure("protocol", message)))
-  const responseError = (response: HttpClientResponse.HttpClientResponse, action: string) => {
-    if (response.status === 401) return failure("login-required", "Identity login is required")
-    if (response.status === 429) {
-      const value = response.headers["x-retry-after"] ?? response.headers["retry-after"]
-      const seconds = value === undefined ? Number.NaN : Number(value)
-      const retryAfterMillis = Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
-      const suffix = retryAfterMillis === undefined ? "" : `; retry in ${Math.ceil(retryAfterMillis / 1_000)} seconds`
-      const limited = {
-        kind: "rate-limit",
-        message: `${action} was rate limited${suffix}`,
+  /**
+   * Builds the failure for a non-2xx response. The status and a short body excerpt travel in the message so the
+   * user and the diagnostics log see why the server refused, not only that it did.
+   */
+  const responseError = (
+    response: HttpClientResponse.HttpClientResponse,
+    action: string,
+  ): Effect.Effect<never, HostedError> =>
+    Effect.gen(function* () {
+      if (response.status === 401) return yield* failure("login-required", "Identity login is required")
+      if (response.status === 429) {
+        const value = response.headers["x-retry-after"] ?? response.headers["retry-after"]
+        const seconds = value === undefined ? Number.NaN : Number(value)
+        const retryAfterMillis = Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1_000) : undefined
+        const suffix = retryAfterMillis === undefined ? "" : `; retry in ${Math.ceil(retryAfterMillis / 1_000)} seconds`
+        const limited = {
+          kind: "rate-limit",
+          message: `${action} was rate limited${suffix}`,
+          status: response.status,
+        } as const
+        return yield* HostedError.make(retryAfterMillis === undefined ? limited : { ...limited, retryAfterMillis })
+      }
+      const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
+      return yield* HostedError.make({
+        kind: response.status >= 500 ? "network" : "protocol",
+        message: `${action} failed (HTTP ${response.status})${responseDetail(body)}`,
         status: response.status,
-      } as const
-      return HostedError.make(retryAfterMillis === undefined ? limited : { ...limited, retryAfterMillis })
-    }
-    return HostedError.make({
-      kind: response.status >= 500 ? "network" : "protocol",
-      message: `${action} failed`,
-      status: response.status,
+      })
     })
-  }
   const withDpop = Effect.fn("HostedHttp.withDpop")(function* (
     request: HttpClientRequest.HttpClientRequest,
     method: string,
@@ -90,7 +125,7 @@ export const clientOperations = Effect.gen(function* () {
       Effect.flatMap((response) =>
         response.status >= 200 && response.status < 300
           ? decode(response, schema, `${action} returned an invalid response`)
-          : Effect.fail(responseError(response, action)),
+          : responseError(response, action),
       ),
     )
   const authenticatedEmpty = (
@@ -103,7 +138,7 @@ export const clientOperations = Effect.gen(function* () {
     withDpop(request, method, url, session.privateJwk, session.accessToken).pipe(
       Effect.flatMap(execute),
       Effect.flatMap((response) =>
-        response.status >= 200 && response.status < 300 ? Effect.void : Effect.fail(responseError(response, action)),
+        response.status >= 200 && response.status < 300 ? Effect.void : responseError(response, action),
       ),
     )
   return { authenticatedEmpty, authenticatedJson, decode, execute, responseError, tokenResponse, withDpop }

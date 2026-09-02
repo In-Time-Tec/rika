@@ -28,10 +28,10 @@ import process, { stdin, stdout } from "node:process"
 import { terminalTitleSequence } from "../program"
 import * as ProcessEvents from "./events"
 import * as ProcessRuntime from "../runtime/service"
+import { provideLayerScoped } from "../../../platform/provide"
 import { initializeRenderer } from "./setup"
 import type { InteractiveLoop } from "../runtime/context"
 import type { TuiLifecycle } from "./interrupt"
-import { provideLayerScoped } from "../runtime/layer"
 
 class EventRouter extends Context.Service<EventRouter, { readonly make: typeof ProcessEvents.makeEventRouter }>()(
   "@rika/cli/interactive/process/lifecycle/loop/EventRouter",

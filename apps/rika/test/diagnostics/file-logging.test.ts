@@ -278,7 +278,7 @@ describe("Logging", () => {
         for (const secret of secrets) assert.notInclude(content, secret)
         const record = yield* decodeRecord(content.trim())
         assert.strictEqual(record.message, "diagnostic.unstructured")
-        assert.strictEqual(record.detail, undefined)
+        assert.strictEqual(record.detail, "usage repository refused an incomplete tree\n14")
         assert.deepStrictEqual(record.annotations, {
           "rika.execution.id": "run-42",
           "rika.failure.category": "invalid_input",

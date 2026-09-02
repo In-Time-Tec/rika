@@ -4,6 +4,7 @@ import {
   type ForegroundRunnerReceiptStore,
 } from "@rika/remote-execution/foreground"
 import { Effect, FileSystem, Option, Schema } from "effect"
+import { writePrivateFile } from "../platform/private-file"
 
 const SnapshotDisk = Schema.Struct({ formatVersion: Schema.Literal(1), snapshot: ForegroundRunnerSnapshot })
 const failure = (message: string) => ForegroundRunnerError.make({ message })
@@ -15,7 +16,6 @@ export const makeRunnerReceiptStore = Effect.fn("RunnerReceiptStore.make")(funct
 }) {
   const fileSystem = yield* FileSystem.FileSystem
   const expectedUid = process.getuid?.()
-  let writeSequence = 0
   const prefix = `${encodeURIComponent(new URL(options.origin).origin)}-${encodeURIComponent(options.deviceId)}`
   const filename = (scope: string) => `${options.directory}/${prefix}-${encodeURIComponent(scope)}.json`
   const unavailable = () => failure("Runner recovery storage is unavailable")
@@ -66,18 +66,9 @@ export const makeRunnerReceiptStore = Effect.fn("RunnerReceiptStore.make")(funct
         snapshot,
       }).pipe(Effect.mapError(() => failure("Runner recovery state could not be encoded")))
       yield* directoryReady(true)
-      writeSequence += 1
       const target = filename(scope)
       yield* filePresent(target)
-      const temporary = `${target}.tmp-${process.pid}-${writeSequence}`
-      yield* fileSystem
-        .writeFileString(temporary, value, { flag: "wx", mode: 0o600 })
-        .pipe(
-          Effect.andThen(fileSystem.chmod(temporary, 0o600)),
-          Effect.andThen(fileSystem.rename(temporary, target)),
-          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
-          Effect.mapError(unavailable),
-        )
+      yield* writePrivateFile(fileSystem, target, value).pipe(Effect.mapError(unavailable))
     })
   const remove = (scope: string) => {
     const target = filename(scope)

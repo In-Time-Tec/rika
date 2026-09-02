@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Schema } from "effect"
 import { RunnerError, RemoteThreadCreation } from "./contract"
+import { writePrivateFile } from "../platform/private-file"
 
 const PreferenceFile = Schema.Struct({
   formatVersion: Schema.Literal(1),
@@ -38,12 +39,7 @@ export const make = Effect.fn("RunnerPreference.make")(function* (path: string) 
           formatVersion: 1,
           checkouts: { ...current.checkouts, [key(deviceId, checkoutFingerprint)]: preference },
         }).pipe(Effect.mapError(() => failure("Runner admission could not be encoded")))
-        const parent = path.slice(0, Math.max(path.lastIndexOf("/"), 1))
-        const temporary = `${path}.tmp-${process.pid}`
-        yield* fileSystem.makeDirectory(parent, { recursive: true, mode: 0o700 }).pipe(
-          Effect.andThen(fileSystem.writeFileString(temporary, encoded, { mode: 0o600 })),
-          Effect.andThen(fileSystem.rename(temporary, path)),
-          Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
+        yield* writePrivateFile(fileSystem, path, encoded).pipe(
           Effect.mapError(() => failure("Runner admission could not be saved")),
         )
       }),

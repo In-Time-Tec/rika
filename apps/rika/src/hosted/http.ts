@@ -65,7 +65,7 @@ export const layer = Layer.effect(
           Effect.flatMap((response) =>
             response.status >= 200 && response.status < 300
               ? decode(response, RegistrationWire, "CLI registration returned an invalid response")
-              : Effect.fail(responseError(response, "CLI registration")),
+              : responseError(response, "CLI registration"),
           ),
           Effect.map((wire) => Registration.make({ clientId: wire.client_id })),
         )
@@ -136,7 +136,7 @@ export const layer = Layer.effect(
                 Effect.map((tokens) => ({ _tag: "Complete" as const, tokens })),
               )
             if (response.status >= 500 || response.status === 429)
-              return Effect.fail(responseError(response, "Device token request"))
+              return responseError(response, "Device token request")
             return decode(response, OAuthErrorWire, "Device token response was invalid").pipe(
               Effect.flatMap((body): Effect.Effect<DevicePoll, HostedError> => {
                 if (body.error === "authorization_pending") return Effect.succeed({ _tag: "Pending" as const })

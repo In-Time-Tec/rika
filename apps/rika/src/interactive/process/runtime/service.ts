@@ -3,9 +3,9 @@ import * as ProcessFiles from "../workspace/files"
 import * as ProcessLifecycle from "../lifecycle/contract"
 import * as ProcessPrompt from "../input/prompt"
 import * as ProcessWorkspace from "../workspace/context"
-import * as ProcessLayer from "./layer"
 import { pendingActionConsumer } from "./pending-action"
 import * as ProcessSignals from "../lifecycle/signals"
+import { provideLayerScoped } from "../../../platform/provide"
 import {
   classifyPrompt,
   displayInput,
@@ -20,14 +20,12 @@ type PromptPart = ReturnType<ReturnType<typeof promptParts>>[number]
 import * as Thread from "@rika/product/thread-record"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Cause, Clock, Deferred, Effect, Exit, Fiber, FileSystem, SubscriptionRef } from "effect"
-import * as Logging from "../../../diagnostics/file-logging"
 import { workspaceDirectory } from "@rika/configuration/configuration-paths"
 import type { InteractiveRuntimeContext } from "./context"
 
 type Runtime = InteractiveRuntimeContext
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
 type RuntimeAdapter = Mutable<Adapter>
-const provideLayerScoped = ProcessLayer.provideLayerScoped
 const noopSelectionResync = (_threadId: string) => undefined
 const mkdir = ProcessFiles.mkdir
 const rm = ProcessFiles.rm
@@ -81,7 +79,6 @@ export const makeProcessRuntime = (runtime: Runtime) => {
           if (loop.initialization !== undefined) yield* Fiber.await(loop.initialization)
           if (showGoodbye) ProcessSignals.writeGoodbye(loop.model)
           yield* Effect.logInfo("tui.teardown.completed")
-          yield* Logging.settleActiveLogs
         }),
       )
     })
