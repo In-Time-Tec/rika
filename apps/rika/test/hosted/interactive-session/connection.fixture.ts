@@ -13,10 +13,10 @@ it.effect("stops instead of reconnecting after a terminal protocol failure", () 
       const harness = H.makeHarness(H.fixtures.defaultReceive)
       const hosted = yield* H.runSession(harness)
       harness.sockets[0]!.invalidFrame()
-      expect(yield* Effect.flip(Fiber.join(hosted.eventFiber))).toMatchObject({
-        operation: "InteractiveSession.events",
-      })
-      expect(hosted.states.at(-1)?.connectivity).toBe("disconnected")
+      const failure = yield* Effect.flip(Fiber.join(hosted.eventFiber))
+      expect(failure).toMatchObject({ operation: "InteractiveSession.events" })
+      expect(hosted.states.at(-1)).toMatchObject({ connectivity: "disconnected", errorMessage: failure.message })
+      expect(failure.message).not.toBe("")
       yield* TestClock.adjust("1 minute")
       expect(harness.sockets).toHaveLength(1)
     }),

@@ -19,6 +19,8 @@ export interface State {
   readonly activity?: Activity
   readonly ownership?: Ownership
   readonly participants: number
+  /** Reason for a terminal `disconnected` state; absent while connected or reconnecting. */
+  readonly errorMessage?: string
 }
 
 export interface Connection {

@@ -334,7 +334,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     Effect.suspend(() => {
       if (stopped) return Effect.void
       let attached = false
-      return update((previousState) => ({
+      return update(({ errorMessage: _, ...previousState }) => ({
         ...previousState,
         connectivity: connectedBefore ? "reconnecting" : "connecting",
         activity: "authenticating",
@@ -396,6 +396,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
                   return update((previousState) => ({
                     ...previousState,
                     connectivity: "disconnected",
+                    errorMessage: error.message,
                   })).pipe(Effect.andThen(Effect.fail(error)))
                 const attempt = attached ? 0 : failedAttempts
                 const delay = reconnectDelay(
