@@ -35,23 +35,20 @@ const watchFailureMessage = (cause: unknown) => {
   return message(cause)
 }
 
-const rootEvents = (
-  runtime: Runtime.Service,
-  link: ExecutionGateway.ExecutionLink,
-  input: WatchInput,
-  hosted: boolean,
-) =>
+const rootEvents = (runtime: Runtime.Service, link: ExecutionGateway.ExecutionLink, hosted: boolean) =>
   Stream.unwrap(
     runtime.treeCheckpoint(link.runId).pipe(
       Effect.map((checkpoint) => {
         const observeModel = hosted ? RuntimeTelemetry.makeHostedModelObserver(link) : () => Effect.void
-        let observeLive = input?.checkpoint === undefined
+        // Events up to the tree head at watch start are history. Re-emitting their telemetry on every
+        // restart or fresh watch floods the hosted logs, so only events that arrive afterwards are observed.
+        let observeLive = checkpoint.inspection.runs.length === 0
         return RunTree.watch({ rootRunId: link.runId, settlement: "root-blocked" }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
           Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
           Stream.tap((event) => {
             if (observeLive) return observeModel(event)
-            if (event.cursor === input?.checkpoint?.cursor) observeLive = true
+            if (event.cursor === checkpoint.cursor) observeLive = true
             return Effect.void
           }),
           Stream.map((event): RootProjectionEvent => ({ _tag: "root", event, checkpoint })),
@@ -226,7 +223,7 @@ const watchTurn = (
   } catch (cause) {
     return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
   }
-  const projected = Stream.merge(rootEvents(runtime, link, input, hosted), titleEvents(runtime, link.titleRunId)).pipe(
+  const projected = Stream.merge(rootEvents(runtime, link, hosted), titleEvents(runtime, link.titleRunId)).pipe(
     Stream.mapEffect(projectEvents(runtime, projector)),
     Stream.flatMap(Stream.fromIterable),
     Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: watchFailureMessage(cause) })),
