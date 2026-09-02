@@ -261,6 +261,28 @@ const markdownStream = Effect.fn("TerminalBenchmark.markdownStream")(function* (
   )
 })
 
+const warmTerminal = Effect.fn("TerminalBenchmark.warmTerminal")(function* () {
+  yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.warmTerminal.use")(function* (runtime) {
+      const source = markdownAnswer().slice(0, 4 * 1_024)
+      let model: Model = {
+        ...initial("/benchmark", "medium"),
+        width: 120,
+        height: 36,
+        currentThreadId: "benchmark-warmup",
+      }
+      for (let offset = 32, revision = 0; offset <= source.length; offset += 32, revision += 1) {
+        model = projectUnits(model, [assistantUnit("tentative:warmup", source.slice(0, offset), revision)])
+        runtime.surface.update(model)
+        yield* renderOnce(runtime.setup.renderOnce)
+      }
+    }),
+  )
+})
+
 const toolOutput = Effect.fn("TerminalBenchmark.toolOutput")(function* () {
   return yield* withSurface(
     120,
@@ -394,6 +416,7 @@ const resizeStorm = Effect.fn("TerminalBenchmark.resizeStorm")(function* () {
 })
 
 export const runTerminalBenchmark = Effect.fn("TerminalBenchmark.run")(function* () {
+  yield* warmTerminal()
   const metrics = [
     yield* markdownStream(),
     yield* toolOutput(),
