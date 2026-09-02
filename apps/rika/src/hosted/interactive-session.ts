@@ -62,7 +62,6 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
       Effect.logWarning("thread-list.refresh.failed").pipe(Effect.annotateLogs("message", error.message)),
     ),
   )
-
   const publishConnection = (value: PhysicalConnection | undefined) => {
     current = value
     connecting = undefined
