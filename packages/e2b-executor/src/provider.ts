@@ -85,6 +85,9 @@ export interface SdkHandle {
   readonly trafficAccessToken?: string
 }
 
+const causeMessage = (cause: unknown): string =>
+  cause instanceof Error && cause.message.length > 0 ? cause.message : String(cause)
+
 export class SdkError extends Schema.TaggedError<SdkError>()("SdkError", {
   message: Schema.String,
 }) {}
@@ -248,7 +251,7 @@ const liveSdk: Sdk = {
   create: (templateId, options) =>
     Effect.tryPromise({
       try: () => Sandbox.create(templateId, options),
-      catch: () => SdkError.make({ message: "E2B sandbox creation failed" }),
+      catch: (error) => SdkError.make({ message: `E2B sandbox creation failed: ${causeMessage(error)}` }),
     }),
   getInfo: (sandboxId, options) =>
     Effect.tryPromise({
@@ -334,9 +337,21 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const configuredConnection: typeof connection & { domain?: string; requestTimeoutMs?: number } = connection
   if (options.domain !== undefined) configuredConnection.domain = options.domain
   if (options.requestTimeoutMillis !== undefined) configuredConnection.requestTimeoutMs = options.requestTimeoutMillis
+  // Only sandbox creation surfaces the SDK's own message (for example a concurrent-sandbox
+  // limit) because operators need it to diagnose failed Orb provisioning; the API key is
+  // redacted in case the SDK echoes request details. Every other operation stays generic.
+  const redactApiKey = (message: string): string => message.split(apiKey).join("[redacted]")
   const attempt = <A, E>(operation: ProviderError["operation"], evaluate: () => Effect.Effect<A, E>) =>
     Effect.suspend(evaluate).pipe(
-      Effect.mapError(() => ProviderError.make({ operation, message: `E2B ${operation} failed` })),
+      Effect.mapError((error) =>
+        ProviderError.make({
+          operation,
+          message:
+            operation === "create" && Schema.is(SdkError)(error)
+              ? redactApiKey(error.message)
+              : `E2B ${operation} failed`,
+        }),
+      ),
     )
 
   const attestTemplateBuild = Effect.fn("Provider.attestTemplateBuild")(function* (request: {

@@ -101,7 +101,9 @@ describe("Controller", () => {
     return Effect.gen(function* () {
       const service = yield* controller
       yield* createAssignment()
-      expect((yield* Effect.flip(service.provision("assignment-1", setupAuthorization))).kind).toBe("provider")
+      const error = yield* Effect.flip(service.provision("assignment-1", setupAuthorization))
+      expect(error.kind).toBe("provider")
+      expect(error.message).toBe("create outcome is unknown and no sandbox exists: create outcome unknown")
       expect(harness.provider.bootstraps).toEqual([])
       expect(harness.provider.kills).toEqual([])
     }).pipe(provideLayer(harness.layer))

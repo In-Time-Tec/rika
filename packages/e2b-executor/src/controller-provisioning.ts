@@ -18,7 +18,7 @@ import {
   version,
   type ExecutorEnvironment,
 } from "./controller-model"
-import type { CreateRequest, Handle, Interface as ProviderInterface } from "./provider"
+import type { CreateRequest, Handle, Interface as ProviderInterface, ProviderError } from "./provider"
 import { encodeArchive } from "@rika/remote-execution/workspace-archive"
 import type { CheckpointRestore, WorkspaceSeedRestore } from "@rika/remote-execution/protocol"
 
@@ -260,11 +260,14 @@ export const provisioningOperations = ({
     return Option.some(adopted)
   })
 
-  const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (assignment: ExecutorAssignment) {
+  const reconcileCreate = Effect.fn("Controller.reconcileCreate")(function* (
+    assignment: ExecutorAssignment,
+    cause: ProviderError,
+  ) {
     const created = yield* findCreatedSandbox(assignment)
     if (Option.isSome(created)) return created.value
     yield* HostedObservability.unknownOutcome(assignmentCorrelation(assignment))
-    return yield* failure("provider", "create outcome is unknown and no sandbox exists")
+    return yield* failure("provider", `create outcome is unknown and no sandbox exists: ${cause.message}`)
   })
 
   const createAndBootstrap = Effect.fn("Controller.createAndBootstrap")(function* (
@@ -286,7 +289,7 @@ export const provisioningOperations = ({
         ? created.value
         : yield* provider
             .create(yield* createRequest(provisioning, authorization))
-            .pipe(Effect.catch(() => reconcileCreate(provisioning)))
+            .pipe(Effect.catch((cause) => reconcileCreate(provisioning, cause)))
     }
     const binding = yield* Effect.result(
       assignments.bindProviderInstance({

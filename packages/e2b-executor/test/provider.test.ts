@@ -229,8 +229,9 @@ describe("Provider", () => {
     let bootstrapBody = ""
     const sdk: Sdk = {
       ...attestationSdk,
-      buildStatus: () => Effect.fail(SdkError.make({ message: "e2b-controller-secret bootstrap-secret" })),
-      create: () => Effect.fail(SdkError.make({ message: "e2b-controller-secret bootstrap-secret" })),
+      buildStatus: () => Effect.fail(SdkError.make({ message: "build lookup failed for key e2b-controller-secret" })),
+      create: () =>
+        Effect.fail(SdkError.make({ message: "concurrent sandbox limit reached for key e2b-controller-secret" })),
       connect: (sandboxId) => {
         calls.push(`connect:${sandboxId}`)
         return Effect.succeed({ sandboxId })
@@ -266,8 +267,8 @@ describe("Provider", () => {
     const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failed = yield* Effect.flip(provider.create(request))
+      expect(failed.message).toBe("build lookup failed for key [redacted]")
       expect(failed.message).not.toContain("e2b-controller-secret")
-      expect(failed.message).not.toContain("bootstrap-secret")
       expect(yield* provider.connect("sandbox", 900_000)).toEqual({ sandboxId: "sandbox", state: "running" })
       expect(yield* provider.host("sandbox", 3000)).toBe("3000-sandbox.e2b.app")
       yield* provider.updateNetwork("sandbox", ["runtime.example.test"])
