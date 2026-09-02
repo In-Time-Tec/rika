@@ -1,7 +1,7 @@
 .DS_Store
 .alchemy/
 .claude/worktrees
-/.agents/state/
+.agents/state/
 .env
 .env.*
 !.env.example
