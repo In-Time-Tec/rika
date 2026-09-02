@@ -74,6 +74,10 @@ interface MutableCreateConnectionInput {
   archiveThreadId?: NonNullable<CreateConnectionInput["archiveThreadId"]>
 }
 
+type OrbWorkspacePlacement = Extract<WorkspacePlacement, { readonly _tag: "OrbWorkspace" }>
+const withAdmittedWorkspace = <A extends object>(admitted: A, workspace: OrbWorkspacePlacement | undefined) =>
+  workspace === undefined ? admitted : { ...admitted, workspace }
+
 export const layerWithOptions = (
   options: {
     readonly databaseUrl?: Redacted.Redacted<string>
@@ -103,6 +107,15 @@ export const layerWithOptions = (
         yield* listenForThreadChanges({ databaseUrl: options.databaseUrl, changes }).pipe(Effect.forkScoped)
 
       const { issueTicket, redeemTicket } = ticketOperations({ product, store, crypto })
+      const admittedWorkspace = Effect.fn("HostedThreadProtocol.admittedWorkspace")(function* (
+        command: ClientMessage["command"],
+        ownerId: ThreadAuthority["ownerId"],
+      ) {
+        const placement = options.workspacePlacement
+        if (command._tag !== "SubmitPrompt" || placement === undefined) return undefined
+        const resolved = yield* placement(ownerId, command.threadId)
+        return resolved._tag === "OrbWorkspace" ? resolved : undefined
+      })
 
       const connect: HostedThreadProtocolService["connect"] = Effect.fn("HostedThreadProtocol.connect")(
         function* (ticket, audience) {
@@ -366,6 +379,7 @@ export const layerWithOptions = (
 
             const encoded = yield* Schema.encodeEffect(JsonObject)(command).pipe(Effect.mapError(() => unavailable()))
             const notificationGeneration = changes.generation(threadId)
+            const promptWorkspace = yield* admittedWorkspace(command, authority.ownerId)
             const admission = yield* store
               .admitCommand({
                 ownerId: authority.ownerId,
@@ -402,15 +416,14 @@ export const layerWithOptions = (
               command: admission.command,
               notificationGeneration,
             })
-            return [
-              frame({
-                _tag: "CommandAdmitted",
-                requestId: message.requestId,
-                commandId: admission.command.commandId,
-                threadId,
-                threadVersion: admission.command.threadVersion,
-              }),
-            ]
+            const admitted = {
+              _tag: "CommandAdmitted" as const,
+              requestId: message.requestId,
+              commandId: admission.command.commandId,
+              threadId,
+              threadVersion: admission.command.threadVersion,
+            }
+            return [frame(withAdmittedWorkspace(admitted, promptWorkspace))]
           })
 
           const durableReady = Effect.suspend(() => {

@@ -29,8 +29,7 @@ import { Crypto, Deferred, Effect, Exit, Schema, Semaphore, SubscriptionRef } fr
 import * as Socket from "effect/unstable/socket/Socket"
 
 const { encodeThreadView, failure, prepareAttachment, threadViewFromHostedSnapshot, unavailable } = AttachmentProjection
-export { threadViewFromHostedSnapshot }
-export type { HostedInteractiveSession }
+export { threadViewFromHostedSnapshot, type HostedInteractiveSession }
 
 export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.make")(function* (
   input: HostedInteractiveSessionInput,
@@ -45,7 +44,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     Effect.mapError(() => failure("Thread request identifier could not be created")),
   )
   const selectionAdmission = yield* Semaphore.make(1)
-  const { initialState, state, update, setActivity, setParticipants, publishProjection } =
+  const { initialState, state, update, setActivity, setParticipants, settlePromptActivity, publishProjection } =
     yield* interactiveSessionStatus
   const closed = yield* Deferred.make<void>()
   let selection: SelectionState = { _tag: "Loading", token: {}, threadId: input.threadId, authority: undefined }
@@ -177,6 +176,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     authority,
     replaceAuthority,
     setParticipants,
+    settlePromptActivity,
     commitSnapshot,
     reconcileSubmission: (threadId, submissionId) => commands.reconcileSubmission(threadId, submissionId),
     acknowledge,
@@ -447,6 +447,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     randomId,
     nextCommandId,
     setUnknownActivity: setActivity("unknown-operation"),
+    setPromptWorkspaceActivity: (workspace) => setActivity(InteractiveSessionState.promptWorkspaceActivity(workspace)),
     refreshThreads,
     closed,
     stopped: () => stopped,

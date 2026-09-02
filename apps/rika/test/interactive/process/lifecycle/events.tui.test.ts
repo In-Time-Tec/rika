@@ -11,7 +11,7 @@ const hasColor = (app: TuiApp.TuiApp, text: string, color: string): boolean =>
     .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color)
 
 test(
-  "shows transient status at bottom-left and only Orb placement on the composer",
+  "shows fresh, hot, and waking Orb prompt status at bottom-left",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -50,13 +50,145 @@ test(
         yield* app.setConnectionState({
           connectivity: "connected",
           target: "orb",
-          activity: "workspace-preparing",
+          activity: "sandbox-preparing",
           ownership: "organization",
           participants: 2,
         })
-        const orb = yield* app.waitFrame("Preparing workspace")
-        expect(orb).toContain("Orb")
+        const preparing = yield* app.waitFrame("Preparing sandbox")
+        expect(preparing).toContain("Orb")
         expect(hasColor(app, "Orb", "61,255,166,255")).toBe(true)
+
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "prompt-waiting",
+          ownership: "organization",
+          participants: 2,
+        })
+        const hot = yield* app.waitFrame("Waiting")
+        expect(hot).not.toContain("Preparing sandbox")
+        expect(hot).not.toContain("Waking sandbox")
+
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "sandbox-waking",
+          ownership: "organization",
+          participants: 2,
+        })
+        const waking = yield* app.waitFrame("Waking sandbox")
+        expect(waking).not.toContain("Preparing sandbox")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "moves fresh, hot, and waking Orb messages through Waiting and Streaming",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          initialConnectionState: {
+            connectivity: "connected",
+            target: "orb",
+            activity: "executor-waiting",
+            participants: 1,
+          },
+          script: [
+            model.turn([model.part("FIRST_ORB_STREAM"), model.part("_DONE")], {
+              delayMillis: 1_000,
+              streamPartDelayMillis: 400,
+            }),
+            model.turn([model.part("SECOND_ORB_STREAM"), model.part("_DONE")], {
+              delayMillis: 1_000,
+              streamPartDelayMillis: 400,
+            }),
+            model.turn([model.part("WOKEN_ORB_STREAM"), model.part("_DONE")], {
+              delayMillis: 1_000,
+              streamPartDelayMillis: 400,
+            }),
+          ],
+        })
+
+        yield* Effect.tryPromise(() => app.type("First Orb prompt"))
+        app.pressEnter()
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "sandbox-preparing",
+          participants: 1,
+        })
+        const preparing = yield* app.waitFrame("Preparing sandbox")
+        expect(preparing).toContain("First Orb prompt")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "prompt-waiting",
+          participants: 1,
+        })
+        yield* app.waitFrame("Waiting")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "executor-connected",
+          participants: 1,
+        })
+        const firstStreaming = yield* app.waitFrame("FIRST_ORB_STREAM")
+        expect(firstStreaming).toContain("Streaming")
+        yield* app.waitFrame("FIRST_ORB_STREAM_DONE")
+        yield* app.settled
+
+        yield* Effect.tryPromise(() => app.type("Second hot Orb prompt"))
+        app.pressEnter()
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "prompt-waiting",
+          participants: 1,
+        })
+        const hot = yield* app.waitFrame("Waiting")
+        expect(hot).toContain("Second hot Orb prompt")
+        expect(hot).not.toContain("Preparing sandbox")
+        expect(hot).not.toContain("Waking sandbox")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "executor-connected",
+          participants: 1,
+        })
+        const secondStreaming = yield* app.waitFrame("SECOND_ORB_STREAM")
+        expect(secondStreaming).toContain("Streaming")
+        yield* app.waitFrame("SECOND_ORB_STREAM_DONE")
+        yield* app.settled
+
+        yield* Effect.tryPromise(() => app.type("Prompt after Orb sleep"))
+        app.pressEnter()
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "sandbox-waking",
+          participants: 1,
+        })
+        const waking = yield* app.waitFrame("Waking sandbox")
+        expect(waking).toContain("Prompt after Orb sleep")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "prompt-waiting",
+          participants: 1,
+        })
+        yield* app.waitFrame("Waiting")
+        yield* app.setConnectionState({
+          connectivity: "connected",
+          target: "orb",
+          activity: "executor-connected",
+          participants: 1,
+        })
+        const wokenStreaming = yield* app.waitFrame("WOKEN_ORB_STREAM")
+        expect(wokenStreaming).toContain("Streaming")
+        yield* app.waitFrame("WOKEN_ORB_STREAM_DONE")
         yield* app.quit
       }),
     ),

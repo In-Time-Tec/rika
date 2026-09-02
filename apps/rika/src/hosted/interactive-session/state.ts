@@ -1,9 +1,20 @@
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
+import type * as InteractiveConnection from "@rika/product/interactive-connection"
 import * as ThreadView from "@rika/product/thread-view"
 import type { HostedError } from "../contract"
 import { AttachmentProjection, type PreparedAttachment, type Projection, type SnapshotProjection } from "./projection"
 
 const { encodeThreadView } = AttachmentProjection
+
+export const promptWorkspaceActivity = (
+  workspace: HostedThreadSnapshot["workspace"],
+): InteractiveConnection.Activity => {
+  if (workspace?._tag !== "OrbWorkspace") return "executor-waiting"
+  if (workspace.state === "failed") return "workspace-failed"
+  if (workspace.readiness === "fresh") return "sandbox-preparing"
+  if (workspace.readiness === "cold") return "sandbox-waking"
+  return "prompt-waiting"
+}
 
 const projectionActivity = (
   view: ThreadView.ThreadViewSnapshot,
@@ -22,8 +33,8 @@ const projectionActivity = (
   )
     return "terminal" as const
   if (active.length > 0 && executorKind === "orb" && workspace?._tag === "OrbWorkspace") {
-    if (workspace.state === "preparing") return "workspace-preparing" as const
-    if (workspace.state === "failed") return "workspace-failed" as const
+    const activity = promptWorkspaceActivity(workspace)
+    if (activity !== "prompt-waiting") return activity
   }
   if (active.some((entry) => entry.turn.status === "waiting")) return "executor-waiting" as const
   if (active.some((entry) => entry.turn.status === "running" || entry.turn.status === "cancelling"))
@@ -134,4 +145,4 @@ const planAttachment = (
   }
 }
 
-export const InteractiveSessionState = { planAttachment, projectionFromSnapshot }
+export const InteractiveSessionState = { planAttachment, projectionFromSnapshot, promptWorkspaceActivity }

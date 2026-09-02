@@ -127,7 +127,7 @@ Create and inspect `.amp/in/artifacts/rika-local-runner.webm` using agent-tty at
 - Create a Thread targeting the current Runner checkout.
 - Show that input becomes available only after the Runner connection is ready.
 - Submit the first prompt and keep the activity/status area visible from admission through terminal output.
-- Demonstrate that the words `Preparing workspace` never appear for this local Thread.
+- Demonstrate that `Preparing sandbox` and `Waking sandbox` never appear for this local Thread.
 - Ask the model to use a workspace tool to create a uniquely named file in the exact checkout, read it back, and report a unique completion marker.
 - Show the tool call, streamed assistant response, and terminal completion without a manual refresh.
 - Submit a second message immediately after or while the first is active and show that it is accepted or visibly queued rather than remaining silently at `Sending`.
@@ -143,9 +143,11 @@ Create and inspect `.amp/in/artifacts/rika-e2b-orb.webm` using agent-tty at the 
 
 - Start the TUI against the same local Alchemy-hosted API and authenticate as the seeded development account.
 - Create a Thread explicitly targeting Orb.
-- Show `Preparing workspace` only after submission causes a durable E2B preparation attempt.
+- On the first prompt, show `Preparing sandbox` only after submission causes a durable E2B preparation attempt, followed by `Waiting` and then `Streaming`.
 - Keep the preparation phase visible until it becomes ready or fails explicitly. For the acceptance recording it must become ready before its configured deadline.
 - Submit a prompt through the server-side OpenRouter route.
+- Submit a second prompt while that Orb is still hot and show it move directly to `Waiting` and then `Streaming`, without showing `Preparing sandbox` or `Waking sandbox`.
+- After the Orb has actually paused or its lease has expired, submit another prompt and show `Waking sandbox`, then `Waiting`, then `Streaming`; it must not be presented as first-time preparation.
 - Ask the model to use an Orb workspace tool to create and read a uniquely named file, then report a unique completion marker.
 - Ask the model to start a background process and inspect its completion, proving process state survives across Orb tool calls.
 - Start a foreground command that waits before writing a uniquely named forbidden file, press Ctrl+C while it is waiting, and show durable cancellation acknowledgement.

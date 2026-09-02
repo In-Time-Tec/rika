@@ -16,6 +16,13 @@ export const interactiveSessionStatus = Effect.gen(function* () {
     update((previousState) =>
       previousState.participants === participants ? previousState : { ...previousState, participants },
     )
+  const settlePromptActivity = update((previousState) =>
+    previousState.activity === "sandbox-preparing" ||
+    previousState.activity === "sandbox-waking" ||
+    previousState.activity === "prompt-waiting"
+      ? { ...previousState, activity: "executor-waiting" }
+      : previousState,
+  )
   const publishProjection = (projection: Projection) =>
     update((previousState) =>
       previousState.target === projection.target &&
@@ -29,5 +36,5 @@ export const interactiveSessionStatus = Effect.gen(function* () {
             participants: projection.participants,
           },
     )
-  return { initialState, state, update, setActivity, setParticipants, publishProjection }
+  return { initialState, state, update, setActivity, setParticipants, settlePromptActivity, publishProjection }
 })

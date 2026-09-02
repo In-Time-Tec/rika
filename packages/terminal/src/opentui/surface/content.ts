@@ -33,8 +33,12 @@ const connectionActivity = (model: Model): string | undefined => {
   switch (connection?.activity) {
     case "authenticating":
       return "Authenticating"
-    case "workspace-preparing":
-      return "Preparing workspace"
+    case "sandbox-preparing":
+      return "Preparing sandbox"
+    case "sandbox-waking":
+      return "Waking sandbox"
+    case "prompt-waiting":
+      return "Waiting"
     case "workspace-failed":
       return "Workspace preparation failed"
     case "approval-required":
@@ -49,7 +53,9 @@ const connectionActivity = (model: Model): string | undefined => {
 const authoritativeActivity = (model: Model): string | undefined => {
   switch (model.connection?.activity) {
     case "authenticating":
-    case "workspace-preparing":
+    case "sandbox-preparing":
+    case "sandbox-waking":
+    case "prompt-waiting":
     case "workspace-failed":
     case "approval-required":
     case "unknown-operation":
@@ -59,19 +65,9 @@ const authoritativeActivity = (model: Model): string | undefined => {
   }
 }
 
-// A first prompt on an Orb is admitted only after the sandbox is provisioned and prepared, which takes
-// about a minute and produces no Thread events, so a bare "Sending" would look like a hang.
-const orbPreparationActivity = (model: Model): string | undefined =>
-  model.activity?._tag === "Sending" &&
-  model.connection?.target === "orb" &&
-  model.connection.activity === "executor-waiting"
-    ? "Preparing Orb workspace"
-    : undefined
-
 const lifecycleLabelImpl = (model: Model, currentTimeMillis: number): string | undefined =>
   connectivityActivity(model) ??
   authoritativeActivity(model) ??
-  orbPreparationActivity(model) ??
   formatActivity(
     model.activity,
     model.activity?._tag === "Retrying"

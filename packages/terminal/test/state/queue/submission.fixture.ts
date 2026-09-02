@@ -113,6 +113,45 @@ test("renders a submitted prompt immediately and reconciles it on active admissi
   ])
 })
 
+test.each(["sandbox-preparing", "sandbox-waking", "prompt-waiting"] as const)(
+  "moves %s to Waiting when the prompt is admitted",
+  (activity) => {
+    const submitted = update(
+      { ...initial("/work"), input: "orb prompt" },
+      { _tag: "Submitted", submissionId: "sub-orb" },
+    )
+    const admitted = update(
+      {
+        ...submitted,
+        connection: { connectivity: "connected", target: "orb", participants: 1, activity },
+      },
+      {
+        _tag: "SubmissionAdmitted",
+        turnId: "turn-orb",
+        status: "active",
+        submissionId: "sub-orb",
+      },
+    )
+
+    expect(admitted.activity).toEqual({ _tag: "Waiting" })
+  },
+)
+
+test("preserves ordinary admission activity without a sandbox transition", () => {
+  const submitted = update(
+    { ...initial("/work"), input: "runner prompt" },
+    { _tag: "Submitted", submissionId: "sub-runner" },
+  )
+  const admitted = update(submitted, {
+    _tag: "SubmissionAdmitted",
+    turnId: "turn-runner",
+    status: "active",
+    submissionId: "sub-runner",
+  })
+
+  expect(admitted.activity).toEqual({ _tag: "Sending" })
+})
+
 test("preserves composer edits made before queued admission", () => {
   const submitted = update(
     { ...initial("/work"), busy: true, activeTurnId: "active", input: "captured", cursor: 8 },

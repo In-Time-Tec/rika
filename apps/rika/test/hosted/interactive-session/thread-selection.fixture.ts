@@ -121,7 +121,7 @@ it.effect("maps Runner waiting snapshots to executor-waiting with or without mig
   ),
 )
 
-it.effect("consumes typed OrbWorkspace preparing and failed snapshots without legacy status frames", () =>
+it.effect("consumes typed OrbWorkspace preparation and failure snapshots without legacy status frames", () =>
   Effect.scoped(
     Effect.gen(function* () {
       let attachCount = 0
@@ -131,12 +131,18 @@ it.effect("consumes typed OrbWorkspace preparing and failed snapshots without le
         const state = attachCount === 1 ? "preparing" : "failed"
         const workspace: HostedThreadSnapshot["workspace"] =
           state === "failed"
-            ? { _tag: "OrbWorkspace", state, generation: "generation-1", message: "checkout failed" }
-            : { _tag: "OrbWorkspace", state, generation: "generation-1" }
+            ? {
+                _tag: "OrbWorkspace",
+                state,
+                readiness: "fresh",
+                generation: "generation-1",
+                message: "checkout failed",
+              }
+            : { _tag: "OrbWorkspace", state, readiness: "fresh", generation: "generation-1" }
         socket.frame(H.fixtures.attached(message, H.fixtures.waitingSnapshot("orb", workspace), String(attachCount)))
       })
       const hosted = yield* H.runSession(harness)
-      expect(hosted.states.at(-1)?.activity).toBe("workspace-preparing")
+      expect(hosted.states.at(-1)?.activity).toBe("sandbox-preparing")
       yield* hosted.session.reopenThread
       expect(hosted.states.at(-1)?.activity).toBe("workspace-failed")
       yield* hosted.session.quit

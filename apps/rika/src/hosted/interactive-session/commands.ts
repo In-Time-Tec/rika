@@ -1,4 +1,4 @@
-import type { MutatingThreadCommand } from "@rika/product/client-protocol"
+import type { MutatingThreadCommand, WorkspacePlacement } from "@rika/product/client-protocol"
 import { CommandId, IdempotencyKey, ThreadId, ThreadVersion } from "@rika/product/hosted-model"
 import type { InteractiveSession } from "@rika/product/interactive-session"
 import { OperationUnavailable } from "@rika/product/product-operation"
@@ -41,6 +41,7 @@ export const interactiveSessionCommands = (dependencies: {
   readonly randomId: Effect.Effect<string, HostedError>
   readonly nextCommandId: (prefix: string) => Effect.Effect<string, OperationUnavailable>
   readonly setUnknownActivity: Effect.Effect<void>
+  readonly setPromptWorkspaceActivity: (workspace: WorkspacePlacement) => Effect.Effect<void>
   readonly refreshThreads: Effect.Effect<void>
   readonly closed: Deferred.Deferred<void>
   readonly stopped: () => boolean
@@ -127,14 +128,21 @@ export const interactiveSessionCommands = (dependencies: {
           return sendUntilKnown().pipe(
             Effect.flatMap((outcome) => {
               if (admittedOutcome(outcome)) {
-                const committed = dependencies.authority()
-                if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
-                  dependencies.replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
-                return outcome._tag === "CommandAccepted" || completeOnAdmission
-                  ? Effect.void
-                  : Effect.fail(
-                      dependencies.failure("Thread command completion was not pushed after durable admission"),
+                return Effect.gen(function* () {
+                  if (
+                    command._tag === "SubmitPrompt" &&
+                    outcome._tag === "CommandAdmitted" &&
+                    outcome.workspace !== undefined
+                  )
+                    yield* dependencies.setPromptWorkspaceActivity(outcome.workspace)
+                  const committed = dependencies.authority()
+                  if (committed?.threadId === threadId && BigInt(outcome.threadVersion) > BigInt(committed.version))
+                    dependencies.replaceAuthority(committed, { ...committed, version: String(outcome.threadVersion) })
+                  if (outcome._tag !== "CommandAccepted" && !completeOnAdmission)
+                    return yield* dependencies.failure(
+                      "Thread command completion was not pushed after durable admission",
                     )
+                })
               }
               if (staleOutcome(outcome, retryStaleVersion)) {
                 const committed = dependencies.authority()

@@ -29,7 +29,7 @@ Use `testing-with-pilotty` for quick semantic snapshots or `testing-with-agent-t
 
 ## Runner flow
 
-1. Launch `.agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- --workspace "$PWD"`. The initial Thread must become writable only after the Runner is connected and must never show `Preparing workspace`.
+1. Launch `.agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- --workspace "$PWD"`. The initial Thread must become writable only after the Runner is connected and must never show `Preparing sandbox` or `Waking sandbox`.
 2. Submit a prompt that creates `.agents/state/<run>/runner-proof.txt`, reads it back, and ends with `RUNNER_DONE_<run>`. Verify the file directly from the checkout.
 3. While that Turn is active, submit `CONTINUE_<run>` with Enter. Verify it appears as queued and later runs as its own Turn.
 4. After both Turns settle, exit the TUI and reopen it with `.agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- thread continue <thread-id>`. Verify the transcript is contiguous without a manual refresh.
@@ -39,10 +39,11 @@ Use `testing-with-pilotty` for quick semantic snapshots or `testing-with-agent-t
 ## Orb flow
 
 1. In the same packaged TUI, choose `new in Orb` from the command palette. The Thread must remain unprepared until its first prompt.
-2. Submit a prompt that creates and reads `orb-proof-<run>.txt`, starts a background process and inspects its completion, and ends with `ORB_DONE_<run>`. Keep `Preparing workspace` visible until the real E2B Executor is ready.
+2. Submit a prompt that creates and reads `orb-proof-<run>.txt`, starts a background process and inspects its completion, and ends with `ORB_DONE_<run>`. The first prompt must show `Preparing sandbox`, then `Waiting`, then `Streaming` as the real E2B Executor becomes ready.
 3. Start a foreground delayed write to `orb-forbidden-<run>`, cancel it with Ctrl+C, wait past the delay, and use a fresh Orb workspace read to prove the file is absent.
-4. Run another workspace command in the same Thread. It must succeed without replacement preparation.
-5. Terminate only the client, reopen with `.agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- thread continue <thread-id>`, and verify the transcript and terminal output remain contiguous.
+4. Run another workspace command in the same hot Thread. It must move directly to `Waiting` and then `Streaming`, without showing `Preparing sandbox`, `Waking sandbox`, or replacement preparation.
+5. After the Orb has actually paused or its lease has expired, submit another prompt. It must show `Waking sandbox`, then `Waiting`, then `Streaming`, and must not show `Preparing sandbox`.
+6. Terminate only the client, reopen with `.agents/skills/rika-acceptance/scripts/with-packaged-rika.sh -- thread continue <thread-id>`, and verify the transcript and terminal output remain contiguous.
 
 ## Evidence
 

@@ -21,4 +21,4 @@
 │                                                                              │
 │                                                                              │
 │                                                                              │
-╰ ∼ Preparing workspace ────────────────────────────────────────── /workspace ─╯
+╰ ∼ Preparing sandbox ──────────────────────────────────────────── /workspace ─╯

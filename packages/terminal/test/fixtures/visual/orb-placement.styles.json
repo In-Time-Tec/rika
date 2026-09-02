@@ -3566,7 +3566,7 @@
           "width": 1
         },
         {
-          "text": " Preparing workspace ",
+          "text": " Preparing sandbox ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3584,10 +3584,10 @@
             }
           },
           "attributes": 2,
-          "width": 21
+          "width": 19
         },
         {
-          "text": "──────────────────────────────────────────",
+          "text": "────────────────────────────────────────────",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -3605,7 +3605,7 @@
             }
           },
           "attributes": 0,
-          "width": 42
+          "width": 44
         },
         {
           "text": " /workspace ",

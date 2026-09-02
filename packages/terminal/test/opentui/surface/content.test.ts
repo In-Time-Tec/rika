@@ -32,17 +32,53 @@ describe("connection animation", () => {
     ).toBe("Disconnected · Runner registration failed")
   })
 
-  it("names Orb preparation while a first prompt waits for the sandbox", () => {
+  it("uses explicit sandbox status instead of inferring it from an Orb submission", () => {
     const sending = { ...model(), busy: true, activity: { _tag: "Sending" as const } }
     const connection = { connectivity: "connected" as const, participants: 1 }
     expect(
       lifecycleLabel({ ...sending, connection: { ...connection, target: "orb", activity: "executor-waiting" } }, 0),
-    ).toBe("Preparing Orb workspace")
+    ).toBe("Sending")
     expect(
       lifecycleLabel({ ...sending, connection: { ...connection, target: "runner", activity: "executor-waiting" } }, 0),
     ).toBe("Sending")
     expect(lifecycleLabel({ ...sending, connection: { ...connection, target: "orb", activity: "terminal" } }, 0)).toBe(
       "Sending",
     )
+  })
+
+  it.each([
+    ["sandbox-preparing", "Preparing sandbox"],
+    ["sandbox-waking", "Waking sandbox"],
+    ["prompt-waiting", "Waiting"],
+  ] as const)("renders %s exactly", (activity, expected) => {
+    expect(
+      lifecycleLabel(
+        {
+          ...model(),
+          busy: true,
+          activity: { _tag: "Sending" },
+          connection: { connectivity: "connected", target: "orb", participants: 1, activity },
+        },
+        0,
+      ),
+    ).toBe(expected)
+  })
+
+  it("keeps connectivity failures above sandbox status", () => {
+    expect(
+      lifecycleLabel(
+        {
+          ...model(),
+          connection: {
+            connectivity: "disconnected",
+            target: "orb",
+            participants: 1,
+            activity: "sandbox-waking",
+            errorMessage: "Network unavailable",
+          },
+        },
+        0,
+      ),
+    ).toBe("Disconnected · Network unavailable")
   })
 })

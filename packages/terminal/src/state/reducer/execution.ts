@@ -132,6 +132,17 @@ const admittedQueue = (
   return [...queue, { id: turnId, prompt, provisional: true }]
 }
 
+const activeSubmissionActivity = (model: Model): Model["activity"] => {
+  switch (model.connection?.activity) {
+    case "sandbox-preparing":
+    case "sandbox-waking":
+    case "prompt-waiting":
+      return { _tag: "Waiting" }
+  }
+  if (model.busy) return model.activity
+  return { _tag: "Sending" }
+}
+
 const reduceSubmissionAdmitted = (model: Model, message: Message): Model | undefined => {
   switch (message._tag) {
     case "SubmissionAdmitted": {
@@ -149,11 +160,10 @@ const reduceSubmissionAdmitted = (model: Model, message: Message): Model | undef
           : { turnId: message.turnId, submissionId: message.submissionId }
       const submittedHistory = admittedHistory(model, draft, prompt)
       const queue = admittedQueue(model, message.submissionId, message.turnId, message.status, prompt)
-      const sendingActivity: Activity = { _tag: "Sending" }
       const laneModel =
         message.status === "queued"
           ? settleProvisionalUserEntry({ ...model, queue }, submissionReference, true)
-          : { ...model, queue, busy: true, activity: model.busy ? model.activity : sendingActivity }
+          : { ...model, queue, busy: true, activity: activeSubmissionActivity(model) }
       const admitted = reconcileUserEntry(
         {
           ...laneModel,

@@ -22,7 +22,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 6 as const
+export const protocolVersion = 7 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 export const ClientProtocolVersion = Schema.Literal(protocolVersion)
@@ -279,6 +279,7 @@ export const WorkspacePlacement = Schema.Union([
   strict(
     Schema.TaggedStruct("OrbWorkspace", {
       state: Schema.Literals(["unassigned", "preparing", "ready", "failed"]),
+      readiness: Schema.Literals(["fresh", "hot", "cold"]),
       generation: Schema.String,
       attempt: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
       phase: Schema.optionalKey(Schema.Literals(["checkout", "setup", "resume", "capabilities"])),
@@ -347,6 +348,7 @@ export const ServerPayload = Schema.Union([
       commandId: CommandId,
       threadId: ThreadId,
       threadVersion: ThreadVersion,
+      workspace: Schema.optionalKey(WorkspacePlacement),
     }),
   ),
   strict(

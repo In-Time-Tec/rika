@@ -79,6 +79,10 @@ describe("hosted owner and actor attribution", () => {
 })
 
 describe("hosted Thread client protocol", () => {
+  it("uses protocol version 7 for prompt workspace readiness", () => {
+    expect(protocolVersion).toBe(7)
+  })
+
   it("round trips every interactive command through one versioned envelope", () => {
     const messages = [
       envelope({
@@ -226,6 +230,22 @@ describe("hosted Thread client protocol", () => {
       pendingAuthorizations: [],
     }
     const frames = [
+      {
+        protocolVersion,
+        payload: {
+          _tag: "CommandAdmitted",
+          requestId,
+          commandId,
+          threadId,
+          threadVersion: ThreadVersion.make("4"),
+          workspace: {
+            _tag: "OrbWorkspace",
+            state: "unassigned",
+            readiness: "cold",
+            generation: "2",
+          },
+        },
+      },
       {
         protocolVersion,
         payload: {

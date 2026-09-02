@@ -2,7 +2,13 @@ import { expect, it } from "@effect/vitest"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import { Deferred, Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
-import { ThreadEventCursor, ThreadVersion, ThreadId as HostedThreadId } from "@rika/product/hosted-model"
+import {
+  Sequence,
+  ThreadEventCursor,
+  ThreadVersion,
+  ThreadId as HostedThreadId,
+  Timestamp,
+} from "@rika/product/hosted-model"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as H from "./harness"
@@ -31,6 +37,101 @@ it.effect("does not poll AttachThread while an idle WebSocket remains connected"
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
       for (let advance = 0; advance < 4; advance += 1) yield* TestClock.adjust("500 millis")
       expect(harness.messages.filter((message) => message.command._tag === "AttachThread")).toHaveLength(1)
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
+it.effect("uses server workspace readiness for fresh, hot, and cold Orb prompts", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const readiness = ["fresh", "hot", "cold"] as const
+      let submissions = 0
+      const harness = H.makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(
+            H.fixtures.attached(
+              message,
+              H.fixtures.snapshot("thread-1", 0, "orb", {
+                _tag: "OrbWorkspace",
+                state: "ready",
+                readiness: "hot",
+                generation: "1",
+              }),
+            ),
+          )
+          return
+        }
+        if (message.command._tag !== "SubmitPrompt") return
+        const current = readiness[submissions]!
+        submissions += 1
+        socket.frame({
+          _tag: "CommandAdmitted",
+          requestId: message.requestId,
+          commandId: message.command.commandId,
+          threadId: message.command.threadId,
+          threadVersion: ThreadVersion.make(String(submissions)),
+          workspace: {
+            _tag: "OrbWorkspace",
+            state: current === "hot" ? "ready" : "unassigned",
+            readiness: current,
+            generation: String(submissions),
+          },
+        })
+      })
+      const hosted = yield* H.runSession(harness)
+      const publishAdmissionEvent = (cursor: string, event: InteractiveEvent) =>
+        harness.sockets[0]!.frame({
+          _tag: "ThreadEvent",
+          event: {
+            threadId: HostedThreadId.make("thread-1"),
+            sequence: Sequence.make(cursor),
+            cursor: ThreadEventCursor.make(cursor),
+            threadVersion: ThreadVersion.make(cursor),
+            event,
+            createdAt: Timestamp.make("2026-09-02T12:00:00.000Z"),
+          },
+        })
+
+      yield* hosted.session.submit("first prompt")
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "sandbox-preparing")
+      publishAdmissionEvent("1", {
+        _tag: "SubmissionRejected",
+        threadId: Thread.ThreadId.make("thread-1"),
+        message: "rejected",
+      })
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "executor-waiting")
+
+      yield* hosted.session.submit("second prompt")
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "prompt-waiting")
+      publishAdmissionEvent("2", {
+        _tag: "QueueFull",
+        threadId: Thread.ThreadId.make("thread-1"),
+        capacity: 8,
+        count: 8,
+      })
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "executor-waiting")
+
+      yield* hosted.session.submit("after sleep")
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "sandbox-waking")
+      publishAdmissionEvent("3", {
+        _tag: "SubmissionAdmitted",
+        threadId: Thread.ThreadId.make("thread-1"),
+        turnId: Turn.TurnId.make("turn-1"),
+        status: "active",
+      })
+      yield* H.eventually(() => hosted.states.at(-1)?.activity === "executor-waiting")
+
+      expect(hosted.states.some((state) => state.activity === "executor-waiting")).toBe(true)
+      expect(
+        hosted.states
+          .map((state) => state.activity)
+          .filter(
+            (activity) =>
+              activity === "sandbox-preparing" || activity === "prompt-waiting" || activity === "sandbox-waking",
+          ),
+      ).toEqual(["sandbox-preparing", "prompt-waiting", "sandbox-waking"])
+
       yield* hosted.session.quit
     }),
   ),

@@ -38,6 +38,7 @@ export const interactiveSessionEvents = (dependencies: {
   readonly authority: () => Projection | undefined
   readonly replaceAuthority: (expected: Projection, replacement: Projection) => boolean
   readonly setParticipants: (participants: number) => Effect.Effect<void>
+  readonly settlePromptActivity: Effect.Effect<void>
   readonly commitSnapshot: (payload: Snapshot, connection: PhysicalConnection) => Effect.Effect<void, HostedError>
   readonly reconcileSubmission: (threadId: string, submissionId: string) => Effect.Effect<void>
   readonly acknowledge: (connection: PhysicalConnection, threadId: string, cursor: string) => Effect.Effect<void>
@@ -71,6 +72,10 @@ export const interactiveSessionEvents = (dependencies: {
     const applied = view.success.apply(event.event.event.patch)
     return applied._tag === "Failure" ? dependencies.failure("Thread event patch was invalid") : view.success.snapshot()
   }
+  const settlePromptActivity = (event: InteractiveEvent) =>
+    ["SubmissionAdmitted", "SubmissionRejected", "QueueFull"].includes(event._tag)
+      ? dependencies.settlePromptActivity
+      : Effect.void
   const threadEvent = (payload: Extract<Payload, { readonly _tag: "ThreadEvent" }>, connection: PhysicalConnection) =>
     Effect.gen(function* () {
       const threadId = String(payload.event.threadId)
@@ -106,6 +111,7 @@ export const interactiveSessionEvents = (dependencies: {
         Effect.annotateLogs(appliedEventAnnotations(threadId, event)),
       )
       dependencies.dispatch(event)
+      yield* settlePromptActivity(event)
       dependencies.replaceAuthority(candidate, {
         ...candidate,
         deliveredCursor: candidate.committedCursor,
