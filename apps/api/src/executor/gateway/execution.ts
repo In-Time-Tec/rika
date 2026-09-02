@@ -236,6 +236,18 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
         message: "Executor is unavailable for native operation cancellation",
       })
     yield* validateAccess(session.access)
+    const durable = yield* lifecycle.inspect(input)
+    const fence = session.access.fence
+    if (
+      durable.state !== "dispatched" ||
+      durable.dispatchedGeneration !== fence.assignmentGeneration ||
+      durable.dispatchedExecutorInstanceId !== fence.executorId ||
+      durable.dispatchedProcessIncarnation !== fence.processIncarnation
+    )
+      return yield* GatewayError.make({
+        kind: "fenced",
+        message: "Native operation was dispatched to a different executor",
+      })
     return yield* dependencies
       .cancelMachine(
         input.assignmentId,

@@ -185,7 +185,7 @@ describe("executor gateway native tools", () => {
     }),
   )
 
-  it.effect("durably settles disconnected cancellation as unknown at the persisted deadline", () =>
+  it.effect("reports disconnected cancellation without deciding the durable operation outcome", () =>
     Effect.gen(function* () {
       const { gateway, target } = yield* connect()
       const deadlineAt = DateTime.formatIso(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 1_000))
@@ -193,19 +193,14 @@ describe("executor gateway native tools", () => {
       const running = yield* Effect.forkChild(gateway.execute(request))
       yield* delivery(target, request.operationKey)
       yield* gateway.disconnected(target)
-      const cancelling = yield* Effect.forkChild(gateway.cancel(request))
+      expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "disconnected" })
       yield* TestClock.adjust("1 second")
-      const cancelled = yield* Fiber.join(cancelling)
-      expect(cancelled).toMatchObject({
-        response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
-        outcome: "unknown",
-      })
-      expect(yield* Fiber.join(running)).toMatchObject({ response: cancelled.response, outcome: cancelled.outcome })
-      expect(yield* gateway.cancel(request)).toEqual(cancelled)
+      expect(yield* Fiber.join(running).pipe(Effect.flip)).toMatchObject({ kind: "timeout" })
+      expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "disconnected" })
     }),
   )
 
-  it.effect("settles cancellation as unknown when a replacement executor owns the live session", () =>
+  it.effect("rejects cancellation when a replacement executor owns the live session", () =>
     Effect.gen(function* () {
       const service = controller({
         hello: (hello) =>
@@ -251,15 +246,11 @@ describe("executor gateway native tools", () => {
         }),
       )
       yield* workspaceReady(gateway, replacementTarget, replacementAccess)
-      const cancelled = yield* gateway.cancel(request)
-      expect(cancelled).toMatchObject({
-        response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
-        outcome: "unknown",
-      })
+      expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "fenced" })
       expect(
         replacementTarget.sent.map((message) => decode(message)).filter((message) => message._tag === "MachineCancel"),
       ).toEqual([])
-      expect(yield* gateway.cancel(request)).toEqual(cancelled)
+      expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "fenced" })
     }),
   )
 

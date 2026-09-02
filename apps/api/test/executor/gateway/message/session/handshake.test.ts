@@ -158,7 +158,7 @@ describe("executor gateway: session-resume-dispatch", () => {
     }),
   )
 
-  it.effect("replaces authority instead of accepting a stale reconnect when no live session exists", () =>
+  it.effect("rejects a stale reconnect without deciding replacement authority", () =>
     Effect.gen(function* () {
       const target = socket()
       let replacements = 0
@@ -181,7 +181,7 @@ describe("executor gateway: session-resume-dispatch", () => {
         }),
       )
       yield* gateway.receive(target, encode({ _tag: "ExecutorReconnect", access }))
-      expect(replacements).toBe(1)
+      expect(replacements).toBe(0)
       expect(decode(target.sent[0]!)).toEqual({ _tag: "Fenced", fence, message: "stale reconnect" })
       expect(target.closed).toEqual([[1008, "fenced"]])
     }),
