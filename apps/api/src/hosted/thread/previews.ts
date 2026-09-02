@@ -202,7 +202,7 @@ const reconnect = (
 ) =>
   effect.pipe(
     Effect.catch((cause) =>
-      Effect.logError(name).pipe(
+      Effect.logDebug(name).pipe(
         Effect.annotateLogs("rika.error.message", cause.message),
         Effect.andThen(discard ?? Effect.void),
       ),

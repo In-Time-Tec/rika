@@ -129,7 +129,7 @@ export const listenForThreadChanges = (options: {
 }) =>
   listenOnce(options.databaseUrl, options.changes).pipe(
     Effect.catch((cause) =>
-      Effect.logError("thread-protocol-listener.disconnected").pipe(
+      Effect.logDebug("thread-protocol-listener.disconnected").pipe(
         Effect.annotateLogs("rika.error.message", cause.message),
       ),
     ),

@@ -70,7 +70,14 @@ export const publicIdentityHandlers = (dependencies: HttpDependencies) =>
             Effect.orElseSucceed(() => false),
           )
         if (!stored) {
-          yield* dependencies.devices.discard(registration.client_id).pipe(Effect.ignore)
+          yield* dependencies.devices.discard(registration.client_id).pipe(
+            Effect.tapError((cause) =>
+              Effect.logWarning("cli-device-registration.discard-failed").pipe(
+                Effect.annotateLogs("rika.error.cause", String(cause)),
+              ),
+            ),
+            Effect.ignore,
+          )
           return yield* ServiceUnavailable.make({ message: "CLI registration could not be persisted" })
         }
         return registration

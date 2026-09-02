@@ -202,7 +202,14 @@ const failCredential =
             })
         }),
       )
-      .pipe(Effect.ignore)
+      .pipe(
+        Effect.tapError((cause) =>
+          Effect.logWarning("repository-publication.fail-credential-persistence-failed").pipe(
+            Effect.annotateLogs("rika.error.cause", String(cause)),
+          ),
+        ),
+        Effect.ignore,
+      )
 
 export const PublicationRows = {
   audit: auditPublication,

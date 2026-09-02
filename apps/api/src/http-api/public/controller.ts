@@ -10,7 +10,7 @@ export const publicHandlers = (dependencies: HttpDependencies) =>
       health: () => Effect.succeed({ status: "ok" }),
       ready: () =>
         dependencies.execution.status.pipe(
-          Effect.tap((status) => Effect.logInfo("hosted-workers.status", status)),
+          Effect.tap((status) => Effect.logDebug("hosted-workers.status", status)),
           Effect.andThen(
             Effect.all([
               dependencies.directory.ready,

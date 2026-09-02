@@ -32,6 +32,11 @@ const mapGitHubError = () => failure("github", "GitHub repository authorization 
 const mapStoreError = (error: RepositoryStoreError) => failure(error.reason, error.message)
 const failure = (reason: HostedRepositoryError["reason"], message: string) =>
   HostedRepositoryError.make({ reason, message })
+const ignoreRevocationFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.tapError((cause) => Effect.logWarning("github-token.revoke-replaced-failed", { cause: String(cause) })),
+    Effect.ignore,
+  )
 export const layer = (options: { readonly baseUrl?: string } = {}) =>
   Layer.effect(
     HostedRepositories,
@@ -283,12 +288,12 @@ export const layer = (options: { readonly baseUrl?: string } = {}) =>
           if (publicationId === undefined) {
             const previous = issued.get(key)
             if (previous !== undefined && previous.token !== next.token)
-              yield* tokens.revoke(previous.token).pipe(Effect.ignore)
+              yield* ignoreRevocationFailure(tokens.revoke(previous.token))
             issued.set(key, next)
           } else {
             const previous = publicationTokens.get(publicationId)
             if (previous !== undefined && previous.token.token !== next.token)
-              yield* tokens.revoke(previous.token.token).pipe(Effect.ignore)
+              yield* ignoreRevocationFailure(tokens.revoke(previous.token.token))
             publicationTokens.set(publicationId, { key, token: next })
           }
           return {
