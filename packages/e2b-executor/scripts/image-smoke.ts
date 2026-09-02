@@ -21,35 +21,45 @@ const DoctorResult = Schema.Struct({
 const SmokeArtifact = Schema.Struct({ ...DoctorResult.fields, sandboxId: Schema.String })
 const requiredChecks = [
   "workspace:ready",
-  "machine:workspace-user",
+  "process:workspace-user",
   "browser:headless",
   "network:outbound",
   "credentials:absent",
   "credentials:broker-ready",
 ] as const
 
-const acceptsDoctorResult = (
+const doctorContractViolations = (
   result: typeof DoctorResult.Type,
   buildId: string,
   manifestSha256: string,
   manifest: typeof ImageManifest.Type,
-) => {
+): ReadonlyArray<string> => {
   const names = new Set(result.checks.map(({ name }) => name))
-  return (
-    result.ok === true &&
-    result.buildId === buildId &&
-    result.manifestSha256 === manifestSha256 &&
-    result.manifestToolCount === manifest.tools.length &&
-    result.manifestPackageCount === manifest.aptPackages.length &&
-    result.checks.every((check) => check.ok === true) &&
-    names.size === result.checks.length &&
-    manifest.tools.every(({ name }) => names.has(`tool:${name}`)) &&
-    manifest.aptPackages.every(({ name }) => names.has(`package:${name}`)) &&
-    requiredChecks.every((name) => names.has(name))
-  )
+  const missing = [
+    ...requiredChecks,
+    ...manifest.tools.map(({ name }) => `tool:${name}`),
+    ...manifest.aptPackages.map(({ name }) => `package:${name}`),
+  ].filter((name) => !names.has(name))
+  const violations = [
+    ...result.checks.filter(({ ok }) => !ok).map(({ name, detail }) => `${name}: ${detail}`),
+    ...(result.ok ? [] : ["doctor reported ok=false"]),
+    ...(result.buildId === buildId ? [] : [`buildId ${result.buildId} is not ${buildId}`]),
+    ...(result.manifestSha256 === manifestSha256
+      ? []
+      : [`manifestSha256 ${result.manifestSha256} is not ${manifestSha256}`]),
+    ...(result.manifestToolCount === manifest.tools.length
+      ? []
+      : [`manifestToolCount ${result.manifestToolCount} is not ${manifest.tools.length}`]),
+    ...(result.manifestPackageCount === manifest.aptPackages.length
+      ? []
+      : [`manifestPackageCount ${result.manifestPackageCount} is not ${manifest.aptPackages.length}`]),
+    ...(names.size === result.checks.length ? [] : ["doctor check names are not unique"]),
+    ...(missing.length === 0 ? [] : [`missing checks: ${missing.join(", ")}`]),
+  ]
+  return violations
 }
 
-export const testing = { acceptsDoctorResult } as const
+export const testing = { doctorContractViolations, requiredChecks } as const
 
 class SmokeError extends Schema.TaggedError<SmokeError>()("SmokeError", { message: Schema.String }) {}
 
@@ -104,10 +114,10 @@ const smoke = Effect.fn("ExecutorImageSmoke.run")(function* (
         ).pipe(Effect.flatMap((command) => decodeDoctorResult(command.stdout)))
         const artifact = yield* encodeSmokeArtifact({ ...result, sandboxId: sandbox.sandboxId })
         yield* fileSystem.writeFileString("executor-smoke.json", `${artifact}\n`)
-        if (!acceptsDoctorResult(result, buildId, manifestSha256, manifest)) {
-          const failed = result.checks.filter(({ ok }) => !ok).map(({ name, detail }) => `${name}: ${detail}`)
+        const violations = doctorContractViolations(result, buildId, manifestSha256, manifest)
+        if (violations.length > 0) {
           return yield* SmokeError.make({
-            message: failed.length === 0 ? "Promoted E2B image failed its doctor contract" : failed.join("; "),
+            message: `Promoted E2B image failed its doctor contract: ${violations.join("; ")}`,
           })
         }
       }),
