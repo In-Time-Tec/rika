@@ -432,7 +432,7 @@ it.layer(bunLayer)((test) => {
                   return product.admitRun(input).pipe(
                     Effect.flatMap((result) =>
                       result._tag === "Admitted"
-                        ? Effect.succeed(result)
+                        ? Effect.succeed({ ...result, text: "" })
                         : Effect.fail(HostedError.make({ kind: "protocol", message: "Prompt was cancelled" })),
                     ),
                     Effect.mapError((error) => HostedError.make({ kind: "protocol", message: error.message })),

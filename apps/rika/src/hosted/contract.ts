@@ -187,6 +187,8 @@ export type RunRequest = typeof RunRequest.Type
 export const RunResult = Schema.Struct({
   commandId: Schema.String,
   status: Schema.Literals(["accepted", "queued"]),
+  turnId: Schema.String,
+  text: Schema.String,
 })
 export type RunResult = typeof RunResult.Type
 

@@ -15,6 +15,8 @@ import {
   ThreadId,
   ThreadVersion,
 } from "@rika/product/hosted-model"
+import type { InteractiveEvent } from "@rika/product/interactive-event"
+import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Deferred, Effect, Layer, Queue, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { HostedError, HostedThreadId, ThreadClient, type ThreadClientInterface } from "./contract"
@@ -92,14 +94,19 @@ const envelope = (requestId: string, command: ClientMessage["command"]): ClientM
   command,
 })
 
+type Connection = Effect.Success<ReturnType<typeof connect>>
+type ThreadEventPayload = Extract<ServerFrameValue["payload"], { readonly _tag: "ThreadEvent" }>
+
 const awaitCommand = Effect.fn("HostedThreadClient.awaitCommand")(function* (
-  connection: Effect.Success<ReturnType<typeof connect>>,
+  connection: Connection,
   requestId: string,
   commandId: string,
   threadId?: string,
+  held?: Array<ThreadEventPayload>,
 ) {
   while (true) {
     const payload = (yield* connection.next).payload
+    if (payload._tag === "ThreadEvent") held?.push(payload)
     if (
       (payload._tag === "CommandAdmitted" ||
         payload._tag === "CommandAccepted" ||
@@ -117,20 +124,112 @@ const awaitCommand = Effect.fn("HostedThreadClient.awaitCommand")(function* (
 })
 
 const applyCommand = Effect.fn("HostedThreadClient.applyCommand")(function* (
-  connection: Effect.Success<ReturnType<typeof connect>>,
+  connection: Connection,
   message: ClientMessage,
   commandId: string,
   threadId?: string,
+  held?: Array<ThreadEventPayload>,
 ) {
   yield* connection.send(message)
   while (true) {
-    const outcome = yield* awaitCommand(connection, message.requestId, commandId, threadId)
+    const outcome = yield* awaitCommand(connection, message.requestId, commandId, threadId, held)
     if (outcome._tag !== "CommandAdmitted") return outcome
   }
 })
 
+/**
+ * Waits for the Turn admitted by `commandId` to settle. The server names the submission by its command ID, so the
+ * Turn is identified from `SubmissionAdmitted`. The hosted stream carries Turn status and transcript units through
+ * Thread view snapshots and patches; the result text is the last top-level assistant entry of that Turn. Thread
+ * events that arrived while the command acknowledgement was pending are replayed first from `held`.
+ */
+const awaitTurn = Effect.fn("HostedThreadClient.awaitTurn")(function* (
+  connection: Connection,
+  threadId: string,
+  commandId: string,
+  held: ReadonlyArray<ThreadEventPayload>,
+) {
+  const watch = new TurnWatch(threadId, commandId)
+  const nextEvent = (index: number) =>
+    index < held.length ? Effect.succeed(held[index]!.event.event) : connection.next.pipe(Effect.map(threadEventOf))
+  for (let index = 0; ; index += 1) {
+    const event = yield* nextEvent(index)
+    if (event === undefined) continue
+    const outcome = watch.observe(event)
+    if (outcome === undefined) continue
+    if (outcome._tag === "Settled") return { turnId: outcome.turnId, text: outcome.text }
+    return yield* failure(outcome.kind, outcome.message)
+  }
+})
+
+type TurnOutcome =
+  | { readonly _tag: "Settled"; readonly turnId: string; readonly text: string }
+  | { readonly _tag: "Failed"; readonly kind: HostedError["kind"]; readonly message: string }
+
+class TurnWatch {
+  private turnId: string | undefined
+  private readonly assistantText = new Map<string, string>()
+
+  constructor(
+    private readonly threadId: string,
+    private readonly commandId: string,
+  ) {}
+
+  observe(event: InteractiveEvent): TurnOutcome | undefined {
+    if (event._tag === "SubmissionRejected" && event.submissionId === this.commandId)
+      return { _tag: "Failed", kind: "protocol", message: event.message }
+    if (event._tag === "SubmissionAdmitted" && event.submissionId === this.commandId) {
+      if (String(event.threadId) !== this.threadId)
+        return { _tag: "Failed", kind: "protocol", message: "Submission admission identity did not match its Thread" }
+      this.turnId = String(event.turnId)
+      return undefined
+    }
+    if (this.turnId === undefined) return undefined
+    if (event._tag === "ExecutionFailed" && event.turnId !== undefined && String(event.turnId) === this.turnId)
+      return { _tag: "Failed", kind: "host", message: event.failure.message }
+    if (event._tag === "ThreadViewPatch") {
+      this.record(event.patch.upsert, event.patch.remove)
+      const change = event.patch.turnChanges.find(
+        (candidate) => candidate._tag === "UpsertTurn" && String(candidate.turn.id) === this.turnId,
+      )
+      return change?._tag === "UpsertTurn" ? this.settle(change.turn.status) : undefined
+    }
+    if (event._tag === "ThreadViewSnapshot") {
+      const entry = event.snapshot.turns.find((candidate) => String(candidate.turn.id) === this.turnId)
+      if (entry === undefined) return undefined
+      this.assistantText.clear()
+      this.record(entry.units)
+      return this.settle(entry.turn.status)
+    }
+    return undefined
+  }
+
+  private record(units: ReadonlyArray<TranscriptUnit.Unit>, removed: ReadonlyArray<string> = []) {
+    for (const unit of units)
+      if (unit.turnId === this.turnId && unit.parentId === undefined && unit.content._tag === "Entry")
+        if (unit.content.role === "assistant") this.assistantText.set(unit.key, unit.content.text)
+    for (const key of removed) this.assistantText.delete(key)
+  }
+
+  private settle(status: string): TurnOutcome | undefined {
+    if (status === "completed") return { _tag: "Settled", turnId: this.turnId!, text: lastValue(this.assistantText) }
+    if (status === "failed" || status === "cancelled")
+      return { _tag: "Failed", kind: "host", message: `Turn ${status}` }
+    return undefined
+  }
+}
+
+const lastValue = (values: ReadonlyMap<string, string>) => {
+  let last = ""
+  for (const value of values.values()) last = value
+  return last
+}
+
+const threadEventOf = (frame: ServerFrameValue) =>
+  frame.payload._tag === "ThreadEvent" ? frame.payload.event.event : undefined
+
 const attach = Effect.fn("HostedThreadClient.attach")(function* (
-  connection: Effect.Success<ReturnType<typeof connect>>,
+  connection: Connection,
   threadId: string,
   requestId: string,
 ) {
@@ -206,15 +305,18 @@ export const layer = Layer.effect(
               text,
             }
             if (input.request.mode !== undefined) command.mode = input.request.mode
+            const held: Array<ThreadEventPayload> = []
             const accepted = yield* applyCommand(
               connection,
               envelope(requestId, command),
               input.commandId,
               input.threadId,
+              held,
             )
             if (accepted.result._tag !== "PromptAdmitted")
               return yield* failure("protocol", "Prompt returned the wrong result")
-            return { commandId: input.commandId, status: accepted.result.status }
+            const settled = yield* awaitTurn(connection, input.threadId, input.commandId, held)
+            return { commandId: input.commandId, status: accepted.result.status, ...settled }
           }),
         ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
       ensureService: (input) =>

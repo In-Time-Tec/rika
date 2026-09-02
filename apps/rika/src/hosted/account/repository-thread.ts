@@ -187,5 +187,5 @@ export const runThread = Effect.fn("HostedAccount.runThread")(function* (threadI
       .issueThreadTicket(profile.origin, session)
       .pipe(Effect.flatMap((ticket) => threads.submit({ ticket, threadId, request, commandId: key }))),
   )
-  yield* Console.log(`Queued command ${result.commandId}`)
+  yield* Console.log(result.text)
 })
