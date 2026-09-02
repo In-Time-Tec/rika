@@ -26,7 +26,11 @@ export const startClient = () => {
   })
   const platform = Layer.merge(BunServices.layer, FetchHttpClient.layer)
   const home = Effect.runSync(Config.string("HOME").pipe(Config.withDefault(process.cwd())))
-  const logging = Logging.layer({ dataRoot: `${home}/.config/rika`, role: "client", version }).pipe(
+  // RIKA_LOG_LEVEL=debug lets a user capture verbose diagnostics for `rika debug` without a rebuild.
+  const level = Effect.runSync(
+    Config.literals(["debug", "info", "warning", "error"], "RIKA_LOG_LEVEL").pipe(Config.withDefault("info")),
+  )
+  const logging = Logging.layer({ dataRoot: `${home}/.config/rika`, role: "client", version, level }).pipe(
     Layer.provide(BunServices.layer),
   )
   const rootFiber = Effect.runFork(run().pipe(Effect.scoped, provideLayerScoped(Layer.merge(platform, logging))))

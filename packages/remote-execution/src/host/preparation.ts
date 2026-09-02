@@ -94,7 +94,7 @@ const prepare = (
     function receive<A>(accept: (message: IncomingMessage) => A | undefined): Effect.Effect<A, HostError> {
       return Effect.gen(function* () {
         const message = yield* Queue.take(incoming)
-        if (message._tag === "Fenced") return yield* HostError.make({ message: message.message })
+        if (message._tag === "Fenced") return yield* HostError.make({ message: message.message, permanent: true })
         if (message._tag === "LeaseReceipt") {
           yield* runtime
             .receipt(message.receipt)
@@ -112,7 +112,8 @@ const prepare = (
             (message.phase !== "setup" && message.phase !== "runtime")
           )
             return yield* HostError.make({
-              message: "Workspace environment authorization does not match its bootstrap",
+              message: `Workspace environment authorization does not match its bootstrap (granted ${message.phase} ${message.digest}, bootstrapped ${identity.environmentDigest})`,
+              permanent: true,
             })
           yield* applyPhaseGrant(message, grants, executionEnvironment, environmentAccess, redactedValues)
         }

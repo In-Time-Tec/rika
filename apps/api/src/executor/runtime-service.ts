@@ -25,6 +25,9 @@ import { Executor, orphanReaper } from "./contract"
 const requiredWorkspaceCapabilities = ["filesystem", "nativeTools", "git", "process", "workspaceLifecycle"] as const
 /** How long an Active Orb session may go without reporting a preparation start before admission fails. */
 const preparationStartDeadlineMillis = 60_000
+// After the host reports preparation ready it sends the refreshed capability snapshot as a separate
+// message; the assignment briefly reports stale capabilities in between.
+const capabilityRefreshGraceMillis = 30_000
 /** Retryable preparation failures (checkout, credentials) are retried up to this many attempts per generation. */
 const maxPreparationAttempts = 3
 
@@ -154,7 +157,11 @@ export const service = Layer.effect(
                   })
                 return
               }
-              if (preparation.state === "ready") return yield* unavailableFailure
+              if (preparation.state === "ready") {
+                if ((yield* Clock.currentTimeMillis) - preparation.updatedAt > capabilityRefreshGraceMillis)
+                  return yield* unavailableFailure
+                return
+              }
               if (preparation.state === "preparing") return
               const failure = preparation.failure!
               const retry =

@@ -3,6 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import {
+  Cause,
   Context,
   Crypto,
   Deferred,
@@ -283,7 +284,21 @@ const host = Effect.scoped(
           }),
         ).pipe(
           Effect.provide(Context.merge(Context.merge(runtimeContext, ptyContext), workspaceContext)),
-          Effect.catchCause(() => Effect.sleep("1 second")),
+          Effect.catchCause((cause) => {
+            const permanent = Cause.findErrorOption(cause).pipe(
+              Option.filter(Schema.is(HostError)),
+              Option.filter((error) => error.permanent === true),
+            )
+            if (Option.isSome(permanent))
+              return Effect.logWarning("executor-host.connection.rejected", {
+                "rika.assignment.id": identity.assignmentId,
+                "rika.failure.message": permanent.value.message,
+              }).pipe(Effect.andThen(Effect.fail(permanent.value)))
+            return Effect.logWarning("executor-host.connection.retry", {
+              "rika.assignment.id": identity.assignmentId,
+              "rika.failure.message": String(Cause.squash(cause)),
+            }).pipe(Effect.andThen(Effect.sleep("1 second")))
+          }),
           Effect.forever,
         )
       }).pipe(

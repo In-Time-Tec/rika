@@ -395,12 +395,13 @@ export const provisioningOperations = ({
       Effect.gen(function* () {
         const placement = yield* orbPlacement(previous)
         const checkpoint = yield* assignments.latestCheckpoint(previous.id).pipe(Effect.mapError(assignmentFailure))
-        yield* authorizeWorkspace(
-          authorization,
+        // The host reports this lifecycle in ExecutorHello and the gateway grants the phase it implies
+        // ("fresh" → setup, otherwise runtime), so the lifecycle must follow the phase bootstrapped here.
+        const phase: EnvironmentPhase =
           previous.lifecycle._tag === "Active" || previous.lifecycle._tag === "Paused" || checkpoint !== undefined
             ? "runtime"
-            : "setup",
-        )
+            : "setup"
+        yield* authorizeWorkspace(authorization, phase)
         const restore = checkpoint === undefined ? null : yield* restoreCheckpoint(previous)
         const identity = yield* issueSecret("executor-bootstrap")
         const replacing = yield* assignments
@@ -411,7 +412,13 @@ export const provisioningOperations = ({
             bootstrapLifetimeMillis,
           })
           .pipe(Effect.mapError(assignmentFailure))
-        return yield* createAndBootstrap(replacing, identity, authorization, "replacement", restore)
+        return yield* createAndBootstrap(
+          replacing,
+          identity,
+          authorization,
+          phase === "runtime" ? "replacement" : "fresh",
+          restore,
+        )
       }),
     )
   })

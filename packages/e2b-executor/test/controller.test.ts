@@ -221,8 +221,10 @@ describe("Controller", () => {
       })
       expect(harness.provider.creates).toHaveLength(1)
       expect(harness.provider.creates[0]).toMatchObject({ templateBuildId: "approved-build", generation: 2 })
+      // The sandbox was bootstrapped with the setup phase digest, so the host must announce itself as
+      // "fresh"; the gateway grants runtime for any other lifecycle and would fence the digest mismatch.
       expect(harness.provider.bootstraps[0]).toMatchObject({
-        identity: { assignmentGeneration: 2, templateBuildId: "approved-build", lifecycle: "replacement" },
+        identity: { assignmentGeneration: 2, templateBuildId: "approved-build", lifecycle: "fresh" },
       })
     }).pipe(provideLayer(harness.layer))
   })

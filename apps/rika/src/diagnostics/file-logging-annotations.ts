@@ -37,7 +37,11 @@ const annotationSchemas = {
   "rika.duration.ms": boundedNumber,
   "rika.duration.millis": boundedNumber,
   "rika.event.cursor": eventCursor,
+  "rika.event.tag": runnerMessageTag,
   "rika.event.type": matching(/^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/, 100),
+  "rika.event.units.removed": boundedNumber,
+  "rika.event.units.upserted": boundedNumber,
+  "rika.view.revision": boundedNumber,
   "rika.execution.id": executionId,
   "rika.failure.category": oneOf(
     "invalid_input",

@@ -10,6 +10,25 @@ import { AttachmentProjection, type Preview, type Projection, type Snapshot } fr
 type Payload = ServerFrame["payload"]
 const { encodeThreadView } = AttachmentProjection
 
+const unitCount = (event: InteractiveEvent, field: "upsert" | "remove"): number => {
+  if (event._tag === "ThreadViewPatch") return event.patch[field].length
+  if (event._tag === "ThreadViewSnapshot" && field === "upsert")
+    return event.snapshot.turns.reduce((total, turn) => total + turn.units.length, 0)
+  return 0
+}
+
+const appliedEventAnnotations = (threadId: string, event: InteractiveEvent) => {
+  const counts = {
+    "rika.thread.id": threadId,
+    "rika.event.tag": event._tag,
+    "rika.event.units.upserted": unitCount(event, "upsert"),
+    "rika.event.units.removed": unitCount(event, "remove"),
+  }
+  if (event._tag === "ThreadViewPatch") return { ...counts, "rika.view.revision": event.patch.revision }
+  if (event._tag === "ThreadViewSnapshot") return { ...counts, "rika.view.revision": event.snapshot.revision }
+  return counts
+}
+
 export const interactiveSessionEvents = (dependencies: {
   readonly activePreviews: Map<string, Preview>
   readonly currentFrame: (connection: PhysicalConnection) => boolean
@@ -83,6 +102,9 @@ export const interactiveSessionEvents = (dependencies: {
         committedCursor: String(payload.event.cursor),
       }
       if (!dependencies.replaceAuthority(projection, candidate)) return
+      yield* Effect.logDebug("hosted.thread_event.applied").pipe(
+        Effect.annotateLogs(appliedEventAnnotations(threadId, event)),
+      )
       dependencies.dispatch(event)
       dependencies.replaceAuthority(candidate, {
         ...candidate,
