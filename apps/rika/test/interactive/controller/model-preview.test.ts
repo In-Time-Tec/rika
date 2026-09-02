@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import "./model-preview/clearing.fixture"
 import "./model-preview/reconciliation.fixture"
 import { Option, Schema } from "effect"
+import { modelResponseId } from "@rika/product/execution-gateway"
 import * as InteractiveController from "../../../src/interactive/controller/service"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import type * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -150,13 +151,30 @@ const ids = (state: InteractiveController.State): ReadonlyArray<string> =>
   transcriptItems(state).flatMap((item) => (item.id === undefined ? [] : [item.id]))
 const runPreview = (state: InteractiveController.State, runId = "run") => state.modelPreview?.byRun.get(runId)
 
-const timelineUnit = (key: string, content: TranscriptUnit.Unit["content"], revision = 1): TranscriptUnit.Unit => ({
-  key,
-  turnId,
-  order: TranscriptOrdering.unitOrder(key, revision),
-  revision,
-  content,
-})
+const timelineUnit = (
+  key: string,
+  content: TranscriptUnit.Unit["content"],
+  revision = 1,
+  responseId?: string,
+): TranscriptUnit.Unit => {
+  const unit: TranscriptUnit.Unit = {
+    key,
+    turnId,
+    order: TranscriptOrdering.unitOrder(key, revision),
+    revision,
+    content,
+  }
+  return responseId === undefined ? unit : { ...unit, modelResponseId: responseId }
+}
+
+const responseId = (options: Partial<ExecutionGateway.ModelPreviewIdentity> = {}) =>
+  modelResponseId({
+    runId: options.runId ?? "run",
+    turn: options.turn ?? 0,
+    modelCallId: options.modelCallId ?? "call",
+    modelAttemptId: options.modelAttemptId ?? "attempt-1",
+    attempt: options.attempt ?? 1,
+  })
 
 interface PatchOptions {
   readonly upsert?: ReadonlyArray<TranscriptUnit.Unit>
@@ -371,11 +389,43 @@ describe("tentative model preview overlay", () => {
 
     state = InteractiveController.update(state, previewCleared(0)).state
     state = applyPatch(state, {
-      upsert: [timelineUnit("committed:answer", { _tag: "Entry", role: "assistant", text })],
+      upsert: [timelineUnit("committed:answer", { _tag: "Entry", role: "assistant", text }, 1, responseId())],
     })
 
     expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
+  })
+
+  it("holds the final answer across a commit-discard clear until its durable response arrives", () => {
+    const text = "Breakage began at 2b8aabb."
+    let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
+    expect(assistantText(state)).toBe(text)
+
+    state = InteractiveController.update(state, previewCleared(0)).state
+    expect(assistantText(state)).toBe(text)
+    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(true)
+
+    state = applyPatch(state, {
+      upsert: [timelineUnit("committed:answer", { _tag: "Entry", role: "assistant", text }, 1, responseId())],
+    })
+
+    expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
+    expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
+  })
+
+  it("rejects late same-identity frames while holding across a commit-discard clear", () => {
+    const text = "held answer"
+    let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
+    state = InteractiveController.update(state, previewCleared(0)).state
+    const held = state
+    expect(assistantText(state)).toBe(text)
+
+    state = InteractiveController.update(
+      state,
+      preview(2, "straggler", {}, "", { text: text.length, reasoning: 0 }),
+    ).state
+    expect(state).toBe(held)
+    expect(assistantText(state)).toBe(text)
   })
 
   it("keeps unchanged preview units mounted across durable patches", () => {
@@ -398,7 +448,7 @@ describe("tentative model preview overlay", () => {
     let state = InteractiveController.update(loaded(), preview(1, "before overflow", {}, "")).state
     state = InteractiveController.update(state, previewCleared(0)).state
 
-    expect(runPreview(state)).toMatchObject({ text: "", incomplete: true })
+    expect(runPreview(state)).toMatchObject({ text: "before overflow", incomplete: true })
     expect(runPreview(state)?.clearFence).toBeUndefined()
     const invalidated = state
     expect(

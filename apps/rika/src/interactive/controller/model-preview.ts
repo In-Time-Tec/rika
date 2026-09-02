@@ -120,7 +120,7 @@ const clearRun = (
       current.incomplete
     )
       return current
-    return { ...current, ...cleared, incomplete: true }
+    return { ...current, incomplete: true }
   }
   const clearFence = Math.max(current?.clearFence ?? Number.NEGATIVE_INFINITY, incoming.attemptFence)
   if (current === undefined)
