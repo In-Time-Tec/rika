@@ -157,6 +157,16 @@ export interface TentativeTranscriptLayout {
   markdownLastLexedAt: number
   readonly markdownBands: Array<Array<ReadonlyArray<TextChunk>>>
   readonly markdownStableContent: Array<StyledText | undefined>
+  markdownTailLength: number
+  markdownTailLexedAt: number
+  readonly markdownTailBands: Array<MarkdownTailBand>
+}
+
+/** One renderable-sized slice of the streaming Markdown tail; `revision` changes only when its lines change. */
+export interface MarkdownTailBand {
+  readonly lines: ReadonlyArray<ReadonlyArray<TextChunk>>
+  readonly content: StyledText
+  readonly revision: number
 }
 
 export interface TranscriptUnitCacheEntry {

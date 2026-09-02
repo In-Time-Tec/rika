@@ -9,7 +9,6 @@ import { streamActivity } from "../activity/model"
 import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from "../queue/model"
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../submission"
 import { changedFiles } from "../changed-file"
-import { isTranscriptUnitExpanded, transcriptUnits, transcriptUnitId } from "../../presentation/transcript/row"
 import { cancelTranscriptBlocks } from "../transcript/model"
 import { detailOverlay } from "./detail-overlay"
 
@@ -75,34 +74,12 @@ const streamReasoning = (model: Model, text: string): Model => {
   return model.busy ? { ...streamed, activity: streamActivity(model.activity, "Thinking", text, undefined) } : streamed
 }
 
-const toggleReasoning = (model: Model, index: number): Model => {
-  const unit = transcriptUnits(model).find((candidate) => candidate.kind === "reasoning" && candidate.block === index)
-  if (unit === undefined) return model
-  const id = transcriptUnitId(model, unit)
-  const expanded = new Set(model.expandedRowKeys)
-  const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
-  if (isTranscriptUnitExpanded(model, unit)) {
-    expanded.delete(id)
-    explicitlyCollapsed.add(id)
-  } else {
-    expanded.add(id)
-    explicitlyCollapsed.delete(id)
-  }
-  return {
-    ...model,
-    expandedRowKeys: [...expanded],
-    explicitlyCollapsedRowKeys: [...explicitlyCollapsed],
-  }
-}
-
 const reduceReasoningOverlay = (model: Model, message: Message): Model | undefined => {
   switch (message._tag) {
     case "ConnectionStateChanged":
       return { ...model, connection: message.state }
     case "ReasoningStreamed":
       return streamReasoning(model, message.text)
-    case "ReasoningToggled":
-      return toggleReasoning(model, message.index)
     case "PaletteActionConsumed":
       return { ...model, pendingAction: undefined }
   }

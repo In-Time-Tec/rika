@@ -5,7 +5,7 @@ import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { truncateToWidth } from "../../../presentation/terminal/format"
-import { toOpenChunk } from "../text-adapter"
+import { renderMarkdownStyled, toOpenChunk } from "../text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
 import { renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./bodies"
 import { toolDetail } from "../../../presentation/transcript/tool/detail"
@@ -17,14 +17,7 @@ import type {
   ToolTranscriptUnit,
   TranscriptUnit,
 } from "../../../presentation/transcript/tool/types"
-import {
-  aggregateRowStatus,
-  rowStatusIcon,
-  wrapTextToWidth,
-  wrapBodyText,
-  subagentPhrase,
-  type RowStatus,
-} from "../window"
+import { aggregateRowStatus, rowStatusIcon, wrapBodyText, subagentPhrase, type RowStatus } from "../window"
 import { toolUnitsFor, type ToolUnit } from "../tool/detail"
 import { transcriptWrapWidth, type TranscriptUnitBuild, type UnitLineRange } from "../transcript/window"
 import { createToolBodyRenderer } from "../tool/bodies"
@@ -354,14 +347,11 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     if (block?._tag !== "Diff") return
     renderDiffBody(block, selected, expanded, transcriptWrapWidth(model.width), append, appendAll)
   }
-  const renderReasoningBody = (index: number, selected: boolean, expanded: boolean) => {
+  const renderReasoningBody = (index: number) => {
     const block = blockAt(index)
     if (block?._tag !== "Reasoning") return
-    const source = expanded
-      ? block.text
-      : (block.text.split("\n").find((value) => value.trim().length > 0) ?? "Reasoning")
-    const text = wrapTextToWidth(source, transcriptWrapWidth(model.width)).join("\n")
-    append(selected ? bold(fg(colors.blue)(text)) : dim(italic(fg(colors.text)(text))))
+    for (const chunk of renderMarkdownStyled(block.text.trimEnd(), transcriptWrapWidth(model.width)).chunks)
+      append(dim(italic(chunk)))
   }
   const renderPlainBlock = (index: number, selected: boolean, expanded: boolean) => {
     const block = blockAt(index)
@@ -412,7 +402,7 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
   }
   const renderUnitBody = (unit: TranscriptUnit, selected: boolean, expanded: boolean) => {
     if (unit.kind === "entry") agentContent.renderEntryBody(unit.entry)
-    else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected, expanded)
+    else if (unit.kind === "reasoning") renderReasoningBody(unit.block)
     else if (unit.kind === "subagent") renderSubagentUnitBody(unit, expanded)
     else if (unit.kind === "subagent-group") renderSubagentGroupUnitBody(unit, expanded)
     else if (unit.kind === "diff") renderDiffUnitBody(unit.block, selected, expanded)

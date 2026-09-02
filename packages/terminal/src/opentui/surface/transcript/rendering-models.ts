@@ -41,6 +41,9 @@ const newTentativeLayout = (width: number, tone: TentativeTranscriptLayout["tone
   markdownLastLexedAt: Number.NEGATIVE_INFINITY,
   markdownBands: [[]],
   markdownStableContent: [],
+  markdownTailLength: 0,
+  markdownTailLexedAt: Number.NEGATIVE_INFINITY,
+  markdownTailBands: [],
 })
 
 const tentativeLayout = (
@@ -58,10 +61,13 @@ const tentativeLayout = (
     : previous
 }
 
-const styledBand = (lines: ReadonlyArray<ReadonlyArray<TextChunk>>) => {
+const toneChunk = (tone: TentativeTranscriptLayout["tone"], chunk: TextChunk) =>
+  tone === "reasoning" ? dim(italic(chunk)) : chunk
+
+const styledBand = (tone: TentativeTranscriptLayout["tone"], lines: ReadonlyArray<ReadonlyArray<TextChunk>>) => {
   const chunks: Array<TextChunk> = []
   for (const [index, line] of lines.entries()) {
-    chunks.push(...line)
+    for (const chunk of line) chunks.push(toneChunk(tone, chunk))
     if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"))
   }
   return new StyledText(chunks)
@@ -86,34 +92,86 @@ const appendMarkdownLines = (
 
 const stableMarkdownChunkSize = 512
 
-const stableMarkdownBoundary = (text: string, offset: number): number => {
-  const limit = Math.min(text.length, offset + stableMarkdownChunkSize)
-  const boundary = text.lastIndexOf("\n\n", limit - 1)
-  return boundary < offset ? offset : boundary + 2
+// The next settle boundary: the first paragraph break at or after one chunk from `offset`, capped at `stableEnd`.
+const stableMarkdownBoundary = (text: string, offset: number, stableEnd: number): number => {
+  const searchFrom = offset + stableMarkdownChunkSize
+  const found = searchFrom >= stableEnd ? -1 : text.indexOf("\n\n", searchFrom)
+  return found === -1 || found + 2 > stableEnd ? stableEnd : found + 2
 }
 
+// Twice a second, every complete paragraph moves from the re-lexed tail into stable bands that never change again.
+// Settling everything available keeps the tail one partial paragraph long however fast the model streams.
 const parseStableMarkdown = (layout: TentativeTranscriptLayout, text: string, nowMillis: number): void => {
   if (nowMillis - layout.markdownLastLexedAt < 500) return
-  const boundary = stableMarkdownBoundary(text, layout.markdownStableLength)
-  if (boundary <= layout.markdownStableLength) return
-  const stableSource = text.slice(layout.markdownStableLength, boundary)
-  appendMarkdownLines(layout, renderMarkdownLines(stableSource, layout.width))
-  layout.markdownStableLength = boundary
+  const lastBreak = text.lastIndexOf("\n\n")
+  if (lastBreak < layout.markdownStableLength) return
+  const stableEnd = lastBreak + 2
+  while (layout.markdownStableLength < stableEnd) {
+    const boundary = stableMarkdownBoundary(text, layout.markdownStableLength, stableEnd)
+    appendMarkdownLines(layout, renderMarkdownLines(text.slice(layout.markdownStableLength, boundary), layout.width))
+    layout.markdownStableLength = boundary
+  }
   layout.markdownLastLexedAt = nowMillis
-  layout.pending = ""
-  layout.pendingSource = ""
-  layout.bands.splice(0, layout.bands.length, [])
-  layout.stableContent.splice(0)
-  layout.sourceLength = boundary
-  appendTentativeText(layout, text.slice(boundary), text.length)
+  layout.markdownTailLength = 0
+  layout.markdownTailLexedAt = Number.NEGATIVE_INFINITY
+  layout.markdownTailBands.splice(0)
 }
 
-const markdownBundles = (key: string, revision: string, layout: TentativeTranscriptLayout) => {
+// A paragraph-sized tail is re-lexed on every delta so lists, tables, and emphasis format while they stream. A
+// larger tail (a long table or code block without a blank line) is re-lexed at most ten times a second.
+const liveMarkdownTailChars = 2048
+
+const sameChunk = (a: TextChunk, b: TextChunk) =>
+  a.text === b.text &&
+  a.attributes === b.attributes &&
+  (a.fg === b.fg || (a.fg !== undefined && a.fg.equals(b.fg))) &&
+  (a.bg === b.bg || (a.bg !== undefined && a.bg.equals(b.bg)))
+
+const sameLines = (a: ReadonlyArray<ReadonlyArray<TextChunk>>, b: ReadonlyArray<ReadonlyArray<TextChunk>>) =>
+  a.length === b.length &&
+  a.every((line, index) => {
+    const other = b[index]!
+    return line.length === other.length && line.every((chunk, chunkIndex) => sameChunk(chunk, other[chunkIndex]!))
+  })
+
+// Only bands whose lines changed receive new content and a new revision, so OpenTUI rebuilds one band per delta.
+const replaceMarkdownTailBands = (
+  layout: TentativeTranscriptLayout,
+  lines: ReadonlyArray<ReadonlyArray<TextChunk>>,
+): void => {
+  const bands = layout.markdownTailBands
+  let index = 0
+  for (let start = 0; start < lines.length; start += transcriptRenderableBandRows, index += 1) {
+    const bandLines = lines.slice(start, start + transcriptRenderableBandRows)
+    const previous = bands[index]
+    if (previous !== undefined && sameLines(previous.lines, bandLines)) continue
+    bands[index] = {
+      lines: bandLines,
+      content: styledBand(layout.tone, bandLines),
+      revision: previous === undefined ? 0 : previous.revision + 1,
+    }
+  }
+  bands.splice(index)
+}
+
+const parseMarkdownTail = (layout: TentativeTranscriptLayout, text: string, nowMillis: number): void => {
+  if (text.length === layout.markdownTailLength) return
+  const tail = text.slice(layout.markdownStableLength)
+  if (tail.length > liveMarkdownTailChars && nowMillis - layout.markdownTailLexedAt < 100) return
+  const trailing = tail.charCodeAt(tail.length - 1)
+  const source = trailing >= 0xd800 && trailing <= 0xdbff ? tail.slice(0, -1) : tail
+  replaceMarkdownTailBands(layout, source.trim().length === 0 ? [] : renderMarkdownLines(source, layout.width))
+  layout.markdownTailLength = text.length
+  layout.markdownTailLexedAt = nowMillis
+  layout.sourceLength = text.length
+}
+
+const markdownBundles = (key: string, layout: TentativeTranscriptLayout) => {
   const bundles: Array<TranscriptRangeBundle> = []
   for (const [index, band] of layout.markdownBands.entries()) {
     if (band.length === 0) continue
     const bandKey = index === 0 ? `${key}:body` : `${key}:body:markdown:${index}`
-    const content = (layout.markdownStableContent[index] ??= styledBand(band))
+    const content = (layout.markdownStableContent[index] ??= styledBand(layout.tone, band))
     bundles.push({
       key: bandKey,
       rows: band.length,
@@ -127,22 +185,16 @@ const markdownBundles = (key: string, revision: string, layout: TentativeTranscr
       ],
     })
   }
-  const style = (value: string) => new StyledText([fg(colors.text)(value)])
-  for (const [index, band] of layout.bands.entries()) {
-    const tail = index === layout.bands.length - 1
-    const rows = tail ? [...band, layout.pending] : band
-    if (rows.length === 0 || (rows.length === 1 && rows[0] === "")) continue
-    const value = rows.join("\n")
-    const content = tail ? style(value) : (layout.stableContent[index] ??= style(value))
+  for (const [index, band] of layout.markdownTailBands.entries()) {
     const bandKey = `${key}:body:tail:${index}`
     bundles.push({
       key: bandKey,
-      rows: rows.length,
+      rows: band.lines.length,
       descriptors: [
         {
           key: bandKey,
-          revision: tail ? `${revision}#tail:${index}` : `${key}:${layout.width}:tail:${index}`,
-          content,
+          revision: `${key}:${layout.width}:tail:${index}:${layout.markdownStableLength}:${band.revision}`,
+          content: band.content,
           selectable: false,
         },
       ],
@@ -213,14 +265,12 @@ export const buildTentativeTranscriptUnitBundles = ({
   cached,
 }: BuildTentativeBundlesOptions): TranscriptUnitCacheEntry => {
   const layout = tentativeLayout(cached, text, width, tone)
-  if (
-    tone === "answer" &&
-    (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength }))
-  ) {
+  if (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength })) {
     layout.markdown = true
-    parseStableMarkdown(layout, text, Number(process.hrtime.bigint()) / 1_000_000)
-    appendTentativeText(layout, text.slice(layout.sourceLength), text.length)
-    return { revision, bundles: markdownBundles(key, revision, layout), tentative: layout }
+    const nowMillis = Number(process.hrtime.bigint()) / 1_000_000
+    parseStableMarkdown(layout, text, nowMillis)
+    parseMarkdownTail(layout, text, nowMillis)
+    return { revision, bundles: markdownBundles(key, layout), tentative: layout }
   }
   appendTentativeText(layout, text.slice(layout.sourceLength), text.length)
   return { revision, bundles: plainBundles(key, revision, layout), tentative: layout }

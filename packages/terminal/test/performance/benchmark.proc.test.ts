@@ -17,7 +17,11 @@ it.live(
 
       expect(stream.latencyP95Ms).toBeLessThanOrEqual(24)
       expect(stream.latencyMaxMs).toBeLessThanOrEqual(48)
-      expect(stream.markdownLexerInvocations).toBeLessThanOrEqual(Math.ceil((stream.events / 200) * 2) + 2)
+      // The unsettled tail is re-lexed on each delta so Markdown formats live; settled paragraphs lex at most twice a
+      // second and never again.
+      expect(stream.markdownLexerInvocations).toBeLessThanOrEqual(
+        stream.events + Math.ceil((stream.events / 200) * 2) + 2,
+      )
       expect(stream.fullTranscriptCopiesPerEvent).toBe(0)
       expect(stream.renderablesCreated).toBeLessThanOrEqual(128)
       expect(scroll.heapGrowthMb).toBeLessThanOrEqual(60)

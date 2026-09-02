@@ -31,8 +31,7 @@ describe("image smoke doctor contract", () => {
         for (const name of testing.requiredChecks) {
           expect(source, `doctor.ts must emit check "${name}"`).toContain(`"${name}"`)
         }
-      }),
-    )
+      }))
   })
 
   it("accepts a matching doctor result", () => {

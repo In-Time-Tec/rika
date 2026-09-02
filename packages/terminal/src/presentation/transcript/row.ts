@@ -299,9 +299,7 @@ export const isExpandableUnit: {
       const block = decodeTranscriptBlock(model.blocks[unit.block])
       return block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0)
     }
-    return (
-      unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "subagent" || unit.kind === "subagent-group"
-    )
+    return unit.kind === "diff" || unit.kind === "subagent" || unit.kind === "subagent-group"
   }
   if (toolUnitHasStructuralDetail(unit)) return true
   return unit.blocks.some((index) => {

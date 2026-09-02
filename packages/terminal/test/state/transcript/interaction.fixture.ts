@@ -301,9 +301,7 @@ test("navigates transcript detail units with Tab and toggles the selected unit",
   model = update(model, { _tag: "KeyPressed", key: key({ name: "tab" }) })
   expect(model.detailSelection).toBe("block:Diff:2")
   model = update(model, { _tag: "KeyPressed", key: key({ name: "tab" }) })
-  expect(model.detailSelection).toBe("block:Reasoning:0")
-  model = update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-  expect(model.expandedRowKeys).toEqual(["block:Diff:2", "tool:1", "block:Reasoning:0"])
+  expect(model.detailSelection).toBe("tool:1")
 })
 test("keeps an expanded streamed tool group open as new children arrive", () => {
   let model = update(initial("/work"), { _tag: "BlockAdded", block: readCall("1", "a") })

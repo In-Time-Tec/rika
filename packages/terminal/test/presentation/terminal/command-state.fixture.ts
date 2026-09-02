@@ -4,12 +4,10 @@ import { initial, type Model } from "../../../src/state/model"
 import { update } from "../../../src/state/reducer/model"
 
 import { key, _thread, readCall, _editFile, _busyQueueModel } from "../../state/queue/model.fixture"
-test("keeps queue state outside the transcript and tracks reasoning and scroll follow", () => {
+test("keeps queue state outside the transcript and tracks scroll follow", () => {
   let model = replaceQueue(initial("/work"), [{ id: "queued", prompt: "old" }])
   model = update(model, { _tag: "ReasoningStreamed", text: "details" })
-  model = update(model, { _tag: "ReasoningToggled", index: 0 })
   expect(model.blocks).toEqual([{ _tag: "Reasoning", text: "details" }])
-  expect(model.expandedRowKeys).toEqual(["block:Reasoning:0"])
   expect(model.queue).toEqual([{ id: "queued", prompt: "old" }])
   model = update(model, { _tag: "ScrollMoved", offset: 4 })
   expect(model.scrollFollow).toBe(false)

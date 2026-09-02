@@ -1,7 +1,6 @@
 import { initial, type Model } from "../../../src/state/model"
 import { ready } from "../../../src/state/loadable"
 import { replaceQueue } from "../../../src/state/queue/model"
-import { update } from "../../../src/state/reducer/model"
 import type { TranscriptBlock } from "../../../src/state/transcript/model"
 import { thread, threadBrowser } from "./thread-browser.fixture"
 
@@ -69,8 +68,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       80,
       24,
     ],
-    ["reasoning-collapsed", reasoning, 80, 24],
-    ["reasoning-expanded", update(reasoning, { _tag: "ReasoningToggled", index: 0 }), 80, 24],
+    ["reasoning", reasoning, 80, 24],
     ["tool", block(tool("tool-1", "read", "src/main.ts", "running")), 80, 24],
     [
       "tool-expanded",

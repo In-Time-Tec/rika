@@ -78,7 +78,6 @@ type Message =
   | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }
   | { readonly _tag: "BlockAdded"; readonly block: TranscriptBlock }
   | { readonly _tag: "ReasoningStreamed"; readonly text: string }
-  | { readonly _tag: "ReasoningToggled"; readonly index: number }
   | { readonly _tag: "ScrollMoved"; readonly offset: number }
   | { readonly _tag: "ScrollFollowed" }
   | { readonly _tag: "PaletteActionConsumed" }

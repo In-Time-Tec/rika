@@ -480,27 +480,6 @@
           "width": 1
         },
         {
-          "text": "▸ ",
-          "fg": {
-            "buffer": {
-              "0": 2176,
-              "1": 384,
-              "2": 128,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 2,
-          "width": 2
-        },
-        {
           "text": "Inspecting stable inputs",
           "fg": {
             "buffer": {
@@ -522,7 +501,7 @@
           "width": 24
         },
         {
-          "text": "                                                     ",
+          "text": "                                                       ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -540,7 +519,7 @@
             }
           },
           "attributes": 0,
-          "width": 53
+          "width": 55
         }
       ]
     },

@@ -334,7 +334,7 @@ test("toggles every transcript detail as one reducer action", () => {
     ],
   }
   model = update(model, { _tag: "AllDetailsToggled" })
-  expect(model.expandedRowKeys).toEqual(["block:Reasoning:0", "tool:read", "block:Diff:2"])
+  expect(model.expandedRowKeys).toEqual(["tool:read", "block:Diff:2"])
   model = update(model, { _tag: "AllDetailsToggled" })
   expect(model.expandedRowKeys).toEqual([])
 })
