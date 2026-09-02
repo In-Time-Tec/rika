@@ -47,12 +47,10 @@ export const shellCommandText = (block: Extract<TranscriptBlock, { _tag: "ToolCa
 export const shellMetadata = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ReadonlyArray<string> => {
   const value = toolInputValue(block.input)
   const workdir = block.process?.workdir ?? inputString(value, ["workdir", "cwd"])
-  const processId = block.process?.processId ?? inputString(value, ["processId"])
   const command = shellCommandText(block)
   const script = inputString(value, ["script"])
   const metadata: Array<string> = []
   if (workdir !== undefined) metadata.push(`cwd ${workdir}`)
-  if (processId !== undefined) metadata.push(`process ${processId}`)
   if (block.process?.background === true) metadata.push("detached")
   if ((script !== undefined && script.length > 0) || command.includes("\n")) metadata.push("script")
   return metadata

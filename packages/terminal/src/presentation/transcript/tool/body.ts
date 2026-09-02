@@ -1,6 +1,7 @@
 import { formatResult } from "@rika/transcript/result-presentation"
 import type { TranscriptBlock } from "../../../state/transcript/model"
 import { isToolOutputDisplayed } from "../agent-response"
+import { inputValue } from "./detail"
 import { Schema } from "effect"
 
 export type ToolBody =
@@ -36,3 +37,15 @@ export const toolBody = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>):
 }
 
 export const isExpandableBody = (body: ToolBody): boolean => body._tag !== "None"
+
+export type ReadFileBody = { readonly text: string; readonly path: string | undefined }
+
+/** The file listing a completed `read` returned, or undefined when the block is not a successful read with output. */
+export const readFileBody = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ReadFileBody | undefined => {
+  if (block.presentation.action !== "read" || block.status !== "complete" || !isToolOutputDisplayed(block))
+    return undefined
+  const text = toolResultText(block.result)
+  if (text === undefined || text.length === 0) return undefined
+  const input = inputValue(block.input)
+  return { text, path: block.files[0]?.path ?? input.path ?? input.file_path ?? input.file }
+}

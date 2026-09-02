@@ -76,7 +76,7 @@ test("shows a nested agent title and renders its prompt once in the expanded bod
     .split("\n")
 
   const text = lines.join("\n")
-  expect(lines.some((line) => line.startsWith("  ├ ▾ ✓ Subagent finished"))).toBe(true)
+  expect(lines.some((line) => line.startsWith("  ├ ✓ Subagent finished") && line.includes("▾"))).toBe(true)
   expect(lines.some((line) => line.startsWith("  │   Read-only explore"))).toBe(true)
   expect(lines.some((line) => line.includes("├") && line.includes("✓ $ git status"))).toBe(true)
   expect(lines.some((line) => line.includes("╰") && line.includes("Nested summary"))).toBe(true)

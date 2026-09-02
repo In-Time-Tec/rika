@@ -134,4 +134,14 @@ describe("native tool projection", () => {
       },
     })
   })
+
+  it("labels a read by the lines it returned when the file ends before the requested range", () => {
+    const input = JSON.stringify({ path: "README.md", read_range: [1, 80] })
+    const running = makeTool("public-read", "raw-read", "read", input, undefined)
+    expect(running.detail).toBe("README.md L1-80")
+    const short = completeTool(running, { text: "1: ```\n2: art\n3: ```", truncated: false }, false)
+    expect(short.detail).toBe("README.md L1-3")
+    expect(completeTool(running, { text: "" }, false).detail).toBe("README.md L1-80")
+    expect(completeTool(running, { status: "rejected" }, false).detail).toBe("README.md L1-80")
+  })
 })

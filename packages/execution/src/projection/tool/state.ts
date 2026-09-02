@@ -38,6 +38,7 @@ const ToolInput = Schema.Struct({
 type ToolInput = typeof ToolInput.Type
 
 const ToolOutput = Schema.Struct({
+  text: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(Schema.String),
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
@@ -185,8 +186,22 @@ const makeToolImpl = (id: string, rawId: string, name: string, input: string, pr
 }
 
 const processFrom = (value: typeof ToolOutput.Type): NonNullable<Tool["process"]> => {
-  const { status: _status, diff: _diff, ...process } = value
+  const { status: _status, diff: _diff, text: _text, ...process } = value
   return process
+}
+
+const numberedLine = /^(\d+): /
+
+/** A read that ran past the end of the file labels the lines it actually returned. */
+const readDetail = (tool: Tool, text: string | undefined): string => {
+  if (tool.name.toLowerCase() !== "read" || tool.readRange === undefined || text === undefined) return tool.detail
+  const lines = text.split("\n")
+  const first = numberedLine.exec(lines[0] ?? "")
+  const last = numberedLine.exec(lines.at(-1) ?? "")
+  if (first === null || last === null) return tool.detail
+  const [start, end] = [Number(first[1]), Number(last[1])]
+  if (start === tool.readRange[0] && end === tool.readRange[1]) return tool.detail
+  return tool.detail.replace(/ L\d+-\d+$/, ` L${start}-${end}`)
 }
 
 const completionStatus = (statusText: string, process: NonNullable<Tool["process"]>, isFailure: boolean) => {
@@ -210,6 +225,7 @@ const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean
   let completed: Tool = {
     ...tool,
     status: status.tool,
+    detail: readDetail(tool, value.text),
     result,
     files: tool.files.map((file, index) => {
       const applied = index === 0 && resolved.length > 0 ? { patch: resolved, ...lineCounts(resolved) } : {}

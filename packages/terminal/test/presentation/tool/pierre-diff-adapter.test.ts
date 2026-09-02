@@ -38,28 +38,29 @@ describe("renderPierreDiff", () => {
     expect(added[0]!.fg).toEqual(colors.green)
   })
 
-  test("syntax highlights context lines and paints additions green and deletions red", () => {
-    const lines = splitLines(renderPierreDiff(patch, { width: 100 })!.chunks)
+  test("syntax highlights every row and tints additions and deletions", () => {
+    const lines = splitLines(renderPierreDiff(patch, { width: 40 })!.chunks)
     const context = lines.find((line) => lineText(line).includes("keep"))!
     const removed = lines.find((line) => lineText(line).includes("removed"))!
     const added = lines.find((line) => lineText(line).includes("added"))!
-    expect(context.some((chunk) => chunk.text === "const" && chunk.fg !== undefined)).toBe(true)
     expect(context.find((chunk) => chunk.text === "const")!.fg).toEqual(colors.blue)
-    expect(added.slice(1)).toHaveLength(1)
-    expect(added[1]!.text).toBe('const added = "new"')
-    expect(added[1]!.fg).toEqual(colors.green)
-    expect(removed.slice(1)).toHaveLength(1)
-    expect(removed[1]!.text).toBe('const removed = "old"')
-    expect(removed[1]!.fg).toEqual(colors.red)
+    expect(context.every((chunk) => chunk.bg === undefined)).toBe(true)
+    expect(added.find((chunk) => chunk.text === "const")!.fg).toEqual(colors.blue)
+    expect(added.slice(1).every((chunk) => chunk.bg === colors.addedBg)).toBe(true)
+    expect(lineText(added)).toHaveLength(40)
+    expect(removed.find((chunk) => chunk.text === "const")!.fg).toEqual(colors.blue)
+    expect(removed.slice(1).every((chunk) => chunk.bg === colors.removedBg)).toBe(true)
+    expect(lineText(removed)).toHaveLength(40)
   })
 
-  test("falls back to plain green and muted lines for unknown languages", () => {
+  test("falls back to plain tinted text and muted context for unknown languages", () => {
     const plain = ["--- a/notes.txt", "+++ b/notes.txt", "@@ -1,2 +1,2 @@", " same words", "+more words", ""].join("\n")
     const lines = splitLines(renderPierreDiff(plain, { width: 100 })!.chunks)
     const context = lines.find((line) => lineText(line).includes("same"))!
     const added = lines.find((line) => lineText(line).includes("more"))!
     expect(context[1]!.fg).toEqual(colors.muted)
-    expect(added[1]!.fg).toEqual(colors.green)
+    expect(added[1]!.fg).toEqual(colors.text)
+    expect(added[1]!.bg).toEqual(colors.addedBg)
   })
 
   test("clips highlighted lines to the width with an ellipsis", () => {

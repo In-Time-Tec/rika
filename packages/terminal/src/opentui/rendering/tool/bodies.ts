@@ -5,7 +5,13 @@ import { decodeTranscriptBlocks } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { escapeControlCharacters, plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
-import { renderDiffStyled, renderPartialDiffStyled, renderPierreDiff, renderToolSummary } from "../diff-text-adapter"
+import {
+  renderDiffStyled,
+  renderPartialDiffStyled,
+  renderPierreDiff,
+  renderReadFile,
+  renderToolSummary,
+} from "../diff-text-adapter"
 import { transcriptWrapWidth } from "../transcript/window"
 import { aggregateRowStatus, rowStatusIcon, wrapTextToWidth, wrapBodyText, type RowStatus } from "../window"
 import {
@@ -20,13 +26,8 @@ import {
 } from "./detail"
 import { toolDetails } from "../../../presentation/transcript/tool/detail"
 import { isToolOutputDisplayed } from "../../../presentation/transcript/agent-response"
-import { isExpandableBody, toolBody, toolResultText } from "../../../presentation/transcript/tool/body"
+import { isExpandableBody, readFileBody, toolBody, toolResultText } from "../../../presentation/transcript/tool/body"
 import type { UnitLineRange } from "../transcript/window"
-
-const disclosureIcon = (expandable: boolean, expanded: boolean): string => {
-  if (!expandable) return "  "
-  return expanded ? "▾ " : "▸ "
-}
 
 export interface ToolBodyContext {
   readonly model: Model
@@ -34,6 +35,8 @@ export interface ToolBodyContext {
   readonly append: (chunk: TextChunk) => void
   readonly appendAll: (styled: StyledText) => void
   readonly line: () => number
+  readonly mark: () => number
+  readonly disclose: (from: number, expanded: boolean) => void
   readonly nestedRanges: Array<UnitLineRange>
   readonly rowExpanded: (id: string) => boolean
   readonly rowExplicitlyCollapsed: (id: string) => boolean
@@ -116,12 +119,17 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       }
     return { detail, summary }
   }
+  const renderExploreOutput = (unit: ToolUnit, output: string, indent: string) => {
+    const file = readFileBody(unit.block)
+    if (file === undefined) append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), indent))))
+    else appendAll(renderReadFile(file.text, { path: file.path, width: transcriptWrapWidth(model.width), indent }))
+  }
   const renderExploreChild = (unit: ToolUnit) => {
     const childId = `tool-child:${unit.block.id}`
     const childOutput = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const childExpandable = isExpandableBody(toolBody(unit.block))
     append(fg(colors.text)("\n "))
-    append(dim(fg(colors.subtle)(disclosureIcon(childExpandable, rowExpanded(childId)))))
+    const rowStart = context.mark()
     const start = context.line()
     append(statusIcon(unit.block.status))
     const { detail, summary } = exploreSummary(unit)
@@ -138,10 +146,11 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
             .find((value) => value.length > 0)
         : undefined
     if (output !== undefined) append(dim(fg(colors.text)(` ${output}`)))
+    if (childExpandable) context.disclose(rowStart, rowExpanded(childId))
     const headerEnd = context.line()
     if (childExpandable && rowExpanded(childId)) {
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(childOutput ?? "", transcriptWrapWidth(model.width), "      "))))
+      renderExploreOutput(unit, childOutput ?? "", "    ")
     }
     const nestedRange = {
       start,
@@ -165,7 +174,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     if (expanded && output !== undefined && output.length > 0) {
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "  "))))
+      renderExploreOutput(unit, output, "  ")
     }
   }
   const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
@@ -203,11 +212,11 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
   }
   const renderEditFileChild = (file: EditFile, running: boolean, cancelled: boolean) => {
     append(fg(colors.text)("\n  "))
+    const rowStart = context.mark()
     const start = context.line()
     const childId = `file:${file.key}`
     const childExpanded = editFileExpanded(file, running)
     const fileRunning = running && file.status === "running"
-    append(dim(fg(colors.subtle)(childExpanded ? "▾ " : "▸ ")))
     append(statusIcon(editFileStatus(file, running, cancelled)))
     for (const chunk of renderToolSummary(
       { primary: file.kind === "add" ? "Create" : "Edit", secondary: ` ${file.path}` },
@@ -216,6 +225,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       append(chunk)
     if (file.additions > 0) append(fg(colors.green)(` +${file.additions}`))
     if (file.deletions > 0) append(fg(colors.red)(` -${file.deletions}`))
+    context.disclose(rowStart, childExpanded)
     if (childExpanded && file.patch.length > 0) {
       append(fg(colors.text)("\n"))
       appendAll(
@@ -350,18 +360,19 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     const expandable = output !== undefined && output.length > 0
     const childExpanded = rowExpanded(childId)
     append(fg(colors.text)("\n  "))
-    append(dim(fg(colors.subtle)(disclosureIcon(expandable, childExpanded))))
+    const rowStart = context.mark()
     const start = context.line()
     append(statusIcon(unit.block.status))
     append(fg(colors.text)(" "))
     append(bold(fg(colors.gold)("$")))
     append(fg(colors.text)(" "))
-    renderShellCommand(unit, "        ", 8)
-    renderShellMetadata(unit, "        ")
+    renderShellCommand(unit, "      ", 6)
+    if (expandable) context.disclose(rowStart, childExpanded)
+    renderShellMetadata(unit, "      ")
     const headerEnd = context.line()
     if (expandable && childExpanded) {
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "        "))))
+      append(dim(fg(colors.text)(wrapBodyText(output, transcriptWrapWidth(model.width), "      "))))
     }
     context.nestedRanges.push({ start, end: context.line(), headerEnd, unit: childId, expandable })
   }

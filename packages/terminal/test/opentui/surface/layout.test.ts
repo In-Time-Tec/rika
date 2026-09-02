@@ -71,7 +71,7 @@ test(
           const styledMarkdown = yield* fileSystem.readFileString(path.join(actual, "markdown.styles.json"))
           expect(styledMarkdown).toContain('"attributes": 1')
           expect(yield* fileSystem.readFileString(path.join(actual, "cancelled-subagent.frame.txt"))).toContain(
-            "▾ ⊘ Subagent cancelled\n │   Wait then run the checks\n │   ├   ⊘ $ sleep 60 (cancelled)\n │   │\n │   │\n │   ╰     The subagent was cancelled.",
+            "⊘ Subagent cancelled ▾\n │   Wait then run the checks\n │   ├ ⊘ $ sleep 60 (cancelled)\n │   │\n │   │\n │   ╰   The subagent was cancelled.",
           )
           const colorScenarios = [
             "mode-picker",

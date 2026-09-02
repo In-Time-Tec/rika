@@ -78,6 +78,8 @@ export interface TerminalThemeColors {
   readonly blue: TerminalColor
   readonly purple: TerminalColor
   readonly gold: TerminalColor
+  readonly addedBg: TerminalColor
+  readonly removedBg: TerminalColor
   readonly low: string
   readonly medium: string
   readonly high: string
@@ -100,6 +102,8 @@ export const colors: TerminalThemeColors = {
   blue: new TerminalColor(0, 0, 128, 255, "indexed", 4),
   purple: new TerminalColor(128, 0, 128, 255, "indexed", 5),
   gold: new TerminalColor(128, 128, 0, 255, "indexed", 3),
+  addedBg: new TerminalColor(20, 56, 32),
+  removedBg: new TerminalColor(72, 28, 32),
   low: "#ffd700",
   medium: "#3dffa6",
   high: "#3dd4ff",

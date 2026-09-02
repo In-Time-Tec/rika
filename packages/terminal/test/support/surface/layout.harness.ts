@@ -19,7 +19,7 @@ const tool = (
     _tag: "ToolCall",
     id,
     name,
-    input: detail,
+    input: name === "read" ? `{"path":"${detail}"}` : detail,
     status,
     presentation:
       name === "read" || name === "grep"
@@ -73,7 +73,15 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     [
       "tool-expanded",
       {
-        ...block(tool("tool-1", "read", "src/main.ts", "complete", "contents")),
+        ...block(
+          tool(
+            "tool-1",
+            "read",
+            "src/main.ts",
+            "complete",
+            '1: import { run } from "./run"\n2: \n3: export const main = () => run()',
+          ),
+        ),
         expandedRowKeys: ["tool:tool-1"],
       },
       80,

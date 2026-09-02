@@ -8,6 +8,7 @@ import {
 } from "../../presentation/tool/diff-renderer"
 import { renderPierreDiff as pierreDiff, type DiffRenderOptions } from "../../presentation/tool/pierre-diff-adapter"
 import { renderToolSummary as toolSummary } from "../../presentation/tool/summary"
+import { renderReadFile as readFile, type ReadFileRenderOptions } from "../../presentation/tool/read-file-renderer"
 const toOpenChunk = (chunk: TerminalTextChunk): TextChunk => {
   const result: TextChunk = { __isChunk: true, text: chunk.text }
   if (chunk.fg !== undefined) result.fg = toOpenColor(chunk.fg)
@@ -75,3 +76,15 @@ export const renderToolSummary: {
     arg1?: Parameters<typeof renderToolSummaryImpl>[1],
   ): (arg0: Parameters<typeof renderToolSummaryImpl>[0]) => ReturnType<typeof renderToolSummaryImpl>
 } = Function.dual((args) => args.length > 0, renderToolSummaryImpl)
+const renderReadFileImpl = (text: string, options: ReadFileRenderOptions): StyledText =>
+  toOpenText(readFile(options)(text))
+
+export const renderReadFile: {
+  (
+    arg1: Parameters<typeof renderReadFileImpl>[1],
+  ): (arg0: Parameters<typeof renderReadFileImpl>[0]) => ReturnType<typeof renderReadFileImpl>
+  (
+    arg0: Parameters<typeof renderReadFileImpl>[0],
+    arg1: Parameters<typeof renderReadFileImpl>[1],
+  ): ReturnType<typeof renderReadFileImpl>
+} = Function.dual(2, renderReadFileImpl)

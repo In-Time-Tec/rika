@@ -13,10 +13,10 @@
 
 
 
-
-
- ▾ ✓ Read src/main.ts
-   contents
+ ✓ Read src/main.ts ▾
+   1  import { run } from "./run"
+   2
+   3  export const main = () => run()
 ╭───────────────────────────────────────────────────── ctx ᗧ······· 0% ─ high ─╮
 │                                                                              │
 │                                                                              │

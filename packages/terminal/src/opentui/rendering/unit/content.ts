@@ -6,6 +6,7 @@ import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { truncateToWidth } from "../../../presentation/terminal/format"
 import { renderMarkdownStyled, toOpenChunk } from "../text-adapter"
+import { renderReadFile } from "../diff-text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
 import { renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./bodies"
 import { toolDetail } from "../../../presentation/transcript/tool/detail"
@@ -21,16 +22,12 @@ import { aggregateRowStatus, rowStatusIcon, wrapBodyText, subagentPhrase, type R
 import { toolUnitsFor, type ToolUnit } from "../tool/detail"
 import { transcriptWrapWidth, type TranscriptUnitBuild, type UnitLineRange } from "../transcript/window"
 import { createToolBodyRenderer } from "../tool/bodies"
-import { toolResultText } from "../../../presentation/transcript/tool/body"
+import { readFileBody, toolResultText } from "../../../presentation/transcript/tool/body"
 import { fallbackContent } from "./fallback-content"
 import { detailContent } from "./detail-content"
 import { bodyContent, type TranscriptUnitBuilder } from "./body-content"
 import { createAgentContentRenderer } from "./agent-content"
-
-const disclosureIcon = (expandable: boolean, expanded: boolean): string => {
-  if (!expandable) return "  "
-  return expanded ? "▾ " : "▸ "
-}
+import { disclosure } from "../disclosure"
 
 const displayedToolOutput = (block: ToolUnit["block"]): string | undefined => {
   if (block.presentation.family === "agent" || !toolOutputDisplayed(block)) return undefined
@@ -75,8 +72,10 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     model.expandedRowKeys.includes(id) && !model.explicitlyCollapsedRowKeys.includes(id)
   const rowExplicitlyCollapsed = (id: string): boolean => model.explicitlyCollapsedRowKeys.includes(id)
   const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
+  const mark = () => chunks.length
+  const disclose = (from: number, expanded: boolean, selected = false) =>
+    disclosure.insertTrailingMarker(chunks, from, disclosure.chunk(expanded, selected))
   const nestedRanges: Array<UnitLineRange> = []
-  let rootHeaderEnd: number | undefined
   const agentContent = createAgentContentRenderer({ model, append, appendAll, line: () => line })
   const toolBodies = createToolBodyRenderer({
     model,
@@ -84,6 +83,8 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     append,
     appendAll,
     line: () => line,
+    mark,
+    disclose,
     nestedRanges,
     rowExpanded,
     rowExplicitlyCollapsed,
@@ -122,7 +123,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       renderNested(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
     if (unit.agentResponse === undefined) return
     const timeline = children.length > 0
-    const terminalPrefix = timeline ? `${bodyIndent}│     ` : bodyIndent
+    const terminalPrefix = timeline ? `${bodyIndent}│   ` : bodyIndent
     const response = bodyContent.agentOutcome(unit.agentResponse)
     const range =
       response.kind === "answer"
@@ -138,14 +139,18 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     expanded: boolean,
   ) => {
     if (!expanded) return
+    const file = readFileBody(block)
     if (block.presentation.family === "agent" && block.detail.length > 0)
       agentContent.renderAgentPrompt(block.detail, bodyIndent)
-    else if (output !== undefined && output.length > 0)
+    else if (file !== undefined) {
+      append(fg(colors.text)("\n"))
+      appendAll(renderReadFile(file.text, { path: file.path, width: rowWidth, indent: bodyIndent }))
+    } else if (output !== undefined && output.length > 0)
       detailContent.renderExpandedToolOutput(
         { append },
         output,
         rowWidth,
-        block.presentation.family === "shell" ? `${bodyIndent}    ` : bodyIndent,
+        block.presentation.family === "shell" ? `${bodyIndent}  ` : bodyIndent,
       )
   }
   const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
@@ -163,23 +168,24 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const rowWidth = transcriptWrapWidth(model.width)
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 12))
     const branchPrefix = `${visiblePrefix}${last ? "└" : "├"} `
-    const continuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
+    const continuationPrefix = `${visiblePrefix}${last ? " " : "│"}   `
     append(fg(colors.text)("\n"))
+    const rowStart = mark()
     append(dim(fg(colors.subtle)(branchPrefix)))
-    append(dim(fg(colors.subtle)(disclosureIcon(expandable, expanded))))
     const start = line
-    const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}       `
+    const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
     detailContent.renderToolHeader(
       { append, statusIcon },
       block,
       detail.label,
       detail.summary,
-      rowWidth,
-      `${branchPrefix}  `,
+      rowWidth - 2,
+      branchPrefix,
       continuationPrefix,
       shellContinuationPrefix,
       detail.target !== undefined,
     )
+    if (expandable) disclose(rowStart, expanded)
     const headerEnd = line
     const rangeIndex = nestedRanges.length
     const nestedRangeBase: UnitLineRange = {
@@ -240,7 +246,7 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
       renderNested(child, bodyIndent, childIndex === unit.children.length - 1 && unit.agentResponse === undefined)
     if (unit.agentResponse !== undefined) {
       const timeline = unit.children.length > 0
-      const prefix = timeline ? `${bodyIndent}│     ` : bodyIndent
+      const prefix = timeline ? `${bodyIndent}│   ` : bodyIndent
       const outcome = bodyContent.agentOutcome(unit.agentResponse)
       const range =
         outcome.kind === "answer"
@@ -257,13 +263,14 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     const expanded = rowExpanded(id) || (running && !rowExplicitlyCollapsed(id))
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, transcriptWrapWidth(model.width) - 12))
     append(fg(colors.text)("\n"))
+    const rowStart = mark()
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
-    append(dim(fg(colors.subtle)(expanded ? "▾ " : "▸ ")))
     const start = line
     renderSubagentHeader(
       unit,
       Math.max(2, transcriptWrapWidth(model.width) - stringWidth(`${visiblePrefix}${last ? "└" : "├"} `) - 2),
     )
+    disclose(rowStart, expanded)
     const rangeIndex = nestedRanges.length
     nestedRanges.push({
       start,
@@ -326,10 +333,11 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     const expanded = rowExpanded(id) || (running && !rowExplicitlyCollapsed(id))
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, transcriptWrapWidth(model.width) - 12))
     append(fg(colors.text)("\n"))
+    const rowStart = mark()
     append(dim(fg(colors.subtle)(`${visiblePrefix}${last ? "└" : "├"} `)))
-    append(dim(fg(colors.subtle)(expanded ? "▾ " : "▸ ")))
     const start = line
     renderSubagentGroupHeader(unit, Math.max(2, transcriptWrapWidth(model.width) - stringWidth(visiblePrefix) - 4))
+    disclose(rowStart, expanded)
     const rangeIndex = nestedRanges.length
     nestedRanges.push({ start, end: start, headerEnd: line, unit: id, expandable: true, animated: running })
     if (expanded) renderSubagentGroupContents(unit, `${visiblePrefix}${last ? "  " : "│ "}  `)
@@ -390,7 +398,7 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
       renderNested(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined)
     if (unit.agentResponse === undefined) return
     const timeline = (unit.children?.length ?? 0) > 0
-    const prefix = timeline ? "  │     " : "  "
+    const prefix = timeline ? "  │   " : "  "
     const ownerId = tools[0]?.block.id
     if (ownerId === undefined) return
     const response = bodyContent.agentOutcome(unit.agentResponse)
@@ -420,15 +428,14 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     chunks = []
     line = 0
     nestedRanges.length = 0
-    rootHeaderEnd = undefined
     const expandable = isExpandableUnit(model, unit)
     const id = transcriptUnitId(model, unit)
     const expanded = isTranscriptUnitExpanded(model, unit)
     const selected = expandable && model.detailSelection === id
     const start = line
     const chunkStart = chunks.length
-    if (expandable) append(dim(fg(selected ? colors.blue : colors.subtle)(expanded ? "▾ " : "▸ ")))
     renderUnitBody(unit, selected, expanded)
+    if (expandable) disclose(chunkStart, expanded, selected)
     const cancelledAgent =
       unit.kind === "tool" &&
       toolUnitsFor(model, unit.blocks).some(
@@ -445,9 +452,7 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
       animated,
       gapBefore: false,
     }
-    const rootBase =
-      rootHeaderEnd === undefined ? rootWithoutHeader : { ...rootWithoutHeader, headerEnd: rootHeaderEnd }
-    const root: UnitLineRange = targets === undefined ? rootBase : { ...rootBase, targets }
+    const root: UnitLineRange = targets === undefined ? rootWithoutHeader : { ...rootWithoutHeader, targets }
     return { chunks, lines: line, root, nested: nestedRanges }
   }
   return { renderUnit, isUnitVisible }

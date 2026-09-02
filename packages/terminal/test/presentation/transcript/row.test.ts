@@ -41,20 +41,21 @@ describe("singleton Read detail is inspectable", () => {
 
   test("collapsed shows Read plus its path and a chevron, never file content", () => {
     const output = rendered(model([]))
-    expect(output).toContain("▸ ✓ Read src/main.ts")
+    expect(output).toContain("✓ Read src/main.ts ▸")
     expect(output).not.toContain("Explored 1 file")
     expect(output).not.toContain("line 100")
   })
 
   test("opening the Read row shows every line without an intermediate child disclosure", () => {
     const output = rendered(model(["tool:read-1"]))
-    expect(output).toContain("▾ ✓ Read src/main.ts")
-    expect(output).toContain("100: line 100")
-    expect(output).toContain("139: line 139")
+    expect(output).toContain("✓ Read src/main.ts ▾")
+    expect(output).toContain("100  line 100")
+    expect(output).toContain("139  line 139")
+    expect(output).not.toContain("100: line 100")
     expect(expandableRowIds(model(["tool:read-1"]))).not.toContain("tool-child:read-1")
   })
 
-  test("a typed read result renders its numbered text directly", () => {
-    expect(rendered(model(["tool:read-1"]))).toContain("100: line 100")
+  test("a typed read result renders as a numbered listing with the prefix stripped", () => {
+    expect(rendered(model(["tool:read-1"]))).toContain("100  line 100")
   })
 })

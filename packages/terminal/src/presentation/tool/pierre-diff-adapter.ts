@@ -1,5 +1,5 @@
-import { TerminalStyledText, type TerminalTextChunk } from "../markdown/styled-text"
-import { fg } from "../markdown/styled-text-effects"
+import { TerminalStyledText, type TerminalColor, type TerminalTextChunk } from "../markdown/styled-text"
+import { bg, fg } from "../markdown/styled-text-effects"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
 import { Warning } from "../../warning"
@@ -24,7 +24,10 @@ type Row =
       readonly lang: string | undefined
     }
 
-const clipLine = (chunks: ReadonlyArray<TerminalTextChunk>, width: number): ReadonlyArray<TerminalTextChunk> => {
+export const clipLine: {
+  (width: number): (chunks: ReadonlyArray<TerminalTextChunk>) => ReadonlyArray<TerminalTextChunk>
+  (chunks: ReadonlyArray<TerminalTextChunk>, width: number): ReadonlyArray<TerminalTextChunk>
+} = Function.dual(2, (chunks: ReadonlyArray<TerminalTextChunk>, width: number): ReadonlyArray<TerminalTextChunk> => {
   const total = chunks.reduce((sum, chunk) => sum + chunk.text.length, 0)
   if (total <= width) return chunks
   const budget = Math.max(0, width - 1)
@@ -38,14 +41,29 @@ const clipLine = (chunks: ReadonlyArray<TerminalTextChunk>, width: number): Read
   }
   clipped.push(fg(colors.muted)("…"))
   return clipped
+})
+
+const rowBackground = (marker: " " | "+" | "-"): TerminalColor | undefined => {
+  if (marker === "+") return colors.addedBg
+  if (marker === "-") return colors.removedBg
+  return undefined
 }
 
 const contentChunks = (row: Extract<Row, { number: number }>): ReadonlyArray<TerminalTextChunk> => {
   if (row.content.length === 0) return []
-  if (row.marker === "-") return [fg(colors.red)(row.content)]
-  if (row.marker === "+") return [fg(colors.green)(row.content)]
-  if (row.lang === undefined) return [fg(colors.muted)(row.content)]
+  if (row.lang === undefined) return [fg(row.marker === " " ? colors.muted : colors.text)(row.content)]
   return highlightLines(row.content, row.lang)[0] ?? []
+}
+
+const tintRow = (
+  chunks: ReadonlyArray<TerminalTextChunk>,
+  width: number,
+  background: TerminalColor | undefined,
+): ReadonlyArray<TerminalTextChunk> => {
+  if (background === undefined) return chunks
+  const used = chunks.reduce((sum, chunk) => sum + chunk.text.length, 0)
+  const padding = width > used ? [bg(background)(" ".repeat(width - used))] : []
+  return [...chunks.map(bg(background)), ...padding]
 }
 
 const pierreCache = new Map<string, ReadonlyArray<TerminalTextChunk> | null>()
@@ -143,7 +161,9 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
     if (row.marker === "+") gutterColor = colors.green
     else if (row.marker === "-") gutterColor = colors.red
     chunks.push(fg(gutterColor)(gutter))
-    for (const chunk of clipLine(contentChunks(row), Math.max(1, width - gutter.length))) chunks.push(chunk)
+    const contentWidth = Math.max(1, width - gutter.length)
+    const content = tintRow(clipLine(contentChunks(row), contentWidth), contentWidth, rowBackground(row.marker))
+    for (const chunk of content) chunks.push(chunk)
   })
   return chunks
 }

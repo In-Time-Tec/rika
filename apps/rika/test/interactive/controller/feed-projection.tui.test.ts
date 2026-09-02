@@ -41,7 +41,7 @@ test(
         yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
         const running = yield* app.waitFrameMatch(
-          (frame) => frame.includes("process 1 · detached") && spinnerFor(frame, command) !== undefined,
+          (frame) => frame.includes("detached") && spinnerFor(frame, command) !== undefined,
           20_000,
         )
         const collapsedGlyph = spinnerFor(running, command)
@@ -55,7 +55,7 @@ test(
         yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, expandedGlyph), 5_000)
 
         yield* app.clickText(command)
-        const recollapsed = yield* app.waitFrame("process 1 · detached")
+        const recollapsed = yield* app.waitFrame("detached")
         const recollapsedGlyph = spinnerFor(recollapsed, command)
         expect(recollapsedGlyph).toBeDefined()
         yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, recollapsedGlyph), 5_000)

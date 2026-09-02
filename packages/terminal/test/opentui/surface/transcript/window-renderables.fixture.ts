@@ -192,7 +192,7 @@ test("keeps mounted renderables bounded inside one giant expanded subagent tree"
         expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
         expect(state.transcriptChildren.length).toBeGreaterThan(0)
         const frame = setup.captureCharFrame()
-        expect(frame).toContain("├   ✓ $ cmd-299")
+        expect(frame).toContain("├ ✓ $ cmd-299")
         expect(frame).not.toContain("cmd-100 ")
         expect(boundedTranscriptModel(model).items.length).toBeLessThanOrEqual(maxMountedTranscriptEntries)
       } finally {

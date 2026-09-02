@@ -330,27 +330,6 @@
           "width": 1
         },
         {
-          "text": "▾ ",
-          "fg": {
-            "buffer": {
-              "0": 2176,
-              "1": 384,
-              "2": 128,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 512,
-              "2": 0,
-              "3": 255
-            }
-          },
-          "attributes": 2,
-          "width": 2
-        },
-        {
           "text": "Δ ",
           "fg": {
             "buffer": {
@@ -391,6 +370,27 @@
           },
           "attributes": 9,
           "width": 12
+        },
+        {
+          "text": " ▾",
+          "fg": {
+            "buffer": {
+              "0": 2176,
+              "1": 384,
+              "2": 128,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 0,
+              "1": 512,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "attributes": 2,
+          "width": 2
         },
         {
           "text": "                                                               ",
@@ -724,7 +724,7 @@
           "width": 1
         },
         {
-          "text": "  226 -     description: \"Delegate a focused technical investigation\",",
+          "text": "  226 - ",
           "fg": {
             "buffer": {
               "0": 384,
@@ -742,10 +742,94 @@
             }
           },
           "attributes": 0,
-          "width": 70
+          "width": 8
         },
         {
-          "text": "         ",
+          "text": "    description: ",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 72,
+              "1": 28,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 17
+        },
+        {
+          "text": "\"Delegate a focused technical investigation\"",
+          "fg": {
+            "buffer": {
+              "0": 512,
+              "1": 384,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 72,
+              "1": 28,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 44
+        },
+        {
+          "text": ",",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 72,
+              "1": 28,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 1
+        },
+        {
+          "text": "      ",
+          "fg": {
+            "buffer": {
+              "0": 255,
+              "1": 255,
+              "2": 255,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 72,
+              "1": 28,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 6
+        },
+        {
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -763,7 +847,7 @@
             }
           },
           "attributes": 0,
-          "width": 9
+          "width": 3
         }
       ]
     },
@@ -791,7 +875,7 @@
           "width": 1
         },
         {
-          "text": "  226 +     description: \"Delegate planning, review, and debugging\",",
+          "text": "  226 + ",
           "fg": {
             "buffer": {
               "0": 512,
@@ -809,10 +893,94 @@
             }
           },
           "attributes": 0,
-          "width": 68
+          "width": 8
         },
         {
-          "text": "           ",
+          "text": "    description: ",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 20,
+              "1": 56,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 17
+        },
+        {
+          "text": "\"Delegate planning, review, and debugging\"",
+          "fg": {
+            "buffer": {
+              "0": 512,
+              "1": 384,
+              "2": 0,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 20,
+              "1": 56,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 42
+        },
+        {
+          "text": ",",
+          "fg": {
+            "buffer": {
+              "0": 1984,
+              "1": 448,
+              "2": 192,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 20,
+              "1": 56,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 1
+        },
+        {
+          "text": "        ",
+          "fg": {
+            "buffer": {
+              "0": 255,
+              "1": 255,
+              "2": 255,
+              "3": 255
+            }
+          },
+          "bg": {
+            "buffer": {
+              "0": 20,
+              "1": 56,
+              "2": 32,
+              "3": 255
+            }
+          },
+          "attributes": 0,
+          "width": 8
+        },
+        {
+          "text": "   ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -830,7 +998,7 @@
             }
           },
           "attributes": 0,
-          "width": 11
+          "width": 3
         }
       ]
     },
