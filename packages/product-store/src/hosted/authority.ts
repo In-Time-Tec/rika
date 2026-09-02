@@ -29,7 +29,7 @@ const databaseError = (cause: unknown) =>
 const query = <A extends object, E, R>(statement: Effect.Effect<ReadonlyArray<A>, E, R>) =>
   statement.pipe(Effect.mapError(databaseError))
 
-export const requireActiveClient = Effect.fn("Authority.requireActiveClient")(function* (
+const requireActiveClient = Effect.fn("Authority.requireActiveClient")(function* (
   executor: AuthorityExecutor,
   input: { readonly ownerId: string; readonly actor: ActorAttribution },
   at?: string,

@@ -1,0 +1,3 @@
+DROP TABLE rika_hosted_client_cursors;
+DROP TABLE rika_hosted_terminal_writer_leases;
+DROP TABLE rika_hosted_audit_events;

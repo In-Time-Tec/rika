@@ -1,7 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import type { EffectDrizzleQueryError } from "drizzle-orm/effect-core"
-import { and, asc, eq, or, sql as expression } from "drizzle-orm"
+import { and, asc, eq, not, or, sql as expression } from "drizzle-orm"
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core"
 import { Effect, Layer, Redacted } from "effect"
 import {
@@ -463,7 +463,12 @@ const make = Effect.gen(function* (): Effect.fn.Return<AssignmentsService, never
   const { commitCheckpoint, latestCheckpoint } = checkpointOperations(operations)
 
   const listManaged: AssignmentsService["listManaged"] = query(
-    db.select(assignmentFields).from(rikaHostedExecutorAssignments).orderBy(asc(rikaHostedExecutorAssignments.id)),
+    db
+      .select(assignmentFields)
+      .from(rikaHostedExecutorAssignments)
+      .where(not(eq(rikaHostedExecutorAssignments.lifecycle, "terminated")))
+      .orderBy(asc(rikaHostedExecutorAssignments.id))
+      .limit(1_000),
   ).pipe(Effect.flatMap((rows) => Effect.forEach(rows.map(assignmentRow), decodeAssignment)))
 
   return ExecutorAssignments.of({

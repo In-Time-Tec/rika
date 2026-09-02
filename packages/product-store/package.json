@@ -60,7 +60,9 @@
     "./thread-repository": "./src/thread/repository.ts",
     "./transcript-repository": "./src/transcript/repository.ts",
     "./turn-repository": "./src/turn/postgres/repository.ts",
-    "./migrations/postgres/0041-native-tool-runner-registration.sql": "./migrations/postgres/0041-native-tool-runner-registration.sql"
+    "./migrations/postgres/0041-native-tool-runner-registration.sql": "./migrations/postgres/0041-native-tool-runner-registration.sql",
+    "./migrations/postgres/0042-runner-assignment-poll-index.sql": "./migrations/postgres/0042-runner-assignment-poll-index.sql",
+    "./migrations/postgres/0043-drop-unused-hosted-tables.sql": "./migrations/postgres/0043-drop-unused-hosted-tables.sql"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",

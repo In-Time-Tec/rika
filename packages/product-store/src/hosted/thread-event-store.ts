@@ -99,6 +99,13 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedThreadEventStoreSer
                 executorInstanceId: rikaHostedExecutorAssignments.executorInstanceId,
               })
               .from(rikaHostedExecutorAssignments)
+              .innerJoin(
+                rikaHostedThreads,
+                and(
+                  eq(rikaHostedThreads.id, rikaHostedExecutorAssignments.threadId),
+                  eq(rikaHostedThreads.ownerId, rikaHostedExecutorAssignments.ownerId),
+                ),
+              )
               .where(
                 and(
                   eq(rikaHostedExecutorAssignments.id, input.assignmentId),
@@ -108,21 +115,11 @@ const make = Effect.gen(function* (): Effect.fn.Return<HostedThreadEventStoreSer
                   gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql<Date>`transaction_timestamp()`),
                 ),
               )
-              .for("share"),
+              .for("update", { of: [rikaHostedExecutorAssignments, rikaHostedThreads] }),
           )
           const assignment = assignments[0]
           if (assignment === undefined || assignment.executorInstanceId === null)
             return yield* failure("stale-fence", "Executor assignment is expired or fenced")
-          const locked = yield* query(
-            tx
-              .select({ id: rikaHostedThreads.id })
-              .from(rikaHostedThreads)
-              .where(
-                and(eq(rikaHostedThreads.id, assignment.threadId), eq(rikaHostedThreads.ownerId, assignment.ownerId)),
-              )
-              .for("update"),
-          )
-          if (locked[0] === undefined) return yield* failure("not-found", "Thread does not exist in the organization")
           const existingRows = yield* query(
             tx
               .select(eventFields)

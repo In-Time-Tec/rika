@@ -2,7 +2,6 @@ import { rikaHostedPresenceStatus, rikaHostedGrantRole } from "./hosted-enums"
 import {
   pgTable,
   text,
-  bigint,
   timestamp,
   jsonb,
   index,
@@ -39,32 +38,6 @@ export const rikaHostedClientAuthorities = pgTable(
       .where(sql`(revoked_at IS NULL)`),
     check("rika_hosted_client_authorities_check", sql`(expires_at > issued_at)`),
     check("rika_hosted_client_authorities_check1", sql`(expires_at <= (issued_at + '00:05:00'::interval))`),
-  ],
-)
-export const rikaHostedClientCursors = pgTable(
-  "rika_hosted_client_cursors",
-  {
-    ownerId: text("owner_id")
-      .notNull()
-      .references(() => SchemaReference.column("rikaHostedOwners", "id"), { onDelete: "cascade" }),
-    threadId: text("thread_id").notNull(),
-    actor: jsonb().notNull(),
-    commitCursor: bigint("commit_cursor", { mode: "number" }).notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.threadId, table.actor], name: "rika_hosted_client_cursors_pkey" }),
-    foreignKey({
-      columns: [table.threadId, table.ownerId],
-      foreignColumns: [
-        SchemaReference.column("rikaHostedThreads", "id"),
-        SchemaReference.column("rikaHostedThreads", "ownerId"),
-      ],
-      name: "rika_hosted_client_cursors_thread_id_owner_id_fkey",
-    }).onDelete("cascade"),
-    check("rika_hosted_client_cursors_actor_check", sql`(jsonb_typeof(actor) = 'object'::text)`),
-    check("rika_hosted_client_cursors_check", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
-    check("rika_hosted_client_cursors_commit_cursor_check", sql`(commit_cursor >= 0)`),
   ],
 )
 export const rikaHostedClients = pgTable(

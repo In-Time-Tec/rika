@@ -21,6 +21,7 @@ import {
   WorkspaceId,
 } from "@rika/product/hosted-model"
 import { sql as drizzleSql } from "drizzle-orm"
+import { EffectLogger } from "drizzle-orm/effect-core"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
@@ -109,6 +110,8 @@ export const isolated = <A, E, R>(
     readonly pool: Pool
     readonly database: NodePgDatabase
     readonly effectDatabase: PgDrizzle.EffectPgDatabase
+    readonly countingEffectDatabase: PgDrizzle.EffectPgDatabase
+    readonly statements: Array<string>
   }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.scoped(
@@ -123,8 +126,15 @@ export const isolated = <A, E, R>(
       const databaseClient = drizzle({ client: pool })
       const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
       const effectDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
+      const statements: Array<string> = []
+      const defaults = yield* Layer.build(PgDrizzle.DefaultServices)
+      const countingEffectDatabase = yield* PgDrizzle.make().pipe(
+        Effect.provideService(EffectLogger, EffectLogger.fromDrizzle({ logQuery: (query) => statements.push(query) })),
+        Effect.provideContext(defaults),
+        Effect.provideContext(context),
+      )
       try {
-        return yield* run({ url, pool, database: databaseClient, effectDatabase })
+        return yield* run({ url, pool, database: databaseClient, effectDatabase, countingEffectDatabase, statements })
       } finally {
         yield* Effect.tryPromise(() => pool.end())
         yield* Effect.tryPromise(() => admin.query(`DROP DATABASE "${database}" WITH (FORCE)`))

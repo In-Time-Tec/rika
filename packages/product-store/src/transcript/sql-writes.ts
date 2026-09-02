@@ -5,7 +5,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Clock, Effect, Schema } from "effect"
 import { rikaTranscriptCheckpoints, rikaTranscriptUnits } from "../database/schema/product"
@@ -123,25 +123,27 @@ export const transcriptSqlWrites = {
             yield* updateThreadUsage(tx, turn, change.state.usage, now)
             if (shouldDeleteStoredUnits(change, replacingOlderProjection))
               yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
-            for (const key of removedUnitKeys(change))
+            const removedKeys = removedUnitKeys(change)
+            if (removedKeys.length > 0)
               yield* tx
                 .delete(rikaTranscriptUnits)
-                .where(and(eq(rikaTranscriptUnits.turnId, turn.id), eq(rikaTranscriptUnits.unitKey, key)))
-            for (const unit of upserts) {
-              const order = TranscriptOrdering.encodeUnitOrder(unit.order)
+                .where(and(eq(rikaTranscriptUnits.turnId, turn.id), inArray(rikaTranscriptUnits.unitKey, removedKeys)))
+            if (upserts.length > 0)
               yield* tx
                 .insert(rikaTranscriptUnits)
-                .values({
-                  turnId: turn.id,
-                  unitKey: unit.key,
-                  threadId: turn.threadId,
-                  unitOrderKey: order,
-                  parentId: unit.parentId ?? null,
-                  revision: unit.revision,
-                  unitJson: encodeUnit(unit),
-                  createdAt: turn.createdAt,
-                  updatedAt: now,
-                })
+                .values(
+                  upserts.map((unit) => ({
+                    turnId: turn.id,
+                    unitKey: unit.key,
+                    threadId: turn.threadId,
+                    unitOrderKey: TranscriptOrdering.encodeUnitOrder(unit.order),
+                    parentId: unit.parentId ?? null,
+                    revision: unit.revision,
+                    unitJson: encodeUnit(unit),
+                    createdAt: turn.createdAt,
+                    updatedAt: now,
+                  })),
+                )
                 .onConflictDoUpdate({
                   target: [rikaTranscriptUnits.turnId, rikaTranscriptUnits.unitKey],
                   set: {
@@ -152,7 +154,6 @@ export const transcriptSqlWrites = {
                   },
                   setWhere: eq(rikaTranscriptUnits.unitOrderKey, sql`excluded.unit_order_key`),
                 })
-            }
             if (withinTransaction !== undefined) yield* withinTransaction
             return "committed" as const
           }),
@@ -206,20 +207,20 @@ export const transcriptSqlWrites = {
               })
             yield* updateThreadUsage(tx, turn, state.usage, now)
             yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
-            for (const unit of units) {
-              const order = TranscriptOrdering.encodeUnitOrder(unit.order)
-              yield* tx.insert(rikaTranscriptUnits).values({
-                turnId: turn.id,
-                unitKey: unit.key,
-                threadId: turn.threadId,
-                unitOrderKey: order,
-                parentId: unit.parentId ?? null,
-                revision: unit.revision,
-                unitJson: encodeUnit(unit),
-                createdAt: turn.createdAt,
-                updatedAt: now,
-              })
-            }
+            if (units.length > 0)
+              yield* tx.insert(rikaTranscriptUnits).values(
+                units.map((unit) => ({
+                  turnId: turn.id,
+                  unitKey: unit.key,
+                  threadId: turn.threadId,
+                  unitOrderKey: TranscriptOrdering.encodeUnitOrder(unit.order),
+                  parentId: unit.parentId ?? null,
+                  revision: unit.revision,
+                  unitJson: encodeUnit(unit),
+                  createdAt: turn.createdAt,
+                  updatedAt: now,
+                })),
+              )
           }),
         )
         .pipe(Effect.mapError(error))

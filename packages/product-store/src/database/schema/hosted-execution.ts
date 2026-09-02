@@ -146,6 +146,14 @@ export const rikaHostedExecutorAssignments = pgTable(
       table.lifecycle.asc().nullsLast(),
       table.providerInstanceId.asc().nullsLast(),
     ),
+    index("rika_hosted_executor_assignments_runner_poll")
+      .using(
+        "btree",
+        sql`(${table.placement} ->> 'deviceId')`,
+        sql`(${table.placement} ->> 'checkoutFingerprint')`,
+        table.lifecycle.asc().nullsLast(),
+      )
+      .where(sql`${table.executorKind} = 'runner'`),
     unique("rika_hosted_executor_assignments_id_owner_id_key").on(table.id, table.ownerId),
     unique("rika_hosted_executor_assignments_thread_id_key").on(table.threadId),
     check(
@@ -441,41 +449,6 @@ export const rikaHostedRunnerRegistrations = pgTable(
     ),
     check("rika_hosted_runner_registrations_repository_check", sql`(jsonb_typeof(repository) = 'object'::text)`),
     check("rika_hosted_runner_supervisor_pair", sql`((supervisor_id IS NULL) = (supervisor_expires_at IS NULL))`),
-  ],
-)
-export const rikaHostedTerminalWriterLeases = pgTable(
-  "rika_hosted_terminal_writer_leases",
-  {
-    ownerId: text("owner_id")
-      .notNull()
-      .references(() => SchemaReference.column("rikaHostedOwners", "id"), { onDelete: "cascade" }),
-    threadId: text("thread_id").primaryKey(),
-    actor: jsonb().notNull(),
-    leaseId: text("lease_id").notNull(),
-    generation: bigint({ mode: "number" }).notNull(),
-    acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull(),
-    renewedAt: timestamp("renewed_at", { withTimezone: true }).notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    foreignKey({
-      columns: [table.threadId, table.ownerId],
-      foreignColumns: [
-        SchemaReference.column("rikaHostedThreads", "id"),
-        SchemaReference.column("rikaHostedThreads", "ownerId"),
-      ],
-      name: "rika_hosted_terminal_writer_leases_thread_id_owner_id_fkey",
-    }).onDelete("cascade"),
-    index("rika_hosted_terminal_writer_leases_expiry").using(
-      "btree",
-      table.expiresAt.asc().nullsLast(),
-      table.ownerId.asc().nullsLast(),
-      table.threadId.asc().nullsLast(),
-    ),
-    check("rika_hosted_terminal_writer_leases_actor_check", sql`(jsonb_typeof(actor) = 'object'::text)`),
-    check("rika_hosted_terminal_writer_leases_check", sql`(expires_at > renewed_at)`),
-    check("rika_hosted_terminal_writer_leases_check1", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
-    check("rika_hosted_terminal_writer_leases_generation_check", sql`(generation >= 1)`),
   ],
 )
 

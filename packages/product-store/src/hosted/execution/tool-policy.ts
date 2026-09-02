@@ -38,8 +38,6 @@ import {
   type DecisionAppend,
 } from "./tool-policy-audit"
 
-export * from "./tool-policy-audit"
-
 export interface ToolPolicyStoreService {
   readonly insertAudit: (record: AuditAppend) => Effect.Effect<void, ToolPolicyStoreError>
   readonly loadAdmissionContext: (input: {

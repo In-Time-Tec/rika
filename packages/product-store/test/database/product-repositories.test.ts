@@ -9,34 +9,24 @@ import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as UnitOrder from "@rika/transcript/transcript-unit-order"
 import * as PgClient from "@effect/sql-pg/PgClient"
-import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
-import { Config, DateTime, Effect, FileSystem, Layer, Random, Redacted } from "effect"
+import { Config, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { and, eq, sql as drizzleSql } from "drizzle-orm"
+import { EffectLogger } from "drizzle-orm/effect-core"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { fileURLToPath } from "node:url"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Pool } from "pg"
 import { identityMigrations } from "../../../identity/src/database/migrations"
 import { runMigration } from "../../../identity/src/database/postgres"
 import * as ProductRepositories from "../../src/database/product-repositories"
+import { transcriptSqlWrites } from "../../src/transcript/sql-writes"
 import { migrations } from "../../src/hosted/migrations"
 import { identityOrganization, identityUser } from "@rika/identity"
 import * as schema from "../../src/database/schema/product"
+import { readFileString } from "../hosted/assignments.support"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
-const readFileString = (url: URL) =>
-  Effect.scoped(
-    Layer.build(BunServices.layer).pipe(
-      Effect.flatMap((context) =>
-        Effect.provide(
-          Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(fileURLToPath(url))),
-          context,
-        ),
-      ),
-    ),
-  )
 const personalOwner = OwnerId.make("product-personal-owner")
 const organizationOwner = OwnerId.make("product-organization-owner")
 const threadId = Thread.ThreadId.make("product-thread")
@@ -120,6 +110,16 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
         )
         const personal = yield* Layer.build(repositoryLayer(url, personalOwner))
         const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(personal))
+        const statements: Array<string> = []
+        const defaults = yield* Layer.build(PgDrizzle.DefaultServices)
+        const countingDatabase = yield* PgDrizzle.make().pipe(
+          Effect.provideService(
+            EffectLogger,
+            EffectLogger.fromDrizzle({ logQuery: (query) => statements.push(query) }),
+          ),
+          Effect.provideContext(defaults),
+          Effect.provideContext(personal),
+        )
         const seedAggregate = (id: Thread.ThreadId, workspace: string, title: string, createdAt: number) =>
           aggregateDatabase.transaction((tx) =>
             Effect.gen(function* () {
@@ -229,6 +229,36 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
               content: { _tag: "Entry" as const, role: "assistant" as const, text: `persisted ${index}` },
             }
           })
+          const countedTranscripts = transcriptSqlWrites.make(countingDatabase, transcripts.get)
+          statements.length = 0
+          yield* countedTranscripts.replaceUnits(active, transcriptUnits)
+          expect(statements).toHaveLength(11)
+          expect(
+            statements.filter((statement) => statement.startsWith('insert into "rika_transcript_units"')),
+          ).toHaveLength(1)
+          statements.length = 0
+          expect(
+            yield* countedTranscripts.commitProjection(active, {
+              _tag: "ProjectionPatch",
+              baseRevision: 0,
+              revision: 1,
+              checkpoint: { version: ExecutionProjection.projectionVersion, cursor: "batched", state: "{}" },
+              upsert: transcriptUnits.slice(0, 2).map((unit) => ({ ...unit, revision: 1 })),
+              remove: transcriptUnits.slice(2).map((unit) => unit.key),
+              state: {
+                status: "completed",
+                usage: ExecutionProjection.emptyUsageState(),
+                steering: { steeringMessages: 0, followUpMessages: 0 },
+              },
+            }),
+          ).toBe("committed")
+          expect(statements).toHaveLength(12)
+          expect(
+            statements.filter((statement) => statement.startsWith('delete from "rika_transcript_units"')),
+          ).toHaveLength(1)
+          expect(
+            statements.filter((statement) => statement.startsWith('insert into "rika_transcript_units"')),
+          ).toHaveLength(1)
           yield* transcripts.replaceUnits(active, transcriptUnits)
           expect(yield* transcripts.get(active.id)).toMatchObject({
             turn: { id: active.id },

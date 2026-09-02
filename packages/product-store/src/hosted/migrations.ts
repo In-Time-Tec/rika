@@ -212,4 +212,14 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "66caa62dcb6faf2f42cd978c93ce6c4c1fe68c607a6b768e6f95b15ffa4dc8c5",
     url: new URL("../../migrations/postgres/0041-native-tool-runner-registration.sql", import.meta.url),
   },
+  {
+    id: "product/0042_runner_assignment_poll_index",
+    checksum: "9f8d26704abb05ec89396fe914daaff6ac77b7eb1bc4ec5a38af0b3a070cc4a8",
+    url: new URL("../../migrations/postgres/0042-runner-assignment-poll-index.sql", import.meta.url),
+  },
+  {
+    id: "product/0043_drop_unused_hosted_tables",
+    checksum: "63b883fa57d0d01e4fe2bcbdf6409416c7cfbb9af21859e74b6c51bae35a6e38",
+    url: new URL("../../migrations/postgres/0043-drop-unused-hosted-tables.sql", import.meta.url),
+  },
 ]

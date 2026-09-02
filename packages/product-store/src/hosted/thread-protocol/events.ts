@@ -74,22 +74,9 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
       readonly createdAt: Timestamp
     },
   ) {
-    const written: Array<ThreadProtocolEvent> = []
-    for (let index = 0; index < input.events.length; index += 1) {
+    const written = input.events.map((event, index): ThreadProtocolEvent => {
       const sequence = (input.firstCursor + BigInt(index)).toString()
-      const event = input.events[index]!
-      yield* query(
-        tx.insert(rikaHostedThreadProtocolEvents).values({
-          ownerId: input.ownerId,
-          threadId: input.threadId,
-          sequence: bigintValue(sequence),
-          cursor: bigintValue(sequence),
-          threadVersion: bigintValue(input.threadVersion),
-          event,
-          createdAt: timestampValue(input.createdAt),
-        }),
-      )
-      written.push({
+      return {
         ownerId: input.ownerId,
         threadId: input.threadId,
         sequence,
@@ -97,8 +84,22 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
         threadVersion: input.threadVersion,
         event,
         createdAt: input.createdAt,
-      })
-    }
+      }
+    })
+    if (written.length > 0)
+      yield* query(
+        tx.insert(rikaHostedThreadProtocolEvents).values(
+          written.map((event) => ({
+            ownerId: event.ownerId,
+            threadId: event.threadId,
+            sequence: bigintValue(event.sequence),
+            cursor: bigintValue(event.cursor),
+            threadVersion: bigintValue(event.threadVersion),
+            event: event.event,
+            createdAt: timestampValue(event.createdAt),
+          })),
+        ),
+      )
     return written
   })
 

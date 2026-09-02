@@ -19,38 +19,6 @@ import {
 import { sql } from "drizzle-orm"
 import { SchemaReference } from "../reference"
 
-export const rikaHostedAuditEvents = pgTable(
-  "rika_hosted_audit_events",
-  {
-    id: text().primaryKey(),
-    ownerId: text("owner_id")
-      .notNull()
-      .references(() => rikaHostedOwners.id, { onDelete: "cascade" }),
-    actor: jsonb().notNull(),
-    action: text().notNull(),
-    resourceKind: text("resource_kind").notNull(),
-    resourceId: text("resource_id").notNull(),
-    commitCursor: bigint("commit_cursor", { mode: "number" }).notNull(),
-    attributes: jsonb().notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    index("rika_hosted_audit_events_timeline").using(
-      "btree",
-      table.ownerId.asc().nullsLast(),
-      table.occurredAt.desc().nullsFirst(),
-      table.id.asc().nullsLast(),
-    ),
-    unique("rika_hosted_audit_events_owner_id_commit_cursor_key").on(table.ownerId, table.commitCursor),
-    check("rika_hosted_audit_events_action_check", sql`(length(action) > 0)`),
-    check("rika_hosted_audit_events_actor_check", sql`(jsonb_typeof(actor) = 'object'::text)`),
-    check("rika_hosted_audit_events_attributes_check", sql`(jsonb_typeof(attributes) = 'object'::text)`),
-    check("rika_hosted_audit_events_check", sql`rika_hosted_actor_matches_owner(actor, owner_id)`),
-    check("rika_hosted_audit_events_commit_cursor_check", sql`(commit_cursor >= 1)`),
-    check("rika_hosted_audit_events_resource_id_check", sql`(length(resource_id) > 0)`),
-    check("rika_hosted_audit_events_resource_kind_check", sql`(length(resource_kind) > 0)`),
-  ],
-)
 export const rikaHostedCredentialReferences = pgTable(
   "rika_hosted_credential_references",
   {

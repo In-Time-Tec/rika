@@ -13,6 +13,7 @@ import { runMigration } from "../../../../identity/src/database/postgres"
 import * as schema from "../../../src/database/schema/product"
 import { migrations } from "../../../src/hosted/migrations"
 import * as HostedPostgres from "../../../src/hosted/layer"
+import { eventOperations } from "../../../src/hosted/thread-protocol/events"
 import {
   apply,
   at,
@@ -64,6 +65,56 @@ it.effect.skipIf(!live)("applies Runner migrations idempotently and inspects rec
       expect(definition.definition).toContain("state = 'unknown'")
       expect(definition.definition).toContain("dispatched_executor_instance_id = NEW.executor_instance_id")
       expect(definition.definition).toContain("clock_timestamp()")
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("upgrades the previous product head with the Runner poll index and unused-table cleanup", () =>
+  isolated(({ pool }) =>
+    Effect.gen(function* () {
+      yield* apply(pool, [...identityMigrations, ...migrations.slice(0, -2)])
+      yield* apply(pool, migrations.slice(-2))
+      const index = yield* Effect.tryPromise(() =>
+        pool.query(`SELECT indexdef FROM pg_indexes
+          WHERE indexname = 'rika_hosted_executor_assignments_runner_poll'`),
+      )
+      const indexRow = yield* Schema.decodeUnknownEffect(Schema.Struct({ indexdef: Schema.String }))(index.rows[0])
+      expect(indexRow.indexdef).toContain("(placement ->> 'deviceId'::text)")
+      const tables = yield* Effect.tryPromise(() =>
+        pool.query(`SELECT to_regclass(name) AS relation FROM unnest($1::text[]) AS name`, [
+          ["rika_hosted_client_cursors", "rika_hosted_terminal_writer_leases", "rika_hosted_audit_events"],
+        ]),
+      )
+      expect(tables.rows).toEqual([{ relation: null }, { relation: null }, { relation: null }])
+    }),
+  ),
+)
+
+it.effect.skipIf(!live)("writes a batch of Thread protocol events with one INSERT statement", () =>
+  isolated(({ pool, database, effectDatabase, countingEffectDatabase, statements }) =>
+    Effect.gen(function* () {
+      yield* apply(pool, [...identityMigrations, ...migrations])
+      yield* seedIdentity(database)
+      yield* seedRecoveryAggregate(effectDatabase)
+      yield* effectDatabase.insert(schema.rikaHostedThreadProtocolState).values({
+        ownerId: ids.owner,
+        threadId: ids.thread,
+      })
+      statements.length = 0
+      const events = yield* eventOperations(countingEffectDatabase).appendEvents({
+        ownerId: ids.owner,
+        threadId: ids.thread,
+        events: Array.from({ length: 4 }, () => ({
+          _tag: "ExecutionControlled" as const,
+          action: "cancelled" as const,
+        })),
+        createdAt: at(1),
+      })
+      expect(events.map((event) => event.sequence)).toEqual(["1", "2", "3", "4"])
+      expect(statements).toHaveLength(3)
+      expect(
+        statements.filter((statement) => statement.startsWith('insert into "rika_hosted_thread_protocol_events"')),
+      ).toHaveLength(1)
     }),
   ),
 )
