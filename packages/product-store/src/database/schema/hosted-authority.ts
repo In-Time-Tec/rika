@@ -1,15 +1,5 @@
 import { rikaHostedPresenceStatus, rikaHostedGrantRole } from "./hosted-enums"
-import {
-  pgTable,
-  text,
-  timestamp,
-  jsonb,
-  index,
-  foreignKey,
-  primaryKey,
-  unique,
-  check,
-} from "drizzle-orm/pg-core"
+import { pgTable, text, timestamp, jsonb, index, foreignKey, primaryKey, unique, check } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import { SchemaReference } from "../reference"
 

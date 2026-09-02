@@ -199,6 +199,12 @@
       }
     },
     {
+      "files": ["apps/api/src/main.ts"],
+      "rules": {
+        "effecttsgo/strict-effect-provide": "off"
+      }
+    },
+    {
       "files": ["apps/rika/src/platform/diagnostic-file-host.ts"],
       "rules": {
         "effecttsgo/node-builtin-import": "off"

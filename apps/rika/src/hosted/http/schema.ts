@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { CliDevice, HostedError, ProviderCredentialStatus, RecoveryOperation, type TokenSet } from "../contract"
+import { CliDevice, HostedError, ProviderCredentialStatus, type TokenSet } from "../contract"
 
 export const RegistrationWire = Schema.Struct({ client_id: Schema.String })
 export const DeviceAuthorizationWire = Schema.Struct({
@@ -22,7 +22,6 @@ export const OAuthErrorWire = Schema.Struct({
 })
 export const DevicesWire = Schema.Union([Schema.Array(CliDevice), Schema.Struct({ devices: Schema.Array(CliDevice) })])
 export const ProviderCredentialsWire = Schema.Struct({ credentials: Schema.Array(ProviderCredentialStatus) })
-export const RecoveryOperationsWire = Schema.Struct({ operations: Schema.Array(RecoveryOperation) })
 
 export const tokensFrom =
   (previousRefreshToken?: string) =>

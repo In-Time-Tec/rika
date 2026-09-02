@@ -24,19 +24,6 @@ type MutableHostedApplicationOptions = {
   >[0][Key]
 }
 
-const provideLayerScoped =
-  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.scopedWith((scope) =>
-      Effect.context<RIn | Exclude<R, ROut>>().pipe(
-        Effect.flatMap((parent) =>
-          Layer.buildWithScope(layer, scope).pipe(
-            Effect.flatMap((context) => effect.pipe(Effect.provideContext(Context.merge(parent, context)))),
-          ),
-        ),
-      ),
-    )
-
 const program = Effect.scoped(
   Effect.gen(function* () {
     const loaded = yield* loadApiConfig(Bun.env)
@@ -116,4 +103,4 @@ const program = Effect.scoped(
   }),
 )
 
-BunRuntime.runMain(program.pipe(provideLayerScoped(Layer.merge(FetchHttpClient.layer, BunCrypto.layer))))
+BunRuntime.runMain(program.pipe(Effect.provide(Layer.merge(FetchHttpClient.layer, BunCrypto.layer))))

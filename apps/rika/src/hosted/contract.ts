@@ -151,18 +151,27 @@ export type HostedThreadList = typeof HostedThreadList.Type
 export const HostedThreadPreview = Schema.Struct({ units: Schema.Array(Unit) })
 export type HostedThreadPreview = typeof HostedThreadPreview.Type
 
-export const RecoveryOperation = Schema.Struct({
-  operationId: Schema.NonEmptyString,
-  operationKey: Schema.NonEmptyString,
+export const RecoveryInspection = Schema.Struct({
   runId: Schema.NonEmptyString,
-  attempt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
-  started: Schema.Boolean,
-  state: Schema.Literals(["needs-resolution", "retrying", "accepted", "aborted"]),
-  actions: Schema.Array(Schema.Literals(["inspect", "retry", "accept", "abort"])),
-  resolution: Schema.NullOr(Schema.Unknown),
+  status: Schema.Literals([
+    "queued",
+    "running",
+    "waiting",
+    "needs-resolution",
+    "cancelling",
+    "succeeded",
+    "failed",
+    "cancelled",
+  ]),
 })
-export type RecoveryOperation = typeof RecoveryOperation.Type
+export type RecoveryInspection = typeof RecoveryInspection.Type
+
+export const RecoveryResolutionReceipt = Schema.Struct({
+  runId: Schema.NonEmptyString,
+  operationId: Schema.NonEmptyString,
+  idempotencyKey: Schema.NonEmptyString,
+})
+export type RecoveryResolutionReceipt = typeof RecoveryResolutionReceipt.Type
 
 export type RecoveryResolution =
   | { readonly action: "retry" }
@@ -318,7 +327,7 @@ export interface HttpInterface {
     threadId: string,
     runId: string,
     session: Session,
-  ) => Effect.Effect<ReadonlyArray<RecoveryOperation>, HostedError>
+  ) => Effect.Effect<RecoveryInspection, HostedError>
   readonly resolveRecovery: (
     origin: string,
     threadId: string,
@@ -327,7 +336,7 @@ export interface HttpInterface {
     resolution: RecoveryResolution,
     operationKey: string,
     session: Session,
-  ) => Effect.Effect<RecoveryOperation, HostedError>
+  ) => Effect.Effect<RecoveryResolutionReceipt, HostedError>
   readonly uploadWorkspaceSeed: (
     origin: string,
     archive: { readonly bytes: Uint8Array; readonly contentDigest: string; readonly sizeBytes: number },

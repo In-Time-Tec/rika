@@ -14,7 +14,8 @@ import {
   OpenAiAccountStatus,
   ProviderCredentialStatus,
   Project,
-  RecoveryOperation,
+  RecoveryInspection,
+  RecoveryResolutionReceipt,
   Registration,
   RepositoryPublicationStatus,
   WorkspaceSeedUpload,
@@ -28,7 +29,6 @@ import {
   DevicesWire,
   OAuthErrorWire,
   ProviderCredentialsWire,
-  RecoveryOperationsWire,
   RegistrationWire,
   TokenWire,
   tokensFrom,
@@ -245,9 +245,9 @@ export const layer = Layer.effect(
           url,
           HttpClientRequest.get(url),
           session,
-          RecoveryOperationsWire,
+          RecoveryInspection,
           "Thread recovery inspection",
-        ).pipe(Effect.map((response) => response.operations))
+        )
       },
       resolveRecovery: (origin, threadId, runId, operationId, resolution, operationKey, session) => {
         const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/recovery/${encodeURIComponent(operationId)}`
@@ -259,7 +259,7 @@ export const layer = Layer.effect(
             HttpClientRequest.bodyJsonUnsafe(resolution),
           ),
           session,
-          RecoveryOperation,
+          RecoveryResolutionReceipt,
           "Thread recovery resolution",
         )
       },

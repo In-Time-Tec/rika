@@ -335,29 +335,15 @@ it.effect("inspects and resolves interrupted Thread operations", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
-      const operation = {
-        operationId: "operation-1",
-        operationKey: "operation-key-1",
+      const inspection = { runId: "run-1", status: "needs-resolution" }
+      const receipt = {
         runId: "run-1",
-        attempt: 0,
-        replayPolicy: "never",
-        started: true,
-        state: "needs-resolution",
-        actions: ["inspect", "retry", "accept", "abort"],
-        resolution: null,
+        operationId: "operation-1",
+        idempotencyKey: "019d1a56-286d-7000-8000-000000000001",
       }
       const client = HttpClient.make((request) => {
         requests.push(request)
-        return Effect.succeed(
-          request.method === "GET"
-            ? response(request, { operations: [operation] })
-            : response(request, {
-                ...operation,
-                state: "retrying",
-                actions: ["inspect"],
-                resolution: { _tag: "Retry" },
-              }),
-        )
+        return Effect.succeed(request.method === "GET" ? response(request, inspection) : response(request, receipt))
       })
       const context = yield* Layer.build(
         layer.pipe(Layer.provide(Layer.merge(BunCrypto.layer, Layer.succeed(HttpClient.HttpClient, client)))),
@@ -366,7 +352,7 @@ it.effect("inspects and resolves interrupted Thread operations", () =>
       const session = { accessToken: Redacted.make("access"), privateJwk: yield* generate() }
       const origin = "https://hosted.example.test"
 
-      expect(yield* http.inspectRecovery(origin, "thread/1", "run/1", session)).toEqual([operation])
+      expect(yield* http.inspectRecovery(origin, "thread/1", "run/1", session)).toEqual(inspection)
       expect(
         yield* http.resolveRecovery(
           origin,
@@ -377,7 +363,7 @@ it.effect("inspects and resolves interrupted Thread operations", () =>
           "019d1a56-286d-7000-8000-000000000001",
           session,
         ),
-      ).toMatchObject({ operationId: "operation-1", state: "retrying" })
+      ).toEqual(receipt)
       expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
         "/api/v1/threads/thread%2F1/runs/run%2F1/recovery",
         "/api/v1/threads/thread%2F1/runs/run%2F1/recovery/operation%2F1",
