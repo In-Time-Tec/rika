@@ -171,10 +171,20 @@ export const preparationContext = (options: Options) =>
       yield* fileSystem.remove(`${credentialRoot}/gh`, { recursive: true, force: true })
     })
     yield* clearCredential()
+    const warnCredentialCleanup = (operation: string) => (error: { readonly message: string }) =>
+      Effect.logWarning("workspace.credential-cleanup-failed").pipe(
+        Effect.annotateLogs({ "rika.cleanup.operation": operation, "rika.error.message": error.message }),
+      )
     yield* Effect.addFinalizer(() =>
-      Effect.all([options.revoke("git-read").pipe(Effect.ignore), options.revoke("github-read").pipe(Effect.ignore)], {
-        discard: true,
-      }).pipe(Effect.andThen(clearCredential), Effect.ignore),
+      Effect.all(
+        [
+          options.revoke("git-read").pipe(Effect.tapError(warnCredentialCleanup("revoke-git-read")), Effect.ignore),
+          options
+            .revoke("github-read")
+            .pipe(Effect.tapError(warnCredentialCleanup("revoke-github-read")), Effect.ignore),
+        ],
+        { discard: true },
+      ).pipe(Effect.andThen(clearCredential), Effect.tapError(warnCredentialCleanup("clear-local")), Effect.ignore),
     )
 
     const acquireCredential = Effect.fn("Workspace.acquireCredential")(function* (purpose: "git-read" | "github-read") {

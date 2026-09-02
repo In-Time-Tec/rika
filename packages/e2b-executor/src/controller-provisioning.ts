@@ -24,7 +24,7 @@ import type { CheckpointRestore, WorkspaceSeedRestore } from "@rika/remote-execu
 
 const failure = failures.make
 
-export interface ProvisioningContext {
+interface ProvisioningContext {
   readonly options: Options
   readonly assignments: AssignmentsService
   readonly provider: ProviderInterface

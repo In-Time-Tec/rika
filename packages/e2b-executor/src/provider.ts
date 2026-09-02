@@ -212,7 +212,14 @@ const bootstrapSandbox = (
           yield* Effect.tryPromise({
             try: () => response.text(),
             catch: () => BootstrapError.make({ message: "E2B bootstrap response could not be read" }),
-          }).pipe(Effect.ignore)
+          }).pipe(
+            Effect.tapError((error) =>
+              Effect.logDebug("e2b.bootstrap-response-cleanup-failed").pipe(
+                Effect.annotateLogs("rika.error.message", error.message),
+              ),
+            ),
+            Effect.ignore,
+          )
           yield* delay(remaining, retry())
         }
       })
@@ -309,7 +316,15 @@ const networkPolicy = (allowedEgress: ReadonlyArray<string>): SandboxNetworkUpda
   denyOut: [...protectedNetworks],
 })
 
-export const testing = { bootstrapHeaders, bootstrapSandbox, bootstrapUrl, networkPolicy, protectedNetworks } as const
+export const testing = {
+  bootstrapHeaders,
+  bootstrapSandbox,
+  bootstrapUrl,
+  makeWithSdk: (input: { readonly options: Options; readonly sdk: Sdk }): Interface =>
+    makeProvider(input.options, input.sdk),
+  networkPolicy,
+  protectedNetworks,
+} as const
 
 const makeProvider = (options: Options, sdk: Sdk): Interface => {
   const apiKey = Redacted.value(options.apiKey)
@@ -373,7 +388,19 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
               ProviderError.make({ operation: "create", message: "E2B sandbox template attestation failed" }),
             ),
       ),
-      Effect.tapError(() => attempt("kill", () => sdk.kill(sandbox.sandboxId, connection)).pipe(Effect.ignore)),
+      Effect.tapError(() =>
+        attempt("kill", () => sdk.kill(sandbox.sandboxId, connection)).pipe(
+          Effect.tapError((error) =>
+            Effect.logDebug("e2b.create-cleanup-failed").pipe(
+              Effect.annotateLogs({
+                "rika.cleanup.operation": error.operation,
+                "rika.error.message": error.message,
+              }),
+            ),
+          ),
+          Effect.ignore,
+        ),
+      ),
     )
     return { sandboxId: sandbox.sandboxId, state: "running" as const }
   })
@@ -443,8 +470,5 @@ const makeProvider = (options: Options, sdk: Sdk): Interface => {
 }
 
 export const make = (options: Options): Interface => makeProvider(options, liveSdk)
-
-export const makeWithSdk = (input: { readonly options: Options; readonly sdk: Sdk }): Interface =>
-  makeProvider(input.options, input.sdk)
 
 export const layer = (options: Options): Layer.Layer<Provider> => Layer.succeed(Provider, make(options))

@@ -107,8 +107,28 @@ const cloneCheckout = Effect.fn("Workspace.cloneCheckout")(function* (
       Effect.all(
         [
           context.fileSystem.remove(checkoutRoot, { recursive: true, force: true }),
-          options.revoke("git-read").pipe(Effect.ignore),
-          context.clearCredential().pipe(Effect.ignore),
+          options.revoke("git-read").pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("workspace.credential-cleanup-failed").pipe(
+                Effect.annotateLogs({
+                  "rika.cleanup.operation": "revoke-git-read",
+                  "rika.error.message": error.message,
+                }),
+              ),
+            ),
+            Effect.ignore,
+          ),
+          context.clearCredential().pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("workspace.credential-cleanup-failed").pipe(
+                Effect.annotateLogs({
+                  "rika.cleanup.operation": "clear-local",
+                  "rika.error.message": error.message,
+                }),
+              ),
+            ),
+            Effect.ignore,
+          ),
         ],
         { discard: true },
       ),

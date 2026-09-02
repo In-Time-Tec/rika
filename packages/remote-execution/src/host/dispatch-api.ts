@@ -31,7 +31,7 @@ type Dispatch = (
   writer: Writer,
 ) => Effect.Effect<boolean, HostError, Runtime | WorkspaceFiles | RepositoryServices>
 
-export interface ApiDispatchDependencies {
+interface ApiDispatchDependencies {
   readonly config: Config
   readonly incoming: Queue.Queue<IncomingMessage>
   readonly credentials: Queue.Queue<RepositoryCredential>

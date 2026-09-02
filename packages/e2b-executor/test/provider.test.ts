@@ -2,7 +2,7 @@ import "./provider.harness"
 import { describe, expect, it } from "@effect/vitest"
 import { ALL_TRAFFIC, type SandboxInfo, type SandboxOpts } from "e2b"
 import { DateTime, Effect, Redacted, Schema } from "effect"
-import { makeWithSdk, type Sdk, SdkError, type SdkHandle, testing } from "../src/provider"
+import { type Sdk, SdkError, type SdkHandle, testing } from "../src/provider"
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
@@ -94,7 +94,7 @@ describe("Provider", () => {
       },
       kill: () => Effect.succeed(true),
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.create(request)).toEqual({ sandboxId: "sandbox-e2b", state: "running" })
       expect(buildChecks).toBe(1)
@@ -138,7 +138,7 @@ describe("Provider", () => {
       },
       kill: () => Effect.succeed(true),
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(provider.create(request))
       expect(failure).toMatchObject({ operation: "create", message: "E2B template build attestation failed" })
@@ -158,7 +158,7 @@ describe("Provider", () => {
         return Effect.succeed(true)
       },
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failure = yield* Effect.flip(provider.create(request))
       expect(failure).toMatchObject({ operation: "create", message: "E2B sandbox template attestation failed" })
@@ -263,7 +263,7 @@ describe("Provider", () => {
         return Effect.void
       },
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       const failed = yield* Effect.flip(provider.create(request))
       expect(failed.message).not.toContain("e2b-controller-secret")
@@ -322,7 +322,7 @@ describe("Provider", () => {
         }
       },
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* Effect.flip(provider.inventory)).toMatchObject({
         operation: "inventory",
@@ -343,7 +343,7 @@ describe("Provider", () => {
         nextItems: Effect.sync(() => pages[page++] ?? []),
       }),
     }
-    const provider = makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
+    const provider = testing.makeWithSdk({ options: { apiKey: Redacted.make("e2b-controller-secret") }, sdk })
     return Effect.gen(function* () {
       expect(yield* provider.inventory).toEqual([
         expect.objectContaining({ sandboxId: "running", state: "running", templateBuildId: "7d0-build-receipt" }),

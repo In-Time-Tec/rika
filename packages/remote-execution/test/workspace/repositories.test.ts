@@ -1,19 +1,16 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
+import type { RepositoryService } from "@rika/product/workspace-capability"
 import { Context, Deferred, Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import {
-  Driver,
-  Repository,
-  RepositoryServices,
-  layer,
-  repositoryLayer,
-  type StoredService,
-} from "../../src/workspace/repositories"
+import { Driver, Repository, RepositoryServices, layer, repositoryLayer } from "../../src/workspace/repositories"
 import type { Fence } from "../../src/protocol/messages"
 import { provideLayer } from "../support/layer"
 
 const service = { serviceId: "docs", command: "bun", args: ["run", "dev"], cwd: "." } as const
+interface StoredService extends RepositoryService {
+  readonly desired: boolean
+}
 
 const harness = () => {
   const records = new Map<string, StoredService>()

@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export interface ExecutionEnvironment {
+interface ExecutionEnvironment {
   readonly values: Record<string, string>
   readonly replace: (values: Readonly<Record<string, string>>) => void
 }
