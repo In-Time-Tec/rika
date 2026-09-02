@@ -123,8 +123,11 @@ test(
         const created = yield* app.waitFrame("Welcome to Rika")
         expect(created).not.toContain("MENTION_COMPLETE")
         app.pressKey("t", { ctrl: true })
-        const threads = yield* app.waitFrame("Say hello.")
+        // The harness title lane answers "idle", so the first Thread carries that generated title, not its prompt.
+        const threads = yield* app.waitFrame("Thread Preview")
         expect(threads).toContain("New thread")
+        expect(threads).toContain("idle")
+        expect(threads).not.toContain("Say hello.")
         app.pressEscape()
 
         yield* app.quit

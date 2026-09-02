@@ -31,6 +31,7 @@ import type { ThreadSummary } from "@rika/product/thread-summary"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
+import { completeLeadingTurn } from "@rika/product/transcript-window"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
@@ -174,10 +175,13 @@ export const layer = Layer.effect(
               if (hostedThread === undefined)
                 return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
               const queue = yield* turns.readQueue(threadId)
-              const page = yield* transcripts.page(threadId, {
-                limit: ThreadView.limits.patchItems,
-                projectionVersion: ExecutionProjection.projectionVersion,
-              })
+              const page = yield* completeLeadingTurn(
+                yield* transcripts.page(threadId, {
+                  limit: ThreadView.limits.patchItems,
+                  projectionVersion: ExecutionProjection.projectionVersion,
+                }),
+                transcripts,
+              )
               const active = yield* turns.findActive(threadId)
               const activeProjection = active === undefined ? undefined : yield* transcripts.get(active.id)
               const loadedAt = yield* Clock.currentTimeMillis

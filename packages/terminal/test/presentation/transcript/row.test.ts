@@ -59,3 +59,43 @@ describe("singleton Read detail is inspectable", () => {
     expect(rendered(model(["tool:read-1"]))).toContain("100  line 100")
   })
 })
+
+describe("children whose parent is not loaded", () => {
+  const orphaned: Model = {
+    ...initial("/workspace", "medium"),
+    width: 100,
+    blocks: [readBlock],
+    entries: [{ role: "assistant", text: "Subagent answer text", turnId: "sub-turn" }],
+    items: [
+      { _tag: "Block", index: 0, id: "read", turnId: "sub-turn", parentId: "missing-card" },
+      { _tag: "Entry", index: 0, id: "answer", turnId: "sub-turn", parentId: "missing-card" },
+    ],
+    expandedRowKeys: [],
+  }
+
+  test("render at the top level instead of leaving the transcript blank", () => {
+    const output = rendered(orphaned)
+    expect(output).toContain("✓ Read src/main.ts")
+    expect(output).toContain("Subagent answer text")
+  })
+
+  test("still nest under their parent once it is loaded", () => {
+    const card = {
+      _tag: "SubagentCard" as const,
+      id: "missing-card",
+      name: "Task",
+      prompt: "Investigate",
+      promptTruncated: false,
+      summary: "Working",
+      status: "complete" as const,
+      activity: [],
+    }
+    const withParent: Model = {
+      ...orphaned,
+      blocks: [readBlock, card],
+      items: [{ _tag: "Block", index: 1, id: "card", turnId: "turn" }, ...orphaned.items],
+    }
+    expect(rendered(withParent)).not.toContain("✓ Read src/main.ts")
+    expect(rendered({ ...withParent, expandedRowKeys: ["subagent:missing-card"] })).toContain("✓ Read src/main.ts")
+  })
+})

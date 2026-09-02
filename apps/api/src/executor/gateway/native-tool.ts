@@ -1,6 +1,7 @@
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import type { ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
 import type { AccessWire, MachineOutcome, MachineRequest } from "@rika/remote-execution/protocol"
-import { Deferred, Effect, Schema } from "effect"
+import { Cause, Deferred, Effect, Option, Schema } from "effect"
 import {
   GatewayError,
   type ExecutionOutcome,
@@ -11,6 +12,16 @@ import {
 import type { PendingOperation } from "./rpc/model"
 
 const jsonValue = <A>(value: A): Schema.Json => Schema.decodeUnknownSync(Schema.Json)(value)
+
+/**
+ * The wire decoder yields a `ToolError` class instance, which is not a JSON value. Encode it back to its plain
+ * shape before it becomes the durable domain failure; decoding the instance directly throws and never settles.
+ */
+const encodeToolError = Schema.encodeSync(NativeToolRuntime.ToolError)
+const toolFailureValue = (failure: NativeToolRuntime.ToolError): Schema.Json => {
+  const encoded = encodeToolError(failure)
+  return jsonValue(encoded)
+}
 
 interface NativeTerminal {
   readonly response: ToolOperationResponse
@@ -30,7 +41,10 @@ export const machineTerminal = (outcome: MachineOutcome): NativeTerminal => {
             outcome: "failed",
           }
     case "Failure":
-      return { response: { _tag: "DomainFailure", failure: jsonValue(outcome.failure) }, outcome: "failed" }
+      return {
+        response: { _tag: "DomainFailure", failure: toolFailureValue(outcome.failure) },
+        outcome: "failed",
+      }
     case "Cancelled":
       return {
         response: { _tag: "DomainFailure", failure: { kind: "cancelled", message: "Tool operation cancelled" } },
@@ -120,8 +134,25 @@ export const runNativeTool = (options: {
     return yield* persistNativeOutcome(options.lifecycle, operation.access, operation.request, outcome)
   })
   return execution.pipe(
-    Effect.matchEffect({
-      onFailure: (error) => Deferred.fail(operation.result, error),
+    Effect.matchCauseEffect({
+      onFailure: (cause) => {
+        const failure = Cause.findErrorOption(cause)
+        if (Option.isSome(failure)) return Deferred.fail(operation.result, failure.value)
+        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
+        return Effect.logError("native-operation.settle-failed").pipe(
+          Effect.annotateLogs({
+            "rika.operation.key": operation.operationKey,
+            "rika.operation.attempt": operation.attempt,
+            "rika.error.message": Cause.pretty(cause),
+          }),
+          Effect.andThen(
+            Deferred.fail(
+              operation.result,
+              GatewayError.make({ kind: "transport", message: "Native operation result could not be recorded" }),
+            ),
+          ),
+        )
+      },
       onSuccess: (result) => Deferred.succeed(operation.result, result),
     }),
     Effect.asVoid,

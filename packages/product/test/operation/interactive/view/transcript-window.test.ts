@@ -1,6 +1,7 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as Thread from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
+import type * as TranscriptPage from "@rika/product/transcript-page"
 import { expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { maximumTranscriptPayloadBytes } from "../../../../src/thread/transcript/bounds"
@@ -8,6 +9,8 @@ import { initialTranscriptWindow } from "../../../../src/operation/interactive/v
 import { makeSelectionState } from "../../../../src/operation/interactive/view/selection"
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+/** The windowed turn has no projection to complete from in these tests. */
+const missingProjection: TranscriptPage.Projection | undefined = undefined
 
 const thread: Thread.Thread = {
   id: Thread.ThreadId.make("thread-window"),
@@ -62,6 +65,7 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
     const window = yield* initialTranscriptWindow({
       state: makeSelectionState(thread, 1),
       transcripts: {
+        get: () => Effect.succeed(missingProjection),
         page: (_threadId, options) => {
           reads += 1
           expect(options).toEqual({ limit: 120, projectionVersion: ExecutionProjection.projectionVersion })

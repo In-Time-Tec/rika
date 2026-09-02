@@ -16,6 +16,7 @@ import type { ModeId } from "@rika/configuration/behavior-mode"
 import type { InteractiveEvent } from "../session-event"
 import type { InteractiveRuntimeContext } from "../session"
 import * as InteractiveQueue from "./queue"
+import { publishGeneratedTitle } from "./title"
 export const admitInteractiveTurn = (input: {
   readonly turns: TurnRepository.Interface
   readonly submission: TurnRepositoryContract.CreateInput
@@ -244,6 +245,7 @@ const executeInteractiveSubmissionImpl = (
           preview,
         })
       }
+      let expectedTitle: string | undefined
       const outcome = yield* Effect.exit(
         Effect.gen(function* () {
           const prepared = yield* prepareExecution(current, thread.workspace)
@@ -279,11 +281,16 @@ const executeInteractiveSubmissionImpl = (
             executionRoute: current.executionRoute,
           }
           if (prepared.promptParts !== undefined) request = { ...request, promptParts: prepared.promptParts }
-          if (titleIntent !== undefined) request = { ...request, titleIntent }
+          if (titleIntent !== undefined) {
+            request = { ...request, titleIntent }
+            expectedTitle = titleIntent.expectedTitle
+          }
           yield* rootTurnOwner.startTurn(request)
           return yield* rootTurnOwner.watchTurn(current.id, publish, publishPreview)
         }),
       )
+      if (expectedTitle !== undefined && Exit.isSuccess(outcome) && outcome.value !== undefined)
+        yield* publishGeneratedTitle(input, thread.id, expectedTitle, outcome.value, dispatch)
       const decision = yield* settleInteractiveSubmission(input, {
         thread,
         turn: current,
@@ -410,7 +417,7 @@ export const submitInteractiveOperation = (input: InteractiveSubmissionContext) 
       }
       submissionThreadId = thread.id
       const turns = yield* TurnRepository.Service
-      if (thread.title === "New thread" && (yield* turns.list(thread.id)).length === 1) {
+      if (thread.title === "New thread" && (yield* turns.list(thread.id)).length === 0) {
         const renamed = yield* threads.renameIfTitle(
           thread.id,
           "New thread",

@@ -112,13 +112,30 @@ const toolIsStandalone = (
   response: AgentResponseState | undefined,
 ): boolean => block.presentation.outputDisplay === "inline" || children.length > 0 || response !== undefined
 
+/** Nested units point at their parent's block id (not its unit key), so collect loaded block ids. */
+const loadedBlockId = (model: Model, item: TranscriptItem): ReadonlyArray<string> => {
+  if (item._tag !== "Block") return []
+  const block = decodeTranscriptBlock(model.blocks[item.index])
+  return "id" in block ? [block.id] : []
+}
+
 const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const units: Array<TranscriptUnit> = []
   const childItems = new Map<string, Array<TranscriptItem>>()
-  for (const item of orderedTranscriptItems(model)) {
-    if (item.parentId === undefined) continue
-    const children = childItems.get(item.parentId)
-    if (children === undefined) childItems.set(item.parentId, [item])
+  const items = orderedTranscriptItems(model)
+  let loadedBlockIds: Set<string> | undefined
+  const blockIsLoaded = (id: string): boolean => {
+    loadedBlockIds ??= new Set(items.flatMap((item) => loadedBlockId(model, item)))
+    return loadedBlockIds.has(id)
+  }
+  // A child whose parent is not loaded renders at the top level instead of disappearing.
+  const parentOf = (item: TranscriptItem): string | undefined =>
+    item.parentId !== undefined && blockIsLoaded(item.parentId) ? item.parentId : undefined
+  for (const item of items) {
+    const parentId = parentOf(item)
+    if (parentId === undefined) continue
+    const children = childItems.get(parentId)
+    if (children === undefined) childItems.set(parentId, [item])
     else children.push(item)
   }
   const subagentResponseFor = (
@@ -201,7 +218,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     toolRun = []
   }
   const appendTopLevelItem = (item: TranscriptItem) => {
-    if (item.parentId !== undefined) return
+    if (parentOf(item) !== undefined) return
     if (item._tag === "Entry") {
       flush()
       units.push({ kind: "entry", entry: item.index })

@@ -9,6 +9,7 @@ import type * as ExecutionProjection from "../../execution/projection/contract"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { turnFailure } from "../failure-message"
 import { shouldRetryTurn, turnRetryBudget, turnRetryDelay } from "../retry-policy"
+import { applyGeneratedTitle } from "../thread-title"
 import type {
   AgentExecutionTurn,
   Dependencies,
@@ -26,18 +27,33 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
     const threads = yield* ThreadRepository.Service
     const turns = yield* TurnRepository.Service
     const now = yield* Clock.currentTimeMillis
+    const provisionalTitle = clampThreadTitle(input.prompt.join(" ")) || "New thread"
+    const publishTitle = (renamed: Thread.Thread) =>
+      dependencies.publishInteractiveActivity(0, {
+        _tag: "ThreadTitled",
+        threadId: String(renamed.id),
+        title: renamed.title,
+      })
+    const adoptProvisionalTitle = (existing: Thread.Thread) =>
+      Effect.gen(function* () {
+        if (existing.title !== "New thread" || (yield* turns.list(existing.id)).length > 0) return existing
+        const renamed = yield* threads.renameIfTitle(existing.id, "New thread", provisionalTitle, now)
+        if (renamed === undefined) return existing
+        publishTitle(renamed)
+        return renamed
+      })
     const resolveThread = Effect.gen(function* () {
       if (input.threadId === undefined)
         return yield* threads.create({
           id: yield* dependencies.makeThreadId,
           workspace: input.workspace ?? dependencies.defaultWorkspace,
-          title: clampThreadTitle(input.prompt.join(" ")) || "New thread",
+          title: provisionalTitle,
           now,
         })
       const existing = yield* threads.get(Thread.ThreadId.make(input.threadId))
       return existing === undefined
         ? yield* dependencies.operationError(`Thread ${input.threadId} does not exist`)
-        : existing
+        : yield* adoptProvisionalTitle(existing)
     })
     const thread = yield* resolveThread
     const runTurn = Effect.fn("ProductOperation.runTurn")(function* (
@@ -63,6 +79,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           "rika.turn.id": String(turn.id),
         }),
       )
+      let expectedTitle: string | undefined
       const execution = yield* Effect.gen(function* () {
         const prepared = preparedInput ?? (yield* dependencies.prepareExecution(turn, thread.workspace))
         const runningTurn = yield* dependencies.setTurnStatus(turn.id, "running", startedAt)
@@ -78,6 +95,7 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
           thread.title === (clampThreadTitle(turn.prompt) || "New thread")
             ? ({ _tag: "GenerateThreadTitle", expectedTitle: thread.title } as const)
             : undefined
+        expectedTitle = titleIntent?.expectedTitle
         const startBase = {
           threadId: turn.threadId,
           turnId: turn.id,
@@ -117,6 +135,14 @@ export const run = Effect.fn("NoninteractiveOperation.run")(function* (
         ),
       )
       const result = execution
+      if (expectedTitle !== undefined) {
+        const renamed = yield* applyGeneratedTitle(thread.id, expectedTitle, result).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("thread-title.apply-failed", { cause: Cause.pretty(cause) }).pipe(Effect.as(undefined)),
+          ),
+        )
+        if (renamed !== undefined) publishTitle(renamed)
+      }
       const completedAt = yield* Clock.currentTimeMillis
       const settledFailure = turnFailure(result.units)
       const failureLog =

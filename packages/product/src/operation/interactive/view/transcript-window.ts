@@ -13,6 +13,7 @@ import {
   transcriptCursorFor,
   transcriptPageEncoder,
 } from "../../../thread/transcript/bounds"
+import { completeLeadingTurn } from "../../../thread/transcript/window"
 import * as InteractiveSelection from "./selection"
 import type { InteractiveEvent } from "../session-event"
 import type { InteractiveRuntimeContext } from "../session"
@@ -42,15 +43,18 @@ export const boundedTranscriptPage = (input: {
 
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
-  readonly transcripts: Pick<TranscriptRepository.Interface, "page">
+  readonly transcripts: Pick<TranscriptRepository.Interface, "page" | "get">
   readonly encodeJson: <Value>(value: Value) => string
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
   Effect.gen(function* () {
-    const page = yield* input.transcripts.page(input.state.thread.id, {
-      limit: 120,
-      projectionVersion: ExecutionProjection.projectionVersion,
-    })
+    const page = yield* completeLeadingTurn(
+      yield* input.transcripts.page(input.state.thread.id, {
+        limit: 120,
+        projectionVersion: ExecutionProjection.projectionVersion,
+      }),
+      input.transcripts,
+    )
     const bounded = yield* boundedTranscriptPage({
       entries: page.entries,
       hasOlder: page.hasOlder,

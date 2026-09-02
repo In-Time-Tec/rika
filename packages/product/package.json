@@ -74,6 +74,7 @@
     "./thread-view": "./src/thread/view/model.ts",
     "./transcript-page": "./src/thread/transcript/page.ts",
     "./transcript-repository": "./src/thread/repository/transcript.ts",
+    "./transcript-window": "./src/thread/transcript/window.ts",
     "./turn-record": "./src/thread/turn/record.ts",
     "./turn-repository": "./src/thread/repository/turn.ts",
     "./turn-repository-steering": "./src/thread/repository/turn-steering.ts"
