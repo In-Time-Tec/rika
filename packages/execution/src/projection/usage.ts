@@ -1,12 +1,9 @@
-import type { RunEvent } from "generalist/runtime"
+import type { Run, RunEvent } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
-import type { Node } from "./model"
-import type { AttemptStart, ModelCallState } from "./persistence"
-import { add, occurredAt } from "./decoding"
+import type { ModelCallState, Node } from "./model"
+import { add, occurredAt, providerCostNanoUsd, token } from "./decoding"
 
 export interface UsageAccounting {
-  readonly attemptStarts: Map<string, AttemptStart>
-  readonly settledAttemptKeys: Set<string>
   readonly modelCalls: Map<string, ModelCallState>
   readonly usage: () => Projection.UsageState
   readonly activeTime: () => Projection.ActiveTime
@@ -18,51 +15,101 @@ export interface UsageAccounting {
   readonly observeLifecycleAt: (event: RunEvent.RunEvent) => number
   readonly activate: (node: Node, event: RunEvent.RunEvent) => void
   readonly deactivate: (node: Node, event: RunEvent.RunEvent, next: "waiting" | "terminal") => void
-  readonly recordAttempt: (input: RecordAttemptInput) => void
-  readonly settleOpenAttempts: (node: Node) => void
-  readonly persist: () => PersistedUsage
-  readonly restore: (persisted: PersistedUsage) => void
-}
-
-export interface RecordAttemptInput {
-  readonly key: string
-  readonly node: Node
-  readonly modelCallId: string
-  readonly inputTotal?: number | undefined
-  readonly inputUncached?: number | undefined
-  readonly inputCacheRead?: number | undefined
-  readonly inputCacheWrite?: number | undefined
-  readonly outputTotal?: number | undefined
-  readonly outputText?: number | undefined
-  readonly outputReasoning?: number | undefined
-  readonly failedProviderTotal?: number | undefined
-  readonly costNanoUsd?: number | undefined
-}
-
-export interface PersistedUsage {
-  readonly usageState: Projection.UsageState
-  readonly requestOrdinal: number
-  readonly pendingContextOrdinal?: number
-  readonly attemptStarts: ReadonlyArray<readonly [string, AttemptStart]>
-  readonly settledAttemptKeys: ReadonlyArray<string>
-  readonly modelCalls: ReadonlyArray<readonly [string, ModelCallState]>
-  readonly activeAvailable: boolean
-  readonly activeDepth: number
-  readonly activeAccumulatedMillis: number
-  readonly activeSince?: number
-  readonly lastLifecycleAt?: number
+  readonly settleCalls: (node: Node) => void
+  readonly replaceFacts: (rootRunId: string, facts: ReadonlyArray<Run.RawUsageFact>) => void
 }
 
 const setDefined = <A extends object, K extends PropertyKey, V>(target: A, key: K, value: V | undefined): void => {
   if (value !== undefined) Object.assign(target, { [key]: value })
 }
 
+interface FactTotals {
+  readonly inputTotal: number | undefined
+  readonly inputUncached: number | undefined
+  readonly inputCacheRead: number | undefined
+  readonly inputCacheWrite: number | undefined
+  readonly outputTotal: number | undefined
+  readonly outputText: number | undefined
+  readonly outputReasoning: number | undefined
+  readonly failedProviderTotal: number | undefined
+  readonly attemptTotal: number | undefined
+}
+
+const factTotals = (fact: Run.RawUsageFact): FactTotals => {
+  const inputTotal = token(fact._tag === "Completed" ? fact.usage.inputTokens.total : fact.providerUsage.inputTokens)
+  const outputTotal = token(fact._tag === "Completed" ? fact.usage.outputTokens.total : fact.providerUsage.outputTokens)
+  const failedProviderTotal = token(fact._tag === "Failed" ? fact.providerUsage.totalTokens : undefined)
+  return {
+    inputTotal,
+    inputUncached: token(fact._tag === "Completed" ? fact.usage.inputTokens.uncached : undefined),
+    inputCacheRead: token(fact._tag === "Completed" ? fact.usage.inputTokens.cacheRead : undefined),
+    inputCacheWrite: token(fact._tag === "Completed" ? fact.usage.inputTokens.cacheWrite : undefined),
+    outputTotal,
+    outputText: token(fact._tag === "Completed" ? fact.usage.outputTokens.text : undefined),
+    outputReasoning: token(fact._tag === "Completed" ? fact.usage.outputTokens.reasoning : undefined),
+    failedProviderTotal,
+    attemptTotal:
+      failedProviderTotal ??
+      (inputTotal === undefined || outputTotal === undefined ? undefined : inputTotal + outputTotal),
+  }
+}
+
+const addFactTokens = (state: Projection.UsageState, totals: FactTotals): void => {
+  const current = state.tokens
+  const input: Projection.TokenTotals["input"] = {}
+  const output: Projection.TokenTotals["output"] = {}
+  setDefined(input, "total", add(current?.input.total, totals.inputTotal))
+  setDefined(input, "uncached", add(current?.input.uncached, totals.inputUncached))
+  setDefined(input, "cacheRead", add(current?.input.cacheRead, totals.inputCacheRead))
+  setDefined(input, "cacheWrite", add(current?.input.cacheWrite, totals.inputCacheWrite))
+  setDefined(output, "total", add(current?.output.total, totals.outputTotal))
+  setDefined(output, "text", add(current?.output.text, totals.outputText))
+  setDefined(output, "reasoning", add(current?.output.reasoning, totals.outputReasoning))
+  const next: Projection.TokenTotals = { input, output }
+  setDefined(next, "total", add(current?.total, totals.attemptTotal))
+  setDefined(next, "failedProviderTotal", add(current?.failedProviderTotal, totals.failedProviderTotal))
+  if (Object.keys(input).length > 0 || Object.keys(output).length > 0 || next.total !== undefined)
+    Object.assign(state, { tokens: next })
+}
+
+const accountFact = (
+  state: Projection.UsageState,
+  fact: Run.RawUsageFact,
+  attemptTotal: number | undefined,
+  pricing: "included" | "metered",
+): void => {
+  Object.assign(
+    state,
+    attemptTotal === undefined
+      ? { uncountedAttempts: state.uncountedAttempts + 1 }
+      : { countedAttempts: state.countedAttempts + 1 },
+  )
+  if (pricing === "included") {
+    Object.assign(state, { includedAttempts: (state.includedAttempts ?? 0) + 1 })
+    return
+  }
+  const cost = providerCostNanoUsd(fact)
+  if (cost === undefined) {
+    Object.assign(state, { unpricedAttempts: state.unpricedAttempts + 1 })
+    return
+  }
+  const costNanoUsd = add(state.costNanoUsd, cost)
+  if (costNanoUsd !== undefined) Object.assign(state, { costNanoUsd, pricedAttempts: state.pricedAttempts + 1 })
+}
+
+const contextFrom = (
+  rootRunId: string,
+  fact: Run.RawUsageFact,
+  inputTokens: number | undefined,
+): Projection.UsageState["context"] => {
+  if (fact._tag !== "Completed" || fact.runId !== rootRunId || fact.purpose !== "conversation") return undefined
+  return inputTokens === undefined ? undefined : { requestOrdinal: fact.turn + 1, purpose: "conversation", inputTokens }
+}
+
 export const makeUsageAccounting = (pricing: "included" | "metered" = "metered"): UsageAccounting => {
   let usageState = Projection.emptyUsageState()
   let requestOrdinal = 0
   let pendingContextOrdinal: number | undefined
-  const attemptStarts = new Map<string, AttemptStart>()
-  const settledAttemptKeys = new Set<string>()
   const modelCalls = new Map<string, ModelCallState>()
   let activeAvailable = false
   let activeDepth = 0
@@ -104,126 +151,31 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     node.lifecycle = next
   }
 
-  const addTokenTotals = (value: {
-    readonly inputTotal?: number | undefined
-    readonly inputUncached?: number | undefined
-    readonly inputCacheRead?: number | undefined
-    readonly inputCacheWrite?: number | undefined
-    readonly outputTotal?: number | undefined
-    readonly outputText?: number | undefined
-    readonly outputReasoning?: number | undefined
-    readonly failedProviderTotal?: number | undefined
-    readonly attemptTotal?: number | undefined
-  }) => {
-    const current = usageState.tokens
-    const total = add(current?.total, value.attemptTotal)
-    const inputTotal = add(current?.input.total, value.inputTotal)
-    const inputUncached = add(current?.input.uncached, value.inputUncached)
-    const inputCacheRead = add(current?.input.cacheRead, value.inputCacheRead)
-    const inputCacheWrite = add(current?.input.cacheWrite, value.inputCacheWrite)
-    const outputTotal = add(current?.output.total, value.outputTotal)
-    const outputText = add(current?.output.text, value.outputText)
-    const outputReasoning = add(current?.output.reasoning, value.outputReasoning)
-    const failedProviderTotal = add(current?.failedProviderTotal, value.failedProviderTotal)
-    const input: Projection.TokenTotals["input"] = {}
-    const output: Projection.TokenTotals["output"] = {}
-    setDefined(input, "total", inputTotal)
-    setDefined(input, "uncached", inputUncached)
-    setDefined(input, "cacheRead", inputCacheRead)
-    setDefined(input, "cacheWrite", inputCacheWrite)
-    setDefined(output, "total", outputTotal)
-    setDefined(output, "text", outputText)
-    setDefined(output, "reasoning", outputReasoning)
-    const next: Projection.TokenTotals = {
-      input,
-      output,
+  const replaceFacts = (rootRunId: string, facts: ReadonlyArray<Run.RawUsageFact>) => {
+    const next = Projection.emptyUsageState()
+    let context: Projection.UsageState["context"]
+    const seen = new Set<string>()
+    for (const fact of facts) {
+      const key = `${fact.runId}\u0000${fact.modelAttemptId}`
+      if (seen.has(key)) throw new TypeError(`Generalist checkpoint contains duplicate usage fact: ${key}`)
+      seen.add(key)
+      const totals = factTotals(fact)
+      addFactTokens(next, totals)
+      accountFact(next, fact, totals.attemptTotal, pricing)
+      const candidate = contextFrom(rootRunId, fact, totals.inputTotal)
+      if (candidate !== undefined && (context === undefined || candidate.requestOrdinal >= context.requestOrdinal))
+        context = candidate
     }
-    setDefined(next, "total", total)
-    setDefined(next, "failedProviderTotal", failedProviderTotal)
-    if (JSON.stringify(next) !== JSON.stringify({ input: {}, output: {} })) usageState = { ...usageState, tokens: next }
-  }
-
-  const rememberSettled = (key: string): boolean => {
-    if (settledAttemptKeys.has(key)) return false
-    settledAttemptKeys.add(key)
-    while (settledAttemptKeys.size > Projection.limits.settledAttemptKeys)
-      settledAttemptKeys.delete(settledAttemptKeys.values().next().value!)
-    return true
-  }
-
-  const accountPrice = (cost: number | undefined) => {
-    if (pricing === "included") {
-      usageState = { ...usageState, includedAttempts: (usageState.includedAttempts ?? 0) + 1 }
-      return
+    if (context !== undefined) {
+      Object.assign(next, { context })
+      requestOrdinal = Math.max(requestOrdinal, context.requestOrdinal)
+      if (pendingContextOrdinal !== undefined && pendingContextOrdinal <= context.requestOrdinal)
+        pendingContextOrdinal = undefined
     }
-    if (cost === undefined) {
-      usageState = { ...usageState, unpricedAttempts: usageState.unpricedAttempts + 1 }
-      return
-    }
-    const costNanoUsd = add(usageState.costNanoUsd, cost)
-    if (costNanoUsd !== undefined)
-      usageState = { ...usageState, costNanoUsd, pricedAttempts: usageState.pricedAttempts + 1 }
-  }
-
-  const recordAttempt = (input: {
-    readonly key: string
-    readonly node: Node
-    readonly modelCallId: string
-    readonly inputTotal?: number | undefined
-    readonly inputUncached?: number | undefined
-    readonly inputCacheRead?: number | undefined
-    readonly inputCacheWrite?: number | undefined
-    readonly outputTotal?: number | undefined
-    readonly outputText?: number | undefined
-    readonly outputReasoning?: number | undefined
-    readonly failedProviderTotal?: number | undefined
-    readonly costNanoUsd?: number | undefined
-  }) => {
-    if (!rememberSettled(input.key)) return
-    const attemptTotal =
-      input.failedProviderTotal ??
-      (input.inputTotal === undefined || input.outputTotal === undefined
-        ? undefined
-        : input.inputTotal + input.outputTotal)
-    addTokenTotals({ ...input, attemptTotal })
-    accountPrice(input.costNanoUsd)
-    usageState = {
-      ...usageState,
-      ...(attemptTotal === undefined
-        ? { uncountedAttempts: usageState.uncountedAttempts + 1 }
-        : { countedAttempts: usageState.countedAttempts + 1 }),
-    }
-    const call = modelCalls.get(`${input.node.rawRunId}\u0000${input.modelCallId}`)
-    if (
-      call?.requestOrdinal !== undefined &&
-      call.purpose === "conversation" &&
-      input.inputTotal !== undefined &&
-      (usageState.context === undefined || call.requestOrdinal >= usageState.context.requestOrdinal)
-    ) {
-      usageState = {
-        ...usageState,
-        context: { requestOrdinal: call.requestOrdinal, purpose: "conversation", inputTokens: input.inputTotal },
-      }
-      if (pendingContextOrdinal === call.requestOrdinal) pendingContextOrdinal = undefined
-    }
-  }
-
-  const settleOpenAttempts = (node: Node) => {
-    for (const [key, attempt] of attemptStarts) {
-      if (attempt.rawRunId !== node.rawRunId) continue
-      recordAttempt({ key, node, modelCallId: attempt.modelCallId })
-      attemptStarts.delete(key)
-    }
-    for (const [key, call] of modelCalls) {
-      if (!key.startsWith(`${node.rawRunId}\u0000`)) continue
-      if (call.requestOrdinal === pendingContextOrdinal) pendingContextOrdinal = undefined
-      modelCalls.delete(key)
-    }
+    usageState = next
   }
 
   return {
-    attemptStarts,
-    settledAttemptKeys,
     modelCalls,
     usage: () => usageState,
     activeTime: () => {
@@ -245,48 +197,13 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
     observeLifecycleAt,
     activate,
     deactivate,
-    recordAttempt,
-    settleOpenAttempts,
-    persist: () => {
-      const persisted: PersistedUsage = {
-        usageState: structuredClone(usageState),
-        requestOrdinal,
-        attemptStarts: [...attemptStarts],
-        settledAttemptKeys: [...settledAttemptKeys],
-        modelCalls: [...modelCalls],
-        activeAvailable,
-        activeDepth,
-        activeAccumulatedMillis,
+    settleCalls: (node) => {
+      for (const [key, call] of modelCalls) {
+        if (!key.startsWith(`${node.rawRunId}\u0000`)) continue
+        if (call.requestOrdinal === pendingContextOrdinal) pendingContextOrdinal = undefined
+        modelCalls.delete(key)
       }
-      if (pendingContextOrdinal !== undefined) Object.assign(persisted, { pendingContextOrdinal })
-      if (activeSince !== undefined) Object.assign(persisted, { activeSince })
-      if (lastLifecycleAt !== undefined) Object.assign(persisted, { lastLifecycleAt })
-      return persisted
     },
-    restore: (persisted) => {
-      usageState = structuredClone(persisted.usageState)
-      requestOrdinal = persisted.requestOrdinal
-      pendingContextOrdinal = persisted.pendingContextOrdinal
-      attemptStarts.clear()
-      for (const [key, value] of persisted.attemptStarts) attemptStarts.set(key, value)
-      settledAttemptKeys.clear()
-      for (const key of persisted.settledAttemptKeys) settledAttemptKeys.add(key)
-      modelCalls.clear()
-      for (const [key, value] of persisted.modelCalls) modelCalls.set(key, value)
-      activeAvailable = persisted.activeAvailable
-      activeDepth = persisted.activeDepth
-      activeAccumulatedMillis = persisted.activeAccumulatedMillis
-      activeSince = persisted.activeSince
-      lastLifecycleAt = persisted.lastLifecycleAt
-      if (
-        attemptStarts.size > Projection.limits.inFlightAttempts ||
-        settledAttemptKeys.size > Projection.limits.settledAttemptKeys ||
-        modelCalls.size > Projection.limits.modelCalls ||
-        activeDepth < 0 ||
-        activeAccumulatedMillis < 0 ||
-        (activeDepth === 0) !== (activeSince === undefined)
-      )
-        throw new TypeError("Invalid bounded Generalist usage checkpoint")
-    },
+    replaceFacts,
   }
 }

@@ -1,64 +1,10 @@
 import * as Projection from "@rika/product/execution-projection"
-import type { Card, Node, ToolState } from "./model"
 
 export interface AuthorizationState {
   readonly unitKey: string
   readonly rawRunId: string
   readonly authorizationId: string
   readonly approvalId: string
-}
-
-export type PersistedCard = Omit<Card, "prompt">
-
-export interface AttemptStart {
-  readonly startedAt: number
-  readonly modelCallId: string
-  readonly rawRunId: string
-}
-
-export interface ModelCallState {
-  readonly purpose: "conversation" | "structured-output" | "compaction-summary"
-  readonly requestOrdinal?: number
-}
-
-export interface PersistedProjector {
-  readonly turnId: string
-  readonly revision: number
-  readonly hasOlder: boolean
-  readonly rootStatus: Projection.ProjectionState["status"]
-  readonly title?: Projection.GeneratedTitle
-  readonly steeringMessages: number
-  readonly followUpMessages: number
-  readonly pendingSteering: ReadonlyArray<Projection.PendingSteering>
-  readonly settledSteering: ReadonlyArray<Projection.SteeringDisposition>
-  readonly usageState: Projection.UsageState
-  readonly requestOrdinal: number
-  readonly pendingContextOrdinal?: number
-  readonly attemptStarts: ReadonlyArray<readonly [string, AttemptStart]>
-  readonly settledAttemptKeys: ReadonlyArray<string>
-  readonly modelCalls: ReadonlyArray<readonly [string, ModelCallState]>
-  readonly activeAvailable: boolean
-  readonly activeDepth: number
-  readonly activeAccumulatedMillis: number
-  readonly activeSince?: number
-  readonly lastLifecycleAt?: number
-  readonly nodes: ReadonlyArray<{
-    readonly rawRunId: string
-    readonly publicId: string
-    readonly parentRawRunId?: string
-    readonly parentUnitKey?: string
-    readonly parentBlockId?: string
-    readonly hidden: boolean
-    readonly phase: number
-    readonly status: Node["status"]
-    readonly lifecycle: Node["lifecycle"]
-    readonly started: boolean
-    readonly attempt?: number
-    readonly tools: ReadonlyArray<readonly [string, ToolState]>
-  }>
-  readonly cards: ReadonlyArray<PersistedCard>
-  readonly authorizations: ReadonlyArray<readonly [string, AuthorizationState]>
-  readonly runningCompactions: ReadonlyArray<string>
 }
 
 export interface ProjectorCore {

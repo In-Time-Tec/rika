@@ -58,11 +58,10 @@ describe("Generalist subagent card projection", () => {
     expect(repaired?.parentId).toBe(blockId)
   })
 
-  it("keeps the child-to-card link across a checkpoint taken after the subagent settled", () => {
+  it("rebuilds the child-to-card link after the subagent settles", () => {
     resetEventPosition()
-    const projector = TreeProjector.make("turn-resume", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
+    const events = [
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
       modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
@@ -71,8 +70,6 @@ describe("Generalist subagent card projection", () => {
         providerExecuted: false,
         metadata: {},
       }),
-    )
-    projector.apply(
       treeEvent("raw-root-run", {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
@@ -82,30 +79,29 @@ describe("Generalist subagent card projection", () => {
         childDepth: 1,
         readiness: "ready",
       }),
-    )
-    projector.apply(
       treeEvent(
         "raw-child-run",
         { _tag: "TurnStarted", turn: 0 },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
-    )
-    const active = projector.snapshot()
-    const resumedActive = TreeProjector.make("turn-resume", "delegate this", active.checkpoint, active.units)
+    ]
+    const projector = TreeProjector.make("turn-resume", "delegate this")
+    projector.applyAll(events)
+    const resumedActive = TreeProjector.make("turn-resume", "delegate this")
+    resumedActive.applyAll(events)
     expect(resumedActive.previewRunIds()).toEqual(["raw-child-run"])
     expect(resumedActive.previewParentId("raw-child-run")).toBeDefined()
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        {
-          _tag: "RunCompleted",
-          result: { text: "", turns: 0, session: { sessionId: "raw-child-run:session", leafId: null } },
-        },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
+    const completion = treeEvent(
+      "raw-child-run",
+      {
+        _tag: "RunCompleted",
+        result: { text: "", turns: 0, session: { sessionId: "raw-child-run:session", leafId: null } },
+      },
+      { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
     )
-    const settled = projector.snapshot()
-    const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
+    projector.apply(completion)
+    const resumed = TreeProjector.make("turn-resume", "delegate this")
+    resumed.applyAll([...events, completion])
     expect(resumed.previewRunIds()).toEqual([])
     expect(resumed.previewParentId("raw-child-run")).toBeDefined()
     resumed.apply(
@@ -121,12 +117,11 @@ describe("Generalist subagent card projection", () => {
     expect(late?.parentId).toBeDefined()
   })
 
-  it("cancels descendant cards when the parent run settles cancelled, across resume", () => {
+  it("rebuilds cancelled descendant cards after durable replay", () => {
     resetEventPosition()
-    const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
+    const events = [
+      treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }),
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
       modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
@@ -135,8 +130,6 @@ describe("Generalist subagent card projection", () => {
         providerExecuted: false,
         metadata: {},
       }),
-    )
-    projector.apply(
       treeEvent("raw-root-run", {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
@@ -146,21 +139,19 @@ describe("Generalist subagent card projection", () => {
         childDepth: 1,
         readiness: "ready",
       }),
-    )
-    projector.apply(
       treeEvent(
         "raw-child-run",
         { _tag: "RunAttemptStarted", attempt: 1 },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
-    )
-    projector.apply(
       treeEvent(
         "raw-child-run",
         { _tag: "TurnStarted", turn: 0 },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
-    )
+    ]
+    const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
+    projector.applyAll(events)
     const running = projector
       .snapshot()
       .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
@@ -170,7 +161,8 @@ describe("Generalist subagent card projection", () => {
         : undefined,
     ).toBe("running")
 
-    const cancelled = projector.apply(treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" }))
+    const cancellation = treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" })
+    const cancelled = projector.apply(cancellation)
     const cancelledCard = block(cancelled, "SubagentCard")
     expect(
       cancelledCard?._tag === "Block" && cancelledCard.block._tag === "SubagentCard"
@@ -178,8 +170,8 @@ describe("Generalist subagent card projection", () => {
         : undefined,
     ).toBe("cancelled")
 
-    const settled = projector.snapshot()
-    const resumed = TreeProjector.make("turn-parent-cancel", "delegate this", settled.checkpoint, settled.units)
+    const resumed = TreeProjector.make("turn-parent-cancel", "delegate this")
+    resumed.applyAll([...events, cancellation])
     const restored = resumed
       .snapshot()
       .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")

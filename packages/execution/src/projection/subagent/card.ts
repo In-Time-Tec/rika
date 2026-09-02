@@ -101,8 +101,6 @@ export interface SubagentCardProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
-  readonly recoverCard: (card: Card) => void
-  readonly recoverNode: (node: Node) => void
 }
 
 const invocationIdFor = (linked: {
@@ -117,19 +115,7 @@ const invocationIdFor = (linked: {
 }
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
-  const {
-    core,
-    units,
-    nodes,
-    unitKeysByRun,
-    cardsByInvocation,
-    cardsByChild,
-    localId,
-    put,
-    unit,
-    recoverCard,
-    recoverNode,
-  } = input
+  const { core, units, nodes, unitKeysByRun, cardsByInvocation, cardsByChild, localId, put, unit } = input
 
   type CardBlock = Extract<Block, { readonly _tag: "SubagentCard" }>
   type GroupBlock = Extract<Block, { readonly _tag: "SubagentGroup" }>
@@ -202,7 +188,6 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     if (label !== undefined) Object.assign(card, { label })
     if (memberKey !== undefined) Object.assign(card, { memberKey })
     cardsByInvocation.set(invocationKey, card)
-    recoverCard(card)
     const block: Extract<Block, { readonly _tag: "SubagentCard" }> = {
       _tag: "SubagentCard",
       id: card.publicId,
@@ -325,7 +310,6 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
           block: { ...candidate.content.block, prompt: card.prompt, promptTruncated: card.promptTruncated },
         },
       })
-    recoverCard(card)
   }
 
   const bindChild = (
@@ -349,12 +333,10 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     if (card === undefined || card.rawChildRunId !== undefined) return
     card.rawChildRunId = childRawRunId
     cardsByChild.set(childRawRunId, card)
-    recoverCard(card)
     const child = nodes.get(childRawRunId)
     if (child !== undefined) {
       const linkedChild = { ...child, parentUnitKey: card.unitKey, parentBlockId: card.blockId }
       nodes.set(childRawRunId, linkedChild)
-      recoverNode(linkedChild)
       for (const key of unitKeysByRun.get(childRawRunId) ?? []) {
         const candidate = units.get(key)
         if (candidate !== undefined && candidate.parentId === undefined)

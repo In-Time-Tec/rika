@@ -39,6 +39,16 @@ export type { ModelTerminalObservation } from "./runtime-telemetry"
 export type { CommonOptions, HostedOptions, MemoryOptions } from "./runtime-options"
 export const approvalTarget = TreeProjector.authorizationTarget
 export const remoteTools = (options: Omit<RemoteToolRoute, "_tag">): RemoteToolRoute => ({ _tag: "Remote", ...options })
+const cancelTitle = (runtime: Runtime.Service, runId: string, reason: string) =>
+  runtime
+    .cancel({ runId, reason })
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("execution.title-cancel-failed").pipe(
+          Effect.annotateLogs({ "rika.run.id": runId, "rika.failure.message": Cause.pretty(cause) }),
+        ),
+      ),
+    )
 const RuntimeAdmission = Schema.Struct({
   runId: Schema.String,
   treePolicy: Schema.optionalKey(TreePolicy.TreePolicy),
@@ -199,8 +209,7 @@ const make = (
         const root = yield* runtime.activate({ runId: link.runId })
         const rootStatus = status(root.status)
         if (rootStatus !== "running" && rootStatus !== "waiting") {
-          if (link.titleRunId !== undefined)
-            yield* runtime.cancel({ runId: link.titleRunId, reason: "Root Run did not activate" }).pipe(Effect.ignore)
+          if (link.titleRunId !== undefined) yield* cancelTitle(runtime, link.titleRunId, "Root Run did not activate")
           if (rootStatus === "queued")
             return yield* ExecutionGateway.ActivateTurnFailure.make({
               kind: "unavailable",
@@ -258,9 +267,7 @@ const make = (
                 Effect.andThen(RunTree.awaitTerminal(link.runId).pipe(Effect.provideService(Runtime.Runtime, runtime))),
                 Effect.asVoid,
               ),
-            link.titleRunId === undefined
-              ? Effect.void
-              : runtime.cancel({ runId: link.titleRunId, reason }).pipe(Effect.ignore),
+            link.titleRunId === undefined ? Effect.void : cancelTitle(runtime, link.titleRunId, reason),
           ],
           { concurrency: 2, discard: true },
         ).pipe(Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) }))),

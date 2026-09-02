@@ -26,8 +26,8 @@ const toolStarted = (context: ProjectorEventContext, treeEvent: SemanticTreeEven
     if (Option.isSome(params)) context.subagents.groupCards(node, event.call.id, params.value)
     context.remove(context.tools.toolState(node, event.call.id).key)
   } else if (event.call.name === "shell_command_status") {
-    context.tools.linkProcessCheck(node, event.call.id, encoded(event.call.params), true)
-  } else context.tools.putTool(node, event.call.id, event.call.name, encoded(event.call.params), undefined, true)
+    context.tools.linkProcessCheck(node, event.call.id, encoded(event.call.params))
+  } else context.tools.putTool(node, event.call.id, event.call.name, encoded(event.call.params))
 }
 
 const toolCompleted = (context: ProjectorEventContext, treeEvent: SemanticTreeEvent, node: Node): void => {
@@ -45,11 +45,8 @@ const toolCompleted = (context: ProjectorEventContext, treeEvent: SemanticTreeEv
   } else if (event.call.name === projectorNames.runChildGroup) {
     completeGroup(context, event, node)
   } else
-    context.tools.updateTool(
-      node,
-      event.call.id,
-      (tool) => completeTool(tool, event.result.result, event.result.isFailure),
-      false,
+    context.tools.updateTool(node, event.call.id, (tool) =>
+      completeTool(tool, event.result.result, event.result.isFailure),
     )
 }
 

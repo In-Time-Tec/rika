@@ -96,7 +96,7 @@ describe("blocking child-group projection", () => {
     ])
   })
 
-  it("keeps aggregate identity, order, counts, and settlement equal after checkpoint restore", () => {
+  it("keeps aggregate identity, order, counts, and settlement equal after durable replay", () => {
     resetEventPosition()
     const live = TreeProjector.make("turn-group-replay", "fan out")
     const call = {
@@ -112,8 +112,10 @@ describe("blocking child-group projection", () => {
       providerExecuted: false,
       metadata: {},
     }
-    const declared = live.apply(modelResponse("raw-root-run", call))
-    const resumed = TreeProjector.make("turn-group-replay", "fan out", declared.checkpoint, live.snapshot().units)
+    const declaration = modelResponse("raw-root-run", call)
+    live.apply(declaration)
+    const resumed = TreeProjector.make("turn-group-replay", "fan out")
+    resumed.apply(declaration)
     const completion = treeEvent("raw-root-run", {
       _tag: "ToolExecutionCompleted",
       turn: 0,

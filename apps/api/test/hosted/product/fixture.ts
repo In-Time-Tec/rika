@@ -33,6 +33,7 @@ import { asc, count as rowCount, eq, inArray, sql } from "drizzle-orm"
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Clock, Config, Context, DateTime, Effect, FileSystem, Layer, Random, Redacted, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { Runtime } from "generalist/runtime"
 import { Pool } from "pg"
 import { live as livePlatform } from "../../support/live-platform"
 import {
@@ -45,7 +46,6 @@ import {
 } from "../../../src/hosted/product"
 import { testLayer as hostedModelRegistryTestLayer } from "../../../src/hosted/environment/model-registry"
 import { unavailableLayer as hostedRepositoriesUnavailableLayer } from "../../../src/hosted/repositories"
-import { runs as generalistRuns } from "../../../src/hosted/execution/generalist-schema"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = databaseUrl !== ""
@@ -133,7 +133,7 @@ const withAuthoritativeDatabase = <A, E>(
   label: string,
   use: (
     database: NodePgDatabase,
-  ) => Effect.Effect<A, E, HostedProduct | HostedTurnWorkerStore | ExecutionGateway.Service>,
+  ) => Effect.Effect<A, E, HostedProduct | HostedTurnWorkerStore | ExecutionGateway.Service | Runtime.Runtime>,
 ): Effect.Effect<A> =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -273,6 +273,7 @@ export {
   Random,
   Redacted,
   Ref,
+  Runtime,
   Schema,
   TestClock,
   Pool,
@@ -282,7 +283,6 @@ export {
   postgresTest,
   hostedModelRegistryTestLayer,
   hostedRepositoriesUnavailableLayer,
-  generalistRuns,
   live,
   principal,
   personal,

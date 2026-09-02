@@ -28,9 +28,10 @@ const discarded = (reason: "completed" | "failed" | "cancelled", ...entryIds: Re
 
 beforeEach(resetEventPosition)
 
-it("persists accepted steering and emits its exact request-keyed user unit only when consumed", () => {
+it("rebuilds accepted steering and emits its exact request-keyed user unit only when consumed", () => {
   const projector = TreeProjector.make("turn-steering", "initial")
-  const admission = projector.apply(accepted("entry-a", "request-a", 0, "redirect the answer"))
+  const admissionEvent = accepted("entry-a", "request-a", 0, "redirect the answer")
+  const admission = projector.apply(admissionEvent)
   expect(admission.state.steering.pending).toEqual([
     {
       runId,
@@ -42,9 +43,11 @@ it("persists accepted steering and emits its exact request-keyed user unit only 
   ])
   expect(admission.upsert).toEqual([])
 
-  const resumed = TreeProjector.make("turn-steering", "initial", admission.checkpoint, projector.snapshot().units)
+  const resumed = TreeProjector.make("turn-steering", "initial")
+  resumed.apply(admissionEvent)
   expect(resumed.snapshot().state.steering.pending).toEqual(admission.state.steering.pending)
-  const consumption = resumed.apply(consumed("entry-a"))
+  const consumptionEvent = consumed("entry-a")
+  const consumption = resumed.apply(consumptionEvent)
   expect(consumption.state.steering.pending).toEqual([])
   expect(consumption.state.steering.settled).toEqual([
     { runId, entryId: "entry-a", requestId: "request-a", sequence: 0, outcome: "consumed" },
@@ -55,12 +58,8 @@ it("persists accepted steering and emits its exact request-keyed user unit only 
       content: { _tag: "Entry", role: "user", text: "redirect the answer" },
     }),
   )
-  const resumedConsumption = TreeProjector.make(
-    "turn-steering",
-    "initial",
-    consumption.checkpoint,
-    resumed.snapshot().units,
-  )
+  const resumedConsumption = TreeProjector.make("turn-steering", "initial")
+  resumedConsumption.applyAll([admissionEvent, consumptionEvent])
   expect(resumedConsumption.snapshot().state.steering.settled).toEqual(consumption.state.steering.settled)
 })
 
@@ -98,15 +97,15 @@ it("removes discarded steering without synthesizing a transcript unit", () => {
   )
 })
 
-it("caps pending steering entries at the bounded projection checkpoint", () => {
+it("caps pending steering entries after deterministic replay", () => {
   const full = TreeProjector.make("turn-full-steering", "initial")
-  const filled = full.applyAll(
-    Array.from({ length: Projection.PendingSteeringMaxEntries }, (_, index) =>
-      accepted(`entry-${index}`, `request-${index}`, index, `steering ${index}`),
-    ),
+  const events = Array.from({ length: Projection.PendingSteeringMaxEntries }, (_, index) =>
+    accepted(`entry-${index}`, `request-${index}`, index, `steering ${index}`),
   )
+  const filled = full.applyAll(events)
   expect(filled.state.steering.pending).toHaveLength(Projection.PendingSteeringMaxEntries)
-  const resumed = TreeProjector.make("turn-full-steering", "initial", filled.checkpoint, full.snapshot().units)
+  const resumed = TreeProjector.make("turn-full-steering", "initial")
+  resumed.applyAll(events)
   expect(resumed.snapshot().state.steering.pending).toHaveLength(Projection.PendingSteeringMaxEntries)
   expect(() =>
     resumed.apply(accepted("entry-overflow", "request-overflow", Projection.PendingSteeringMaxEntries, "one too many")),
@@ -117,18 +116,15 @@ it("caps pending steering entries at the bounded projection checkpoint", () => {
 it("projects oversized steering text without applying the user input limit", () => {
   const projector = TreeProjector.make("turn-oversized-accepted", "initial")
   const oversized = "x".repeat(Projection.SteeringTextMaxCharacters + 5_000)
-  const admission = projector.apply(accepted("entry-oversized", "request-oversized", 0, oversized))
+  const admissionEvent = accepted("entry-oversized", "request-oversized", 0, oversized)
+  const admission = projector.apply(admissionEvent)
   expect(admission.state.steering.pending).toEqual([
     { runId, entryId: "entry-oversized", requestId: "request-oversized", sequence: 0, text: oversized },
   ])
   expect(admission.upsert).toEqual([])
 
-  const resumed = TreeProjector.make(
-    "turn-oversized-accepted",
-    "initial",
-    admission.checkpoint,
-    projector.snapshot().units,
-  )
+  const resumed = TreeProjector.make("turn-oversized-accepted", "initial")
+  resumed.apply(admissionEvent)
   expect(resumed.snapshot().state.steering.pending).toEqual(admission.state.steering.pending)
   const consumption = resumed.apply(consumed("entry-oversized"))
   expect(consumption.state.steering.pending).toEqual([])

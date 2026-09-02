@@ -110,7 +110,6 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     recovery: {
       inspect: () => Effect.die("unused"),
       resolve: () => Effect.die("unused"),
-      reconcileCompleted: Effect.die("unused"),
     },
     execution: {
       check: Effect.succeed({ backend: "postgres", source: "test", workerId: "test" }),

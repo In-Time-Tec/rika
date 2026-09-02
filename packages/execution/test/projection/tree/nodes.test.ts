@@ -58,11 +58,10 @@ describe("Generalist tree projector parent attribution", () => {
     expect(repaired?.parentId).toBe(blockId)
   })
 
-  it("keeps the child-to-card link across a checkpoint taken after the subagent settled", () => {
+  it("rebuilds the child-to-card link after the subagent settles", () => {
     resetEventPosition()
-    const projector = TreeProjector.make("turn-resume", "delegate this")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    projector.apply(
+    const events = [
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
       modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-1",
@@ -71,8 +70,6 @@ describe("Generalist tree projector parent attribution", () => {
         providerExecuted: false,
         metadata: {},
       }),
-    )
-    projector.apply(
       treeEvent("raw-root-run", {
         _tag: "ChildLinked",
         childRunId: "raw-child-run",
@@ -82,26 +79,25 @@ describe("Generalist tree projector parent attribution", () => {
         childDepth: 1,
         readiness: "ready",
       }),
-    )
-    projector.apply(
       treeEvent(
         "raw-child-run",
         { _tag: "TurnStarted", turn: 0 },
         { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
       ),
+    ]
+    const projector = TreeProjector.make("turn-resume", "delegate this")
+    projector.applyAll(events)
+    const completion = treeEvent(
+      "raw-child-run",
+      {
+        _tag: "RunCompleted",
+        result: { text: "", turns: 1, session: { sessionId: "raw-child-run:session", leafId: null } },
+      },
+      { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
     )
-    projector.apply(
-      treeEvent(
-        "raw-child-run",
-        {
-          _tag: "RunCompleted",
-          result: { text: "", turns: 1, session: { sessionId: "raw-child-run:session", leafId: null } },
-        },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    )
-    const settled = projector.snapshot()
-    const resumed = TreeProjector.make("turn-resume", "delegate this", settled.checkpoint, settled.units)
+    projector.apply(completion)
+    const resumed = TreeProjector.make("turn-resume", "delegate this")
+    resumed.applyAll([...events, completion])
     resumed.apply(
       modelResponse(
         "raw-child-run",

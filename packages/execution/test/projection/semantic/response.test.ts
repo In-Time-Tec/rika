@@ -217,15 +217,8 @@ describe("Generalist semantic response projection", () => {
     const live = TreeProjector.make("turn-archive", "archive this")
     const livePatch = live.applyAll(events)
 
-    const archived = TreeProjector.make("turn-archive", "archive this")
-    const responsePatch = archived.applyAll(events.slice(0, 2))
-    const rebuilt = TreeProjector.make(
-      "turn-archive",
-      "archive this",
-      responsePatch.checkpoint,
-      archived.snapshot().units,
-    )
-    const rebuiltPatch = rebuilt.applyAll(events.slice(2))
+    const rebuilt = TreeProjector.make("turn-archive", "archive this")
+    const rebuiltPatch = rebuilt.applyAll(events)
 
     const rebuiltSnapshot = rebuilt.snapshot()
     const liveSnapshot = live.snapshot()

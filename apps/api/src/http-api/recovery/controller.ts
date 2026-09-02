@@ -22,7 +22,7 @@ export const recoveryHandlers = (dependencies: HttpDependencies) =>
           const access = yield* CurrentAccess
           if (access.deviceId === undefined || access.principal.clientId === undefined)
             return yield* Unauthorized.make({ message: "CLI device authentication required" })
-          const operations = yield* dependencies.recovery
+          return yield* dependencies.recovery
             .inspect({
               principal: authenticatedPrincipal(access),
               threadId: params.threadId,
@@ -35,7 +35,6 @@ export const recoveryHandlers = (dependencies: HttpDependencies) =>
                 return ServiceUnavailable.make({ message: error.message })
               }),
             )
-          return { operations }
         }),
       resolveRecovery: ({ headers, params, payload }) =>
         Effect.gen(function* () {

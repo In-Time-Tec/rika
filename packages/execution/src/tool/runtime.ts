@@ -166,7 +166,12 @@ export const layerWithProcessRegistry = (workspace: string) =>
       const home = yield* Config.string("HOME").pipe(
         Config.option,
         Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv()),
-        Effect.orDie,
+        Effect.catchTag("ConfigError", (error) =>
+          Effect.logWarning("native-tool-runtime.home-unavailable").pipe(
+            Effect.annotateLogs({ "rika.failure.message": String(error) }),
+            Effect.as(Option.none<string>()),
+          ),
+        ),
       )
       const lookup: LocalPath.Lookup = {
         exists: (target) => fileSystem.exists(target),

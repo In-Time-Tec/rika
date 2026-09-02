@@ -15,7 +15,7 @@ export interface SemanticResponseProjectionInput {
   readonly groupCards: (node: Node, rawId: string, input: SubagentGroupInput) => ReadonlyArray<Card>
   readonly removeTool: (node: Node, rawId: string) => void
   readonly putTool: (node: Node, rawId: string, name: string, input: string) => void
-  readonly linkProcessCheck: (node: Node, rawId: string, input: string, operationActive: boolean) => void
+  readonly linkProcessCheck: (node: Node, rawId: string, input: string) => void
   readonly notice: (node: Node, family: string, title: string, detail: string, discriminator: string | number) => void
   readonly beginOrderedResponse: () => void
   readonly endOrderedResponse: () => void
@@ -69,7 +69,7 @@ export const makeSemanticResponseProjection = (input: SemanticResponseProjection
       if (Option.isSome(params)) input.groupCards(node, part.id, params.value)
       return input.removeTool(node, part.id)
     }
-    if (part.name === "shell_command_status") input.linkProcessCheck(node, part.id, encoded(part.params), false)
+    if (part.name === "shell_command_status") input.linkProcessCheck(node, part.id, encoded(part.params))
     else input.putTool(node, part.id, part.name, encoded(part.params))
   }
 

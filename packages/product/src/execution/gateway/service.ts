@@ -1,4 +1,3 @@
-import type { Unit } from "@rika/transcript/transcript-unit"
 import { Checkpoint, type Change } from "../projection/contract"
 import type { ActivationStatus, Status } from "../session/status"
 import type { ModelPreviewEvent } from "../model/preview"
@@ -44,7 +43,6 @@ export interface Interface {
     input?: {
       readonly prompt?: string
       readonly checkpoint?: Checkpoint
-      readonly units?: ReadonlyArray<Unit>
       readonly pricing?: "included" | "metered"
     },
   ) => Stream.Stream<WatchEvent, WatchTurnFailure>

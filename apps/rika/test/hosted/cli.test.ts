@@ -310,9 +310,8 @@ it.layer(bunLayer)((test) => {
               connect: () => Effect.die("The test Thread client handles the canonical command boundary"),
             },
             recovery: {
-              inspect: () => Effect.succeed([]),
+              inspect: () => Effect.succeed({ runId: "unused", status: "running" as const }),
               resolve: () => Effect.die("unused"),
-              reconcileCompleted: Effect.void,
             },
             executor,
             execution: {

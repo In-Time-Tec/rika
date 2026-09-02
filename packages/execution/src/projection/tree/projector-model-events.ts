@@ -1,7 +1,6 @@
 import * as Projection from "@rika/product/execution-projection"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import type { ModelCallState } from "../persistence"
-import { providerCostNanoUsd, token } from "../decoding"
+import type { ModelCallState } from "../model"
 import { boundedInsert } from "./nodes"
 import type { ProjectorEventHandler } from "./projector-event-context"
 
@@ -28,7 +27,6 @@ const startCall = (
 
 const handleModelEvent: ProjectorEventHandler = (context, treeEvent, node) => {
   const event = treeEvent.event
-  const { usage } = context
   switch (event._tag) {
     case "ModelCallStarted":
       startCall(context, node, event)
@@ -37,41 +35,8 @@ const handleModelEvent: ProjectorEventHandler = (context, treeEvent, node) => {
       settleCall(context, node.rawRunId, event.modelCallId)
       return true
     case "ModelAttemptStarted":
-      boundedInsert(
-        usage.attemptStarts,
-        context.localId("usage", node.publicId, event.modelAttemptId),
-        { startedAt: event.startedAt, modelCallId: event.modelCallId, rawRunId: node.rawRunId },
-        Projection.limits.inFlightAttempts,
-        "in-flight attempts",
-      )
-      return true
     case "ModelAttemptCompleted":
-      usage.recordAttempt({
-        key: context.localId("usage", node.publicId, event.modelAttemptId),
-        node,
-        modelCallId: event.modelCallId,
-        inputTotal: token(event.usage.inputTokens.total),
-        inputUncached: token(event.usage.inputTokens.uncached),
-        inputCacheRead: token(event.usage.inputTokens.cacheRead),
-        inputCacheWrite: token(event.usage.inputTokens.cacheWrite),
-        outputTotal: token(event.usage.outputTokens.total),
-        outputText: token(event.usage.outputTokens.text),
-        outputReasoning: token(event.usage.outputTokens.reasoning),
-        costNanoUsd: providerCostNanoUsd(event),
-      })
-      usage.attemptStarts.delete(context.localId("usage", node.publicId, event.modelAttemptId))
-      return true
     case "ModelAttemptFailed":
-      usage.recordAttempt({
-        key: context.localId("usage", node.publicId, event.modelAttemptId),
-        node,
-        modelCallId: event.modelCallId,
-        inputTotal: token(event.providerUsage?.inputTokens),
-        outputTotal: token(event.providerUsage?.outputTokens),
-        failedProviderTotal: token(event.providerUsage?.totalTokens),
-        costNanoUsd: providerCostNanoUsd(event),
-      })
-      usage.attemptStarts.delete(context.localId("usage", node.publicId, event.modelAttemptId))
       return true
     case "ModelCallFailed":
       settleCall(context, node.rawRunId, event.modelCallId)
@@ -118,7 +83,6 @@ const putCompaction = (
 ): void => {
   const key = context.localId("compaction", node.publicId, id)
   context.put(context.unit(node, key, { _tag: "Block", block: { _tag: "Compaction", summary: "", status } }))
-  context.recovery.compactionChanged(key, status === "running")
 }
 
 const completeCompaction = (
@@ -135,7 +99,6 @@ const completeCompaction = (
       ? { _tag: "Compaction", checkpoint: event.checkpointId, status: "complete", summary: previous?.summary ?? "" }
       : { _tag: "Compaction", status: "complete", summary: previous?.summary ?? "" }
   context.put(context.unit(node, key, { _tag: "Block", block }))
-  context.recovery.compactionChanged(key, false)
 }
 
 export const ModelUsageCompactionEvents = { handle: handleModelUsageCompactionEvent } satisfies {

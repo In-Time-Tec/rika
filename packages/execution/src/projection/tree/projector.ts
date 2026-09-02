@@ -13,7 +13,6 @@ import * as Checkpoint from "../checkpoint"
 import * as Usage from "../usage"
 import type { Card, Node, Projector } from "../model"
 import type { AuthorizationState, ProjectorCore } from "../persistence"
-import * as ProjectorRecovery from "./projector-recovery"
 import { projectorNames, textLimit } from "../values"
 import type { ProjectorEventContext, ProjectorEventHandler } from "./projector-event-context"
 import { RunLifecycleEvents } from "./projector-run-events"
@@ -21,23 +20,19 @@ import { ToolSubagentEvents } from "./projector-tool-events"
 import { ModelUsageCompactionEvents } from "./projector-model-events"
 import { SteeringNoopEvents } from "./projector-steering-events"
 import { ProjectorSnapshot } from "./projector-snapshot"
-import { providerCostNanoUsd, scopedId, token } from "../decoding"
+import { scopedId } from "../decoding"
 
 export type { Projector }
 
 const make = (
   turnId: string,
   prompt: string,
-  resume?: Projection.Checkpoint,
-  baselineUnits: ReadonlyArray<Unit> = [],
-  titleExpected = false,
-  pricing: "included" | "metered" = "metered",
-  instrumentation?: ProjectorRecovery.CheckpointInstrumentation,
+  options: { readonly titleExpected?: boolean; readonly pricing?: "included" | "metered" } = {},
 ): Projector => {
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
-  const usage = Usage.makeUsageAccounting(pricing)
-  const { deactivate, recordAttempt, settleOpenAttempts } = usage
+  const usage = Usage.makeUsageAccounting(options.pricing)
+  const { deactivate, settleCalls } = usage
   const core: ProjectorCore = {
     revision: 0,
     checkpoint: undefined,
@@ -53,14 +48,14 @@ const make = (
   const cardsByChild = new Map<string, Card>()
   const unitKeysByRun = new Map<string, Set<string>>()
   const authorizations = new Map<string, AuthorizationState>()
-  const recoveryOptions: Parameters<typeof ProjectorRecovery.makeProjectorRecoveryIndex>[0] =
-    instrumentation === undefined ? { nodes } : { instrumentation, nodes }
-  const recovery = ProjectorRecovery.makeProjectorRecoveryIndex(recoveryOptions)
+  let rootUsageFacts: ReadonlyArray<Run.RawUsageFact> = []
+  let titleUsageFacts: ReadonlyArray<Run.RawUsageFact> = []
+  let usageRootRunId: string | undefined
   let changed = new Map<string, Unit>()
   let removed = new Set<string>()
   let createdInBatch = new Set<string>()
   let semanticOrderPart: number | undefined
-  let titleSettled = !titleExpected
+  let titleSettled = options.titleExpected !== true
 
   const projectionState = (): Projection.ProjectionState => {
     const state: Projection.ProjectionState =
@@ -151,7 +146,6 @@ const make = (
     localId,
     put,
     unit,
-    recover: recovery.authorizationChanged,
   })
 
   const { toolState, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds } =
@@ -160,7 +154,6 @@ const make = (
       localId,
       put,
       unit,
-      recover: recovery.toolChanged,
     })
 
   const { cardFor, updateCard, groupCards, settleGroup, bindChild } = SubagentCard.makeSubagentCardProjection({
@@ -173,8 +166,6 @@ const make = (
     localId,
     put,
     unit,
-    recoverCard: recovery.cardChanged,
-    recoverNode: recovery.nodeChanged,
   })
 
   const semanticResponse = SemanticResponse.makeSemanticResponseProjection({
@@ -229,19 +220,14 @@ const make = (
   const settleNodeState = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
     for (const rawId of runningToolIds(node))
-      updateTool(
-        node,
-        rawId,
-        (tool) =>
-          tool.status === "running" && tool.process?.running !== true
-            ? { ...tool, status: status === "completed" ? "cancelled" : status }
-            : tool,
-        false,
+      updateTool(node, rawId, (tool) =>
+        tool.status === "running" && tool.process?.running !== true
+          ? { ...tool, status: status === "completed" ? "cancelled" : status }
+          : tool,
       )
     const card = cardsByChild.get(node.rawRunId)
     if (card !== undefined) updateCard(card, status === "completed" ? "complete" : status, detail)
     if (node.parentRawRunId === undefined) core.rootStatus = status
-    recovery.nodeChanged(node)
   }
 
   const settleNode = (
@@ -253,7 +239,8 @@ const make = (
     settleNodeState(node, status, detail)
     const descendants: Array<Node> = []
     const collect = (id: string): void => {
-      for (const candidate of recovery.childrenOf(id)) {
+      for (const candidate of nodes.values()) {
+        if (candidate.parentRawRunId !== id) continue
         descendants.push(candidate)
         collect(candidate.rawRunId)
       }
@@ -264,7 +251,7 @@ const make = (
         continue
       if (candidate.lifecycle !== "terminal") {
         deactivate(candidate, event, "terminal")
-        settleOpenAttempts(candidate)
+        settleCalls(candidate)
         settleAuthorizations(candidate, "cancelled")
       }
       settleNodeState(candidate, "cancelled")
@@ -278,7 +265,6 @@ const make = (
     cardsByInvocation,
     cardsByChild,
     usage,
-    recovery,
     semanticResponse,
     steering,
     localId,
@@ -304,40 +290,23 @@ const make = (
     throw new TypeError(`Unsupported Generalist Run event: ${treeEvent.event._tag}`)
   }
 
-  const { serialize, restore } = Checkpoint.makeProjectorCheckpointCodec({
-    turnId,
-    baselineUnits,
-    core,
-    usage,
-    units,
-    nodes,
-    cardsByInvocation,
-    cardsByChild,
-    authorizations,
-    pendingSteering: steering.pending,
-    settledSteering: steering.settled,
-    recovery,
-  })
-
-  if (resume === undefined) {
-    const promptKey = `turn:${turnId}:user`
-    const chunks =
-      prompt.length === 0
-        ? [""]
-        : Array.from({ length: Math.ceil(prompt.length / textLimit) }, (_, index) =>
-            prompt.slice(index * textLimit, (index + 1) * textLimit),
-          )
-    for (const [index, text] of chunks.entries()) {
-      const key = index === 0 ? promptKey : `${promptKey}:chunk:${index}`
-      units.set(key, {
-        key,
-        turnId,
-        order: UnitOrder.unitOrder(key, -1, index),
-        revision: 0,
-        content: { _tag: "Entry", role: "user", text },
-      })
-    }
-  } else restore(resume)
+  const promptKey = `turn:${turnId}:user`
+  const chunks =
+    prompt.length === 0
+      ? [""]
+      : Array.from({ length: Math.ceil(prompt.length / textLimit) }, (_, index) =>
+          prompt.slice(index * textLimit, (index + 1) * textLimit),
+        )
+  for (const [index, text] of chunks.entries()) {
+    const key = index === 0 ? promptKey : `${promptKey}:chunk:${index}`
+    units.set(key, {
+      key,
+      turnId,
+      order: UnitOrder.unitOrder(key, -1, index),
+      revision: 0,
+      content: { _tag: "Entry", role: "user", text },
+    })
+  }
 
   const applyAll = (inputs: ReadonlyArray<SemanticTreeEvent>): Projection.Patch => {
     const first = inputs[0]
@@ -361,14 +330,8 @@ const make = (
     for (const input of inputs) {
       core.revision += 1
       applyRunEvent(input)
-      const node = nodes.get(input.runId)
-      if (node !== undefined) recovery.nodeChanged(node)
     }
-    core.checkpoint = {
-      version: Projection.projectionVersion,
-      cursor: String(last.cursor),
-      state: serialize(),
-    }
+    core.checkpoint = Checkpoint.make({ turnId, cursor: String(last.cursor), authorizations })
     return {
       _tag: "ProjectionPatch",
       baseRevision,
@@ -389,43 +352,8 @@ const make = (
     const before = JSON.stringify(usage.usage())
     const settlementChanged = !titleSettled
     titleSettled = true
-    const titleNode: Node = {
-      rawRunId: `${turnId}:title`,
-      publicId: "title",
-      hidden: true,
-      tools: new Map(),
-      phase: 0,
-      status: "completed",
-      lifecycle: "terminal",
-      started: true,
-    }
-    for (const fact of titleUsage) {
-      const key = localId("usage", "title", fact.modelAttemptId)
-      if (fact._tag === "Completed")
-        recordAttempt({
-          key,
-          node: titleNode,
-          modelCallId: fact.modelCallId,
-          inputTotal: token(fact.usage.inputTokens.total),
-          inputUncached: token(fact.usage.inputTokens.uncached),
-          inputCacheRead: token(fact.usage.inputTokens.cacheRead),
-          inputCacheWrite: token(fact.usage.inputTokens.cacheWrite),
-          outputTotal: token(fact.usage.outputTokens.total),
-          outputText: token(fact.usage.outputTokens.text),
-          outputReasoning: token(fact.usage.outputTokens.reasoning),
-          costNanoUsd: providerCostNanoUsd(fact),
-        })
-      else
-        recordAttempt({
-          key,
-          node: titleNode,
-          modelCallId: fact.modelCallId,
-          inputTotal: token(fact.providerUsage.inputTokens),
-          outputTotal: token(fact.providerUsage.outputTokens),
-          failedProviderTotal: token(fact.providerUsage.totalTokens),
-          costNanoUsd: providerCostNanoUsd(fact),
-        })
-    }
+    titleUsageFacts = titleUsage
+    if (usageRootRunId !== undefined) usage.replaceFacts(usageRootRunId, [...rootUsageFacts, ...titleUsageFacts])
     const changedTitle = text !== undefined && core.title?.text !== text
     if (!settlementChanged && !changedTitle && JSON.stringify(usage.usage()) === before) return undefined
     changed = new Map()
@@ -434,7 +362,7 @@ const make = (
     const baseRevision = core.revision
     core.revision += 1
     if (text !== undefined) core.title = { text }
-    core.checkpoint = { ...checkpoint, state: serialize() }
+    core.checkpoint = Checkpoint.make({ turnId, cursor: checkpoint.cursor, authorizations })
     return {
       _tag: "ProjectionPatch",
       baseRevision,
@@ -459,6 +387,11 @@ const make = (
       }),
     previewParentId: (runId) => cardsByChild.get(runId)?.blockId,
     applyTitle,
+    replaceUsage: (rootRunId, facts) => {
+      usageRootRunId = rootRunId
+      rootUsageFacts = facts
+      usage.replaceFacts(rootRunId, [...rootUsageFacts, ...titleUsageFacts])
+    },
   }
 }
 

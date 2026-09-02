@@ -164,7 +164,15 @@ it.effect("parks an explicit remote unknown in a never-replay nested marker", ()
         executor.execute(request("read", { path: "README.md" })).pipe(Effect.provide(services)),
       )
       expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(false)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(false)
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          _tag: "generalist/core/FrameworkFailure",
+          stage: "placement",
+          tool: "read",
+          message: "Remote tool outcome is unknown: receipt was not observed",
+        })
+      }
       expect(markers).toHaveLength(1)
       expect(markers[0]).toMatchObject({
         kind: "rika-native-tool-terminal-unknown",
@@ -174,6 +182,36 @@ it.effect("parks an explicit remote unknown in a never-replay nested marker", ()
           toolCallId: "call-read",
           toolName: "read",
         },
+      })
+    }),
+  ),
+)
+
+it.effect("returns a typed failure when an unknown outcome has no Generalist operation host", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const remote = RemoteTools.layer({
+        execute: () => RemoteTools.UnknownOutcome.make({ message: "receipt was not observed" }),
+        cancel: () => Effect.die("unused"),
+      })
+      const built = yield* Layer.build(
+        remoteToolExecutor({
+          route: remote,
+          workspace: "workspace-one",
+          executionIdentity: { threadId: "thread-one", turnId: "turn-one" },
+        }),
+      )
+      const executor = Context.get(built, ToolExecutor.ToolExecutor)
+      const toolContext = yield* Layer.build(contextLayer)
+      const failure = yield* executor
+        .execute(request("read", { path: "README.md" }))
+        .pipe(Effect.provide(toolContext), Effect.flip)
+
+      expect(failure).toMatchObject({
+        _tag: "generalist/core/FrameworkFailure",
+        stage: "placement",
+        tool: "read",
+        message: "Generalist nested-operation host is unavailable: receipt was not observed",
       })
     }),
   ),

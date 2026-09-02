@@ -112,10 +112,12 @@ describe("Generalist subagent card projection", () => {
     expect(JSON.stringify(snapshot.units)).not.toContain("raw-child-run")
   })
 
-  it("preserves a long child final response as one complete semantic entry across resume", () => {
+  it("rebuilds a long child final response as one complete semantic entry", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-long", "delegate this")
-    projector.apply(
+    const response = `BEGIN\n\n${"complete paragraph. ".repeat(700)}\n\nEND`
+    expect(response.length).toBeGreaterThan(8_192)
+    const events = [
       modelResponse("raw-root-run", {
         type: "tool-call",
         id: "provider-call-long",
@@ -124,8 +126,6 @@ describe("Generalist subagent card projection", () => {
         providerExecuted: false,
         metadata: {},
       }),
-    )
-    projector.apply(
       treeEvent("raw-root-run", {
         _tag: "ChildLinked",
         childRunId: "raw-child-long",
@@ -135,21 +135,19 @@ describe("Generalist subagent card projection", () => {
         childDepth: 1,
         readiness: "ready",
       }),
-    )
-    const response = `BEGIN\n\n${"complete paragraph. ".repeat(700)}\n\nEND`
-    expect(response.length).toBeGreaterThan(8_192)
-    projector.apply(
       modelResponse(
         "raw-child-long",
         { type: "text", text: response, metadata: {} },
         { parentRunId: "raw-root-run", invocationId: "provider-call-long" },
       ),
-    )
+    ]
+    projector.applyAll(events)
     const snapshot = projector.snapshot()
     const answers = snapshot.units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")
     expect(answers).toHaveLength(1)
     expect(answers[0]?.content).toEqual({ _tag: "Entry", role: "assistant", text: response })
-    const resumed = TreeProjector.make("turn-long", "delegate this", snapshot.checkpoint, snapshot.units)
+    const resumed = TreeProjector.make("turn-long", "delegate this")
+    resumed.applyAll(events)
     const restored = resumed
       .snapshot()
       .units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "assistant")

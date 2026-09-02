@@ -11,10 +11,10 @@ import { modelRegistrationIdentity } from "@rika/product/model-registration-iden
 import { Prompt } from "effect/unstable/ai"
 import { memoryLayer as layer } from "../../support/adapters"
 
-const runFailure = (message: string) =>
+const agentFailure = (message: string) =>
   Schema.decodeSync(RunEvent.RunFailure)({ _tag: "generalist/runtime/AgentExecutionFailure", message })
 
-describe("friendly failure presentation in the projector", () => {
+describe("friendly Run failure presentation in the projector", () => {
   it("renders a model rate-limit failure as one what-happened message and an action", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-rate-limit", "say hello")
@@ -79,7 +79,7 @@ describe("friendly failure presentation in the projector", () => {
     projector.apply(
       treeEvent("raw-root-run", {
         _tag: "RunFailed",
-        error: runFailure("effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded"),
+        error: agentFailure("effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded"),
       }),
     )
     const errors = projector
@@ -111,7 +111,7 @@ describe("friendly failure presentation in the projector", () => {
     projector.apply(
       treeEvent("raw-root-run", {
         _tag: "RunFailed",
-        error: runFailure("effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded"),
+        error: agentFailure("effect/ai/AiError/AiError: OpenAiClient.createResponseStream: Rate Limit exceeded"),
       }),
     )
     const unit = projector

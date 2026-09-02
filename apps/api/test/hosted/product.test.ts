@@ -24,7 +24,7 @@ import {
   DateTime,
   Effect,
   HostedProduct,
-  generalistRuns,
+  Runtime,
   live,
   principal,
   personal,
@@ -55,6 +55,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
         }),
       )
       const product = yield* HostedProduct
+      const runtime = yield* Runtime.Runtime
       const fingerprint = CheckoutFingerprint.make("atomic-run-checkout")
       yield* product.registerRunner({
         principal: authenticated,
@@ -99,9 +100,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
             .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
         ),
         turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
-        runs: yield* Effect.tryPromise(() =>
-          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
-        ),
+        runs: yield* runtime.list({ limit: 100 }).pipe(Effect.map((runs) => runs.length)),
         events: yield* Effect.tryPromise(() =>
           database.$count(
             rikaHostedThreadProtocolEvents,
@@ -132,9 +131,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
             .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
         ),
         turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
-        runs: yield* Effect.tryPromise(() =>
-          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
-        ),
+        runs: yield* runtime.list({ limit: 100 }).pipe(Effect.map((runs) => runs.length)),
         events: yield* Effect.tryPromise(() =>
           database.$count(
             rikaHostedThreadProtocolEvents,
@@ -192,11 +189,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
       )
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(firstActivation)
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(recoveredActivation)
-      expect(
-        yield* Effect.tryPromise(() =>
-          database.$count(generalistRuns, eq(generalistRuns.sessionId, connection.threadId)),
-        ),
-      ).toBe(1)
+      expect((yield* runtime.list({ limit: 100 })).length).toBe(1)
       yield* turnWorkerStore.completeActivation(recoveredClaim, recoveredActivation, yield* Clock.currentTimeMillis)
       expect(
         yield* Effect.tryPromise(() =>

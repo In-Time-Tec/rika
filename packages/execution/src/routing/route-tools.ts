@@ -47,7 +47,10 @@ const parkTerminalUnknown = (
   Effect.gen(function* () {
     const operations = yield* Effect.serviceOption(NestedOperation.Operations)
     if (Option.isNone(operations))
-      return yield* Effect.die(new Error("Generalist nested-operation host is unavailable", { cause: error }))
+      return yield* placementFailure(
+        request.call.name,
+        `Generalist nested-operation host is unavailable: ${error.message}`,
+      )
     return yield* operations.value
       .run(
         {
@@ -60,7 +63,16 @@ const parkTerminalUnknown = (
         Effect.interrupt,
       )
       .pipe(
-        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.die(error) : Effect.failCause(cause))),
+        Effect.catchCause((cause) =>
+          Effect.fail(
+            placementFailure(
+              request.call.name,
+              Cause.hasInterruptsOnly(cause)
+                ? `Remote tool outcome is unknown: ${error.message}`
+                : `Generalist could not preserve the unknown remote tool outcome: ${Cause.pretty(cause)}`,
+            ),
+          ),
+        ),
       )
   })
 

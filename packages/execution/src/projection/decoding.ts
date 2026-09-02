@@ -8,8 +8,8 @@ export const encoded = (value: ModelValue): string => {
   if (Schema.is(Schema.String)(value)) return bounded(value, toolTextLimit)
   try {
     return bounded(JSON.stringify(value) ?? "", toolTextLimit)
-  } catch {
-    return String(value)
+  } catch (cause) {
+    throw new TypeError("Generalist tool input could not be encoded for transcript presentation", { cause })
   }
 }
 

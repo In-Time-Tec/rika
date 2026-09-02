@@ -9,7 +9,6 @@ import type { SteeringProjection } from "../steering"
 import type { SubagentCardProjection } from "../subagent/card"
 import type { ToolUnitProjection } from "../tool/unit"
 import type { UsageAccounting } from "../usage"
-import type { ProjectorRecoveryIndex } from "./projector-recovery"
 
 export interface ProjectorEventContext {
   readonly core: ProjectorCore
@@ -18,7 +17,6 @@ export interface ProjectorEventContext {
   readonly cardsByInvocation: Map<string, Card>
   readonly cardsByChild: Map<string, Card>
   readonly usage: UsageAccounting
-  readonly recovery: ProjectorRecoveryIndex
   readonly semanticResponse: { readonly apply: (node: Node, event: SemanticModelResponseEvent) => void }
   readonly steering: Pick<SteeringProjection, "accept" | "consume" | "discard">
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
