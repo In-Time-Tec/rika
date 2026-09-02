@@ -174,8 +174,16 @@ const productCommand = (command: InteractiveMutatingCommand) => {
   )
 }
 
-export const commandApplication = (options: { readonly claimMillis: number }) =>
+// A command that keeps failing because its Executor is unavailable is retried on every claim. Without a
+// bound the client shows "Sending" forever, so after this long the submission is rejected with the cause.
+const defaultAdmissionDeadlineMillis = 5 * 60_000
+
+export const commandApplication = (options: {
+  readonly claimMillis: number
+  readonly admissionDeadlineMillis?: number
+}) =>
   Effect.gen(function* () {
+    const admissionDeadlineMillis = options.admissionDeadlineMillis ?? defaultAdmissionDeadlineMillis
     const protocol = yield* ThreadProtocolStore
     const hosted = yield* HostedClientAuthority
     const product = yield* HostedProduct
@@ -425,16 +433,30 @@ export const commandApplication = (options: { readonly claimMillis: number }) =>
         .pipe(Effect.ignore)
       return apply(record, claimToken).pipe(
         Effect.mapError(commandFailure),
-        Effect.catch((error) => {
-          if (error.kind === "unavailable") return Effect.fail(error)
-          const payload = durableCommandPayload(record)
-          return complete(
-            record,
-            claimToken,
-            { _tag: "Rejected", reason: error.kind, message: error.message },
-            rejectionEvents(Schema.is(DurableThreadCommand)(payload) ? payload : undefined, error),
-          ).pipe(Effect.mapError(commandFailure))
-        }),
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            if (error.kind === "unavailable") {
+              const now = yield* Clock.currentTimeMillis
+              const pendingMillis = now - DateTime.toEpochMillis(DateTime.makeUnsafe(record.admittedAt))
+              if (pendingMillis < admissionDeadlineMillis) return yield* error
+              yield* Effect.logWarning("hosted-command.admission-deadline-exceeded").pipe(
+                Effect.annotateLogs({
+                  "rika.thread.id": record.threadId,
+                  "rika.command.id": record.commandId,
+                  "rika.duration.millis": pendingMillis,
+                  "rika.failure.message": error.message,
+                }),
+              )
+            }
+            const payload = durableCommandPayload(record)
+            return yield* complete(
+              record,
+              claimToken,
+              { _tag: "Rejected", reason: error.kind, message: error.message },
+              rejectionEvents(Schema.is(DurableThreadCommand)(payload) ? payload : undefined, error),
+            ).pipe(Effect.mapError(commandFailure))
+          }),
+        ),
         Effect.raceFirst(renew(record, claimToken)),
         Effect.onExit((exit) => (Exit.isSuccess(exit) || Cause.hasInterrupts(exit.cause) ? release : Effect.void)),
       )

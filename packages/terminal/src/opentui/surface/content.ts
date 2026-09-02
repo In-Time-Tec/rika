@@ -59,9 +59,19 @@ const authoritativeActivity = (model: Model): string | undefined => {
   }
 }
 
+// A first prompt on an Orb is admitted only after the sandbox is provisioned and prepared, which takes
+// about a minute and produces no Thread events, so a bare "Sending" would look like a hang.
+const orbPreparationActivity = (model: Model): string | undefined =>
+  model.activity?._tag === "Sending" &&
+  model.connection?.target === "orb" &&
+  model.connection.activity === "executor-waiting"
+    ? "Preparing Orb workspace"
+    : undefined
+
 const lifecycleLabelImpl = (model: Model, currentTimeMillis: number): string | undefined =>
   connectivityActivity(model) ??
   authoritativeActivity(model) ??
+  orbPreparationActivity(model) ??
   formatActivity(
     model.activity,
     model.activity?._tag === "Retrying"
