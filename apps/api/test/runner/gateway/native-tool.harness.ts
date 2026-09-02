@@ -64,7 +64,6 @@ it.effect.skipIf(!live)("executes a native Runner tool directly", () =>
           value: { _tag: "NativeTool", result: nativeResult },
         })
         expect(yield* Fiber.join(running)).toEqual({
-          access,
           response: { _tag: "Success", result: nativeResult },
           outcome: "completed",
           eventPersisted: false,

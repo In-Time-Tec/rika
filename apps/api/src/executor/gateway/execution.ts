@@ -52,14 +52,11 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
 
   const durableResult = Effect.fn("ExecutorGateway.durableResult")(function* (
     durable: Effect.Success<ReturnType<LifecycleStore["inspect"]>>,
-    access?: AccessWire,
   ): Effect.fn.Return<ExecutionResult | undefined, GatewayError> {
     if (durable.state !== "completed" && durable.state !== "unknown") return undefined
     if (durable.response === undefined || durable.outcome === undefined)
       return yield* GatewayError.make({ kind: "transport", message: "Persisted executor terminal is incomplete" })
-    return access === undefined
-      ? { response: durable.response, outcome: durable.outcome }
-      : { access, response: durable.response, outcome: durable.outcome }
+    return { response: durable.response, outcome: durable.outcome }
   })
 
   const retireOperation = Effect.fn("ExecutorGateway.retireOperation")(function* (
@@ -120,7 +117,7 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
     session: Session,
   ) {
     const durable = yield* lifecycle.inspect(request)
-    const restored = yield* durableResult(durable, session.access)
+    const restored = yield* durableResult(durable)
     if (restored !== undefined) return yield* settledPending(request, session, restored)
     const fence = session.access.fence
     if (

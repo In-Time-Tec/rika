@@ -1,3 +1,151 @@
+-- Terminal writer leases, client cursors, and audit events have no product code path. The revocation
+-- triggers from 0016 still referenced the lease table; PL/pgSQL binds table names at execution time, so those
+-- functions must lose the references before the table goes. The terminal-input guard from 0001 lost its
+-- trigger when 0038 dropped rika_hosted_thread_commands; the orphaned function goes with the table.
+
+DROP FUNCTION rika_hosted_validate_terminal_input();
+
+CREATE OR REPLACE FUNCTION rika_hosted_revoke_device_authority()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  authority_revoked_at TIMESTAMPTZ;
+  authority_device_id TEXT;
+  authority_user_id TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (OLD.revoked_at IS NOT NULL OR NEW.revoked_at IS NULL) THEN
+    RETURN NEW;
+  END IF;
+
+  authority_revoked_at := CASE WHEN TG_OP = 'DELETE' THEN transaction_timestamp() ELSE NEW.revoked_at END;
+  authority_device_id := OLD.device_id::text;
+  authority_user_id := OLD.user_id;
+
+  UPDATE rika_hosted_devices
+  SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
+  WHERE id = authority_device_id AND user_id = authority_user_id;
+
+  UPDATE rika_hosted_clients
+  SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
+  WHERE device_id = authority_device_id AND user_id = authority_user_id;
+
+  UPDATE rika_hosted_client_authorities authority
+  SET revoked_at = COALESCE(authority.revoked_at, authority_revoked_at)
+  FROM rika_hosted_clients client_record
+  WHERE authority.client_id = client_record.id
+    AND client_record.device_id = authority_device_id
+    AND client_record.user_id = authority_user_id;
+
+  UPDATE rika_hosted_runner_admissions
+  SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
+  WHERE device_id = authority_device_id AND user_id = authority_user_id;
+
+  UPDATE rika_hosted_thread_socket_tickets
+  SET revoked_at = COALESCE(revoked_at, authority_revoked_at)
+  WHERE device_id = authority_device_id AND user_id = authority_user_id;
+
+  DELETE FROM rika_hosted_runner_registrations
+  WHERE device_id = authority_device_id AND user_id = authority_user_id;
+
+  UPDATE rika_hosted_executor_assignments
+  SET generation = generation + 1,
+    revision = revision + 1,
+    lifecycle = 'terminated',
+    provider_instance_id = NULL,
+    bootstrap_digest = NULL,
+    bootstrap_expires_at = NULL,
+    executor_instance_id = NULL,
+    process_incarnation = NULL,
+    session_digest = NULL,
+    lease_epoch = NULL,
+    lease_expires_at = NULL,
+    updated_at = authority_revoked_at
+  WHERE executor_kind = 'runner'
+    AND placement ->> 'deviceId' = authority_device_id
+    AND lifecycle <> 'terminated';
+
+  DELETE FROM rika_hosted_presence
+  WHERE actor ->> 'deviceId' = authority_device_id
+    AND actor ->> 'userId' = authority_user_id;
+
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION rika_hosted_revoke_membership_authority()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  selected_owner_id TEXT;
+BEGIN
+  SELECT id INTO selected_owner_id
+  FROM rika_hosted_owners
+  WHERE kind = 'organization' AND organization_id = OLD.organization_id;
+
+  IF selected_owner_id IS NULL THEN RETURN OLD; END IF;
+
+  UPDATE rika_hosted_client_authorities authority
+  SET revoked_at = COALESCE(authority.revoked_at, transaction_timestamp())
+  FROM rika_hosted_clients client_record
+  WHERE authority.client_id = client_record.id
+    AND authority.owner_id = selected_owner_id
+    AND client_record.user_id = OLD.user_id;
+
+  UPDATE rika_hosted_runner_admissions admission
+  SET revoked_at = COALESCE(admission.revoked_at, transaction_timestamp())
+  WHERE admission.owner_id = selected_owner_id AND admission.user_id = OLD.user_id;
+
+  UPDATE rika_hosted_executor_assignments assignment
+  SET generation = assignment.generation + 1,
+    revision = assignment.revision + 1,
+    lifecycle = 'terminated',
+    provider_instance_id = NULL,
+    bootstrap_digest = NULL,
+    bootstrap_expires_at = NULL,
+    executor_instance_id = NULL,
+    process_incarnation = NULL,
+    session_digest = NULL,
+    lease_epoch = NULL,
+    lease_expires_at = NULL,
+    updated_at = transaction_timestamp()
+  FROM rika_hosted_devices device
+  WHERE assignment.owner_id = selected_owner_id
+    AND assignment.executor_kind = 'runner'
+    AND assignment.placement ->> 'deviceId' = device.id
+    AND device.user_id = OLD.user_id
+    AND assignment.lifecycle <> 'terminated';
+
+  DELETE FROM rika_hosted_presence
+  WHERE owner_id = selected_owner_id AND actor ->> 'membershipId' = OLD.id;
+
+  RETURN OLD;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION rika_hosted_revoke_project_grant_sessions()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM rika_hosted_presence presence_record
+  USING rika_hosted_threads thread
+  WHERE presence_record.owner_id = OLD.owner_id
+    AND presence_record.thread_id = thread.id
+    AND thread.project_id = OLD.project_id
+    AND presence_record.actor ->> 'membershipId' = OLD.membership_id;
+
+  RETURN OLD;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION rika_hosted_revoke_thread_grant_sessions()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM rika_hosted_presence
+  WHERE owner_id = OLD.owner_id AND thread_id = OLD.thread_id
+    AND actor ->> 'membershipId' = OLD.membership_id;
+
+  RETURN OLD;
+END;
+$$;
+
 DROP TABLE rika_hosted_client_cursors;
 DROP TABLE rika_hosted_terminal_writer_leases;
 DROP TABLE rika_hosted_audit_events;

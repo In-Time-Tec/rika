@@ -48,7 +48,7 @@ it.effect.skipIf(!live)("fences organization dispatch immediately after membersh
         const error = yield* gateway.execute(toolRequest("operation-revoked-membership")).pipe(Effect.flip)
         expect(error).toMatchObject({
           kind: "fenced",
-          message: "Runner fence is no longer current",
+          message: "Executor dispatch fence is no longer current",
         })
         expect(yield* operationState(databaseClient, "operation-revoked-membership")).toEqual([
           { state: "accepted", events: 0 },
@@ -182,7 +182,7 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
         )
         expect(yield* gateway.execute(toolRequest("operation-environment-changed")).pipe(Effect.flip)).toMatchObject({
           kind: "fenced",
-          message: "Runner fence is no longer current",
+          message: "Executor dispatch fence is no longer current",
         })
         expect(yield* operationState(databaseClient, "operation-environment-changed")).toEqual([
           { state: "accepted", events: 0 },

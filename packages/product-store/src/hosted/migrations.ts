@@ -219,7 +219,7 @@ export const migrations: ReadonlyArray<Migration> = [
   },
   {
     id: "product/0043_drop_unused_hosted_tables",
-    checksum: "63b883fa57d0d01e4fe2bcbdf6409416c7cfbb9af21859e74b6c51bae35a6e38",
+    checksum: "f170cf30f7c04dc0418b2c7ee78ed7587aa8f09441325437731bb9d21b4606c2",
     url: new URL("../../migrations/postgres/0043-drop-unused-hosted-tables.sql", import.meta.url),
   },
 ]

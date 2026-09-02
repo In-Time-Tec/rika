@@ -81,7 +81,7 @@ export const persistNativeOutcome = Effect.fn("ExecutorGateway.native.persistOut
 ): Effect.fn.Return<ExecutionResult, GatewayError> {
   const terminal = machineTerminal(outcome)
   const alreadyTerminal = yield* persistNativeStart(lifecycle, access, operation)
-  if (alreadyTerminal !== undefined) return { ...alreadyTerminal, access }
+  if (alreadyTerminal !== undefined) return alreadyTerminal
   const appended = yield* lifecycle.append(access, {
     _tag: "Terminal",
     attribution: attribution(operation),
@@ -89,7 +89,7 @@ export const persistNativeOutcome = Effect.fn("ExecutorGateway.native.persistOut
     outcome: terminal.outcome,
     response: terminal.response,
   })
-  return appended._tag === "AlreadyTerminal" ? { ...appended.result, access } : { ...terminal, access }
+  return appended._tag === "AlreadyTerminal" ? appended.result : terminal
 })
 
 export const runNativeTool = (options: {
@@ -108,7 +108,7 @@ export const runNativeTool = (options: {
   const { operation } = options
   const execution = Effect.gen(function* () {
     const alreadyTerminal = yield* persistNativeStart(options.lifecycle, operation.access, operation.request)
-    if (alreadyTerminal !== undefined) return { ...alreadyTerminal, access: operation.access }
+    if (alreadyTerminal !== undefined) return alreadyTerminal
     const outcome = yield* options.invoke(
       operation.assignmentId,
       operation.operationKey,

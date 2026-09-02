@@ -30,7 +30,6 @@ export interface Socket {
 export type SocketFrame = string | Uint8Array<ArrayBufferLike>
 
 export interface ExecutionResult {
-  readonly access?: AccessWire
   readonly response: ToolOperationResponse
   readonly outcome: ExecutionOutcome
 }
