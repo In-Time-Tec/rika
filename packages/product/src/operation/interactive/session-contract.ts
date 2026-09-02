@@ -57,6 +57,7 @@ export interface InteractiveSession {
   readonly newOrbThread?: Effect.Effect<void, OperationUnavailable>
   readonly archiveThread: Effect.Effect<void, OperationUnavailable>
   readonly archiveAndNewThread: Effect.Effect<void, OperationUnavailable>
+  readonly refreshThreads: Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string, requestId: number) => Effect.Effect<void, OperationUnavailable>

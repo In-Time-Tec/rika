@@ -205,6 +205,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
             if (delivered._tag === "ThreadViewSnapshot") selectionsLoaded += 1
             if (delivered._tag === "SubmissionAdmitted") submissionAdmissions += 1
           }),
+        refreshThreads: Effect.sync(() => options.onRefreshThreads?.()).pipe(Effect.andThen(current.refreshThreads)),
         selectThread: (threadId) =>
           Effect.sync(() => {
             selectionAttempts += 1

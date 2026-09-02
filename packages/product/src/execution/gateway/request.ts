@@ -7,6 +7,7 @@ import { ReviewIntent } from "../review-intent"
 export const ExecutionLink = Schema.Struct({
   runId: Schema.String,
   titleRunId: Schema.optionalKey(Schema.String),
+  titleExpected: Schema.optionalKey(Schema.String),
   turnId: Schema.String,
   threadId: Schema.String,
 })
@@ -29,6 +30,7 @@ export const PreparedTurn = Schema.Struct({
   turnId: Schema.String,
   runId: Schema.String,
   titleRunId: Schema.optionalKey(Schema.String),
+  titleExpected: Schema.optionalKey(Schema.String),
   rootAdmissionJson: Schema.NonEmptyString,
   titleAdmissionJson: Schema.optionalKey(Schema.NonEmptyString),
   reviewIntent: Schema.optionalKey(ReviewIntent),

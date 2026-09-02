@@ -486,6 +486,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     createThread: input.createThread,
     requestSelection,
     initialThreadId: input.threadId,
+    refreshThreads,
     previewThread: input.previewThread,
     dispatch: (event) => dispatch(event),
     failure,

@@ -175,17 +175,24 @@ it.effect("publishes hosted Thread summaries and previews", () =>
         lastActivityAt: 1,
         turnCount: 1,
       }
+      let summaries = [summary]
       const hosted = yield* H.runSession(
         harness,
         (receivedEvent) => received.push(receivedEvent),
         () => Effect.die("unused"),
-        Effect.succeed([summary]),
+        Effect.sync(() => summaries),
         () => Effect.succeed([]),
       )
       yield* H.eventually(() => received.some((receivedEvent) => receivedEvent._tag === "ThreadsListed"))
       expect(received.find((receivedEvent) => receivedEvent._tag === "ThreadsListed")).toEqual({
         _tag: "ThreadsListed",
         threads: [summary],
+      })
+      summaries = [{ ...summary, title: "Refreshed hosted Thread" }]
+      yield* hosted.session.refreshThreads
+      expect(received.findLast((receivedEvent) => receivedEvent._tag === "ThreadsListed")).toEqual({
+        _tag: "ThreadsListed",
+        threads: summaries,
       })
       yield* hosted.session.previewThread("thread-1", 7)
       expect(received.at(-1)).toEqual({

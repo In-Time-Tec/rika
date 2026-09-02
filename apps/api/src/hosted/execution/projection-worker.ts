@@ -38,28 +38,32 @@ export const layer = (options: { readonly concurrency: number; readonly fallback
       const operations = yield* HostedThreadApplication
       const runtime = yield* HostedWorkerRuntime
       const project = (candidate: ProjectionRecoveryCandidate) =>
-        HostedObservability.observe(
-          "attach",
-          { turnId: candidate.turnId },
-          ExecutionProjectionWatch.watch({
-            turnId: candidate.turnId,
-            turns,
-            transcripts,
-            backend,
-            onPreview: (preview) =>
-              previews.publish({
-                threadId: HostedThreadId.make(candidate.threadId),
-                turnId: candidate.turnId,
-                preview,
-              }),
-            onCommitted: () =>
-              operations
-                .projectionCommitted(candidate.threadId)
-                .pipe(
-                  Effect.mapError((error) => TranscriptRepository.RepositoryError.make({ message: error.message })),
-                ),
-          }).pipe(Effect.asVoid),
-        ).pipe(
+        Effect.gen(function* () {
+          const turn = yield* turns.get(candidate.turnId)
+          const titleExpected = turn?._tag === "AgentExecution" ? turn.executionLink?.titleExpected : undefined
+          yield* HostedObservability.observe(
+            "attach",
+            { turnId: candidate.turnId },
+            ExecutionProjectionWatch.watch({
+              turnId: candidate.turnId,
+              turns,
+              transcripts,
+              backend,
+              onPreview: (preview) =>
+                previews.publish({
+                  threadId: HostedThreadId.make(candidate.threadId),
+                  turnId: candidate.turnId,
+                  preview,
+                }),
+              onCommitted: (change) =>
+                operations
+                  .projectionCommitted(candidate.threadId, change, titleExpected)
+                  .pipe(
+                    Effect.mapError((error) => TranscriptRepository.RepositoryError.make({ message: error.message })),
+                  ),
+            }).pipe(Effect.asVoid),
+          )
+        }).pipe(
           Effect.annotateLogs({
             "rika.turn.id": String(candidate.turnId),
           }),

@@ -201,6 +201,7 @@ export const makeInteractiveSessionEvents = (
   | "newThread"
   | "archiveThread"
   | "archiveAndNewThread"
+  | "refreshThreads"
   | "shell"
   | "editQueued"
   | "dequeue"
@@ -226,6 +227,12 @@ export const makeInteractiveSessionEvents = (
           : OperationUnavailable.make({ operation: "InteractiveSession.events", message: String(error) }),
       ),
     )
+  const refreshThreads = input
+    .dispatchThreadSummaries(input.sessionDispatch)
+    .pipe(
+      Effect.provide(input.executionDependencies),
+      Effect.mapError(operationUnavailable("InteractiveSession.refreshThreads")),
+    )
   const submit = (
     prompt: string,
     mode?: ModeId,
@@ -238,6 +245,7 @@ export const makeInteractiveSessionEvents = (
   const shell = InteractiveShell.makeInteractiveShell(input)
   return {
     events,
+    refreshThreads,
     submit: (prompt, mode, parts, tuning, submissionId, turnId) =>
       submit(prompt, mode, parts, tuning, submissionId, turnId),
     newThread: input.safe(
@@ -367,6 +375,7 @@ export const makeInteractiveSession = (
       newThread: state.composition.admitLocal(implementation.newThread),
       archiveThread: state.composition.admitLocal(implementation.archiveThread),
       archiveAndNewThread: state.composition.admitLocal(implementation.archiveAndNewThread),
+      refreshThreads: state.composition.admitLocal(implementation.refreshThreads),
       shell: (threadId, command, incognito, turnId) =>
         state.composition.admitLocal(implementation.shell(threadId, command, incognito, turnId)),
       editQueued: (turnId, prompt) => state.composition.admitLocal(implementation.editQueued(turnId, prompt)),

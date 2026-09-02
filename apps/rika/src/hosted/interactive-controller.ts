@@ -86,6 +86,7 @@ export const makeDeferredSession = (
     newOrbThread: deferredEffect((value) => value.newOrbThread ?? unavailable()),
     archiveThread: deferredEffect((value) => value.archiveThread),
     archiveAndNewThread: deferredEffect((value) => value.archiveAndNewThread),
+    refreshThreads: deferredEffect((value) => value.refreshThreads),
     selectThread: (...args) => deferredEffect((value) => value.selectThread(...args)),
     readQueue: (...args) => deferredEffect((value) => value.readQueue(...args)),
     previewThread: (...args) => deferredEffect((value) => value.previewThread(...args)),

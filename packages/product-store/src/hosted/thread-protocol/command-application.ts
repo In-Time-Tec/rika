@@ -2,7 +2,7 @@ import { ActorAttribution, ThreadVersion } from "@rika/product/hosted-model"
 import type { ThreadProtocolStoreService } from "@rika/product/thread-protocol-store"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, notExists, or, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
 import {
@@ -180,6 +180,30 @@ export const commandApplicationOperations = ({
             )
             if (productThread[0] === undefined)
               return yield* failure("invalid-authority", "Thread has no product state for the owner")
+            const renameProvisionalTitle = Effect.gen(function* () {
+              const title = input.prepared.titleExpected
+              if (title === undefined || title === "New thread") return undefined
+              return (yield* query(
+                tx
+                  .update(rikaThreads)
+                  .set({ title, updatedAt: admittedAtMillis })
+                  .where(
+                    and(
+                      eq(rikaThreads.id, input.threadId),
+                      eq(rikaThreads.ownerId, input.ownerId),
+                      eq(rikaThreads.title, "New thread"),
+                      notExists(
+                        tx
+                          .select({ turnId: rikaTurns.id })
+                          .from(rikaTurns)
+                          .where(eq(rikaTurns.threadId, input.threadId)),
+                      ),
+                    ),
+                  )
+                  .returning({ title: rikaThreads.title }),
+              ))[0]?.title
+            })
+            const renamedTitle = yield* renameProvisionalTitle
             const collidingTurn = yield* query(
               tx
                 .select({ present: sql<number>`1` })
@@ -246,20 +270,30 @@ export const commandApplicationOperations = ({
             yield* query(
               tx.update(rikaTurns).set({ executionLinkJson: encodedLink }).where(eq(rikaTurns.id, input.turnId)),
             )
+            const submissionEvent = {
+              _tag: "SubmissionAdmitted" as const,
+              threadId: ProductThreadId.make(input.threadId),
+              turnId: input.turnId,
+              status: status === "accepted" ? ("active" as const) : ("queued" as const),
+              submissionId: input.submissionId,
+            }
+            const promptEvents = () => {
+              if (renamedTitle === undefined) return [submissionEvent]
+              return [
+                {
+                  _tag: "ThreadTitled" as const,
+                  threadId: ProductThreadId.make(input.threadId),
+                  title: renamedTitle,
+                },
+                submissionEvent,
+              ]
+            }
             const events = yield* writeEvents(tx, {
               ownerId: input.ownerId,
               threadId: input.threadId,
               threadVersion: ThreadVersion.make(state.version),
               firstCursor: BigInt(state.cursor) + 1n,
-              events: [
-                {
-                  _tag: "SubmissionAdmitted",
-                  threadId: ProductThreadId.make(input.threadId),
-                  turnId: input.turnId,
-                  status: status === "accepted" ? "active" : "queued",
-                  submissionId: input.submissionId,
-                },
-              ],
+              events: promptEvents(),
               createdAt: input.completedAt,
             })
             const cursor = events.at(-1)!.cursor

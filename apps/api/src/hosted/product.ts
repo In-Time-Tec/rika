@@ -4,6 +4,7 @@ import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { BetterAuthUserId, CommandId, IdempotencyKey, JsonObject, ThreadId } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
+import { provisionalThreadTitle } from "@rika/product/thread-title-policy"
 import { TurnId } from "@rika/product/turn-record"
 import { layer as postgresLayer } from "@rika/product-store/layer"
 import { ProductRepository } from "@rika/product-store/product-repository"
@@ -150,6 +151,8 @@ export const layer = (options: {
           .pipe(Effect.mapError(repositoryFailure))
         if (execution === undefined)
           return yield* HostedProductError.make({ kind: "not-found", message: "Thread executor is unavailable" })
+        const firstPromptTitle =
+          execution.title === "New thread" && !execution.hasTurns ? provisionalThreadTitle(input.prompt) : undefined
         const startInput = {
           threadId: input.threadId,
           turnId: input.turnId,
@@ -158,6 +161,10 @@ export const layer = (options: {
           executionRoute,
         }
         if (input.promptParts !== undefined) Object.assign(startInput, { promptParts: input.promptParts })
+        if (firstPromptTitle !== undefined)
+          Object.assign(startInput, {
+            titleIntent: { _tag: "GenerateThreadTitle" as const, expectedTitle: firstPromptTitle },
+          })
         const prepared = yield* gateway.prepareTurn(startInput)
         const promptInput = {
           ownerId: input.authority.ownerId,

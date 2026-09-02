@@ -41,6 +41,7 @@ export const interactiveSessionInterface = (dependencies: {
   readonly createThread: (kind: "runner" | "orb", archiveThreadId?: string) => Effect.Effect<string, HostedError>
   readonly requestSelection: (threadId: string) => Effect.Effect<void, HostedError>
   readonly initialThreadId: string
+  readonly refreshThreads: Effect.Effect<void>
   readonly previewThread: (threadId: string) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
   readonly dispatch: (event: InteractiveEvent) => void
   readonly failure: (message: string) => HostedError
@@ -82,6 +83,7 @@ export const interactiveSessionInterface = (dependencies: {
       Effect.mapError((error) => dependencies.unavailable("InteractiveSession.newOrbThread", error)),
     ),
     archiveThread: dependencies.commands.archiveCurrentThread("InteractiveSession.archiveThread"),
+    refreshThreads: dependencies.refreshThreads,
     archiveAndNewThread: Effect.suspend(() => selectCreated("runner", dependencies.authority()?.threadId)).pipe(
       Effect.mapError((error) =>
         Schema.is(OperationUnavailable)(error)

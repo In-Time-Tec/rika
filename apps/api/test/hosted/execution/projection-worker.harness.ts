@@ -86,11 +86,14 @@ const eventually = <A>(effect: Effect.Effect<A>, predicate: (value: A) => boolea
     return yield* Effect.die("Expected PostgreSQL projection state was not observed")
   })
 
-const state = (status: "running" | "completed") => ({
-  status,
-  usage: ExecutionProjection.emptyUsageState(),
-  steering: { steeringMessages: 0, followUpMessages: 0 },
-})
+const state = (status: "running" | "completed", title?: string) => {
+  const value = {
+    status,
+    usage: ExecutionProjection.emptyUsageState(),
+    steering: { steeringMessages: 0, followUpMessages: 0 },
+  }
+  return title === undefined ? value : { ...value, title: { text: title } }
+}
 
 it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its PostgreSQL checkpoint", () =>
   Effect.gen(function* () {
@@ -133,6 +136,8 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       const route = yield* Schema.encodeEffect(JsonRoute)(ExecutionRoute.testExecutionRoute())
       const link = yield* Schema.encodeEffect(JsonLink)({
         runId: "projection-run",
+        titleRunId: "projection-run:title",
+        titleExpected: "Projection",
         threadId: "projection-thread",
         turnId: "projection-turn",
       })
@@ -254,7 +259,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           },
         ],
         remove: [],
-        state: state("completed"),
+        state: state("completed", "Generated projection title"),
       }
       const cursors = new Array<string | undefined>()
       const gatewayBase = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
@@ -317,6 +322,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         ),
       )
       const application = Context.get(applicationContext, HostedThreadApplication)
+      const rollback = { ...running, state: state("running", "Rolled back title") }
       yield* aggregateDatabase
         .delete(rikaHostedThreadProtocolState)
         .where(eq(rikaHostedThreadProtocolState.threadId, "projection-thread"))
@@ -344,14 +350,19 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
               createdAt: 2,
               updatedAt: 2,
             },
-            running,
+            rollback,
             application
-              .projectionCommitted(ThreadId.make("projection-thread"))
+              .projectionCommitted(ThreadId.make("projection-thread"), rollback, "Projection")
               .pipe(Effect.mapError((error) => TranscriptRepository.RepositoryError.make({ message: error.message }))),
           ),
         ))._tag,
       ).toBe("Failure")
       expect(yield* transactionalTranscripts.get(TurnId.make("projection-turn"))).toBeUndefined()
+      expect(
+        yield* Effect.tryPromise(() =>
+          db.select({ title: rikaThreads.title }).from(rikaThreads).where(eq(rikaThreads.id, "projection-thread")),
+        ),
+      ).toEqual([{ title: "Projection" }])
       yield* protocol.initializeThread({
         ownerId: OwnerId.make("projection-owner"),
         threadId: HostedThreadId.make("projection-thread"),
@@ -419,6 +430,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           db
             .select({
               status: rikaTurns.status,
+              title: rikaThreads.title,
               revision: rikaTranscriptCheckpoints.revision,
               projector_cursor: rikaTranscriptCheckpoints.projectorCursor,
               unit_json: rikaTranscriptUnits.unitJson,
@@ -426,10 +438,12 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
             .from(rikaTurns)
             .innerJoin(rikaTranscriptCheckpoints, eq(rikaTranscriptCheckpoints.turnId, rikaTurns.id))
             .innerJoin(rikaTranscriptUnits, eq(rikaTranscriptUnits.turnId, rikaTurns.id))
+            .innerJoin(rikaThreads, eq(rikaThreads.id, rikaTurns.threadId))
             .where(eq(rikaTurns.id, "projection-turn")),
         ),
         (result) =>
           result[0]?.status === "completed" &&
+          result[0]?.title === "Generated projection title" &&
           result[0]?.revision === 1 &&
           result[0]?.projector_cursor === "cursor-completed",
       )
@@ -437,6 +451,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
       expect(cursors).toEqual([undefined, "cursor-running"])
       expect(persisted[0]).toMatchObject({
         status: "completed",
+        title: "Generated projection title",
         revision: 1,
         projector_cursor: "cursor-completed",
       })
@@ -451,9 +466,17 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
         includeSnapshot: false,
         limit: 10,
       })
-      expect(replay.events).toHaveLength(2)
-      expect(replay.events.at(-1)).toMatchObject({
+      expect(replay.events).toHaveLength(3)
+      expect(replay.events.at(-2)).toMatchObject({
         cursor: "2",
+        event: {
+          _tag: "ThreadTitled",
+          threadId: "projection-thread",
+          title: "Generated projection title",
+        },
+      })
+      expect(replay.events.at(-1)).toMatchObject({
+        cursor: "3",
         event: {
           _tag: "ThreadViewSnapshot",
           snapshot: {

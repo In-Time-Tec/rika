@@ -35,6 +35,7 @@ export interface TuiAppOptions {
   readonly holdCancellation?: Deferred.Deferred<void>
   readonly mapInteractiveEvent?: (event: SessionEvent) => SessionEvent
   readonly duplicateInteractiveEvent?: (event: SessionEvent) => boolean
+  readonly onRefreshThreads?: () => void
   readonly submissionFailure?: (attempt: number) => string | undefined
   readonly newOrbThreadFailure?: string
   readonly historicalTranscriptFixture?: HistoricalTranscriptFixture

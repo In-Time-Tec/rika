@@ -26,12 +26,15 @@ export const interruptAndClearTrackedFiber: {
   ): ReturnType<typeof interruptAndClearTrackedFiberImpl>
 } = Function.dual(2, interruptAndClearTrackedFiberImpl)
 
-const refreshThreadsOnSwitcherOpenImpl = (wasOpen: boolean, isOpen: boolean, initialize: Effect.Effect<void, never>) =>
-  !wasOpen && isOpen ? initialize : Effect.void
+const refreshThreadsOnSwitcherOpenImpl = <E, R>(
+  wasOpen: boolean,
+  isOpen: boolean,
+  initialize: Effect.Effect<void, E, R>,
+) => (!wasOpen && isOpen ? initialize : Effect.void)
 
 export const refreshThreadsOnSwitcherOpen: {
-  (isOpen: boolean, initialize: Effect.Effect<void, never>): (wasOpen: boolean) => Effect.Effect<void, never>
-  (wasOpen: boolean, isOpen: boolean, initialize: Effect.Effect<void, never>): Effect.Effect<void, never>
+  <E, R>(isOpen: boolean, initialize: Effect.Effect<void, E, R>): (wasOpen: boolean) => Effect.Effect<void, E, R>
+  <E, R>(wasOpen: boolean, isOpen: boolean, initialize: Effect.Effect<void, E, R>): Effect.Effect<void, E, R>
 } = Function.dual(3, refreshThreadsOnSwitcherOpenImpl)
 
 const settleTuiInitializationImpl = <T, E, E2>(

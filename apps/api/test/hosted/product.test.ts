@@ -130,6 +130,12 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
             .from(rikaHostedThreadProtocolCommands)
             .where(eq(rikaHostedThreadProtocolCommands.threadId, connection.threadId)),
         ),
+        title: yield* Effect.tryPromise(() =>
+          database
+            .select({ title: rikaThreads.title })
+            .from(rikaThreads)
+            .where(eq(rikaThreads.id, connection.threadId)),
+        ),
         turns: yield* Effect.tryPromise(() => database.$count(rikaTurns, eq(rikaTurns.threadId, connection.threadId))),
         runs: yield* runtime.list({ limit: 100 }).pipe(Effect.map((runs) => runs.length)),
         events: yield* Effect.tryPromise(() =>
@@ -148,9 +154,10 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
             result: { _tag: "PromptAdmitted", status: "accepted" },
           },
         ],
+        title: [{ title: input.prompt }],
         turns: 1,
-        runs: 1,
-        events: 1,
+        runs: 2,
+        events: 2,
       })
 
       const turnWorkerStore = yield* HostedTurnWorkerStore
@@ -189,7 +196,7 @@ it.effect.skipIf(!live)("commits the canonical command, Turn, and Generalist Run
       )
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(firstActivation)
       expect(["running", "waiting", "completed", "failed", "cancelled", "cancelling"]).toContain(recoveredActivation)
-      expect((yield* runtime.list({ limit: 100 })).length).toBe(1)
+      expect((yield* runtime.list({ limit: 100 })).length).toBe(2)
       yield* turnWorkerStore.completeActivation(recoveredClaim, recoveredActivation, yield* Clock.currentTimeMillis)
       expect(
         yield* Effect.tryPromise(() =>

@@ -33,6 +33,8 @@ export interface ThreadAuthorityProjection {
 export interface ThreadExecutionProjection {
   readonly assignmentId: string
   readonly workspaceId: string
+  readonly title: string
+  readonly hasTurns: boolean
   readonly executorKind: "runner" | "orb"
   readonly generation: string
   readonly lifecycle: string

@@ -28,6 +28,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import type { ThreadSummary } from "@rika/product/thread-summary"
+import { applyGeneratedTitle } from "@rika/product/thread-title-operation"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
@@ -74,7 +75,11 @@ export interface HostedThreadApplicationService {
     ownerId: OwnerId,
     threadId: ThreadId,
   ) => Effect.Effect<HostedThreadSnapshot, HostedThreadApplicationError>
-  readonly projectionCommitted: (threadId: ThreadId) => Effect.Effect<void, HostedThreadApplicationError>
+  readonly projectionCommitted: (
+    threadId: ThreadId,
+    change: ExecutionProjection.Change,
+    titleExpected?: string,
+  ) => Effect.Effect<void, HostedThreadApplicationError>
 }
 
 export class HostedThreadApplication extends Context.Service<HostedThreadApplication, HostedThreadApplicationService>()(
@@ -393,16 +398,33 @@ export const layer = Layer.effect(
           )
         }),
       snapshot: currentSnapshot,
-      projectionCommitted: (threadId) =>
+      projectionCommitted: (threadId, change, titleExpected) =>
         Effect.gen(function* () {
           const hostedThread = yield* hosted.findThread(HostedThreadId.make(threadId))
           if (hostedThread === undefined)
             return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
+          const renamed =
+            titleExpected === undefined
+              ? undefined
+              : yield* Effect.scoped(
+                  ownerRepositories
+                    .contextEffect(hostedThread.ownerId)
+                    .pipe(
+                      Effect.flatMap((context) =>
+                        applyGeneratedTitle(threadId, titleExpected, change).pipe(Effect.provide(context)),
+                      ),
+                    ),
+                )
           const snapshot = yield* repositorySnapshot(hostedThread.ownerId, threadId)
           yield* store.appendEvents({
             ownerId: hostedThread.ownerId,
             threadId: HostedThreadId.make(threadId),
-            events: [{ _tag: "ThreadViewSnapshot", snapshot: snapshot.view }],
+            events: [
+              ...(renamed === undefined
+                ? []
+                : [{ _tag: "ThreadTitled" as const, threadId: String(threadId), title: renamed.title }]),
+              { _tag: "ThreadViewSnapshot" as const, snapshot: snapshot.view },
+            ],
             snapshot,
             createdAt: DateTime.formatIso(DateTime.makeUnsafe(yield* Clock.currentTimeMillis)),
           })

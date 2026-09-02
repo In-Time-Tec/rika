@@ -11,6 +11,7 @@ import {
   rikaHostedWorkspaceSeeds,
   rikaHostedWorkspaces,
   rikaThreads,
+  rikaTurns,
   rikaWorkspaces,
 } from "../../database/schema/product"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
@@ -398,6 +399,8 @@ export const threadOperations = Effect.gen(function* () {
           .select({
             assignmentId: rikaHostedExecutorAssignments.id,
             workspaceId: rikaHostedExecutorAssignments.workspaceId,
+            title: rikaThreads.title,
+            hasTurns: sql<boolean>`exists(select 1 from ${rikaTurns} where ${rikaTurns.threadId} = ${rikaThreads.id})`,
             executorKind: rikaHostedExecutorAssignments.executorKind,
             generation: rikaHostedExecutorAssignments.generation,
             lifecycle: rikaHostedExecutorAssignments.lifecycle,
@@ -407,6 +410,13 @@ export const threadOperations = Effect.gen(function* () {
             placement: rikaHostedExecutorAssignments.placement,
           })
           .from(rikaHostedExecutorAssignments)
+          .innerJoin(
+            rikaThreads,
+            and(
+              eq(rikaThreads.id, rikaHostedExecutorAssignments.threadId),
+              eq(rikaThreads.ownerId, rikaHostedExecutorAssignments.ownerId),
+            ),
+          )
           .where(
             and(
               eq(rikaHostedExecutorAssignments.ownerId, ownerId),
@@ -438,6 +448,8 @@ export const threadOperations = Effect.gen(function* () {
       return {
         assignmentId: row.assignmentId,
         workspaceId: row.workspaceId,
+        title: row.title,
+        hasTurns: row.hasTurns,
         executorKind: row.executorKind,
         generation: String(row.generation),
         lifecycle: row.lifecycle,

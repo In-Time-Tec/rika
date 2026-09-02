@@ -156,6 +156,7 @@ const make = (
         turnId: input.turnId,
         runId,
         titleRunId: derivedTitleRunId,
+        titleExpected: input.titleIntent.expectedTitle,
         rootAdmissionJson,
         titleAdmissionJson,
       }
@@ -192,6 +193,7 @@ const make = (
         threadId: input.threadId,
       }
       if (input.titleRunId !== undefined) Object.assign(link, { titleRunId: input.titleRunId })
+      if (input.titleExpected !== undefined) Object.assign(link, { titleExpected: input.titleExpected })
       return link
     }, Effect.mapError(admitFailure))
     const activateTurn: ExecutionGateway.Interface["activateTurn"] = Effect.fn("ExecutionGateway.activateTurn")(
@@ -200,7 +202,8 @@ const make = (
           input.runId !== link.runId ||
           input.turnId !== link.turnId ||
           input.threadId !== link.threadId ||
-          input.titleRunId !== link.titleRunId
+          input.titleRunId !== link.titleRunId ||
+          input.titleExpected !== link.titleExpected
         )
           return yield* ExecutionGateway.ActivateTurnFailure.make({
             kind: "missing",

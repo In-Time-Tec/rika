@@ -69,6 +69,8 @@
     "./thread-state": "./src/thread/model/state.ts",
     "./thread-summary": "./src/thread/model/summary.ts",
     "./thread-summary-repository": "./src/thread/repository/summary.ts",
+    "./thread-title-operation": "./src/operation/thread-title.ts",
+    "./thread-title-policy": "./src/thread/query/title-policy.ts",
     "./thread-tool-contract": "./src/thread/tool/contract.ts",
     "./tool-operation-lifecycle": "./src/execution/tool/operation-lifecycle.ts",
     "./thread-view": "./src/thread/view/model.ts",

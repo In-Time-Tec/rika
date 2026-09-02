@@ -10,3 +10,5 @@ export const clampThreadTitle = (text: string): string =>
     .slice(0, threadTitleLimit)
     .join("")
     .trimEnd()
+
+export const provisionalThreadTitle = (prompt: string): string => clampThreadTitle(prompt) || "New thread"

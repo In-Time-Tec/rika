@@ -11,7 +11,7 @@ import { clampThreadTitle } from "../thread/query/title-policy"
 export const applyGeneratedTitle = Effect.fn("ProductOperation.applyGeneratedTitle")(function* (
   threadId: Thread.ThreadId,
   expectedTitle: string,
-  result: ExecutionProjection.Result,
+  result: Pick<ExecutionProjection.Result, "state">,
 ) {
   const text = result.state.title?.text
   if (text === undefined) return undefined

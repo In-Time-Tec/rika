@@ -17,6 +17,38 @@ const rendersQueued = (frame: string, prompt: string): boolean =>
   frame.split("\n").some((line) => line.includes(prompt) && line.includes("Backspace to dequeue"))
 
 test(
+  "refreshes previous Threads when the switcher opens before any prompt is sent",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        let refreshRequested = false
+        const app = yield* TuiApp.tuiApp({
+          historicalTranscriptFixture: {
+            threadId: "thread-before-startup-refresh",
+            entryCount: 2,
+            marker: "unused",
+          },
+          onRefreshThreads: () => {
+            refreshRequested = true
+          },
+          mapInteractiveEvent: (event) =>
+            event._tag === "ThreadsListed" && !refreshRequested ? { ...event, threads: [] } : event,
+        })
+
+        app.pressKey("t", { ctrl: true })
+        const switcher = yield* app.waitFrameMatch(
+          (frame) => frame.includes("Switch Thread") && frame.includes("Durable history"),
+        )
+        expect(switcher).toContain("Durable history")
+        expect(refreshRequested).toBe(true)
+        expect(yield* app.modelRequestCount).toBe(0)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
   "never renders an idle first prompt as queued across duplicate delivery and resync",
   () =>
     TuiApp.run(

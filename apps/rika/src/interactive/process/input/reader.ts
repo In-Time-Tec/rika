@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import type { InteractiveInputContext } from "../runtime/context"
 import { imagePasteBlockedNotice } from "../../input/prompt"
 import { nextSubmissionId } from "../../controller/turn-submission"
+import { refreshThreadsOnSwitcherOpen } from "../lifecycle/contract"
 import { pasteClipboardPng, pastedImagePath, persistPastedImage } from "../workspace/context"
 
 type InputContext = Omit<InteractiveInputContext, "options" | "resume"> & {
@@ -127,6 +128,7 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
   }
   const applyKeyTransition = (key: InputKey) => {
     const wasChangedFilesOpen = loop.model.changedFilesOpen
+    const wasThreadSwitcherOpen = loop.model.threadSwitcher.open
     const beforePreviewId = previewThreadId(loop.model)
     const submitting = isPlainReturn(key) && !loop.model.threadLoading && canSubmit(loop.model)
     if (isPlainReturn(key) && loop.model.threadLoading)
@@ -148,7 +150,7 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
       )
     if (changedFilesOpened(wasChangedFilesOpen, loop.model.changedFilesOpen))
       loop.model = update(loop.model, { _tag: "ChangedFilesRequested" })
-    return { wasChangedFilesOpen, beforePreviewId, ...submission }
+    return { wasChangedFilesOpen, wasThreadSwitcherOpen, beforePreviewId, ...submission }
   }
   const requestThreadPreview = (beforePreviewId: string | undefined): string | undefined => {
     const afterPreviewId = previewThreadId(loop.model)
@@ -165,6 +167,7 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
   }
   const runKeyEffects = (
     wasChangedFilesOpen: boolean,
+    wasThreadSwitcherOpen: boolean,
     previewId: string | undefined,
     submittedPrompt: string | undefined,
     parts: SubmitParts | undefined,
@@ -172,6 +175,11 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
   ) => {
     loop.renderer?.surface.update(loop.model)
     if (changedFilesOpened(wasChangedFilesOpen, loop.model.changedFilesOpen)) run(loadChangedFiles)
+    run(
+      refreshThreadsOnSwitcherOpen(wasThreadSwitcherOpen, loop.model.threadSwitcher.open, session.refreshThreads).pipe(
+        recoverSession,
+      ),
+    )
     if (previewId !== undefined) {
       const requestId = previewRequestId
       previewTimer(
@@ -206,6 +214,7 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
     const previewId = requestThreadPreview(transition.beforePreviewId)
     runKeyEffects(
       transition.wasChangedFilesOpen,
+      transition.wasThreadSwitcherOpen,
       previewId,
       transition.submittedPrompt,
       transition.parts,

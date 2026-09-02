@@ -58,7 +58,15 @@ export class Service extends Context.Service<Service, Interface>()("@rika/produc
 
 export const makeTest = (overrides: Partial<Interface> = {}): Interface =>
   Service.of({
-    startTurn: (input) => Effect.succeed({ runId: "opaque-test-run", turnId: input.turnId, threadId: input.threadId }),
+    startTurn: (input) => {
+      const link: ExecutionLink = { runId: "opaque-test-run", turnId: input.turnId, threadId: input.threadId }
+      if (input.titleIntent !== undefined)
+        Object.assign(link, {
+          titleRunId: `${input.turnId}:title`,
+          titleExpected: input.titleIntent.expectedTitle,
+        })
+      return Effect.succeed(link)
+    },
     prepareTurn: (input) => {
       const prepared: PreparedTurn = {
         threadId: input.threadId,
@@ -66,6 +74,12 @@ export const makeTest = (overrides: Partial<Interface> = {}): Interface =>
         runId: input.turnId,
         rootAdmissionJson: "{}",
       }
+      if (input.titleIntent !== undefined)
+        Object.assign(prepared, {
+          titleRunId: `${input.turnId}:title`,
+          titleExpected: input.titleIntent.expectedTitle,
+          titleAdmissionJson: "{}",
+        })
       return Effect.succeed(
         input.reviewIntent === undefined ? prepared : { ...prepared, reviewIntent: input.reviewIntent },
       )
@@ -76,7 +90,9 @@ export const makeTest = (overrides: Partial<Interface> = {}): Interface =>
         turnId: input.turnId,
         threadId: input.threadId,
       }
-      return Effect.succeed(input.titleRunId === undefined ? link : { ...link, titleRunId: input.titleRunId })
+      if (input.titleRunId !== undefined) Object.assign(link, { titleRunId: input.titleRunId })
+      if (input.titleExpected !== undefined) Object.assign(link, { titleExpected: input.titleExpected })
+      return Effect.succeed(link)
     },
     activateTurn: () => Effect.succeed("running"),
     cancelTurn: () => Effect.void,
