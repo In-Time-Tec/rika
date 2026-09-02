@@ -7,6 +7,8 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import { Cause, Clock, Effect, Stream } from "effect"
 
 const DefectMaxConsecutiveAttempts = 3
+const RetryDelayMaxMs = 5_000
+const StalledRetryDelayMaxMs = 30_000
 export const StallMaxSilenceMs = 15 * 60_000
 
 interface WatchInput {
@@ -189,8 +191,8 @@ const recoverFailure = (input: {
     if (Cause.hasInterrupts(input.cause)) return yield* Effect.interrupt
     const now = yield* Clock.currentTimeMillis
     const silence = now - input.lastProgressAt
-    if (silence >= input.stallSilenceMs && input.consecutiveDefects === 0 && !Cause.hasDies(input.cause))
-      yield* logStall(input.turnId, silence)
+    const stalled = silence >= input.stallSilenceMs
+    if (stalled && input.consecutiveDefects === 0 && !Cause.hasDies(input.cause)) yield* logStall(input.turnId, silence)
     const consecutiveDefects = Cause.hasDies(input.cause) ? input.consecutiveDefects + 1 : 0
     if (consecutiveDefects === DefectMaxConsecutiveAttempts)
       yield* Effect.logError("execution-projection-watch.defect").pipe(
@@ -201,15 +203,18 @@ const recoverFailure = (input: {
         }),
       )
     const delay = input.progressed ? 100 : input.retryDelay
-    yield* Effect.logWarning("execution-projection-watch.reconnecting").pipe(
+    // A watch that keeps failing without progress is an incident, not a reconnect: after the stall
+    // threshold it reports at ERROR and slows down so the retries stop hammering the store and the log.
+    yield* (stalled ? Effect.logError : Effect.logWarning)("execution-projection-watch.reconnecting").pipe(
       Effect.annotateLogs({
         "rika.turn.id": String(input.turnId),
         "rika.retry.delay.ms": delay,
+        "rika.stall.silence.ms": silence,
         "rika.failure.message": Cause.pretty(input.cause),
       }),
     )
     yield* Effect.sleep(delay)
-    return { consecutiveDefects, retryDelay: Math.min(delay * 2, 5_000) }
+    return { consecutiveDefects, retryDelay: Math.min(delay * 2, stalled ? StalledRetryDelayMaxMs : RetryDelayMaxMs) }
   })
 
 const watchLinked = (
@@ -255,7 +260,7 @@ const watchLinked = (
         const silence = (yield* clock.currentTimeMillis) - lastProgressAt
         if (silence >= stallSilenceMs) yield* logStall(input.turnId, silence)
         const delay = signals.progressed ? 100 : retryDelay
-        retryDelay = Math.min(delay * 2, 5_000)
+        retryDelay = Math.min(delay * 2, RetryDelayMaxMs)
         yield* Effect.sleep(delay)
         continue
       }

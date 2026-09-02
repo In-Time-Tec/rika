@@ -7,6 +7,7 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { and, asc, desc, eq, gt, gte, lt, lte, ne, or, type SQL } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
+import { decodeDerivedRow } from "../database/derived-row"
 import {
   rikaTranscriptCheckpoints,
   rikaTranscriptThreadUsage,
@@ -134,7 +135,16 @@ const decodeEntry = (raw: typeof PageRow.Encoded) =>
   Effect.gen(function* () {
     const row = yield* Schema.decodeEffect(PageRow)(raw).pipe(Effect.mapError(error))
     const turn = yield* decode(row).pipe(Effect.mapError(error))
-    const unit = yield* Schema.decodeEffect(UnitJson)(row.unit_json).pipe(Effect.mapError(error))
+    const unit = yield* decodeDerivedRow({
+      schema: UnitJson,
+      event: "transcript.unit-undecodable",
+      value: row.unit_json,
+      annotations: [
+        ["rika.turn.id", String(turn.id)],
+        ["rika.transcript.unit.order", row.unit_order_key],
+      ],
+    })
+    if (unit === undefined) return undefined
     const cursor = { createdAt: turn.createdAt, turnId: turn.id, orderKey: row.unit_order_key }
     if (unit.turnId !== turn.id || TranscriptOrdering.encodeUnitOrder(unit.order) !== cursor.orderKey)
       return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} does not match its durable identity` })
@@ -185,7 +195,7 @@ export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Inte
         .pipe(Effect.mapError(error))
       const hasExtra = loaded.length > limit
       const rows = loaded.slice(0, limit)
-      const decoded = yield* Effect.forEach(rows, decodeEntry)
+      const decoded = (yield* Effect.forEach(rows, decodeEntry)).filter((entry) => entry !== undefined)
       const selected = newestFirst ? decoded.toReversed() : decoded
       const boundaryExists = (condition: SQL<unknown>) => {
         const boundaryConditions = [

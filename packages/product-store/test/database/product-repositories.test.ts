@@ -25,6 +25,7 @@ import { migrations } from "../../src/hosted/migrations"
 import { identityOrganization, identityUser } from "@rika/identity"
 import * as schema from "../../src/database/schema/product"
 import { readFileString } from "../hosted/assignments.support"
+import { expectLegacyUnitsSkipped } from "./legacy-units.harness"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const personalOwner = OwnerId.make("product-personal-owner")
@@ -284,7 +285,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             hasOlder: true,
             hasNewer: false,
           })
-
+          yield* expectLegacyUnitsSkipped(db, transcripts, { threadId, turn: active, units: transcriptUnits })
           const usageThreadId = Thread.ThreadId.make("product-usage-thread")
           yield* seedAggregate(usageThreadId, "/work/product-usage", "Usage", 40)
           const firstUsageTurn = yield* createTurn(turns, {

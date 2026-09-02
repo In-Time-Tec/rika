@@ -14,7 +14,13 @@ import { identityMember, identityOrganization, identityUser } from "./account-sc
 
 export class PostgresAdapterError extends Schema.TaggedError<PostgresAdapterError>()("PostgresAdapterError", {
   operation: Schema.String,
+  message: Schema.String,
 }) {}
+
+const describeCause = (cause: unknown) => (cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause))
+
+const postgresError = (operation: string) => (cause: unknown) =>
+  PostgresAdapterError.make({ operation, message: `PostgreSQL ${operation} failed: ${describeCause(cause)}` })
 
 const poolOptions = (config: IdentityDatabaseConfig): PoolConfig => ({
   connectionString: Redacted.value(config.databaseUrl),
@@ -30,8 +36,6 @@ const poolOptions = (config: IdentityDatabaseConfig): PoolConfig => ({
 })
 
 export const makePostgresPool = (config: IdentityDatabaseConfig) => new Pool(poolOptions(config))
-
-const postgresError = (operation: string) => () => PostgresAdapterError.make({ operation })
 
 type IdentityDatabase = Pick<PgDrizzle.EffectPgDatabase, "select">
 
@@ -172,7 +176,10 @@ export const runMigration = (input: {
           [migrationIds],
         )
         if (applied.rows.some(({ checksum }) => checksum !== input.checksum)) {
-          return yield* PostgresAdapterError.make({ operation: `migration checksum mismatch: ${input.id}` })
+          return yield* PostgresAdapterError.make({
+            operation: `migration checksum mismatch: ${input.id}`,
+            message: `Migration ${input.id} was already applied with a different checksum`,
+          })
         }
         if (applied.rowCount === 0) {
           yield* clientQuery(client, `apply migration ${input.id}`, input.sql)

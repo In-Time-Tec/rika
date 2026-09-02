@@ -10,12 +10,12 @@ import {
   rikaHostedThreadProtocolSnapshots,
   rikaHostedThreadProtocolState,
 } from "../../database/schema/product"
+import { decodeDerivedRow } from "../../database/derived-row"
 import { requireThreadAccess } from "../authority"
 import {
   bigintText,
   bigintValue,
   databaseError,
-  decode,
   persistenceErrors,
   protocolEquivalence,
   query,
@@ -39,6 +39,64 @@ const replayCheckpointCondition = (input: ReplayInput, targetCursor: ThreadEvent
     lte(rikaHostedThreadProtocolSnapshots.cursor, bigintValue(targetCursor)),
   )
 }
+
+interface ReplaySnapshotRow {
+  readonly threadVersion: string
+  readonly cursor: string
+  readonly snapshot: unknown
+  readonly createdAt: string
+}
+
+interface ReplayEventRow {
+  readonly sequence: string
+  readonly cursor: string
+  readonly threadVersion: string
+  readonly event: unknown
+  readonly createdAt: string
+}
+
+/** A stored snapshot that no longer decodes is a stale derived row: replay proceeds without it. */
+const decodeReplaySnapshot = (threadId: ReplayInput["threadId"], row: ReplaySnapshotRow | undefined) =>
+  Effect.gen(function* () {
+    if (row === undefined) return undefined
+    const snapshot = yield* decodeDerivedRow({
+      schema: HostedThreadSnapshot,
+      event: "hosted-thread-protocol.snapshot-undecodable",
+      value: row.snapshot,
+      annotations: [
+        ["rika.thread.id", String(threadId)],
+        ["rika.snapshot.cursor", row.cursor],
+      ],
+    })
+    return snapshot === undefined ? undefined : { row, snapshot }
+  })
+
+const decodeReplayEvents = (input: ReplayInput, rows: ReadonlyArray<ReplayEventRow>) =>
+  Effect.gen(function* () {
+    const events: Array<ThreadProtocolEvent> = []
+    for (const row of rows) {
+      const event = yield* decodeDerivedRow({
+        schema: InteractiveEventSchema,
+        event: "hosted-thread-protocol.event-undecodable",
+        value: row.event,
+        annotations: [
+          ["rika.thread.id", String(input.threadId)],
+          ["rika.event.cursor", row.cursor],
+        ],
+      })
+      if (event === undefined) continue
+      events.push({
+        ownerId: input.ownerId,
+        threadId: input.threadId,
+        sequence: row.sequence,
+        cursor: ThreadEventCursor.make(row.cursor),
+        threadVersion: ThreadVersion.make(row.threadVersion),
+        event,
+        createdAt: Timestamp.make(row.createdAt),
+      })
+    }
+    return events
+  })
 
 const replaySnapshotCondition = (replayCursor: ThreadEventCursor, targetCursor: ThreadEventCursor) =>
   replayCursor === "0"
@@ -182,7 +240,16 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
         .limit(1),
     ))[0]
     if (latest === undefined) return { due: true, replayRequired: false }
-    const stored = yield* decode(HostedThreadSnapshot)(latest.snapshot)
+    const stored = yield* decodeDerivedRow({
+      schema: HostedThreadSnapshot,
+      event: "hosted-thread-protocol.checkpoint-undecodable",
+      value: latest.snapshot,
+      annotations: [
+        ["rika.thread.id", String(threadId)],
+        ["rika.snapshot.cursor", latest.cursor],
+      ],
+    })
+    if (stored === undefined) return { due: true, replayRequired: true }
     const authorizationChanged = !pendingAuthorizationsEquivalent(
       stored.pendingAuthorizations,
       snapshot.pendingAuthorizations,
@@ -367,39 +434,28 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
                   .orderBy(desc(rikaHostedThreadProtocolSnapshots.cursor))
                   .limit(1),
               )
-          const snapshotRow = snapshotRows[0]
-          if (snapshotRow !== undefined) {
-            replayCursor = ThreadEventCursor.make(snapshotRow.cursor)
+          const decoded = yield* decodeReplaySnapshot(input.threadId, snapshotRows[0])
+          if (decoded !== undefined) {
+            replayCursor = ThreadEventCursor.make(decoded.row.cursor)
             eventRows = yield* readEvents(replayCursor)
           }
           const hasMore = eventRows.length > limit
-          eventRows = eventRows.slice(0, limit)
-          const events: Array<ThreadProtocolEvent> = []
-          for (const row of eventRows)
-            events.push({
-              ownerId: input.ownerId,
-              threadId: input.threadId,
-              sequence: row.sequence,
-              cursor: ThreadEventCursor.make(row.cursor),
-              threadVersion: ThreadVersion.make(row.threadVersion),
-              event: yield* decode(InteractiveEventSchema)(row.event),
-              createdAt: Timestamp.make(row.createdAt),
-            })
+          const events = yield* decodeReplayEvents(input, eventRows.slice(0, limit))
           const replayResult: Effect.Success<ReturnType<ThreadProtocolStoreService["replay"]>> = {
             threadVersion: ThreadVersion.make(state.version),
             cursor: ThreadEventCursor.make(state.cursor),
             events,
             hasMore,
           }
-          if (snapshotRow !== undefined)
+          if (decoded !== undefined)
             Object.assign(replayResult, {
               snapshot: {
                 ownerId: input.ownerId,
                 threadId: input.threadId,
-                threadVersion: ThreadVersion.make(snapshotRow.threadVersion),
-                cursor: ThreadEventCursor.make(snapshotRow.cursor),
-                snapshot: yield* decode(HostedThreadSnapshot)(snapshotRow.snapshot),
-                createdAt: Timestamp.make(snapshotRow.createdAt),
+                threadVersion: ThreadVersion.make(decoded.row.threadVersion),
+                cursor: ThreadEventCursor.make(decoded.row.cursor),
+                snapshot: decoded.snapshot,
+                createdAt: Timestamp.make(decoded.row.createdAt),
               },
             })
           return replayResult

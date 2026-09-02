@@ -7,6 +7,7 @@ import { asc, eq } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
 import type { TurnId } from "@rika/product/turn-record"
+import { decodeDerivedRow } from "../database/derived-row"
 import { rikaTranscriptCheckpoints, rikaTranscriptUnits, rikaTurns } from "../database/schema/product"
 import { decode } from "../turn/postgres/row-codec"
 
@@ -98,10 +99,19 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
     .where(eq(rikaTranscriptUnits.turnId, turnId))
     .orderBy(asc(rikaTranscriptUnits.unitOrderKey))
     .pipe(Effect.mapError(error))
-  const units = yield* Effect.forEach(unitRows, (raw) =>
+  const decodedUnits = yield* Effect.forEach(unitRows, (raw) =>
     Effect.gen(function* () {
       const unitRow = yield* Schema.decodeEffect(UnitRow)(raw).pipe(Effect.mapError(error))
-      const unit = yield* Schema.decodeEffect(UnitJson)(unitRow.unit_json).pipe(Effect.mapError(error))
+      const unit = yield* decodeDerivedRow({
+        schema: UnitJson,
+        event: "transcript.unit-undecodable",
+        value: unitRow.unit_json,
+        annotations: [
+          ["rika.turn.id", String(turnId)],
+          ["rika.transcript.unit.key", unitRow.unit_key],
+        ],
+      })
+      if (unit === undefined) return undefined
       if (
         unit.key !== unitRow.unit_key ||
         unit.turnId !== turnId ||
@@ -115,6 +125,7 @@ export const readTranscriptProjection = Effect.fn("TranscriptRepository.read")(f
       return unit
     }),
   )
+  const units = decodedUnits.filter((unit) => unit !== undefined)
   const state = yield* Schema.decodeEffect(Schema.fromJsonString(ExecutionProjection.ProjectionState))(
     row.state_json,
   ).pipe(Effect.mapError(error))
