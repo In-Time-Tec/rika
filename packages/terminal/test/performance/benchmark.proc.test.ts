@@ -19,6 +19,7 @@ it.live(
       expect(stream.latencyMaxMs).toBeLessThanOrEqual(48)
       expect(stream.markdownLexerInvocations).toBeLessThanOrEqual(Math.ceil((stream.events / 200) * 2) + 2)
       expect(stream.fullTranscriptCopiesPerEvent).toBe(0)
+      expect(stream.renderablesCreated).toBeLessThanOrEqual(128)
       expect(scroll.heapGrowthMb).toBeLessThanOrEqual(60)
       expect(scroll.latencyP95Ms).toBeLessThanOrEqual(24)
       expect(resize.latencyP95Ms).toBeLessThanOrEqual(150)

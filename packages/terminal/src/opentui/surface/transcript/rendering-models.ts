@@ -89,7 +89,7 @@ const stableMarkdownChunkSize = 512
 const stableMarkdownBoundary = (text: string, offset: number): number => {
   const limit = Math.min(text.length, offset + stableMarkdownChunkSize)
   const boundary = text.lastIndexOf("\n\n", limit - 1)
-  return boundary < 0 ? 0 : boundary + 2
+  return boundary < offset ? offset : boundary + 2
 }
 
 const parseStableMarkdown = (layout: TentativeTranscriptLayout, text: string, nowMillis: number): void => {
@@ -110,17 +110,22 @@ const parseStableMarkdown = (layout: TentativeTranscriptLayout, text: string, no
 
 const markdownBundles = (key: string, revision: string, layout: TentativeTranscriptLayout) => {
   const bundles: Array<TranscriptRangeBundle> = []
-  let row = 0
   for (const [index, band] of layout.markdownBands.entries()) {
     if (band.length === 0) continue
-    const bandKey = row === 0 ? `${key}:body` : `${key}:body:${row}`
+    const bandKey = index === 0 ? `${key}:body` : `${key}:body:markdown:${index}`
     const content = (layout.markdownStableContent[index] ??= styledBand(band))
     bundles.push({
       key: bandKey,
       rows: band.length,
-      descriptors: [{ key: bandKey, revision: `${key}:${layout.width}:markdown:${index}`, content, selectable: false }],
+      descriptors: [
+        {
+          key: bandKey,
+          revision: `${key}:${layout.width}:markdown:${index}:${band.length}`,
+          content,
+          selectable: false,
+        },
+      ],
     })
-    row += band.length
   }
   const style = (value: string) => new StyledText([fg(colors.text)(value)])
   for (const [index, band] of layout.bands.entries()) {
@@ -129,7 +134,7 @@ const markdownBundles = (key: string, revision: string, layout: TentativeTranscr
     if (rows.length === 0 || (rows.length === 1 && rows[0] === "")) continue
     const value = rows.join("\n")
     const content = tail ? style(value) : (layout.stableContent[index] ??= style(value))
-    const bandKey = row === 0 ? `${key}:body` : `${key}:body:${row}`
+    const bandKey = `${key}:body:tail:${index}`
     bundles.push({
       key: bandKey,
       rows: rows.length,
@@ -142,7 +147,6 @@ const markdownBundles = (key: string, revision: string, layout: TentativeTranscr
         },
       ],
     })
-    row += rows.length
   }
   return bundles
 }
