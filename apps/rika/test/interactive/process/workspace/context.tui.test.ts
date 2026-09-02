@@ -85,6 +85,9 @@ test(
         yield* Effect.tryPromise(() => app.type("Run realistic volume"))
         app.pressEnter()
         yield* app.waitModelRequests(1)
+        // The reload window only shifts once the active Turn has durable units; the model request
+        // alone does not prove the projection commit has landed.
+        yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) => projection.units.length > 0)
         yield* app.reload
         const reloaded = app.frame()
 
