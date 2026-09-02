@@ -10,7 +10,11 @@ import {
 import stringWidth from "string-width"
 import { Option, Schema } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import { mountedTranscriptRowBudget, transcriptRenderableBandRows } from "../../../presentation/transcript/window"
+import {
+  mountedStreamingTranscriptRowBudget,
+  mountedTranscriptRowBudget,
+  transcriptRenderableBandRows,
+} from "../../../presentation/transcript/window"
 import { mergePinnedRecords } from "../../../presentation/transcript/record-order"
 import { transcriptUnitId, transcriptUnits } from "../../../presentation/transcript/row"
 import { escapePathTarget } from "../../../presentation/transcript/tool/detail"
@@ -448,7 +452,13 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
   const rowPrefix: Array<number> = [0]
   for (const current of orderedBundles) rowPrefix.push(rowPrefix.at(-1)! + current.rows)
   const rowTotal = rowPrefix.at(-1) ?? 0
-  const budget = mountedTranscriptRowBudget(options.viewportHeight > 0 ? options.viewportHeight : model.height)
+  const preserveStreamingBands = transcriptUnits(model).some((unit) =>
+    transcriptUnitId(model, unit).includes(":tentative:"),
+  )
+  const viewportRows = options.viewportHeight > 0 ? options.viewportHeight : model.height
+  const budget = preserveStreamingBands
+    ? mountedStreamingTranscriptRowBudget(viewportRows)
+    : mountedTranscriptRowBudget(viewportRows)
   const range = includeSelectedBands(
     options,
     orderedBundles,

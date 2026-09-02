@@ -2,6 +2,7 @@ import { CliRenderEvents } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { unitOrder } from "@rika/transcript/transcript-unit-order"
+import { Clock, Effect } from "effect"
 import { Surface } from "../opentui/surface/service"
 import {
   resetTranscriptRenderableDiagnostics,
@@ -44,7 +45,17 @@ export interface TerminalBenchmarkResult {
   }
 }
 
-const now = () => Number(process.hrtime.bigint()) / 1_000_000
+type TestRendererSetup = Awaited<ReturnType<typeof createTestRenderer>>
+
+interface SurfaceRuntime {
+  readonly setup: TestRendererSetup
+  readonly surface: Surface
+}
+
+type RecordAction = (action: Effect.Effect<void>) => Effect.Effect<void>
+
+const elapsedMilliseconds = (startedAt: bigint, finishedAt: bigint): number =>
+  Number(finishedAt - startedAt) / 1_000_000
 
 const percentile = (samples: ReadonlyArray<number>, ratio: number): number => {
   const sorted = samples.toSorted((left, right) => left - right)
@@ -155,95 +166,129 @@ const metric = (
   }
 }
 
-const measuredScenario = async (
+const renderOnce = (render: TestRendererSetup["renderOnce"]) => Effect.tryPromise(render).pipe(Effect.orDie)
+
+const makeTestRenderer = (width: number, height: number) =>
+  Effect.tryPromise(() => createTestRenderer({ width, height })).pipe(Effect.orDie)
+
+const surfaceSetup = Effect.fn("TerminalBenchmark.surfaceSetup")(function* (
+  width: number,
+  height: number,
+  animate: boolean,
+) {
+  const setup = yield* makeTestRenderer(width, height)
+  const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate })
+  return { setup, surface }
+})
+
+const destroySurface = (runtime: SurfaceRuntime): void => {
+  runtime.surface.destroy()
+  runtime.setup.renderer.destroy()
+}
+
+const withSurface = <Value, Error, Requirements>(
+  width: number,
+  height: number,
+  animate: boolean,
+  use: (runtime: SurfaceRuntime) => Effect.Effect<Value, Error, Requirements>,
+): Effect.Effect<Value, Error, Requirements> =>
+  Effect.acquireUseRelease(surfaceSetup(width, height, animate), use, (runtime) =>
+    Effect.sync(() => destroySurface(runtime)),
+  )
+
+const measuredScenario = Effect.fn("TerminalBenchmark.measuredScenario")(function* (
   scenario: TerminalBenchmarkMetric["scenario"],
-  run: (record: (action: () => Promise<void> | void) => Promise<void>) => Promise<void>,
-): Promise<TerminalBenchmarkMetric> => {
+  run: (record: RecordAction) => Effect.Effect<void>,
+) {
   resetDiagnostics()
   const heapBefore = memory()
   const cpuBefore = process.cpuUsage()
-  const wallStarted = now()
+  const wallStarted = yield* Clock.currentTimeNanos
   const samples: Array<number> = []
-  await run(async (action) => {
-    const started = now()
-    await action()
-    samples.push(now() - started)
+  const record = Effect.fn("TerminalBenchmark.record")(function* (action: Effect.Effect<void>) {
+    const started = yield* Clock.currentTimeNanos
+    yield* action
+    samples.push(elapsedMilliseconds(started, yield* Clock.currentTimeNanos))
   })
-  const wallMs = now() - wallStarted
+  yield* run(record)
+  const wallMs = elapsedMilliseconds(wallStarted, yield* Clock.currentTimeNanos)
   const cpu = process.cpuUsage(cpuBefore)
   const heapAfter = memory()
   return metric(scenario, samples, wallMs, cpu, heapBefore, heapAfter)
-}
+})
 
-const surfaceSetup = async (width = 120, height = 36, animate = false) => {
-  const setup = await createTestRenderer({ width, height })
-  const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate })
-  return { setup, surface }
-}
-
-const destroySurface = ({ setup, surface }: Awaited<ReturnType<typeof surfaceSetup>>) => {
-  surface.destroy()
-  setup.renderer.destroy()
-}
-
-const markdownStream = async (): Promise<TerminalBenchmarkMetric> => {
-  const runtime = await surfaceSetup()
-  try {
-    const source = markdownAnswer()
-    let model: Model = {
-      ...initial("/benchmark", "medium"),
-      width: 120,
-      height: 36,
-      currentThreadId: "benchmark",
-      busy: true,
-      activity: { _tag: "Streaming", bytes: 0 },
-    }
-    let offset = 0
-    let revision = 0
-    runtime.surface.update(model)
-    await runtime.setup.renderOnce()
-    return await measuredScenario("markdown-stream", async (record) => {
-      let arrival = now()
-      while (offset < source.length) {
-        const length = 8 + ((revision * 17) % 57)
-        offset = Math.min(source.length, offset + length)
-        const wait = arrival - now()
-        if (wait > 0) await Bun.sleep(wait)
-        await record(async () => {
-          model = projectUnits(model, [assistantUnit("tentative:benchmark", source.slice(0, offset), revision)])
-          runtime.surface.update(model)
-          await runtime.setup.renderOnce()
-        })
-        revision += 1
-        arrival += 5
+const markdownStream = Effect.fn("TerminalBenchmark.markdownStream")(function* () {
+  return yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.markdownStream.use")(function* (runtime) {
+      const source = markdownAnswer()
+      let model: Model = {
+        ...initial("/benchmark", "medium"),
+        width: 120,
+        height: 36,
+        currentThreadId: "benchmark",
+        busy: true,
+        activity: { _tag: "Streaming", bytes: 0 },
       }
-    })
-  } finally {
-    destroySurface(runtime)
-  }
-}
+      let offset = 0
+      let revision = 0
+      runtime.surface.update(model)
+      yield* renderOnce(runtime.setup.renderOnce)
+      return yield* measuredScenario(
+        "markdown-stream",
+        Effect.fn("TerminalBenchmark.markdownStream.run")(function* (record) {
+          let arrival = yield* Clock.currentTimeNanos
+          while (offset < source.length) {
+            const length = 8 + ((revision * 17) % 57)
+            offset = Math.min(source.length, offset + length)
+            const wait = arrival - (yield* Clock.currentTimeNanos)
+            if (wait > 0) yield* Effect.sleep(Number(wait) / 1_000_000)
+            yield* record(
+              Effect.gen(function* () {
+                model = projectUnits(model, [assistantUnit("tentative:benchmark", source.slice(0, offset), revision)])
+                runtime.surface.update(model)
+                yield* renderOnce(runtime.setup.renderOnce)
+              }),
+            )
+            revision += 1
+            arrival += 5_000_000n
+          }
+        }),
+      )
+    }),
+  )
+})
 
-const toolOutput = async (): Promise<TerminalBenchmarkMetric> => {
-  const runtime = await surfaceSetup()
-  try {
-    let model: Model = {
-      ...initial("/benchmark", "medium"),
-      width: 120,
-      height: 36,
-      currentThreadId: "benchmark",
-    }
-    return await measuredScenario("tool-output", async (record) => {
-      for (let index = 0; index < 30; index += 1)
-        await record(async () => {
-          model = projectUnits(model, [toolUnit(index)])
-          runtime.surface.update(model)
-          await runtime.setup.renderOnce()
-        })
-    })
-  } finally {
-    destroySurface(runtime)
-  }
-}
+const toolOutput = Effect.fn("TerminalBenchmark.toolOutput")(function* () {
+  return yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.toolOutput.use")(function* (runtime) {
+      let model: Model = {
+        ...initial("/benchmark", "medium"),
+        width: 120,
+        height: 36,
+        currentThreadId: "benchmark",
+      }
+      return yield* measuredScenario(
+        "tool-output",
+        Effect.fn("TerminalBenchmark.toolOutput.run")(function* (record) {
+          for (let index = 0; index < 30; index += 1)
+            yield* record(
+              Effect.gen(function* () {
+                model = projectUnits(model, [toolUnit(index)])
+                runtime.surface.update(model)
+                yield* renderOnce(runtime.setup.renderOnce)
+              }),
+            )
+        }),
+      )
+    }),
+  )
+})
 
 const transcriptModel = (): Model => {
   const units = Array.from({ length: 500 }, (_, index) =>
@@ -257,121 +302,144 @@ const transcriptModel = (): Model => {
   )
 }
 
-const transcriptScroll = async (): Promise<TerminalBenchmarkMetric> => {
-  const runtime = await surfaceSetup()
-  try {
-    return await measuredScenario("transcript-scroll", async (record) => {
-      const model = transcriptModel()
-      runtime.surface.update(model)
-      await runtime.setup.renderOnce()
-      runtime.surface.transcriptScroll.scrollTop = 0
-      const page = Math.max(1, runtime.surface.transcriptScroll.viewport.height - 1)
-      const maximum = Math.max(
-        0,
-        runtime.surface.transcriptScroll.scrollHeight - runtime.surface.transcriptScroll.viewport.height,
-      )
-      for (let position = 0; position <= maximum; position += page)
-        await record(async () => {
-          runtime.surface.transcriptScroll.scrollTop = Math.min(maximum, position)
-          runtime.setup.renderer.requestRender()
-          await runtime.setup.renderOnce()
-        })
-    })
-  } finally {
-    destroySurface(runtime)
-  }
-}
-
-const composerPaste = async (): Promise<TerminalBenchmarkMetric> => {
-  const runtime = await surfaceSetup()
-  try {
-    const base: Model = {
-      ...initial("/benchmark", "medium"),
-      width: 120,
-      height: 36,
-      currentThreadId: "benchmark",
-    }
-    runtime.surface.update(base)
-    await runtime.setup.renderOnce()
-    const pasted = Array.from({ length: 3_000 }, (_, index) => `line ${index} 界🙂`).join("\n")
-    return await measuredScenario("composer-paste", async (record) =>
-      record(async () => {
-        runtime.surface.update({ ...base, input: pasted, cursor: pasted.length })
-        await runtime.setup.renderOnce()
-      }),
-    )
-  } finally {
-    destroySurface(runtime)
-  }
-}
-
-const resizeStorm = async (): Promise<TerminalBenchmarkMetric> => {
-  const runtime = await surfaceSetup()
-  try {
-    let model = transcriptModel()
-    runtime.surface.update(model)
-    await runtime.setup.renderOnce()
-    return await measuredScenario("resize-storm", async (record) => {
-      for (let index = 0; index < 20; index += 1)
-        await record(async () => {
-          const width = index % 2 === 0 ? 80 : 140
-          const height = index % 3 === 0 ? 28 : 40
-          runtime.setup.resize(width, height)
-          model = { ...model, width, height }
+const transcriptScroll = Effect.fn("TerminalBenchmark.transcriptScroll")(function* () {
+  return yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.transcriptScroll.use")(function* (runtime) {
+      return yield* measuredScenario(
+        "transcript-scroll",
+        Effect.fn("TerminalBenchmark.transcriptScroll.run")(function* (record) {
+          const model = transcriptModel()
           runtime.surface.update(model)
-          await runtime.setup.renderOnce()
-        })
-    })
-  } finally {
-    destroySurface(runtime)
-  }
-}
+          yield* renderOnce(runtime.setup.renderOnce)
+          runtime.surface.transcriptScroll.scrollTop = 0
+          const page = Math.max(1, runtime.surface.transcriptScroll.viewport.height - 1)
+          const maximum = Math.max(
+            0,
+            runtime.surface.transcriptScroll.scrollHeight - runtime.surface.transcriptScroll.viewport.height,
+          )
+          for (let position = 0; position <= maximum; position += page)
+            yield* record(
+              Effect.gen(function* () {
+                runtime.surface.transcriptScroll.scrollTop = Math.min(maximum, position)
+                runtime.setup.renderer.requestRender()
+                yield* renderOnce(runtime.setup.renderOnce)
+              }),
+            )
+        }),
+      )
+    }),
+  )
+})
 
-export const runTerminalBenchmark = async (): Promise<TerminalBenchmarkResult> => {
+const composerPaste = Effect.fn("TerminalBenchmark.composerPaste")(function* () {
+  return yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.composerPaste.use")(function* (runtime) {
+      const base: Model = {
+        ...initial("/benchmark", "medium"),
+        width: 120,
+        height: 36,
+        currentThreadId: "benchmark",
+      }
+      runtime.surface.update(base)
+      yield* renderOnce(runtime.setup.renderOnce)
+      const pasted = Array.from({ length: 3_000 }, (_, index) => `line ${index} 界🙂`).join("\n")
+      return yield* measuredScenario(
+        "composer-paste",
+        Effect.fn("TerminalBenchmark.composerPaste.run")(function* (record) {
+          yield* record(
+            Effect.gen(function* () {
+              runtime.surface.update({ ...base, input: pasted, cursor: pasted.length })
+              yield* renderOnce(runtime.setup.renderOnce)
+            }),
+          )
+        }),
+      )
+    }),
+  )
+})
+
+const resizeStorm = Effect.fn("TerminalBenchmark.resizeStorm")(function* () {
+  return yield* withSurface(
+    120,
+    36,
+    false,
+    Effect.fn("TerminalBenchmark.resizeStorm.use")(function* (runtime) {
+      let model = transcriptModel()
+      runtime.surface.update(model)
+      yield* renderOnce(runtime.setup.renderOnce)
+      return yield* measuredScenario(
+        "resize-storm",
+        Effect.fn("TerminalBenchmark.resizeStorm.run")(function* (record) {
+          for (let index = 0; index < 20; index += 1)
+            yield* record(
+              Effect.gen(function* () {
+                const width = index % 2 === 0 ? 80 : 140
+                const height = index % 3 === 0 ? 28 : 40
+                runtime.setup.resize(width, height)
+                model = Object.assign({}, model, { width, height })
+                runtime.surface.update(model)
+                yield* renderOnce(runtime.setup.renderOnce)
+              }),
+            )
+        }),
+      )
+    }),
+  )
+})
+
+export const runTerminalBenchmark = Effect.fn("TerminalBenchmark.run")(function* () {
   const metrics = [
-    await markdownStream(),
-    await toolOutput(),
-    await transcriptScroll(),
-    await composerPaste(),
-    await resizeStorm(),
+    yield* markdownStream(),
+    yield* toolOutput(),
+    yield* transcriptScroll(),
+    yield* composerPaste(),
+    yield* resizeStorm(),
   ]
-  const runtime = await surfaceSetup(120, 36, true)
-  try {
-    runtime.surface.update({
-      ...initial("/benchmark", "medium"),
-      width: 120,
-      height: 36,
-      currentThreadId: "benchmark",
-      entries: [{ role: "assistant", text: "Settled" }],
-    })
-    await runtime.setup.renderOnce()
-    const animations = runtime.surface.animationDiagnostics()
-    await Bun.sleep(100)
-    let idleFrames = 0
-    const countFrame = () => {
-      idleFrames += 1
-    }
-    runtime.setup.renderer.on(CliRenderEvents.FRAME, countFrame)
-    const idleCpuBefore = process.cpuUsage()
-    const idleObservedMs = 250
-    await Bun.sleep(idleObservedMs)
-    const idleCpu = process.cpuUsage(idleCpuBefore)
-    runtime.setup.renderer.off(CliRenderEvents.FRAME, countFrame)
-    return {
-      renderer: "opentui-test-renderer",
-      metrics,
-      idle: {
-        loaderRunning: animations.loaderRunning,
-        welcomeRunning: animations.welcomeRunning,
-        frames: idleFrames,
-        observedMs: idleObservedMs,
-        cpuMs: (idleCpu.user + idleCpu.system) / 1_000,
-      },
-    }
-  } finally {
-    destroySurface(runtime)
-  }
-}
+  return yield* withSurface(
+    120,
+    36,
+    true,
+    Effect.fn("TerminalBenchmark.idleObservation")(function* (runtime): Effect.fn.Return<TerminalBenchmarkResult> {
+      runtime.surface.update({
+        ...initial("/benchmark", "medium"),
+        width: 120,
+        height: 36,
+        currentThreadId: "benchmark",
+        entries: [{ role: "assistant", text: "Settled" }],
+      })
+      yield* renderOnce(runtime.setup.renderOnce)
+      const animations = runtime.surface.animationDiagnostics()
+      yield* Effect.sleep(100)
+      let idleFrames = 0
+      const countFrame = () => {
+        idleFrames += 1
+      }
+      runtime.setup.renderer.on(CliRenderEvents.FRAME, countFrame)
+      const idleCpuBefore = process.cpuUsage()
+      const idleObservedMs = 250
+      yield* Effect.sleep(idleObservedMs)
+      const idleCpu = process.cpuUsage(idleCpuBefore)
+      runtime.setup.renderer.off(CliRenderEvents.FRAME, countFrame)
+      return {
+        renderer: "opentui-test-renderer",
+        metrics,
+        idle: {
+          loaderRunning: animations.loaderRunning,
+          welcomeRunning: animations.welcomeRunning,
+          frames: idleFrames,
+          observedMs: idleObservedMs,
+          cpuMs: (idleCpu.user + idleCpu.system) / 1_000,
+        },
+      }
+    }),
+  )
+})
 
 export const terminalBenchmarkTable = (result: TerminalBenchmarkResult) =>
   result.metrics.map((current) => ({

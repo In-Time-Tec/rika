@@ -153,13 +153,11 @@ export const settleProvisionalUserEntry: {
   ): ReturnType<typeof settleProvisionalUserEntryImpl>
 } = Function.dual(3, settleProvisionalUserEntryImpl)
 
-export const overlayPendingSubmissions: {
-  (arg0: Model, arg1: Model): Model
-  (arg1: Model): (arg0: Model) => Model
-} = Function.dual(2, (model: Model, previous: Model): Model => {
-  let entries = model.entries as Array<Model["entries"][number]>
-  let items = model.items as Array<Model["items"][number]>
-  let transcriptCloned = false
+const overlayProvisionalTranscript = (model: Model, previous: Model) => {
+  let entries: Model["entries"] = model.entries
+  let items: Model["items"] = model.items
+  let mutableEntries: Array<Model["entries"][number]> | undefined
+  let mutableItems: Array<Model["items"][number]> | undefined
   for (const item of previous.items) {
     if (!isSubmissionItem(item) || item.provisional !== true) continue
     if (items.some((candidate) => isSubmissionItem(candidate) && itemMatches(candidate, item))) continue
@@ -172,15 +170,24 @@ export const overlayPendingSubmissions: {
       (candidate) => candidate.role === entry.role && candidate.text === entry.text,
     ).length
     if (currentCount >= previousCount) continue
-    if (!transcriptCloned) {
-      entries = [...entries]
-      items = [...items]
-      transcriptCloned = true
+    if (mutableEntries === undefined || mutableItems === undefined) {
+      mutableEntries = Array.from(entries)
+      mutableItems = Array.from(items)
+      entries = mutableEntries
+      items = mutableItems
     }
-    const index = entries.length
-    entries.push(entry)
-    items.push({ ...item, index })
+    const index = mutableEntries.length
+    mutableEntries.push(entry)
+    mutableItems.push({ ...item, index })
   }
+  return { entries, items, changed: mutableEntries !== undefined }
+}
+
+export const overlayPendingSubmissions: {
+  (arg0: Model, arg1: Model): Model
+  (arg1: Model): (arg0: Model) => Model
+} = Function.dual(2, (model: Model, previous: Model): Model => {
+  const transcript = overlayProvisionalTranscript(model, previous)
   const missingQueue = previous.queue.filter(
     (item) => item.provisional === true && !model.queue.some((candidate) => candidate.id === item.id),
   )
@@ -191,8 +198,8 @@ export const overlayPendingSubmissions: {
     ? model.queueSelection
     : queue.at(-1)?.id
   const overlaid =
-    transcriptCloned || queue !== model.queue || queueSelection !== model.queueSelection
-      ? { ...model, entries, items, queue, queueSelection }
+    transcript.changed || queue !== model.queue || queueSelection !== model.queueSelection
+      ? { ...model, entries: transcript.entries, items: transcript.items, queue, queueSelection }
       : model
   if (!restoreSending) return overlaid
   return { ...overlaid, busy: true, activity: previous.activity ?? { _tag: "Sending" as const } }

@@ -1,7 +1,7 @@
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import { UnitOrder, type Unit } from "@rika/transcript/transcript-unit"
-import { Function, Schema } from "effect"
+import type { Unit } from "@rika/transcript/transcript-unit"
+import { Function } from "effect"
 export interface UnitDelta {
   readonly upsert: ReadonlyArray<Unit>
   readonly remove: ReadonlyArray<string>
@@ -9,61 +9,17 @@ export interface UnitDelta {
 import { outcomeShadow, updateExecutionOutcomes } from "./projection-outcomes"
 import type { Model } from "../../state/model"
 import type { TranscriptItem as TranscriptItemModel } from "../../state/transcript/model"
+import {
+  isBlock,
+  isTranscriptItem,
+  knownIndexesFor,
+  ProjectionIndexCache,
+  recordArrayCopy,
+  validBlocks,
+  validItems,
+} from "./projection-cache"
 
-const EventData = Schema.Record(Schema.String, Schema.Unknown)
-type EventData = typeof EventData.Type
-
-export interface Event {
-  readonly turnId?: string
-  readonly cursor: string
-  readonly sequence: number
-  readonly type: string
-  readonly text?: string
-  readonly content?: ReadonlyArray<unknown>
-  readonly data?: Readonly<EventData>
-}
-
-const TranscriptItem = Schema.Union([
-  Schema.TaggedStruct("Entry", {
-    index: Schema.Finite,
-    id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
-    rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
-    order: Schema.optionalKey(UnitOrder),
-  }),
-  Schema.TaggedStruct("Block", {
-    index: Schema.Finite,
-    id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
-    rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
-    order: Schema.optionalKey(UnitOrder),
-  }),
-])
-const isBlock = Schema.is(Block)
-const isTranscriptItem = Schema.is(TranscriptItem)
-
-const validBlocksCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<Block>>()
-const validItemsCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<TranscriptItemModel>>()
-
-const validBlocks = (source: ReadonlyArray<unknown>): ReadonlyArray<Block> => {
-  const cached = validBlocksCache.get(source)
-  if (cached !== undefined) return cached
-  const valid = source.every(isBlock) ? (source as ReadonlyArray<Block>) : source.filter(isBlock)
-  validBlocksCache.set(source, valid)
-  return valid
-}
-
-const validItems = (source: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItemModel> => {
-  const cached = validItemsCache.get(source)
-  if (cached !== undefined) return cached
-  const valid = source.every(isTranscriptItem)
-    ? (source as ReadonlyArray<TranscriptItemModel>)
-    : source.filter(isTranscriptItem)
-  validItemsCache.set(source, valid)
-  return valid
-}
+export { resetTranscriptProjectionDiagnostics, transcriptProjectionDiagnostics } from "./projection-cache"
 
 const isCancellationNotice = (unit: Unit): boolean =>
   unit.key.startsWith("execution:") &&
@@ -153,34 +109,7 @@ const cancelParentRows = (model: Model, parentIds: ReadonlySet<string>): Model =
   return changed ? { ...model, blocks } : model
 }
 
-const knownIndexCache = new WeakMap<ReadonlyArray<unknown>, Map<string, number>>()
-
-let copiedTranscriptBytes = 0
-let fullTranscriptArrayCopies = 0
-
-const recordArrayCopy = (length: number): void => {
-  if (length === 0) return
-  fullTranscriptArrayCopies += 1
-  copiedTranscriptBytes += length * 8
-}
-
-export const transcriptProjectionDiagnostics = () => ({ copiedTranscriptBytes, fullTranscriptArrayCopies })
-
-export const resetTranscriptProjectionDiagnostics = (): void => {
-  copiedTranscriptBytes = 0
-  fullTranscriptArrayCopies = 0
-}
-
 type TranscriptItem = TranscriptItemModel
-
-const knownIndexesFor = (items: ReadonlyArray<TranscriptItem>): Map<string, number> => {
-  const cached = knownIndexCache.get(items)
-  if (cached !== undefined) return cached
-  const built = new Map<string, number>()
-  for (const [index, item] of items.entries()) if (item.id !== undefined) built.set(item.id, index)
-  knownIndexCache.set(items, built)
-  return built
-}
 
 const insertionPosition = (
   items: ReadonlyArray<TranscriptItem>,
@@ -240,12 +169,12 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
   const projectedModel = cancelParentRows(model, cancellation.parentIds)
-  let entries = projectedModel.entries as Array<Model["entries"][number]>
-  let blocks = validBlocks(projectedModel.blocks) as Array<Block>
-  let items = validItems(projectedModel.items) as Array<TranscriptItem>
-  let entriesCloned = false
-  let blocksCloned = false
-  let itemsCloned = false
+  let entries: ReadonlyArray<Model["entries"][number]> = projectedModel.entries
+  let blocks: ReadonlyArray<Block> = validBlocks(projectedModel.blocks)
+  let items: ReadonlyArray<TranscriptItem> = validItems(projectedModel.items)
+  let mutableEntries: Array<Model["entries"][number]> | undefined
+  let mutableBlocks: Array<Block> | undefined
+  let mutableItems: Array<TranscriptItem> | undefined
   let tentativeMutated = false
   const writtenToolIds = new Set<string>()
   let known = knownIndexesFor(items)
@@ -258,29 +187,29 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     known.set(key, index)
   }
   const writeEntry = (index: number, value: Model["entries"][number]) => {
-    if (!entriesCloned) {
+    if (mutableEntries === undefined) {
       recordArrayCopy(entries.length)
-      entries = [...entries]
-      entriesCloned = true
+      mutableEntries = Array.from(entries)
+      entries = mutableEntries
     }
-    entries[index] = value
+    mutableEntries[index] = value
   }
   const writeBlock = (index: number, value: Block) => {
-    if (!blocksCloned) {
+    if (mutableBlocks === undefined) {
       recordArrayCopy(blocks.length)
-      blocks = [...blocks]
-      blocksCloned = true
+      mutableBlocks = Array.from(blocks)
+      blocks = mutableBlocks
     }
-    blocks[index] = value
+    mutableBlocks[index] = value
     if (value._tag === "ToolCall") writtenToolIds.add(value.id)
   }
   const writeItem = (index: number, value: TranscriptItem) => {
-    if (!itemsCloned) {
+    if (mutableItems === undefined) {
       recordArrayCopy(items.length)
-      items = [...items]
-      itemsCloned = true
+      mutableItems = Array.from(items)
+      items = mutableItems
     }
-    items[index] = value
+    mutableItems[index] = value
   }
   const insertItem = (index: number, value: TranscriptItem) => {
     if (index === items.length) {
@@ -288,15 +217,35 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
       if (value.id !== undefined) rememberIndex(value.id, index)
       return
     }
-    if (!itemsCloned) {
+    if (mutableItems === undefined) {
       recordArrayCopy(items.length)
-      items = [...items]
-      itemsCloned = true
+      mutableItems = Array.from(items)
+      items = mutableItems
     }
-    items.splice(index, 0, value)
+    mutableItems.splice(index, 0, value)
     known = new Map()
     for (const [position, item] of items.entries()) if (item.id !== undefined) known.set(item.id, position)
     knownCloned = true
+  }
+  const updateCurrentEntry = (current: TranscriptItem, unit: Unit) => {
+    if (unit.content._tag !== "Entry" || current._tag !== "Entry") return
+    const stored = entries[current.index]
+    if (entryIsUnchanged(cancellationActive, stored, unit)) return
+    const entry = { ...unit.content, turnId: unit.turnId }
+    if (!cancellationActive && unit.key.startsWith("tentative:")) {
+      Reflect.set(entries, current.index, entry)
+      tentativeMutated = true
+    } else writeEntry(current.index, entry)
+  }
+  const updateCurrentBlock = (current: TranscriptItem, unit: Unit) => {
+    if (unit.content._tag !== "Block" || current._tag !== "Block") return
+    const block = unit.content.block
+    if (blockIsUnchanged(cancellationActive, blocks[current.index], block)) return
+    if (!cancellationActive && unit.key.startsWith("tentative:")) {
+      Reflect.set(blocks, current.index, block)
+      tentativeMutated = true
+      if (block._tag === "ToolCall") writtenToolIds.add(block.id)
+    } else writeBlock(current.index, block)
   }
   const updateCurrentUnit = (
     itemIndex: number,
@@ -304,25 +253,8 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     unit: Unit,
     nestedParentId: string | undefined,
   ) => {
-    if (unit.content._tag === "Entry" && current._tag === "Entry") {
-      const stored = entries[current.index]
-      if (!entryIsUnchanged(cancellationActive, stored, unit)) {
-        const entry = { ...unit.content, turnId: unit.turnId }
-        if (!cancellationActive && unit.key.startsWith("tentative:")) {
-          entries[current.index] = entry
-          tentativeMutated = true
-        } else writeEntry(current.index, entry)
-      }
-    } else if (unit.content._tag === "Block" && current._tag === "Block") {
-      const stored = blocks[current.index]
-      if (!blockIsUnchanged(cancellationActive, stored, unit.content.block)) {
-        if (!cancellationActive && unit.key.startsWith("tentative:")) {
-          blocks[current.index] = unit.content.block
-          tentativeMutated = true
-          if (unit.content.block._tag === "ToolCall") writtenToolIds.add(unit.content.block.id)
-        } else writeBlock(current.index, unit.content.block)
-      }
-    }
+    updateCurrentEntry(current, unit)
+    updateCurrentBlock(current, unit)
     if (!itemContextChanged(current, nestedParentId, rootTurnId)) return
     const updated: TranscriptItem = { ...current, order: current.order ?? unit.order }
     const withParent: TranscriptItem = nestedParentId === undefined ? updated : { ...updated, parentId: nestedParentId }
@@ -359,9 +291,9 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     insertUnit(unit, nestedParentId)
   }
   for (const unit of cancellation.units) applyUnit(unit)
-  if (itemsCloned) knownIndexCache.set(items, known)
+  if (mutableItems !== undefined) ProjectionIndexCache.set(items, known)
   const base =
-    entriesCloned || blocksCloned || itemsCloned || tentativeMutated
+    mutableEntries !== undefined || mutableBlocks !== undefined || mutableItems !== undefined || tentativeMutated
       ? {
           ...projectedModel,
           entries,

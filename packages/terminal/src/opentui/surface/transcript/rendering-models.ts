@@ -214,7 +214,7 @@ export const buildTentativeTranscriptUnitBundles = ({
     (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength }))
   ) {
     layout.markdown = true
-    parseStableMarkdown(layout, text, performance.now())
+    parseStableMarkdown(layout, text, Number(process.hrtime.bigint()) / 1_000_000)
     appendTentativeText(layout, text.slice(layout.sourceLength), text.length)
     return { revision, bundles: markdownBundles(key, revision, layout), tentative: layout }
   }
