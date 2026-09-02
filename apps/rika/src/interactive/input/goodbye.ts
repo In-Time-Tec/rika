@@ -1,8 +1,8 @@
 import type { ModeId } from "@rika/configuration/behavior-mode"
 import { homedir } from "node:os"
-export type GoodbyeMode = ModeId
+type GoodbyeMode = ModeId
 
-export interface GoodbyeInput {
+interface GoodbyeInput {
   readonly mode: GoodbyeMode
   readonly workspace: string
   readonly threadId?: string

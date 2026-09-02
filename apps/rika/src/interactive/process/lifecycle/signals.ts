@@ -9,9 +9,9 @@ import {
 export { forceQuitWindow, interruptDecision, type InterruptDecision } from "./interrupt"
 export { writeGoodbye } from "./goodbye"
 
-export type LifecycleSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGTSTP" | "SIGCONT"
+type LifecycleSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGTSTP" | "SIGCONT"
 
-export type LifecycleEvent = { readonly _tag: "Signal"; readonly signal: LifecycleSignal } | { readonly _tag: "Hangup" }
+type LifecycleEvent = { readonly _tag: "Signal"; readonly signal: LifecycleSignal } | { readonly _tag: "Hangup" }
 
 const watchedSignals: ReadonlyArray<LifecycleSignal> = ["SIGINT", "SIGTERM", "SIGHUP", "SIGTSTP", "SIGCONT"]
 const processEmitter: NodeJS.EventEmitter = process
