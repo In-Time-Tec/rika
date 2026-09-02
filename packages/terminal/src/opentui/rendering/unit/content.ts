@@ -4,7 +4,7 @@ import { Block } from "@rika/transcript/transcript-presentation-model"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
-import { truncateToWidth } from "../../../presentation/terminal/format"
+import { plural, truncateToWidth } from "../../../presentation/terminal/format"
 import { renderMarkdownStyled, toOpenChunk } from "../text-adapter"
 import { renderReadFile } from "../diff-text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
@@ -308,18 +308,18 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     if (block?._tag !== "SubagentGroup") return
     const status = subagentGroupStatus(block)
     append(statusIcon(status))
-    const title = block.name.trim().length > 0 ? block.name : "Subagents"
-    const progress = `${block.counts.complete}/${block.counts.total} complete`
-    const failures = block.counts.failed > 0 ? ` · ${block.counts.failed} failed` : ""
-    const running = block.counts.running > 0 ? ` · ${block.counts.running} running` : ""
-    append(fg(colors.text)(` ${truncateToWidth(title, Math.max(1, width - 2))}`))
-    append(
-      dim(
-        fg(colors.muted)(
-          truncateToWidth(` · ${progress}${running}${failures}`, Math.max(0, width - stringWidth(title) - 2)),
-        ),
-      ),
-    )
+    const counts = block.counts
+    const progress = [
+      counts.running > 0 ? `${plural(counts.running, "agent")} running` : undefined,
+      counts.complete > 0 ? `${plural(counts.complete, "agent")} finished` : undefined,
+      counts.queued > 0 ? `${plural(counts.queued, "agent")} queued` : undefined,
+      counts.waiting > 0 ? `${plural(counts.waiting, "agent")} waiting` : undefined,
+      counts.cancelling > 0 ? `${plural(counts.cancelling, "agent")} stopping` : undefined,
+      counts.failed > 0 ? `${plural(counts.failed, "agent")} failed` : undefined,
+      counts.cancelled > 0 ? `${plural(counts.cancelled, "agent")} cancelled` : undefined,
+    ].filter((part): part is string => part !== undefined)
+    const label = progress.length === 0 ? plural(counts.total, "agent") : progress.join(", ")
+    append(fg(colors.text)(` ${truncateToWidth(label, Math.max(1, width - 2))}`))
   }
   const renderSubagentGroupContents = (unit: SubagentGroupTranscriptUnit, prefix: string) => {
     for (const [childIndex, child] of unit.children.entries())

@@ -1,11 +1,20 @@
 import { describe, expect, it } from "@effect/vitest"
-import { animationActive, lifecycleLabel } from "../../../src/opentui/surface/content"
+import { animationActive, lifecycleLabel, statusContent } from "../../../src/opentui/surface/content"
 import { initial, type Model } from "../../../src/state/model"
+import { styledTextValue } from "../../support/surface/transcript/pane-geometry.fixture"
 
 const model = (): Model => ({
   ...initial("/work", "high"),
   width: 120,
   height: 40,
+})
+
+it("keeps the Unicode spinner but hides the internal finishing label", () => {
+  const finishing = { ...model(), busy: true, activity: { _tag: "Finishing" as const } }
+
+  expect(lifecycleLabel(finishing, 0)).toBeUndefined()
+  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ ")
+  expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ ")
 })
 
 describe("connection animation", () => {

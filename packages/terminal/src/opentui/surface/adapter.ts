@@ -76,7 +76,7 @@ const createSurfaceAdapter = <Surface extends TerminalSurface>(
             }
             const redrawTerminal = () => {
               if (released) return
-              // OpenTUI 0.4.3 has no public full-redraw API. This is its internal repaint flag.
+              // OpenTUI has no public full-redraw API. This is its internal repaint flag.
               Reflect.set(renderer, "forceFullRepaintRequested", true)
               renderer.requestRender()
             }

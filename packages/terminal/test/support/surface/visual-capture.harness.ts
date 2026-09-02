@@ -7,7 +7,7 @@ const visualMetadata = {
   schema: 2,
   terminal: { columns: 80, rows: 24, emulator: "OpenTUI test renderer", font: "cell-grid" },
   theme: { name: "Rika dark", background: "inherited", foreground: "#c9d1d9", surface: "#161b22" },
-  native: { opentui: "0.4.3", bun: "1.3.14" },
+  native: { opentui: "0.5.10", bun: "1.3.14" },
   masks: [],
   thresholds: { characterDifferences: 0, pixelChannelDelta: 0, differingPixelRatio: 0 },
   pixelModel:

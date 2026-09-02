@@ -94,6 +94,12 @@ const statusContentImpl = (model: Model, phase: number, currentTimeMillis: numbe
       dim(fg(toOpenColor(colors.text))(" cancel ")),
     ])
   const lifecycle = lifecycleLabel(model, currentTimeMillis)
+  if (lifecycle === undefined && model.activity?._tag === "Finishing")
+    return new StyledText([
+      fg(toOpenColor(colors.text))(" "),
+      fg(toOpenColor(colors.blue))(loaderFrame("", phase)),
+      fg(toOpenColor(colors.text))(" "),
+    ])
   if (lifecycle === undefined) return ""
   const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]
   chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))

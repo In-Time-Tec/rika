@@ -274,32 +274,79 @@ test("renders a real SubagentGroup with live cards and streamed answers", () => 
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
   expect(running).toContain("▾")
-  expect(running).toContain("Reviewers")
+  expect(running).toContain("1 agent running, 1 agent finished")
   expect(running).toContain("Checking failure precedence")
   expect(running).toContain("Do not show this tentative answer yet.")
 
   const settled = {
     ...state,
-    blocks: state.blocks.map((block, index) =>
-      index === 1
-        ? {
-            _tag: "SubagentCard" as const,
-            id: "one",
-            name: "Oracle",
-            prompt: "Review the design",
-            promptTruncated: false,
-            summary: "",
-            status: "complete" as const,
-            activity: ["Checking failure precedence"],
-          }
-        : block,
-    ),
+    blocks: state.blocks.map((block, index) => {
+      if (index === 0)
+        return {
+          _tag: "SubagentGroup" as const,
+          id: "group",
+          name: "Reviewers",
+          status: "complete" as const,
+          settled: true,
+          memberIds: ["one", "two"],
+          counts: { ...counts, running: 0, complete: 2 },
+        }
+      if (index === 1)
+        return {
+          _tag: "SubagentCard" as const,
+          id: "one",
+          name: "Oracle",
+          prompt: "Review the design",
+          promptTruncated: false,
+          summary: "",
+          status: "complete" as const,
+          activity: ["Checking failure precedence"],
+        }
+      return block
+    }),
     expandedRowKeys: ["subagent-group:group", "subagent:one"],
   }
   const complete = buildTranscript(settled)
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
+  expect(complete).toContain("2 agents finished")
   expect(complete).toContain("Do not show this tentative answer yet.")
+})
+
+test("summarizes SubagentGroup progress as running and finished agents", () => {
+  const renderProgress = (running: number, complete: number) =>
+    buildTranscript(
+      model({
+        blocks: [
+          {
+            _tag: "SubagentGroup",
+            id: "group",
+            name: "3 agents",
+            status: running > 0 ? ("running" as const) : ("complete" as const),
+            settled: running === 0,
+            memberIds: ["one", "two", "three"],
+            counts: {
+              total: 3,
+              queued: 0,
+              running,
+              waiting: 0,
+              cancelling: 0,
+              complete,
+              failed: 0,
+              cancelled: 0,
+            },
+          },
+        ],
+        items: [{ _tag: "Block", index: 0, id: "group" }],
+      }),
+    )
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+
+  expect(renderProgress(3, 0)).toContain("3 agents running")
+  expect(renderProgress(2, 1)).toContain("2 agents running, 1 agent finished")
+  expect(renderProgress(1, 2)).toContain("1 agent running, 2 agents finished")
+  expect(renderProgress(0, 3)).toContain("3 agents finished")
 })
 
 test("uses failure precedence for mixed groups and distinct rejected and unknown tones", () => {

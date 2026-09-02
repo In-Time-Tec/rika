@@ -54,7 +54,7 @@ export interface TranscriptRenderInput {
   readonly detailSelection: Model["detailSelection"]
   readonly width: number
   readonly windowEnd: number
-  readonly animationTick: number
+  readonly compactionShimmerTick: number | undefined
   readonly transcriptRevision: number
 }
 

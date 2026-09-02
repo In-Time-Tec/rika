@@ -67,6 +67,35 @@ for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
       }),
     ))
 }
+
+test("does not reconcile transcript rows for a status-spinner tick", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        const base: Model = {
+          ...initial("/work", "high"),
+          width: 80,
+          height: 24,
+          entries: [{ role: "assistant", text: "settled response" }],
+        }
+        surface.update(base)
+        yield* openTui(() => setup.flush())
+        const rows = [...surface.transcriptDiagnostics().rows]
+        const mouseHandlers = rows.map((row) => row.onMouseDown)
+
+        surface.update({ ...base, animationTick: base.animationTick + 1 })
+
+        expect(surface.transcriptDiagnostics().rows).toEqual(rows)
+        expect(rows.map((row) => row.onMouseDown)).toEqual(mouseHandlers)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(

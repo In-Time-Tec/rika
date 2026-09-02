@@ -33,11 +33,12 @@ type InteractiveConnection = Parameters<ReturnType<typeof interactiveTui>>[2]
 type InteractiveConnectionState = InteractiveConnection["initialState"]
 
 /**
- * Settling means no work is still in flight, so a running subagent counts. `Running` covers every
- * running-tools label the activity line produces — a tool, a subagent, or several of either — which
- * an exact "Running 1 tool" misses the moment a turn delegates.
+ * Settling means no work is still in flight, so a running subagent counts. The status spinner remains
+ * visible while the internal Finishing phase intentionally has no label. `Running` covers every
+ * running-tools label — a tool, a subagent, or several of either.
  */
-const activityMarkers = ["Waiting", "Streaming", "Finishing", "Running", "Thinking", "Sending"] as const
+const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking", "Sending"] as const
+const finishingSpinner = / [∼≈≋] ─/u
 
 export type { CapturedSpans, TuiApp, TuiAppOptions } from "./tui-app.capabilities"
 import type { TuiApp, TuiAppOptions } from "./tui-app.capabilities"
@@ -292,7 +293,7 @@ const start = Effect.fn("TuiApp.start")(function* (options: TuiAppOptions) {
       }
     })
   const settled = waitFor(
-    (captured) => !activityMarkers.some((marker) => captured.includes(marker)),
+    (captured) => !activityMarkers.some((marker) => captured.includes(marker)) && !finishingSpinner.test(captured),
     10_000,
     "settled frame",
   )
