@@ -44,6 +44,27 @@ const TranscriptItem = Schema.Union([
 const isBlock = Schema.is(Block)
 const isTranscriptItem = Schema.is(TranscriptItem)
 
+const validBlocksCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<Block>>()
+const validItemsCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<TranscriptItemModel>>()
+
+const validBlocks = (source: ReadonlyArray<unknown>): ReadonlyArray<Block> => {
+  const cached = validBlocksCache.get(source)
+  if (cached !== undefined) return cached
+  const valid = source.every(isBlock) ? (source as ReadonlyArray<Block>) : source.filter(isBlock)
+  validBlocksCache.set(source, valid)
+  return valid
+}
+
+const validItems = (source: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItemModel> => {
+  const cached = validItemsCache.get(source)
+  if (cached !== undefined) return cached
+  const valid = source.every(isTranscriptItem)
+    ? (source as ReadonlyArray<TranscriptItemModel>)
+    : source.filter(isTranscriptItem)
+  validItemsCache.set(source, valid)
+  return valid
+}
+
 const isCancellationNotice = (unit: Unit): boolean =>
   unit.key.startsWith("execution:") &&
   unit.key.endsWith(":cancelled") &&
@@ -134,6 +155,22 @@ const cancelParentRows = (model: Model, parentIds: ReadonlySet<string>): Model =
 
 const knownIndexCache = new WeakMap<ReadonlyArray<unknown>, Map<string, number>>()
 
+let copiedTranscriptBytes = 0
+let fullTranscriptArrayCopies = 0
+
+const recordArrayCopy = (length: number): void => {
+  if (length === 0) return
+  fullTranscriptArrayCopies += 1
+  copiedTranscriptBytes += length * 8
+}
+
+export const transcriptProjectionDiagnostics = () => ({ copiedTranscriptBytes, fullTranscriptArrayCopies })
+
+export const resetTranscriptProjectionDiagnostics = (): void => {
+  copiedTranscriptBytes = 0
+  fullTranscriptArrayCopies = 0
+}
+
 type TranscriptItem = TranscriptItemModel
 
 const knownIndexesFor = (items: ReadonlyArray<TranscriptItem>): Map<string, number> => {
@@ -198,17 +235,18 @@ const itemContextChanged = (
   current.order === undefined
 
 const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: string, rootTurnId?: string): Model => {
-  const modelBlocks = model.blocks.filter(isBlock)
+  const modelBlocks = validBlocks(model.blocks)
   const parentCancelled = parentIsCancelled(modelBlocks, parentId)
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
   const projectedModel = cancelParentRows(model, cancellation.parentIds)
-  let entries = [...projectedModel.entries]
-  let blocks = projectedModel.blocks.filter(isBlock)
-  let items = projectedModel.items.filter(isTranscriptItem)
+  let entries = projectedModel.entries as Array<Model["entries"][number]>
+  let blocks = validBlocks(projectedModel.blocks) as Array<Block>
+  let items = validItems(projectedModel.items) as Array<TranscriptItem>
   let entriesCloned = false
   let blocksCloned = false
   let itemsCloned = false
+  let tentativeMutated = false
   const writtenToolIds = new Set<string>()
   let known = knownIndexesFor(items)
   let knownCloned = false
@@ -221,6 +259,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   }
   const writeEntry = (index: number, value: Model["entries"][number]) => {
     if (!entriesCloned) {
+      recordArrayCopy(entries.length)
       entries = [...entries]
       entriesCloned = true
     }
@@ -228,6 +267,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   }
   const writeBlock = (index: number, value: Block) => {
     if (!blocksCloned) {
+      recordArrayCopy(blocks.length)
       blocks = [...blocks]
       blocksCloned = true
     }
@@ -236,6 +276,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   }
   const writeItem = (index: number, value: TranscriptItem) => {
     if (!itemsCloned) {
+      recordArrayCopy(items.length)
       items = [...items]
       itemsCloned = true
     }
@@ -248,6 +289,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
       return
     }
     if (!itemsCloned) {
+      recordArrayCopy(items.length)
       items = [...items]
       itemsCloned = true
     }
@@ -264,12 +306,22 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   ) => {
     if (unit.content._tag === "Entry" && current._tag === "Entry") {
       const stored = entries[current.index]
-      if (!entryIsUnchanged(cancellationActive, stored, unit))
-        writeEntry(current.index, { ...unit.content, turnId: unit.turnId })
+      if (!entryIsUnchanged(cancellationActive, stored, unit)) {
+        const entry = { ...unit.content, turnId: unit.turnId }
+        if (!cancellationActive && unit.key.startsWith("tentative:")) {
+          entries[current.index] = entry
+          tentativeMutated = true
+        } else writeEntry(current.index, entry)
+      }
     } else if (unit.content._tag === "Block" && current._tag === "Block") {
       const stored = blocks[current.index]
-      if (!blockIsUnchanged(cancellationActive, stored, unit.content.block))
-        writeBlock(current.index, unit.content.block)
+      if (!blockIsUnchanged(cancellationActive, stored, unit.content.block)) {
+        if (!cancellationActive && unit.key.startsWith("tentative:")) {
+          blocks[current.index] = unit.content.block
+          tentativeMutated = true
+          if (unit.content.block._tag === "ToolCall") writtenToolIds.add(unit.content.block.id)
+        } else writeBlock(current.index, unit.content.block)
+      }
     }
     if (!itemContextChanged(current, nestedParentId, rootTurnId)) return
     const updated: TranscriptItem = { ...current, order: current.order ?? unit.order }
@@ -309,7 +361,15 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   for (const unit of cancellation.units) applyUnit(unit)
   if (itemsCloned) knownIndexCache.set(items, known)
   const base =
-    entriesCloned || blocksCloned || itemsCloned ? { ...projectedModel, entries, blocks, items } : projectedModel
+    entriesCloned || blocksCloned || itemsCloned || tentativeMutated
+      ? {
+          ...projectedModel,
+          entries,
+          blocks,
+          items,
+          transcriptRevision: projectedModel.transcriptRevision + (tentativeMutated ? 1 : 0),
+        }
+      : projectedModel
   return updateExecutionOutcomes(base, units, [], writtenToolIds, parentId)
 }
 
@@ -321,7 +381,7 @@ interface RemovedUnits {
 }
 
 const removedUnits = (model: Model, keys: ReadonlyArray<string>): RemovedUnits => {
-  const known = knownIndexesFor(model.items.filter(isTranscriptItem))
+  const known = knownIndexesFor(validItems(model.items))
   const removedPositions = new Set<number>()
   const removedEntryIndexes = new Set<number>()
   const removedBlockIndexes = new Set<number>()
@@ -440,16 +500,16 @@ export const projectChildUnits: {
   ): (model: import("../../state/model").Model) => import("../../state/model").Model
 } = Function.dual(3, (model: import("../../state/model").Model, parentId: string, units: ReadonlyArray<Unit>) => {
   const projected = projectUnitsImpl(model, units, parentId)
-  const parentCancelled = projected.blocks
-    .filter(isBlock)
-    .some((block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled")
+  const parentCancelled = validBlocks(projected.blocks).some(
+    (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
+  )
   if (!parentCancelled) return projected
   const childIndexes = new Set(
     projected.items
       .filter(isTranscriptItem)
       .flatMap((item) => (item._tag === "Block" && item.parentId === parentId ? [item.index] : [])),
   )
-  const blocks = projected.blocks.filter(isBlock)
+  const blocks = [...validBlocks(projected.blocks)]
   for (const index of childIndexes) {
     const block = blocks[index]
     if (block === undefined) continue

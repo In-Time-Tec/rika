@@ -4,7 +4,7 @@ export const transcriptOverscanRows = 64
 
 export const transcriptRenderableBandRows = 64
 
-export const minimumMountedTranscriptRows = 1200
+export const minimumMountedTranscriptRows = 384
 
 export const mountedTranscriptRowBudget = (viewportRows: number): number =>
   Math.min(

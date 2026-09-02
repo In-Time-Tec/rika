@@ -244,15 +244,35 @@ const applyUnitDeltas = (
   nextPreviewUnits: ReadonlyArray<Unit>,
 ): Model => {
   let next = model
-  const previewTurnId = nextPreviewUnits[0]?.turnId ?? previousPreviewUnits[0]?.turnId
-  if (previewTurnId !== undefined && previousPreviewUnits.length > 0)
-    next = applyTurnDelta(next, previewTurnId, {
+  const nextPreviewByKey = new Map(nextPreviewUnits.map((unit) => [unit.key, unit]))
+  const previousPreviewByKey = new Map(previousPreviewUnits.map((unit) => [unit.key, unit]))
+  const durableTranscriptChanged = delta.turns.some((turn) => turn.upsert.length > 0 || turn.remove.length > 0)
+  const removedPreviewKeys = previousPreviewUnits
+    .filter((unit) => durableTranscriptChanged || !nextPreviewByKey.has(unit.key))
+    .map((unit) => unit.key)
+  const previousPreviewTurnId = previousPreviewUnits[0]?.turnId
+  if (previousPreviewTurnId !== undefined && removedPreviewKeys.length > 0)
+    next = applyTurnDelta(next, previousPreviewTurnId, {
       upsert: [],
-      remove: previousPreviewUnits.map((unit) => unit.key),
+      remove: removedPreviewKeys,
     })
   for (const turn of delta.turns) next = applyTurnDelta(next, turn.turnId, { upsert: turn.upsert, remove: turn.remove })
-  if (previewTurnId !== undefined && nextPreviewUnits.length > 0)
-    next = applyTurnDelta(next, previewTurnId, { upsert: nextPreviewUnits, remove: [] })
+  const durableKeys = new Set(delta.turns.flatMap((turn) => [...turn.remove, ...turn.upsert.map((unit) => unit.key)]))
+  const changedPreviewUnits = nextPreviewUnits.filter((unit) => {
+    if (durableTranscriptChanged) return true
+    const previous = previousPreviewByKey.get(unit.key)
+    if (previous === undefined || previous.revision !== unit.revision || durableKeys.has(unit.key)) return true
+    if (previous.parentId !== unit.parentId || previous.content._tag !== unit.content._tag) return true
+    if (previous.content._tag === "Entry" && unit.content._tag === "Entry")
+      return previous.content.role !== unit.content.role || previous.content.text !== unit.content.text
+    if (previous.content._tag !== "Block" || unit.content._tag !== "Block") return true
+    const previousBlock = previous.content.block
+    const nextBlock = unit.content.block
+    return previousBlock._tag !== "Reasoning" || nextBlock._tag !== "Reasoning" || previousBlock.text !== nextBlock.text
+  })
+  const nextPreviewTurnId = nextPreviewUnits[0]?.turnId
+  if (nextPreviewTurnId !== undefined && changedPreviewUnits.length > 0)
+    next = applyTurnDelta(next, nextPreviewTurnId, { upsert: changedPreviewUnits, remove: [] })
   return next
 }
 

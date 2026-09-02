@@ -1,6 +1,6 @@
 import { Function, Schema } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import { StyledText, type TextRenderable } from "@opentui/core"
+import { StyledText, type TextChunk, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../../state/model"
 import type {
   NestedTranscriptUnit,
@@ -153,6 +153,10 @@ export interface TentativeTranscriptLayout {
   pendingSource: string
   readonly bands: Array<Array<string>>
   readonly stableContent: Array<StyledText | undefined>
+  markdownStableLength: number
+  markdownLastLexedAt: number
+  readonly markdownBands: Array<Array<ReadonlyArray<TextChunk>>>
+  readonly markdownStableContent: Array<StyledText | undefined>
 }
 
 export interface TranscriptUnitCacheEntry {

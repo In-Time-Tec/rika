@@ -127,6 +127,23 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     contentWidth: number,
     renderedInputHeight: number,
   ): void {
+    const queueChanged = modelFieldsChanged(previousModel, model, [
+      "queue",
+      "steeringRequests",
+      "pendingSteering",
+      "queueSelection",
+      "editingTurnId",
+      "activeTurnId",
+      "mode",
+      "width",
+      "height",
+      "input",
+      "pastedText",
+      "composerHeight",
+      "shortcutsOpen",
+      "sidebarWidth",
+    ])
+    if (!queueChanged) return
     const queue = model.queue
     const visibleQueue =
       model.editingTurnId === undefined ? queue : queue.filter((item) => item.id !== model.editingTurnId)
@@ -192,23 +209,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       availableRows,
       queueTextWidth,
     )
-    const queueChanged = modelFieldsChanged(previousModel, model, [
-      "queue",
-      "steeringRequests",
-      "pendingSteering",
-      "queueSelection",
-      "editingTurnId",
-      "activeTurnId",
-      "mode",
-      "width",
-      "height",
-      "input",
-      "pastedText",
-      "composerHeight",
-      "shortcutsOpen",
-      "sidebarWidth",
-    ])
-    if (queueChanged) this.queueText.content = new StyledText(queueChunks)
+    this.queueText.content = new StyledText(queueChunks)
     this.queueHint.top = hintTop
     const hintChunks: Array<TextChunk> = []
     for (const [index, segment] of hintSegments.entries()) {
@@ -217,7 +218,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       if (segment.suffix.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(segment.suffix)))
     }
     if (hintSegments.length > 0) hintChunks.push(dim(fg(toOpenColor(colors.text))(" ")))
-    if (queueChanged) this.queueHint.content = new StyledText(hintChunks)
+    this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
     this.queueLeftJoint.visible = visibleQueue.length > 0 || steering.length > 0
     this.queueRightJoint.visible = visibleQueue.length > 0 || steering.length > 0
@@ -234,7 +235,21 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     this.inputBox.title = model.connection?.target === "orb" ? " Orb " : ""
     this.inputBox.titleColor = toOpenColor(modeColor(model.mode))
     this.modeLabel.right = sidebarWidth + 2
-    this.renderModeLabel(model)
+    if (
+      modelFieldsChanged(previousModel, model, [
+        "width",
+        "sidebarWidth",
+        "mode",
+        "contextUsage",
+        "modeRoutes",
+        "contextAnimation",
+        "modeCommit",
+        "fastMode",
+        "busy",
+        "animationTick",
+      ])
+    )
+      this.renderModeLabel(model)
     const title = workspaceTitle(model)
     const panelLoadingLabel = panelLoading(model)
     const statusChanged =
@@ -270,7 +285,8 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
       this.input.content = model.shortcutsOpen ? shortcutsContent(model, Math.max(1, contentWidth - 4)) : ""
     this.composerEditor.visible = !model.shortcutsOpen
     this.composerEditor.height = Math.max(1, renderedInputHeight - 2)
-    this.composerEditor.sync(displayInput(model), displayCursorOffset(model))
+    if (modelFieldsChanged(previousModel, model, ["input", "cursor", "pastedText", "shortcutsOpen"]))
+      this.composerEditor.sync(displayInput(model), displayCursorOffset(model))
   }
 
   private renderSidebars(

@@ -38,6 +38,19 @@ export { tentativeTranscriptContainsMarkdown }
 export type { TranscriptRowsCache }
 export type TranscriptPathTarget = PathTarget
 
+let transcriptRenderablesCreated = 0
+let transcriptRenderablesDestroyed = 0
+
+export const transcriptRenderableDiagnostics = () => ({
+  created: transcriptRenderablesCreated,
+  destroyed: transcriptRenderablesDestroyed,
+})
+
+export const resetTranscriptRenderableDiagnostics = (): void => {
+  transcriptRenderablesCreated = 0
+  transcriptRenderablesDestroyed = 0
+}
+
 const isolateSpinnerChunk = (content: StyledText, spinnerGlyph: string) => {
   const chunkIndex = content.chunks.findIndex((chunk) => chunk.text.includes(spinnerGlyph))
   if (chunkIndex < 0) return { content, spinnerChunk: -1 }
@@ -147,6 +160,7 @@ const reconcileTranscriptRenderables = ({
     if (desiredKeys.has(record.key) || selected.has(record.renderable)) continue
     content.remove(record.renderable)
     record.renderable.destroy()
+    transcriptRenderablesDestroyed += 1
     records.delete(record.key)
   }
   const desired = descriptors.map((descriptor) => {
@@ -199,6 +213,7 @@ const reconcileTranscriptRenderables = ({
       wrapMode: "none",
       selectable: descriptor.selectable ?? true,
     })
+    transcriptRenderablesCreated += 1
     renderable.onMouseDown = (event) => handleMouseDown(renderable, event)
     renderable.onMouseOver = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
     renderable.onMouseMove = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
@@ -217,14 +232,9 @@ const reconcileTranscriptRenderables = ({
   if (!bottomSpacer.visible && bottomSpacer.parent === content) content.remove(bottomSpacer)
   if (topSpacer.visible && content.getChildren()[0] !== topSpacer) content.add(topSpacer, 0)
   const leading = topSpacer.visible ? 1 : 0
-  const current = [...content.getChildren()]
   children.forEach((child, index) => {
     const target = index + leading
-    if (current[target] === child) return
-    const previous = current.indexOf(child)
-    if (previous >= 0) current.splice(previous, 1)
-    current.splice(target, 0, child)
-    content.add(child, target)
+    if (content.getChildren()[target] !== child) content.add(child, target)
   })
   if (bottomSpacer.visible) {
     const target = leading + children.length
@@ -259,7 +269,8 @@ const transcriptRenderInputChanged = (
   previous.detailSelection !== input.detailSelection ||
   previous.width !== input.width ||
   previous.windowEnd !== input.windowEnd ||
-  previous.animationTick !== input.animationTick
+  previous.animationTick !== input.animationTick ||
+  previous.transcriptRevision !== input.transcriptRevision
 
 interface ProjectTranscriptRowsOptions {
   readonly renderer: CliRenderer
@@ -422,6 +433,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     width: model.width,
     windowEnd: options.windowEnd,
     animationTick: model.animationTick,
+    transcriptRevision: model.transcriptRevision,
   }
   if (!transcriptRenderInputChanged(options.renderInput, input)) return undefined
   const previousExpandedRows = options.renderInput?.expandedRowKeys

@@ -157,8 +157,9 @@ export const overlayPendingSubmissions: {
   (arg0: Model, arg1: Model): Model
   (arg1: Model): (arg0: Model) => Model
 } = Function.dual(2, (model: Model, previous: Model): Model => {
-  const entries = [...model.entries]
-  const items = [...model.items]
+  let entries = model.entries as Array<Model["entries"][number]>
+  let items = model.items as Array<Model["items"][number]>
+  let transcriptCloned = false
   for (const item of previous.items) {
     if (!isSubmissionItem(item) || item.provisional !== true) continue
     if (items.some((candidate) => isSubmissionItem(candidate) && itemMatches(candidate, item))) continue
@@ -171,6 +172,11 @@ export const overlayPendingSubmissions: {
       (candidate) => candidate.role === entry.role && candidate.text === entry.text,
     ).length
     if (currentCount >= previousCount) continue
+    if (!transcriptCloned) {
+      entries = [...entries]
+      items = [...items]
+      transcriptCloned = true
+    }
     const index = entries.length
     entries.push(entry)
     items.push({ ...item, index })
@@ -178,16 +184,16 @@ export const overlayPendingSubmissions: {
   const missingQueue = previous.queue.filter(
     (item) => item.provisional === true && !model.queue.some((candidate) => candidate.id === item.id),
   )
-  const queue = [...model.queue, ...missingQueue]
+  const queue = missingQueue.length === 0 ? model.queue : [...model.queue, ...missingQueue]
   const restoreSending =
     previous.busy && !model.busy && previous.submittedDrafts.some((draft) => draft.turnId === undefined)
-  const overlaid = {
-    ...model,
-    entries,
-    items,
-    queue,
-    queueSelection: queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : queue.at(-1)?.id,
-  }
+  const queueSelection = queue.some((item) => item.id === model.queueSelection)
+    ? model.queueSelection
+    : queue.at(-1)?.id
+  const overlaid =
+    transcriptCloned || queue !== model.queue || queueSelection !== model.queueSelection
+      ? { ...model, entries, items, queue, queueSelection }
+      : model
   if (!restoreSending) return overlaid
   return { ...overlaid, busy: true, activity: previous.activity ?? { _tag: "Sending" as const } }
 })

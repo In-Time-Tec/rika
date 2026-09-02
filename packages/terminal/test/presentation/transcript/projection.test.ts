@@ -4,7 +4,11 @@ import * as TranscriptUnitOrder from "@rika/transcript/transcript-unit-order"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { Effect } from "effect"
 import { expect, test } from "vitest"
-import { projectUnits } from "../../../src/presentation/transcript/projection"
+import {
+  projectUnits,
+  resetTranscriptProjectionDiagnostics,
+  transcriptProjectionDiagnostics,
+} from "../../../src/presentation/transcript/projection"
 import { Surface } from "../../../src/opentui/surface/service"
 import { TranscriptPane } from "../../../src/opentui/surface/transcript/pane"
 import { initial, type Model } from "../../../src/state/model"
@@ -102,6 +106,47 @@ const browserModel = (units: ReadonlyArray<Unit>, width = 140, height = 40): Mod
 
 const text = (rows: ReturnType<TranscriptPane["diagnostics"]>["rows"]): ReadonlyArray<string> =>
   rows.map((row) => row.content.chunks.map((chunk) => chunk.text).join(""))
+
+test("tentative updates preserve transcript arrays and still invalidate the surface", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 30 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const tentative = (value: string, revision: number): Unit => ({
+        key: "tentative:answer",
+        turnId: "turn",
+        order: TranscriptUnitOrder.unitOrder("tentative:answer", 500),
+        revision,
+        content: { _tag: "Entry", role: "assistant", text: value },
+      })
+      try {
+        const history = transcriptUnits(250)
+        const before = projectUnits(initial("/workspace", "medium"), [...history, tentative("before", 0)])
+        surface.update(before)
+        yield* openTui(() => setup.renderOnce())
+        resetTranscriptProjectionDiagnostics()
+        const afterText = Array.from({ length: 40 }, (_, index) => `after ${index}`).join("\n")
+        const after = projectUnits(before, [tentative(afterText, 1)])
+        expect(after.entries).toBe(before.entries)
+        expect(after.blocks).toBe(before.blocks)
+        expect(after.items).toBe(before.items)
+        expect(after.transcriptRevision).toBe(before.transcriptRevision + 1)
+        expect(transcriptProjectionDiagnostics()).toEqual({
+          copiedTranscriptBytes: 0,
+          fullTranscriptArrayCopies: 0,
+        })
+        surface.update(after)
+        yield* openTui(() => setup.renderOnce())
+        expect(setup.captureCharFrame()).toContain("after 39")
+        expect(surface.transcriptScroll.scrollTop).toBeGreaterThanOrEqual(
+          surface.transcriptScroll.scrollHeight - surface.transcriptScroll.viewport.height - 1,
+        )
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
 
 test("two transcript panes produce identical keyed renderables for the same document and width", () =>
   Effect.runPromise(

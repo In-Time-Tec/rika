@@ -76,24 +76,7 @@ const inlineChunks = (tokens: ReadonlyArray<Token>, plain: boolean): Array<Termi
   tokens.flatMap((token) => inlineTokenChunks(token, plain))
 
 const headingChunks = (heading: Tokens.Heading, plain: boolean): Array<TerminalTextChunk> =>
-  inlineChunks(heading.tokens, plain).map((chunk) => {
-    const colored = chunk.fg === colors.text ? fg(colors.teal)(chunk) : chunk
-    switch (heading.depth) {
-      case 1:
-        return underline(bold(colored))
-      case 2:
-        return bold(colored)
-      case 3:
-        return underline(colored)
-      case 4:
-        return italic(colored)
-      case 5:
-        return colored
-      case 6:
-        return dim(colored)
-    }
-    return colored
-  })
+  inlineChunks(heading.tokens, plain).map((chunk) => bold(chunk))
 
 const distribute = (amount: number, weights: ReadonlyArray<number>): Array<number> => {
   if (amount <= 0) return weights.map(() => 0)
@@ -303,10 +286,28 @@ const blockTokenLines = (token: Token, depth: number, plain: boolean, width: num
   }
 }
 
+const blockLinesCache = new Map<string, Lines>()
+const blockLinesCacheLimit = 256
+
+const cachedBlockTokenLines = (token: Token, depth: number, plain: boolean, width: number): Lines => {
+  const key = `${plain ? "p" : "m"}:${width}:${depth}:${token.type}:${token.raw}`
+  const cached = blockLinesCache.get(key)
+  if (cached !== undefined) return cached
+  const lines = blockTokenLines(token, depth, plain, width)
+  if (token.raw.length <= 4_096) {
+    if (blockLinesCache.size >= blockLinesCacheLimit) {
+      const oldest = blockLinesCache.keys().next().value
+      if (oldest !== undefined) blockLinesCache.delete(oldest)
+    }
+    blockLinesCache.set(key, lines)
+  }
+  return lines
+}
+
 const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean, width: number): Lines => {
   const lines: Lines = []
   tokens.forEach((token) => {
-    lines.push(...blockTokenLines(token, depth, plain, width))
+    lines.push(...cachedBlockTokenLines(token, depth, plain, width))
     if (token.type === "space") return
     const blanks = trailingBlankLines(token.raw)
     for (let index = 0; index < blanks; index += 1) lines.push([])
@@ -322,9 +323,13 @@ const isPlainLine = (source: string): boolean => {
   return true
 }
 
+let markdownLexerInvocations = 0
+let markdownCacheBytes = 0
+
 const renderLinesUncached = (source: string, plain: boolean, width: number): Lines => {
   const safeSource = terminalSafeText(source)
   if (safeSource.split("\n").every(isPlainLine)) return wrapChunks([fg(colors.text)(safeSource)], width)
+  markdownLexerInvocations += 1
   const tokens = Lexer.lex(safeSource, { gfm: true })
   const lines = blockLines(tokens, 0, plain, Math.max(1, Math.floor(width)))
   while (lines.length > 0 && lines[lines.length - 1]!.length === 0) lines.pop()
@@ -332,16 +337,39 @@ const renderLinesUncached = (source: string, plain: boolean, width: number): Lin
 }
 
 const renderLinesCache = new Map<string, Lines>()
-const renderLinesCacheLimit = 512
+const renderLinesCacheLimit = 128
+const renderLinesCacheSourceLimit = 4_096
 
 const renderLines = (source: string, plain: boolean, width: number): Lines => {
   const key = `${plain ? "p" : "m"}:${width}:${source}`
   const cached = renderLinesCache.get(key)
   if (cached !== undefined) return cached
   const lines = renderLinesUncached(source, plain, width)
-  if (renderLinesCache.size >= renderLinesCacheLimit) renderLinesCache.delete(renderLinesCache.keys().next().value!)
-  renderLinesCache.set(key, lines)
+  if (source.length <= renderLinesCacheSourceLimit) {
+    if (renderLinesCache.size >= renderLinesCacheLimit) {
+      const oldest = renderLinesCache.keys().next().value
+      if (oldest !== undefined) {
+        markdownCacheBytes -= oldest.length * 2
+        renderLinesCache.delete(oldest)
+      }
+    }
+    renderLinesCache.set(key, lines)
+    markdownCacheBytes += key.length * 2
+  }
   return lines
+}
+
+export const markdownRendererDiagnostics = () => ({
+  lexerInvocations: markdownLexerInvocations,
+  cacheEntries: renderLinesCache.size,
+  cacheBytes: markdownCacheBytes,
+})
+
+export const resetMarkdownRendererDiagnostics = (): void => {
+  markdownLexerInvocations = 0
+  markdownCacheBytes = 0
+  renderLinesCache.clear()
+  blockLinesCache.clear()
 }
 
 export const renderMarkdown: {

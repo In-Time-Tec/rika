@@ -105,6 +105,7 @@ export const ConnectionState = Schema.Struct({
   ),
   ownership: Schema.optional(Schema.Literals(["personal", "organization"])),
   participants: Schema.Int,
+  errorMessage: Schema.optional(Schema.String),
 })
 export type ConnectionState = typeof ConnectionState.Type
 export const Model = Schema.Struct({
@@ -167,6 +168,7 @@ export const Model = Schema.Struct({
   contextUsage: Schema.optional(ContextUsage),
   contextAnimation: ContextAnimationSchema,
   animationTick: Schema.Finite,
+  transcriptRevision: Schema.Finite,
   retryCountdown: Schema.Finite,
   compactionShimmer: Schema.optional(CompactionShimmerSchema),
   contextDetailsOpen: Schema.Boolean,
@@ -255,6 +257,7 @@ const initialImpl = (workspace: string, mode: Mode): Model => ({
   contextUsage: { _tag: "Loading" },
   contextAnimation: { munchTick: 0, flashTicks: 0, flashed75: false, flashed90: false },
   animationTick: 0,
+  transcriptRevision: 0,
   retryCountdown: 0,
   compactionShimmer: undefined,
   contextDetailsOpen: false,

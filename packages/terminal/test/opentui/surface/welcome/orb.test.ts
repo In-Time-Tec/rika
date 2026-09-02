@@ -29,6 +29,11 @@ test("renders a constant row count across every phase", () => {
   expect(new Set(small).size).toBe(1)
 })
 
+test("reuses a precomputed idle frame after one animation cycle", () => {
+  const geometry = orbGeometry(160, 44)
+  expect(orbRows(geometry, 7, [])).toBe(orbRows(geometry, 127, []))
+})
+
 test("keeps the orb bounding box fixed while an impulse expands", () => {
   const geometry = orbGeometry(160, 44)
   const impulse: OrbImpulse = { column: 10, row: 4, startPhase: 0 }

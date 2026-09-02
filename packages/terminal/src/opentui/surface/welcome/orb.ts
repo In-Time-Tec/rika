@@ -32,6 +32,8 @@ const impulseGain = 1.4
 const impulseLifetime = 3.2
 
 const copyColumnWidth = 24
+const orbFrameCount = 120
+const orbFrameCacheLimit = 4
 
 const orbGeometryImpl = (width: number, height: number): OrbGeometry => {
   const available = Math.max(12, Math.floor(width / 2) - 2)
@@ -67,10 +69,11 @@ export const orbImpulseExpired: {
   ): ReturnType<typeof orbImpulseExpiredImpl>
 } = Function.dual(2, orbImpulseExpiredImpl)
 
-const surfaceIntensity = (nx: number, ny: number, nz: number, time: number): number => {
+const surfaceIntensity = (nx: number, ny: number, nz: number, phase: number): number => {
+  const angle = ((phase % orbFrameCount) / orbFrameCount) * Math.PI * 2
   const lambert = Math.max(0, nx * -0.5 + ny * -0.58 + nz * 0.65)
-  const shimmer = 0.5 + 0.5 * Math.sin(nx * 3.4 + ny * 2.6 - time * 2)
-  const ripple = 0.5 + 0.5 * Math.sin(nx * 7.1 - ny * 5.2 + time * 1.3)
+  const shimmer = 0.5 + 0.5 * Math.sin(nx * 3.4 + ny * 2.6 - angle * 3)
+  const ripple = 0.5 + 0.5 * Math.sin(nx * 7.1 - ny * 5.2 + angle * 2)
   return lambert * 0.92 + shimmer * 0.18 + ripple * 0.08 - (nx * nx + ny * ny) * 0.18
 }
 
@@ -89,8 +92,7 @@ const orbCell = (
   const squared = nx * nx + ny * ny
   if (squared > 1) return " "
   const nz = Math.sqrt(Math.max(0, 1 - squared))
-  const time = phase * 0.09
-  let intensity = Math.max(0.08, surfaceIntensity(nx, ny, nz, time))
+  let intensity = Math.max(0.08, surfaceIntensity(nx, ny, nz, phase))
   for (const impulse of impulses) {
     const age = (phase - impulse.startPhase) * 0.09
     if (age < 0) continue
@@ -105,7 +107,7 @@ const orbCell = (
   return rampGlyph(intensity)
 }
 
-const orbRowsImpl = (
+const renderOrbRows = (
   geometry: OrbGeometry,
   phase: number,
   impulses: ReadonlyArray<OrbImpulse>,
@@ -115,6 +117,29 @@ const orbRowsImpl = (
       orbCell(geometry, column, row, phase, impulses),
     ).join(""),
   )
+
+const precomputedFrames = new Map<string, ReadonlyArray<ReadonlyArray<string>>>()
+const framesFor = (geometry: OrbGeometry): ReadonlyArray<ReadonlyArray<string>> => {
+  const key = `${geometry.columns}:${geometry.rows}`
+  const cached = precomputedFrames.get(key)
+  if (cached !== undefined) return cached
+  const frames = Array.from({ length: orbFrameCount }, (_, phase) => renderOrbRows(geometry, phase, []))
+  if (precomputedFrames.size >= orbFrameCacheLimit) {
+    const oldest = precomputedFrames.keys().next().value
+    if (oldest !== undefined) precomputedFrames.delete(oldest)
+  }
+  precomputedFrames.set(key, frames)
+  return frames
+}
+
+const orbRowsImpl = (
+  geometry: OrbGeometry,
+  phase: number,
+  impulses: ReadonlyArray<OrbImpulse>,
+): ReadonlyArray<string> =>
+  impulses.length === 0
+    ? framesFor(geometry)[((phase % orbFrameCount) + orbFrameCount) % orbFrameCount]!
+    : renderOrbRows(geometry, phase, impulses)
 
 export const orbRows: {
   (

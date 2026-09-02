@@ -378,6 +378,22 @@ describe("tentative model preview overlay", () => {
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
   })
 
+  it("keeps unchanged preview units mounted across durable patches", () => {
+    let state = InteractiveController.update(loaded(), preview(1, "still streaming", {}, "")).state
+    const entries = state.model.entries
+    const blocks = state.model.blocks
+    const items = state.model.items
+
+    state = applyPatch(state, {})
+
+    expect({
+      entries: state.model.entries === entries,
+      blocks: state.model.blocks === blocks,
+      items: state.model.items === items,
+    }).toEqual({ entries: true, blocks: true, items: true })
+    expect(assistantText(state)).toBe("still streaming")
+  })
+
   it("uses a synthetic overflow clear only to invalidate the current identity", () => {
     let state = InteractiveController.update(loaded(), preview(1, "before overflow", {}, "")).state
     state = InteractiveController.update(state, previewCleared(0)).state

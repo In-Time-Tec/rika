@@ -30,10 +30,19 @@ const TranscriptItemSchema = Schema.Union([
 ])
 const decodeTranscriptItems = Schema.decodeUnknownSync(Schema.Array(TranscriptItemSchema))
 const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
+const decodedItemsCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<TranscriptItem>>()
+const transcriptItems = (items: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItem> => {
+  const cached = decodedItemsCache.get(items)
+  if (cached !== undefined) return cached
+  const decoded = decodeTranscriptItems(items)
+  decodedItemsCache.set(items, decoded)
+  decodedItemsCache.set(decoded, decoded)
+  return decoded
+}
 
 export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptItem> =>
   model.items.length > 0
-    ? decodeTranscriptItems(model.items)
+    ? transcriptItems(model.items)
     : [
         ...model.entries.map((_, index) => ({ _tag: "Entry" as const, index })),
         ...model.blocks.map((_, index) => ({ _tag: "Block" as const, index })),
@@ -55,7 +64,7 @@ const rowsCacheFor = (model: Model): RowsCache | undefined => {
   if (cached !== undefined && cached.blocks === model.blocks && cached.entries === model.entries) return cached
   const entryItemByIndex = new Map<number, TranscriptItem>()
   const blockItemByIndex = new Map<number, TranscriptItem>()
-  for (const item of decodeTranscriptItems(model.items)) {
+  for (const item of transcriptItems(model.items)) {
     const byIndex = item._tag === "Entry" ? entryItemByIndex : blockItemByIndex
     if (!byIndex.has(item.index)) byIndex.set(item.index, item)
   }
@@ -108,7 +117,9 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const childItems = new Map<string, Array<TranscriptItem>>()
   for (const item of orderedTranscriptItems(model)) {
     if (item.parentId === undefined) continue
-    childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
+    const children = childItems.get(item.parentId)
+    if (children === undefined) childItems.set(item.parentId, [item])
+    else children.push(item)
   }
   const subagentResponseFor = (
     block: Extract<TranscriptBlock, { _tag: "SubagentCard" }>,
