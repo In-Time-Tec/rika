@@ -42,6 +42,8 @@ const tuiSignalExitCode = ProcessLifecycle.tuiSignalExitCode
 export const makeProcessRuntime = (runtime: Runtime) => {
   const { loop, fork, session, options, recoverSession, resume } = runtime
   let requestSelectionResync: (threadId: string) => void = noopSelectionResync
+  let closeStarted = false
+  let teardownStarted = false
   const pauseTerminal = () => {
     if (loop.closed) return () => false
     if (loop.terminalPauseCount === 0)
@@ -69,10 +71,11 @@ export const makeProcessRuntime = (runtime: Runtime) => {
   }
   const teardown = (showGoodbye: boolean) =>
     Effect.suspend(() => {
-      if (Effect.runSync(SubscriptionRef.get(loop.lifecycle))._tag === "TornDown") return Effect.void
-      Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "TornDown" }))
+      if (teardownStarted) return Effect.void
+      teardownStarted = true
       return Effect.uninterruptible(
         Effect.gen(function* () {
+          yield* SubscriptionRef.set(loop.lifecycle, { _tag: "TornDown" })
           yield* Effect.logInfo("tui.teardown.started")
           loop.closed = true
           loop.renderer?.releaseTerminal()
@@ -83,21 +86,23 @@ export const makeProcessRuntime = (runtime: Runtime) => {
       )
     })
   const close = (exitCode?: number, showGoodbye = true, lastInterruptAt?: number) => {
-    const current = Effect.runSync(SubscriptionRef.get(loop.lifecycle))
-    if (current._tag === "Quitting" || current._tag === "TornDown") return
-    Effect.runSync(SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt }))
+    if (closeStarted || teardownStarted) return
+    closeStarted = true
     if (exitCode !== undefined) process.exitCode = exitCode
     fork(
-      Effect.raceFirst(
-        session.quit.pipe(
-          Effect.catch((failure) =>
-            Effect.logWarning("tui.quit.stop_work.failed").pipe(
-              Effect.annotateLogs("rika.failure.kind", failure instanceof Error ? failure.name : "unknown"),
+      SubscriptionRef.set(loop.lifecycle, { _tag: "Quitting", lastInterruptAt }).pipe(
+        Effect.andThen(
+          Effect.raceFirst(
+            session.quit.pipe(
+              Effect.catch((failure) =>
+                Effect.logWarning("tui.quit.stop_work.failed").pipe(
+                  Effect.annotateLogs("rika.failure.kind", failure instanceof Error ? failure.name : "unknown"),
+                ),
+              ),
             ),
+            Deferred.await(loop.forceQuit).pipe(Effect.andThen(Effect.logInfo("tui.quit.forced"))),
           ),
         ),
-        Deferred.await(loop.forceQuit).pipe(Effect.andThen(Effect.logInfo("tui.quit.forced"))),
-      ).pipe(
         Effect.timeoutOrElse({
           duration: quitStopWorkBound,
           orElse: () => Effect.logWarning("tui.quit.stop_work.timeout"),

@@ -134,7 +134,7 @@ describe("transcript renderers", () => {
     expect(rendered.split("\n").every((line) => stringWidth(line) <= 9)).toBe(true)
   })
 
-  test("preserves inline heading styles and gives heading levels distinct emphasis", () => {
+  test("preserves inline heading styles and renders every heading as plain bold text", () => {
     const styled = renderMarkdownStyled("###### plain **bold** *italic* `code` [link](https://rika.dev)", 18)
     const boldChunk = chunkFor(styled.chunks, "bold")
     const italicChunk = chunkFor(styled.chunks, "italic")
@@ -155,14 +155,7 @@ describe("transcript renderers", () => {
       const heading = renderMarkdownStyled(`${"#".repeat(index + 1)} Level`)
       return chunkFor(heading.chunks, "Level").attributes ?? TextAttributes.NONE
     })
-    expect(attributes).toEqual([
-      TextAttributes.BOLD | TextAttributes.UNDERLINE,
-      TextAttributes.BOLD,
-      TextAttributes.UNDERLINE,
-      TextAttributes.ITALIC,
-      TextAttributes.NONE,
-      TextAttributes.DIM,
-    ])
+    expect(attributes).toEqual(Array.from({ length: 6 }, () => TextAttributes.BOLD))
   })
 
   it.effect("renders a 4000-chunk unbroken stream without quadratic wrapping", () =>

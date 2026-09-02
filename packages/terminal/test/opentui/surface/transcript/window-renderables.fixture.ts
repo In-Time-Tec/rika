@@ -99,6 +99,47 @@ test("moves the bounded transcript window to older mounted entries and keeps it 
       }
     }),
   ))
+test("every durable user and assistant message remains reachable by paging to the top", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const count = 700
+      const entries = Array.from({ length: count }, (_, index) => ({
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        text: `MESSAGE_${String(index).padStart(4, "0")}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `message-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update({ ...initial("/work", "high"), entries, items, scrollFollow: true })
+        yield* openTui(() => setup.flush())
+        const seen = new Set<number>()
+        let previousPosition = ""
+        for (let page = 0; page < 200 && seen.size < count; page += 1) {
+          for (const match of setup.captureCharFrame().matchAll(/MESSAGE_(\d{4})/gu)) seen.add(Number(match[1]))
+          const diagnostics = surface.transcriptDiagnostics()
+          const position = `${diagnostics.windowEnd}:${surface.transcriptScroll.scrollTop}`
+          if (position === previousPosition) break
+          previousPosition = position
+          setup.mockInput.pressKey("\u001b[5~")
+          yield* openTui(() => setup.flush())
+        }
+
+        expect(seen.size).toBe(count)
+        expect(seen.has(0)).toBe(true)
+        expect(seen.has(count - 1)).toBe(true)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
 test("bounded transcript keeps visible entries when a collapsed subagent overflows the entry budget", () => {
   const model = collapsedSubagentModel(30, maxMountedTranscriptEntries + 60)
   const bounded = boundedTranscriptModel(model)

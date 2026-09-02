@@ -7,7 +7,7 @@ import { Function } from "effect"
 const retiredIdentityCapacity = 16
 const utf8Encoder = new TextEncoder()
 
-export interface RunOverlay {
+interface RunOverlay {
   readonly preview: ExecutionGateway.ModelPreviewFrame | undefined
   readonly identity: string | undefined
   readonly responseId: string | undefined

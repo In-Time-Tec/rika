@@ -1,4 +1,5 @@
 import { Function, Schema } from "effect"
+import { Warning } from "../../warning"
 import type { Model } from "../model"
 
 export type PromptPart =
@@ -46,7 +47,9 @@ const appendParsedText = (parts: Array<PromptPart>, text: string, pasted: boolea
     if (path.startsWith("file://")) {
       try {
         path = decodeURIComponent(new URL(path).pathname)
-      } catch {}
+      } catch (cause) {
+        Warning.log("tui.composer.image_url.invalid", cause)
+      }
     }
     appendPromptPart(parts, { type: "image", path: path.replace(/\\ /g, " ") })
     offset = index + match[0].length

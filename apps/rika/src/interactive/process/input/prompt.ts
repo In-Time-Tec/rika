@@ -23,7 +23,7 @@ export class PromptAttachmentError extends Schema.TaggedError<PromptAttachmentEr
   message: Schema.String,
 }) {}
 
-export const maxAttachmentBytes = 5_000_000
+const maxAttachmentBytes = 5_000_000
 const maxPromptPartsBytes = 16_777_216 - 65_536
 const attachmentMegabytes = formatBytes
 

@@ -1,6 +1,5 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as ThreadView from "@rika/product/thread-view"
-import { Effect } from "effect"
 import type { Model } from "@rika/terminal/terminal-state"
 import { clearPreviewState, updateState } from "./feed"
 import type { Overlay as ModelPreviewOverlay } from "./model-preview"
@@ -27,8 +26,6 @@ export interface Update {
   readonly resync?: boolean
   readonly rejection?: "gap" | "thread" | "revision"
 }
-
-export const warnUnattached = (_unattached: ReadonlyArray<string>) => Effect.void
 
 export const update: {
   (event: TranscriptEvent): (state: State) => Update

@@ -20,15 +20,27 @@ const wrappedRowsForLine = (text: string, width: number): number => {
   }
   return rows
 }
+const wrappedRowCountUpTo = (text: string, width: number, limit: number): number => {
+  let rows = 0
+  let start = 0
+  while (start <= text.length) {
+    const newline = text.indexOf("\n", start)
+    const end = newline < 0 ? text.length : newline
+    rows += wrappedRowsForLine(text.slice(start, end), width)
+    if (rows >= limit || newline < 0) return Math.min(rows, limit)
+    start = newline + 1
+  }
+  return rows
+}
 export const wrappedRowCount: {
   (text: string, width: number): number
   (width: number): (text: string) => number
 } = Function.dual(2, (text: string, width: number): number =>
-  text.split("\n").reduce((rows, line) => rows + wrappedRowsForLine(line, width), 0),
+  wrappedRowCountUpTo(text, width, Number.POSITIVE_INFINITY),
 )
 export const queueContentWidth = (model: Model): number => Math.max(1, contentColumnWidth(model) - 6)
 export const inputRows = (model: Model): number =>
-  Math.min(8, Math.max(1, wrappedRowCount(displayInput(model), Math.max(1, contentColumnWidth(model) - 4))))
+  Math.max(1, wrappedRowCountUpTo(displayInput(model), Math.max(1, contentColumnWidth(model) - 4), 8))
 export const composerHeight = (model: Model): number =>
   Math.min(composerHeightLimit(model.height), Math.max(5, model.composerHeight, inputRows(model) + 2))
 export const composerHeightLimit = (terminalHeight: number): number =>

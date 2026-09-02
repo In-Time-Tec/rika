@@ -37,6 +37,10 @@ const newTentativeLayout = (width: number, tone: TentativeTranscriptLayout["tone
   pendingSource: "",
   bands: [[]],
   stableContent: [],
+  markdownStableLength: 0,
+  markdownLastLexedAt: Number.NEGATIVE_INFINITY,
+  markdownBands: [[]],
+  markdownStableContent: [],
 })
 
 const tentativeLayout = (
@@ -54,22 +58,93 @@ const tentativeLayout = (
     : previous
 }
 
-const markdownBundles = (key: string, text: string, width: number, revision: string) => {
+const styledBand = (lines: ReadonlyArray<ReadonlyArray<TextChunk>>) => {
+  const chunks: Array<TextChunk> = []
+  for (const [index, line] of lines.entries()) {
+    chunks.push(...line)
+    if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"))
+  }
+  return new StyledText(chunks)
+}
+
+const appendMarkdownLines = (
+  layout: TentativeTranscriptLayout,
+  lines: ReadonlyArray<ReadonlyArray<TextChunk>>,
+): void => {
+  if (layout.markdownStableLength > 0) {
+    const last = layout.markdownBands.at(-1)!
+    if (last.length === transcriptRenderableBandRows) layout.markdownBands.push([])
+    layout.markdownBands.at(-1)!.push([])
+    layout.markdownStableContent[layout.markdownBands.length - 1] = undefined
+  }
+  for (const line of lines) {
+    if (layout.markdownBands.at(-1)!.length === transcriptRenderableBandRows) layout.markdownBands.push([])
+    layout.markdownBands.at(-1)!.push(line)
+    layout.markdownStableContent[layout.markdownBands.length - 1] = undefined
+  }
+}
+
+const stableMarkdownChunkSize = 512
+
+const stableMarkdownBoundary = (text: string, offset: number): number => {
+  const limit = Math.min(text.length, offset + stableMarkdownChunkSize)
+  const boundary = text.lastIndexOf("\n\n", limit - 1)
+  return boundary < offset ? offset : boundary + 2
+}
+
+const parseStableMarkdown = (layout: TentativeTranscriptLayout, text: string, nowMillis: number): void => {
+  if (nowMillis - layout.markdownLastLexedAt < 500) return
+  const boundary = stableMarkdownBoundary(text, layout.markdownStableLength)
+  if (boundary <= layout.markdownStableLength) return
+  const stableSource = text.slice(layout.markdownStableLength, boundary)
+  appendMarkdownLines(layout, renderMarkdownLines(stableSource, layout.width))
+  layout.markdownStableLength = boundary
+  layout.markdownLastLexedAt = nowMillis
+  layout.pending = ""
+  layout.pendingSource = ""
+  layout.bands.splice(0, layout.bands.length, [])
+  layout.stableContent.splice(0)
+  layout.sourceLength = boundary
+  appendTentativeText(layout, text.slice(boundary), text.length)
+}
+
+const markdownBundles = (key: string, revision: string, layout: TentativeTranscriptLayout) => {
   const bundles: Array<TranscriptRangeBundle> = []
-  const lines = renderMarkdownLines(text.trimEnd(), width)
-  for (let start = 0; start < lines.length; start += transcriptRenderableBandRows) {
-    const band = lines.slice(start, start + transcriptRenderableBandRows)
-    const chunks: Array<TextChunk> = []
-    for (const [index, line] of band.entries()) {
-      chunks.push(...line)
-      if (index < band.length - 1) chunks.push(fg(colors.text)("\n"))
-    }
-    const bandKey = start === 0 ? `${key}:body` : `${key}:body:${start}`
+  for (const [index, band] of layout.markdownBands.entries()) {
+    if (band.length === 0) continue
+    const bandKey = index === 0 ? `${key}:body` : `${key}:body:markdown:${index}`
+    const content = (layout.markdownStableContent[index] ??= styledBand(band))
     bundles.push({
       key: bandKey,
       rows: band.length,
       descriptors: [
-        { key: bandKey, revision: `${revision}#${start}`, content: new StyledText(chunks), selectable: false },
+        {
+          key: bandKey,
+          revision: `${key}:${layout.width}:markdown:${index}:${band.length}`,
+          content,
+          selectable: false,
+        },
+      ],
+    })
+  }
+  const style = (value: string) => new StyledText([fg(colors.text)(value)])
+  for (const [index, band] of layout.bands.entries()) {
+    const tail = index === layout.bands.length - 1
+    const rows = tail ? [...band, layout.pending] : band
+    if (rows.length === 0 || (rows.length === 1 && rows[0] === "")) continue
+    const value = rows.join("\n")
+    const content = tail ? style(value) : (layout.stableContent[index] ??= style(value))
+    const bandKey = `${key}:body:tail:${index}`
+    bundles.push({
+      key: bandKey,
+      rows: rows.length,
+      descriptors: [
+        {
+          key: bandKey,
+          revision: tail ? `${revision}#tail:${index}` : `${key}:${layout.width}:tail:${index}`,
+          content,
+          selectable: false,
+        },
       ],
     })
   }
@@ -143,8 +218,9 @@ export const buildTentativeTranscriptUnitBundles = ({
     (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength }))
   ) {
     layout.markdown = true
-    layout.sourceLength = text.length
-    return { revision, bundles: markdownBundles(key, text, width, revision), tentative: layout }
+    parseStableMarkdown(layout, text, Number(process.hrtime.bigint()) / 1_000_000)
+    appendTentativeText(layout, text.slice(layout.sourceLength), text.length)
+    return { revision, bundles: markdownBundles(key, revision, layout), tentative: layout }
   }
   appendTentativeText(layout, text.slice(layout.sourceLength), text.length)
   return { revision, bundles: plainBundles(key, revision, layout), tentative: layout }

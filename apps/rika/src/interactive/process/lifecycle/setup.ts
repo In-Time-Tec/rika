@@ -80,8 +80,20 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
   const inputHandlers = createInputHandlers(
     options.rememberMode === undefined ? inputContext : { ...inputContext, rememberMode: options.rememberMode },
   )
-  const tuiOptions =
-    options.makeRenderer === undefined ? inputHandlers : { ...inputHandlers, makeRenderer: options.makeRenderer }
+  const warning = (event: string, cause: unknown) => {
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    fork(
+      Effect.logWarning(event).pipe(
+        Effect.annotateLogs({
+          "rika.failure.kind": error.name,
+          "rika.failure.message": error.message,
+          "rika.failure.stack": error.stack ?? error.message,
+        }),
+      ),
+    )
+  }
+  const handlers = { ...inputHandlers, warning }
+  const tuiOptions = options.makeRenderer === undefined ? handlers : { ...handlers, makeRenderer: options.makeRenderer }
   return fork(
     settleTuiInitialization(
       createTui(tuiOptions),

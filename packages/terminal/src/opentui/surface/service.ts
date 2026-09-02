@@ -27,6 +27,7 @@ import { TranscriptPane } from "./transcript/pane"
 import type { TranscriptScrollBoxRenderable } from "./transcript/pane-geometry"
 import { ThreadBrowser } from "./thread-browser"
 import { AdapterError, SurfaceAdapter } from "./adapter"
+import { registerWarningReporter } from "../../warning"
 
 class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
   onWindowChanged: (() => void) | undefined
@@ -439,9 +440,10 @@ export class Surface extends SurfaceLifecycle {
     this.inputBox.onMouseOver = this.onComposerMouseMove
     this.inputBox.onMouseMove = this.onComposerMouseMove
     this.inputBox.onMouseOut = this.onComposerMouseOut
-    renderer.root.onMouseDrag = this.onRootMouseDrag
-    renderer.root.onMouseUp = this.onRootMouseUp
-    renderer.root.onMouseDragEnd = this.onRootMouseUp
+    this.initializeGuardedCallbacks()
+    renderer.root.onMouseDrag = this.guardedOnRootMouseDrag
+    renderer.root.onMouseUp = this.guardedOnRootMouseUp
+    renderer.root.onMouseDragEnd = this.guardedOnRootMouseUp
     this.changedFilesBox.onMouseDown = this.onSidebarMouseDown
     this.changedFilesBox.onMouseOver = this.onSidebarMouseMove
     this.changedFilesBox.onMouseMove = this.onSidebarMouseMove
@@ -473,10 +475,11 @@ export class Surface extends SurfaceLifecycle {
     renderer.root.add(this.toastBox)
     renderer.root.add(this.ctrlCMenuBox)
     renderer.root.add(this.ctrlCMenuTitle)
-    renderer.keyInput.on("keypress", this.onKey)
-    renderer.keyInput.on("paste", this.onPaste)
-    renderer.on(CliRenderEvents.RESIZE, this.onResize)
-    renderer.on(CliRenderEvents.SELECTION, this.onSelection)
+    renderer.keyInput.on("keypress", this.guardedOnKey)
+    renderer.keyInput.on("paste", this.guardedOnPaste)
+    renderer.on(CliRenderEvents.RESIZE, this.guardedOnResize)
+    renderer.on(CliRenderEvents.SELECTION, this.guardedOnSelection)
+    if (handlers.warning !== undefined) this.releaseWarningReporter = registerWarningReporter(handlers.warning)
   }
 }
 

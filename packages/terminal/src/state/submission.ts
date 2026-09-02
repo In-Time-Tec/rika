@@ -153,12 +153,11 @@ export const settleProvisionalUserEntry: {
   ): ReturnType<typeof settleProvisionalUserEntryImpl>
 } = Function.dual(3, settleProvisionalUserEntryImpl)
 
-export const overlayPendingSubmissions: {
-  (arg0: Model, arg1: Model): Model
-  (arg1: Model): (arg0: Model) => Model
-} = Function.dual(2, (model: Model, previous: Model): Model => {
-  const entries = [...model.entries]
-  const items = [...model.items]
+const overlayProvisionalTranscript = (model: Model, previous: Model) => {
+  let entries: Model["entries"] = model.entries
+  let items: Model["items"] = model.items
+  let mutableEntries: Array<Model["entries"][number]> | undefined
+  let mutableItems: Array<Model["items"][number]> | undefined
   for (const item of previous.items) {
     if (!isSubmissionItem(item) || item.provisional !== true) continue
     if (items.some((candidate) => isSubmissionItem(candidate) && itemMatches(candidate, item))) continue
@@ -171,23 +170,37 @@ export const overlayPendingSubmissions: {
       (candidate) => candidate.role === entry.role && candidate.text === entry.text,
     ).length
     if (currentCount >= previousCount) continue
-    const index = entries.length
-    entries.push(entry)
-    items.push({ ...item, index })
+    if (mutableEntries === undefined || mutableItems === undefined) {
+      mutableEntries = Array.from(entries)
+      mutableItems = Array.from(items)
+      entries = mutableEntries
+      items = mutableItems
+    }
+    const index = mutableEntries.length
+    mutableEntries.push(entry)
+    mutableItems.push({ ...item, index })
   }
+  return { entries, items, changed: mutableEntries !== undefined }
+}
+
+export const overlayPendingSubmissions: {
+  (arg0: Model, arg1: Model): Model
+  (arg1: Model): (arg0: Model) => Model
+} = Function.dual(2, (model: Model, previous: Model): Model => {
+  const transcript = overlayProvisionalTranscript(model, previous)
   const missingQueue = previous.queue.filter(
     (item) => item.provisional === true && !model.queue.some((candidate) => candidate.id === item.id),
   )
-  const queue = [...model.queue, ...missingQueue]
+  const queue = missingQueue.length === 0 ? model.queue : [...model.queue, ...missingQueue]
   const restoreSending =
     previous.busy && !model.busy && previous.submittedDrafts.some((draft) => draft.turnId === undefined)
-  const overlaid = {
-    ...model,
-    entries,
-    items,
-    queue,
-    queueSelection: queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : queue.at(-1)?.id,
-  }
+  const queueSelection = queue.some((item) => item.id === model.queueSelection)
+    ? model.queueSelection
+    : queue.at(-1)?.id
+  const overlaid =
+    transcript.changed || queue !== model.queue || queueSelection !== model.queueSelection
+      ? { ...model, entries: transcript.entries, items: transcript.items, queue, queueSelection }
+      : model
   if (!restoreSending) return overlaid
   return { ...overlaid, busy: true, activity: previous.activity ?? { _tag: "Sending" as const } }
 })

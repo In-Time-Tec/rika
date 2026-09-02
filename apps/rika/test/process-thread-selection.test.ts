@@ -50,6 +50,7 @@ describe("created Thread selection", () => {
     }
     const { dispatch } = makeEventRouter({
       loop,
+      currentTimeMillis: () => 0,
       render: () => undefined,
       refreshTerminalTitle: () => undefined,
       requestSelectionResync: () => undefined,
@@ -92,6 +93,7 @@ describe("created Thread selection", () => {
     }
     const { dispatch } = makeEventRouter({
       loop,
+      currentTimeMillis: () => 0,
       render: () => undefined,
       refreshTerminalTitle: () => undefined,
       requestSelectionResync: () => undefined,

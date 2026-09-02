@@ -12,12 +12,12 @@ export interface TerminalSurface {
   destroy(): void
 }
 
-interface SurfaceConstructor<Surface extends TerminalSurface> {
-  new (renderer: Awaited<ReturnType<typeof createCliRenderer>>, handlers: Handlers, options: SurfaceOptions): Surface
-}
-
 const createSurfaceAdapter = <Surface extends TerminalSurface>(
-  Surface: SurfaceConstructor<Surface>,
+  Surface: new (
+    renderer: Awaited<ReturnType<typeof createCliRenderer>>,
+    handlers: Handlers,
+    options: SurfaceOptions,
+  ) => Surface,
   handlers: Handlers,
 ) =>
   (handlers.makeRenderer === undefined
@@ -46,11 +46,14 @@ const createSurfaceAdapter = <Surface extends TerminalSurface>(
               released = true
               try {
                 surface?.destroy()
-              } catch {
+              } catch (cause) {
+                handlers.warning?.("tui.surface.destroy.failed", cause)
               } finally {
                 try {
                   renderer.destroy()
-                } catch {}
+                } catch (cause) {
+                  handlers.warning?.("tui.renderer.destroy.failed", cause)
+                }
               }
             }
             const suspendTerminal = () => {
@@ -71,11 +74,17 @@ const createSurfaceAdapter = <Surface extends TerminalSurface>(
                 throw cause
               }
             }
+            const redrawTerminal = () => {
+              if (released) return
+              // OpenTUI 0.4.3 has no public full-redraw API. This is its internal repaint flag.
+              Reflect.set(renderer, "forceFullRepaintRequested", true)
+              renderer.requestRender()
+            }
             try {
               renderer.setBackgroundColor("transparent")
               handlers.resize(renderer.terminalWidth, renderer.terminalHeight)
               surface = new Surface(renderer, handlers, { epochMillis })
-              return { surface, releaseTerminal, suspendTerminal, resumeTerminal }
+              return { surface, releaseTerminal, suspendTerminal, resumeTerminal, redrawTerminal }
             } catch (cause) {
               releaseTerminal()
               throw cause
@@ -88,7 +97,14 @@ const createSurfaceAdapter = <Surface extends TerminalSurface>(
   )
 
 export const SurfaceAdapter = {
-  create<Surface extends TerminalSurface>(Surface: SurfaceConstructor<Surface>, handlers: Handlers) {
+  create<Surface extends TerminalSurface>(
+    Surface: new (
+      renderer: Awaited<ReturnType<typeof createCliRenderer>>,
+      handlers: Handlers,
+      options: SurfaceOptions,
+    ) => Surface,
+    handlers: Handlers,
+  ) {
     return createSurfaceAdapter(Surface, handlers)
   },
 }

@@ -1,6 +1,6 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Clock, Effect, Schema } from "effect"
+import { Schema } from "effect"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../../controller/service"
 import * as ThreadSelection from "../../controller/thread-selection"
@@ -14,6 +14,7 @@ type EventLoop = Pick<
 
 type Runtime = {
   readonly loop: EventLoop
+  readonly currentTimeMillis: () => number
   readonly render: (immediate?: boolean) => void
   readonly refreshTerminalTitle: () => void
   readonly requestSelectionResync: (threadId: string) => void
@@ -60,7 +61,7 @@ const isThreadPreviewEvent = (event: InteractiveEventType): event is ThreadPrevi
   event._tag === "ThreadPreviewLoaded" || event._tag === "ThreadPreviewFailed"
 
 export const makeEventRouter = (runtime: Runtime) => {
-  const { loop, refreshTerminalTitle, render, requestSelectionResync } = runtime
+  const { loop, currentTimeMillis, refreshTerminalTitle, render, requestSelectionResync } = runtime
   const controllerState = () => {
     const state: ControllerState = {
       model: loop.model,
@@ -203,7 +204,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         budget: event.budget,
         message: event.message,
         nextAt: event.nextAt,
-        retryCountdown: Math.max(0, Math.ceil((event.nextAt - Effect.runSync(Clock.currentTimeMillis)) / 1000)),
+        retryCountdown: Math.max(0, Math.ceil((event.nextAt - currentTimeMillis()) / 1_000)),
       })
       return true
     }
@@ -216,6 +217,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       }
       if (event.turnId !== undefined) action.turnId = event.turnId
       loop.model = update(loop.model, action)
+      loop.renderer?.surface.showToast(event.failure.message, "#e06c75")
       return true
     }
     if (event._tag === "ShellCompleted") {

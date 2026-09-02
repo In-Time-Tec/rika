@@ -12,6 +12,7 @@ import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import {
   Context,
+  Clock,
   Crypto,
   Deferred,
   Effect,
@@ -81,6 +82,7 @@ export const interactiveTui =
     Effect.gen(function* () {
       if (options.makeRenderer === undefined && (!stdin.isTTY || !stdout.isTTY)) return
       const crypto = yield* Crypto.Crypto
+      const clock = yield* Clock.Clock
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const nextSteeringRequestId = () => `rika:steer:${runSync(crypto.randomUUIDv4)}`
       const appScope = yield* Scope.make()
@@ -211,6 +213,7 @@ export const interactiveTui =
         } = runtime
         const { dispatch } = eventRouter.make({
           loop,
+          currentTimeMillis: () => clock.currentTimeMillisUnsafe(),
           refreshTerminalTitle,
           render,
           requestSelectionResync,

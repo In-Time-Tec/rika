@@ -10,7 +10,11 @@ import {
 import stringWidth from "string-width"
 import { Option, Schema } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import { mountedTranscriptRowBudget, transcriptRenderableBandRows } from "../../../presentation/transcript/window"
+import {
+  mountedStreamingTranscriptRowBudget,
+  mountedTranscriptRowBudget,
+  transcriptRenderableBandRows,
+} from "../../../presentation/transcript/window"
 import { mergePinnedRecords } from "../../../presentation/transcript/record-order"
 import { transcriptUnitId, transcriptUnits } from "../../../presentation/transcript/row"
 import { escapePathTarget } from "../../../presentation/transcript/tool/detail"
@@ -37,6 +41,19 @@ import {
 export { tentativeTranscriptContainsMarkdown }
 export type { TranscriptRowsCache }
 export type TranscriptPathTarget = PathTarget
+
+let transcriptRenderablesCreated = 0
+let transcriptRenderablesDestroyed = 0
+
+export const transcriptRenderableDiagnostics = () => ({
+  created: transcriptRenderablesCreated,
+  destroyed: transcriptRenderablesDestroyed,
+})
+
+export const resetTranscriptRenderableDiagnostics = (): void => {
+  transcriptRenderablesCreated = 0
+  transcriptRenderablesDestroyed = 0
+}
 
 const isolateSpinnerChunk = (content: StyledText, spinnerGlyph: string) => {
   const chunkIndex = content.chunks.findIndex((chunk) => chunk.text.includes(spinnerGlyph))
@@ -147,6 +164,7 @@ const reconcileTranscriptRenderables = ({
     if (desiredKeys.has(record.key) || selected.has(record.renderable)) continue
     content.remove(record.renderable)
     record.renderable.destroy()
+    transcriptRenderablesDestroyed += 1
     records.delete(record.key)
   }
   const desired = descriptors.map((descriptor) => {
@@ -199,6 +217,7 @@ const reconcileTranscriptRenderables = ({
       wrapMode: "none",
       selectable: descriptor.selectable ?? true,
     })
+    transcriptRenderablesCreated += 1
     renderable.onMouseDown = (event) => handleMouseDown(renderable, event)
     renderable.onMouseOver = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
     renderable.onMouseMove = descriptor.pointer === true ? () => renderer.setMousePointer("pointer") : undefined
@@ -217,14 +236,9 @@ const reconcileTranscriptRenderables = ({
   if (!bottomSpacer.visible && bottomSpacer.parent === content) content.remove(bottomSpacer)
   if (topSpacer.visible && content.getChildren()[0] !== topSpacer) content.add(topSpacer, 0)
   const leading = topSpacer.visible ? 1 : 0
-  const current = [...content.getChildren()]
   children.forEach((child, index) => {
     const target = index + leading
-    if (current[target] === child) return
-    const previous = current.indexOf(child)
-    if (previous >= 0) current.splice(previous, 1)
-    current.splice(target, 0, child)
-    content.add(child, target)
+    if (content.getChildren()[target] !== child) content.add(child, target)
   })
   if (bottomSpacer.visible) {
     const target = leading + children.length
@@ -259,7 +273,8 @@ const transcriptRenderInputChanged = (
   previous.detailSelection !== input.detailSelection ||
   previous.width !== input.width ||
   previous.windowEnd !== input.windowEnd ||
-  previous.animationTick !== input.animationTick
+  previous.animationTick !== input.animationTick ||
+  previous.transcriptRevision !== input.transcriptRevision
 
 interface ProjectTranscriptRowsOptions {
   readonly renderer: CliRenderer
@@ -422,6 +437,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     width: model.width,
     windowEnd: options.windowEnd,
     animationTick: model.animationTick,
+    transcriptRevision: model.transcriptRevision,
   }
   if (!transcriptRenderInputChanged(options.renderInput, input)) return undefined
   const previousExpandedRows = options.renderInput?.expandedRowKeys
@@ -436,7 +452,13 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
   const rowPrefix: Array<number> = [0]
   for (const current of orderedBundles) rowPrefix.push(rowPrefix.at(-1)! + current.rows)
   const rowTotal = rowPrefix.at(-1) ?? 0
-  const budget = mountedTranscriptRowBudget(options.viewportHeight > 0 ? options.viewportHeight : model.height)
+  const preserveStreamingBands = transcriptUnits(model).some((unit) =>
+    transcriptUnitId(model, unit).includes(":tentative:"),
+  )
+  const viewportRows = options.viewportHeight > 0 ? options.viewportHeight : model.height
+  const budget = preserveStreamingBands
+    ? mountedStreamingTranscriptRowBudget(viewportRows)
+    : mountedTranscriptRowBudget(viewportRows)
   const range = includeSelectedBands(
     options,
     orderedBundles,

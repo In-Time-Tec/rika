@@ -55,6 +55,7 @@ export interface TranscriptRenderInput {
   readonly width: number
   readonly windowEnd: number
   readonly animationTick: number
+  readonly transcriptRevision: number
 }
 
 export interface ChangedFileRow {
