@@ -2,9 +2,10 @@ import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Schema } from "effect"
 import { workspacePaths } from "@rika/configuration/configuration-paths"
-import * as TuiApp from "../../support/tui-app.harness"
-import { model } from "../../support/tui-model.fixture"
+import * as TuiApp from "../../../support/tui-app.harness"
+import { model } from "../../../support/tui-model.fixture"
 
+/** Exercises pending interactive actions through one real TUI process. */
 const tuiTestTimeout = 60_000
 
 test(

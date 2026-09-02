@@ -1,9 +1,10 @@
 import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
-import * as TuiApp from "../support/tui-app.harness"
-import { model } from "../support/tui-model.fixture"
+import * as TuiApp from "../../support/tui-app.harness"
+import { model } from "../../support/tui-model.fixture"
 
+/** Exercises process-result folding through the hosted feed projection. */
 const tuiTestTimeout = 60_000
 const spinnerFor = (frame: string, marker: string): string | undefined => {
   const lines = frame.split("\n")
