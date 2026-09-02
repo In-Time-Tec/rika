@@ -192,7 +192,7 @@ it.effect.skipIf(!live)("rejects dispatch after the admitted workspace environme
   ),
 )
 
-it.effect.skipIf(!live)("records an uncertain native delivery as unknown", () =>
+it.effect.skipIf(!live)("reports an uncertain native delivery without deciding its durable outcome", () =>
   isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -212,15 +212,11 @@ it.effect.skipIf(!live)("records an uncertain native delivery as unknown", () =>
           encode({ _tag: "ExecutorReconnect", protocolVersion: runnerProtocolVersion, access }),
         )
         target.failSend = true
-        expect(yield* gateway.execute(request)).toMatchObject({
-          response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
-          outcome: "unknown",
-          eventPersisted: true,
-        })
+        expect(yield* gateway.execute(request).pipe(Effect.flip)).toMatchObject({ kind: "transport" })
         expect(target.sent.map((value) => decode(value)).some((message) => message._tag === "MachineExecute")).toBe(
           true,
         )
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "unknown", events: 1 }])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),

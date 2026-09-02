@@ -5,7 +5,7 @@ import {
   type AccessWire,
   type ExecutorMessage as ExecutorMessageValue,
 } from "@rika/remote-execution/protocol"
-import { Context, Crypto, Deferred, Effect, Encoding, Layer, PubSub, Redacted, Ref, Semaphore } from "effect"
+import { Context, Crypto, DateTime, Deferred, Effect, Encoding, Layer, PubSub, Redacted, Ref, Semaphore } from "effect"
 import {
   GatewayError,
   type Gateway,
@@ -22,15 +22,14 @@ import { gatewayExecutionFactory } from "./gateway/execution"
 import { gatewayMessageHandlerFactory } from "./gateway/message/handler"
 import { gatewayProtocol } from "./gateway/protocol"
 import { gatewaySessionAwaiter, gatewaySessionsFactory } from "./gateway/sessions"
-import { machineRpcFactory } from "./gateway/rpc/machine"
 import { workspaceRpcFactory } from "./gateway/rpc/workspace"
 import type {
   BranchPushCall,
   GatewaySession as Session,
-  MachineCall,
   PendingOperation as Pending,
   WorkspaceCall,
 } from "./gateway/rpc/model"
+import { makeNativeOperationEndpoint } from "./native-operation-endpoint"
 
 const { accessFailure, decode, encode, expired, fenceOf, sameAccess } = gatewayProtocol
 
@@ -59,7 +58,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, Pending>())
-  const machineCalls = yield* Ref.make(new Map<string, MachineCall>())
   const workspaceCalls = yield* Ref.make(new Map<string, WorkspaceCall>())
   const branchPushCalls = yield* Ref.make(new Map<string, BranchPushCall>())
   const quiescing = yield* Ref.make(new Set<string>())
@@ -74,7 +72,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     >(),
   )
   const admission = yield* Semaphore.make(1)
-  const machineLock = yield* Semaphore.make(1)
   const ptyFrames = yield* PubSub.sliding<PtyEvent>(256)
   const crypto = yield* Crypto.Crypto
   const scope = yield* Effect.scope
@@ -88,15 +85,28 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
   const awaitSession = gatewaySessionAwaiter(sessions)
-  const machineRpc = machineRpcFactory({
-    sessions,
-    assignments,
-    pending,
-    calls: machineCalls,
-    lock: machineLock,
-    admission,
+  const nativeOperations = yield* makeNativeOperationEndpoint({
     digest,
-    send: (socket, message) => socket.send(encode(message)),
+    encodeRequest: gatewayProtocol.encodeMachineRequest,
+    session: (assignmentId) => Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId))),
+    authorize: (input, session) =>
+      Ref.get(pending).pipe(
+        Effect.map((current) => {
+          const operation = current.get(gatewayProtocol.key(input.assignmentId, input.operationKey, input.attempt))
+          return (
+            operation !== undefined &&
+            operation.socket === session.socket &&
+            gatewayProtocol.sameExecutor(operation.access, session.access)
+          )
+        }),
+      ),
+    sameAccess: gatewayProtocol.sameAccess,
+    send: (session, message) =>
+      Effect.try({
+        try: () => session.socket.send(encode(message)),
+        catch: (cause) =>
+          GatewayError.make({ kind: "transport", message: `Could not deliver native operation: ${String(cause)}` }),
+      }),
   })
   const workspaceRpc = workspaceRpcFactory({
     controller,
@@ -166,9 +176,9 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
 
   const execution = gatewayExecutionFactory({
-    controller,
     lifecycle,
-    preparation,
+    validateAccess: (access) => controller.validateAccess(redactAccess(access)).pipe(Effect.mapError(accessFailure)),
+    ready: preparation.ready,
     sessions,
     pending,
     quiescing,
@@ -176,8 +186,24 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     awaitSession,
     grant: (session, operationKey) => grant(session, "runtime", operationKey),
     machineIdFor: (operationKey, attempt) => digest(`${attempt}\u0000${operationKey}`),
-    invokeMachine: machineRpc.invoke,
-    cancelMachine: machineRpc.cancel,
+    invokeMachine: (assignmentId, operationKey, attempt, machineId, request, deadlineAt) =>
+      nativeOperations.invoke({
+        assignmentId,
+        operationKey,
+        attempt,
+        machineId,
+        request,
+        deadlineAtMillis: DateTime.toEpochMillis(DateTime.makeUnsafe(deadlineAt)),
+      }),
+    cancelMachine: (assignmentId, operationKey, attempt, machineId, request, deadlineAt) =>
+      nativeOperations.cancel({
+        assignmentId,
+        operationKey,
+        attempt,
+        machineId,
+        request,
+        deadlineAtMillis: DateTime.toEpochMillis(DateTime.makeUnsafe(deadlineAt)),
+      }),
     scope,
   })
 
@@ -185,16 +211,16 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     sessions,
     assignments,
     pending,
-    machineCalls,
     workspaceCalls,
     quiescence,
     admission,
-    machineLock,
     close,
     failBranchPush: branchPushRpc.fail,
     grantRuntime: (session, operationKey) => grant(session, "runtime", operationKey),
     send: (socket, message) => socket.send(encode(message)),
-    machineDeadlineOutcome: machineRpc.deadlineOutcome,
+    refreshNative: nativeOperations.refreshed,
+    reconnectNative: nativeOperations.reconnected,
+    disconnectNative: nativeOperations.disconnected,
   })
   const { register, replayPending, disconnected } = sessionRegistry
 
@@ -213,29 +239,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   })
   const { active, ptyEvents, publishPty, quiesce, retryPreparation, sendPty } = control
 
-  const recover = Effect.fn("ExecutorGateway.recover")(function* (
-    message: ExecutorMessageValue,
-    error: ControllerError | GatewayError,
-  ) {
-    if (message._tag !== "ExecutorReconnect" || error.kind !== "fenced") return
-    const current = yield* Ref.get(sessions).pipe(
-      Effect.map((registered) => registered.get(message.access.fence.assignmentId)),
-    )
-    if (current !== undefined) return
-    const successor = {
-      ...message.access,
-      leaseEpoch: message.access.leaseEpoch + 1,
-    }
-    const acknowledged = yield* Effect.result(controller.validateAccess(redactAccess(successor)))
-    if (acknowledged._tag === "Failure") return
-    yield* phases
-      .replace({
-        assignmentId: message.access.fence.assignmentId,
-        generation: message.access.fence.assignmentGeneration,
-      })
-      .pipe(Effect.ignoreCause)
-  })
-
   const messageHandler = gatewayMessageHandlerFactory({
     controller,
     sessions,
@@ -247,16 +250,18 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     preparation,
     branchPushCalls,
     send: (socket, message) => socket.send(encode(message)),
-    receiveMachine: (socket, message) =>
-      machineRpc.receive(
-        socket,
-        message.access,
-        message.operationKey,
-        message.attempt,
-        message.machineId,
-        message.requestDigest,
-        message.outcome,
-      ),
+    receiveMachine: (socket, message) => {
+      const current = Ref.get(sessions).pipe(
+        Effect.map((registered) => registered.get(message.access.fence.assignmentId)),
+      )
+      return Effect.flatMap(current, (session) =>
+        session === undefined ||
+        session.socket !== socket ||
+        !gatewayProtocol.sameAccess(session.access, message.access)
+          ? GatewayError.make({ kind: "fenced", message: "Native operation result came from an unknown executor" })
+          : nativeOperations.receive(session, { ...message, assignmentId: message.access.fence.assignmentId }),
+      )
+    },
     receiveWorkspace: (socket, message) => workspaceRpc.receive(socket, message.access, message.response),
     receiveBranchPush: (socket, message) =>
       branchPushRpc.receive(
@@ -284,7 +289,6 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
                     "rika.error.kind": error.kind,
                     "rika.error.message": error.message,
                   }),
-                  Effect.andThen(recover(message, error)),
                   Effect.andThen(Effect.sync(() => failure(socket, message, error))),
                 ),
               onSuccess: () => Effect.void,

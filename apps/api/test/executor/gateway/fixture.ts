@@ -173,31 +173,6 @@ const lifecycleStore = (
           result: { response: cancelledResponse, outcome: "cancelled" as const },
         }
       }),
-    resolveDeadline: (input) =>
-      Effect.sync(() => {
-        const operationId = operation(input)
-        const current = operations.get(operationId) ?? {
-          state: "accepted" as const,
-          started: false,
-          deadlineAt: operationalWindows.get(operationId)?.deadlineAt ?? "2999-01-01T00:00:00.000Z",
-        }
-        if (
-          (current.state === "completed" || current.state === "unknown") &&
-          current.response !== undefined &&
-          current.outcome !== undefined
-        )
-          return { _tag: "AlreadyTerminal" as const, result: { response: current.response, outcome: current.outcome } }
-        const unknown = current.state === "dispatched"
-        const response = {
-          _tag: "DomainFailure" as const,
-          failure: unknown
-            ? { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" }
-            : { kind: "timeout", message: "Tool operation deadline exceeded" },
-        }
-        const outcome = unknown ? ("unknown" as const) : ("failed" as const)
-        operations.set(operationId, { ...current, state: unknown ? "unknown" : "completed", response, outcome })
-        return { _tag: "Resolved" as const, result: { response, outcome } }
-      }),
   }
 }
 

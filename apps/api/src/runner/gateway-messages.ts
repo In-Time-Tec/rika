@@ -1,20 +1,28 @@
-import { redactAccess, redactHeartbeat } from "@rika/remote-execution/protocol"
+import { redactAccess, redactHeartbeat, type AccessWire, type MachineOutcome } from "@rika/remote-execution/protocol"
 import { Effect, Redacted } from "effect"
-import type { Socket, SocketFrame } from "../executor/gateway"
+import type { GatewayError, Socket, SocketFrame } from "../executor/gateway"
 import type { RunnerExecutorAuthority } from "./executor"
-import type { runnerGatewayCalls } from "./gateway-calls"
 import { gatewayModel, type Session } from "./gateway-model"
 
-type Calls = ReturnType<typeof runnerGatewayCalls>
 interface MessageDependencies {
   readonly authority: RunnerExecutorAuthority
-  readonly register: (session: Session) => Effect.Effect<void>
+  readonly register: (session: Session) => Effect.Effect<void, GatewayError>
   readonly replayPending: (session: Session) => Effect.Effect<void, import("../executor/gateway").GatewayError>
   readonly shutdown: (
     socket: Socket,
     access: Session["access"],
   ) => Effect.Effect<void, import("../executor/gateway").GatewayError>
-  readonly calls: Pick<Calls, "receiveMachine">
+  readonly calls: {
+    readonly receiveMachine: (
+      socket: Socket,
+      access: AccessWire,
+      operationKey: string,
+      attempt: number,
+      machineId: string,
+      requestDigest: string,
+      outcome: MachineOutcome,
+    ) => Effect.Effect<void, GatewayError>
+  }
 }
 
 export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
@@ -47,6 +55,8 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                     sessionToken: Redacted.value(welcome.sessionToken),
                   },
                   leaseExpiresAt: welcome.leaseExpiresAt,
+                  ready: true,
+                  environmentDigest: null,
                 }),
               ),
               Effect.catch((error) => Effect.sync(() => socket.close(1008, error.kind))),
@@ -58,6 +68,8 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                   socket,
                   access: { ...message.access, leaseEpoch: welcome.leaseEpoch },
                   leaseExpiresAt: welcome.leaseExpiresAt,
+                  ready: true,
+                  environmentDigest: null,
                 }
                 return Effect.sync(() => {
                   socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
@@ -72,6 +84,8 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                   socket,
                   access: { ...message.heartbeat.access, leaseEpoch: receipt.leaseEpoch },
                   leaseExpiresAt: receipt.leaseExpiresAt,
+                  ready: true,
+                  environmentDigest: null,
                 }),
               ),
               Effect.tap((receipt) =>

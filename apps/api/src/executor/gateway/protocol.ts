@@ -17,8 +17,6 @@ const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(ExecutorMessage)
 const encode = Schema.encodeSync(Schema.fromJsonString(ApiMessage))
 const key = (assignmentId: string, operationKey: string, attempt: number) =>
   `${assignmentId}\u0000${operationKey}\u0000${attempt}`
-const machineKey = (assignmentId: string, operationKey: string, attempt: number, machineId: string) =>
-  `${assignmentId}\u0000${operationKey}\u0000${attempt}\u0000${machineId}`
 const workspaceKey = (assignmentId: string, requestId: string) => `${assignmentId}\u0000${requestId}`
 const encodeMachineRequest = Schema.encodeSync(Schema.fromJsonString(MachineRequest))
 const equivalentWorkspaceRequest = Schema.toEquivalence(WorkspaceRequest)
@@ -80,7 +78,6 @@ export const gatewayProtocol = {
   expired,
   fenceOf,
   key,
-  machineKey,
   matchesWorkspaceRequest,
   sameAccess,
   sameExecutor,

@@ -1,8 +1,6 @@
 import type {
   AccessWire,
   BranchPushOutcome,
-  MachineOutcome,
-  MachineRequest,
   WorkspaceRequest,
   WorkspaceResponse,
 } from "@rika/remote-execution/protocol"
@@ -26,20 +24,6 @@ export interface PendingOperation {
   readonly access: AccessWire
   readonly result: Deferred.Deferred<ExecutionResult, GatewayError>
   readonly waiters: number
-}
-
-export interface MachineCall {
-  readonly assignmentId: string
-  readonly operationKey: string
-  readonly attempt: number
-  readonly machineId: string
-  readonly requestDigest: string
-  readonly request: MachineRequest
-  readonly socket: Socket
-  readonly access: AccessWire
-  readonly deadlineAtMillis: number
-  readonly cancelling: boolean
-  readonly result: Deferred.Deferred<MachineOutcome>
 }
 
 export interface WorkspaceCall {
