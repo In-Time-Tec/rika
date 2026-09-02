@@ -1,8 +1,5 @@
 import type { HostedExecutionOperationsService, OperationRecord } from "@rika/product-store/executor-operations"
-import {
-  ToolOperationResponse,
-  type ToolOperationResponse as ToolOperationResponseValue,
-} from "@rika/product/tool-operation-lifecycle"
+import { ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
 import { Crypto, Effect, Encoding, Schema } from "effect"
 import {
   cancelledResponse,
@@ -58,14 +55,6 @@ const matchesLifecycle = (
 export const LifecycleStores = {
   build: (operations: HostedExecutionOperationsService, crypto: Crypto.Crypto) => {
     const decodeResponse = Schema.decodeUnknownEffect(ToolOperationResponse)
-    const unknownResponse: ToolOperationResponseValue = {
-      _tag: "DomainFailure",
-      failure: { kind: "unknown", message: "Executor operation outcome is unknown after executor loss" },
-    }
-    const timeoutResponse: ToolOperationResponseValue = {
-      _tag: "DomainFailure",
-      failure: { kind: "timeout", message: "Tool operation deadline exceeded" },
-    }
     const identifyOperation = (input: OperationIdentity) =>
       crypto
         .digest(
@@ -256,52 +245,6 @@ export const LifecycleStores = {
             kind: "fenced",
             message: "Executor operation changed before cancellation",
           })
-        }),
-      resolveDeadline: (input) =>
-        Effect.gen(function* () {
-          const row = yield* operations
-            .findOperation(input)
-            .pipe(persistenceFailure("Could not resolve executor operation deadline"))
-          if (row === undefined)
-            return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
-          if (row.state === "completed" || row.state === "unknown")
-            return { _tag: "AlreadyTerminal", result: yield* terminalResult(row) } as const
-          if (row.state === "dispatched") {
-            const finalized = yield* operations
-              .finalizeOperation({
-                assignmentId: input.assignmentId,
-                operationKey: input.operationKey,
-                attempt: input.attempt,
-                response: unknownResponse,
-                state: "unknown",
-              })
-              .pipe(persistenceFailure("Could not persist unknown executor outcome"))
-            if (finalized._tag === "finalized" || finalized._tag === "already-terminal")
-              return {
-                _tag: "Resolved",
-                result: { response: finalized.response, outcome: finalized.outcome },
-              } as const
-            if (finalized._tag === "missing")
-              return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
-            return yield* GatewayError.make({
-              kind: "fenced",
-              message: "Executor operation could not be terminalized as unknown",
-            })
-          }
-          const timedOut = yield* operations
-            .terminalizeAccepted(input, timeoutResponse, "failed")
-            .pipe(persistenceFailure("Could not resolve executor operation deadline"))
-          if (timedOut === undefined) {
-            const current = yield* operations
-              .findOperation(input)
-              .pipe(persistenceFailure("Could not resolve executor operation deadline"))
-            if (current === undefined)
-              return yield* GatewayError.make({ kind: "transport", message: "Executor operation is unavailable" })
-            if (current.state === "completed" || current.state === "unknown")
-              return { _tag: "AlreadyTerminal", result: yield* terminalResult(current) } as const
-            return { _tag: "Resolved", result: { response: unknownResponse, outcome: "unknown" } } as const
-          }
-          return { _tag: "Resolved", result: { response: timeoutResponse, outcome: "failed" } } as const
         }),
     }
     return lifecycle

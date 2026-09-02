@@ -176,7 +176,7 @@ export type RepositoryCheckoutWire = typeof RepositoryCheckoutWire.Type
 export const WorkspacePreparationPhase = Schema.Literals(["checkout", "setup", "resume", "capabilities"])
 export type WorkspacePreparationPhase = typeof WorkspacePreparationPhase.Type
 
-export const HookEvidenceWire = Schema.Struct({
+const HookEvidenceWire = Schema.Struct({
   digest: Schema.NullOr(Sha256),
   commitSha: Schema.NullOr(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))),
   buildDigest: Sha256,

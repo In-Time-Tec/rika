@@ -25,11 +25,11 @@ const Snapshot = Schema.Struct({ version: Schema.Literal(1), services: Schema.Ar
 const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot))
 const encodeSnapshot = Schema.encodeEffect(Schema.fromJsonString(Snapshot))
 
-export interface StoredService extends RepositoryService {
+interface StoredService extends RepositoryService {
   readonly desired: boolean
 }
 
-export class RepositoryServiceError extends Schema.TaggedError<RepositoryServiceError>()("RepositoryServiceError", {
+class RepositoryServiceError extends Schema.TaggedError<RepositoryServiceError>()("RepositoryServiceError", {
   kind: Schema.Literals(["conflict", "driver", "invalid", "missing", "storage"]),
   message: Schema.String,
 }) {}
@@ -44,7 +44,7 @@ export class Repository extends Context.Service<Repository, RepositoryInterface>
   "@rika/remote-execution/workspace/repositories/Repository",
 ) {}
 
-export interface RunningService {
+interface RunningService {
   readonly exit: Effect.Effect<number, RepositoryServiceError>
 }
 

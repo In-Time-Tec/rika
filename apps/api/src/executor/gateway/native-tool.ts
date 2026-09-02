@@ -102,6 +102,7 @@ export const runNativeTool = (options: {
     attempt: number,
     machineId: string,
     request: MachineRequest,
+    deadlineAt: string,
   ) => Effect.Effect<MachineOutcome, GatewayError>
 }): Effect.Effect<void> => {
   const { operation } = options
@@ -114,6 +115,7 @@ export const runNativeTool = (options: {
       operation.attempt,
       yield* options.machineIdFor(operation.operationKey, operation.attempt),
       operation.request.machineRequest,
+      operation.request.deadlineAt,
     )
     return yield* persistNativeOutcome(options.lifecycle, operation.access, operation.request, outcome)
   })

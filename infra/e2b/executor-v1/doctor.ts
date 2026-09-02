@@ -154,7 +154,7 @@ const program = Effect.gen(function* () {
     ),
   )
   yield* check(
-    "machine:workspace-user",
+    "native-tool:workspace-user",
     Effect.gen(function* () {
       const existingFile = path.join(temp, "existing.txt")
       const createdFile = path.join(temp, "created.txt")
@@ -163,17 +163,18 @@ const program = Effect.gen(function* () {
       const output = yield* command([
         "bun",
         "run",
-        "/opt/rika/packages/remote-execution/src/host/machinery/machine-doctor.ts",
+        "/opt/rika/packages/remote-execution/src/host/machinery/native-tool-doctor.ts",
         temp,
       ])
-      if (output !== "rika-workspace:machine-environment")
-        return yield* DoctorError.make({ message: `unexpected machine probe: ${output}` })
+      if (output !== "rika-workspace:native-tool-environment")
+        return yield* DoctorError.make({ message: `unexpected native tool probe: ${output}` })
       if ((yield* fileSystem.readFileString(existingFile)) !== "after")
-        return yield* DoctorError.make({ message: "machine did not edit workspace file" })
-      if ((yield* fileSystem.readFileString(createdFile)) !== "created-by-machine")
-        return yield* DoctorError.make({ message: "machine did not create workspace file" })
+        return yield* DoctorError.make({ message: "native tool did not edit workspace file" })
+      if ((yield* fileSystem.readFileString(createdFile)) !== "created-by-native-tool")
+        return yield* DoctorError.make({ message: "native tool did not create workspace file" })
       const owner = yield* command(["stat", "-c", "%U", createdFile])
-      if (owner !== "rika-workspace") return yield* DoctorError.make({ message: "machine file has the wrong owner" })
+      if (owner !== "rika-workspace")
+        return yield* DoctorError.make({ message: "native tool file has the wrong owner" })
       return output
     }),
   )

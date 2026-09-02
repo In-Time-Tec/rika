@@ -1,2 +1,10 @@
 export { createArchive } from "./archive-upload"
-export * from "./archive"
+export {
+  MaximumArchiveBytes,
+  SetupCacheKey,
+  decodeArchive,
+  encodeArchive,
+  inspectArchive,
+  restoreArchive,
+  type Archive,
+} from "./archive"

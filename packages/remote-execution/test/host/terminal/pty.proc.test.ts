@@ -1,5 +1,5 @@
-import "../../support/host-fragments/machine-process.fixture"
-import "../../support/host-fragments/machine.fixture"
+import "../../support/host-fragments/native-tool-subprocess.fixture"
+import "../../support/host-fragments/native-tool.fixture"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Exit, FileSystem, Layer, Scope } from "effect"

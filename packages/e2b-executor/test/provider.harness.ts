@@ -47,7 +47,7 @@ describe("E2B template", () => {
         expect(host).toContain('cold: config.restoredSession !== undefined || identity.lifecycle === "resume"')
         expect(host).toContain("const nativeToolRuntimeDigest = Encoding.encodeHex(")
         expect(host).toContain('new TextEncoder().encode("rika-native-tools-v1")')
-        expect(host).toContain("machineLayer({")
+        expect(host).toContain("nativeToolLayer({")
         expect(host).toContain('message: "Native tool admission is closed while the executor is quiesced"')
       }))
   })

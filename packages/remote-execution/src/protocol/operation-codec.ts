@@ -18,7 +18,7 @@ export interface Event {
   readonly outcome: MachineOutcome
 }
 
-export interface MachineExecutionInput {
+interface MachineExecutionInput {
   readonly operationKey: string
   readonly attempt: number
   readonly machineId: string

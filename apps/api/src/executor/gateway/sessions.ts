@@ -1,9 +1,9 @@
 import type { Quiescence } from "@rika/e2b-executor/controller"
 import type { AccessWire, ApiMessage, WorkspaceResponse } from "@rika/remote-execution/protocol"
-import { Clock, Deferred, Effect, Ref, type Semaphore } from "effect"
+import { Deferred, Effect, Ref, type Semaphore } from "effect"
 import { GatewayError, type ExecutionResult, type Socket } from "./contract"
 import { gatewayProtocol } from "./protocol"
-import type { GatewaySession as Session, MachineCall, PendingOperation as Pending, WorkspaceCall } from "./rpc/model"
+import type { GatewaySession as Session, PendingOperation as Pending, WorkspaceCall } from "./rpc/model"
 
 const { sameAccess, sameExecutor } = gatewayProtocol
 
@@ -11,7 +11,6 @@ interface SessionRegistryOptions {
   readonly sessions: Ref.Ref<Map<string, Session>>
   readonly assignments: Ref.Ref<Map<Socket, string>>
   readonly pending: Ref.Ref<Map<string, Pending>>
-  readonly machineCalls: Ref.Ref<Map<string, MachineCall>>
   readonly workspaceCalls: Ref.Ref<Map<string, WorkspaceCall>>
   readonly quiescence: Ref.Ref<
     Map<
@@ -24,7 +23,6 @@ interface SessionRegistryOptions {
     >
   >
   readonly admission: Semaphore.Semaphore
-  readonly machineLock: Semaphore.Semaphore
   readonly close: (socket: Socket, code: number, reason: string) => void
   readonly failBranchPush: (
     predicate: (call: { readonly socket: Socket }) => boolean,
@@ -32,7 +30,9 @@ interface SessionRegistryOptions {
   ) => Effect.Effect<void>
   readonly grantRuntime: (session: Session, operationKey: string) => Effect.Effect<void, GatewayError>
   readonly send: (socket: Socket, message: ApiMessage) => void
-  readonly machineDeadlineOutcome: import("@rika/remote-execution/protocol").MachineOutcome
+  readonly refreshNative: (session: Session) => Effect.Effect<void, GatewayError>
+  readonly reconnectNative: (session: Session) => Effect.Effect<void, GatewayError>
+  readonly disconnectNative: (socket: Socket) => Effect.Effect<void>
 }
 
 export const gatewaySessionAwaiter = (sessions: Ref.Ref<Map<string, Session>>) => {
@@ -134,15 +134,7 @@ export const gatewaySessionsFactory = (options: SessionRegistryOptions) => {
               next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
           return next
         })
-        yield* options.machineLock.withPermits(1)(
-          Ref.update(options.machineCalls, (current) => {
-            const next = new Map(current)
-            for (const [pendingKey, operation] of next)
-              if (operation.assignmentId === assignmentId)
-                next.set(pendingKey, { ...operation, socket: session.socket, access: session.access })
-            return next
-          }),
-        )
+        yield* options.refreshNative(session)
         const failedWorkspace = yield* Ref.modify(
           options.workspaceCalls,
           (
@@ -189,47 +181,7 @@ export const gatewaySessionsFactory = (options: SessionRegistryOptions) => {
       if (operation.assignmentId !== session.access.fence.assignmentId) continue
       yield* options.grantRuntime(session, operation.operationKey)
     }
-    yield* options.machineLock.withPermits(1)(
-      Effect.uninterruptible(
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
-          for (const [mapKey, operation] of yield* Ref.get(options.machineCalls)) {
-            if (operation.assignmentId !== session.access.fence.assignmentId) continue
-            if (now >= operation.deadlineAtMillis) {
-              yield* Deferred.succeed(operation.result, options.machineDeadlineOutcome)
-              yield* Ref.update(options.machineCalls, (current) => {
-                if (current.get(mapKey)?.result !== operation.result) return current
-                const next = new Map(current)
-                next.delete(mapKey)
-                return next
-              })
-              continue
-            }
-            options.send(
-              session.socket,
-              operation.cancelling
-                ? {
-                    _tag: "MachineCancel",
-                    access: session.access,
-                    operationKey: operation.operationKey,
-                    attempt: operation.attempt,
-                    machineId: operation.machineId,
-                    requestDigest: operation.requestDigest,
-                  }
-                : {
-                    _tag: "MachineExecute",
-                    access: session.access,
-                    operationKey: operation.operationKey,
-                    attempt: operation.attempt,
-                    machineId: operation.machineId,
-                    requestDigest: operation.requestDigest,
-                    request: operation.request,
-                  },
-            )
-          }
-        }),
-      ),
-    )
+    yield* options.reconnectNative(session)
     for (const call of (yield* Ref.get(options.workspaceCalls)).values()) {
       if (call.assignmentId !== session.access.fence.assignmentId) continue
       options.send(session.socket, { _tag: "WorkspaceRequest", fence: session.access.fence, request: call.request })
@@ -272,6 +224,7 @@ export const gatewaySessionsFactory = (options: SessionRegistryOptions) => {
           (call) => call.socket === socket,
           "Executor disconnected during the approved branch push",
         )
+        yield* options.disconnectNative(socket)
       }),
     )
   })

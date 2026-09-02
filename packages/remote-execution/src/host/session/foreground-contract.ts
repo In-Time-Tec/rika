@@ -1,7 +1,7 @@
 import type { Deferred, Effect } from "effect"
 import { Schema } from "effect"
 import { AccessWire, RunnerAdmissionWire } from "../../protocol/messages"
-import { State as MachineState } from "../machinery/machine"
+import { NativeToolState } from "../machinery/native-tool"
 
 export interface ForegroundRunnerOptions {
   readonly admission?: RunnerAdmissionWire
@@ -25,7 +25,7 @@ export const ForegroundRunnerSnapshot = Schema.Struct({
   leaseExpiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   cursor: Schema.Struct({ sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), value: Schema.String }),
-  machines: Schema.Array(Schema.Struct({ machineId: Schema.String, state: MachineState })),
+  machines: Schema.Array(Schema.Struct({ machineId: Schema.String, state: NativeToolState })),
 })
 export type ForegroundRunnerSnapshot = typeof ForegroundRunnerSnapshot.Type
 

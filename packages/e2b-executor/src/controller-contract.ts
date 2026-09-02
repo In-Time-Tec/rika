@@ -31,7 +31,7 @@ export interface Assignment {
   readonly cursor: Cursor
 }
 
-export interface VerifiedCheckpoint {
+interface VerifiedCheckpoint {
   readonly assignmentId: string
   readonly generation: number
   readonly sandboxId: string

@@ -1,11 +1,4 @@
-import type { Interface as Controller } from "@rika/e2b-executor/controller"
-import * as HostedObservability from "@rika/product/hosted-observability"
-import {
-  redactAccess,
-  type AccessWire,
-  type MachineOutcome,
-  type MachineRequest,
-} from "@rika/remote-execution/protocol"
+import type { AccessWire, MachineOutcome, MachineRequest } from "@rika/remote-execution/protocol"
 import { Cause, Clock, DateTime, Deferred, Effect, Exit, Option, Ref, Scope, type Semaphore } from "effect"
 import {
   GatewayError,
@@ -13,7 +6,6 @@ import {
   type ExecutionResult,
   type LifecycleStore,
   type OperationIdentity,
-  type PreparationStore,
 } from "./contract"
 import { gatewayProtocol } from "./protocol"
 import type { GatewaySession, PendingOperation } from "./rpc/model"
@@ -23,9 +15,9 @@ type Session = GatewaySession
 type Pending = PendingOperation
 
 export interface GatewayExecutionDependencies {
-  readonly controller: Controller
   readonly lifecycle: LifecycleStore
-  readonly preparation: PreparationStore
+  readonly validateAccess: (access: AccessWire) => Effect.Effect<void, GatewayError>
+  readonly ready: (access: AccessWire) => Effect.Effect<void, GatewayError>
   readonly sessions: Ref.Ref<Map<string, Session>>
   readonly pending: Ref.Ref<Map<string, Pending>>
   readonly quiescing: Ref.Ref<Set<string>>
@@ -39,6 +31,7 @@ export interface GatewayExecutionDependencies {
     attempt: number,
     machineId: string,
     request: MachineRequest,
+    deadlineAt: string,
   ) => Effect.Effect<MachineOutcome, GatewayError>
   readonly cancelMachine: (
     assignmentId: string,
@@ -51,10 +44,10 @@ export interface GatewayExecutionDependencies {
   readonly scope: Scope.Scope
 }
 
-const { accessFailure, expired, key, sameAccess } = gatewayProtocol
+const { expired, key, sameAccess } = gatewayProtocol
 
 export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependencies) => {
-  const { controller, lifecycle, preparation, sessions, pending, quiescing, admission, awaitSession, grant } =
+  const { lifecycle, validateAccess, ready, sessions, pending, quiescing, admission, awaitSession, grant } =
     dependencies
 
   const durableResult = Effect.fn("ExecutorGateway.durableResult")(function* (
@@ -81,25 +74,6 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
     })
   })
 
-  const resolveDeadline = (request: OperationIdentity) =>
-    lifecycle.resolveDeadline(request).pipe(
-      Effect.tap((resolution) => {
-        if (resolution._tag !== "Resolved") return Effect.void
-        const correlation = {
-          threadId: request.threadId,
-          turnId: request.turnId,
-          runId: request.runId,
-          operationId: request.operationKey,
-        }
-        if (resolution.result.outcome === "unknown") return HostedObservability.unknownOutcome(correlation)
-        let outcome: "success" | "interrupted" | "failure" = "failure"
-        if (resolution.result.outcome === "completed") outcome = "success"
-        if (resolution.result.outcome === "cancelled") outcome = "interrupted"
-        return HostedObservability.event("terminal", outcome, correlation)
-      }),
-      Effect.map((resolution) => resolution.result),
-    )
-
   const awaitSettlement = (
     request: ExecuteInput,
     result?: Deferred.Deferred<ExecutionResult, GatewayError>,
@@ -114,11 +88,10 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
       const durable = yield* lifecycle.inspect(request)
       const terminal = yield* durableResult(durable)
       if (terminal !== undefined) return terminal
-      if (result !== undefined) {
-        const settling = yield* Deferred.await(result).pipe(Effect.timeoutOption("1 second"))
-        if (Option.isSome(settling)) return settling.value
-      }
-      return yield* resolveDeadline(request)
+      return yield* GatewayError.make({
+        kind: "timeout",
+        message: "Native operation did not settle before its deadline",
+      })
     })
 
   const makePending = (
@@ -156,7 +129,10 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
         durable.dispatchedExecutorInstanceId !== fence.executorId ||
         durable.dispatchedProcessIncarnation !== fence.processIncarnation)
     )
-      return yield* settledPending(request, session, yield* resolveDeadline(request))
+      return yield* GatewayError.make({
+        kind: "fenced",
+        message: "Native operation was dispatched to a different executor",
+      })
     return undefined
   })
 
@@ -204,8 +180,8 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
     if ((yield* Ref.get(quiescing)).has(request.assignmentId))
       return yield* GatewayError.make({ kind: "fenced", message: "Executor is quiescing" })
     if ((yield* Clock.currentTimeMillis) >= session.leaseExpiresAt) return yield* expired()
-    yield* controller.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
-    yield* preparation.ready(session.access)
+    yield* validateAccess(session.access)
+    yield* ready(session.access)
     yield* grant(session, request.operationKey)
     return (yield* existingAdmission(request, session)) ?? (yield* dispatchAdmission(request, session, pendingKey))
   })
@@ -246,7 +222,6 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
   const cancel = Effect.fn("ExecutorGateway.cancel")(function* (input: OperationIdentity) {
     const resolution = yield* lifecycle.cancel(input)
     if (resolution._tag !== "Dispatched") return resolution.result
-    const cancellationDeadlineAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(resolution.deadlineAt))
     const pendingKey = key(input.assignmentId, input.operationKey, input.attempt)
     const settle = (terminal: ExecutionResult) =>
       Effect.gen(function* () {
@@ -254,48 +229,38 @@ export const gatewayExecutionFactory = (dependencies: GatewayExecutionDependenci
         if (operation !== undefined) yield* Deferred.succeed(operation.result, terminal)
         return terminal
       })
-    const resolveUnknown = () => resolveDeadline(input).pipe(Effect.flatMap(settle))
-    const waitAndRetry = (remaining: number) => Effect.sleep(Math.min(100, remaining)).pipe(Effect.andThen(reconcile))
-    const reconcile = (): Effect.Effect<ExecutionResult, GatewayError> =>
-      Effect.gen(function* () {
-        const durable = yield* lifecycle.inspect(input)
-        const terminal = yield* durableResult(durable)
-        if (terminal !== undefined) return yield* settle(terminal)
-        const now = yield* Clock.currentTimeMillis
-        const remaining = Math.max(0, cancellationDeadlineAtMillis - now)
-        if (remaining === 0) return yield* resolveUnknown()
-        const session = (yield* Ref.get(sessions)).get(input.assignmentId)
-        if (session === undefined || !session.ready) return yield* waitAndRetry(remaining)
-        const fence = session.access.fence
-        if (
-          durable.state !== "dispatched" ||
-          durable.dispatchedGeneration !== fence.assignmentGeneration ||
-          durable.dispatchedExecutorInstanceId !== fence.executorId ||
-          durable.dispatchedProcessIncarnation !== fence.processIncarnation
-        )
-          return yield* resolveUnknown()
-        const validated = yield* controller
-          .validateAccess(redactAccess(session.access))
-          .pipe(Effect.mapError(accessFailure), Effect.result)
-        if (validated._tag === "Failure")
-          return validated.failure.kind === "fenced" ? yield* resolveUnknown() : yield* waitAndRetry(remaining)
-        const cancelled = yield* dependencies
-          .cancelMachine(
-            input.assignmentId,
-            input.operationKey,
-            input.attempt,
-            yield* dependencies.machineIdFor(input.operationKey, input.attempt),
-            input.machineRequest,
-            resolution.deadlineAt,
-          )
-          .pipe(
-            Effect.flatMap((outcome) => persistNativeOutcome(lifecycle, session.access, input, outcome)),
-            Effect.result,
-          )
-        if (cancelled._tag === "Success") return yield* settle(cancelled.success)
-        return cancelled.failure.kind === "fenced" ? yield* resolveUnknown() : yield* waitAndRetry(remaining)
+    const session = (yield* Ref.get(sessions)).get(input.assignmentId)
+    if (session === undefined || !session.ready)
+      return yield* GatewayError.make({
+        kind: "disconnected",
+        message: "Executor is unavailable for native operation cancellation",
       })
-    return yield* reconcile()
+    yield* validateAccess(session.access)
+    const durable = yield* lifecycle.inspect(input)
+    const fence = session.access.fence
+    if (
+      durable.state !== "dispatched" ||
+      durable.dispatchedGeneration !== fence.assignmentGeneration ||
+      durable.dispatchedExecutorInstanceId !== fence.executorId ||
+      durable.dispatchedProcessIncarnation !== fence.processIncarnation
+    )
+      return yield* GatewayError.make({
+        kind: "fenced",
+        message: "Native operation was dispatched to a different executor",
+      })
+    return yield* dependencies
+      .cancelMachine(
+        input.assignmentId,
+        input.operationKey,
+        input.attempt,
+        yield* dependencies.machineIdFor(input.operationKey, input.attempt),
+        input.machineRequest,
+        resolution.deadlineAt,
+      )
+      .pipe(
+        Effect.flatMap((outcome) => persistNativeOutcome(lifecycle, session.access, input, outcome)),
+        Effect.flatMap(settle),
+      )
   })
 
   return { execute, cancel }

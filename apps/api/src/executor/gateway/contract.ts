@@ -42,10 +42,6 @@ export type LifecycleAppendDisposition =
   | { readonly _tag: "AlreadyAppended" }
   | { readonly _tag: "AlreadyTerminal"; readonly result: ExecutionResult }
 
-export type DeadlineResolution =
-  | { readonly _tag: "Resolved"; readonly result: ExecutionResult }
-  | { readonly _tag: "AlreadyTerminal"; readonly result: ExecutionResult }
-
 export type PtyRequest =
   | { readonly _tag: "PtyCreate"; readonly request: PtyCreate }
   | { readonly _tag: "PtyInput"; readonly request: PtyInput }
@@ -159,7 +155,6 @@ export interface LifecycleStore {
     | { readonly _tag: "AlreadyTerminal"; readonly result: ExecutionResult },
     GatewayError
   >
-  readonly resolveDeadline: (input: OperationIdentity) => Effect.Effect<DeadlineResolution, GatewayError>
 }
 
 export const cancelledResponse: ToolOperationResponse = {

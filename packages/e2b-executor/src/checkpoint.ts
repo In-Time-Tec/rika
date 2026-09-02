@@ -274,19 +274,29 @@ export const vaultLayer = (
         load(stored.objectKey, checkpointPrefix(scope), checkpointAad(scope), stored)
       const storeSetupCache: VaultInterface["storeSetupCache"] = (key, archive) =>
         store(cacheKey(key), cacheAad(key), archive)
+      const removeInvalidCache = (objectKey: string) =>
+        objects.remove(objectKey).pipe(
+          Effect.tapError((error) =>
+            Effect.logDebug("checkpoint.cache-cleanup-failed").pipe(
+              Effect.annotateLogs("rika.error.message", error.message),
+            ),
+          ),
+          Effect.ignore,
+          Effect.as(Option.none()),
+        )
       const loadSetupCache: VaultInterface["loadSetupCache"] = (key) => {
         const objectKey = cacheKey(key)
         return objects.get(objectKey).pipe(
           Effect.flatMap((remote) => {
             if (Option.isNone(remote)) return Effect.succeedNone
             if (remote.value.byteLength === 0 || remote.value.byteLength > MaximumEncryptedArchiveBytes)
-              return objects.remove(objectKey).pipe(Effect.ignore, Effect.as(Option.none()))
+              return removeInvalidCache(objectKey)
             return decrypt(cryptoKey, cacheAad(key), remote.value).pipe(
               Effect.flatMap((bytes) =>
                 inspect({ bytes, contentDigest: objectDigest(bytes), sizeBytes: bytes.byteLength }),
               ),
               Effect.map(Option.some),
-              Effect.catch(() => objects.remove(objectKey).pipe(Effect.ignore, Effect.as(Option.none()))),
+              Effect.catch(() => removeInvalidCache(objectKey)),
             )
           }),
           Effect.catch(() => Effect.succeedNone),
@@ -314,6 +324,7 @@ export const vaultLayer = (
     }),
   ).pipe(Layer.provide(BunServices.layer))
 
+// Used by the cross-package hosted CLI harness without exposing an object-store implementation in production wiring.
 export const memoryObjectStore = (): ObjectStoreInterface => {
   const objects = new Map<string, Uint8Array>()
   return ObjectStore.of({

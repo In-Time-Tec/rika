@@ -5,7 +5,7 @@ import { DateTime, Effect } from "effect"
 import type { ProviderError } from "./provider"
 import { type Assignment, ControllerError } from "./controller-contract"
 
-export const assignmentFailureKind = (cause: AssignmentError): ControllerError["kind"] => {
+const assignmentFailureKind = (cause: AssignmentError): ControllerError["kind"] => {
   if (cause.reason === "not-found") return "assignment-missing"
   if (cause.reason === "stale-fence") return "fenced"
   if (cause.reason === "authentication") return "authentication"

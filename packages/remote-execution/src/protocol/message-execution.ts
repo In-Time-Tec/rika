@@ -7,9 +7,9 @@ import type { Access } from "./message-core"
 export const MachineRequest = Schema.TaggedStruct("NativeTool", { request: NativeToolRuntime.Request })
 export type MachineRequest = typeof MachineRequest.Type
 
-export const MachineSuccess = Schema.TaggedStruct("NativeTool", { result: NativeToolResult.Result })
+const MachineSuccess = Schema.TaggedStruct("NativeTool", { result: NativeToolResult.Result })
 
-export const MachineFailure = NativeToolRuntime.ToolError
+const MachineFailure = NativeToolRuntime.ToolError
 
 export const MachineOutcome = Schema.Union([
   Schema.TaggedStruct("Success", { value: MachineSuccess }),

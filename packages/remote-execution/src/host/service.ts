@@ -21,7 +21,7 @@ import {
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as Operations from "../protocol/operations"
-import { Machine, workspaceLayer as machineLayer } from "./machinery/machine"
+import { NativeToolService, nativeToolLayer } from "./machinery/native-tool"
 import {
   Manager as PtyManager,
   driverLayer as ptyDriverLayer,
@@ -85,7 +85,7 @@ const host = Effect.scoped(
     }
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
-    const { readMachine, writeMachine } = statePersistence(environmentIdentity.stateDirectory, crypto, fileSystem)
+    const { readNativeTool, writeNativeTool } = statePersistence(environmentIdentity.stateDirectory, crypto, fileSystem)
     const run = (
       identity: Identity,
       bootstrapToken: Redacted.Redacted<string>,
@@ -171,17 +171,17 @@ const host = Effect.scoped(
           undefined,
         )
         const hostScope = yield* Effect.scope
-        const makeMachine = yield* Effect.cached(
+        const makeNativeTool = yield* Effect.cached(
           Layer.buildWithScope(
-            machineLayer({
+            nativeToolLayer({
               workspace: root,
               workspaceUser,
               environment: executionEnvironment,
-              read: readMachine,
-              write: writeMachine,
+              read: readNativeTool,
+              write: writeNativeTool,
             }),
             hostScope,
-          ).pipe(Effect.map((context) => Context.get(context, Machine))),
+          ).pipe(Effect.map((context) => Context.get(context, NativeToolService))),
         )
         const quiesced = yield* Ref.make(false)
         const ptyDelivery = yield* Semaphore.make(1)
@@ -235,8 +235,8 @@ const host = Effect.scoped(
                   .withPermits(1)(
                     Effect.sync(() => environment.replace(phase.values)).pipe(
                       Effect.andThen(
-                        Effect.flatMap(makeMachine, (machine) =>
-                          machine.execute({
+                        Effect.flatMap(makeNativeTool, (nativeTool) =>
+                          nativeTool.execute({
                             machineId: input.machineId,
                             requestDigest: input.requestDigest,
                             request: input.request,
@@ -252,7 +252,7 @@ const host = Effect.scoped(
                   )
               }),
             cancel: (input) =>
-              Effect.flatMap(makeMachine, (machine) => machine.cancel(input)).pipe(
+              Effect.flatMap(makeNativeTool, (nativeTool) => nativeTool.cancel(input)).pipe(
                 Effect.mapError((error) =>
                   Operations.OperationError.make({ kind: "execution", message: error.message }),
                 ),

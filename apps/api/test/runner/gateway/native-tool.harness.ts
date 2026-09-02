@@ -67,9 +67,9 @@ it.effect.skipIf(!live)("executes a native Runner tool directly", () =>
           access,
           response: { _tag: "Success", result: nativeResult },
           outcome: "completed",
-          eventPersisted: true,
+          eventPersisted: false,
         })
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 0 }])
         expect(
           yield* Effect.tryPromise(() =>
             databaseClient
@@ -169,7 +169,7 @@ it.effect.skipIf(!live)("retains and replays one native Runner machine call thro
         })
         const results = yield* Effect.all([Fiber.join(first), Fiber.join(retained)])
         expect(results[0]).toEqual(results[1])
-        expect(results[0]).toMatchObject({ outcome: "completed", eventPersisted: true })
+        expect(results[0]).toMatchObject({ outcome: "completed", eventPersisted: false })
       }),
     ),
   ),
@@ -246,16 +246,16 @@ it.effect.skipIf(!live)("cancels a direct native Runner tool with MachineCancel"
         expect(cancelled).toMatchObject({
           response: { _tag: "DomainFailure", failure: { kind: "cancelled" } },
           outcome: "cancelled",
-          eventPersisted: true,
+          eventPersisted: false,
         })
         expect(yield* Fiber.join(running)).toEqual(cancelled)
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 0 }])
       }),
     ),
   ),
 )
 
-it.effect.skipIf(!live)("terminalizes disconnected Runner cancellation as durable unknown", () =>
+it.effect.skipIf(!live)("reports disconnected Runner cancellation without deciding its durable outcome", () =>
   isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -267,20 +267,15 @@ it.effect.skipIf(!live)("terminalizes disconnected Runner cancellation as durabl
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
-        const cancelled = yield* gateway.cancel(request)
-        expect(cancelled).toMatchObject({
-          response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
-          outcome: "unknown",
-          eventPersisted: true,
-        })
-        expect(yield* gateway.cancel(request)).toEqual(cancelled)
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "unknown", events: 1 }])
+        expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "disconnected" })
+        expect(yield* gateway.cancel(request).pipe(Effect.flip)).toMatchObject({ kind: "disconnected" })
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
 )
 
-it.effect.skipIf(!live)("persists a lost native Runner terminal receipt as unknown after its deadline", () =>
+it.effect.skipIf(!live)("reports a lost Runner result deadline without deciding its durable outcome", () =>
   isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -292,26 +287,22 @@ it.effect.skipIf(!live)("persists a lost native Runner terminal receipt as unkno
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
-        const unknown = yield* gateway.execute(request)
-        expect(unknown).toMatchObject({
-          response: { _tag: "DomainFailure", failure: { kind: "unknown" } },
-          outcome: "unknown",
-          eventPersisted: true,
-        })
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "unknown", events: 1 }])
-        expect(yield* gateway.execute(request)).toEqual(unknown)
+        expect(yield* gateway.execute(request).pipe(Effect.flip)).toMatchObject({ kind: "timeout" })
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
+        expect(yield* gateway.execute(request).pipe(Effect.flip)).toMatchObject({ kind: "timeout" })
       }),
     ),
   ),
 )
 
-it.effect.skipIf(!live)("recovers a retained native Runner terminal receipt after gateway restart", () =>
+it.effect.skipIf(!live)("leaves a stale Runner terminal frame for Generalist to resolve after restart", () =>
   isolated(({ url, databaseClient }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const operationKey = "native-tool-restart-terminal"
-        const request = toolRequest(operationKey)
-        yield* seed(databaseClient, operationKey, { request, state: "dispatched" })
+        const deadlineAt = DateTime.formatIso(DateTime.makeUnsafe((yield* Clock.currentTimeMillis) - 10_000))
+        const request = toolRequest(operationKey, deadlineAt)
+        yield* seed(databaseClient, operationKey, { request, state: "dispatched", deadlineAt })
         yield* Effect.tryPromise(() =>
           databaseClient.insert(rikaHostedExecutorOperationFrames).values({
             assignmentId: request.assignmentId,
@@ -342,17 +333,8 @@ it.effect.skipIf(!live)("recovers a retained native Runner terminal receipt afte
           Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
         )
         const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
-        expect(yield* gateway.execute(request)).toEqual({
-          response: { _tag: "Success", result: nativeResult },
-          outcome: "completed",
-          eventPersisted: true,
-        })
-        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 1 }])
-        expect(yield* gateway.execute(request)).toEqual({
-          response: { _tag: "Success", result: nativeResult },
-          outcome: "completed",
-          eventPersisted: true,
-        })
+        expect(yield* gateway.execute(request).pipe(Effect.flip)).toMatchObject({ kind: "timeout" })
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "dispatched", events: 0 }])
       }),
     ),
   ),
@@ -378,12 +360,12 @@ it.effect.skipIf(!live)("keeps a native Runner unknown outcome unknown during la
         expect(unknown).toMatchObject({
           response: { _tag: "DomainFailure", failure: { kind: "unknown", message: "delivery uncertain" } },
           outcome: "unknown",
-          eventPersisted: true,
+          eventPersisted: false,
         })
         expect(yield* gateway.cancel(request)).toEqual({
           response: unknown.response,
           outcome: "unknown",
-          eventPersisted: true,
+          eventPersisted: false,
         })
         expect(
           yield* Effect.tryPromise(() =>

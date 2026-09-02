@@ -261,8 +261,12 @@ export const service = Layer.effect(
           correlation,
           assignment.placement._tag === "RunnerPlacement" ? runnerGateway.execute(request) : gateway.execute(request),
         )
-        const response = yield* Schema.decodeEffect(RemoteTools.Response)(result.response).pipe(Effect.orDie)
-        return { ...result, response, eventPersisted: assignment.placement._tag === "RunnerPlacement" }
+        const response = yield* Schema.decodeEffect(RemoteTools.Response)(result.response).pipe(
+          Effect.mapError(() =>
+            ControllerError.make({ kind: "protocol", message: "Persisted remote tool response is invalid" }),
+          ),
+        )
+        return { ...result, response, eventPersisted: false }
       }),
       cancelTool: Effect.fn("Executor.cancelTool")(function* (input) {
         const assignment = yield* assignments
