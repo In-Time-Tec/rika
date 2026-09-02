@@ -2,6 +2,8 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { it } from "@effect/vitest"
 import { createTestRenderer } from "@opentui/core/testing"
+import { ThreadId } from "@rika/product/thread-record"
+import type { ThreadSummary } from "@rika/product/thread-summary"
 import { Deferred, Effect, Fiber, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "vitest"
@@ -9,6 +11,7 @@ import * as HostedCli from "../../../src/hosted/cli"
 import { CredentialStore, ProfileStore, type PrivateJwk, type Profile } from "../../../src/hosted/contract"
 import { runHostedInteractive } from "../../../src/hosted/interactive-controller"
 import * as Runner from "../../../src/runner/service"
+import { eventually, fixtures, makeHarness } from "../interactive-session/harness"
 
 const neverRunner = (): Effect.Effect<never> => Effect.never
 type TestRenderer = Awaited<ReturnType<typeof createTestRenderer>>
@@ -201,4 +204,44 @@ it.layer(startupLayer)((test) => {
       initialSetup.renderer.destroy()
     }),
   )
+
+  test.effect("continues the most recent Thread with a Turn for --last instead of creating one", () =>
+    Effect.gen(function* () {
+      const setup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24, exitOnCtrlC: false }))
+      const rendererRequested = Deferred.makeUnsafe<void>()
+      const harness = makeHarness(
+        (socket, message) => {
+          if (message.command._tag === "AttachThread")
+            socket.frame(fixtures.attached(message, fixtures.snapshot(String(message.command.threadId), 0, "orb")))
+        },
+        { listThreads: () => Effect.succeed([threadSummary("thread-empty", 0), threadSummary("thread-active", 3)]) },
+      )
+      const context = yield* Layer.build(harness.layer)
+      const operation = runHostedInteractive(
+        { _tag: "Interactive", prompt: [], ephemeral: false, last: true },
+        startupOptions(setup, { onRenderer: () => Deferred.doneUnsafe(rendererRequested, Effect.void) }),
+      ).pipe(Effect.provide(context))
+      const fiber = yield* operation.pipe(Effect.forkChild)
+      yield* Deferred.await(rendererRequested)
+      yield* Effect.tryPromise(() => setup.renderOnce())
+      // Creating a Thread would call the harness's unused `registerRunner`, which dies and settles the fiber.
+      yield* eventually(() => harness.messages.length > 0 || fiber.pollUnsafe() !== undefined)
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      expect(harness.messages[0]?.command).toMatchObject({ _tag: "AttachThread", threadId: "thread-active" })
+      yield* Fiber.interrupt(fiber)
+      setup.renderer.destroy()
+    }).pipe(Effect.scoped),
+  )
+})
+
+const threadSummary = (id: string, turnCount: number): ThreadSummary => ({
+  id: ThreadId.make(id),
+  workspace: "workspace-1",
+  title: `Thread ${id}`,
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 1,
+  turnCount,
 })

@@ -5,6 +5,7 @@ import * as HostedObservability from "@rika/product/hosted-observability"
 import { Crypto, Deferred, Effect, Fiber, FileSystem, Schema, Scope, Stream, SubscriptionRef } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { OperationUnavailable } from "@rika/product/product-operation"
+import { lastContinuable } from "@rika/product/thread-summary"
 import { CredentialStore, HostedError, HostedThreadId, ThreadClient, Http, ProfileStore } from "./contract"
 import { authenticated, selectedProfile } from "./account"
 import * as HostedInteractiveSession from "./interactive-session"
@@ -200,10 +201,13 @@ const run = Effect.fn("HostedInteractiveController.run")(function* <E, R extends
           })
         }),
       )
-    const threadId = input.threadId ?? (yield* createThread("runner"))
     const listThreads = authenticated(profile, (session) =>
       http.listThreads(profile.origin, profile.owner, profile.project, session),
     ).pipe(Effect.provideService(Http, http), Effect.provideService(CredentialStore, credentials))
+    // `thread continue --last` reopens the most recently active Thread that has a Turn; a Thread
+    // created moments ago and never prompted has nothing to continue. Without one, a new Thread starts.
+    const lastThreadId = input.last === true ? lastContinuable(yield* listThreads)?.id : undefined
+    const threadId = input.threadId ?? lastThreadId ?? (yield* createThread("runner"))
     const previewThread = (selectedThreadId: string) =>
       authenticated(profile, (session) => http.previewThread(profile.origin, selectedThreadId, session)).pipe(
         Effect.provideService(Http, http),
