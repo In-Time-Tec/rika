@@ -2,6 +2,7 @@ import { TerminalStyledText, type TerminalTextChunk } from "../markdown/styled-t
 import { fg } from "../markdown/styled-text-effects"
 import { parsePatchFiles } from "@pierre/diffs"
 import { Function } from "effect"
+import { logWarning } from "../../warning"
 import { highlightLines, languageForPath } from "../markdown/syntax-highlighter"
 import { colors } from "../terminal/theme"
 
@@ -122,7 +123,8 @@ const renderPierreDiffChunks = (patch: string, options: DiffRenderOptions): Read
   let parsed: ReturnType<typeof parsePatchFiles>
   try {
     parsed = parsePatchFiles(patch)
-  } catch {
+  } catch (cause) {
+    logWarning("tui.diff.parse.failed", cause)
     return null
   }
   if (!Array.isArray(parsed) || parsed.length === 0) return null

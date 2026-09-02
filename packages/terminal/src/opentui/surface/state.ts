@@ -20,6 +20,7 @@ import type { ThreadBrowser } from "./thread-browser"
 import type { PendingTranscriptPosition, TranscriptRenderableRecord } from "./transcript/types"
 import type { TranscriptViewport, ViewportAnchor } from "../../presentation/transcript/viewport/state"
 import type { ViewportEvent } from "../../presentation/transcript/viewport/protocol"
+import type { WarningReporter } from "../../warning"
 
 export interface Handlers {
   readonly key: (key: Key) => void
@@ -41,6 +42,7 @@ export interface Handlers {
   readonly threadSidebarSelect?: (index: number) => void
   readonly openPath?: (target: PathTarget) => void
   readonly resize: (width: number, height: number) => void
+  readonly warning?: WarningReporter
   readonly makeRenderer?: () => Effect.Effect<CliRenderer>
 }
 
@@ -110,6 +112,7 @@ export class SurfaceState {
   protected renderer!: CliRenderer
   protected handlers!: Handlers
   protected options!: SurfaceOptions
+  protected releaseWarningReporter: () => void = () => undefined
   public mountedTranscriptRowCount(): number {
     return this.transcriptPane.mountedRowCount()
   }

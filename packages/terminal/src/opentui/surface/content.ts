@@ -23,7 +23,8 @@ const connectivityActivity = (model: Model): string | undefined => {
   const connection = model.connection
   if (connection?.connectivity === "connecting") return "Connecting"
   if (connection?.connectivity === "reconnecting") return "Reconnecting"
-  if (connection?.connectivity === "disconnected") return "Disconnected"
+  if (connection?.connectivity === "disconnected")
+    return connection.errorMessage === undefined ? "Disconnected" : `Disconnected · ${connection.errorMessage}`
   return undefined
 }
 

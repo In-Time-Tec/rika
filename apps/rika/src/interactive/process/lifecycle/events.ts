@@ -1,6 +1,6 @@
 import * as InteractiveEvent from "@rika/product/interactive-event"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { Clock, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { selectedThreadMetadata, update } from "@rika/terminal/terminal-state-reducer"
 import * as InteractiveController from "../../controller/service"
 import * as ThreadSelection from "../../controller/thread-selection"
@@ -203,7 +203,7 @@ export const makeEventRouter = (runtime: Runtime) => {
         budget: event.budget,
         message: event.message,
         nextAt: event.nextAt,
-        retryCountdown: Math.max(0, Math.ceil((event.nextAt - Effect.runSync(Clock.currentTimeMillis)) / 1000)),
+        retryCountdown: Math.max(0, Math.ceil((event.nextAt - Date.now()) / 1000)),
       })
       return true
     }
@@ -216,6 +216,7 @@ export const makeEventRouter = (runtime: Runtime) => {
       }
       if (event.turnId !== undefined) action.turnId = event.turnId
       loop.model = update(loop.model, action)
+      loop.renderer?.surface.showToast(event.failure.message, "#e06c75")
       return true
     }
     if (event._tag === "ShellCompleted") {

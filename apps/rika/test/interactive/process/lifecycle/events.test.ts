@@ -20,6 +20,7 @@ const router = Effect.gen(function* () {
       releaseTerminal: () => undefined,
       suspendTerminal: () => undefined,
       resumeTerminal: () => undefined,
+      redrawTerminal: () => undefined,
     },
     submittedSinceIdle: false,
     threadView: undefined,
@@ -86,6 +87,38 @@ describe("approval control failures", () => {
         },
       })
       expect(showToast).not.toHaveBeenCalled()
+      close()
+    }),
+  )
+})
+
+describe("turn failures", () => {
+  it.effect("keeps the transcript error and also shows a toast", () =>
+    Effect.gen(function* () {
+      const { dispatch, loop, showToast, close } = yield* router
+      loop.model = { ...loop.model, activeTurnId: "turn", busy: true }
+      dispatch({
+        _tag: "ExecutionFailed",
+        threadId: Thread.ThreadId.make("thread"),
+        turnId: Turn.TurnId.make("turn"),
+        failure: {
+          tag: "TurnFailed",
+          message: "Provider rejected credentials",
+          category: "authentication",
+          retryable: false,
+          retry: "none",
+          actor: "environment",
+        },
+      })
+
+      expect(showToast).toHaveBeenCalledWith("Provider rejected credentials", "#e06c75")
+      expect(loop.model.blocks).toContainEqual({
+        _tag: "Error",
+        title: "TurnFailed",
+        detail: "Provider rejected credentials",
+        category: "authentication",
+        retryable: false,
+      })
       close()
     }),
   )

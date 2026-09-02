@@ -1,4 +1,5 @@
 import type { Key } from "../../presentation/terminal/keymap"
+import { logWarning } from "../../warning"
 import type { Model } from "../model"
 import type { ComposerAttachment } from "./model"
 
@@ -70,7 +71,9 @@ const pastedImagePath = (value: string): string | undefined => {
   if (unquoted.startsWith("file://")) {
     try {
       return decodeURIComponent(new URL(unquoted).pathname)
-    } catch {}
+    } catch (cause) {
+      logWarning("tui.composer.pasted_image_url.invalid", cause)
+    }
   }
   return unquoted.replace(/\\ /g, " ")
 }

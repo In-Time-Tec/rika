@@ -161,6 +161,33 @@ it.effect("releases the renderer after construction", () =>
     expect(opentui.renderer.isDestroyed).toBe(true)
   }),
 )
+it.effect("requests a forced full repaint after foreign terminal output", () =>
+  Effect.gen(function* () {
+    const created = yield* createScoped(handlers())
+    const renderer = opentui.renderer as unknown as { forceFullRepaintRequested: boolean }
+    renderer.forceFullRepaintRequested = false
+
+    created.redrawTerminal()
+
+    expect(renderer.forceFullRepaintRequested).toBe(true)
+  }),
+)
+it.effect("contains callback exceptions and keeps the renderer alive", () =>
+  Effect.gen(function* () {
+    const key = vi.fn(() => {
+      throw new Error("callback failed")
+    })
+    const warning = vi.fn()
+    yield* createScoped({ ...handlers(), key, warning })
+
+    activeSetup.mockInput.pressKey("x")
+    yield* Effect.tryPromise(() => activeSetup.renderOnce())
+
+    expect(key).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith("tui.callback.keypress.failed", expect.any(Error))
+    expect(opentui.renderer.isDestroyed).toBe(false)
+  }),
+)
 it.effect("releases renderer terminal modes when initialization fails after acquisition", () =>
   Effect.gen(function* () {
     activeSetup = yield* Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 }))
