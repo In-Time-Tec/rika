@@ -34,7 +34,7 @@ interface Interface {
 }
 
 export class NativeToolService extends Context.Service<NativeToolService, Interface>()(
-  "@rika/remote-execution/host/native-tool",
+  "@rika/remote-execution/host/machinery/native-tool/NativeToolService",
 ) {}
 
 interface Entry {

@@ -10,7 +10,7 @@ import { gatewayProtocol } from "../executor/gateway/protocol"
 import { gatewaySessionAwaiter } from "../executor/gateway/sessions"
 import type { PendingOperation } from "../executor/gateway/rpc/model"
 import { LifecycleStores } from "../executor/lifecycle-store"
-import { makeNativeOperationEndpoint } from "../executor/native-operation-endpoint"
+import { nativeOperationEndpoint } from "../executor/native-operation-endpoint"
 import type { RunnerExecutorAuthority } from "./executor"
 import { runnerGatewayMessages } from "./gateway-messages"
 import { gatewayModel, type FinalResult, type LocalExecuteInput, type Session } from "./gateway-model"
@@ -44,7 +44,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     return Encoding.encodeHex(bytes)
   })
   const machineIdFor = (operationKey: string, attempt: number) => digest(`${attempt}\u0000${operationKey}`)
-  const nativeOperations = yield* makeNativeOperationEndpoint({
+  const nativeOperations = yield* nativeOperationEndpoint({
     digest,
     encodeRequest: gatewayModel.encodeMachineRequest,
     session: (assignmentId) => Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId))),

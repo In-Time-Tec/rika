@@ -21,7 +21,7 @@ export interface NativeOperationRequest extends NativeOperationIdentity {
 
 interface PendingNativeOperation extends NativeOperationRequest {
   readonly requestDigest: string
-  readonly session?: NativeOperationSession
+  readonly session: NativeOperationSession | undefined
   readonly cancelling: boolean
   readonly result: Deferred.Deferred<MachineOutcome, GatewayError>
 }
@@ -48,7 +48,7 @@ const deadline = () =>
 const unavailable = () =>
   GatewayError.make({ kind: "disconnected", message: "Native operation executor is no longer available" })
 
-export const makeNativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")(function* (
+export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")(function* (
   options: NativeOperationEndpointOptions,
 ) {
   const pending = yield* Ref.make(new Map<string, PendingNativeOperation>())
@@ -190,7 +190,7 @@ export const makeNativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.ma
     const candidate: PendingNativeOperation = {
       ...input,
       requestDigest,
-      ...(session === undefined ? {} : { session }),
+      session,
       cancelling: true,
       result: yield* Deferred.make<MachineOutcome, GatewayError>(),
     }
@@ -203,7 +203,7 @@ export const makeNativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.ma
           if (known === undefined && session === undefined) return undefined
           const cancelling = {
             ...(known ?? candidate),
-            ...(session === undefined ? {} : { session }),
+            session,
             cancelling: true,
           }
           yield* Ref.set(pending, new Map(current).set(key, cancelling))
@@ -239,8 +239,7 @@ export const makeNativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.ma
         const next = new Map(current)
         for (const [key, operation] of next) {
           if (operation.session?.socket !== socket) continue
-          const { session: _, ...disconnected } = operation
-          next.set(key, disconnected)
+          next.set(key, { ...operation, session: undefined })
         }
         return next
       }),

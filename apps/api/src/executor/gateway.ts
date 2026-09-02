@@ -29,7 +29,7 @@ import type {
   PendingOperation as Pending,
   WorkspaceCall,
 } from "./gateway/rpc/model"
-import { makeNativeOperationEndpoint } from "./native-operation-endpoint"
+import { nativeOperationEndpoint } from "./native-operation-endpoint"
 
 const { accessFailure, decode, encode, expired, fenceOf, sameAccess } = gatewayProtocol
 
@@ -85,7 +85,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
     )
   })
   const awaitSession = gatewaySessionAwaiter(sessions)
-  const nativeOperations = yield* makeNativeOperationEndpoint({
+  const nativeOperations = yield* nativeOperationEndpoint({
     digest,
     encodeRequest: gatewayProtocol.encodeMachineRequest,
     session: (assignmentId) => Ref.get(sessions).pipe(Effect.map((current) => current.get(assignmentId))),
