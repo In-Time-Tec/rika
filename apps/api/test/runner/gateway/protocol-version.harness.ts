@@ -32,8 +32,8 @@ it.effect.skipIf(!live)("rejects obsolete Runner hello and reconnect frames befo
         )
         const reconnect = socket()
         yield* gateway.receive(reconnect, encodeLegacy({ _tag: "ExecutorReconnect", access }))
-        expect(hello.closed).toEqual([[1007, "malformed"]])
-        expect(reconnect.closed).toEqual([[1007, "malformed"]])
+        expect(hello.closed).toEqual([[1007, "undecodable RunnerHello frame; peer protocol does not match"]])
+        expect(reconnect.closed).toEqual([[1007, "undecodable ExecutorReconnect frame; peer protocol does not match"]])
       }),
     ),
   ),
