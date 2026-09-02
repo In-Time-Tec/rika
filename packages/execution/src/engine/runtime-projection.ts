@@ -8,8 +8,12 @@ import * as RuntimeTelemetry from "./runtime-telemetry"
 
 type WatchInput = Parameters<ExecutionGateway.Interface["watchTurn"]>[1]
 type Projector = ReturnType<typeof TreeProjector.make>
-type Projection = { readonly change: ExecutionGateway.WatchEvent; readonly childRunId?: string }
-type RootProjectionEvent = { readonly _tag: "root"; readonly event: SemanticTreeEvent }
+type Projection = { readonly change?: ExecutionGateway.WatchEvent; readonly childRunId?: string }
+type RootProjectionEvent = {
+  readonly _tag: "root"
+  readonly event: SemanticTreeEvent
+  readonly checkpoint: RunTree.Checkpoint
+}
 type TitleProjectionEvent = { readonly _tag: "title"; readonly snapshot: Run.RunSnapshot | undefined }
 type ProjectionEvent = RootProjectionEvent | TitleProjectionEvent
 
@@ -31,47 +35,30 @@ const watchFailureMessage = (cause: unknown) => {
   return message(cause)
 }
 
-const replayThenWatch = (
-  runtime: Runtime.Service,
-  rootRunId: string,
-  cursor: RunTree.TreeCursor,
-): Stream.Stream<RunTree.TreeEvent, Runtime.TreeReplayError> =>
-  Stream.unwrap(
-    RunTree.replay({ rootRunId, cursor, limit: 1_000 }).pipe(
-      Effect.provideService(Runtime.Runtime, runtime),
-      Effect.map((page) =>
-        Stream.concat(
-          Stream.fromIterable(page.events),
-          page.hasMore
-            ? replayThenWatch(runtime, rootRunId, page.cursor)
-            : RunTree.watch({ rootRunId, cursor: page.cursor, settlement: "root-blocked" }).pipe(
-                Stream.provideService(Runtime.Runtime, runtime),
-              ),
-        ),
-      ),
-    ),
-  )
-
 const rootEvents = (
   runtime: Runtime.Service,
   link: ExecutionGateway.ExecutionLink,
   input: WatchInput,
   hosted: boolean,
-) => {
-  const cursor = input?.checkpoint?.cursor
-  const events =
-    cursor === undefined
-      ? RunTree.watch({ rootRunId: link.runId, settlement: "root-blocked" }).pipe(
+) =>
+  Stream.unwrap(
+    runtime.treeCheckpoint(link.runId).pipe(
+      Effect.map((checkpoint) => {
+        const observeModel = hosted ? RuntimeTelemetry.makeHostedModelObserver(link) : () => Effect.void
+        let observeLive = input?.checkpoint === undefined
+        return RunTree.watch({ rootRunId: link.runId, settlement: "root-blocked" }).pipe(
           Stream.provideService(Runtime.Runtime, runtime),
+          Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
+          Stream.tap((event) => {
+            if (observeLive) return observeModel(event)
+            if (event.cursor === input?.checkpoint?.cursor) observeLive = true
+            return Effect.void
+          }),
+          Stream.map((event): RootProjectionEvent => ({ _tag: "root", event, checkpoint })),
         )
-      : replayThenWatch(runtime, link.runId, RunTree.TreeCursor.make(cursor))
-  const observeModel = hosted ? RuntimeTelemetry.makeHostedModelObserver(link) : () => Effect.void
-  return events.pipe(
-    Stream.mapEffect((event) => resolveSemanticTreeEvent(event, runtime.resolveModelResponse)),
-    Stream.tap(observeModel),
-    Stream.map((event): RootProjectionEvent => ({ _tag: "root", event })),
+      }),
+    ),
   )
-}
 
 const titleEvents = (runtime: Runtime.Service, titleId: string | undefined) =>
   titleId === undefined
@@ -129,10 +116,31 @@ const modelPreviewUsage = (
   return parentId === undefined ? usage : { ...usage, parentId }
 }
 
-const projectEvents = (projector: Projector, input: WatchInput) => {
+const refreshUsage = (
+  runtime: Runtime.Service,
+  projector: Projector,
+  event: RootProjectionEvent,
+  pending: RunTree.Checkpoint | undefined,
+) =>
+  Effect.gen(function* () {
+    if (pending?.cursor === event.event.cursor) {
+      projector.replaceUsage(event.event.rootRunId, pending.inspection.usage)
+      return undefined
+    }
+    if (pending !== undefined) return pending
+    const runEvent = event.event.event
+    if (runEvent._tag !== "ModelAttemptCompleted" && runEvent._tag !== "ModelAttemptFailed") return undefined
+    const checkpoint = yield* runtime.treeCheckpoint(event.event.rootRunId)
+    if (checkpoint.cursor !== event.event.cursor) return checkpoint
+    projector.replaceUsage(event.event.rootRunId, checkpoint.inspection.usage)
+    return undefined
+  })
+
+const projectEvents = (runtime: Runtime.Service, projector: Projector) => {
   let pendingTitle: Run.RunSnapshot | null | undefined
-  let rootProjected = input?.checkpoint !== undefined
-  return (event: ProjectionEvent): Effect.Effect<Array<Projection>> => {
+  let pendingUsage: RunTree.Checkpoint | undefined
+  let rootProjected = false
+  return (event: ProjectionEvent) => {
     if (event._tag === "title") {
       if (!rootProjected && pendingTitle === undefined) {
         pendingTitle = event.snapshot ?? null
@@ -140,9 +148,21 @@ const projectEvents = (projector: Projector, input: WatchInput) => {
       }
       return Effect.succeed(applyTitle(projector, event.snapshot))
     }
-    return Effect.sync(() => {
-      rootProjected = true
+    return Effect.gen(function* () {
+      if (rootProjected) pendingUsage = yield* refreshUsage(runtime, projector, event, pendingUsage)
       const change = projector.apply(event.event)
+      if (!rootProjected) {
+        if (event.event.cursor !== event.checkpoint.cursor) return []
+        rootProjected = true
+        projector.replaceUsage(event.event.rootRunId, event.checkpoint.inspection.usage)
+        const changes: Array<Projection> = [{ change: projector.snapshot() }]
+        changes.push(...projector.previewRunIds().map((childRunId) => ({ childRunId })))
+        if (pendingTitle !== undefined) {
+          changes.push(...applyTitle(projector, pendingTitle))
+          pendingTitle = undefined
+        }
+        return changes
+      }
       const projected: Projection =
         event.event.event._tag === "ChildLinked" ? { change, childRunId: event.event.event.childRunId } : { change }
       const usage = modelPreviewUsage(projector, event.event)
@@ -160,19 +180,16 @@ const output = (
   runtime: Runtime.Service,
   projector: Projector,
   link: ExecutionGateway.ExecutionLink,
-  input: WatchInput,
   projected: Stream.Stream<Projection, ExecutionGateway.WatchTurnFailure>,
 ) =>
   Stream.unwrap(
     Stream.broadcastN(projected, { n: 2, capacity: 64 }).pipe(
       Effect.map(([projectionEvents, childEvents]) => {
-        const projections = Stream.map(projectionEvents, ({ change }) => change)
-        const durable =
-          input?.checkpoint === undefined
-            ? Stream.concat(Stream.succeed(projector.snapshot()), projections)
-            : projections
+        const durable = projectionEvents.pipe(
+          Stream.flatMap(({ change }) => (change === undefined ? Stream.empty : Stream.succeed(change))),
+        )
         const previewRunIds = Stream.concat(
-          Stream.fromIterable([link.runId, ...projector.previewRunIds()]),
+          Stream.succeed(link.runId),
           childEvents.pipe(
             Stream.flatMap(({ childRunId }) => (childRunId === undefined ? Stream.empty : Stream.succeed(childRunId))),
           ),
@@ -201,23 +218,20 @@ const watchTurn = (
 ) => {
   let projector: Projector
   try {
-    projector = TreeProjector.make(
-      link.turnId,
-      input?.prompt ?? "",
-      input?.checkpoint,
-      input?.units ?? [],
-      link.titleRunId !== undefined,
-      input?.pricing,
-    )
+    const options: Parameters<typeof TreeProjector.make>[2] = {
+      titleExpected: link.titleRunId !== undefined,
+    }
+    if (input?.pricing !== undefined) Object.assign(options, { pricing: input.pricing })
+    projector = TreeProjector.make(link.turnId, input?.prompt ?? "", options)
   } catch (cause) {
     return Stream.fail(ExecutionGateway.WatchTurnFailure.make({ message: message(cause) }))
   }
   const projected = Stream.merge(rootEvents(runtime, link, input, hosted), titleEvents(runtime, link.titleRunId)).pipe(
-    Stream.mapEffect(projectEvents(projector, input)),
+    Stream.mapEffect(projectEvents(runtime, projector)),
     Stream.flatMap(Stream.fromIterable),
     Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: watchFailureMessage(cause) })),
   )
-  return output(runtime, projector, link, input, projected)
+  return output(runtime, projector, link, projected)
 }
 
 export const RuntimeProjection = { watchTurn }

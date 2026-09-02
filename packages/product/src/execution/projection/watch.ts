@@ -45,9 +45,8 @@ const watchRequest = (
   )
     ? "included"
     : "metered"
-  const units = projection === undefined ? {} : { units: projection.units }
   const checkpoint = projection?.projectorCheckpoint === undefined ? {} : { checkpoint: projection.projectorCheckpoint }
-  return { prompt: turn.prompt, pricing, ...units, ...checkpoint }
+  return { prompt: turn.prompt, pricing, ...checkpoint }
 }
 
 const terminalInspection = (inspection: Inspection): inspection is TerminalInspection =>

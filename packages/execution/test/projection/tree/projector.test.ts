@@ -1,5 +1,4 @@
 import "./projector-checkpoint.fixture"
-import "./projector-indexed-recovery.fixture"
 import { describe, expect, it } from "@effect/vitest"
 import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
@@ -24,8 +23,8 @@ describe("Generalist tree projector", () => {
       .units.filter((unit) => unit.content._tag === "Entry" && unit.content.role === "user")
     expect(initial[0]?.key).toBe("turn:turn-large-user:user")
     expect(initial.map((unit) => (unit.content._tag === "Entry" ? unit.content.text : "")).join("")).toBe(prompt)
-    const changed = projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    const resumed = TreeProjector.make("turn-large-user", prompt, changed.checkpoint, projector.snapshot().units)
+    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    const resumed = TreeProjector.make("turn-large-user", prompt)
     expect(
       resumed
         .snapshot()
@@ -240,12 +239,16 @@ describe("Generalist tree projector", () => {
     })
   })
 
-  it("restores a committed model response and topology from one opaque checkpoint", () => {
+  it("rebuilds a committed model response and topology before continuing", () => {
     resetEventPosition()
     const first = TreeProjector.make("turn-resume", "continue")
-    first.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-    const committed = first.apply(modelResponse("raw-root-run", { type: "text", text: "hello", metadata: {} }))
-    const resumed = TreeProjector.make("turn-resume", "continue", committed.checkpoint, first.snapshot().units)
+    const events = [
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
+      modelResponse("raw-root-run", { type: "text", text: "hello", metadata: {} }),
+    ]
+    const committed = first.applyAll(events)
+    const resumed = TreeProjector.make("turn-resume", "continue")
+    resumed.applyAll(events)
     const completed = resumed.apply(
       treeEvent(
         "raw-root-run",
@@ -268,20 +271,19 @@ describe("Generalist tree projector", () => {
   it("projects typed authorization state and its resolution", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-auth", "approve")
-    const waiting = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "RunWaiting",
-        wait: {
-          waitId: "raw-wait",
-          reason: {
-            _tag: "Approval",
-            request: { approvalId: "approval-1", operation: "write", capability: "workspace", input: {} },
-          },
-          status: "open",
-          openedAt: occurredAt(0),
+    const waitingEvent = treeEvent("raw-root-run", {
+      _tag: "RunWaiting",
+      wait: {
+        waitId: "raw-wait",
+        reason: {
+          _tag: "Approval",
+          request: { approvalId: "approval-1", operation: "write", capability: "workspace", input: {} },
         },
-      }),
-    )
+        status: "open",
+        openedAt: occurredAt(0),
+      },
+    })
+    const waiting = projector.apply(waitingEvent)
     expect(waiting.state.status).toBe("waiting")
     const authorization = block(waiting, "AuthorizationCard")
     const authorizationId =
@@ -299,7 +301,9 @@ describe("Generalist tree projector", () => {
         status: "pending",
       },
     })
-    const resumed = TreeProjector.make("turn-auth", "approve", waiting.checkpoint, projector.snapshot().units).apply(
+    const replayed = TreeProjector.make("turn-auth", "approve")
+    replayed.apply(waitingEvent)
+    const resumed = replayed.apply(
       treeEvent("raw-root-run", {
         _tag: "RunResumed",
         waitId: "raw-wait",

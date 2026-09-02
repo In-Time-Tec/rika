@@ -46,38 +46,37 @@ describe("native tool projection", () => {
       providerExecuted: false,
       metadata: {},
     }
-    projector.apply(modelResponse("raw-root-run", bashCall))
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionStarted",
-        turn: 0,
-        call: Response.toolCallPart(bashCall),
+    const declaration = modelResponse("raw-root-run", bashCall)
+    const started = treeEvent("raw-root-run", {
+      _tag: "ToolExecutionStarted",
+      turn: 0,
+      call: Response.toolCallPart(bashCall),
+    })
+    const completion = treeEvent("raw-root-run", {
+      _tag: "ToolExecutionCompleted",
+      turn: 0,
+      call: Response.toolCallPart(bashCall),
+      result: Response.toolResultPart({
+        id: bashCall.id,
+        name: bashCall.name,
+        isFailure: false,
+        result: {
+          running: true,
+          processId: "process-1",
+          elapsedMillis: 25,
+          stdout: "started",
+          stderr: "",
+          truncated: false,
+        },
+        encodedResult: {},
+        providerExecuted: false,
+        preliminary: false,
+        metadata: {},
       }),
-    )
-    const background = projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionCompleted",
-        turn: 0,
-        call: Response.toolCallPart(bashCall),
-        result: Response.toolResultPart({
-          id: bashCall.id,
-          name: bashCall.name,
-          isFailure: false,
-          result: {
-            running: true,
-            processId: "process-1",
-            elapsedMillis: 25,
-            stdout: "started",
-            stderr: "",
-            truncated: false,
-          },
-          encodedResult: {},
-          providerExecuted: false,
-          preliminary: false,
-          metadata: {},
-        }),
-      }),
-    )
+    })
+    projector.apply(declaration)
+    projector.apply(started)
+    const background = projector.apply(completion)
     expect(block(background, "ToolCall")).toMatchObject({
       _tag: "Block",
       block: {
@@ -93,13 +92,8 @@ describe("native tool projection", () => {
         },
       },
     })
-    projector = TreeProjector.make(
-      "turn-process-correlation",
-      "run in background",
-      background.checkpoint,
-      projector.snapshot().units,
-    )
-
+    projector = TreeProjector.make("turn-process-correlation", "run in background")
+    projector.applyAll([declaration, started, completion])
     const statusCall = {
       type: "tool-call" as const,
       id: "status-check",

@@ -26,11 +26,10 @@ export interface AuthorizationProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
-  readonly recover: (key: string, unitKey: string | undefined) => void
 }
 
 export const makeAuthorizationProjection = (input: AuthorizationProjectionInput): AuthorizationProjection => {
-  const { core, units, authorizations, localId, put, unit, recover } = input
+  const { core, units, authorizations, localId, put, unit } = input
 
   const putAuthorization = (
     node: Node,
@@ -47,12 +46,13 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
       authorizationId,
       approvalId: request.approvalId,
     })
-    recover(authorizationKey, key)
     const fullInput = (() => {
       try {
         return Schema.is(Schema.String)(request.input) ? request.input : (JSON.stringify(request.input) ?? "")
-      } catch {
-        return String(request.input)
+      } catch (cause) {
+        throw new TypeError("Generalist authorization input could not be encoded for transcript presentation", {
+          cause,
+        })
       }
     })()
     put(
@@ -86,7 +86,6 @@ export const makeAuthorizationProjection = (input: AuthorizationProjectionInput)
       content: { _tag: "Block", block: { ...candidate.content.block, status } },
     })
     authorizations.delete(authorizationKey)
-    recover(authorizationKey, undefined)
   }
 
   const settleAuthorizations = (node: Node, status: "cancelled" | "expired") => {

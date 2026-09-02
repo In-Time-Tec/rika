@@ -12,15 +12,13 @@ export interface ToolUnitProjection {
     name: string,
     input: string,
     mutate?: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
-    operationActive?: boolean,
   ) => void
   readonly updateTool: (
     node: Node,
     rawId: string,
     mutate: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
-    operationActive?: boolean,
   ) => void
-  readonly linkProcessCheck: (node: Node, rawId: string, input: string, operationActive: boolean) => void
+  readonly linkProcessCheck: (node: Node, rawId: string, input: string) => void
   readonly settleUnknown: (node: Node, rawId: string, operationId: string) => void
   readonly runningToolIds: (node: Node) => ReadonlyArray<string>
 }
@@ -30,11 +28,10 @@ export interface ToolUnitProjectionInput {
   readonly localId: (family: string, ...parts: ReadonlyArray<string | number>) => string
   readonly put: (unit: Unit) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
-  readonly recover: (node: Node, tool: ToolState, active: boolean) => void
 }
 
 export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): ToolUnitProjection => {
-  const { units, localId, put, unit, recover } = dependencies
+  const { units, localId, put, unit } = dependencies
 
   const toolState = (node: Node, rawId: string): ToolState => {
     const current = node.tools.get(rawId)
@@ -62,7 +59,6 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     name: string,
     input: string,
     mutate?: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
-    operationActive?: boolean,
   ) => {
     if (node.hidden) return
     const identity = toolState(node, rawId)
@@ -70,21 +66,19 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     const base = ToolBlock.makeTool(identity.blockId, rawId, name, bounded(input, toolTextLimit), previous)
     const block = mutate === undefined ? base : mutate(base)
     put(unit(node, identity.key, { _tag: "Block", block }))
-    if (operationActive !== undefined) recover(node, identity, operationActive)
   }
 
   const updateTool = (
     node: Node,
     rawId: string,
     mutate: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
-    operationActive?: boolean,
   ) => {
     const current = toolBlock(node, rawId)
     if (current === undefined) return
-    putTool(node, rawId, current.name, current.input, mutate, operationActive)
+    putTool(node, rawId, current.name, current.input, mutate)
   }
 
-  const linkProcessCheck = (node: Node, rawId: string, encodedInput: string, operationActive: boolean) => {
+  const linkProcessCheck = (node: Node, rawId: string, encodedInput: string) => {
     const check = ToolBlock.Input.processCheckFromInput(rawId, encodedInput)
     let origin =
       check === undefined
@@ -122,7 +116,7 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
       }
     }
     if (origin === undefined || check === undefined) {
-      putTool(node, rawId, "shell_command_status", encodedInput, undefined, operationActive)
+      putTool(node, rawId, "shell_command_status", encodedInput)
       return
     }
     const [originRawId, originState] = origin
@@ -132,25 +126,19 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
       const checks = [...(tool.process?.checks ?? []).filter((candidate) => candidate.toolCallId !== rawId), check]
       return { ...tool, status: "running", process: { ...tool.process, checks } }
     })
-    recover(node, alias, operationActive)
   }
 
   const settleUnknown = (node: Node, rawId: string, operationId: string) => {
     const current = toolBlock(node, rawId)
     if (current === undefined) return
-    updateTool(
-      node,
-      rawId,
-      (tool) => {
-        if (tool.toolCallId === rawId) return { ...tool, operationId, status: "unknown" }
-        const checks = tool.process?.checks?.map((check) =>
-          check.toolCallId === rawId ? { ...check, operationId } : check,
-        )
-        if (checks === undefined) return { ...tool, status: "unknown" }
-        return { ...tool, status: "unknown", process: { ...tool.process, checks } }
-      },
-      false,
-    )
+    updateTool(node, rawId, (tool) => {
+      if (tool.toolCallId === rawId) return { ...tool, operationId, status: "unknown" }
+      const checks = tool.process?.checks?.map((check) =>
+        check.toolCallId === rawId ? { ...check, operationId } : check,
+      )
+      if (checks === undefined) return { ...tool, status: "unknown" }
+      return { ...tool, status: "unknown", process: { ...tool.process, checks } }
+    })
   }
 
   const runningToolIds = (node: Node): ReadonlyArray<string> => {

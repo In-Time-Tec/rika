@@ -8,6 +8,11 @@ export interface ToolState {
   readonly blockId: string
 }
 
+export interface ModelCallState {
+  readonly purpose: "conversation" | "structured-output" | "compaction-summary"
+  readonly requestOrdinal?: number
+}
+
 export interface Node {
   rawRunId: string
   readonly publicId: string
@@ -47,4 +52,5 @@ export interface Projector {
     text: string | undefined,
     usage: ReadonlyArray<Run.RawUsageFact>,
   ) => Projection.Patch | undefined
+  readonly replaceUsage: (rootRunId: string, usage: ReadonlyArray<Run.RawUsageFact>) => void
 }

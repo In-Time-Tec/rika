@@ -21,18 +21,24 @@ type RunEventInput = {
 const runEvent = (event: RunEventInput): RunEventInput => event
 
 describe("Generalist tree projector checkpoints and lifecycle", () => {
-  it("keeps the opaque checkpoint bounded after a long materialized history", () => {
+  it("keeps the presentation checkpoint bounded after a long replay", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-long", "long")
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
+    const events: Array<SemanticTreeEvent> = [treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 })]
+    projector.apply(events[0]!)
     for (let index = 0; index < 500; index += 1) {
-      projector.apply(modelResponse("raw-root-run", { type: "text", text: `response-${index}`, metadata: {} }))
-      projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: index + 1 }))
+      const response = modelResponse("raw-root-run", { type: "text", text: `response-${index}`, metadata: {} })
+      const turn = treeEvent("raw-root-run", { _tag: "TurnStarted", turn: index + 1 })
+      events.push(response, turn)
+      projector.applyAll([response, turn])
     }
-    const partial = projector.apply(modelResponse("raw-root-run", { type: "text", text: "partial-", metadata: {} }))
+    const partialEvent = modelResponse("raw-root-run", { type: "text", text: "partial-", metadata: {} })
+    events.push(partialEvent)
+    const partial = projector.apply(partialEvent)
     expect(partial.checkpoint.state.length).toBeLessThanOrEqual(1_000_000)
     expect(projector.snapshot().hasOlder).toBe(true)
-    const resumed = TreeProjector.make("turn-long", "long", partial.checkpoint, projector.snapshot().units)
+    const resumed = TreeProjector.make("turn-long", "long")
+    resumed.applyAll(events)
     resumed.apply(modelResponse("raw-root-run", { type: "text", text: "continued", metadata: {} }))
     expect(
       resumed
@@ -43,9 +49,10 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
     ).toEqual(["partial-", "continued"])
   })
 
-  it("externalizes near-limit concurrent active unit content across restart", () => {
+  it("rebuilds near-limit concurrent active unit content from durable events", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-wide-resume", "wide")
+    const events: Array<SemanticTreeEvent> = []
     const stored = new Map<string, ReturnType<typeof projector.snapshot>["units"][number]>()
     const apply = (event: SemanticTreeEvent) => {
       const change = projector.apply(event)
@@ -57,34 +64,34 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
     let latest!: ReturnType<typeof apply>
     for (let index = 0; index < 64; index += 1) {
       const child = `raw-active-${index}`
-      latest = apply(
-        treeEvent(
-          "raw-root-run",
-          runEvent({
-            _tag: "ChildLinked",
-            childRunId: child,
-            invocationId: `active-${index}`,
-            selection: "Review",
-            prompt: Prompt.make(large),
-          }),
-        ),
+      const linked = treeEvent(
+        "raw-root-run",
+        runEvent({
+          _tag: "ChildLinked",
+          childRunId: child,
+          invocationId: `active-${index}`,
+          selection: "Review",
+          prompt: Prompt.make(large),
+        }),
       )
-      latest = apply(
-        modelResponse(
-          child,
-          { type: "text", text: large, metadata: {} },
-          {
-            parentRunId: "raw-root-run",
-            invocationId: `active-${index}`,
-          },
-        ),
+      const response = modelResponse(
+        child,
+        { type: "text", text: large, metadata: {} },
+        {
+          parentRunId: "raw-root-run",
+          invocationId: `active-${index}`,
+        },
       )
+      events.push(linked, response)
+      latest = apply(linked)
+      latest = apply(response)
     }
     expect([...stored.values()].reduce((size, unit) => size + JSON.stringify(unit).length, 0)).toBeGreaterThan(
       1_000_000,
     )
     expect(latest.checkpoint.state.length).toBeLessThan(1_000_000)
-    const resumed = TreeProjector.make("turn-wide-resume", "wide", latest.checkpoint, [...stored.values()])
+    const resumed = TreeProjector.make("turn-wide-resume", "wide")
+    resumed.applyAll(events)
     const continued = resumed.apply(
       modelResponse(
         "raw-active-0",
@@ -158,6 +165,9 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
       runId: "raw-left",
       approvalId: "same-approval",
     })
+    expect(() =>
+      TreeProjector.authorizationTarget({ ...changes[1]!.checkpoint, state: "not-json" }, cards[0]!.id),
+    ).toThrow("Rika presentation checkpoint could not be decoded")
     projector.apply(
       treeEvent(
         "raw-left",
@@ -296,17 +306,16 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
     expect([...firstKeys].some((key) => secondKeys.has(key))).toBe(false)
   })
 
-  it("restores committed response boundaries from a checkpoint within the same turn", () => {
+  it("rebuilds committed response boundaries within the same turn", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-chunked-restore", "chunk me")
-    projector.apply(treeEvent("raw-chunk-run", { _tag: "TurnStarted", turn: 0 }))
-    const opening = projector.apply(modelResponse("raw-chunk-run", { type: "text", text: "OPENING ", metadata: {} }))
-    const resumed = TreeProjector.make(
-      "turn-chunked-restore",
-      "chunk me",
-      opening.checkpoint,
-      projector.snapshot().units,
-    )
+    const events = [
+      treeEvent("raw-chunk-run", { _tag: "TurnStarted", turn: 0 }),
+      modelResponse("raw-chunk-run", { type: "text", text: "OPENING ", metadata: {} }),
+    ]
+    projector.applyAll(events)
+    const resumed = TreeProjector.make("turn-chunked-restore", "chunk me")
+    resumed.applyAll(events)
     resumed.apply(modelResponse("raw-chunk-run", { type: "text", text: "CONTINUED", metadata: {} }))
     const assistant = resumed
       .snapshot()
@@ -332,14 +341,7 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
     expect(cancellation.upsert).toMatchObject([])
     expect(cancellation.remove).toMatchObject([])
     expect(projector.snapshot().units).toMatchObject(before)
-    expect(
-      TreeProjector.make(
-        "turn-silent-cancellation",
-        "cancel me",
-        cancellation.checkpoint,
-        projector.snapshot().units,
-      ).snapshot().state.status,
-    ).toBe("cancelling")
+    expect(projector.snapshot().state.status).toBe("cancelling")
   })
 
   it("parks the root as waiting when an interrupted operation needs resolution", () => {

@@ -33,7 +33,7 @@ const resume = (context: ProjectorEventContext, node: Node, event: RunEvent.RunR
 
 const fail = (context: ProjectorEventContext, node: Node, event: RunEvent.RunFailed): void => {
   context.usage.deactivate(node, event, "terminal")
-  context.usage.settleOpenAttempts(node)
+  context.usage.settleCalls(node)
   context.authorization.settleAuthorizations(node, "expired")
   if (node.hidden) {
     node.status = "failed"
@@ -47,7 +47,7 @@ const fail = (context: ProjectorEventContext, node: Node, event: RunEvent.RunFai
 
 const complete = (context: ProjectorEventContext, node: Node, event: RunEvent.RunCompleted): void => {
   context.usage.deactivate(node, event, "terminal")
-  context.usage.settleOpenAttempts(node)
+  context.usage.settleCalls(node)
   if (node.hidden) {
     node.status = "completed"
     if ("text" in event.result) context.core.title = { text: event.result.text }
@@ -56,7 +56,7 @@ const complete = (context: ProjectorEventContext, node: Node, event: RunEvent.Ru
 
 const cancel = (context: ProjectorEventContext, node: Node, event: RunEvent.RunCancelled): void => {
   context.usage.deactivate(node, event, "terminal")
-  context.usage.settleOpenAttempts(node)
+  context.usage.settleCalls(node)
   context.authorization.settleAuthorizations(node, "cancelled")
   if (node.hidden) node.status = "cancelled"
   else context.settleNode(node, "cancelled", event, event.reason)
@@ -86,7 +86,7 @@ const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node)
       resume(context, node, event)
       return true
     case "OperationUnknown": {
-      const activeToolId = context.recovery.activeToolIds(node)[0]
+      const activeToolId = context.tools.runningToolIds(node).at(-1)
       if (activeToolId !== undefined) context.tools.settleUnknown(node, activeToolId, event.operationId)
       if (context.core.rootStatus !== "cancelling") {
         if (node.lifecycle === "active") context.usage.deactivate(node, event, "waiting")
