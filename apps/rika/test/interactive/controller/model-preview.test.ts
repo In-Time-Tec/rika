@@ -411,6 +411,11 @@ describe("tentative model preview overlay", () => {
 
     expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
+    expect(state.model.activity).toEqual({
+      _tag: "Finishing",
+      previous: { _tag: "Streaming", bytes: text.length },
+    })
+    expect(formatActivity(state.model.activity)).toBe("Streaming ~7 tok")
   })
 
   it("rejects late same-identity frames while holding across a commit-discard clear", () => {

@@ -9,12 +9,27 @@ const model = (): Model => ({
   height: 40,
 })
 
-it("keeps the Unicode spinner but hides the internal finishing label", () => {
+it("keeps the Unicode spinner but hides an internal finishing label without prior model activity", () => {
   const finishing = { ...model(), busy: true, activity: { _tag: "Finishing" as const } }
 
   expect(lifecycleLabel(finishing, 0)).toBeUndefined()
   expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ ")
   expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ ")
+})
+
+it.each([
+  ["Thinking", 12, "Thinking ~3 tok"],
+  ["Streaming", 16, "Streaming ~4 tok"],
+] as const)("keeps %s visible while the turn finishes", (tag, bytes, expected) => {
+  const finishing = {
+    ...model(),
+    busy: true,
+    activity: { _tag: "Finishing" as const, previous: { _tag: tag, bytes } },
+  }
+
+  expect(lifecycleLabel(finishing, 0)).toBe(expected)
+  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(` ∼ ${expected} `)
+  expect(styledTextValue(statusContent(finishing, 0, 0))).not.toContain("Finishing")
 })
 
 describe("connection animation", () => {

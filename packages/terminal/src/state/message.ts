@@ -120,6 +120,7 @@ type Message =
 
 export type { Message }
 export const runningToolsActivity = ActivityState.runningToolsActivity
+export const finishingActivity = ActivityState.finishingActivity
 export const streamActivity = ActivityState.streamActivity
 export const formatActivity = ActivityState.formatActivity
 export type { TranscriptBlock, TranscriptItem }

@@ -2,7 +2,7 @@ import * as ThreadView from "@rika/product/thread-view"
 import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
-import { runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
+import { finishingActivity, runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
 import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model } from "@rika/terminal/terminal-state"
 import { update as updateModel } from "@rika/terminal/terminal-state-reducer"
@@ -10,10 +10,28 @@ import { overlayPendingSubmissions } from "@rika/terminal/terminal-submission-st
 import type { Unit } from "@rika/transcript/transcript-unit"
 import * as ModelPreview from "./model-preview"
 
+const finishingUnitActivity = (previousActivity: Model["activity"]): Model["activity"] => {
+  if (
+    previousActivity?._tag === "Finishing" ||
+    previousActivity?._tag === "Thinking" ||
+    previousActivity?._tag === "Streaming"
+  )
+    return finishingActivity(previousActivity)
+  return finishingActivity(undefined)
+}
+
+const retainedActivity = (
+  model: Model,
+  active: ThreadView.ThreadViewTurnState | undefined,
+  threadId: string,
+): Model["activity"] =>
+  model.currentThreadId === threadId && model.activeTurnId === String(active?.turn.id) ? model.activity : undefined
+
 const activeUnitActivity = (
   entry: ThreadView.ThreadViewTurnState | undefined,
   modelPreview: ModelPreview.Overlay | undefined,
   model: Model,
+  previousActivity: Model["activity"],
 ): Model["activity"] => {
   if (entry === undefined) return undefined
   const previewActivity = ModelPreview.activity(modelPreview, String(entry.turn.id))
@@ -29,7 +47,7 @@ const activeUnitActivity = (
   }
   const turnId = String(entry.turn.id)
   const latest = model.entries.findLast((candidate) => candidate.turnId === turnId)
-  return latest?.role === "assistant" ? { _tag: "Finishing" } : { _tag: "Waiting" }
+  return latest?.role === "assistant" ? finishingUnitActivity(previousActivity) : { _tag: "Waiting" }
 }
 
 const clearTimeline = (model: Model): Model => ({
@@ -207,7 +225,15 @@ const projectSnapshot = (
   const previewUnits = ModelPreview.units(modelPreview, view)
   if (previewUnits[0] !== undefined) next = applyRootUnits(next, previewUnits[0].turnId, previewUnits)
   if (preserveOptimisticState) next = overlayPendingSubmissions(next, model)
-  next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
+  next = {
+    ...next,
+    activity: activeUnitActivity(
+      active,
+      modelPreview,
+      next,
+      retainedActivity(model, active, String(snapshot.thread.id)),
+    ),
+  }
   const settled = snapshot.turns.find((entry) => String(entry.turn.id) === model.activeTurnId)
   next = applySettlement(next, model, active, settled, settled?.units ?? [])
   return applyUsage(next, snapshot.usage, snapshot.turns.length > 0 || snapshot.pending.length > 0)
@@ -307,10 +333,13 @@ const projectPatch = (
   }
   if (model.currentThreadId === undefined || model.currentThreadId === String(view.thread.id))
     next = overlayPendingSubmissions(next, model)
-  next = { ...next, activity: activeUnitActivity(active, modelPreview, next) }
+  next = {
+    ...next,
+    activity: activeUnitActivity(active, modelPreview, next, retainedActivity(model, active, String(view.thread.id))),
+  }
   const settled = view.turn(model.activeTurnId ?? "")
   next = applySettlement(next, model, active, settled, view.units(model.activeTurnId ?? ""))
   return applyUsage(next, view.usage, view.turnCount > 0 || view.pending.length > 0)
 }
 
-export const FeedProjection = { activeUnitActivity, projectPatch, projectSnapshot }
+export const FeedProjection = { activeUnitActivity, projectPatch, projectSnapshot, retainedActivity }

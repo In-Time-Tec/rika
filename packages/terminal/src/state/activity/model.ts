@@ -4,18 +4,24 @@ import { orderedTranscriptItems } from "../../presentation/transcript/row"
 import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Model } from "../model"
 
+const ThinkingActivity = Schema.TaggedStruct("Thinking", {
+  bytes: Schema.Finite,
+  blockId: Schema.optionalKey(Schema.String),
+})
+const StreamingActivity = Schema.TaggedStruct("Streaming", {
+  bytes: Schema.Finite,
+  blockId: Schema.optionalKey(Schema.String),
+})
+const ModelActivity = Schema.Union([ThinkingActivity, StreamingActivity])
+
 export const Activity = Schema.Union([
   Schema.TaggedStruct("Sending", {}),
   Schema.TaggedStruct("Waiting", {}),
-  Schema.TaggedStruct("Finishing", {}),
-  Schema.TaggedStruct("Thinking", {
-    bytes: Schema.Finite,
-    blockId: Schema.optionalKey(Schema.String),
+  Schema.TaggedStruct("Finishing", {
+    previous: Schema.optionalKey(ModelActivity),
   }),
-  Schema.TaggedStruct("Streaming", {
-    bytes: Schema.Finite,
-    blockId: Schema.optionalKey(Schema.String),
-  }),
+  ThinkingActivity,
+  StreamingActivity,
   Schema.TaggedStruct("RunningTools", {
     subagents: Schema.optionalKey(Schema.Finite),
     tools: Schema.optionalKey(Schema.Finite),
@@ -29,6 +35,12 @@ export const Activity = Schema.Union([
   }),
 ])
 export type Activity = typeof Activity.Type
+
+export const finishingActivity = (current: Activity | undefined): Extract<Activity, { readonly _tag: "Finishing" }> => {
+  if (current?._tag === "Finishing") return current
+  if (current?._tag === "Thinking" || current?._tag === "Streaming") return { _tag: "Finishing", previous: current }
+  return { _tag: "Finishing" }
+}
 
 export const utf8ByteLength = (value: string): number => {
   let bytes = 0
@@ -57,7 +69,7 @@ const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: n
   }
   if (activity._tag === "Compacting") return "Auto-Compacting"
   if (activity._tag === "Waiting") return "Waiting"
-  if (activity._tag === "Finishing") return undefined
+  if (activity._tag === "Finishing") return formatActivityImpl(activity.previous, countdownSeconds)
   if (activity._tag === "Thinking" || activity._tag === "Streaming")
     return `${activity._tag} ~${formatTokens(Math.ceil(activity.bytes / 4))}`
   return activity._tag

@@ -11,7 +11,7 @@ import { isNarrow } from "../../../src/state/layout/model"
 import { ready } from "../../../src/state/loadable"
 import { replaceTurnPrompt } from "../../../src/state/queue/prompt"
 import { applyQueueDelta, resetQueue } from "../../../src/state/queue/model"
-import { initial } from "../../../src/state/model"
+import { initial, type Model } from "../../../src/state/model"
 import { filteredFiles } from "../../../src/state/thread/navigation"
 import { update } from "../../../src/state/reducer/model"
 
@@ -45,12 +45,27 @@ test("tracks turn activity states", () => {
   model = update(model, { _tag: "AssistantStreamed", text: "abcdefgh", turnId: "turn" })
   expect(formatActivity(model.activity)).toBe("Streaming ~2 tok")
   model = update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
-  expect(model.activity).toEqual({ _tag: "Finishing" })
-  expect(formatActivity(model.activity)).toBeUndefined()
+  expect(model.activity).toEqual({ _tag: "Finishing", previous: { _tag: "Streaming", bytes: 8 } })
+  expect(formatActivity(model.activity)).toBe("Streaming ~2 tok")
   expect(formatActivity({ _tag: "Compacting" })).toBe("Auto-Compacting")
 
   model = update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
   expect(formatActivity(model.activity)).toBe("Waiting")
+})
+test("keeps thinking visible through completion and clears it only when execution settles", () => {
+  let model: Model = {
+    ...initial("/work", "medium"),
+    busy: true,
+    activeTurnId: "turn",
+    activity: { _tag: "Thinking" as const, bytes: 12 },
+  }
+
+  model = update(model, { _tag: "AssistantCompleted", text: "", turnId: "turn" })
+  expect(model.activity).toEqual({ _tag: "Finishing", previous: { _tag: "Thinking", bytes: 12 } })
+  expect(formatActivity(model.activity)).toBe("Thinking ~3 tok")
+
+  model = update(model, { _tag: "ExecutionCompleted", turnId: "turn" })
+  expect(model.activity).toBeUndefined()
 })
 test("labels live byte-based token estimates and increases them with streamed content", () => {
   expect(formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking ~0 tok")

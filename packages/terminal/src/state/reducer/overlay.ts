@@ -5,7 +5,7 @@ import type { Message } from "../message"
 import type { Model } from "../model"
 import type { TranscriptBlock, TranscriptItem } from "../transcript/model"
 import { ready, loading } from "../loadable"
-import { streamActivity } from "../activity/model"
+import { finishingActivity, streamActivity } from "../activity/model"
 import { dropSubmittedDrafts, takeSubmittedDraftFor, validQueueSelection } from "../queue/model"
 import { hasProvisionalUserEntry, settleProvisionalUserEntry } from "../submission"
 import { changedFiles } from "../changed-file"
@@ -135,7 +135,7 @@ const completedAssistant = (model: Model, text: string, id: string | undefined, 
     entries,
     items: index >= 0 ? model.items : [...model.items, identified],
     busy: model.busy,
-    activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Finishing" } : undefined,
+    activity: model.busy && model.activeTurnId !== undefined ? finishingActivity(model.activity) : undefined,
   }
 }
 

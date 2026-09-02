@@ -34,8 +34,8 @@ type InteractiveConnectionState = InteractiveConnection["initialState"]
 
 /**
  * Settling means no work is still in flight, so a running subagent counts. The status spinner remains
- * visible while the internal Finishing phase intentionally has no label. `Running` covers every
- * running-tools label — a tool, a subagent, or several of either.
+ * visible while the internal Finishing phase retains its prior model activity label. `Running` covers
+ * every running-tools label — a tool, a subagent, or several of either.
  */
 const activityMarkers = ["Waiting", "Streaming", "Running", "Thinking", "Sending"] as const
 const finishingSpinner = / [∼≈≋] ─/u
