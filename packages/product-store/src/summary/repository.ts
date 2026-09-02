@@ -85,6 +85,7 @@ const decodeSummary = (value: {
       }),
       unread: (value.lastActivityAt ?? 0) > (value.lastReadAt ?? 0),
       lastActivityAt: value.lastActivityAt ?? 0,
+      turnCount: Math.max(0, value.turnCount ?? 0),
     })
     if (editTotals !== undefined) Object.assign(summary, { editTotals })
     return summary

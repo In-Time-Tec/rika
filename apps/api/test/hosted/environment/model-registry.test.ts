@@ -50,6 +50,11 @@ it.effect("pins every hosted mode to the owner's OpenAI account", () =>
       }
     }
     expect(required).toEqual(["owner-1", "owner-1", "owner-1", "owner-1"])
+    // A mode declared only in a Workspace settings file is refused by name, before any credential lookup.
+    const refused = yield* registry.resolve("owner-1", "load").pipe(Effect.flip)
+    expect(refused.kind).toBe("invalid")
+    expect(refused.message).toBe('Mode "load" is not a hosted mode; hosted modes are low, medium, high, ultra')
+    expect(required).toHaveLength(4)
   }),
 )
 

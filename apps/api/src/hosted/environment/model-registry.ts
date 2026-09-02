@@ -24,6 +24,15 @@ export class HostedModelRegistry extends Context.Service<HostedModelRegistry, Ho
 ) {}
 
 const invalid = () => HostedModelRegistryError.make({ kind: "invalid", message: "Model route is unavailable" })
+/**
+ * Hosted routing resolves only the built-in modes. A mode declared in a Workspace or global settings file exists
+ * on the client only, so naming the hosted set tells the user why their `--mode` was refused.
+ */
+const unknownMode = (mode: string, modes: ReadonlyArray<string>) =>
+  HostedModelRegistryError.make({
+    kind: "invalid",
+    message: `Mode "${mode}" is not a hosted mode; hosted modes are ${modes.join(", ")}`,
+  })
 const credentialFailure = (error: HostedProviderCredentialError) => {
   if (error.kind === "missing") {
     return HostedModelRegistryError.make({
@@ -65,6 +74,8 @@ export const layer = (options: { readonly developmentModel?: string } = {}) =>
       const credentials = yield* HostedProviderCredentials
       const resolve = Effect.fn("HostedModelRegistry.resolve")(function* (ownerId: string, requestedMode?: string) {
         const mode = ModeId.make(requestedMode ?? hostedSettings.defaultMode)
+        if (!Object.hasOwn(hostedSettings.modes, mode))
+          return yield* unknownMode(mode, Object.keys(hostedSettings.modes))
         const developmentModel = options.developmentModel
         if (developmentModel !== undefined) {
           const credential = yield* credentials.require(ownerId, "openrouter").pipe(Effect.mapError(credentialFailure))

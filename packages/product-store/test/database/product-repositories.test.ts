@@ -215,6 +215,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             {
               id: threadId,
               status: "running",
+              turnCount: 3,
               editTotals: { added: 3, modified: 2, removed: 1 },
             },
           ])

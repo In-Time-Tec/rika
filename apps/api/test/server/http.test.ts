@@ -225,6 +225,7 @@ describe("api HTTP", () => {
         status: "idle" as const,
         unread: false,
         lastActivityAt: 1,
+        turnCount: 1,
       }
       const hidden = { ...visible, id: ThreadId.make("thread-hidden"), title: "Hidden Thread" }
       const deps: HttpDependencies = {

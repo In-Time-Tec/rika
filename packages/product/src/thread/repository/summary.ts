@@ -103,6 +103,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           status: ThreadState.threadState(history.map((turn) => turn.status)),
           unread: lastActivityAt > (readValues.get(thread.id) ?? 0),
           lastActivityAt,
+          turnCount: history.length,
         }
         return history.length > 0 && currentProjected.length === history.length
           ? ThreadSummary.make({ ...summary, editTotals: totals })

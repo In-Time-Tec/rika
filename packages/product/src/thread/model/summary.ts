@@ -22,9 +22,18 @@ export const ThreadSummary = Schema.Struct({
   status: SummaryStatus,
   unread: Schema.Boolean,
   lastActivityAt: Schema.Finite,
+  turnCount: Schema.Int,
   editTotals: Schema.optionalKey(EditTotals),
 })
 export type ThreadSummary = typeof ThreadSummary.Type
+
+/**
+ * The Thread `thread continue --last` reopens. Summaries arrive ordered by activity, but a Thread created moments
+ * ago and never prompted ranks first by that order while having nothing to continue, so the most recently active
+ * Thread with at least one Turn wins. Only when no Thread has a Turn does the newest empty Thread count.
+ */
+export const lastContinuable = (summaries: ReadonlyArray<ThreadSummary>): ThreadSummary | undefined =>
+  summaries.find((summary) => summary.turnCount > 0) ?? summaries[0]
 
 export const RepairCandidate = Schema.Struct({
   turnId: TurnId,

@@ -1,6 +1,7 @@
 import { redactAccess, redactHeartbeat, type AccessWire, type MachineOutcome } from "@rika/remote-execution/protocol"
 import { Effect, Redacted } from "effect"
 import type { GatewayError, Socket, SocketFrame } from "../executor/gateway"
+import { undecodableFrame } from "../executor/gateway/undecodable-frame"
 import type { RunnerExecutorAuthority } from "./executor"
 import { gatewayModel, type Session } from "./gateway-model"
 
@@ -31,7 +32,7 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
   return (socket: Socket, frame: SocketFrame) =>
     decode(frame).pipe(
       Effect.matchEffect({
-        onFailure: () => Effect.sync(() => socket.close(1007, "malformed")),
+        onFailure: (cause) => undecodableFrame.close("runner", socket, frame, cause),
         onSuccess: (message) => {
           if (message._tag === "RunnerHello")
             return authority.hello(message.hello).pipe(

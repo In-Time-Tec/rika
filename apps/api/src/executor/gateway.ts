@@ -22,6 +22,7 @@ import { gatewayExecutionFactory } from "./gateway/execution"
 import { gatewayMessageHandlerFactory } from "./gateway/message/handler"
 import { gatewayProtocol } from "./gateway/protocol"
 import { gatewaySessionAwaiter, gatewaySessionsFactory } from "./gateway/sessions"
+import { undecodableFrame } from "./gateway/undecodable-frame"
 import { workspaceRpcFactory } from "./gateway/rpc/workspace"
 import type {
   BranchPushCall,
@@ -278,7 +279,7 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
   const receive = (socket: Socket, frame: SocketFrame) =>
     decode(frame).pipe(
       Effect.matchEffect({
-        onFailure: () => Effect.sync(() => close(socket, 1007, "malformed")),
+        onFailure: (cause) => undecodableFrame.close("executor", socket, frame, cause),
         onSuccess: (message) =>
           messageHandler.handle(socket, message).pipe(
             Effect.matchEffect({

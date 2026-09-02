@@ -128,7 +128,7 @@ describe("executor gateway: protocol-fencing", () => {
       const gateway = yield* makeGateway(controller())
       yield* gateway.receive(target, "not json")
       expect(target.sent).toEqual([])
-      expect(target.closed).toEqual([[1007, "malformed"]])
+      expect(target.closed).toEqual([[1007, "undecodable unknown frame; peer protocol does not match"]])
     }),
   )
 

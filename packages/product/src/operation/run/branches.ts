@@ -4,6 +4,7 @@ import * as TurnRepository from "@rika/product/turn-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Thread from "@rika/product/thread-record"
+import { lastContinuable } from "@rika/product/thread-summary"
 import * as NoninteractiveOperation from "../dispatch/noninteractive"
 import * as ExtensionOperations from "../contract/extension"
 import * as ConfigurationOperation from "./configuration"
@@ -69,9 +70,11 @@ const runInteractiveOperationImpl = (
     const typedInteractiveRun = factory.options.interactive
     let initialThreadId = input.threadId
     if (input.last === true) {
-      const summary = (yield* Context.get(typedDependencyContext, ThreadSummaryRepository.Service)
-        .list({ limit: 1 })
-        .pipe(Effect.mapError((error) => unavailable(factory, input, String(error)))))[0]
+      const summary = lastContinuable(
+        yield* Context.get(typedDependencyContext, ThreadSummaryRepository.Service)
+          .list()
+          .pipe(Effect.mapError((error) => unavailable(factory, input, String(error)))),
+      )
       if (summary === undefined) return yield* unavailable(factory, input, "No threads exist")
       initialThreadId = String(summary.id)
     }

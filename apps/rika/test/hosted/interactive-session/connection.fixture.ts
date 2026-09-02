@@ -72,6 +72,7 @@ it.effect("publishes hosted Thread summaries and previews", () =>
         status: "idle" as const,
         unread: false,
         lastActivityAt: 1,
+        turnCount: 1,
       }
       const hosted = yield* H.runSession(
         harness,
