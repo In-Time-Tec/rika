@@ -30,6 +30,7 @@ const router = Effect.gen(function* () {
   }
   const eventRouter = makeEventRouter({
     loop,
+    currentTimeMillis: () => 1_000,
     render: () => undefined,
     refreshTerminalTitle: () => undefined,
     requestSelectionResync: () => undefined,

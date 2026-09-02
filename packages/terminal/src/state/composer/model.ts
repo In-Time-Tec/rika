@@ -1,5 +1,5 @@
 import { Function, Schema } from "effect"
-import { logWarning } from "../../warning"
+import { Warning } from "../../warning"
 import type { Model } from "../model"
 
 export type PromptPart =
@@ -48,7 +48,7 @@ const appendParsedText = (parts: Array<PromptPart>, text: string, pasted: boolea
       try {
         path = decodeURIComponent(new URL(path).pathname)
       } catch (cause) {
-        logWarning("tui.composer.image_url.invalid", cause)
+        Warning.log("tui.composer.image_url.invalid", cause)
       }
     }
     appendPromptPart(parts, { type: "image", path: path.replace(/\\ /g, " ") })

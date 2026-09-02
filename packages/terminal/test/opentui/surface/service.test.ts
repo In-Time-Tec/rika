@@ -164,12 +164,11 @@ it.effect("releases the renderer after construction", () =>
 it.effect("requests a forced full repaint after foreign terminal output", () =>
   Effect.gen(function* () {
     const created = yield* createScoped(handlers())
-    const renderer = opentui.renderer as unknown as { forceFullRepaintRequested: boolean }
-    renderer.forceFullRepaintRequested = false
+    Reflect.set(opentui.renderer, "forceFullRepaintRequested", false)
 
     created.redrawTerminal()
 
-    expect(renderer.forceFullRepaintRequested).toBe(true)
+    expect(Object.getOwnPropertyDescriptor(opentui.renderer, "forceFullRepaintRequested")?.value).toBe(true)
   }),
 )
 it.effect("contains callback exceptions and keeps the renderer alive", () =>

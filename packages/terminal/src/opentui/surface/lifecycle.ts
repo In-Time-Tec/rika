@@ -4,7 +4,7 @@ import { idleSpinnerFrame, spinnerInterval } from "../rendering/spinner"
 import { animationActive } from "./content"
 import { welcomeAnimationActive } from "./welcome/state"
 import { SurfaceLayout } from "./layout"
-import { logWarning } from "../../warning"
+import { Warning } from "../../warning"
 
 export abstract class SurfaceLifecycle extends SurfaceLayout {
   protected guardedOnKey!: typeof this.onKey
@@ -22,7 +22,7 @@ export abstract class SurfaceLifecycle extends SurfaceLayout {
       try {
         callback(...args)
       } catch (cause) {
-        logWarning(`tui.callback.${event}.failed`, cause)
+        Warning.log(`tui.callback.${event}.failed`, cause)
         if (!this.destroyed) this.renderer.requestRender()
       }
     }

@@ -7,6 +7,8 @@ export const registerWarningReporter = (reporter: WarningReporter): (() => void)
   return () => reporters.delete(reporter)
 }
 
-export const logWarning = (event: string, cause: unknown): void => {
-  for (const reporter of reporters) reporter(event, cause)
+export const Warning = {
+  log(event: string, cause: unknown): void {
+    for (const reporter of reporters) reporter(event, cause)
+  },
 }
