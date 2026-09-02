@@ -41,7 +41,7 @@ test(
         app.pressEnter()
         yield* app.waitFrame("ROOT_SAME_DONE", 30_000)
         // A terminal group collapses to its neutral summary. Expand it before checking member rows.
-        yield* app.waitFrame("2 agents · 2/2 complete", 30_000)
+        yield* app.waitFrame("2 agents finished", 30_000)
         app.pressKey("\t")
         app.pressEnter()
         const completed = yield* app.waitFrameMatch(

@@ -45,7 +45,8 @@ test("tracks turn activity states", () => {
   model = update(model, { _tag: "AssistantStreamed", text: "abcdefgh", turnId: "turn" })
   expect(formatActivity(model.activity)).toBe("Streaming ~2 tok")
   model = update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
-  expect(formatActivity(model.activity)).toBe("Finishing")
+  expect(model.activity).toEqual({ _tag: "Finishing" })
+  expect(formatActivity(model.activity)).toBeUndefined()
   expect(formatActivity({ _tag: "Compacting" })).toBe("Auto-Compacting")
 
   model = update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })

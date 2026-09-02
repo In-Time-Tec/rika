@@ -273,7 +273,7 @@ const transcriptRenderInputChanged = (
   previous.detailSelection !== input.detailSelection ||
   previous.width !== input.width ||
   previous.windowEnd !== input.windowEnd ||
-  previous.animationTick !== input.animationTick ||
+  previous.compactionShimmerTick !== input.compactionShimmerTick ||
   previous.transcriptRevision !== input.transcriptRevision
 
 interface ProjectTranscriptRowsOptions {
@@ -436,7 +436,7 @@ export const projectTranscriptRows = (options: ProjectTranscriptRowsOptions) => 
     detailSelection: model.detailSelection,
     width: model.width,
     windowEnd: options.windowEnd,
-    animationTick: model.animationTick,
+    compactionShimmerTick: model.compactionShimmer?.tick,
     transcriptRevision: model.transcriptRevision,
   }
   if (!transcriptRenderInputChanged(options.renderInput, input)) return undefined

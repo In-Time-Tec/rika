@@ -57,6 +57,7 @@ const formatActivityImpl = (activity: Activity | undefined, countdownSeconds?: n
   }
   if (activity._tag === "Compacting") return "Auto-Compacting"
   if (activity._tag === "Waiting") return "Waiting"
+  if (activity._tag === "Finishing") return undefined
   if (activity._tag === "Thinking" || activity._tag === "Streaming")
     return `${activity._tag} ~${formatTokens(Math.ceil(activity.bytes / 4))}`
   return activity._tag
