@@ -24,7 +24,6 @@ const config: IdentityConfig = {
 const recovery: HttpDependencies["recovery"] = {
   inspect: () => Effect.die("unused"),
   resolve: () => Effect.die("unused"),
-  reconcileCompleted: Effect.die("unused"),
 }
 
 const unusedController: ControllerService = {
