@@ -1,9 +1,15 @@
 import * as PgClient from "@effect/sql-pg/PgClient"
 import type { RunnerProfile } from "@rika/product/runner-registration"
-import { and, asc, eq, inArray, isNull, lte, not, or, sql } from "drizzle-orm"
+import { and, asc, eq, exists, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Context, Effect, Layer, Schema } from "effect"
-import { rikaHostedExecutorAssignments, rikaHostedRunnerRegistrations } from "../../database/schema/product"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedPresence,
+  rikaHostedRunnerRegistrations,
+  rikaHostedThreadProtocolCommands,
+  rikaTurns,
+} from "../../database/schema/product"
 
 export class RunnerRegistrationsError extends Schema.TaggedError<RunnerRegistrationsError>()(
   "RunnerRegistrationsError",
@@ -106,6 +112,50 @@ const make = Effect.gen(function* () {
         .returning({ deviceId: rikaHostedRunnerRegistrations.deviceId }),
     ).pipe(Effect.map((rows) => rows[0] !== undefined))
 
+  /**
+   * A Runner serves a Thread only while that Thread has demand: a live viewer, an accepted or running Turn, or
+   * queued work. Without this, a checkout with many historical Threads would open one Executor socket per Thread.
+   * Never-served (pending) assignments count as demand because their creator is about to prompt.
+   */
+  const threadDemand = (tx: PgDrizzle.EffectPgDatabase) =>
+    or(
+      eq(rikaHostedExecutorAssignments.lifecycle, "pending"),
+      exists(
+        tx
+          .select({ value: sql`1` })
+          .from(rikaHostedPresence)
+          .where(
+            and(
+              eq(rikaHostedPresence.threadId, rikaHostedExecutorAssignments.threadId),
+              eq(rikaHostedPresence.status, "viewing"),
+              gt(rikaHostedPresence.expiresAt, sql`clock_timestamp()`),
+            ),
+          ),
+      ),
+      exists(
+        tx
+          .select({ value: sql`1` })
+          .from(rikaTurns)
+          .where(
+            and(
+              eq(rikaTurns.threadId, rikaHostedExecutorAssignments.threadId),
+              inArray(rikaTurns.status, ["queued", "accepted", "running", "waiting", "cancelling"]),
+            ),
+          ),
+      ),
+      exists(
+        tx
+          .select({ value: sql`1` })
+          .from(rikaHostedThreadProtocolCommands)
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolCommands.threadId, rikaHostedExecutorAssignments.threadId),
+              isNotNull(rikaHostedThreadProtocolCommands.workState),
+            ),
+          ),
+      ),
+    )
+
   const claimSupervisorAndPoll: RunnerRegistrationsService["claimSupervisorAndPoll"] = (input) =>
     db
       .transaction((tx) =>
@@ -169,6 +219,7 @@ const make = Effect.gen(function* () {
                     ),
                     eq(rikaHostedExecutorAssignments.lifecycle, "active"),
                   ),
+                  threadDemand(tx),
                   eq(
                     sql`${rikaHostedExecutorAssignments.placement} ->> 'deviceId'`,
                     rikaHostedRunnerRegistrations.deviceId,

@@ -186,7 +186,14 @@ export const layer = (options: {
             tools: RemoteTools.layer({
               execute: (request) =>
                 executor.runTool(request).pipe(
-                  Effect.mapError((error) => RemoteTools.Unavailable.make({ message: error.message })),
+                  Effect.mapError((error) =>
+                    RemoteTools.Unavailable.make({
+                      message: error.message,
+                      retryable:
+                        error._tag === "ExecutorGatewayError" &&
+                        (error.kind === "disconnected" || error.kind === "transport"),
+                    }),
+                  ),
                   Effect.flatMap((result) =>
                     result.outcome === "unknown"
                       ? RemoteTools.UnknownOutcome.make({ message: "Remote tool outcome is unknown" })

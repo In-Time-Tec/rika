@@ -46,8 +46,13 @@ export const CancellationResponse = Schema.Union([
 ])
 export type CancellationResponse = typeof CancellationResponse.Type
 
+/**
+ * The Executor could not take the operation. `retryable` marks transient causes (Executor still connecting or a
+ * transport hiccup) that Generalist's idempotent remote route may retry under the same operation key.
+ */
 export class Unavailable extends Schema.TaggedError<Unavailable>()("@rika/execution/remote-tools/Unavailable", {
   message: Schema.String,
+  retryable: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class UnknownOutcome extends Schema.TaggedError<UnknownOutcome>()(

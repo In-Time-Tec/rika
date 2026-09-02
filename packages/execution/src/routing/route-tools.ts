@@ -3,7 +3,7 @@ import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import * as Edit from "@rika/product/edit-file-tool"
 import * as Read from "@rika/product/read-file-tool"
 import * as ShellCommandStatus from "@rika/product/shell-command-status-tool"
-import { Cause, Clock, DateTime, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Clock, DateTime, Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
 import { NestedOperation, ToolContext, ToolExecutor } from "generalist"
 import * as RemoteTools from "../remote-tools"
 import * as NativeTools from "../tool/registry"
@@ -30,6 +30,16 @@ const timeoutFor = (toolName: string): number => {
       return 120_000
   }
 }
+
+/**
+ * Transient Executor unavailability (a Runner or Orb still connecting, a replaced socket) is retried by Generalist's
+ * idempotent remote route under the same durable operation key. The Rika endpoint deduplicates on that key, so a
+ * retry can never run the tool twice. Roughly 30 seconds of retries covers a Runner admission poll plus connect.
+ */
+const unavailableRetries = 16
+const unavailableSchedule = Schedule.exponential("250 millis").pipe(
+  Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(2)))),
+)
 
 const terminalOutcomeFrom = (response: RemoteTools.TerminalResponse): ToolExecutor.TerminalOutcome =>
   response._tag === "Success"
@@ -141,6 +151,12 @@ export const remoteToolExecutor = (options: {
     Effect.map(RemoteTools.Service, (service) => {
       const base = ToolExecutor.remote({
         toolkit: NativeTools.toolkit,
+        idempotent: true,
+        // Generalist checks this key stays stable across attempts; the endpoint deduplicates on the durable
+        // ToolContext operation key, which is derived from the same tool call id.
+        operationKey: (request) => request.call.id,
+        maxRetries: unavailableRetries,
+        schedule: unavailableSchedule,
         execute: (request) =>
           Effect.gen(function* () {
             const context = yield* ToolContext.ToolContext
@@ -184,6 +200,11 @@ export const remoteToolExecutor = (options: {
               .pipe(
                 Effect.catchIf(Schema.is(RemoteTools.UnknownOutcome), (error) =>
                   parkTerminalUnknown(request, operationKey, toolCallId, error),
+                ),
+                Effect.catchIf(
+                  (error): error is RemoteTools.Unavailable =>
+                    Schema.is(RemoteTools.Unavailable)(error) && error.retryable !== true,
+                  (error) => placementFailure(request.call.name, error.message),
                 ),
               )
           }),

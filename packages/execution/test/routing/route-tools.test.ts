@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import { Cause, Context, Effect, Exit, Layer, Schema } from "effect"
+import { Cause, Context, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { Response } from "effect/unstable/ai"
 import { NestedOperation, ToolContext, ToolExecutor } from "generalist"
 import * as RemoteTools from "../../src/remote-tools"
@@ -78,6 +79,78 @@ it.effect("routes a native call through the durable remote operation identity", 
       })
       expect(executor.replayPolicy?.(execution)).toBe("provider-idempotent")
       expect(executor.cancellable?.(execution)).toBe(true)
+    }),
+  ),
+)
+
+it.effect("retries transient Executor unavailability under the same operation key", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const seen: Array<string> = []
+      const remote = RemoteTools.layer({
+        execute: (input) =>
+          Effect.suspend(() => {
+            seen.push(input.operationKey)
+            return seen.length < 3
+              ? RemoteTools.Unavailable.make({ message: "Executor workspace is not ready", retryable: true })
+              : Effect.succeed({ _tag: "Success" as const, result: { text: "1:hello", truncated: false } })
+          }),
+        cancel: () => Effect.succeed({ _tag: "Cancelled" as const }),
+      })
+      const built = yield* Layer.build(
+        remoteToolExecutor({
+          route: remote,
+          workspace: "workspace-one",
+          executionIdentity: { threadId: "thread-one", turnId: "turn-one" },
+        }),
+      )
+      const executor = Context.get(built, ToolExecutor.ToolExecutor)
+      const toolContext = yield* Layer.build(contextLayer)
+      const fiber = yield* executor
+        .execute(request("read", { path: "README.md" }))
+        .pipe(Effect.provide(toolContext), Effect.forkScoped)
+      yield* TestClock.adjust("250 millis")
+      yield* TestClock.adjust("500 millis")
+      const outcome = yield* Fiber.join(fiber)
+
+      expect(outcome).toMatchObject({ _tag: "Success", result: { text: "1:hello", truncated: false } })
+      expect(seen).toEqual(["operation-one", "operation-one", "operation-one"])
+    }),
+  ),
+)
+
+it.effect("does not retry Executor unavailability that is not transient", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let attempts = 0
+      const remote = RemoteTools.layer({
+        execute: () =>
+          Effect.suspend(() => {
+            attempts += 1
+            return RemoteTools.Unavailable.make({ message: "Runner assignment is terminated" })
+          }),
+        cancel: () => Effect.succeed({ _tag: "Cancelled" as const }),
+      })
+      const built = yield* Layer.build(
+        remoteToolExecutor({
+          route: remote,
+          workspace: "workspace-one",
+          executionIdentity: { threadId: "thread-one", turnId: "turn-one" },
+        }),
+      )
+      const executor = Context.get(built, ToolExecutor.ToolExecutor)
+      const toolContext = yield* Layer.build(contextLayer)
+      const exit = yield* executor
+        .execute(request("read", { path: "README.md" }))
+        .pipe(Effect.provide(toolContext), Effect.exit)
+
+      expect(attempts).toBe(1)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.squash(exit.cause)
+        expect(Schema.is(ToolExecutor.FrameworkFailure)(failure)).toBe(true)
+        expect(failure).toMatchObject({ stage: "placement", message: "Runner assignment is terminated" })
+      }
     }),
   ),
 )

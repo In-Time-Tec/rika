@@ -4,6 +4,7 @@ import { identityMember, identityOrganization } from "@rika/identity"
 import { ThreadId } from "@rika/product/hosted-model"
 import {
   rikaHostedExecutorAssignments,
+  rikaHostedPresence,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
   rikaHostedThreads,
@@ -75,6 +76,26 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         processIncarnation: "personal-process",
         ...helloReadiness,
       })
+      // Without a viewer, Turn, or queued work the Thread has no Runner demand: the poll claims but offers nothing.
+      expect(
+        yield* product.pollRunner({
+          principal: owner,
+          checkoutFingerprint: connection.checkoutFingerprint,
+          supervisorId: "10000000-0000-4000-8000-000000000011",
+          activeAssignmentIds: [],
+        }),
+      ).toEqual({ claimed: true })
+      const viewingSince = yield* DateTime.now
+      yield* Effect.tryPromise(() =>
+        databaseClient.insert(rikaHostedPresence).values({
+          ownerId: threadAuthority.ownerId,
+          threadId: connection.threadId,
+          actor: threadAuthority.actor,
+          status: "viewing",
+          lastSeenAt: DateTime.toDate(viewingSince),
+          expiresAt: DateTime.toDate(DateTime.add(viewingSince, { minutes: 1 })),
+        }),
+      )
       const resume = yield* product.pollRunner({
         principal: owner,
         checkoutFingerprint: connection.checkoutFingerprint,

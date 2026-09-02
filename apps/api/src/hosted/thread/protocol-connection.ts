@@ -29,6 +29,14 @@ const replayDistance = (cursor: string, afterCursor: string) => {
   return distance <= 0 ? 0 : Number(distance > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : distance)
 }
 
+/**
+ * Presence is the durable "someone is viewing this Thread" signal. It expires after one minute, so an attached
+ * connection refreshes it every thirty seconds and marks itself away when it detaches or its socket closes.
+ * Runner admission and other demand-driven work read it, so it must stay live for the whole attachment.
+ */
+export const presenceLifetimeMillis = 60_000
+export const presenceRefreshMillis = 30_000
+
 interface Attachment {
   readonly threadId: ThreadId
   readonly authority: ThreadAuthority
@@ -37,6 +45,7 @@ interface Attachment {
   readonly knownHead: ThreadEventCursor
   readonly notificationGeneration: ThreadProtocolNotificationGeneration
   readonly previewSubscription: HostedPreviewSubscription
+  readonly presenceRefreshedAt: number
 }
 
 interface ProtocolConnectionDependencies {
@@ -74,6 +83,52 @@ export interface ProtocolConnectionState {
 export const protocolConnectionState = (dependencies: ProtocolConnectionDependencies): ProtocolConnectionState => {
   const { principal, product, operations, store, presence, changes, previews, workspacePlacement } = dependencies
   let attached: Attachment | undefined
+
+  const presenceViewing = (authority: ThreadAuthority, threadId: ThreadId, nowMillis: number) =>
+    presence.upsert({
+      ownerId: authority.ownerId,
+      threadId,
+      actor: authority.actor,
+      status: "viewing",
+      now: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis))),
+      expiresAt: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis + presenceLifetimeMillis))),
+    })
+
+  const presenceAway = (authority: ThreadAuthority, threadId: ThreadId, nowMillis: number) => {
+    const now = Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis)))
+    return presence.upsert({
+      ownerId: authority.ownerId,
+      threadId,
+      actor: authority.actor,
+      status: "away",
+      now,
+      expiresAt: now,
+    })
+  }
+
+  /** Refreshes the attachment's presence when it is due; never fails the connection over a presence write. */
+  const refreshPresence = Effect.gen(function* () {
+    const current = attached
+    if (current === undefined) return
+    const nowMillis = yield* Clock.currentTimeMillis
+    if (nowMillis < current.presenceRefreshedAt + presenceRefreshMillis) return
+    yield* presenceViewing(current.authority, current.threadId, nowMillis).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("thread.presence.refresh_failed").pipe(
+          Effect.annotateLogs({ "rika.thread.id": String(current.threadId), "rika.failure.message": error.message }),
+        ),
+      ),
+      Effect.ignore,
+    )
+    if (attached === current) attached = { ...current, presenceRefreshedAt: nowMillis }
+  })
+
+  const presenceDue = Effect.gen(function* () {
+    const current = attached
+    if (current === undefined) return yield* Effect.never
+    const nowMillis = yield* Clock.currentTimeMillis
+    yield* Effect.sleep(Math.max(0, current.presenceRefreshedAt + presenceRefreshMillis - nowMillis))
+  })
 
   const materializeSnapshot = Effect.fn("HostedThreadProtocol.materializeSnapshot")(function* (
     authority: ThreadAuthority,
@@ -196,26 +251,18 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
               workspace: yield* workspacePlacement(authority.ownerId, command.threadId),
             }
       const presenceNow = Timestamp.make(receivedAt)
-      const participants = yield* presence
-        .upsert({
-          ownerId: authority.ownerId,
-          threadId: command.threadId,
-          actor: authority.actor,
-          status: "viewing",
-          now: presenceNow,
-          expiresAt: Timestamp.make(DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(receivedAt), { minutes: 1 }))),
-        })
-        .pipe(
-          Effect.andThen(
-            presence.list({
-              ownerId: authority.ownerId,
-              threadId: command.threadId,
-              actor: authority.actor,
-              now: presenceNow,
-            }),
-          ),
-          Effect.orElseSucceed(() => []),
-        )
+      const attachedAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(receivedAt))
+      const participants = yield* presenceViewing(authority, command.threadId, attachedAtMillis).pipe(
+        Effect.andThen(
+          presence.list({
+            ownerId: authority.ownerId,
+            threadId: command.threadId,
+            actor: authority.actor,
+            now: presenceNow,
+          }),
+        ),
+        Effect.orElseSucceed(() => []),
+      )
       const attachmentPayload = {
         _tag: "ThreadAttached",
         requestId,
@@ -254,6 +301,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
         knownHead: representedCursor,
         notificationGeneration,
         previewSubscription,
+        presenceRefreshedAt: attachedAtMillis,
       }
       return [attachment]
     },
@@ -262,22 +310,16 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
   const detach = (receivedAt: string) => {
     const current = attached
     if (current === undefined) return Effect.succeed<ReadonlyArray<ServerFrame>>([])
-    const now = Timestamp.make(receivedAt)
-    return presence
-      .upsert({
-        ownerId: current.authority.ownerId,
-        threadId: current.threadId,
-        actor: current.authority.actor,
-        status: "away",
-        now,
-        expiresAt: now,
-      })
-      .pipe(
-        Effect.ignore,
-        Effect.andThen(current.previewSubscription.close),
-        Effect.tap(() => Effect.sync(() => (attached = undefined))),
-        Effect.as([]),
-      )
+    return presenceAway(
+      current.authority,
+      current.threadId,
+      DateTime.toEpochMillis(DateTime.makeUnsafe(receivedAt)),
+    ).pipe(
+      Effect.ignore,
+      Effect.andThen(current.previewSubscription.close),
+      Effect.tap(() => Effect.sync(() => (attached = undefined))),
+      Effect.as([]),
+    )
   }
 
   const ready = Effect.suspend(() => {
@@ -377,9 +419,14 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
     Effect.suspend(() => {
       const current = attached
       if (current === undefined) return durableReady.pipe(Effect.andThen(drainDurable))
-      return Effect.raceFirst(durableReady.pipe(Effect.as(undefined)), current.previewSubscription.take).pipe(
+      const presenceRefresh = presenceDue.pipe(Effect.as("presence" as const))
+      return Effect.raceFirst(
+        Effect.raceFirst(durableReady.pipe(Effect.as(undefined)), current.previewSubscription.take),
+        presenceRefresh,
+      ).pipe(
         Effect.flatMap((delivery) => {
-          if (delivery === undefined) return drainDurable
+          if (delivery === "presence") return refreshPresence.pipe(Effect.as([]))
+          if (delivery === undefined) return refreshPresence.pipe(Effect.andThen(drainDurable))
           if (attached !== current) return Effect.succeed([])
           return Effect.succeed([
             frame(
@@ -406,7 +453,12 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
     close: Effect.suspend(() => {
       const current = attached
       attached = undefined
-      return current?.previewSubscription.close ?? Effect.void
+      if (current === undefined) return Effect.void
+      return Clock.currentTimeMillis.pipe(
+        Effect.flatMap((nowMillis) => presenceAway(current.authority, current.threadId, nowMillis)),
+        Effect.ignore,
+        Effect.andThen(current.previewSubscription.close),
+      )
     }),
   }
 }
