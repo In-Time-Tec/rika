@@ -4,47 +4,50 @@ import { Config, Crypto, Deferred, Effect, Encoding, FileSystem, Layer, Option, 
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ExecutorBootstrapWire } from "../protocol/messages"
 import { hostIdentity, type Bootstrap } from "./identity"
-import { MachineError, State as MachineState, type State as MachineStateValue } from "./machinery/machine"
+import { NativeToolError, NativeToolState, type NativeToolState as NativeToolStateValue } from "./machinery/native-tool"
 
 const statePersistence = (stateDirectory: string, crypto: Crypto.Crypto, fileSystem: FileSystem.FileSystem) => {
-  const machineDirectory = `${stateDirectory}/machines`
-  const decodeMachine = Schema.decodeUnknownEffect(Schema.fromJsonString(MachineState))
-  const encodeMachine = Schema.encodeEffect(Schema.fromJsonString(MachineState))
-  const machinePath = Effect.fn("Host.machineStatePath")(function* (machineId: string) {
+  const nativeToolDirectory = `${stateDirectory}/native-tools`
+  const decodeNativeTool = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeToolState))
+  const encodeNativeTool = Schema.encodeEffect(Schema.fromJsonString(NativeToolState))
+  const nativeToolPath = Effect.fn("Host.nativeToolStatePath")(function* (operationId: string) {
     const digest = yield* crypto
-      .digest("SHA-256", new TextEncoder().encode(machineId))
-      .pipe(Effect.mapError(() => MachineError.make({ message: "Could not identify machine state" })))
-    return `${machineDirectory}/${Encoding.encodeHex(digest)}.json`
+      .digest("SHA-256", new TextEncoder().encode(operationId))
+      .pipe(Effect.mapError(() => NativeToolError.make({ message: "Could not identify native tool state" })))
+    return `${nativeToolDirectory}/${Encoding.encodeHex(digest)}.json`
   })
-  const readMachine = Effect.fn("Host.readMachineState")(function* (machineId: string) {
-    const filename = yield* machinePath(machineId)
+  const readNativeTool = Effect.fn("Host.readNativeToolState")(function* (operationId: string) {
+    const filename = yield* nativeToolPath(operationId)
     const exists = yield* fileSystem
       .exists(filename)
-      .pipe(Effect.mapError(() => MachineError.make({ message: "Could not inspect machine state" })))
+      .pipe(Effect.mapError(() => NativeToolError.make({ message: "Could not inspect native tool state" })))
     if (!exists) return undefined
     const text = yield* fileSystem
       .readFileString(filename)
-      .pipe(Effect.mapError(() => MachineError.make({ message: "Could not read machine state" })))
-    return yield* decodeMachine(text).pipe(
-      Effect.mapError(() => MachineError.make({ message: "Machine state is invalid" })),
+      .pipe(Effect.mapError(() => NativeToolError.make({ message: "Could not read native tool state" })))
+    return yield* decodeNativeTool(text).pipe(
+      Effect.mapError(() => NativeToolError.make({ message: "Native tool state is invalid" })),
     )
   })
-  const writeMachine = Effect.fn("Host.writeMachineState")(function* (machineId: string, state: MachineStateValue) {
-    const filename = yield* machinePath(machineId)
+  const writeNativeTool = Effect.fn("Host.writeNativeToolState")(function* (
+    operationId: string,
+    state: NativeToolStateValue,
+  ) {
+    const filename = yield* nativeToolPath(operationId)
     const temporary = `${filename}.tmp-${process.pid}`
-    const text = yield* encodeMachine(state).pipe(
-      Effect.mapError(() => MachineError.make({ message: "Could not encode machine state" })),
+    const text = yield* encodeNativeTool(state).pipe(
+      Effect.mapError(() => NativeToolError.make({ message: "Could not encode native tool state" })),
     )
     yield* fileSystem
-      .makeDirectory(machineDirectory, { recursive: true, mode: 0o700 })
-      .pipe(Effect.mapError(() => MachineError.make({ message: "Could not create machine state" })))
+      .makeDirectory(nativeToolDirectory, { recursive: true, mode: 0o700 })
+      .pipe(Effect.mapError(() => NativeToolError.make({ message: "Could not create native tool state" })))
     yield* fileSystem.writeFileString(temporary, text, { mode: 0o600 }).pipe(
       Effect.flatMap(() => fileSystem.rename(temporary, filename)),
       Effect.ensuring(fileSystem.remove(temporary, { force: true }).pipe(Effect.ignore)),
-      Effect.mapError(() => MachineError.make({ message: "Could not persist machine state" })),
+      Effect.mapError(() => NativeToolError.make({ message: "Could not persist native tool state" })),
     )
   })
-  return { readMachine, writeMachine }
+  return { readNativeTool, writeNativeTool }
 }
 
 export const receiveBootstrap = Effect.scoped(

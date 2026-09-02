@@ -1,10 +1,11 @@
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import { Config, Crypto, Deferred, Effect, FileSystem, Ref, Schema, Semaphore } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { MachineOutcome, MachineRequest, type MachineOutcome as MachineOutcomeValue } from "../../protocol/messages"
+import { MachineOutcome, type MachineOutcome as MachineOutcomeValue } from "../../protocol/messages"
 
 const Request = Schema.Struct({
   environment: Schema.Record(Schema.String, Schema.String),
-  request: MachineRequest,
+  request: NativeToolRuntime.Request,
 })
 
 const Response = Schema.Union([Schema.Struct({ outcome: MachineOutcome }), Schema.Struct({ error: Schema.String })])
@@ -12,11 +13,11 @@ const Response = Schema.Union([Schema.Struct({ outcome: MachineOutcome }), Schem
 const encodeRequest = Schema.encodeSync(Schema.fromJsonString(Request))
 const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(Response))
 
-export class MachineProcessError extends Schema.TaggedError<MachineProcessError>()("MachineProcessError", {
+class NativeToolSubprocessError extends Schema.TaggedError<NativeToolSubprocessError>()("NativeToolSubprocessError", {
   message: Schema.String,
 }) {}
 
-export interface Options {
+interface Options {
   readonly workspace: string
   readonly workspaceUser: string
   readonly environment: Readonly<Record<string, string>>
@@ -29,12 +30,12 @@ interface ConnectionState {
 const connect = (
   socketPath: string,
   input: typeof Request.Type,
-): Effect.Effect<MachineOutcomeValue, MachineProcessError> =>
+): Effect.Effect<MachineOutcomeValue, NativeToolSubprocessError> =>
   Effect.gen(function* () {
     const decoder = new TextDecoder()
     const state: ConnectionState = { text: "" }
-    const result = yield* Deferred.make<MachineOutcomeValue, MachineProcessError>()
-    const complete = (effect: Effect.Effect<MachineOutcomeValue, MachineProcessError>) => {
+    const result = yield* Deferred.make<MachineOutcomeValue, NativeToolSubprocessError>()
+    const complete = (effect: Effect.Effect<MachineOutcomeValue, NativeToolSubprocessError>) => {
       Deferred.doneUnsafe(result, effect)
     }
     const socket = yield* Effect.tryPromise({
@@ -54,22 +55,22 @@ const connect = (
               complete(
                 decodeResponse(opened.data.text.trim()).pipe(
                   Effect.mapError(() =>
-                    MachineProcessError.make({ message: "Workspace machine returned an invalid response" }),
+                    NativeToolSubprocessError.make({ message: "Native tool subprocess returned an invalid response" }),
                   ),
                   Effect.flatMap((response) =>
                     "outcome" in response
                       ? Effect.succeed(response.outcome)
-                      : Effect.fail(MachineProcessError.make({ message: response.error })),
+                      : Effect.fail(NativeToolSubprocessError.make({ message: response.error })),
                   ),
                 ),
               )
             },
             error(_opened, error) {
-              complete(Effect.fail(MachineProcessError.make({ message: String(error) })))
+              complete(Effect.fail(NativeToolSubprocessError.make({ message: String(error) })))
             },
           },
         }),
-      catch: (error) => MachineProcessError.make({ message: String(error) }),
+      catch: (error) => NativeToolSubprocessError.make({ message: String(error) }),
     })
     return yield* Deferred.await(result).pipe(
       Effect.ensuring(
@@ -83,16 +84,16 @@ const connect = (
 const waitUntilReady = (
   socketPath: string,
   process: ChildProcessSpawner.ChildProcessHandle,
-): Effect.Effect<void, MachineProcessError, FileSystem.FileSystem> =>
+): Effect.Effect<void, NativeToolSubprocessError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     for (let attempt = 0; attempt < 100; attempt++) {
       if (yield* fileSystem.exists(socketPath).pipe(Effect.orElseSucceed(() => false))) return
       if (!(yield* process.isRunning.pipe(Effect.orElseSucceed(() => false))))
-        return yield* MachineProcessError.make({ message: "Workspace machine exited before becoming ready" })
+        return yield* NativeToolSubprocessError.make({ message: "Native tool subprocess exited before becoming ready" })
       yield* Effect.sleep("50 millis")
     }
-    return yield* MachineProcessError.make({ message: "Workspace machine did not become ready" })
+    return yield* NativeToolSubprocessError.make({ message: "Native tool subprocess did not become ready" })
   })
 
 const runCleanup = (
@@ -132,9 +133,9 @@ export const make = (options: Options) =>
     const executablePath = yield* Config.string("PATH").pipe(Config.withDefault("/usr/local/bin:/usr/bin:/bin"))
     const language = yield* Config.string("LANG").pipe(Config.withDefault("C.UTF-8"))
     const githubConfig = yield* Config.string("GH_CONFIG_DIR").pipe(Config.withDefault("/run/rika/gh"))
-    const main = new URL("./machine-process-main.ts", import.meta.url).pathname
+    const main = new URL("./native-tool-subprocess-main.ts", import.meta.url).pathname
     const start = Effect.gen(function* () {
-      const socketPath = `/tmp/rika-machine-${yield* crypto.randomUUIDv4}.sock`
+      const socketPath = `/tmp/rika-native-tool-${yield* crypto.randomUUIDv4}.sock`
       const child = yield* spawner
         .spawn(
           ChildProcess.make(
@@ -156,7 +157,7 @@ export const make = (options: Options) =>
             { stdout: "inherit", stderr: "inherit" },
           ),
         )
-        .pipe(Effect.mapError((error) => MachineProcessError.make({ message: String(error) })))
+        .pipe(Effect.mapError((error) => NativeToolSubprocessError.make({ message: String(error) })))
       yield* waitUntilReady(socketPath, child).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
       return {
         child,
@@ -178,7 +179,7 @@ export const make = (options: Options) =>
       ({ state }) => Effect.flatMap(Ref.get(state), (running) => stop(spawner, options.workspaceUser, running)),
     ).pipe(
       Effect.map(({ state, restart }) => ({
-        execute: (request: MachineRequest) =>
+        execute: (request: NativeToolRuntime.Request) =>
           Effect.gen(function* () {
             const running = yield* Ref.get(state)
             return yield* connect(running.socketPath, {

@@ -20,7 +20,7 @@ import {
 import * as Socket from "effect/unstable/socket/Socket"
 import * as Operations from "../../protocol/operations"
 import { consumeFailureKind, messageCorrelation, runnerEvent, runnerWarning } from "../../protocol/telemetry"
-import { Machine, MachineError, workspaceLayer as machineLayer } from "../machinery/machine"
+import { NativeToolError, NativeToolService, nativeToolLayer } from "../machinery/native-tool"
 import {
   ApiMessage,
   type ApiMessage as IncomingMessage,
@@ -213,7 +213,7 @@ export const foregroundRunnerLayer = Layer.mergeAll(
 const runnerSource = (options: ForegroundRunnerOptions) => options.resume?.executorUrl ?? options.admission?.executorUrl
 const workspaceIdentityFor = (options: ForegroundRunnerOptions) =>
   options.resume?.workspaceIdentity ?? options.admission?.workspaceIdentity
-const initialMachineStates = (resume: ForegroundRunnerSnapshot | undefined) =>
+const initialNativeToolStates = (resume: ForegroundRunnerSnapshot | undefined) =>
   new Map((resume?.machines ?? []).map(({ machineId, state }) => [machineId, state] as const))
 
 export const runForegroundRunner = (
@@ -235,7 +235,7 @@ export const runForegroundRunner = (
           Effect.mapError(() => failure("Could not create the local process incarnation")),
         ))
       const sessions = yield* Ref.make<LocalSession | undefined>(initialSessionFor(options.resume))
-      const machineStates = yield* Ref.make(initialMachineStates(options.resume))
+      const nativeToolStates = yield* Ref.make(initialNativeToolStates(options.resume))
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
       )
@@ -258,22 +258,25 @@ export const runForegroundRunner = (
                 leaseExpiresAt: session.leaseExpiresAt,
                 heartbeatIntervalMillis: session.heartbeatIntervalMillis,
                 cursor: session.cursor,
-                machines: Array.from(yield* Ref.get(machineStates), ([machineId, state]) => ({ machineId, state })),
+                machines: Array.from(yield* Ref.get(nativeToolStates), ([machineId, state]) => ({
+                  machineId,
+                  state,
+                })),
               })
             })
       const persist = () => persistLock.withPermits(1)(saveSnapshot())
-      const machineContext = yield* Layer.build(
-        machineLayer({
+      const nativeToolContext = yield* Layer.build(
+        nativeToolLayer({
           workspace: options.workspacePath,
-          read: (machineId) => Effect.map(Ref.get(machineStates), (states) => states.get(machineId)),
-          write: (machineId, state) =>
-            Ref.update(machineStates, (states) => new Map(states).set(machineId, state)).pipe(
+          read: (operationId) => Effect.map(Ref.get(nativeToolStates), (states) => states.get(operationId)),
+          write: (operationId, state) =>
+            Ref.update(nativeToolStates, (states) => new Map(states).set(operationId, state)).pipe(
               Effect.andThen(persist()),
-              Effect.mapError((error) => MachineError.make({ message: error.message })),
+              Effect.mapError((error) => NativeToolError.make({ message: error.message })),
             ),
         }),
       )
-      const machine = Context.get(machineContext, Machine)
+      const nativeTool = Context.get(nativeToolContext, NativeToolService)
       const currentAccess = Ref.get(sessions).pipe(
         Effect.flatMap((session) =>
           session === undefined
@@ -304,7 +307,7 @@ export const runForegroundRunner = (
           ),
         machine: {
           execute: (input) =>
-            machine
+            nativeTool
               .execute({
                 machineId: input.machineId,
                 requestDigest: input.requestDigest,
@@ -316,7 +319,7 @@ export const runForegroundRunner = (
                 ),
               ),
           cancel: (input) =>
-            machine
+            nativeTool
               .cancel(input)
               .pipe(
                 Effect.mapError((error) =>

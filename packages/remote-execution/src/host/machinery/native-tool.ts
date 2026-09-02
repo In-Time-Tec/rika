@@ -1,55 +1,58 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as LocalTools from "@rika/execution/local-tools"
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import { Cause, Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
 import { MachineOutcome, MachineRequest, type MachineOutcome as MachineOutcomeValue } from "../../protocol/messages"
-import * as MachineExecution from "./machine-execution"
-import * as MachineProcess from "./machine-process"
+import * as NativeToolSubprocess from "./native-tool-subprocess"
 
-export const State = Schema.Union([
+export const NativeToolState = Schema.Union([
   Schema.TaggedStruct("Running", { requestDigest: Schema.String }),
   Schema.TaggedStruct("Completed", { requestDigest: Schema.String, outcome: MachineOutcome }),
 ])
-export type State = typeof State.Type
+export type NativeToolState = typeof NativeToolState.Type
 
-export class MachineError extends Schema.TaggedError<MachineError>()("MachineError", {
+export class NativeToolError extends Schema.TaggedError<NativeToolError>()("NativeToolError", {
   message: Schema.String,
 }) {}
 
-export interface Options {
-  readonly read: (machineId: string) => Effect.Effect<State | undefined, MachineError>
-  readonly write: (machineId: string, state: State) => Effect.Effect<void, MachineError>
+interface Options {
+  readonly read: (machineId: string) => Effect.Effect<NativeToolState | undefined, NativeToolError>
+  readonly write: (machineId: string, state: NativeToolState) => Effect.Effect<void, NativeToolError>
 }
 
-export interface Interface {
+interface Interface {
   readonly execute: (input: {
     readonly machineId: string
     readonly requestDigest: string
     readonly request: MachineRequest
-  }) => Effect.Effect<MachineOutcomeValue, MachineError>
+  }) => Effect.Effect<MachineOutcomeValue, NativeToolError>
   readonly cancel: (input: {
     readonly machineId: string
     readonly requestDigest: string
     readonly admitted?: boolean
-  }) => Effect.Effect<MachineOutcomeValue, MachineError>
+  }) => Effect.Effect<MachineOutcomeValue, NativeToolError>
 }
 
-export class Machine extends Context.Service<Machine, Interface>()("@rika/remote-execution/host/machinery/machine") {}
+export class NativeToolService extends Context.Service<NativeToolService, Interface>()(
+  "@rika/remote-execution/host/native-tool",
+) {}
 
 interface Entry {
   readonly requestDigest: string
-  readonly result: Deferred.Deferred<MachineOutcomeValue, MachineError>
+  readonly result: Deferred.Deferred<MachineOutcomeValue, NativeToolError>
 }
 
 const layerWith = <R>(
   options: Options,
   executeRequest: (request: MachineRequest) => Effect.Effect<MachineOutcomeValue, never, R>,
-): Layer.Layer<Machine, never, R> =>
+): Layer.Layer<NativeToolService, never, R> =>
   Layer.effect(
-    Machine,
+    NativeToolService,
     Effect.gen(function* () {
       const services = yield* Effect.context<R>()
       const entries = yield* Ref.make(new Map<string, Entry>())
-      const execute: Interface["execute"] = Effect.fn("Machine.execute")(function* (input) {
-        const result = yield* Deferred.make<MachineOutcomeValue, MachineError>()
+      const execute: Interface["execute"] = Effect.fn("NativeToolService.execute")(function* (input) {
+        const result = yield* Deferred.make<MachineOutcomeValue, NativeToolError>()
         const entry = yield* Ref.modify(entries, (current) => {
           const known = current.get(input.machineId)
           if (known !== undefined) return [known, current] as const
@@ -57,16 +60,22 @@ const layerWith = <R>(
           return [fresh, new Map(current).set(input.machineId, fresh)] as const
         })
         if (entry.requestDigest !== input.requestDigest)
-          return { _tag: "Fenced", message: "machine call id conflicts with a different request" }
+          return { _tag: "Fenced", message: "native tool operation id conflicts with a different request" }
         if (entry.result === result) {
           const operation = Effect.gen(function* () {
             const stored = yield* options.read(input.machineId)
             if (stored !== undefined) {
               if (stored.requestDigest !== input.requestDigest)
-                return { _tag: "Fenced" as const, message: "machine call id conflicts with a persisted request" }
+                return {
+                  _tag: "Fenced" as const,
+                  message: "native tool operation id conflicts with a persisted request",
+                }
               return stored._tag === "Completed"
                 ? stored.outcome
-                : ({ _tag: "Unknown", message: "machine call outcome is unknown after executor restart" } as const)
+                : ({
+                    _tag: "Unknown",
+                    message: "native tool operation outcome is unknown after executor restart",
+                  } as const)
             }
             yield* options.write(input.machineId, { _tag: "Running", requestDigest: input.requestDigest })
             const outcome = yield* executeRequest(input.request).pipe(Effect.provideContext(services))
@@ -78,60 +87,72 @@ const layerWith = <R>(
               onFailure: (cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.interrupt
-                  : Deferred.fail(result, MachineError.make({ message: String(Cause.squash(cause)) })),
+                  : Deferred.fail(result, NativeToolError.make({ message: String(Cause.squash(cause)) })),
               onSuccess: (outcome) => Deferred.succeed(result, outcome),
             }),
           )
         }
         return yield* Deferred.await(entry.result)
       })
-      const cancel: Interface["cancel"] = Effect.fn("Machine.cancel")(function* (input) {
+      const cancel: Interface["cancel"] = Effect.fn("NativeToolService.cancel")(function* (input) {
         const entry = (yield* Ref.get(entries)).get(input.machineId)
         if (entry !== undefined && entry.requestDigest !== input.requestDigest)
-          return { _tag: "Fenced", message: "machine call id conflicts with a different request" }
+          return { _tag: "Fenced", message: "native tool operation id conflicts with a different request" }
         const stored = yield* options.read(input.machineId)
         if (stored === undefined) {
           if (entry === undefined && input.admitted !== true)
-            return { _tag: "Unknown", message: "machine call was not retained before cancellation" }
+            return { _tag: "Unknown", message: "native tool operation was not retained before cancellation" }
           const outcome = { _tag: "Cancelled" as const }
           yield* options.write(input.machineId, { _tag: "Completed", requestDigest: input.requestDigest, outcome })
           if (entry !== undefined) yield* Deferred.succeed(entry.result, outcome)
           return outcome
         }
         if (stored.requestDigest !== input.requestDigest)
-          return { _tag: "Fenced", message: "machine call id conflicts with a persisted request" }
+          return { _tag: "Fenced", message: "native tool operation id conflicts with a persisted request" }
         if (stored._tag === "Completed") return stored.outcome
         if (entry === undefined)
-          return { _tag: "Unknown", message: "machine call outcome is unknown after executor restart" }
+          return { _tag: "Unknown", message: "native tool operation outcome is unknown after executor restart" }
         const outcome = { _tag: "Cancelled" as const }
         yield* options.write(input.machineId, { _tag: "Completed", requestDigest: input.requestDigest, outcome })
         yield* Deferred.succeed(entry.result, outcome)
         return outcome
       })
-      return Machine.of({ execute, cancel })
+      return NativeToolService.of({ execute, cancel })
     }),
   )
 
-export const layer = (options: Options): Layer.Layer<Machine, never, MachineExecution.Requirements> =>
-  layerWith(options, MachineExecution.execute)
+const layer = (options: Options): Layer.Layer<NativeToolService, never, NativeToolRuntime.Service> =>
+  layerWith(options, (request) =>
+    Effect.flatMap(NativeToolRuntime.Service, (runtime) => runtime.run(request.request)).pipe(
+      Effect.match({
+        onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
+        onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "NativeTool" as const, result } }),
+      }),
+    ),
+  )
 
-export const workspaceLayer = (
+export const nativeToolLayer = (
   options: Options & {
     readonly workspace: string
     readonly workspaceUser?: string
     readonly environment?: Readonly<Record<string, string>>
   },
-): Layer.Layer<Machine> => {
+): Layer.Layer<NativeToolService> => {
   const workspaceUser = options.workspaceUser
   if (workspaceUser === undefined)
     return layer(options).pipe(
-      Layer.provide(MachineExecution.layer(options.workspace)),
+      Layer.provide(
+        Layer.effect(
+          NativeToolRuntime.Service,
+          Effect.map(NativeToolRuntime.Service, NativeToolRuntime.Service.of),
+        ).pipe(Layer.provide(LocalTools.layer(options.workspace))),
+      ),
       Layer.provide(BunServices.layer),
     )
   return Layer.effect(
-    Machine,
+    NativeToolService,
     Effect.gen(function* () {
-      const process = yield* MachineProcess.make({
+      const process = yield* NativeToolSubprocess.make({
         workspace: options.workspace,
         workspaceUser,
         environment: options.environment ?? {},
@@ -139,11 +160,11 @@ export const workspaceLayer = (
       const context = yield* Layer.build(
         layerWith(options, (request) =>
           process
-            .execute(request)
+            .execute(request.request)
             .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
         ),
       )
-      return Context.get(context, Machine)
+      return Context.get(context, NativeToolService)
     }),
   ).pipe(Layer.provide(BunServices.layer))
 }

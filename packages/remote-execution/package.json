@@ -9,14 +9,12 @@
     "./runtime": "./src/host/runtime.ts",
     "./workspace": "./src/workspace/service.ts",
     "./operations": "./src/protocol/operations.ts",
-    "./machine": "./src/host/machinery/machine.ts",
     "./protocol": "./src/protocol/messages.ts",
     "./pty": "./src/host/terminal/pty.ts",
     "./repository-services": "./src/workspace/repositories.ts",
     "./workspace-files": "./src/workspace/files.ts",
     "./workspace-archive": "./src/workspace/artifact/archive-api.ts",
-    "./foreground": "./src/host/session/foreground.ts",
-    "./machine-process": "./src/host/machinery/machine-process.ts"
+    "./foreground": "./src/host/session/foreground.ts"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
