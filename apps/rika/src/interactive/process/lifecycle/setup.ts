@@ -118,6 +118,7 @@ export const initializeRenderer = (context: StartupContext): Fiber.Fiber<void, n
           run(Effect.logInfo("tui.renderer.started"))
           if (loop.closed) return
           run(recoverSession(session.events(dispatch)))
+          run(Effect.yieldNow.pipe(Effect.andThen(recoverSession(session.refreshThreads))))
           run(watchChangedFiles)
           run(
             workspaceGlob(loop.model.workspace, "**/*", 10_000).pipe(

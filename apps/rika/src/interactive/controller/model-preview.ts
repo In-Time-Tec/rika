@@ -139,7 +139,6 @@ const clearRun = (
   if (current.incomplete && clearFence === current.clearFence) return current
   return {
     ...current,
-    ...cleared,
     incomplete: true,
     clearFence,
   }
@@ -228,27 +227,36 @@ export const replace: {
 const terminal = (status: ThreadView.ThreadViewTurnRecord["status"]): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
 
+const awaitsDurableResponse = (run: RunOverlay): boolean =>
+  run.preview !== undefined &&
+  run.responseId !== undefined &&
+  run.incomplete &&
+  (run.reasoning.length > 0 || run.text.length > 0)
+
 const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadViewAccumulator): Overlay | undefined => {
   if (overlay === undefined) return undefined
   const turn = view.turn(overlay.turnId)
-  if (turn === undefined || terminal(turn.turn.status)) return undefined
+  if (turn === undefined) return undefined
+  const terminalStatus = terminal(turn.turn.status)
   const durableResponseIds = new Set(
     view.units(overlay.turnId).flatMap((unit) => (unit.modelResponseId === undefined ? [] : [unit.modelResponseId])),
   )
-  if (durableResponseIds.size === 0) return overlay
   let changed = false
   const byRun = new Map<string, RunOverlay>()
   for (const [runId, run] of overlay.byRun) {
-    if (run.responseId === undefined || !durableResponseIds.has(run.responseId)) {
-      byRun.set(runId, run)
+    const durable = run.responseId !== undefined && durableResponseIds.has(run.responseId)
+    if (durable) {
+      changed = true
+      if (!terminalStatus)
+        byRun.set(runId, { ...run, preview: undefined, identity: undefined, ...cleared, incomplete: true })
       continue
     }
-    if (run.preview === undefined) {
-      byRun.set(runId, run)
+    if (terminalStatus) {
+      if (turn.turn.status === "completed" && awaitsDurableResponse(run)) byRun.set(runId, run)
+      else changed = true
       continue
     }
-    changed = true
-    byRun.set(runId, { ...run, preview: undefined, identity: undefined, ...cleared, incomplete: true })
+    byRun.set(runId, run)
   }
   if (!changed) return overlay
   return byRun.size === 0 ? undefined : { ...overlay, byRun }

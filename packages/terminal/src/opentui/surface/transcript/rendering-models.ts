@@ -265,7 +265,7 @@ export const buildTentativeTranscriptUnitBundles = ({
   cached,
 }: BuildTentativeBundlesOptions): TranscriptUnitCacheEntry => {
   const layout = tentativeLayout(cached, text, width, tone)
-  if (layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength })) {
+  if (tone === "reasoning" || layout.markdown || tentativeTranscriptContainsMarkdown({ text, sourceLength: layout.sourceLength })) {
     layout.markdown = true
     const nowMillis = Number(process.hrtime.bigint()) / 1_000_000
     parseStableMarkdown(layout, text, nowMillis)

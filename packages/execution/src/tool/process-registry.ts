@@ -44,9 +44,14 @@ interface BoundedText {
   readonly truncated: boolean
 }
 
+interface BoundedTextState extends BoundedText {
+  readonly bytes: number
+}
+
 interface PendingOutput {
   readonly stdout: string
   readonly stderr: string
+  readonly retainedBytes: number
   readonly stdoutBytes: number
   readonly stderrBytes: number
   readonly truncated: boolean
@@ -75,14 +80,41 @@ const retainTerminalOutput = (
   return next
 }
 
+const appendBoundedText = (state: BoundedTextState, text: string, limit: number): BoundedTextState => {
+  const incomingBytes = RuntimeFilesystem.byteLength(text)
+  const remainingBytes = Math.max(0, limit - state.bytes)
+  if (incomingBytes <= remainingBytes)
+    return {
+      text: state.text + text,
+      bytes: state.bytes + incomingBytes,
+      truncated: state.truncated,
+    }
+  if (remainingBytes === 0)
+    return {
+      ...state,
+      truncated: state.truncated || incomingBytes > 0,
+    }
+  const accepted = RuntimeFilesystem.boundedPrefix(text, remainingBytes)
+  return {
+    text: state.text + accepted,
+    bytes: state.bytes + RuntimeFilesystem.byteLength(accepted),
+    truncated: true,
+  }
+}
+
 const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text: string): PendingOutput => {
-  const retainedBytes = RuntimeFilesystem.byteLength(pending.stdout) + RuntimeFilesystem.byteLength(pending.stderr)
-  const accepted = RuntimeFilesystem.boundedPrefix(text, pendingOutputLimit - retainedBytes)
+  const incomingBytes = RuntimeFilesystem.byteLength(text)
+  const remainingBytes = Math.max(0, pendingOutputLimit - pending.retainedBytes)
+  let accepted = text
+  if (incomingBytes > remainingBytes)
+    accepted = remainingBytes === 0 ? "" : RuntimeFilesystem.boundedPrefix(text, remainingBytes)
+  const acceptedBytes = accepted === text ? incomingBytes : RuntimeFilesystem.byteLength(accepted)
   const bytesKey = channel === "stdout" ? "stdoutBytes" : "stderrBytes"
   return {
     ...pending,
     [channel]: pending[channel] + accepted,
-    [bytesKey]: pending[bytesKey] + RuntimeFilesystem.byteLength(text),
+    retainedBytes: pending.retainedBytes + acceptedBytes,
+    [bytesKey]: pending[bytesKey] + incomingBytes,
     truncated: pending.truncated || accepted !== text,
   }
 }
@@ -95,18 +127,13 @@ export const collectBoundedText: {
     const decoder = new TextDecoder()
     const collected = yield* Stream.runFold(
       stream,
-      () => ({ text: "", truncated: false }),
-      (state, bytes) => {
-        const decoded = decoder.decode(bytes, { stream: true })
-        const accepted = RuntimeFilesystem.boundedPrefix(decoded, limit - RuntimeFilesystem.byteLength(state.text))
-        return { text: state.text + accepted, truncated: state.truncated || accepted !== decoded }
-      },
+      (): BoundedTextState => ({ text: "", bytes: 0, truncated: false }),
+      (state, bytes) => appendBoundedText(state, decoder.decode(bytes, { stream: true }), limit),
     )
-    const final = decoder.decode()
-    const accepted = RuntimeFilesystem.boundedPrefix(final, limit - RuntimeFilesystem.byteLength(collected.text))
+    const completed = appendBoundedText(collected, decoder.decode(), limit)
     return {
-      text: collected.text + accepted,
-      truncated: collected.truncated || accepted !== final,
+      text: completed.text,
+      truncated: completed.truncated,
     }
   }),
 )
@@ -154,6 +181,7 @@ export const layer = Layer.effect(
         const output = yield* Ref.make<PendingOutput>({
           stdout: "",
           stderr: "",
+          retainedBytes: 0,
           stdoutBytes: 0,
           stderrBytes: 0,
           truncated: false,
@@ -212,6 +240,7 @@ export const layer = Layer.effect(
             const output = yield* Ref.getAndSet(entry.output, {
               stdout: "",
               stderr: "",
+              retainedBytes: 0,
               stdoutBytes: 0,
               stderrBytes: 0,
               truncated: false,
