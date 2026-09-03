@@ -1,6 +1,6 @@
-import { Function } from "effect"
+import { Function, Schema } from "effect"
 import type { Model } from "../../../state/model"
-import type { TranscriptBlock, TranscriptItem } from "../../../state/transcript/model"
+import { TranscriptBlock, type TranscriptItem } from "../../../state/transcript/model"
 import { spacing } from "../../terminal/theme"
 import { orderedTranscriptItems } from "../row"
 import { toolResultText } from "../tool/body"
@@ -43,10 +43,25 @@ const blockText = (block: TranscriptBlock | undefined): string => {
   }
 }
 
-const itemRows = (item: TranscriptItem, model: Model, wrapWidth: number): number => {
+const TranscriptBlocks = Schema.Array(TranscriptBlock)
+const decodedBlocks = new WeakMap<Model["blocks"], ReadonlyArray<TranscriptBlock>>()
+
+const transcriptBlocks = (model: Model): ReadonlyArray<TranscriptBlock> => {
+  const cached = decodedBlocks.get(model.blocks)
+  if (cached !== undefined) return cached
+  const blocks = Schema.decodeUnknownSync(TranscriptBlocks)(model.blocks)
+  decodedBlocks.set(model.blocks, blocks)
+  return blocks
+}
+
+const itemRows = (
+  item: TranscriptItem,
+  model: Model,
+  blocks: ReadonlyArray<TranscriptBlock>,
+  wrapWidth: number,
+): number => {
   if (item._tag === "Entry") return textRows(model.entries[item.index]?.text ?? "", wrapWidth)
-  const block = model.blocks[item.index] as TranscriptBlock | undefined
-  return 1 + textRows(blockText(block), wrapWidth)
+  return 1 + textRows(blockText(blocks[item.index]), wrapWidth)
 }
 
 export const transcriptVirtualIndex: {
@@ -55,10 +70,11 @@ export const transcriptVirtualIndex: {
 } = Function.dual(2, (model: Model, width: number): TranscriptVirtualIndex => {
   const wrapWidth = transcriptWrapWidth(width)
   const items = orderedTranscriptItems(model)
+  const blocks = transcriptBlocks(model)
   const rowsPerItem = new Float64Array(items.length)
   const prefix = new Float64Array(items.length + 1)
   for (let position = 0; position < items.length; position += 1) {
-    const rows = itemRows(items[position]!, model, wrapWidth)
+    const rows = itemRows(items[position]!, model, blocks, wrapWidth)
     rowsPerItem[position] = rows
     prefix[position + 1] = prefix[position]! + rows + (position + 1 < items.length ? 1 : 0)
   }
