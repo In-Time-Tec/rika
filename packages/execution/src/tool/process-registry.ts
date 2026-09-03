@@ -105,12 +105,9 @@ const appendBoundedText = (state: BoundedTextState, text: string, limit: number)
 const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text: string): PendingOutput => {
   const incomingBytes = RuntimeFilesystem.byteLength(text)
   const remainingBytes = Math.max(0, pendingOutputLimit - pending.retainedBytes)
-  const accepted =
-    incomingBytes <= remainingBytes
-      ? text
-      : remainingBytes === 0
-        ? ""
-        : RuntimeFilesystem.boundedPrefix(text, remainingBytes)
+  let accepted = text
+  if (incomingBytes > remainingBytes)
+    accepted = remainingBytes === 0 ? "" : RuntimeFilesystem.boundedPrefix(text, remainingBytes)
   const acceptedBytes = accepted === text ? incomingBytes : RuntimeFilesystem.byteLength(accepted)
   const bytesKey = channel === "stdout" ? "stdoutBytes" : "stderrBytes"
   return {
