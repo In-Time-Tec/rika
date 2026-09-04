@@ -49,6 +49,7 @@ interface PendingOutput {
   readonly stderr: string
   readonly stdoutBytes: number
   readonly stderrBytes: number
+  readonly retainedBytes: number
   readonly truncated: boolean
 }
 
@@ -76,13 +77,15 @@ const retainTerminalOutput = (
 }
 
 const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text: string): PendingOutput => {
-  const retainedBytes = RuntimeFilesystem.byteLength(pending.stdout) + RuntimeFilesystem.byteLength(pending.stderr)
-  const accepted = RuntimeFilesystem.boundedPrefix(text, pendingOutputLimit - retainedBytes)
+  const accepted = pending.truncated
+    ? ""
+    : RuntimeFilesystem.boundedPrefix(text, pendingOutputLimit - pending.retainedBytes)
   const bytesKey = channel === "stdout" ? "stdoutBytes" : "stderrBytes"
   return {
     ...pending,
     [channel]: pending[channel] + accepted,
     [bytesKey]: pending[bytesKey] + RuntimeFilesystem.byteLength(text),
+    retainedBytes: pending.retainedBytes + RuntimeFilesystem.byteLength(accepted),
     truncated: pending.truncated || accepted !== text,
   }
 }
@@ -95,15 +98,19 @@ export const collectBoundedText: {
     const decoder = new TextDecoder()
     const collected = yield* Stream.runFold(
       stream,
-      () => ({ text: "", truncated: false }),
+      () => ({ text: "", retainedBytes: 0, truncated: false }),
       (state, bytes) => {
         const decoded = decoder.decode(bytes, { stream: true })
-        const accepted = RuntimeFilesystem.boundedPrefix(decoded, limit - RuntimeFilesystem.byteLength(state.text))
-        return { text: state.text + accepted, truncated: state.truncated || accepted !== decoded }
+        const accepted = state.truncated ? "" : RuntimeFilesystem.boundedPrefix(decoded, limit - state.retainedBytes)
+        return {
+          text: state.text + accepted,
+          retainedBytes: state.retainedBytes + RuntimeFilesystem.byteLength(accepted),
+          truncated: state.truncated || accepted !== decoded,
+        }
       },
     )
     const final = decoder.decode()
-    const accepted = RuntimeFilesystem.boundedPrefix(final, limit - RuntimeFilesystem.byteLength(collected.text))
+    const accepted = collected.truncated ? "" : RuntimeFilesystem.boundedPrefix(final, limit - collected.retainedBytes)
     return {
       text: collected.text + accepted,
       truncated: collected.truncated || accepted !== final,
@@ -156,6 +163,7 @@ export const layer = Layer.effect(
           stderr: "",
           stdoutBytes: 0,
           stderrBytes: 0,
+          retainedBytes: 0,
           truncated: false,
         })
         const exit = yield* Deferred.make<number>()
@@ -214,6 +222,7 @@ export const layer = Layer.effect(
               stderr: "",
               stdoutBytes: 0,
               stderrBytes: 0,
+              retainedBytes: 0,
               truncated: false,
             })
             const combined = `${output.stdout}${output.stderr}`

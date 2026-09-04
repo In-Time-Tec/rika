@@ -3,6 +3,8 @@ import { Deferred, Effect, Fiber, Layer, Queue, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as ProcessRegistry from "../../src/tool/process-registry"
+import { RuntimeFilesystem } from "../../src/tool/filesystem"
+import { vi } from "vitest"
 import { provide } from "./support"
 
 interface ControlledProcess {
@@ -58,6 +60,63 @@ const finish = (process: ControlledProcess, exitCode = 0) =>
 const bytes = (text: string) => new TextEncoder().encode(text)
 
 describe("ProcessRegistry", () => {
+  it.effect("counts retained multibyte output linearly across 10,000 chunks", () =>
+    Effect.gen(function* () {
+      const original = RuntimeFilesystem.byteLength
+      let measuredBytes = 0
+      const spy = vi.spyOn(RuntimeFilesystem, "byteLength").mockImplementation((text) => {
+        const size = original(text)
+        measuredBytes += size
+        return size
+      })
+      const result = yield* ProcessRegistry.collectBoundedText(
+        Stream.fromIterable(Array.from({ length: 10_000 }, () => bytes("🙂"))),
+        65_536,
+      ).pipe(Effect.ensuring(Effect.sync(() => spy.mockRestore())))
+      expect(result).toEqual({ text: "🙂".repeat(10_000), truncated: false })
+      expect(measuredBytes).toBe(40_000)
+    }),
+  )
+
+  it.effect("decodes split UTF-8 and flushes an incomplete final scalar within the byte limit", () =>
+    Effect.gen(function* () {
+      const source = bytes("a🙂é")
+      const chunks = Array.from(source, (byte) => Uint8Array.of(byte))
+      expect(yield* ProcessRegistry.collectBoundedText(Stream.fromIterable(chunks), 5)).toEqual({
+        text: "a🙂",
+        truncated: true,
+      })
+      expect(yield* ProcessRegistry.collectBoundedText(Stream.fromIterable([Uint8Array.of(0xf0)]), 3)).toEqual({
+        text: "�",
+        truncated: false,
+      })
+    }),
+  )
+
+  it.effect("never fills spare bytes with later text after truncating a multibyte scalar", () =>
+    Effect.gen(function* () {
+      expect(yield* ProcessRegistry.collectBoundedText(Stream.fromIterable([bytes("🙂"), bytes("a")]), 2)).toEqual({
+        text: "",
+        truncated: true,
+      })
+      const spawner = controlledSpawner([])
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* ProcessRegistry.Service
+          const id = yield* registry.start("output", [], "/workspace")
+          const process = spawner.spawned[0]!
+          yield* Queue.offer(process.stdoutQueue, bytes("x".repeat(ProcessRegistry.pendingOutputLimit - 2) + "🙂"))
+          yield* Effect.yieldNow
+          yield* Queue.offer(process.stderrQueue, bytes("a"))
+          yield* Effect.yieldNow
+          const output = yield* registry.poll(id, 0, ProcessRegistry.pendingOutputLimit * 2)
+          expect(output.stderr).toBe("")
+          expect(output.truncated).toBe(true)
+        }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
+      )
+    }),
+  )
+
   it.effect("assigns stable ids, returns only new running output, and repeats the terminal result", () => {
     const kills: Array<string> = []
     const spawner = controlledSpawner(kills)
