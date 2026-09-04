@@ -2,14 +2,49 @@ import { createHash } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Sink, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { createArchive, restoreArchive } from "../../../src/workspace/artifact/archive-api"
+import { run } from "../../../src/workspace/artifact/archive"
 
 const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.scoped(Layer.build(BunServices.layer).pipe(Effect.flatMap((context) => Effect.provide(effect, context))))
 
 describe("Workspace archive", () => {
+  it.effect("collects multi-chunk archive output byte-for-byte with its exit code", () => {
+    const chunks = Array.from({ length: 1024 }, (_, index) => new Uint8Array(4096).fill(index % 256))
+    const spawner = Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() =>
+        Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(7)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.fromIterable(chunks),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void),
+          }),
+        ),
+      ),
+    )
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(spawner)
+        const result = yield* Effect.provide(run({ command: ["archive-fixture"] }), context)
+        expect(result.exitCode).toBe(7)
+        expect(result.stdout.byteLength).toBe(4 * 1024 * 1024)
+        for (const [index, chunk] of chunks.entries())
+          expect(Buffer.compare(result.stdout.subarray(index * 4096, (index + 1) * 4096), chunk)).toBe(0)
+      }),
+    )
+  })
+
   it.effect("creates deterministic scrubbed archives and restores them without replacing repository identity", () =>
     withPlatform(
       Effect.gen(function* () {

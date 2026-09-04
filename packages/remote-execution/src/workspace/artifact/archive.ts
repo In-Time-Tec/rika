@@ -133,16 +133,7 @@ export const run = (input: {
         .pipe(Effect.mapError(() => failure("archive", "Workspace archive command could not start")))
       const [stdout, , exitCode] = yield* Effect.all(
         [
-          Stream.runFold(
-            child.stdout,
-            () => new Uint8Array(),
-            (accumulator, chunk) => {
-              const output = new Uint8Array(accumulator.byteLength + chunk.byteLength)
-              output.set(accumulator)
-              output.set(chunk, accumulator.byteLength)
-              return output
-            },
-          ),
+          Stream.runCollect(child.stdout).pipe(Effect.map((chunks) => Buffer.concat(chunks))),
           Stream.runDrain(child.stderr),
           child.exitCode,
         ],
