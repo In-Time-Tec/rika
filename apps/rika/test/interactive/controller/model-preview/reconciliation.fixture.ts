@@ -205,6 +205,31 @@ const applyPatch = (state: InteractiveController.State, options: PatchOptions): 
 }
 
 describe("tentative model preview overlay", () => {
+  it.each([true, false])("keeps completed previews until durable output (clear first: %s)", (clearFirst) => {
+    const text = "final answer stays visible"
+    let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
+    const clear = () => {
+      state = InteractiveController.update(state, {
+        _tag: "ExecutionModelPreviewChanged",
+        threadId,
+        turnId,
+        preview: { _tag: "ModelPreviewCleared", runId: "run", attemptFence: 1, generation: 0 },
+      }).state
+    }
+    if (clearFirst) clear()
+    state = applyPatch(state, { status: "completed" })
+    expect(assistantText(state)).toBe(text)
+    expect(state.model.busy).toBe(false)
+    if (!clearFirst) clear()
+    expect(assistantText(state)).toBe(text)
+    state = applyPatch(state, {
+      upsert: [timelineUnit("final", { _tag: "Entry", role: "assistant", text }, 1, responseId())],
+    })
+    expect(state.model.entries.filter((entry) => entry.role === "assistant")).toHaveLength(1)
+    expect(assistantText(state)).toBe(text)
+    expect(state.modelPreview).toBeUndefined()
+  })
+
   it("replaces a matching preview with its durable response without rendering both", () => {
     const text = "one visible answer"
     let state = InteractiveController.update(loaded(), preview(1, text, {}, "")).state
@@ -369,7 +394,7 @@ describe("tentative model preview overlay", () => {
     expect(assistantText(state)).toBe("still streaming")
   })
 
-  it.each(["completed", "failed", "cancelled"] as const)("clears on terminal %s status", (status) => {
+  it.each(["failed", "cancelled"] as const)("clears on terminal %s status", (status) => {
     let state = InteractiveController.update(loaded(), preview(1, "tentative answer")).state
     expect(state.modelPreview).toBeDefined()
     state = applyPatch(state, { status })
@@ -392,6 +417,7 @@ describe("tentative model preview overlay", () => {
           turnId,
           order: TranscriptOrdering.unitOrder(reasoningKey, 1),
           revision: 1,
+          modelResponseId: responseId(),
           content: { _tag: "Block", block: { _tag: "Reasoning", text: "durable thought" } },
         },
         {
@@ -399,6 +425,7 @@ describe("tentative model preview overlay", () => {
           turnId,
           order: TranscriptOrdering.unitOrder(answerKey, 2),
           revision: 1,
+          modelResponseId: responseId(),
           content: { _tag: "Entry", role: "assistant", text: "durable answer" },
         },
       ],

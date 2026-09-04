@@ -225,13 +225,12 @@ export const replace: {
   (current: Overlay | undefined, turnId: string, incoming: ExecutionGateway.ModelPreviewEvent): Overlay | undefined
 } = Function.dual(3, replaceImpl)
 
-const terminal = (status: ThreadView.ThreadViewTurnRecord["status"]): boolean =>
-  status === "completed" || status === "failed" || status === "cancelled"
-
 const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadViewAccumulator): Overlay | undefined => {
   if (overlay === undefined) return undefined
   const turn = view.turn(overlay.turnId)
-  if (turn === undefined || terminal(turn.turn.status)) return undefined
+  if (turn === undefined || turn.turn.status === "failed" || turn.turn.status === "cancelled") return undefined
+  // Completion can arrive before the final projection. Only a matching durable
+  // response replaces its preview; the status record alone contains no answer.
   const durableResponseIds = new Set(
     view.units(overlay.turnId).flatMap((unit) => (unit.modelResponseId === undefined ? [] : [unit.modelResponseId])),
   )
@@ -250,6 +249,8 @@ const reconcileImpl = (overlay: Overlay | undefined, view: ThreadView.ThreadView
     changed = true
     byRun.set(runId, { ...run, preview: undefined, identity: undefined, ...cleared, incomplete: true })
   }
+  if (turn.turn.status === "completed" && [...byRun.values()].every((run) => run.preview === undefined))
+    return undefined
   if (!changed) return overlay
   return byRun.size === 0 ? undefined : { ...overlay, byRun }
 }
