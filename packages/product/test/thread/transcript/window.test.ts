@@ -5,8 +5,11 @@ import { TurnId, type Turn } from "@rika/product/turn-record"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import { expect, it } from "@effect/vitest"
-import { Effect } from "effect"
-import { completeLeadingTurn } from "../../../src/thread/transcript/window"
+import { Effect, Schema } from "effect"
+import { completeLeadingTurn, loadTranscriptWindow } from "../../../src/thread/transcript/window"
+import { maximumTranscriptPayloadBytes } from "../../../src/thread/transcript/bounds"
+import { makeMemory } from "../../../src/thread/repository/transcript-memory/memory"
+import { maximumTranscriptUnits } from "@rika/product/transcript-page"
 
 const threadId = Thread.ThreadId.make("thread-window")
 const olderTurnId = TurnId.make("turn-older")
@@ -111,6 +114,70 @@ const projection = (): TranscriptPage.Projection => ({
   state: projectionState,
   projectionVersion: ExecutionProjection.projectionVersion,
 })
+
+it.effect("retains every member card when a page starts inside a grouped subagent", () =>
+  Effect.gen(function* () {
+    const group: TranscriptUnit.Unit = {
+      ...card(1, "group"),
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "SubagentGroup",
+          id: "group",
+          name: "Task",
+          status: "complete",
+          settled: true,
+          memberIds: ["card-1", "card-2", "card-3", "card-4"],
+          counts: { total: 4, complete: 4, queued: 0, running: 0, waiting: 0, cancelling: 0, failed: 0, cancelled: 0 },
+        },
+      },
+    }
+    const members = cards.map((unit) => ({ ...unit, parentId: "group" }))
+    const record = turn(turnId, 20)
+    const page: TranscriptPage.Page = {
+      entries: children.slice(-80).map((unit) => entry(unit, record)),
+      hasOlder: true,
+      hasNewer: false,
+      oldestCursor: undefined,
+      newestCursor: undefined,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+    }
+    const completed = yield* completeLeadingTurn(page, {
+      get: () => Effect.succeed({ ...projection(), units: [prompt, group, ...members, ...children] }),
+    })
+    for (const member of members) expect(completed.entries.map((item) => item.unit.key)).toContain(member.key)
+    expect(completed.entries).toHaveLength(86)
+  }),
+)
+
+it.effect("reads the bounded timeline beyond page and patch sizes from the repository", () =>
+  Effect.gen(function* () {
+    const timeline = Array.from({ length: 600 }, (_, index) => entryUnit(turnId, `answer:${index}`, index, "assistant"))
+    const repository = yield* makeMemory({ initial: [{ ...projection(), units: timeline }] })
+    const page = yield* loadTranscriptWindow(threadId, repository)
+    expect(page.entries.map((item) => item.unit.key)).toEqual(timeline.map((unit) => unit.key))
+    expect(page.hasOlder).toBe(false)
+    expect((yield* Effect.result(repository.page(threadId, { limit: maximumTranscriptUnits + 1 })))._tag).toBe(
+      "Failure",
+    )
+  }),
+)
+
+it.effect("bounds initial hosted-sized snapshots by bytes as well as unit count", () =>
+  Effect.gen(function* () {
+    const timeline: ReadonlyArray<TranscriptUnit.Unit> = Array.from({ length: 3 }, (_, index) => ({
+      ...entryUnit(turnId, `large:${index}`, index, "assistant"),
+      content: { _tag: "Entry", role: "assistant", text: "x".repeat(12 * 1024 * 1024) },
+    }))
+    const repository = yield* makeMemory({ initial: [{ ...projection(), units: timeline }] })
+    const page = yield* loadTranscriptWindow(threadId, repository)
+    expect(page.hasOlder).toBe(true)
+    expect(page.entries.map((item) => item.unit.key)).toEqual(["large:1", "large:2"])
+    const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(page.entries)
+    expect(Buffer.byteLength(encoded)).toBeLessThan(maximumTranscriptPayloadBytes)
+    expect(page.oldestCursor?.turnId).toBe(turnId)
+  }),
+)
 
 it.effect("completeLeadingTurn adds only the structure a windowed turn is missing", () =>
   Effect.gen(function* () {

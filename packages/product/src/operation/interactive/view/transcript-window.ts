@@ -1,7 +1,6 @@
 import * as TranscriptPage from "@rika/product/transcript-page"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as TurnRepository from "@rika/product/turn-repository"
-import * as ExecutionProjection from "../../../execution/projection/contract"
 import * as Thread from "@rika/product/thread-record"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
@@ -13,7 +12,7 @@ import {
   transcriptCursorFor,
   transcriptPageEncoder,
 } from "../../../thread/transcript/bounds"
-import { completeLeadingTurn } from "../../../thread/transcript/window"
+import { loadTranscriptWindow } from "../../../thread/transcript/window"
 import * as InteractiveSelection from "./selection"
 import type { InteractiveEvent } from "../session-event"
 import type { InteractiveRuntimeContext } from "../session"
@@ -48,13 +47,7 @@ export const initialTranscriptWindow = (input: {
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
   Effect.gen(function* () {
-    const page = yield* completeLeadingTurn(
-      yield* input.transcripts.page(input.state.thread.id, {
-        limit: 120,
-        projectionVersion: ExecutionProjection.projectionVersion,
-      }),
-      input.transcripts,
-    )
+    const page = yield* loadTranscriptWindow(input.state.thread.id, input.transcripts)
     const bounded = yield* boundedTranscriptPage({
       entries: page.entries,
       hasOlder: page.hasOlder,

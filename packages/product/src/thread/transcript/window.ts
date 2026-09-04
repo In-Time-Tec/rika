@@ -1,8 +1,11 @@
 import { Effect, Order } from "effect"
 import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import type * as TranscriptPage from "./page"
-import type { Interface as TranscriptRepositoryInterface } from "../repository/transcript"
+import * as TranscriptPage from "./page"
+import { RepositoryError, type Interface as TranscriptRepositoryInterface } from "../repository/transcript"
+import type { ThreadId } from "../model/record"
+import { projectionVersion } from "../../execution/projection/contract"
+import { boundTranscriptEntries, transcriptCursorFor } from "./bounds"
 
 const compareEntries = (left: TranscriptPage.Entry, right: TranscriptPage.Entry): number =>
   left.turn.createdAt - right.turn.createdAt ||
@@ -37,7 +40,10 @@ const structuralUnits = (
   }
   for (const unit of units) {
     if (unit.parentId === undefined) required.add(unit.key)
-    else if (windowed.has(unit.key)) requireAncestors(unit)
+    else if (unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard") {
+      required.add(unit.key)
+      requireAncestors(unit)
+    } else if (windowed.has(unit.key)) requireAncestors(unit)
   }
   return units.filter((unit) => required.has(unit.key) && !windowed.has(unit.key))
 }
@@ -70,4 +76,26 @@ export const completeLeadingTurn = Effect.fn("TranscriptWindow.completeLeadingTu
   )
   if (added.length === 0) return page
   return { ...page, entries: [...added, ...page.entries].toSorted(compareEntries) }
+})
+
+/** Shared initial/reload read: count-bounded at storage and byte-bounded before transport. */
+export const loadTranscriptWindow = Effect.fn("TranscriptWindow.load")(function* (
+  threadId: ThreadId,
+  transcripts: Pick<TranscriptRepositoryInterface, "page" | "get">,
+) {
+  const page = yield* completeLeadingTurn(
+    yield* transcripts.page(threadId, { limit: TranscriptPage.maximumTranscriptUnits, projectionVersion }),
+    transcripts,
+  )
+  const bounded = boundTranscriptEntries(page.entries, JSON.stringify)
+  if (bounded.oversizedEntry)
+    return yield* RepositoryError.make({ message: "Transcript entry exceeds the transcript event limit" })
+  if (!bounded.truncated) return page
+  return {
+    ...page,
+    entries: bounded.entries,
+    hasOlder: true,
+    oldestCursor: bounded.partialCursor ?? transcriptCursorFor(bounded.entries[0]),
+    newestCursor: transcriptCursorFor(bounded.entries.at(-1)),
+  }
 })

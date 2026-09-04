@@ -24,7 +24,6 @@ import { operationError } from "@rika/product/operation-error"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ProductOperationService from "@rika/product/product-operation-service"
 import { ThreadId, type Thread } from "@rika/product/thread-record"
-import * as ThreadView from "@rika/product/thread-view"
 import * as ThreadRepository from "@rika/product/thread-repository"
 import * as ThreadSummaryRepository from "@rika/product/thread-summary-repository"
 import type { ThreadSummary } from "@rika/product/thread-summary"
@@ -32,7 +31,7 @@ import { applyGeneratedTitle } from "@rika/product/thread-title-operation"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { completeLeadingTurn } from "@rika/product/transcript-window"
+import { loadTranscriptWindow } from "@rika/product/transcript-window"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
@@ -180,13 +179,7 @@ export const layer = Layer.effect(
               if (hostedThread === undefined)
                 return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
               const queue = yield* turns.readQueue(threadId)
-              const page = yield* completeLeadingTurn(
-                yield* transcripts.page(threadId, {
-                  limit: ThreadView.limits.patchItems,
-                  projectionVersion: ExecutionProjection.projectionVersion,
-                }),
-                transcripts,
-              )
+              const page = yield* loadTranscriptWindow(threadId, transcripts)
               const active = yield* turns.findActive(threadId)
               const activeProjection = active === undefined ? undefined : yield* transcripts.get(active.id)
               const loadedAt = yield* Clock.currentTimeMillis

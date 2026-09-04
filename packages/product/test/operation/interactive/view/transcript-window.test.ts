@@ -1,7 +1,7 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as Thread from "@rika/product/thread-record"
 import { TurnId } from "@rika/product/turn-record"
-import type * as TranscriptPage from "@rika/product/transcript-page"
+import * as TranscriptPage from "@rika/product/transcript-page"
 import { expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { maximumTranscriptPayloadBytes } from "../../../../src/thread/transcript/bounds"
@@ -29,7 +29,7 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
     const usage = { usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }
     const oldestCursor = { createdAt: 10, turnId: TurnId.make("turn-10"), orderKey: "00010" }
     const newestCursor = { createdAt: 20, turnId: TurnId.make("turn-20"), orderKey: "00020" }
-    const entries = Array.from({ length: 120 }, (_, index) => {
+    const entries = Array.from({ length: 600 }, (_, index) => {
       const id = TurnId.make(`turn-${index}`)
       const key = `assistant:${index}`
       return {
@@ -68,7 +68,10 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
         get: () => Effect.succeed(missingProjection),
         page: (_threadId, options) => {
           reads += 1
-          expect(options).toEqual({ limit: 120, projectionVersion: ExecutionProjection.projectionVersion })
+          expect(options).toEqual({
+            limit: TranscriptPage.maximumTranscriptUnits,
+            projectionVersion: ExecutionProjection.projectionVersion,
+          })
           return Effect.succeed({
             entries,
             hasOlder: true,
@@ -83,7 +86,7 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
       fail: (message) => Effect.die(message),
     })
     expect(reads).toBe(1)
-    expect(window.entries).toHaveLength(120)
+    expect(window.entries).toHaveLength(600)
     expect(window.hasOlder).toBe(true)
     expect(window.hasNewer).toBe(false)
     expect(window.oldestCursor).toEqual(oldestCursor)

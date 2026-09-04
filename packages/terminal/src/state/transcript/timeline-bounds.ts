@@ -1,7 +1,7 @@
 import { Function } from "effect"
 import type { Model } from "../model"
 import type { TranscriptItem } from "./model"
-import { decodeTranscriptItems } from "./model"
+import { decodeTranscriptBlocks, decodeTranscriptItems } from "./model"
 
 export const maxInMemoryTranscriptUnits = 20_000
 
@@ -11,6 +11,7 @@ export const trimTranscriptTimeline: {
 } = Function.dual(2, (model: Model, cap: number): Model => {
   const items = decodeTranscriptItems(model.items)
   if (items.length <= cap) return model
+  const blocks = decodeTranscriptBlocks(model.blocks)
   const childrenByParent = new Map<string, Array<number>>()
   for (const [position, item] of items.entries())
     if (item.parentId !== undefined) {
@@ -25,8 +26,10 @@ export const trimTranscriptTimeline: {
       const position = stack.pop()!
       size += 1
       const item = items[position]!
-      if (item._tag === "Block" && item.id !== undefined)
-        for (const child of childrenByParent.get(item.id) ?? []) stack.push(child)
+      if (item._tag === "Block") {
+        const block = blocks[item.index]!
+        if ("id" in block) for (const child of childrenByParent.get(block.id) ?? []) stack.push(child)
+      }
     }
     return size
   }
@@ -52,7 +55,7 @@ export const trimTranscriptTimeline: {
   const entryIndices = new Map<number, number>()
   const blockIndices = new Map<number, number>()
   const entries: Array<Model["entries"][number]> = []
-  const blocks: Array<Model["blocks"][number]> = []
+  const keptBlocks: Array<Model["blocks"][number]> = []
   const remapped: Array<TranscriptItem> = []
   for (const item of keptItems) {
     if (item._tag === "Entry") {
@@ -67,11 +70,11 @@ export const trimTranscriptTimeline: {
     }
     let index = blockIndices.get(item.index)
     if (index === undefined) {
-      index = blocks.length
+      index = keptBlocks.length
       blockIndices.set(item.index, index)
-      blocks.push(model.blocks[item.index])
+      keptBlocks.push(model.blocks[item.index])
     }
     remapped.push({ ...item, index })
   }
-  return { ...model, entries, blocks, items: remapped }
+  return { ...model, entries, blocks: keptBlocks, items: remapped }
 })

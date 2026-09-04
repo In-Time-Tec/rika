@@ -7,6 +7,8 @@ import type { UsageSummary } from "./page-usage"
 export * from "./page-entry"
 export * from "./page-usage"
 
+export const maximumTranscriptUnits = 20_000
+
 export interface Projection {
   readonly turn: Turn
   readonly units: ReadonlyArray<TranscriptUnit.Unit>

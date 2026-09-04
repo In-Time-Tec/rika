@@ -57,7 +57,7 @@ test("trimTranscriptTimeline keeps the newest units and remaps entry indexes", (
   expect(model.items).toHaveLength(12)
 })
 
-test("trimTranscriptTimeline never splits a parent-child subtree at the boundary", () => {
+test.each(["tool-a", "unit:tool-a"])("trimTranscriptTimeline keeps whole subtrees with unit key %s", (unitKey) => {
   const parent = {
     _tag: "Block" as const,
     block: {
@@ -106,7 +106,7 @@ test("trimTranscriptTimeline never splits a parent-child subtree at the boundary
         id: `leading-${index}`,
         turnId: `turn-${index}`,
       })),
-      { _tag: "Block" as const, index: 0, id: "tool-a", turnId: "turn-a" },
+      { _tag: "Block" as const, index: 0, id: unitKey, turnId: "turn-a" },
       ...children.map((child, index) => ({
         _tag: "Entry" as const,
         index: leading.length + index,
@@ -116,14 +116,14 @@ test("trimTranscriptTimeline never splits a parent-child subtree at the boundary
       })),
     ],
   }
-  const trimmed = trimTranscriptTimeline(model, 10)
+  const trimmed = trimTranscriptTimeline(model, 5)
   const keptItems = Schema.decodeUnknownSync(TranscriptItems)(trimmed.items)
   const keptKeys = keptItems.map((item) => item.id)
-  expect(keptKeys).toContain("tool-a")
+  expect(keptKeys).toContain(unitKey)
   expect(keptKeys.filter((key) => key?.startsWith("child-"))).toHaveLength(8)
-  expect(keptKeys.filter((key) => key?.startsWith("leading-"))).toHaveLength(1)
-  expect(keptKeys).toHaveLength(10)
-  for (const item of keptItems) if (item.parentId !== undefined) expect(keptKeys).toContain(item.parentId)
+  expect(keptKeys.filter((key) => key?.startsWith("leading-"))).toHaveLength(0)
+  expect(keptKeys).toHaveLength(9)
+  for (const item of keptItems) if (item.parentId !== undefined) expect(item.parentId).toBe(parent.block.id)
 })
 
 test("trimTranscriptTimeline is a no-op at or below the cap", () => {

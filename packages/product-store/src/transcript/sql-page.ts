@@ -1,4 +1,4 @@
-import { UsageSummary, type Entry, type PageCursor } from "@rika/product/transcript-page"
+import { maximumTranscriptUnits, UsageSummary, type Entry, type PageCursor } from "@rika/product/transcript-page"
 import type { ThreadId } from "@rika/product/thread-record"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
@@ -126,9 +126,9 @@ const validatePageOptions = (options: Parameters<Interface["page"]>[1]) => {
   if (options?.before !== undefined && options.after !== undefined)
     return RepositoryError.make({ message: "Transcript page cannot use before and after together" })
   const limit = options?.limit ?? 200
-  return Number.isInteger(limit) && limit >= 1 && limit <= 500
+  return Number.isInteger(limit) && limit >= 1 && limit <= maximumTranscriptUnits
     ? limit
-    : RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
+    : RepositoryError.make({ message: `Transcript page limit must be from 1 to ${maximumTranscriptUnits}` })
 }
 
 const decodeEntry = (raw: typeof PageRow.Encoded) =>

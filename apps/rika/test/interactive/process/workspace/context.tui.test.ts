@@ -7,14 +7,14 @@ import { model } from "../../../support/tui-model.fixture"
 const tuiTestTimeout = 90_000
 
 test(
-  "retains the bounded recent window across an active-only resync at realistic tool and child volume",
+  "retains loaded history across resync and reaches it with Home at realistic tool and child volume",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const marker = "PRIOR_TURN_HISTORY_MARKER"
         const threadId = "tui-pageup-thread"
         /**
-         * The point of this lane is a transcript larger than one screen, so paging is exercised
+         * The point of this lane is a transcript larger than one screen, so scroll-back is exercised
          * rather than described. The entry count carries that; the viewport height and tool count
          * only have to exceed a screen, and at their former sizes the lane needed more memory than
          * a small runner has.
@@ -85,15 +85,17 @@ test(
         yield* Effect.tryPromise(() => app.type("Run realistic volume"))
         app.pressEnter()
         yield* app.waitModelRequests(1)
-        // The reload window only shifts once the active Turn has durable units; the model request
-        // alone does not prove the projection commit has landed.
+        // Reload after the active Turn has durable units, not merely a model request.
         yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) => projection.units.length > 0)
         yield* app.reload
         const reloaded = app.frame()
 
-        expect(hasOlderHistory, "the bounded fixture window reports older history").toBe(true)
-        expect(fixturePageCursors, "initial load and active reload expose their bounded oldest cursors").toHaveLength(2)
+        expect(hasOlderHistory, "all 412 historical entries fit in the bounded timeline").toBe(false)
+        expect(fixturePageCursors, "reload retains the oldest loaded cursor").toHaveLength(1)
         expect(reloaded).not.toContain(marker)
+        app.pressKey("\u001b[H")
+        expect(yield* app.waitFrame(marker)).toContain(marker)
+        app.pressKey("\u001b[F")
         yield* app.waitTranscript(
           Turn.TurnId.make("tui-turn-0"),
           (liveProjection) =>

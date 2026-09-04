@@ -1,5 +1,6 @@
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import type { Projection, PageCursor, UsageSummary } from "@rika/product/transcript-page"
+import { maximumTranscriptUnits } from "@rika/product/transcript-page"
 import { Service, RepositoryError, type Interface } from "./contract"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
@@ -217,8 +218,10 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
       if (options.before !== undefined && options.after !== undefined)
         return yield* RepositoryError.make({ message: "Transcript page cannot use before and after together" })
       const limit = options.limit ?? 200
-      if (!Number.isInteger(limit) || limit < 1 || limit > 500)
-        return yield* RepositoryError.make({ message: "Transcript page limit must be from 1 to 500" })
+      if (!Number.isInteger(limit) || limit < 1 || limit > maximumTranscriptUnits)
+        return yield* RepositoryError.make({
+          message: `Transcript page limit must be from 1 to ${maximumTranscriptUnits}`,
+        })
       const ordered = [...(yield* Ref.get(state)).values()]
         .flatMap((projection) =>
           projection.turn.threadId !== threadId ||
