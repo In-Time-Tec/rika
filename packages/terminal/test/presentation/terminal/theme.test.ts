@@ -413,3 +413,137 @@ test("renders gold Bash prompts, muted native process metadata, and underlined p
   const path = built.styled.chunks.find((chunk) => chunk.text.includes("src/main.ts"))
   expect((path?.attributes ?? 0) & 8).toBe(8)
 })
+
+test("renders every group member in memberIds order", () => {
+  const state = model({
+    blocks: [
+      {
+        _tag: "SubagentGroup",
+        id: "group",
+        name: "2 agents",
+        status: "running",
+        settled: false,
+        memberIds: ["one", "two"],
+        counts: { total: 2, queued: 0, running: 2, waiting: 0, cancelling: 0, complete: 0, failed: 0, cancelled: 0 },
+      },
+      {
+        _tag: "SubagentCard",
+        id: "one",
+        name: "Oracle",
+        prompt: "Prompt Oracle",
+        promptTruncated: false,
+        summary: "",
+        status: "running",
+        activity: [],
+      },
+      {
+        _tag: "SubagentCard",
+        id: "two",
+        name: "Task",
+        prompt: "Prompt Task",
+        promptTruncated: false,
+        summary: "",
+        status: "running",
+        activity: [],
+      },
+    ],
+    items: [
+      { _tag: "Block", index: 0, id: "group" },
+      { _tag: "Block", index: 2, id: "two", parentId: "group" },
+      { _tag: "Block", index: 1, id: "one", parentId: "group" },
+    ],
+  })
+  const text = buildTranscript(state).styled.chunks.map((chunk) => chunk.text).join("")
+  expect(text.indexOf("Prompt Oracle")).toBeLessThan(text.indexOf("Prompt Task"))
+})
+
+test("never reports more finished agents than rendered finished rows", () => {
+  const state = model({
+    blocks: [
+      {
+        _tag: "SubagentGroup",
+        id: "group",
+        name: "4 agents",
+        status: "complete",
+        settled: true,
+        memberIds: ["one", "two"],
+        counts: { total: 4, queued: 0, running: 0, waiting: 0, cancelling: 0, complete: 4, failed: 0, cancelled: 0 },
+      },
+      {
+        _tag: "SubagentCard",
+        id: "one",
+        name: "Oracle",
+        prompt: "Review the design",
+        promptTruncated: false,
+        summary: "",
+        status: "complete",
+        activity: [],
+      },
+      {
+        _tag: "SubagentCard",
+        id: "two",
+        name: "Task",
+        prompt: "Run the tests",
+        promptTruncated: false,
+        summary: "",
+        status: "complete",
+        activity: [],
+      },
+    ],
+    items: [
+      { _tag: "Block", index: 0, id: "group" },
+      { _tag: "Block", index: 1, id: "one", parentId: "group" },
+      { _tag: "Block", index: 2, id: "two", parentId: "group" },
+    ],
+    expandedRowKeys: ["subagent-group:group"],
+  })
+  const text = buildTranscript(state).styled.chunks.map((chunk) => chunk.text).join("")
+  const header = text.match(/(\d+) agents? finished/)
+  expect(header?.[1]).toBe("4")
+  const finishedRows = text.split("\n").filter((line) => line.includes("✓")).length - 1
+  expect(finishedRows).toBeGreaterThanOrEqual(Number(header?.[1] ?? "0"))
+})
+
+test("renders an integrity row instead of an inflated summary when a member is missing", () => {
+  const state = model({
+    blocks: [
+      {
+        _tag: "SubagentGroup",
+        id: "group",
+        name: "3 agents",
+        status: "complete",
+        settled: true,
+        memberIds: ["one", "two", "ghost"],
+        counts: { total: 3, queued: 0, running: 0, waiting: 0, cancelling: 0, complete: 2, failed: 0, cancelled: 0 },
+      },
+      {
+        _tag: "SubagentCard",
+        id: "one",
+        name: "Oracle",
+        prompt: "Review the design",
+        promptTruncated: false,
+        summary: "",
+        status: "complete",
+        activity: [],
+      },
+      {
+        _tag: "SubagentCard",
+        id: "two",
+        name: "Task",
+        prompt: "Run the tests",
+        promptTruncated: false,
+        summary: "",
+        status: "complete",
+        activity: [],
+      },
+    ],
+    items: [
+      { _tag: "Block", index: 0, id: "group" },
+      { _tag: "Block", index: 1, id: "one", parentId: "group" },
+      { _tag: "Block", index: 2, id: "two", parentId: "group" },
+    ],
+    expandedRowKeys: ["subagent-group:group"],
+  })
+  const text = buildTranscript(state).styled.chunks.map((chunk) => chunk.text).join("")
+  expect(text).toMatch(/missing|integrity|unresolved/i)
+})

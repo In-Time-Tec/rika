@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest"
 import { buildTranscript } from "../../../../src/opentui/rendering/renderer"
-import { transcriptUnitRevision } from "../../../../src/opentui/rendering/transcript/revision"
+import { buildTentativeTranscriptUnitBundles } from "../../../../src/opentui/surface/transcript/rendering-models"
+import {
+  transcriptUnitRevision,
+  type TranscriptUnitCacheEntry,
+} from "../../../../src/opentui/rendering/transcript/revision"
 import { shellCommandText } from "../../../../src/opentui/rendering/tool/detail"
 import { transcriptUnitId, transcriptUnits } from "../../../../src/presentation/transcript/row"
 import { initial, type Model } from "../../../../src/state/model"
@@ -101,5 +105,135 @@ describe("shell command text", () => {
 
   test("stays empty before any argument text arrives", () => {
     expect(shellCommandText(nested('{"comm'))).toBe("")
+  })
+})
+
+describe("subagent group revision (defect #359)", () => {
+  const counts = (overrides: Record<string, number> = {}) => ({
+    total: 2,
+    queued: 0,
+    running: 0,
+    waiting: 0,
+    cancelling: 0,
+    complete: 0,
+    failed: 0,
+    cancelled: 0,
+    ...overrides,
+  })
+  const groupModel = (): Model => {
+    const group: TranscriptBlock = {
+      _tag: "SubagentGroup",
+      id: "group",
+      name: "2 agents",
+      status: "running",
+      settled: false,
+      memberIds: ["one", "two"],
+      counts: counts({ running: 1, complete: 1 }),
+    }
+    const one: TranscriptBlock = {
+      _tag: "SubagentCard",
+      id: "one",
+      name: "Oracle",
+      prompt: "Review the design",
+      promptTruncated: false,
+      summary: "",
+      status: "running",
+      activity: [],
+    }
+    const two: TranscriptBlock = {
+      _tag: "SubagentCard",
+      id: "two",
+      name: "Task",
+      prompt: "Run the tests",
+      promptTruncated: false,
+      summary: "",
+      status: "complete",
+      activity: [],
+    }
+    return {
+      ...initial("/workspace", "medium"),
+      width: 100,
+      blocks: [group, one, two],
+      entries: [{ role: "assistant", text: "partial answer", turnId: "turn" }],
+      items: [
+        { _tag: "Block", index: 0, id: "group", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "one", turnId: "turn", parentId: "group" },
+        { _tag: "Entry", index: 0, id: "one-answer", turnId: "turn", parentId: "one" },
+        { _tag: "Block", index: 2, id: "two", turnId: "turn", parentId: "group" },
+      ],
+      expandedRowKeys: ["subagent-group:group"],
+    }
+  }
+  const groupRevision = (current: Model): string => {
+    const unit = transcriptUnits(current).find((candidate) => candidate.kind === "subagent-group")
+    if (unit === undefined) throw new Error("expected a subagent-group unit")
+    return transcriptUnitRevision(current, unit, transcriptUnitId(current, unit), new Set(current.expandedRowKeys))
+  }
+
+  test("changes the group render revision when only counts change", () => {
+    const current = groupModel()
+    const before = groupRevision(current)
+    const group = current.blocks[0]
+    if (group?._tag !== "SubagentGroup") throw new Error("expected a SubagentGroup block")
+    group.counts = counts({ complete: 2 })
+    expect(groupRevision(current)).not.toBe(before)
+  })
+
+  test("changes the group render revision when one child status changes", () => {
+    const current = groupModel()
+    const before = groupRevision(current)
+    const one = current.blocks[1]
+    if (one?._tag !== "SubagentCard") throw new Error("expected a SubagentCard block")
+    one.status = "waiting"
+    expect(groupRevision(current)).not.toBe(before)
+  })
+
+  test("renders tentative and durable reasoning with the same normalized rows", () => {
+    const source = `**Inspecting repository state**
+The first logical line.
+The second logical line.
+- Validate the reducer.
+- Validate the renderer.
+
+| Area | Result |
+|---|---|
+| State | valid |
+
+\`\`\`ts
+const marker = "*inside code*"
+\`\`\``
+    const durable: Model = {
+      ...initial("/workspace", "medium"),
+      width: 80,
+      blocks: [{ _tag: "Reasoning", id: "reasoning-canonical", text: source }],
+      items: [{ _tag: "Block", index: 0, id: "reasoning-canonical", turnId: "turn" }],
+    }
+    const durableRows = buildTranscript(durable)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+      .split("\n")
+    let cached: TranscriptUnitCacheEntry | undefined
+    for (let end = 1; end <= source.length; end += 1)
+      cached = buildTentativeTranscriptUnitBundles({
+        key: "block:tentative:reasoning",
+        text: source.slice(0, end),
+        width: 76,
+        tone: "reasoning",
+        revision: `r${end}`,
+        cached,
+      })
+    const tentativeRows = (cached?.bundles ?? [])
+      .flatMap((bundle) => bundle.descriptors)
+      .map((descriptor) => descriptor.content.chunks.map((chunk) => chunk.text).join(""))
+      .join("\n")
+      .split("\n")
+    const normalized = (rows: ReadonlyArray<string>): ReadonlyArray<string> => {
+      let start = 0
+      let end = rows.length
+      while (start < end && (rows[start] ?? "").trim().length === 0) start += 1
+      while (end > start && (rows[end - 1] ?? "").trim().length === 0) end -= 1
+      return rows.slice(start, end)
+    }
+    expect(normalized(tentativeRows)).toEqual(normalized(durableRows))
   })
 })

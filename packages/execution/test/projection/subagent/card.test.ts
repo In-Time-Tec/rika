@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Prompt, Response } from "generalist"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../../../src/projection/tree/projector"
+import * as SubagentCardProjection from "../../../src/projection/subagent/card"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
 const subagentCard = (unit: Unit | undefined) =>
@@ -435,5 +436,207 @@ describe("Generalist subagent card projection", () => {
         ? direct.content.block.id
         : undefined,
     )
+  })
+})
+describe("subagent group settlement coherence (defect #359)", () => {
+  const members = Array.from({ length: 4 }, (_, index) => ({
+    key: `lane-${index}`,
+    selection: "Task",
+    label: `Coherent lane ${index}`,
+    prompt: `Inspect coherent lane ${index}`,
+  }))
+  const call = {
+    type: "tool-call" as const,
+    id: "coherent-group-call",
+    name: "run_child_group",
+    params: { members, concurrency: 4 },
+    providerExecuted: false,
+    metadata: {},
+  }
+  const groupOf = (unit: Unit | undefined) =>
+    unit?.content._tag === "Block" && unit.content.block._tag === "SubagentGroup" ? unit.content.block : undefined
+  const cardsOf = (units: ReadonlyArray<Unit>) =>
+    units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+
+  it("emits one coherent group patch with every declared member", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-coherent-group", "fan out")
+    const declaration = projector.apply(modelResponse("raw-root-run", call))
+    const started = projector.apply(
+      treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: Response.toolCallPart(call) }),
+    )
+    const patches = [declaration, started]
+    const groupPatches = patches.filter((patch) =>
+      patch.upsert.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup"),
+    )
+    expect(groupPatches).toHaveLength(1)
+    const patch = groupPatches[0]!
+    const group = groupOf(patch.upsert.find((unit) => groupOf(unit) !== undefined))
+    const cards = cardsOf(patch.upsert)
+    expect(cards).toHaveLength(4)
+    expect(group?.memberIds).toHaveLength(4)
+    expect(
+      cards.map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.id : "",
+      ),
+    ).toEqual(group?.memberIds)
+    expect(cards.map((unit) => unit.parentId)).toEqual(
+      Array.from({ length: 4 }, () => group?.id),
+    )
+    expect(group?.counts).toMatchObject({ total: 4, queued: 4, running: 0, complete: 0 })
+  })
+
+  it("settles all group cards before it publishes final counts", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-settle-order", "fan out")
+    projector.apply(modelResponse("raw-root-run", call))
+    const settled = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: Response.toolCallPart(call),
+        result: Response.toolResultPart({
+          id: call.id,
+          name: call.name,
+          isFailure: false,
+          result: {
+            groupId: "settle-order-group",
+            status: "succeeded",
+            children: [
+              { key: "lane-0", selection: "Task", childRunId: "child-0", depth: 1, readiness: "ready", status: "succeeded", text: "lane zero done" },
+              { key: "lane-1", selection: "Task", childRunId: "child-1", depth: 1, readiness: "ready", status: "failed", message: "lane one failed" },
+              { key: "lane-2", selection: "Task", childRunId: "child-2", depth: 1, readiness: "ready", status: "succeeded", text: "lane two done" },
+              { key: "lane-3", selection: "Task", childRunId: "child-3", depth: 1, readiness: "ready", status: "cancelled", reason: "lane three cancelled" },
+            ],
+          },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    const resolved = new Map<string, string>()
+    for (const unit of settled.upsert) {
+      if (unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard") {
+        resolved.set(unit.content.block.id, unit.content.block.status)
+        continue
+      }
+      const group = groupOf(unit)
+      if (group === undefined) continue
+      const seen = (status: string) => [...resolved.values()].filter((candidate) => candidate === status).length
+      expect(group.counts.complete).toBeLessThanOrEqual(seen("complete"))
+      expect(group.counts.failed).toBeLessThanOrEqual(seen("failed"))
+      expect(group.counts.cancelled).toBeLessThanOrEqual(seen("cancelled"))
+      expect(resolved.size).toBe(4)
+    }
+    expect(resolved.size).toBe(4)
+  })
+
+  it("keeps group member order stable across ChildLinked events", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-link-order", "fan out")
+    for (const index of [3, 2, 1, 0]) {
+      projector.apply(
+        treeEvent("raw-root-run", {
+          _tag: "ChildLinked",
+          childRunId: `raw-link-child-${index}`,
+          invocationId: `coherent-group-call:lane-${index}`,
+          selection: "Task",
+          prompt: Prompt.make(`Inspect coherent lane ${index}`),
+          childDepth: 1,
+          key: `lane-${index}`,
+          label: `Coherent lane ${index}`,
+          origin: { parentToolCallId: "coherent-group-call" },
+        }),
+      )
+    }
+    projector.apply(modelResponse("raw-root-run", call))
+    const snapshot = projector.snapshot()
+    const group = snapshot.units
+      .map((unit) => groupOf(unit))
+      .find((candidate) => candidate !== undefined)
+    const rendered = cardsOf(snapshot.units).map((unit) =>
+      unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.id : "",
+    )
+    expect(group?.memberIds).toEqual(rendered)
+    expect(rendered).toHaveLength(4)
+    expect(
+      cardsOf(snapshot.units).map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.name : "",
+      ),
+    ).toEqual(["Coherent lane 0", "Coherent lane 1", "Coherent lane 2", "Coherent lane 3"])
+  })
+
+  it("calculates group counts in one pass after batch settlement", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-one-pass", "fan out")
+    projector.apply(modelResponse("raw-root-run", call))
+    const settled = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: Response.toolCallPart(call),
+        result: Response.toolResultPart({
+          id: call.id,
+          name: call.name,
+          isFailure: false,
+          result: {
+            groupId: "one-pass-group",
+            status: "succeeded",
+            children: members.map((member, index) => ({
+              key: member.key,
+              selection: "Task",
+              childRunId: `child-one-pass-${index}`,
+              depth: 1,
+              readiness: "ready",
+              status: "succeeded",
+              text: `lane ${index} done`,
+            })),
+          },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    const groupEntries = settled.upsert.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup",
+    )
+    expect(groupEntries).toHaveLength(1)
+    expect(settled.upsert.at(-1)?.content).toEqual(groupEntries[0]?.content)
+    expect(groupOf(settled.upsert.at(-1))?.counts).toMatchObject({ total: 4, complete: 4 })
+  })
+
+  it("reports a structured projection violation for a missing member card", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-violation", "fan out")
+    projector.apply(modelResponse("raw-root-run", call))
+    const snapshot = projector.snapshot()
+    const group = snapshot.units.map((unit) => groupOf(unit)).find((candidate) => candidate !== undefined)
+    expect(group?.memberIds).toHaveLength(4)
+    const cardIds = new Set(
+      cardsOf(snapshot.units).map((unit) =>
+        unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block.id : "",
+      ),
+    )
+    expect(cardIds.size).toBe(4)
+    const invalidMemberIds = [...(group?.memberIds ?? []), "subagent-missing-member"]
+    expect(invalidMemberIds.filter((id) => !cardIds.has(id))).toEqual(["subagent-missing-member"])
+    const validate = (SubagentCardProjection as unknown as Record<string, unknown>)[
+      "validateSubagentGroupProjection"
+    ]
+    expect(typeof validate).toBe("function")
+    const violations = (
+      validate as (input: {
+        memberIds: ReadonlyArray<string>
+        cardIds: ReadonlyArray<string>
+      }) => ReadonlyArray<{ missingId: string }>
+    )({
+      memberIds: invalidMemberIds,
+      cardIds: [...cardIds],
+    })
+    expect(violations).toEqual([{ missingId: "subagent-missing-member" }])
   })
 })

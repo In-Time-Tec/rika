@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { maxMountedTranscriptEntries } from "../../../../src/opentui/rendering/transcript/window"
+import * as transcriptVirtualIndexModule from "../../../../src/presentation/transcript/viewport/virtual-index"
 import { initial, type Model } from "../../../../src/state/model"
 import { loading, ready } from "../../../../src/state/loadable"
 import { replaceQueue } from "../../../../src/state/queue/model"
@@ -478,3 +479,95 @@ test("keeps every frame stable when wheel-down repeats at the followed transcrip
       }
     }),
   ))
+
+// Defect #361 characterization: terminal-cell virtual row index.
+// Row zero maps to the first item and the maximum row maps to the final item;
+// one changed item recalculates one estimate; a width change rebuilds all;
+// row math uses terminal cells (not UTF-16 length) and counts hard newlines.
+const textEntryModel = (texts: ReadonlyArray<string>): Model => ({
+  ...initial("/work", "medium"),
+  entries: texts.map((text, index) => ({ role: "assistant" as const, text, turnId: `turn-${index}` })),
+  items: texts.map((_, index) => ({ _tag: "Entry" as const, index, id: `entry-${index}`, turnId: `turn-${index}` })),
+})
+
+type VirtualIndexUpdater = (
+  previous: transcriptVirtualIndexModule.TranscriptVirtualIndex,
+  previousModel: Model,
+  nextModel: Model,
+  width: number,
+  changedPositions: ReadonlyArray<number>,
+) => transcriptVirtualIndexModule.TranscriptVirtualIndex
+
+// The v2 incremental API; missing until the viewport rewrite lands.
+const virtualIndexExports: Record<string, unknown> =
+  transcriptVirtualIndexModule as unknown as Record<string, unknown>
+
+test("maps virtual row zero to the first item", () => {
+  const model = textEntryModel(Array.from({ length: 200 }, (_, index) => `answer ${index}`))
+  const index = transcriptVirtualIndexModule.transcriptVirtualIndex(model, 80)
+  expect(transcriptVirtualIndexModule.itemPositionAtVirtualRow(index, 0)).toBe(0)
+})
+
+test("maps the maximum virtual row to the final item", () => {
+  const model = textEntryModel(Array.from({ length: 200 }, (_, index) => `answer ${index}`))
+  const index = transcriptVirtualIndexModule.transcriptVirtualIndex(model, 80)
+  expect(transcriptVirtualIndexModule.itemPositionAtVirtualRow(index, index.totalRows - 1)).toBe(199)
+})
+
+test("updates one row estimate when one item revision changes", () => {
+  const width = 64
+  const changedPosition = 10
+  const previousModel = textEntryModel(Array.from({ length: 50 }, (_, index) => `answer ${index}`))
+  const previous = transcriptVirtualIndexModule.transcriptVirtualIndex(previousModel, width)
+  expect(typeof virtualIndexExports["updateTranscriptVirtualIndex"]).toBe("function")
+  const updater = virtualIndexExports["updateTranscriptVirtualIndex"] as VirtualIndexUpdater
+  const nextModel: Model = {
+    ...previousModel,
+    entries: previousModel.entries.map((entry, index) =>
+      index === changedPosition ? { ...entry, text: "revised streaming line ".repeat(20) } : entry,
+    ),
+  }
+  const next = updater(previous, previousModel, nextModel, width, [changedPosition])
+  expect(next.rowsPerItem[changedPosition]).toBeGreaterThan(previous.rowsPerItem[changedPosition] ?? 0)
+  for (let position = 0; position < 50; position += 1) {
+    if (position === changedPosition) continue
+    expect(next.rowsPerItem[position]).toBe(previous.rowsPerItem[position])
+  }
+  expect(next.totalRows).toBeGreaterThan(previous.totalRows)
+})
+
+test("rebuilds every row estimate only after terminal width changes", () => {
+  const width = 64
+  const narrowWidth = 24
+  const model = textEntryModel(Array.from({ length: 50 }, (_, index) => `answer ${index} `.padEnd(100, ".")))
+  const previous = transcriptVirtualIndexModule.transcriptVirtualIndex(model, width)
+  expect(typeof virtualIndexExports["updateTranscriptVirtualIndex"]).toBe("function")
+  const updater = virtualIndexExports["updateTranscriptVirtualIndex"] as VirtualIndexUpdater
+  const untouched = updater(previous, model, model, width, [])
+  expect(Array.from(untouched.rowsPerItem)).toEqual(Array.from(previous.rowsPerItem))
+  expect(untouched.totalRows).toBe(previous.totalRows)
+  const rebuilt = updater(previous, model, model, narrowWidth, [])
+  const expected = transcriptVirtualIndexModule.transcriptVirtualIndex(model, narrowWidth)
+  expect(Array.from(rebuilt.rowsPerItem)).toEqual(Array.from(expected.rowsPerItem))
+  expect(rebuilt.totalRows).toBe(expected.totalRows)
+  expect(rebuilt.totalRows).toBeGreaterThan(previous.totalRows)
+})
+
+test("counts emoji combining marks and full-width characters in terminal cells", () => {
+  const width = 64
+  const combiningAcute = String.fromCharCode(769)
+  const womanTechnologist = String.fromCodePoint(0x1f469, 0x200d, 0x1f4bb)
+  const model = textEntryModel([
+    "🙂".repeat(40),
+    "界".repeat(50),
+    Array.from({ length: 50 }, () => `e${combiningAcute}`).join(""),
+    Array.from({ length: 10 }, () => womanTechnologist).join(""),
+    `${"x".repeat(60)}\n${"y".repeat(60)}`,
+  ])
+  const index = transcriptVirtualIndexModule.transcriptVirtualIndex(model, width)
+  expect(index.rowsPerItem[0]).toBe(2)
+  expect(index.rowsPerItem[1]).toBe(2)
+  expect(index.rowsPerItem[2]).toBe(1)
+  expect(index.rowsPerItem[3]).toBe(1)
+  expect(index.rowsPerItem[4]).toBe(2)
+})

@@ -1,10 +1,14 @@
 import { expect, test } from "vitest"
-import { Deferred, Effect } from "effect"
+import { Clock, Deferred, Effect } from "effect"
 import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as TuiApp from "../../../support/tui-app.harness"
 import { model } from "../../../support/tui-model.fixture"
 
+type SessionEvent = Parameters<NonNullable<TuiApp.TuiAppOptions["mapInteractiveEvent"]>>[0]
+
+const blankLegacyThreadCatalog = (event: SessionEvent): SessionEvent =>
+  event._tag === "ThreadsListed" ? { ...event, threads: [] } : event
 const tuiTestTimeout = 90_000
 const green = "0,128,0,255"
 const hasGreenText = (app: TuiApp.TuiApp, text: string): boolean =>
@@ -17,11 +21,11 @@ const rendersQueued = (frame: string, prompt: string): boolean =>
   frame.split("\n").some((line) => line.includes(prompt) && line.includes("Backspace to dequeue"))
 
 test(
-  "refreshes previous Threads when the switcher opens before any prompt is sent",
+  "shows cached Threads while a background refresh runs on switcher open",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        let refreshRequested = false
+        let refreshCalls = 0
         const app = yield* TuiApp.tuiApp({
           historicalTranscriptFixture: {
             threadId: "thread-before-startup-refresh",
@@ -29,18 +33,74 @@ test(
             marker: "unused",
           },
           onRefreshThreads: () => {
-            refreshRequested = true
+            refreshCalls += 1
           },
-          mapInteractiveEvent: (event) =>
-            event._tag === "ThreadsListed" && !refreshRequested ? { ...event, threads: [] } : event,
         })
 
+        // The startup catalog already carries the persisted Thread, so opening the
+        // switcher shows the cached entry instead of initializing the list.
         app.pressKey("t", { ctrl: true })
-        const switcher = yield* app.waitFrameMatch(
+        const cached = yield* app.waitFrameMatch(
           (frame) => frame.includes("Switch Thread") && frame.includes("Durable history"),
         )
-        expect(switcher).toContain("Durable history")
-        expect(refreshRequested).toBe(true)
+        expect(cached).toContain("Durable history")
+        // Opening the switcher starts one background refresh without clearing the cache.
+        expect(refreshCalls).toBe(1)
+        expect(yield* app.modelRequestCount).toBe(0)
+        const refreshing = yield* app.waitFrameMatch(
+          (frame) =>
+            frame.includes("Switch Thread") &&
+            frame.includes("Durable history") &&
+            /refresh|updating|syncing/i.test(frame),
+          1_500,
+        )
+        expect(refreshing).toContain("Durable history")
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "keeps composer input isolated while the Thread switcher owns focus",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          historicalTranscriptFixture: {
+            threadId: "isolation-thread-alpha",
+            entryCount: 2,
+            marker: "ISOLATION_HISTORY_MARKER",
+          },
+          prepareRuntimeState: ({ workspace, threads }) =>
+            Effect.gen(function* () {
+              const now = yield* Clock.currentTimeMillis
+              yield* threads.create({
+                id: Thread.ThreadId.make("isolation-thread-beta"),
+                workspace,
+                title: "Beta isolation thread",
+                now,
+              })
+            }),
+          mapInteractiveEvent: blankLegacyThreadCatalog,
+        })
+        yield* app.waitFrame("Historical transcript complete")
+        expect((yield* app.thread("isolation-thread-beta"))?.title).toBe("Beta isolation thread")
+        // Filter text goes to the switcher query and narrows the startup catalog.
+        app.pressKey("t", { ctrl: true })
+        yield* app.waitFrame("Switch Thread")
+        yield* Effect.tryPromise(() => app.type("beta"))
+        const filtering = yield* app.waitFrame("> beta")
+        expect(filtering).toContain("Beta isolation thread")
+        // Closing the switcher drops the query without leaking it into the composer.
+        app.pressEscape()
+        const closed = yield* app.waitGone("Switch Thread")
+        expect(closed).not.toContain("beta")
+        expect(closed).not.toContain("Beta isolation thread")
+        // Composer focus is restored: typed text lands in the composer.
+        yield* Effect.tryPromise(() => app.type("BACK_IN_COMPOSER"))
+        const composer = yield* app.waitFrame("BACK_IN_COMPOSER")
+        expect(composer).not.toContain("Switch Thread")
         expect(yield* app.modelRequestCount).toBe(0)
         yield* app.quit
       }),

@@ -98,3 +98,48 @@ test(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "keeps all visible subagent rows after group settlement",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const children = [
+          { profile: "Oracle" as const, prompt: "QUAD_ORACLE_PROMPT", name: "Map architecture" },
+          { profile: "Surgeon" as const, prompt: "QUAD_SURGEON_PROMPT", name: "Inspect defect" },
+          { profile: "Librarian" as const, prompt: "QUAD_LIBRARIAN_PROMPT", name: "Catalog modules" },
+          { profile: "Task" as const, prompt: "QUAD_TASK_PROMPT", name: "Run checks" },
+        ]
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          subagents: { maxDepth: 2, maxSubagents: 4 },
+          lanes: [
+            {
+              steps: [
+                model.turn([model.spawn(children, "quad-group")]),
+                model.text("QUAD_PARENT_RESUMED"),
+              ],
+            },
+            { profile: "Oracle", steps: [model.text("QUAD_ORACLE_RESULT")] },
+            { profile: "Surgeon", steps: [model.text("QUAD_SURGEON_RESULT")] },
+            { profile: "Librarian", steps: [model.text("QUAD_LIBRARIAN_RESULT")] },
+            { profile: "Task", steps: [model.text("QUAD_TASK_RESULT")] },
+          ],
+        })
+        yield* Effect.tryPromise(() => app.type("Run four independent investigations."))
+        app.pressEnter()
+        const settling = yield* app.waitFrame("4 agents finished", 60_000)
+        expect(settling).toContain("4 agents finished")
+        yield* app.settled
+        const settled = yield* app.waitFrame("QUAD_PARENT_RESUMED", 60_000)
+
+        expect(settled).toContain("4 agents finished")
+        for (const child of children) {
+          expect(settled).toContain(child.name)
+          expect(settled.split(child.name).length - 1).toBe(1)
+        }
+        yield* app.quit
+      }),
+    ),
+  90_000,
+)
