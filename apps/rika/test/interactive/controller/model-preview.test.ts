@@ -497,3 +497,464 @@ describe("tentative model preview overlay", () => {
     expect(assistantText(state)).toBe("new attempt")
   })
 })
+
+describe("final answer handoff continuity", () => {
+  const answer = "the final answer"
+  const secondAnswer = "the second answer"
+  const childAnswer = "child final answer"
+  const rootAnswer = "root final answer"
+
+  const identityFor = (options: Partial<ExecutionGateway.ModelPreviewIdentity> = {}): string =>
+    JSON.stringify([
+      options.runId ?? "run",
+      options.attemptFence ?? 1,
+      options.turn ?? 0,
+      options.modelCallId ?? "call",
+      options.modelAttemptId ?? "attempt-1",
+      options.attempt ?? 1,
+    ])
+
+  const tentativeAssistantId = (options: Partial<ExecutionGateway.ModelPreviewIdentity> = {}): string =>
+    `tentative:${String(turnId)}:${identityFor(options)}:assistant`
+
+  const tentativeIds = (state: InteractiveController.State): ReadonlyArray<string> =>
+    ids(state).filter((id) => id.startsWith("tentative:"))
+
+  const viewUnitKeys = (state: InteractiveController.State): ReadonlyArray<string> =>
+    state.view?.snapshot().turns.flatMap((entry) => entry.units.map((unit) => unit.key)) ?? []
+
+  const hasDurable = (state: InteractiveController.State, key: string): boolean => viewUnitKeys(state).includes(key)
+
+  const answerCount = (state: InteractiveController.State, text: string): number =>
+    state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text).length
+
+  const subagentCard = (id: string): TranscriptUnit.Unit["content"] => ({
+    _tag: "Block",
+    block: {
+      _tag: "SubagentCard",
+      id,
+      name: "Task",
+      prompt: id,
+      promptTruncated: false,
+      summary: "",
+      status: "running",
+      activity: [],
+    },
+  })
+
+  const errorContent = (detail: string): TranscriptUnit.Unit["content"] => ({
+    _tag: "Block",
+    block: { _tag: "Error", title: "Model failed", detail },
+  })
+
+  interface HandoffStep {
+    readonly label: string;
+    readonly apply: (state: InteractiveController.State) => InteractiveController.State;
+    readonly expectUnchanged?: boolean;
+    readonly terminal?: boolean;
+    readonly probe?: { readonly text: string; readonly options?: Partial<ExecutionGateway.ModelPreviewIdentity> };
+  }
+
+  interface TrackedAnswer {
+    readonly text: string;
+    readonly durableKey?: string;
+    readonly options?: Partial<ExecutionGateway.ModelPreviewIdentity>;
+    readonly absentLabels?: ReadonlyArray<string>;
+  }
+
+  interface HandoffOrder {
+    readonly name: string;
+    readonly kind: "success" | "terminal";
+    readonly steps: ReadonlyArray<HandoffStep>;
+    readonly answers: ReadonlyArray<TrackedAnswer>;
+    readonly errorKey?: string;
+  }
+
+  interface Observation {
+    readonly label: string;
+    readonly state: InteractiveController.State;
+    readonly tentative: ReadonlyArray<string>;
+    readonly counts: Readonly<Record<string, number>>;
+    readonly durableKeys: ReadonlyArray<string>;
+    readonly retiredByRun: Readonly<Record<string, ReadonlyArray<string>>>;
+    readonly probe?: { readonly text: string; readonly options?: Partial<ExecutionGateway.ModelPreviewIdentity> };
+    readonly terminal: boolean;
+  }
+
+  const showPreview = (
+    label: string,
+    text: string,
+    options: Partial<ExecutionGateway.ModelPreviewIdentity> = {},
+  ): HandoffStep => ({
+    label,
+    apply: (state) => InteractiveController.update(state, preview(1, text, options, "")).state,
+  })
+
+  const handoff = (runId = "run"): HandoffStep => ({
+    label: runId === "run" ? "commit-handoff" : `commit-handoff ${runId}`,
+    apply: (state) => InteractiveController.update(state, previewCleared(0, { runId })).state,
+  })
+
+  const durableAnswer = (
+    label: string,
+    key: string,
+    text: string,
+    options: Partial<ExecutionGateway.ModelPreviewIdentity> = {},
+  ): HandoffStep => ({
+    label,
+    apply: (state) =>
+      applyPatch(state, {
+        upsert: [timelineUnit(key, { _tag: "Entry", role: "assistant", text }, 1, responseId(options))],
+      }),
+  })
+
+  const statusStep = (label: string, status: ThreadView.ThreadViewTurnRecord["status"]): HandoffStep => ({
+    label,
+    terminal: status !== "waiting",
+    apply: (state) => applyPatch(state, { status }),
+  })
+
+  const failedStep = (label: string, key: string): HandoffStep => ({
+    label,
+    terminal: true,
+    apply: (state) =>
+      applyPatch(state, {
+        status: "failed",
+        upsert: [timelineUnit(key, errorContent("provider rejected the request"))],
+      }),
+  })
+
+  const staleFrame = (label: string, text: string): HandoffStep => ({
+    label,
+    expectUnchanged: true,
+    apply: (state) =>
+      InteractiveController.update(state, preview(2, `${text} straggler`, {}, "", { text: text.length, reasoning: 0 }))
+        .state,
+  })
+
+  const lateFrame = (
+    label: string,
+    text: string,
+    options: Partial<ExecutionGateway.ModelPreviewIdentity> = {},
+  ): HandoffStep => ({
+    label,
+    probe: { text, options },
+    apply: (state) => InteractiveController.update(state, preview(1, text, options, "")).state,
+  })
+
+  const childOptions = {
+    runId: "child",
+    parentId: "card-a",
+    modelCallId: "call-child",
+    modelAttemptId: "attempt-child",
+  } as const
+
+  const secondCallOptions = { modelCallId: "call-b", modelAttemptId: "attempt-b" } as const
+
+  const orders: ReadonlyArray<HandoffOrder> = [
+    {
+      name: "preview -> commit-handoff -> durable patch -> completed",
+      kind: "success",
+      steps: [
+        showPreview("preview", answer),
+        handoff(),
+        durableAnswer("durable patch", "durable:answer", answer),
+        lateFrame("late frame", answer),
+        statusStep("completed", "completed"),
+      ],
+      answers: [{ text: answer, durableKey: "durable:answer" }],
+    },
+    {
+      name: "preview -> commit-handoff -> completed -> durable patch",
+      kind: "success",
+      steps: [
+        showPreview("preview", answer),
+        handoff(),
+        statusStep("completed", "completed"),
+        durableAnswer("durable patch", "durable:answer", answer),
+        lateFrame("late frame", answer),
+      ],
+      answers: [{ text: answer, durableKey: "durable:answer" }],
+    },
+    {
+      name: "preview -> completed -> commit-handoff -> durable patch",
+      kind: "success",
+      steps: [
+        showPreview("preview", answer),
+        statusStep("completed", "completed"),
+        handoff(),
+        durableAnswer("durable patch", "durable:answer", answer),
+        lateFrame("late frame", answer),
+      ],
+      answers: [{ text: answer, durableKey: "durable:answer" }],
+    },
+    {
+      name: "preview -> durable patch -> commit-handoff -> completed",
+      kind: "success",
+      steps: [
+        showPreview("preview", answer),
+        durableAnswer("durable patch", "durable:answer", answer),
+        lateFrame("late frame", answer),
+        handoff(),
+        statusStep("completed", "completed"),
+      ],
+      answers: [{ text: answer, durableKey: "durable:answer" }],
+    },
+    {
+      name: "preview -> commit-handoff -> stale preview frame -> durable patch",
+      kind: "success",
+      steps: [
+        showPreview("preview", answer),
+        handoff(),
+        staleFrame("stale preview frame", answer),
+        durableAnswer("durable patch", "durable:answer", answer),
+        lateFrame("late frame", answer),
+      ],
+      answers: [{ text: answer, durableKey: "durable:answer" }],
+    },
+    {
+      name: "preview A -> commit-handoff A -> preview B -> durable patch A",
+      kind: "success",
+      steps: [
+        showPreview("preview A", answer),
+        handoff(),
+        showPreview("preview B", secondAnswer, secondCallOptions),
+        durableAnswer("durable patch A", "durable:a", answer),
+        lateFrame("late frame A", answer),
+      ],
+      answers: [
+        { text: answer, durableKey: "durable:a", absentLabels: ["preview B"] },
+        { text: secondAnswer, options: secondCallOptions },
+      ],
+    },
+    {
+      name: "preview -> failed",
+      kind: "terminal",
+      steps: [showPreview("preview", answer), failedStep("failed", "durable:error")],
+      answers: [{ text: answer }],
+      errorKey: "durable:error",
+    },
+    {
+      name: "preview -> cancelled",
+      kind: "terminal",
+      steps: [showPreview("preview", answer), statusStep("cancelled", "cancelled")],
+      answers: [{ text: answer }],
+    },
+    {
+      name: "child preview -> root preview -> child durable -> root durable",
+      kind: "success",
+      steps: [
+        {
+          label: "stage card",
+          apply: (state) => applyPatch(state, { upsert: [timelineUnit("card-a", subagentCard("card-a"))] }),
+        },
+        showPreview("child preview", childAnswer, childOptions),
+        showPreview("root preview", rootAnswer),
+        durableAnswer("child durable", "durable:child", childAnswer, childOptions),
+        lateFrame("late frame child", childAnswer, childOptions),
+        durableAnswer("root durable", "durable:root", rootAnswer),
+        lateFrame("late frame root", rootAnswer),
+      ],
+      answers: [
+        { text: childAnswer, durableKey: "durable:child", options: childOptions },
+        { text: rootAnswer, durableKey: "durable:root" },
+      ],
+    },
+  ]
+  const checkSuccessAnswer = (
+    order: HandoffOrder,
+    answer: TrackedAnswer,
+    observations: ReadonlyArray<Observation>,
+    violations: Array<string>,
+  ): void => {
+    const key = tentativeAssistantId(answer.options ?? {})
+    const runId = answer.options?.runId ?? "run"
+    const firstSeen = observations.findIndex((observation) => (observation.counts[answer.text] ?? 0) > 0)
+    if (firstSeen < 0) {
+      violations.push(`[${order.name}] ${answer.text}: never became visible`)
+      return
+    }
+    const firstDurable =
+      answer.durableKey === undefined
+        ? -1
+        : observations.findIndex((observation) => observation.durableKeys.includes(answer.durableKey!))
+    if (answer.durableKey !== undefined && firstDurable < 0)
+      violations.push(`[${order.name}] ${answer.text}: durable ${answer.durableKey} never arrived`)
+    observations.forEach((observation, index) => {
+      if (index < firstSeen) return
+      const tentative = observation.tentative.includes(key)
+      const durable = answer.durableKey !== undefined && observation.durableKeys.includes(answer.durableKey)
+      const count = observation.counts[answer.text] ?? 0
+      if ((answer.absentLabels ?? []).includes(observation.label)) {
+        if (tentative || durable || count !== 0)
+          violations.push(
+            `[${order.name}] ${observation.label}: expected ${answer.text} fully superseded, got tentative=${tentative} durable=${durable} count=${count}`,
+          )
+        return
+      }
+      if (count !== 1)
+        violations.push(
+          `[${order.name}] ${observation.label}: expected exactly one visible copy of ${answer.text}, got ${count}`,
+        )
+      if (!tentative && !durable)
+        violations.push(
+          `[${order.name}] ${observation.label}: intermediate state lacks both tentative and durable ${answer.text}`,
+        )
+      if (index === firstDurable) {
+        if (tentative)
+          violations.push(
+            `[${order.name}] ${observation.label}: tentative ${answer.text} survived the transition that added durable output`,
+          )
+        const retired = observation.retiredByRun[runId] ?? []
+        if (!retired.includes(identityFor(answer.options ?? {})))
+          violations.push(
+            `[${order.name}] ${observation.label}: durable ${answer.durableKey} did not retire tentative identity`,
+          )
+      }
+    })
+  }
+
+  const checkProbe = (order: HandoffOrder, observation: Observation, violations: Array<string>): void => {
+    if (observation.probe === undefined) return
+    const key = tentativeAssistantId(observation.probe.options ?? {})
+    if (observation.tentative.includes(key))
+      violations.push(`[${order.name}] ${observation.label}: late frame revived tentative ${observation.probe.text}`)
+    const count = observation.counts[observation.probe.text] ?? 0
+    if (count !== 1)
+      violations.push(
+        `[${order.name}] ${observation.label}: late frame changed visible copies of ${observation.probe.text} to ${count}`,
+      )
+  }
+
+  const checkTerminal = (
+    order: HandoffOrder,
+    observations: ReadonlyArray<Observation>,
+    violations: Array<string>,
+  ): void => {
+    const terminalIndex = observations.findIndex((observation) => observation.terminal)
+    observations.forEach((observation, index) => {
+      if (terminalIndex >= 0 && index < terminalIndex) return
+      if (terminalIndex < 0 && index < observations.length - 1) return
+      const held = observation.tentative
+      if (held.length > 0)
+        violations.push(`[${order.name}] ${observation.label}: terminal state still holds tentative ${held.join(",")}`)
+    })
+    const final = observations.at(-1)!
+    for (const answer of order.answers) {
+      if ((final.counts[answer.text] ?? 0) !== 0)
+        violations.push(`[${order.name}] final state still shows cleared ${answer.text}`)
+    }
+    if (order.errorKey !== undefined && !final.durableKeys.includes(order.errorKey))
+      violations.push(`[${order.name}] durable error ${order.errorKey} is not visible`)
+  }
+
+  it("keeps a visible final answer continuous across every durable handoff order", () => {
+    const failures: Array<string> = []
+    for (const order of orders) {
+      let state = loaded()
+      const observations: Array<Observation> = []
+      const violations: Array<string> = []
+      for (const step of order.steps) {
+        const before = state
+        state = step.apply(state)
+        const texts = [
+          ...order.answers.map((entry) => entry.text),
+          ...order.steps.flatMap((candidate) => (candidate.probe === undefined ? [] : [candidate.probe.text])),
+        ]
+        const counts: Record<string, number> = {}
+        for (const text of texts) counts[text] = answerCount(state, text)
+        const retiredByRun: Record<string, ReadonlyArray<string>> = {}
+        for (const [runId, run] of state.modelPreview?.byRun ?? []) retiredByRun[runId] = run.retiredIdentities
+        observations.push({
+          label: step.label,
+          state,
+          tentative: tentativeIds(state),
+          counts,
+          durableKeys: viewUnitKeys(state),
+          retiredByRun,
+          probe: step.probe,
+          terminal: step.terminal ?? false,
+        })
+        if (step.expectUnchanged === true && state !== before)
+          violations.push(`[${order.name}] ${step.label}: expected no state change while held`)
+      }
+      if (order.kind === "success") {
+        for (const answer of order.answers) checkSuccessAnswer(order, answer, observations, violations)
+        for (const observation of observations) checkProbe(order, observation, violations)
+      } else {
+        checkTerminal(order, observations, violations)
+      }
+      failures.push(...violations)
+    }
+    expect(failures).toEqual([])
+  })
+
+  it("clears a held preview immediately on failure or cancellation", () => {
+    for (const status of ["failed", "cancelled"] as const) {
+      let state = InteractiveController.update(loaded(), preview(1, answer, {}, "")).state
+      state = InteractiveController.update(state, previewCleared(0)).state
+      expect(assistantText(state)).toBe(answer)
+      expect(tentativeIds(state)).toHaveLength(1)
+
+      state =
+        status === "failed"
+          ? applyPatch(state, {
+              status,
+              upsert: [timelineUnit("durable:error", errorContent("provider rejected the request"))],
+            })
+          : applyPatch(state, { status })
+
+      expect(state.modelPreview).toBeUndefined()
+      expect(tentativeIds(state)).toHaveLength(0)
+      expect(answerCount(state, answer)).toBe(0)
+      if (status === "failed") expect(hasDurable(state, "durable:error")).toBe(true)
+
+      const settled = state
+      state = InteractiveController.update(state, preview(1, answer, {}, "")).state
+      expect(state).toBe(settled)
+    }
+  })
+
+  it("does not clear a held preview on completed status alone", () => {
+    let state = InteractiveController.update(loaded(), preview(1, answer, {}, "")).state
+    state = InteractiveController.update(state, previewCleared(0)).state
+    expect(assistantText(state)).toBe(answer)
+
+    state = applyPatch(state, { status: "completed" })
+
+    expect(state.modelPreview).toBeDefined()
+    expect(assistantText(state)).toBe(answer)
+    expect(ids(state)).toContain(tentativeAssistantId())
+
+    state = applyPatch(state, {
+      upsert: [timelineUnit("durable:answer", { _tag: "Entry", role: "assistant", text: answer }, 1, responseId())],
+    })
+
+    expect(answerCount(state, answer)).toBe(1)
+    expect(tentativeIds(state)).toHaveLength(0)
+  })
+
+  it("rejects a durable model response without modelResponseId", () => {
+    let state = InteractiveController.update(loaded(), preview(1, answer, {}, "")).state
+    state = InteractiveController.update(state, previewCleared(0)).state
+    expect(assistantText(state)).toBe(answer)
+
+    const view = state.view!
+    const update = InteractiveController.update(state, {
+      _tag: "ThreadViewPatch",
+      patch: {
+        threadId,
+        baseRevision: view.revision,
+        revision: view.revision + 1,
+        upsert: [timelineUnit("durable:answer", { _tag: "Entry", role: "assistant", text: answer })],
+        remove: [],
+        turnChanges: [],
+      },
+    })
+
+    expect(update.resync).toBe(true)
+    expect(assistantText(update.state)).toBe(answer)
+    expect(tentativeIds(update.state)).toHaveLength(1)
+    expect(answerCount(update.state, answer)).toBe(1)
+  })
+})
