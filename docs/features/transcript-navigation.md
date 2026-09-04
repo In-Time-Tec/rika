@@ -10,7 +10,10 @@ never waits on the server and never remounts the whole transcript.
 Tab and Shift+Tab move through expandable tool, diff, and subagent rows. Enter
 or a click toggles the selected row. Reasoning is not expandable: it renders in
 full as dim italic Markdown, and both reasoning and answers format Markdown
-while they stream, with completed paragraphs settling into rows that never
-re-render. The terminal mounts only the
-visible units plus overscan; the scrollbar reflects the full in-memory
-timeline, and dragging it re-positions the mounted window.
+while they stream. Each rendered update interprets the complete source so blank
+lines inside fences and late reference definitions remain correct. Unchanged
+parsed blocks, wrapped lines, and native row bands are reused; blank lines alone
+never permanently settle Markdown. This spends more lexer work than a
+paragraph-only tail, but avoids chunk-dependent output and missing final deltas.
+The terminal mounts only visible units plus overscan; the scrollbar reflects the
+full in-memory timeline, and dragging it re-positions the mounted window.

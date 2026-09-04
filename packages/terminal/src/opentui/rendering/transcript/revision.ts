@@ -153,12 +153,6 @@ export interface TentativeTranscriptLayout {
   pendingSource: string
   readonly bands: Array<Array<string>>
   readonly stableContent: Array<StyledText | undefined>
-  markdownStableLength: number
-  markdownLastLexedAt: number
-  readonly markdownBands: Array<Array<ReadonlyArray<TextChunk>>>
-  readonly markdownStableContent: Array<StyledText | undefined>
-  markdownTailLength: number
-  markdownTailLexedAt: number
   readonly markdownTailBands: Array<MarkdownTailBand>
 }
 

@@ -90,8 +90,15 @@ const terminalChunk = (chunk: TextChunk): TerminalTextChunk => {
   if (chunk.link !== undefined) terminal.link = chunk.link
   return terminal
 }
+const markdownLineCache = new WeakMap<ReadonlyArray<TerminalTextChunk>, ReadonlyArray<TextChunk>>()
 const renderMarkdownLinesImpl = (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>> =>
-  markdownLines(source, width).map((line) => line.map(toOpenChunk))
+  markdownLines(source, width).map((line) => {
+    const cached = markdownLineCache.get(line)
+    if (cached !== undefined) return cached
+    const converted = line.map(toOpenChunk)
+    markdownLineCache.set(line, converted)
+    return converted
+  })
 
 export const renderMarkdownLines: {
   (

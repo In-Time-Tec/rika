@@ -290,10 +290,14 @@ const blockLinesCache = new Map<string, Lines>()
 const blockLinesCacheLimit = 256
 
 const cachedBlockTokenLines = (token: Token, depth: number, plain: boolean, width: number): Lines => {
-  const key = `${plain ? "p" : "m"}:${width}:${depth}:${token.type}:${token.raw}`
+  const key = `${plain ? "p" : "m"}:${width}:${depth}:${JSON.stringify(token)}`
   const cached = blockLinesCache.get(key)
   if (cached !== undefined) return cached
-  const lines = blockTokenLines(token, depth, plain, width)
+  const lines = blockTokenLines(token, depth, plain, width).flatMap((line) => {
+    const safe = line.map((chunk) => ({ ...chunk, text: terminalSafeText(chunk.text) }))
+    const lineWidth = safe.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+    return lineWidth <= width ? [safe] : wrapChunkLine(safe, width)
+  })
   if (token.raw.length <= 4_096) {
     if (blockLinesCache.size >= blockLinesCacheLimit) {
       const oldest = blockLinesCache.keys().next().value
@@ -333,7 +337,7 @@ const renderLinesUncached = (source: string, plain: boolean, width: number): Lin
   const tokens = Lexer.lex(safeSource, { gfm: true })
   const lines = blockLines(tokens, 0, plain, Math.max(1, Math.floor(width)))
   while (lines.length > 0 && lines[lines.length - 1]!.length === 0) lines.pop()
-  return lines.map((line) => line.map((chunk) => ({ ...chunk, text: terminalSafeText(chunk.text) })))
+  return lines
 }
 
 const renderLinesCache = new Map<string, Lines>()
@@ -390,11 +394,7 @@ export const renderMarkdownLines: {
   (args) => Predicate.isString(args[0]),
   (source: string, width: number = 80): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const bounded = Math.max(1, Math.floor(width))
-    return renderLines(source, false, bounded).flatMap((line) => {
-      if (line.length === 0) return [[]]
-      const lineWidth = line.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-      return lineWidth <= bounded ? [line] : wrapChunkLine(line, bounded)
-    })
+    return renderLines(source, false, bounded)
   },
 )
 

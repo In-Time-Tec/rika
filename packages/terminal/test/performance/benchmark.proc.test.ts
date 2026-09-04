@@ -17,8 +17,7 @@ it.live(
 
       expect(stream.latencyP95Ms).toBeLessThanOrEqual(24)
       expect(stream.latencyMaxMs).toBeLessThanOrEqual(48)
-      // The unsettled tail is re-lexed on each delta so Markdown formats live; settled paragraphs lex at most twice a
-      // second and never again.
+      // Re-lex complete source on each rendered delta; reuse unchanged block and row output.
       expect(stream.markdownLexerInvocations).toBeLessThanOrEqual(
         stream.events + Math.ceil((stream.events / 200) * 2) + 2,
       )

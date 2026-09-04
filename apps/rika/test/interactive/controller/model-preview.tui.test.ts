@@ -7,6 +7,38 @@ import { model } from "../../support/tui-model.fixture"
 const tuiTestTimeout = 60_000
 
 test(
+  "renders fenced blank lines through the real model preview and durable handoff",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          inspectTranscript: true,
+          script: [
+            model.turn([model.part("```text\nFIRST_CODE\n\nSECOND_CODE\n```\n\nMARKDOWN_HANDOFF_DONE")], {
+              streamPartDelayMillis: 250,
+            }),
+          ],
+          height: 30,
+        })
+        yield* Effect.tryPromise(() => app.type("Show the code."))
+        app.pressEnter()
+        yield* app.waitTranscript(Turn.TurnId.make("tui-turn-0"), (projection) =>
+          projection.units.some(
+            (unit) => unit.content._tag === "Entry" && unit.content.text.includes("MARKDOWN_HANDOFF_DONE"),
+          ),
+        )
+        const frame = yield* app.waitFrame("MARKDOWN_HANDOFF_DONE")
+        expect(frame).toContain("FIRST_CODE")
+        expect(frame).toContain("SECOND_CODE")
+        expect(frame).not.toContain("```")
+        expect(frame.match(/MARKDOWN_HANDOFF_DONE/g)).toHaveLength(1)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
   "delegates two levels deep, each level using a tool",
   () =>
     TuiApp.run(
