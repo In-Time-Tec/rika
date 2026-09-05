@@ -1,4 +1,5 @@
 import "./projector-checkpoint.fixture"
+import "./projector-recovery.fixture"
 import { describe, expect, it } from "@effect/vitest"
 import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
