@@ -276,21 +276,39 @@ export const layer = Layer.effect(
           .for("update"),
       )
 
-    const renew: HostedTurnWorkerStoreService["renew"] = (claim, leaseMillis) =>
-      query(
+    const renew: HostedTurnWorkerStoreService["renew"] = (claim, leaseMillis) => {
+      // Lock first, then check wall time. Transaction time predates any row-lock wait.
+      const locked = db.$with("locked_turn_claim").as(
         db
-          .update(rikaHostedThreadProtocolCommands)
-          .set({ claimExpiresAt: sql`transaction_timestamp() + ${leaseMillis} * interval '1 millisecond'` })
+          .select({
+            turnId: rikaHostedThreadProtocolCommands.turnId,
+            expiresAt: rikaHostedThreadProtocolCommands.claimExpiresAt,
+          })
+          .from(rikaHostedThreadProtocolCommands)
           .where(
             and(
               eq(rikaHostedThreadProtocolCommands.turnId, claim.input.turnId),
               eq(rikaHostedThreadProtocolCommands.claimToken, claim.claimToken),
               sql`${rikaHostedThreadProtocolCommands.workState} is not null`,
-              gt(rikaHostedThreadProtocolCommands.claimExpiresAt, sql`transaction_timestamp()`),
+            ),
+          )
+          .for("update"),
+      )
+      return query(
+        db
+          .with(locked)
+          .update(rikaHostedThreadProtocolCommands)
+          .set({ claimExpiresAt: sql`clock_timestamp() + ${leaseMillis} * interval '1 millisecond'` })
+          .from(locked)
+          .where(
+            and(
+              eq(rikaHostedThreadProtocolCommands.turnId, locked.turnId),
+              gt(locked.expiresAt, sql`clock_timestamp()`),
             ),
           )
           .returning({ commandId: rikaHostedThreadProtocolCommands.commandId }),
       ).pipe(Effect.map((rows) => rows[0] !== undefined))
+    }
 
     const requestActivation: HostedTurnWorkerStoreService["requestActivation"] = Effect.fn(
       "HostedTurnWorkerStore.requestActivation",
