@@ -40,9 +40,14 @@ test(
           (frame) => frame.includes("Switch Thread") && frame.includes("Durable history"),
         )
         expect(switcher).toContain("Durable history")
+        expect(switcher).not.toContain("Ctrl+R")
         expect(refreshRequests).toBe(1)
         app.pressKey("r", { ctrl: true })
-        yield* app.waitFrame("Ctrl+R refresh")
+        const refreshed = yield* app.waitFrameMatch(
+          (frame) =>
+            refreshRequests === 2 && frame.includes("Durable history") && !frame.includes("Refreshing threads"),
+        )
+        expect(refreshed).not.toContain("Ctrl+R")
         expect(refreshRequests).toBe(2)
         expect(yield* app.modelRequestCount).toBe(0)
         yield* app.quit

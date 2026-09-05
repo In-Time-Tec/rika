@@ -63,10 +63,10 @@ const threadListRows = (
 
 const threadSwitcherListContentImpl = (model: Model, width: number, height: number, now: number): StyledText => {
   const rows = threadListRows(model, width, height, now)
-  let status = "Ctrl+R refresh"
+  let status = ""
   if (model.threadsRefresh === "loading") status = "Refreshing threads…"
-  else if (model.threadsRefresh === "failed") status = "Refresh failed · Ctrl+R retry"
-  else if (filteredThreads(model).length === 0) status = "No matching threads · Ctrl+R refresh"
+  else if (model.threadsRefresh === "failed") status = "Refresh failed"
+  else if (filteredThreads(model).length === 0) status = "No matching threads"
   rows.set(2, [fg(model.threadsRefresh === "failed" ? colors.red : colors.muted)(truncateToWidth(status, width))])
   const chunks: Array<TextChunk> = []
   for (let row = 0; row < height; row += 1) {

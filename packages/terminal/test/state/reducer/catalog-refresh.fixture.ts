@@ -25,7 +25,7 @@ test("renders refresh loading, failure and recovery while retaining titles and s
       try {
         for (const [status, label] of [
           ["loading", "Refreshing threads"],
-          ["failed", "Refresh failed · Ctrl+R retry"],
+          ["failed", "Refresh failed"],
           ["loading", "Refreshing threads"],
         ] as const) {
           model = update(model, { _tag: "ThreadsRefreshChanged", status })
