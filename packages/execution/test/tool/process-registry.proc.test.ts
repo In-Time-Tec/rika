@@ -5,7 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 // ast-grep-ignore: effect-prefer-child-process
 import { execFileSync } from "node:child_process" // oxlint-disable-line effecttsgo/node-builtin-import
 // ast-grep-ignore: effect-prefer-filesystem
-import { readFileSync, readdirSync } from "node:fs" // oxlint-disable-line effecttsgo/node-builtin-import
+import { readFileSync, readdirSync, statSync } from "node:fs" // oxlint-disable-line effecttsgo/node-builtin-import
 import { expect, test } from "vitest"
 import * as ProcessRegistry from "../../src/tool/process-registry"
 import { provide } from "./support"
@@ -140,8 +140,14 @@ test("preserves cwd, environment, literal arguments, stdin, exec and signal stat
             process.cwd(),
           )
           yield* Stream.run(Stream.make(new TextEncoder().encode("input line\n")), handles[0]!.stdin)
-          expect(yield* registry.poll(id, 2_000, 10_000)).toMatchObject({
-            stdout: `${process.cwd()}\n${inheritedPath}\n${literal}\ninput line\n`,
+          const result = yield* registry.poll(id, 2_000, 10_000)
+          const [observedCwd, ...output] = result.stdout.split("\n")
+          // Shell PWD can preserve different casing for the same macOS directory.
+          const expectedDirectory = statSync(process.cwd())
+          const observedDirectory = statSync(observedCwd!)
+          expect([observedDirectory.dev, observedDirectory.ino]).toEqual([expectedDirectory.dev, expectedDirectory.ino])
+          expect(output.join("\n")).toBe(`${inheritedPath}\n${literal}\ninput line\n`)
+          expect(result).toMatchObject({
             stderr: "stderr",
             running: false,
             exitCode: 23,

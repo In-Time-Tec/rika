@@ -39,17 +39,17 @@ test(
         yield* app.waitFrame("LIVE_ACTIVITY_PROMPT")
 
         // Reasoning previews arrive before any durable answer unit; the estimate must visibly increase.
-        const thinkingOne = yield* app.waitFrame("Thinking ~1 tok", 30_000)
+        const thinkingOne = yield* app.waitFrame("Thinking 1 tok", 30_000)
         expect(thinkingOne).toContain("LIVE_ACTIVITY_PROMPT")
         expect(thinkingOne).not.toContain("Execution failed")
-        const thinkingThree = yield* app.waitFrame("Thinking ~3 tok", 30_000)
+        const thinkingThree = yield* app.waitFrame("Thinking 3 tok", 30_000)
         expect(thinkingThree).toContain("LIVE_ACTIVITY_PROMPT")
 
         // Answer text has its own counter and must also increase before the durable unit lands.
-        const streamingOne = yield* app.waitFrame("Streaming ~1 tok", 30_000)
+        const streamingOne = yield* app.waitFrame("Streaming 1 tok", 30_000)
         expect(streamingOne).toContain("LIVE_ACTIVITY_PROMPT")
         expect(streamingOne).not.toContain("Execution failed")
-        const streamingThree = yield* app.waitFrame("Streaming ~3 tok", 30_000)
+        const streamingThree = yield* app.waitFrame("Streaming 3 tok", 30_000)
         expect(streamingThree).toContain("LIVE_ACTIVITY_PROMPT")
 
         // The durable answer lands exactly once and the echoed prompt is never duplicated.
@@ -168,13 +168,18 @@ test(
         yield* Effect.tryPromise(() => app.type("Use a tool, then stream the answer."))
         app.pressEnter()
 
-        const thought = yield* app.waitFrame("Thinking ~5 tok", 30_000)
+        const thought = yield* app.waitFrame("Thinking 5 tok", 30_000)
         expect(thought).toContain("Use a tool, then stream the answer.")
         expect(thought).not.toContain("Execution failed")
         yield* app.waitFrame("printf THINKING_COUNT_OK", 30_000)
 
-        const counted = yield* app.waitFrame("Streaming ~5 tok", 30_000)
+        const counted = yield* app.waitFrame("Streaming 5 tok", 30_000)
         expect(counted).toContain("FIRST_CALL_STREAMED")
+
+        const waiting = yield* app.waitFrame("Waiting", 30_000)
+        expect(waiting).toContain("FIRST_CALL_STREAMED")
+        expect(waiting).not.toContain("Finishing")
+        expect(waiting).not.toContain("Streaming 5 tok")
 
         const live = yield* app.waitFrame("SECOND_CALL_STREAMING", 30_000)
         expect(live).toContain("Streaming")

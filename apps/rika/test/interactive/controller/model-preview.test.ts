@@ -229,32 +229,32 @@ describe("tentative model preview overlay", () => {
   it("increases estimated Thinking and Streaming tokens as previews append", () => {
     let state = InteractiveController.update(loaded(), preview(1, "", {}, "12345678")).state
     expect(state.model.activity).toEqual({ _tag: "Thinking", bytes: 8 })
-    expect(formatActivity(state.model.activity)).toBe("Thinking ~2 tok")
+    expect(formatActivity(state.model.activity)).toBe("Thinking 2 tok")
 
     state = InteractiveController.update(state, preview(2, "123456789012", {}, "", { text: 0, reasoning: 8 })).state
     expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 12 })
-    expect(formatActivity(state.model.activity)).toBe("Streaming ~3 tok")
+    expect(formatActivity(state.model.activity)).toBe("Streaming 3 tok")
 
     state = InteractiveController.update(state, preview(3, "3456", {}, "", { text: 12, reasoning: 8 })).state
     expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 16 })
-    expect(formatActivity(state.model.activity)).toBe("Streaming ~4 tok")
+    expect(formatActivity(state.model.activity)).toBe("Streaming 4 tok")
   })
 
   it("keeps displaying the live estimate when final provider usage arrives", () => {
     let state = InteractiveController.update(loaded(), preview(1, "", {}, "reasoning")).state
-    expect(formatActivity(state.model.activity)).toBe("Thinking ~3 tok")
+    expect(formatActivity(state.model.activity)).toBe("Thinking 3 tok")
 
     state = InteractiveController.update(state, previewUsage({ total: 7, reasoning: 7 })).state
     expect(state.model.activity).toEqual({ _tag: "Thinking", bytes: 9 })
-    expect(formatActivity(state.model.activity)).toBe("Thinking ~3 tok")
+    expect(formatActivity(state.model.activity)).toBe("Thinking 3 tok")
 
     const nextAttempt = { attemptFence: 2, modelCallId: "call-2", modelAttemptId: "attempt-2", attempt: 2 }
     state = InteractiveController.update(state, preview(1, "streamed answer", nextAttempt, "")).state
-    expect(formatActivity(state.model.activity)).toBe("Streaming ~4 tok")
+    expect(formatActivity(state.model.activity)).toBe("Streaming 4 tok")
 
     state = InteractiveController.update(state, previewUsage({ total: 11, text: 11 }, nextAttempt)).state
     expect(state.model.activity).toEqual({ _tag: "Streaming", bytes: 15 })
-    expect(formatActivity(state.model.activity)).toBe("Streaming ~4 tok")
+    expect(formatActivity(state.model.activity)).toBe("Streaming 4 tok")
   })
 
   it("keeps concurrent child previews separate and attaches each answer to its subagent card", () => {
@@ -411,11 +411,8 @@ describe("tentative model preview overlay", () => {
 
     expect(state.model.entries.filter((entry) => entry.role === "assistant" && entry.text === text)).toHaveLength(1)
     expect(ids(state).some((id) => id.startsWith("tentative:"))).toBe(false)
-    expect(state.model.activity).toEqual({
-      _tag: "Finishing",
-      previous: { _tag: "Streaming", bytes: text.length },
-    })
-    expect(formatActivity(state.model.activity)).toBe("Streaming ~7 tok")
+    expect(state.model.activity).toEqual({ _tag: "Waiting" })
+    expect(formatActivity(state.model.activity)).toBe("Waiting")
   })
 
   it("rejects late same-identity frames while holding across a commit-discard clear", () => {

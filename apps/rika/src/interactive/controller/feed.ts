@@ -22,12 +22,7 @@ const clearPreviewStateImpl = (state: State, turnId: string | undefined): State 
     modelPreview: undefined,
     model: {
       ...model,
-      activity: FeedProjection.activeUnitActivity(
-        state.view.activeTurn(),
-        undefined,
-        model,
-        FeedProjection.retainedActivity(state.model, state.view.activeTurn(), String(state.view.thread.id)),
-      ),
+      activity: FeedProjection.activeUnitActivity(state.view.activeTurn(), undefined, model),
     },
   }
 }
@@ -63,12 +58,7 @@ const applyPreview = (
       modelPreview,
       model: {
         ...model,
-        activity: FeedProjection.activeUnitActivity(
-          turn,
-          modelPreview,
-          model,
-          FeedProjection.retainedActivity(state.model, turn, String(state.view.thread.id)),
-        ),
+        activity: FeedProjection.activeUnitActivity(turn, modelPreview, model),
       },
     },
     preserveAnchor: false,

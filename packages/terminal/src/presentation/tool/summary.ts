@@ -21,14 +21,17 @@ export const renderToolSummary: {
   (args) => Schema.is(Schema.Struct({ primary: Schema.String }))(args[0]),
   (summary: ToolSummary, options: ToolSummaryOptions = {}): ReadonlyArray<ReadonlyArray<TerminalTextChunk>> => {
     const leading = options.leading ?? ""
-    const secondary =
-      summary.secondary === undefined
-        ? []
-        : [
-            options.underlineSecondary === true
-              ? underline(fg(options.selected === true ? colors.blue : colors.muted)(summary.secondary))
-              : fg(options.selected === true ? colors.blue : colors.muted)(summary.secondary),
-          ]
+    const secondary: TerminalTextChunk[] = []
+    if (summary.secondary !== undefined) {
+      const color = options.selected === true ? colors.blue : colors.muted
+      if (options.underlineSecondary === true) {
+        // The summary separator is not part of the path's link styling.
+        const separator = summary.secondary.match(/^\s*/)?.[0] ?? ""
+        const path = summary.secondary.slice(separator.length)
+        if (separator.length > 0) secondary.push(fg(color)(separator))
+        if (path.length > 0) secondary.push(underline(fg(color)(path)))
+      } else secondary.push(fg(color)(summary.secondary))
+    }
     const chunks =
       options.selected === true
         ? [bold(fg(colors.blue)(summary.primary)), ...secondary.map(bold)]

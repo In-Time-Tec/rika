@@ -77,3 +77,51 @@ test(
     ),
   tuiTestTimeout,
 )
+
+test(
+  "keeps a completed child explicitly open across group settlement and later app updates",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          height: 48,
+          lanes: [
+            {
+              steps: [
+                model.turn([
+                  model.spawn(
+                    [
+                      { profile: "Oracle", name: "Quick review", prompt: "Finish the quick review." },
+                      { profile: "Task", name: "Slow review", prompt: "Finish the slow review." },
+                    ],
+                    "review-group",
+                  ),
+                ]),
+                model.text("ROOT_REVIEWS_DONE"),
+                model.text("ROOT_FOLLOWUP_DONE"),
+                model.text("ROOT_EXTRA_ACK"),
+              ],
+            },
+            { profile: "Oracle", steps: [model.text("PERSISTENT_CHILD_ANSWER")] },
+            { profile: "Task", steps: [model.text("SLOW_CHILD_ANSWER", 5_000)] },
+          ],
+        })
+        yield* app.submit("Delegate both reviews.")
+        yield* app.waitFrame("Quick review finished", 30_000)
+        expect(app.frame()).not.toContain("PERSISTENT_CHILD_ANSWER")
+        yield* app.clickText("Quick review finished")
+        yield* app.waitFrame("PERSISTENT_CHILD_ANSWER")
+        yield* app.waitFrame("ROOT_REVIEWS_DONE", 30_000)
+        const settled = yield* app.settled
+        expect(settled).toContain("PERSISTENT_CHILD_ANSWER")
+        expect(settled).toContain("Slow review finished")
+        // Composer and animation updates must not undo the explicit disclosure either.
+        yield* Effect.tryPromise(() => app.type("Keep this draft"))
+        expect(yield* app.nextFrame).toContain("PERSISTENT_CHILD_ANSWER")
+        yield* app.clickText("Quick review finished")
+        expect(yield* app.waitGone("PERSISTENT_CHILD_ANSWER")).not.toContain("PERSISTENT_CHILD_ANSWER")
+        yield* app.quit
+      }),
+    ),
+  60_000,
+)

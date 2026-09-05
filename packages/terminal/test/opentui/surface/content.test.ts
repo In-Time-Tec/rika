@@ -23,16 +23,16 @@ it("shows earlier history loading when idle without running an animation", () =>
 it("labels finishing even without prior model activity", () => {
   const finishing = { ...model(), busy: true, activity: { _tag: "Finishing" as const } }
 
-  expect(lifecycleLabel(finishing, 0)).toBe("Finishing")
-  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ Finishing ")
-  expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ Finishing ")
+  expect(lifecycleLabel(finishing, 0)).toBe("Waiting")
+  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ Waiting ")
+  expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ Waiting ")
 })
 
 it.each([
-  ["Thinking", 12, "Thinking ~3 tok"],
-  ["Streaming", 16, "Streaming ~4 tok"],
-  ["Thinking", 0, "Thinking ~0 tok"],
-  ["Streaming", 0, "Streaming ~0 tok"],
+  ["Thinking", 12, "Thinking 3 tok"],
+  ["Streaming", 16, "Streaming 4 tok"],
+  ["Thinking", 0, "Thinking 0 tok"],
+  ["Streaming", 0, "Streaming 0 tok"],
 ] as const)("keeps %s visible while the turn finishes", (tag, bytes, expected) => {
   const finishing = {
     ...model(),

@@ -147,7 +147,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(oracleChunks.find((chunk) => chunk.text === " has spoken")!.fg?.equals(colors.muted)).toBe(true)
         const readChunks = transcriptRow("Read src/a.ts L2-4").content.chunks
         expect(readChunks.find((chunk) => chunk.text.includes("Read"))!.fg?.equals(colors.text)).toBe(true)
-        expect(readChunks.find((chunk) => chunk.text === " src/a.ts L2-4")!.fg?.equals(colors.muted)).toBe(true)
+        expect(readChunks.find((chunk) => chunk.text === "src/a.ts L2-4")!.fg?.equals(colors.muted)).toBe(true)
         const collapsedLines = collapsed.split("\n")
         const shellRow = collapsedLines.findIndex((line) => line.includes("$ bun test"))
         const responseRow = collapsedLines.findIndex((line) => line.includes("Review complete"))

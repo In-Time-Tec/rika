@@ -1,3 +1,4 @@
+import "./feed/projection.fixture"
 import * as InteractiveController from "../../../src/interactive/controller/service"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
@@ -80,12 +81,12 @@ it("keeps a reconnected waiting Turn waiting instead of showing stale assistant 
   const restored = InteractiveController.update(reconnected, structuredClone(snapshot))
   expect(restored.state.model.blocks).toEqual(state.model.blocks)
   expect(restored.state.model.activity).toEqual({ _tag: "Waiting" })
-  // Old snapshots have no signal: a historical notice must not act as execution authority.
+  // Without a resolution signal or live work, historical content still means Waiting.
   const ordinary = {
     ...snapshot,
     snapshot: { ...snapshot.snapshot, turns: snapshot.snapshot.turns.map(({ needsResolution: _, ...turn }) => turn) },
   }
-  expect(InteractiveController.update(initialState(), ordinary).state.model.activity?._tag).not.toBe("Waiting")
+  expect(InteractiveController.update(initialState(), ordinary).state.model.activity?._tag).toBe("Waiting")
 })
 
 it("projects a full snapshot beyond the old 120-unit window bound without truncation", () => {

@@ -95,3 +95,18 @@ describe("running subagent activity", () => {
     expect(activityOf([tool("k", "running")], [block(0, "k")])).toBe("Running 1 tool")
   })
 })
+
+describe("activity labels", () => {
+  test("shows Waiting rather than Finishing when there is no model activity", () => {
+    expect(formatActivity({ _tag: "Finishing" })).toBe("Waiting")
+    expect(formatActivity({ _tag: "Waiting" })).toBe("Waiting")
+    expect(formatActivity(undefined)).toBeUndefined()
+  })
+
+  test.each(["Thinking", "Streaming"] as const)("formats %s token counts without a tilde", (_tag) => {
+    expect(formatActivity({ _tag, bytes: 0 })).toBe(`${_tag} 0 tok`)
+    expect(formatActivity({ _tag, bytes: 5 })).toBe(`${_tag} 2 tok`)
+    expect(formatActivity({ _tag, bytes: 4_000 })).toBe(`${_tag} 1K tok`)
+    expect(formatActivity({ _tag: "Finishing", previous: { _tag, bytes: 5 } })).toBe(`${_tag} 2 tok`)
+  })
+})

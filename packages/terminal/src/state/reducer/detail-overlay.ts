@@ -1,5 +1,6 @@
 import type { Message } from "../message"
 import type { Model } from "../model"
+import type { TranscriptUnit } from "../../presentation/transcript/tool/types"
 import {
   expandableRowIds,
   isTranscriptUnitExpanded,
@@ -18,12 +19,29 @@ const moveDetail = (model: Model, message: Extract<Message, { readonly _tag: "De
   return { ...model, detailSelection: ids[nextIndex]! }
 }
 
+// Resolve nested units too: their running-state expansion is the same as the
+// renderer's, and explicitly opening one must keep its auto-expanded parents open.
+const detailPath = (
+  model: Model,
+  id: string,
+  units: ReadonlyArray<TranscriptUnit> = transcriptUnits(model),
+): ReadonlyArray<TranscriptUnit> | undefined => {
+  for (const unit of units) {
+    if (transcriptUnitId(model, unit) === id) return [unit]
+    if (!("children" in unit)) continue
+    const nested = detailPath(model, id, unit.children ?? [])
+    if (nested !== undefined) return [unit, ...nested]
+  }
+  return undefined
+}
+
 const toggleDetail = (model: Model, message: Extract<Message, { readonly _tag: "DetailToggled" }>): Model => {
   const id = message.id ?? model.detailSelection
   if (id === undefined || !expandableRowIds(model).includes(id)) return model
   const expanded = new Set(model.expandedRowKeys)
   const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
-  const unit = transcriptUnits(model).find((candidate) => transcriptUnitId(model, candidate) === id)
+  const path = detailPath(model, id)
+  const unit = path?.at(-1)
   const currentlyExpanded = unit === undefined ? expanded.has(id) : isTranscriptUnitExpanded(model, unit)
   if (currentlyExpanded) {
     expanded.delete(id)
@@ -31,6 +49,11 @@ const toggleDetail = (model: Model, message: Extract<Message, { readonly _tag: "
   } else {
     expanded.add(id)
     explicitlyCollapsed.delete(id)
+    for (const ancestor of path?.slice(0, -1) ?? []) {
+      const ancestorId = transcriptUnitId(model, ancestor)
+      expanded.add(ancestorId)
+      explicitlyCollapsed.delete(ancestorId)
+    }
   }
   return {
     ...model,

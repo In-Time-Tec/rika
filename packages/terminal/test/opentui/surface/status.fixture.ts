@@ -7,7 +7,7 @@ import { update } from "../../../src/state/reducer/model"
 import { statusContent } from "../../../src/opentui/surface/content"
 import { openTui, styledTextValue } from "../../support/surface/transcript/pane-geometry.fixture"
 
-it.effect("keeps finishing text visible after a non-streamed completion and clears it on terminal completion", () =>
+it.effect("shows Waiting after a non-streamed completion and clears it on terminal completion", () =>
   Effect.gen(function* () {
     const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 24 }))
     const clock = new ManualClock()
@@ -31,7 +31,7 @@ it.effect("keeps finishing text visible after a non-streamed completion and clea
           if (phase > 0) clock.advance(100)
           yield* openTui(() => setup.renderOnce())
           const footer = setup.captureCharFrame().split("\n")[23] ?? ""
-          if (width >= 15) expect(footer, `${width} columns, phase ${phase}`).toMatch(/[∼≈≋] Finishing/)
+          if (width >= 13) expect(footer, `${width} columns, phase ${phase}`).toMatch(/[∼≈≋] Waiting/)
           else expect(footer).not.toMatch(/[∼≈≋]/)
         }
       }
@@ -39,7 +39,7 @@ it.effect("keeps finishing text visible after a non-streamed completion and clea
       surface.update(model)
       clock.advance(100)
       yield* openTui(() => setup.renderOnce())
-      expect(setup.captureCharFrame().split("\n")[23]).not.toMatch(/[∼≈≋]|Finishing/)
+      expect(setup.captureCharFrame().split("\n")[23]).not.toMatch(/[∼≈≋]|Waiting/)
       expect(model.activity).toBeUndefined()
       expect(model.busy).toBe(false)
     } finally {
@@ -58,12 +58,12 @@ it.effect("renders activity and recovery labels together with their icons across
     const states: ReadonlyArray<readonly [Partial<Model>, string | undefined]> = [
       [{ activity: { _tag: "Sending" } }, "Sending"],
       [{ activity: { _tag: "Waiting" } }, "Waiting"],
-      [{ activity: { _tag: "Thinking", bytes: 0 } }, "Thinking ~0 tok"],
-      [{ activity: { _tag: "Streaming", bytes: 16 } }, "Streaming ~4 tok"],
+      [{ activity: { _tag: "Thinking", bytes: 0 } }, "Thinking 0 tok"],
+      [{ activity: { _tag: "Streaming", bytes: 16 } }, "Streaming 4 tok"],
       [{ activity: { _tag: "RunningTools" } }, "Running tools"],
       [{ activity: { _tag: "RunningTools", tools: 2, subagents: 1 } }, "Running 1 subagent, 2 tools"],
-      [{ activity: { _tag: "Finishing" } }, "Finishing"],
-      [{ activity: { _tag: "Finishing", previous: { _tag: "Streaming", bytes: 0 } } }, "Streaming ~0 tok"],
+      [{ activity: { _tag: "Finishing" } }, "Waiting"],
+      [{ activity: { _tag: "Finishing", previous: { _tag: "Streaming", bytes: 0 } } }, "Streaming 0 tok"],
       [{ activity: { _tag: "Compacting" } }, "Auto-Compacting"],
       [
         { activity: { _tag: "Retrying", attempt: 1, budget: 3, message: "", nextAt: 0 } },
