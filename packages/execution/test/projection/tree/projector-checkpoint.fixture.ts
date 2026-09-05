@@ -347,20 +347,36 @@ describe("Generalist tree projector checkpoints and lifecycle", () => {
   it("parks the root as waiting when an interrupted operation needs resolution", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-resolution", "cancel me")
-    projector.apply(treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }))
-    projector.apply(treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }))
-
-    const parked = projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
+    const events = [
+      treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }),
+      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
+      treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }),
+    ]
+    const parked = projector.applyAll(events)
     expect(projector.snapshot().state.status).toBe("waiting")
-    const failure = parked.upsert.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")
-    expect(failure?.content).toMatchObject({
+    expect(parked.upsert.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error")).toBe(
+      false,
+    )
+    const notice = parked.upsert.find(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification",
+    )
+    expect(notice?.executionOutcome).toBeUndefined()
+    expect(notice?.content).toMatchObject({
       _tag: "Block",
       block: {
-        _tag: "Error",
-        detail:
-          "Unknown operation op-1 in Run raw-root-run. Inspect it with rika thread recovery inspect <thread-id> raw-root-run.",
+        _tag: "Notification",
+        title: "Waiting for operation recovery",
       },
     })
+    if (notice?.content._tag !== "Block" || notice.content.block._tag !== "Notification")
+      throw new Error("Missing recovery notification")
+    expect(notice.content.block.detail).toContain("Run: raw-root-run; operation: op-1.")
+    expect(notice.content.block.detail).toContain("shell_command_status consumes buffered output")
+    expect(notice.content.block.detail).toContain("Retry can repeat side effects")
+    const restored = TreeProjector.make("turn-resolution", "cancel me")
+    restored.applyAll(events)
+    expect(restored.snapshot().units).toEqual(projector.snapshot().units)
+    expect(restored.snapshot().state.status).toBe("waiting")
   })
 
   it("keeps cancellation authoritative when a never-replay nested operation becomes unknown", () => {

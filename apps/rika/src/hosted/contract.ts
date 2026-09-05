@@ -163,6 +163,7 @@ export const RecoveryInspection = Schema.Struct({
     "failed",
     "cancelled",
   ]),
+  operationDetails: Schema.optional(Schema.TaggedStruct("Unavailable", { reason: Schema.String })),
 })
 export type RecoveryInspection = typeof RecoveryInspection.Type
 

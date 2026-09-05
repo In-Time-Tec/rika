@@ -24,6 +24,63 @@ const entry = (unitKey: string, sequence: number, text: string) => ({
   },
 })
 
+it("keeps a reconnected waiting Turn waiting instead of showing stale assistant activity", () => {
+  const feed = makeThreadViewFeed(() => 1)
+  const source = entry("assistant", 1, "Checking the operation")
+  const selected = feed.publish({
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    projectionCheckpoints: [],
+    thread,
+    entries: [
+      {
+        ...source,
+        turn: { ...source.turn, status: "waiting" },
+        projectionState: { ...source.projectionState, status: "waiting" },
+      },
+      {
+        ...source,
+        turn: { ...source.turn, status: "waiting" },
+        projectionState: { ...source.projectionState, status: "waiting" },
+        unit: {
+          ...source.unit,
+          key: "operation:notice",
+          order: TranscriptOrdering.unitOrder("operation:notice", 2),
+          content: {
+            _tag: "Block",
+            block: {
+              _tag: "Notification",
+              title: "Waiting for operation recovery",
+              detail: "Run: run-1; operation: op-1.",
+            },
+          },
+        },
+      },
+    ],
+    hasOlder: false,
+    usage: { usage: ExecutionProjection.emptyUsageState() },
+  })
+  let state = initialState()
+  for (const event of selected)
+    if (event._tag === "ThreadViewSnapshot") state = InteractiveController.update(state, event).state
+  expect(state.model.busy).toBe(true)
+  expect(state.model.activity).toEqual({ _tag: "Waiting" })
+  expect(state.model.blocks).toContainEqual({
+    _tag: "Notification",
+    title: "Waiting for operation recovery",
+    detail: "Run: run-1; operation: op-1.",
+  })
+  const reconnected = initialState()
+  const snapshot = selected.find((event) => event._tag === "ThreadViewSnapshot")
+  if (snapshot?._tag !== "ThreadViewSnapshot") throw new Error("Missing snapshot")
+  const restored = InteractiveController.update(reconnected, structuredClone(snapshot))
+  expect(restored.state.model.blocks).toEqual(state.model.blocks)
+  expect(restored.state.model.activity).toEqual({ _tag: "Waiting" })
+})
+
 it("projects a full snapshot beyond the old 120-unit window bound without truncation", () => {
   const feed = makeThreadViewFeed(() => 1)
   const selected = feed.publish({

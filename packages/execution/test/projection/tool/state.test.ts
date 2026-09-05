@@ -5,37 +5,44 @@ import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
 describe("native tool projection", () => {
-  it("projects all six durable native tool lifecycle states", () => {
+  it("projects observed native tool lifecycle states", () => {
     const running = makeTool("public-tool", "raw-tool", "bash", JSON.stringify({ command: "true" }), undefined)
     expect(running.status).toBe("running")
     expect(completeTool(running, {}, false).status).toBe("complete")
     expect(completeTool(running, {}, true).status).toBe("failed")
     expect(completeTool(running, { status: "rejected" }, false).status).toBe("rejected")
     expect(completeTool(running, { status: "cancelled" }, false).status).toBe("cancelled")
-
-    const projector = TreeProjector.make("turn-unknown-tool", "run")
-    const call = {
-      type: "tool-call" as const,
-      id: "unknown-call",
-      name: "bash",
-      params: { command: "do-something" },
-      providerExecuted: false,
-      metadata: {},
-    }
-    projector.apply(modelResponse("raw-root-run", call))
-    projector.apply(
-      treeEvent("raw-root-run", {
-        _tag: "ToolExecutionStarted",
-        turn: 0,
-        call: Response.toolCallPart(call),
-      }),
-    )
-    expect(
-      block(projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" })), "ToolCall"),
-    ).toMatchObject({ _tag: "Block", block: { status: "unknown", operationId: "op-1" } })
   })
 
-  it("correlates background bash polls and settles the active check as unknown", () => {
+  it("does not invent an operation identity for either of two running tools", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-unknown-tool", "run")
+    for (const id of ["first", "second"])
+      projector.apply(
+        treeEvent("raw-root-run", {
+          _tag: "ToolExecutionStarted",
+          turn: 0,
+          call: Response.toolCallPart({
+            id,
+            name: "bash",
+            params: { command: `echo ${id}` },
+            providerExecuted: false,
+            metadata: {},
+          }),
+        }),
+      )
+    const tools = () =>
+      projector
+        .snapshot()
+        .units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall")
+    const before = tools()
+    expect(before).toHaveLength(2)
+    projector.apply(treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "op-1" }))
+    expect(tools()).toEqual(before)
+    expect(projector.snapshot().state.status).toBe("waiting")
+  })
+
+  it("correlates background bash polls without guessing an unknown operation belongs to the check", () => {
     resetEventPosition()
     let projector = TreeProjector.make("turn-process-correlation", "run in background")
     const bashCall = {
@@ -125,14 +132,8 @@ describe("native tool projection", () => {
     const unknown = projector.apply(
       treeEvent("raw-root-run", { _tag: "OperationUnknown", operationId: "operation-status" }),
     )
-    expect(block(unknown, "ToolCall")).toMatchObject({
-      _tag: "Block",
-      block: {
-        name: "bash",
-        status: "unknown",
-        process: { checks: [{ toolCallId: "status-check", operationId: "operation-status" }] },
-      },
-    })
+    expect(block(unknown, "ToolCall")).toBeUndefined()
+    expect(unknown.state.status).toBe("waiting")
   })
 
   it("labels a read by the lines it returned when the file ends before the requested range", () => {

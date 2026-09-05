@@ -38,10 +38,7 @@ export interface ProjectorEventContext {
     SubagentCardProjection,
     "cardFor" | "updateCard" | "groupCards" | "settleGroup" | "bindChild"
   >
-  readonly tools: Pick<
-    ToolUnitProjection,
-    "toolState" | "putTool" | "updateTool" | "linkProcessCheck" | "settleUnknown" | "runningToolIds"
-  >
+  readonly tools: Pick<ToolUnitProjection, "toolState" | "putTool" | "updateTool" | "linkProcessCheck">
 }
 
 export type ProjectorEventHandler = (

@@ -86,17 +86,29 @@ const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node)
       resume(context, node, event)
       return true
     case "OperationUnknown": {
-      const activeToolId = context.tools.runningToolIds(node).at(-1)
-      if (activeToolId !== undefined) context.tools.settleUnknown(node, activeToolId, event.operationId)
+      // Generalist supplies no tool-call identity here. Do not attach this operation to a guessed tool.
       if (context.core.rootStatus !== "cancelling") {
         if (node.lifecycle === "active") context.usage.deactivate(node, event, "waiting")
         node.status = "waiting"
         if (node.parentRawRunId === undefined) context.core.rootStatus = "waiting"
-        context.diagnostics.error(
+        context.diagnostics.notice(
           node,
           "operation",
-          "Execution needs resolution",
-          `Unknown operation ${event.operationId} in Run ${node.rawRunId}. Inspect it with rika thread recovery inspect <thread-id> ${node.rawRunId}.`,
+          "Waiting for operation recovery",
+          [
+            `Run: ${node.rawRunId}; operation: ${event.operationId}.`,
+            "Execution paused because the outcome is unknown. The operation may already have taken effect; reconnecting does not retry it.",
+            "Generalist cannot expose operation details, replay policy, or the result schema. Do not guess the outcome.",
+            "In another terminal, replace <thread-id> with this Thread's ID and <run-id>/<operation-id> with the IDs above:",
+            "rika thread recovery inspect <thread-id> <run-id>",
+            "Authorized operators can explicitly resolve the operation:",
+            'rika thread recovery abort <thread-id> <run-id> <operation-id> "reason"',
+            "Abort records failure; it does not undo side effects. To stop the whole Turn, use Ctrl+C in the active TUI.",
+            "Retry can repeat side effects; even shell_command_status consumes buffered output. Only retry after checking what happened:",
+            "rika thread recovery retry <thread-id> <run-id> <operation-id>",
+            "Accept requires a known correct result, not a guessed value:",
+            "rika thread recovery accept <thread-id> <run-id> <operation-id> '<json-value>'",
+          ].join("\n"),
           event.operationId,
         )
       }

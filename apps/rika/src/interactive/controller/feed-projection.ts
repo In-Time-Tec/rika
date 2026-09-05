@@ -34,6 +34,7 @@ const activeUnitActivity = (
   previousActivity: Model["activity"],
 ): Model["activity"] => {
   if (entry === undefined) return undefined
+  if (entry.turn.status === "waiting") return { _tag: "Waiting" }
   const previewActivity = ModelPreview.activity(modelPreview, String(entry.turn.id))
   if (previewActivity?.active === true) {
     const { active: _, ...activity } = previewActivity

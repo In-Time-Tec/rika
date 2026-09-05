@@ -148,13 +148,12 @@ const make = (
     unit,
   })
 
-  const { toolState, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds } =
-    ToolUnit.makeToolUnitProjection({
-      units,
-      localId,
-      put,
-      unit,
-    })
+  const { toolState, putTool, updateTool, linkProcessCheck, runningToolIds } = ToolUnit.makeToolUnitProjection({
+    units,
+    localId,
+    put,
+    unit,
+  })
 
   const { cardFor, updateCard, groupCards, settleGroup, bindChild } = SubagentCard.makeSubagentCardProjection({
     core,
@@ -275,7 +274,7 @@ const make = (
     authorization: { putAuthorization, resolveAuthorization, settleAuthorizations },
     diagnostics: { notice, error, modelFailureError, executionFailureError },
     subagents: { cardFor, updateCard, groupCards, settleGroup, bindChild },
-    tools: { toolState, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds },
+    tools: { toolState, putTool, updateTool, linkProcessCheck },
   }
   const eventHandlers: ReadonlyArray<ProjectorEventHandler> = [
     RunLifecycleEvents.handle,

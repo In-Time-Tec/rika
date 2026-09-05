@@ -26,6 +26,46 @@ const inspection = (status: Run.RunStatus): Run.RunInspection =>
 
 const authorize = () => Effect.void
 
+it.effect("rejects unauthorized inspection and resolution before accessing Generalist", () =>
+  Effect.gen(function* () {
+    const rejected = HostedRecoveryError.make({ kind: "forbidden", message: "Recovery operation was rejected" })
+    const service = makeService({
+      runtime: {
+        inspect: () => Effect.die("unauthorized inspection"),
+        resolveOperation: () => Effect.die("unauthorized resolution"),
+      },
+      authorizeRun: () => Effect.fail(rejected),
+    })
+    const input = { principal, threadId: "thread-1", runId: "run-1" }
+    expect(yield* service.inspect(input).pipe(Effect.flip)).toEqual(rejected)
+    for (const resolution of [
+      { _tag: "Retry" },
+      { _tag: "Accept", value: {} },
+      { _tag: "Abort", reason: "stop" },
+    ] as const)
+      expect(
+        yield* service
+          .resolve({ ...input, operationId: "op-1", idempotencyKey: "key-1", resolution })
+          .pipe(Effect.flip),
+      ).toEqual(rejected)
+  }),
+)
+
+it.effect("reports a missing Run rather than a recovery state", () =>
+  Effect.gen(function* () {
+    const service = makeService({
+      runtime: {
+        inspect: () => Effect.fail(Errors.RunNotFound.make({ runId: "missing" })),
+        resolveOperation: () => Effect.die("unused"),
+      },
+      authorizeRun: authorize,
+    })
+    expect(yield* service.inspect({ principal, threadId: "thread-1", runId: "missing" }).pipe(Effect.flip)).toEqual(
+      HostedRecoveryError.make({ kind: "not-found", message: "Run is unavailable" }),
+    )
+  }),
+)
+
 it.effect("authorizes and delegates Run inspection to Generalist", () =>
   Effect.gen(function* () {
     const inspected = yield* Ref.make<Array<string>>([])
@@ -50,22 +90,22 @@ it.effect("authorizes and delegates Run inspection to Generalist", () =>
   }),
 )
 
-it.effect("fails loudly when Generalist reports an unresolved operation it cannot inspect", () =>
+it.effect("reports unresolved status and missing details without resolving on repeated inspection", () =>
   Effect.gen(function* () {
     const runtime = {
       inspect: () => Effect.succeed(inspection("needs-resolution")),
       resolveOperation: () => Effect.die("unused"),
     } satisfies Pick<Runtime.Service, "inspect" | "resolveOperation">
-    const failure = yield* makeService({ runtime, authorizeRun: authorize })
-      .inspect({ principal, threadId: "thread-1", runId: "run-1" })
-      .pipe(Effect.flip)
-
-    expect(failure).toEqual(
-      HostedRecoveryError.make({
-        kind: "unavailable",
-        message: "Generalist does not expose unresolved operation inspection",
-      }),
-    )
+    const service = makeService({ runtime, authorizeRun: authorize })
+    for (let attempt = 0; attempt < 2; attempt++)
+      expect(yield* service.inspect({ principal, threadId: "thread-1", runId: "run-1" })).toEqual({
+        runId: "run-1",
+        status: "needs-resolution",
+        operationDetails: {
+          _tag: "Unavailable",
+          reason: "Generalist does not expose unresolved operation details, replay policy, or result schema",
+        },
+      })
   }),
 )
 

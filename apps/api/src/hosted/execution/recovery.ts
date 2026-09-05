@@ -35,6 +35,7 @@ export const RecoveryInspection = Schema.Struct({
     "failed",
     "cancelled",
   ]),
+  operationDetails: Schema.optional(Schema.TaggedStruct("Unavailable", { reason: Schema.String })),
 })
 export type RecoveryInspection = typeof RecoveryInspection.Type
 
@@ -106,7 +107,14 @@ export const makeService = (dependencies: {
       )
     if (run.status !== "needs-resolution") return { runId: run.runId, status: run.status }
     // TODO(generalist): expose exact unresolved operation inspections, including replay policy and accepted value schema.
-    return yield* unavailable("Generalist does not expose unresolved operation inspection")
+    return {
+      runId: run.runId,
+      status: run.status,
+      operationDetails: {
+        _tag: "Unavailable" as const,
+        reason: "Generalist does not expose unresolved operation details, replay policy, or result schema",
+      },
+    }
   })
 
   const resolve: HostedRecoveryService["resolve"] = Effect.fn("HostedRecovery.resolve")(function* (input) {

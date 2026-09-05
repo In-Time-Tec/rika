@@ -19,7 +19,6 @@ export interface ToolUnitProjection {
     mutate: (block: Extract<Block, { readonly _tag: "ToolCall" }>) => Extract<Block, { readonly _tag: "ToolCall" }>,
   ) => void
   readonly linkProcessCheck: (node: Node, rawId: string, input: string) => void
-  readonly settleUnknown: (node: Node, rawId: string, operationId: string) => void
   readonly runningToolIds: (node: Node) => ReadonlyArray<string>
 }
 
@@ -128,19 +127,6 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     })
   }
 
-  const settleUnknown = (node: Node, rawId: string, operationId: string) => {
-    const current = toolBlock(node, rawId)
-    if (current === undefined) return
-    updateTool(node, rawId, (tool) => {
-      if (tool.toolCallId === rawId) return { ...tool, operationId, status: "unknown" }
-      const checks = tool.process?.checks?.map((check) =>
-        check.toolCallId === rawId ? { ...check, operationId } : check,
-      )
-      if (checks === undefined) return { ...tool, status: "unknown" }
-      return { ...tool, status: "unknown", process: { ...tool.process, checks } }
-    })
-  }
-
   const runningToolIds = (node: Node): ReadonlyArray<string> => {
     const ids = new Set<string>()
     for (const [rawId] of node.tools) if (toolBlock(node, rawId)?.status === "running") ids.add(rawId)
@@ -161,5 +147,5 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     return [...ids]
   }
 
-  return { toolState, toolBlock, putTool, updateTool, linkProcessCheck, settleUnknown, runningToolIds }
+  return { toolState, toolBlock, putTool, updateTool, linkProcessCheck, runningToolIds }
 }
