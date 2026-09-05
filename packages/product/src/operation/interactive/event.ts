@@ -11,6 +11,7 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("ThreadViewPatch"), patch: ThreadView.ThreadViewPatch }),
   ThreadView.ResyncRequired,
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
+  Schema.Struct({ _tag: Schema.tag("ThreadsRefreshChanged"), status: Schema.Literals(["loading", "failed", "idle"]) }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionModelPreviewChanged"),
     threadId: Thread.ThreadId,

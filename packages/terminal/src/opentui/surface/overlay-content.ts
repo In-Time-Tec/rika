@@ -25,7 +25,7 @@ const threadListRows = (
   width: number,
   height: number,
   now: number,
-): ReadonlyMap<number, ReadonlyArray<TextChunk>> => {
+): Map<number, ReadonlyArray<TextChunk>> => {
   const threads = filteredThreads(model)
   const listRows = new Map<number, ReadonlyArray<TextChunk>>()
   threads.slice(0, Math.max(1, height - 4)).forEach((thread, index) => {
@@ -63,6 +63,11 @@ const threadListRows = (
 
 const threadSwitcherListContentImpl = (model: Model, width: number, height: number, now: number): StyledText => {
   const rows = threadListRows(model, width, height, now)
+  let status = "Ctrl+R refresh"
+  if (model.threadsRefresh === "loading") status = "Refreshing threads…"
+  else if (model.threadsRefresh === "failed") status = "Refresh failed · Ctrl+R retry"
+  else if (filteredThreads(model).length === 0) status = "No matching threads · Ctrl+R refresh"
+  rows.set(2, [fg(model.threadsRefresh === "failed" ? colors.red : colors.muted)(truncateToWidth(status, width))])
   const chunks: Array<TextChunk> = []
   for (let row = 0; row < height; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))

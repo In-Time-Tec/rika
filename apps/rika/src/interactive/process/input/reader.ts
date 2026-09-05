@@ -206,6 +206,10 @@ export const createInputHandlers = (context: InputContext): Parameters<typeof cr
     if (handleCtrlC(key)) return
     if (cancellable && loop.ctrlCMenuVisible) showCtrlCMenu(false)
     if (handleCtrlCMenu(key)) return
+    if (loop.model.threadSwitcher.open && isCtrlKey(key, "r")) {
+      run(session.refreshThreads.pipe(recoverSession))
+      return
+    }
     if (isCtrlKey(key, "g")) {
       run(editComposer)
       return

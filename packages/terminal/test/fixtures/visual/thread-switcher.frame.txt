@@ -3,7 +3,7 @@
                               ╭─ Switch Thread ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
                               │                                                                                                                                          │
                               │ >                                                                  ╭───────────────────────── Thread Preview ─────────────────────────╮  │
-                              │                                                                    │                                                                  │  │
+                              │Ctrl+R refresh                                                      │                                                                  │  │
                               │  Rika performance and reliability                  +428 ~56 -59    │                                                                  │  │
                               │  Push all local changes to main                    +558 ~68 -68    │                                                                  │  │
                               │  TUI performance and bug audit                                     │                                                                  │  │

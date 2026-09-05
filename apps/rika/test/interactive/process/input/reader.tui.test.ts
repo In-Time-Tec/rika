@@ -21,7 +21,7 @@ test(
   () =>
     TuiApp.run(
       Effect.gen(function* () {
-        let refreshRequested = false
+        let refreshRequests = 0
         const app = yield* TuiApp.tuiApp({
           historicalTranscriptFixture: {
             threadId: "thread-before-startup-refresh",
@@ -29,10 +29,10 @@ test(
             marker: "unused",
           },
           onRefreshThreads: () => {
-            refreshRequested = true
+            refreshRequests += 1
           },
           mapInteractiveEvent: (event) =>
-            event._tag === "ThreadsListed" && !refreshRequested ? { ...event, threads: [] } : event,
+            event._tag === "ThreadsListed" && refreshRequests === 0 ? { ...event, threads: [] } : event,
         })
 
         app.pressKey("t", { ctrl: true })
@@ -40,7 +40,10 @@ test(
           (frame) => frame.includes("Switch Thread") && frame.includes("Durable history"),
         )
         expect(switcher).toContain("Durable history")
-        expect(refreshRequested).toBe(true)
+        expect(refreshRequests).toBe(1)
+        app.pressKey("r", { ctrl: true })
+        yield* app.waitFrame("Ctrl+R refresh")
+        expect(refreshRequests).toBe(2)
         expect(yield* app.modelRequestCount).toBe(0)
         yield* app.quit
       }),

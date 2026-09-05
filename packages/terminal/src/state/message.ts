@@ -82,6 +82,7 @@ type Message =
   | { readonly _tag: "ScrollFollowed" }
   | { readonly _tag: "PaletteActionConsumed" }
   | { readonly _tag: "ThreadsReplaced"; readonly threads: ReadonlyArray<ThreadItem> }
+  | { readonly _tag: "ThreadsRefreshChanged"; readonly status: "idle" | "loading" | "failed" }
   | { readonly _tag: "ThreadActivated"; readonly threadId: string; readonly title: string }
   | { readonly _tag: "ThreadTitleChanged"; readonly threadId: string; readonly title: string }
   | { readonly _tag: "FilesReplaced"; readonly files: ReadonlyArray<string> }

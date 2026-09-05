@@ -1,4 +1,5 @@
 import { createTestRenderer } from "@opentui/core/testing"
+import "./catalog-refresh.fixture"
 import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../src/opentui/surface/service"

@@ -31,7 +31,7 @@ type SubmissionEvent = EventWithTag<"SubmissionAdmitted" | "SubmissionRejected" 
 type ExecutionOutcomeEvent = EventWithTag<
   "ExecutionFailed" | "TurnRetryScheduled" | "ShellCompleted" | "AssistantCompleted"
 >
-type ThreadDataEvent = EventWithTag<"ThreadsListed" | "ContextDiagnostics">
+type ThreadDataEvent = EventWithTag<"ThreadsListed" | "ThreadsRefreshChanged" | "ContextDiagnostics">
 type ThreadIdentityEvent = EventWithTag<"ThreadTitled" | "ThreadActivated">
 type ThreadPreviewEvent = EventWithTag<"ThreadPreviewLoaded" | "ThreadPreviewFailed">
 
@@ -52,7 +52,7 @@ const isExecutionOutcomeEvent = (event: InteractiveEventType): event is Executio
   event._tag === "AssistantCompleted"
 
 const isThreadDataEvent = (event: InteractiveEventType): event is ThreadDataEvent =>
-  event._tag === "ThreadsListed" || event._tag === "ContextDiagnostics"
+  event._tag === "ThreadsListed" || event._tag === "ThreadsRefreshChanged" || event._tag === "ContextDiagnostics"
 
 const isThreadIdentityEvent = (event: InteractiveEventType): event is ThreadIdentityEvent =>
   event._tag === "ThreadTitled" || event._tag === "ThreadActivated"
@@ -230,6 +230,10 @@ export const makeEventRouter = (runtime: Runtime) => {
     return true
   }
   const routeThreadDataEvent = (event: ThreadDataEvent): boolean => {
+    if (event._tag === "ThreadsRefreshChanged") {
+      loop.model = update(loop.model, event)
+      return true
+    }
     if (event._tag === "ThreadsListed") {
       loop.model = update(loop.model, {
         _tag: "ThreadsReplaced",

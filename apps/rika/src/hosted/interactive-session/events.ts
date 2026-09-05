@@ -171,3 +171,28 @@ export const interactivePreviewState = (dispatch: (event: InteractiveEvent) => v
   }
   return { activePreviews, resetPreviews }
 }
+
+export const threadCatalogRefresh = ({
+  listThreads,
+  dispatch,
+}: {
+  readonly listThreads: Effect.Effect<Extract<InteractiveEvent, { _tag: "ThreadsListed" }>["threads"], HostedError>
+  readonly dispatch: (event: InteractiveEvent) => void
+}) => {
+  let catalogRequest = 0
+  return Effect.gen(function* () {
+    const request = ++catalogRequest
+    dispatch({ _tag: "ThreadsRefreshChanged", status: "loading" })
+    const result = yield* Effect.result(listThreads)
+    if (request !== catalogRequest) return
+    if (result._tag === "Failure") {
+      dispatch({ _tag: "ThreadsRefreshChanged", status: "failed" })
+      yield* Effect.logWarning("thread-list.refresh.failed").pipe(
+        Effect.annotateLogs("message", result.failure.message),
+      )
+    } else {
+      dispatch({ _tag: "ThreadsListed", threads: result.success })
+      dispatch({ _tag: "ThreadsRefreshChanged", status: "idle" })
+    }
+  })
+}

@@ -9,7 +9,7 @@ import {
   type PhysicalConnection,
 } from "./interactive-session/connection"
 import { interactiveSessionCommands } from "./interactive-session/commands"
-import { interactivePreviewState, interactiveSessionEvents } from "./interactive-session/events"
+import { interactivePreviewState, interactiveSessionEvents, threadCatalogRefresh } from "./interactive-session/events"
 import {
   type HostedInteractiveSession,
   type HostedInteractiveSessionInput,
@@ -56,12 +56,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
   const threadCursors = new Map<string, string>()
   const { activePreviews, resetPreviews } = interactivePreviewState((event) => dispatch(event))
   let connectionChanged = Deferred.makeUnsafe<void>()
-  const refreshThreads = input.listThreads.pipe(
-    Effect.tap((threads) => Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads }))),
-    Effect.catch((error) =>
-      Effect.logWarning("thread-list.refresh.failed").pipe(Effect.annotateLogs("message", error.message)),
-    ),
-  )
+  const refreshThreads = threadCatalogRefresh({ listThreads: input.listThreads, dispatch: (event) => dispatch(event) })
   const publishConnection = (value: PhysicalConnection | undefined) => {
     current = value
     connecting = undefined

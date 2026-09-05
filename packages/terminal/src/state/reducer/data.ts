@@ -57,6 +57,8 @@ const reduceComposerData = (model: Model, message: Message): Model | undefined =
 
 const reduceThreadReplacement = (model: Model, message: Message): Model | undefined => {
   switch (message._tag) {
+    case "ThreadsRefreshChanged":
+      return { ...model, threadsRefresh: message.status }
     case "ThreadsReplaced": {
       const selectedThread = Schema.decodeUnknownOption(ThreadItemSchema)(model.threads[model.threadSidebar.selected])
       const selectedId = Option.getOrUndefined(selectedThread)?.id
