@@ -11,6 +11,7 @@ const startAttempt = (context: ProjectorEventContext, node: Node, event: RunEven
   }
   node.started = true
   node.attempt = event.attempt
+  node.needsResolution = false
   if (node.lifecycle === "active") context.usage.observeLifecycleAt(event)
   else context.usage.activate(node, event)
   const card = context.cardsByChild.get(node.rawRunId)
@@ -18,6 +19,7 @@ const startAttempt = (context: ProjectorEventContext, node: Node, event: RunEven
 }
 
 const resume = (context: ProjectorEventContext, node: Node, event: RunEvent.RunResumed): void => {
+  node.needsResolution = false
   if (node.started) context.usage.activate(node, event)
   else {
     context.usage.observeLifecycleAt(event)
@@ -88,6 +90,7 @@ const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node)
     case "OperationUnknown": {
       // Generalist supplies no tool-call identity here. Do not attach this operation to a guessed tool.
       if (context.core.rootStatus !== "cancelling") {
+        node.needsResolution = true
         if (node.lifecycle === "active") context.usage.deactivate(node, event, "waiting")
         node.status = "waiting"
         if (node.parentRawRunId === undefined) context.core.rootStatus = "waiting"

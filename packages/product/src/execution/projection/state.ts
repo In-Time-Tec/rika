@@ -9,6 +9,7 @@ export type GeneratedTitle = typeof GeneratedTitle.Type
 
 export const ProjectionState = Schema.Struct({
   status: Schema.Literals(["running", "waiting", "cancelling", "completed", "failed", "cancelled"]),
+  needsResolution: Schema.optionalKey(Schema.Boolean),
   usage: UsageState,
   title: Schema.optionalKey(GeneratedTitle),
   steering: SteeringSummary,

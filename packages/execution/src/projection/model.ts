@@ -26,6 +26,7 @@ export interface Node {
   lifecycle: "unknown" | "accepted" | "active" | "waiting" | "terminal"
   started: boolean
   attempt?: number
+  needsResolution?: boolean
 }
 
 export interface Card {

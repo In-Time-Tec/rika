@@ -66,6 +66,7 @@ const turnState = (entry: ThreadViewTurn): ThreadViewTurnState => ({
   turn: entry.turn,
   projectionRevision: entry.projectionRevision,
   usage: entry.usage,
+  needsResolution: entry.needsResolution ?? false,
   pendingSteering: entry.pendingSteering ?? [],
   settledSteering: entry.settledSteering ?? [],
 })
@@ -76,6 +77,7 @@ const changedTurnState = (
   turn: change.turn,
   projectionRevision: change.projectionRevision,
   usage: change.usage,
+  needsResolution: change.needsResolution ?? false,
   pendingSteering: change.pendingSteering ?? [],
   settledSteering: change.settledSteering ?? [],
 })

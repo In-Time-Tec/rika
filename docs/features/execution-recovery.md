@@ -6,6 +6,8 @@ Workspace operations are dispatched with a stable operation key to the current f
 
 Generalist owns unknown-outcome resolution. The transcript presents an unknown operation as a waiting notification, not an ordinary execution error, and preserves the known Run and operation IDs through projection rebuilds and reconnects. An authenticated client inspects a Run with `rika thread recovery inspect <thread-id> <run-id>`, which returns the Run ID and Generalist's status. For `needs-resolution`, the response explicitly includes `operationDetails: { _tag: "Unavailable", reason: ... }`; successful inspection does not mean successful execution. Generalist 0.46.1 exposes no public unresolved-operation details, replay policy, or result schema. Rika does not invent those details or offer automatic replay based on a tool's name.
 
+The optional `ProjectionState.needsResolution` field is derived from each Run's `OperationUnknown` event and cleared by that Run's resume, new attempt, or settlement. Sibling progress cannot clear another Run's uncertainty. ThreadView snapshots and patches carry the signal separately from ordinary `waiting`: a parent waiting for a live child still shows subagent activity. Persisted projection JSON and older ThreadView snapshots without the field remain readable and do not imply unknown-operation recovery. No database migration is required.
+
 An authorized operator can explicitly resolve a known operation using:
 
 ```sh

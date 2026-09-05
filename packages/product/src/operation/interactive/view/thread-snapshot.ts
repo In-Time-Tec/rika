@@ -72,6 +72,7 @@ const snapshotFromSelection = (
       readonly units: Array<import("@rika/transcript/transcript-unit").Unit>
       projectionRevision: number
       usage: ExecutionProjection.UsageState
+      needsResolution: boolean
       pendingSteering: ReadonlyArray<ExecutionProjection.PendingSteering>
       settledSteering: ReadonlyArray<ExecutionProjection.SteeringDisposition>
     }
@@ -85,6 +86,7 @@ const snapshotFromSelection = (
         units: [entry.unit],
         projectionRevision: entry.projectionRevision,
         usage: entry.projectionState.usage,
+        needsResolution: entry.projectionState.needsResolution === true,
         pendingSteering: entry.projectionState.steering.pending ?? [],
         settledSteering: entry.projectionState.steering.settled ?? [],
       })
@@ -92,6 +94,7 @@ const snapshotFromSelection = (
       current.units.push(entry.unit)
       if (entry.projectionRevision >= current.projectionRevision) {
         current.usage = entry.projectionState.usage
+        current.needsResolution = entry.projectionState.needsResolution === true
         current.pendingSteering = entry.projectionState.steering.pending ?? []
         current.settledSteering = entry.projectionState.steering.settled ?? []
       }
@@ -104,6 +107,7 @@ const snapshotFromSelection = (
       units: [promptUnit(event.activeTurn)],
       projectionRevision: 0,
       usage: ExecutionProjection.emptyUsageState(),
+      needsResolution: false,
       pendingSteering: [],
       settledSteering: [],
     })

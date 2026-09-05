@@ -18,6 +18,41 @@ const state = (status: "running" | "waiting" | "completed" = "running") => ({
 })
 
 describe("interactive ThreadView feed", () => {
+  it("carries recovery through projection insertion, patch and removal without retaining a stale signal", () => {
+    const feed = makeThreadViewFeed(() => 1)
+    feed.publish({
+      _tag: "SelectionLoaded",
+      selectionEpoch: 1,
+      activitySequence: 0,
+      thread,
+      entries: [],
+      hasOlder: false,
+      usage: { usage: ExecutionProjection.emptyUsageState() },
+      queueRevision: 0,
+      queue: [],
+    })
+    for (const [revision, needsResolution] of [
+      [1, true],
+      [2, false],
+      [3, true],
+    ] as const) {
+      const events = feed.publish({
+        _tag: "ExecutionProjectionChanged",
+        threadId,
+        turn,
+        change: {
+          _tag: "ProjectionSnapshot",
+          revision,
+          units: [unit("recovery", "text")],
+          hasOlder: false,
+          state: needsResolution ? { ...state("waiting"), needsResolution: true } : state("running"),
+        },
+      })
+      expect(events).toMatchObject([{ _tag: "ThreadViewPatch", patch: { turnChanges: [{ needsResolution }] } }])
+      expect(feed.current()?.turns[0]?.needsResolution).toBe(needsResolution)
+    }
+  })
+
   it("updates closed aggregate usage atomically in the same ThreadView patch", () => {
     const feed = makeThreadViewFeed(() => 1)
     feed.publish({

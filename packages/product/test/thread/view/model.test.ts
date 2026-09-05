@@ -85,6 +85,25 @@ const patch = <Changes>(changes?: Changes) =>
   })
 
 describe("ThreadView contract", () => {
+  it("decodes recovery snapshots and clears recovery on replacement and Turn removal", () => {
+    const source = snapshot()
+    const recovering = decodeSnapshot({
+      ...source,
+      turns: source.turns.map((entry) => ({ ...entry, needsResolution: true })),
+    })
+    const view = Result.getOrThrow(ThreadView.fromSnapshot(recovering))
+    expect(view.turn("turn")?.needsResolution).toBe(true)
+    const original = source.turns[0]!
+    Result.getOrThrow(view.apply(patch({ turnChanges: [{ _tag: "UpsertTurn", ...original }] })))
+    expect(view.turn("turn")?.needsResolution).toBe(false)
+    const restored = Result.getOrThrow(ThreadView.fromSnapshot(recovering))
+    Result.getOrThrow(
+      restored.apply(patch({ turnChanges: [{ _tag: "RemoveTurn", turnId: "turn" }], remove: ["unit:1"] })),
+    )
+    expect(restored.turn("turn")).toBeUndefined()
+    expect(restored.snapshot().turns).toEqual([])
+  })
+
   it("round-trips a bounded read model without execution transport vocabulary", () => {
     const value = snapshot()
     const encoded = Schema.encodeSync(ThreadView.ThreadViewSnapshot)(value)

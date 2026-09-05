@@ -82,6 +82,14 @@ test(
         app.pressEnter()
         const direct = yield* app.waitFrame("Parent survey working", 30_000)
         expect(direct).toContain("Running 1 subagent")
+        // A parent suspends normally while its child works; that is not unknown-operation recovery.
+        const waiting = yield* app.waitTranscript(
+          Turn.TurnId.make("tui-turn-0"),
+          (projection) => projection.state.status === "waiting",
+          30_000,
+        )
+        expect(waiting?.state.needsResolution).not.toBe(true)
+        yield* app.waitFrame("Running 1 subagent", 30_000)
         yield* app.waitFrame("ROOT_DEEP_DONE", 30_000)
         app.pressKey("\t")
         app.pressEnter()

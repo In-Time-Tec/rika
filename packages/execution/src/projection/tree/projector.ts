@@ -85,7 +85,10 @@ const make = (
               active: usage.activeTime(),
             },
           }
-    return state
+    return (core.rootStatus === "running" || core.rootStatus === "waiting") &&
+      [...nodes.values()].some((node) => node.needsResolution === true && node.status === "waiting")
+      ? { ...state, needsResolution: true }
+      : state
   }
 
   const put = (unit: Unit) => {

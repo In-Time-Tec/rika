@@ -57,6 +57,7 @@ export const ThreadViewTurnChange = Schema.Union([
     turn: ThreadViewTurnRecord,
     projectionRevision: NonNegativeRevision,
     usage: ExecutionProjection.UsageState,
+    needsResolution: Schema.optionalKey(Schema.Boolean),
     pendingSteering: Schema.optionalKey(
       Schema.Array(ExecutionProjection.PendingSteering).check(
         Schema.isMaxLength(ExecutionProjection.PendingSteeringMaxEntries),
