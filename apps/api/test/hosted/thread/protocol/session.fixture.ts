@@ -30,6 +30,8 @@ export const makeSessionFixture = () => {
     createProject: () => Effect.die("unused"),
     activatePrincipal: () => Effect.void,
     authorizeOwner: () => Effect.die("unused"),
+    authorizeReadOwner: () => Effect.die("unused"),
+    authorizeReadThread: () => Effect.die("unused"),
     authorizeThread: (_principal, _threadId, action) =>
       Effect.sync(() => {
         authorizedActions.push(action)

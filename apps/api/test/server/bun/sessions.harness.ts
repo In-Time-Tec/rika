@@ -105,6 +105,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
       identity: {
         handle: () => Effect.die("unused"),
         identify: () => Effect.die("unused"),
+        browserSession: () => Effect.die("unused"),
         protectedResourceMetadata: Effect.die("unused"),
       },
       directory: { ready: Effect.void, account: () => Effect.die("unused") },
@@ -120,6 +121,8 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
         ready: Effect.void,
         activatePrincipal: () => Effect.die("unused"),
         authorizeOwner: () => Effect.die("unused"),
+        authorizeReadOwner: () => Effect.die("unused"),
+        authorizeReadThread: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         projects: () => Effect.die("unused"),
@@ -135,6 +138,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
       },
       threads: {
         issueTicket: () => Effect.die("unused"),
+        connectBrowser: () => Effect.die("unused"),
         connect: (ticket, audience) => {
           connected = [ticket, audience]
           connectionCount += 1

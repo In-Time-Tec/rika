@@ -286,6 +286,7 @@ it.layer(bunLayer)((test) => {
             identity: {
               handle: () => Effect.die("unused"),
               identify: () => Effect.succeed({ userId: account.user.id, clientId, dpopJkt: "dpop-thumbprint" }),
+              browserSession: () => Effect.die("unused"),
               protectedResourceMetadata: Effect.die("unused"),
             } satisfies IdentityRuntime,
             directory: {
@@ -302,6 +303,7 @@ it.layer(bunLayer)((test) => {
             } satisfies CliDeviceDirectory,
             product,
             threads: {
+              connectBrowser: () => Effect.die("unused"),
               issueTicket: () =>
                 Effect.succeed({
                   ticket: "thread-ticket",

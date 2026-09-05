@@ -3,7 +3,8 @@ import { Sequence, ThreadEventCursor, ThreadId, Timestamp } from "@rika/product/
 import type { HostedPresence } from "@rika/product/hosted-presence"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { type ClientMessage, ServerFrame, type WorkspacePlacement } from "@rika/product/client-protocol"
-import type { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
+import type { ThreadProtocolStore, ThreadReader } from "@rika/product/thread-protocol-store"
+import type { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { ThreadId as ProductThreadId } from "@rika/product/thread-record"
 import type { HostedThreadApplication } from "./application"
 import type { HostedProduct, ThreadAuthority } from "../product"
@@ -11,12 +12,14 @@ import type { ThreadProtocolNotificationGeneration, ThreadProtocolNotifications 
 import type { HostedPreviewBusService, HostedPreviewSubscription } from "./previews"
 import {
   frame,
+  type BrowserReadPrincipal,
   type HostedThreadConnection,
   type HostedThreadProtocolError,
   operationFailure,
   productFailure,
   storeFailure,
   unavailable,
+  validateBrowserRead,
   zeroCursor,
 } from "./protocol-contract"
 
@@ -29,17 +32,18 @@ const replayDistance = (cursor: string, afterCursor: string) => {
   return distance <= 0 ? 0 : Number(distance > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : distance)
 }
 
-/**
- * Presence is the durable "someone is viewing this Thread" signal. It expires after one minute, so an attached
- * connection refreshes it every thirty seconds and marks itself away when it detaches or its socket closes.
- * Runner admission and other demand-driven work read it, so it must stay live for the whole attachment.
- */
+// Device presence keeps Runner demand live; passive browser readers never write it.
 export const presenceLifetimeMillis = 60_000
 export const presenceRefreshMillis = 30_000
 
+interface ReadAuthority {
+  readonly ownerId: ThreadAuthority["ownerId"]
+  readonly actor: ThreadReader
+}
+
 interface Attachment {
   readonly threadId: ThreadId
-  readonly authority: ThreadAuthority
+  readonly authority: ReadAuthority
   readonly cursor: ThreadEventCursor
   readonly checkpointCursor: ThreadEventCursor
   readonly knownHead: ThreadEventCursor
@@ -48,8 +52,8 @@ interface Attachment {
   readonly presenceRefreshedAt: number
 }
 
-interface ProtocolConnectionDependencies {
-  readonly principal: Parameters<HostedProduct["Service"]["authorizeThread"]>[0]
+export interface ProtocolConnectionDependencies {
+  readonly principal: Parameters<HostedProduct["Service"]["authorizeThread"]>[0] | BrowserReadPrincipal
   readonly product: HostedProduct["Service"]
   readonly operations: HostedThreadApplication["Service"]
   readonly store: ThreadProtocolStore["Service"]
@@ -84,26 +88,43 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
   const { principal, product, operations, store, presence, changes, previews, workspacePlacement } = dependencies
   let attached: Attachment | undefined
 
-  const presenceViewing = (authority: ThreadAuthority, threadId: ThreadId, nowMillis: number) =>
-    presence.upsert({
-      ownerId: authority.ownerId,
-      threadId,
-      actor: authority.actor,
-      status: "viewing",
-      now: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis))),
-      expiresAt: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis + presenceLifetimeMillis))),
-    })
+  const validate = Effect.suspend(() => validateBrowserRead({ principal, product, threadId: attached?.threadId }))
 
-  const presenceAway = (authority: ThreadAuthority, threadId: ThreadId, nowMillis: number) => {
+  const presenceViewing = (
+    authority: ReadAuthority,
+    threadId: ThreadId,
+    nowMillis: number,
+  ): Effect.Effect<void, HostedPersistenceError> =>
+    authority.actor._tag === "BrowserRead"
+      ? Effect.void
+      : presence
+          .upsert({
+            ownerId: authority.ownerId,
+            threadId,
+            actor: authority.actor,
+            status: "viewing",
+            now: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis))),
+            expiresAt: Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis + presenceLifetimeMillis))),
+          })
+          .pipe(Effect.asVoid)
+
+  const presenceAway = (
+    authority: ReadAuthority,
+    threadId: ThreadId,
+    nowMillis: number,
+  ): Effect.Effect<void, HostedPersistenceError> => {
+    if (authority.actor._tag === "BrowserRead") return Effect.void
     const now = Timestamp.make(DateTime.formatIso(DateTime.makeUnsafe(nowMillis)))
-    return presence.upsert({
-      ownerId: authority.ownerId,
-      threadId,
-      actor: authority.actor,
-      status: "away",
-      now,
-      expiresAt: now,
-    })
+    return presence
+      .upsert({
+        ownerId: authority.ownerId,
+        threadId,
+        actor: authority.actor,
+        status: "away",
+        now,
+        expiresAt: now,
+      })
+      .pipe(Effect.asVoid)
   }
 
   /** Refreshes the attachment's presence when it is due; never fails the connection over a presence write. */
@@ -124,6 +145,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
   })
 
   const presenceDue = Effect.gen(function* () {
+    if ("_tag" in principal) return yield* Effect.never
     const current = attached
     if (current === undefined) return yield* Effect.never
     const nowMillis = yield* Clock.currentTimeMillis
@@ -131,7 +153,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
   })
 
   const materializeSnapshot = Effect.fn("HostedThreadProtocol.materializeSnapshot")(function* (
-    authority: ThreadAuthority,
+    authority: ReadAuthority,
     threadId: ThreadId,
     afterCursor: ThreadEventCursor,
     afterCheckpointCursor?: ThreadEventCursor,
@@ -143,6 +165,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
         : store.replay({ ...baseReplayInput, afterCheckpointCursor })
     ).pipe(Effect.mapError(storeFailure))
     while (true) {
+      if (!(yield* validate)) return yield* unavailable("Browser session is no longer authorized")
       const replay = yield* readReplay
       const directTail =
         afterCursor !== zeroCursor &&
@@ -173,7 +196,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
   })
 
   const completeAttachmentReplay = Effect.fn("HostedThreadProtocol.completeAttachmentReplay")(function* (
-    authority: ThreadAuthority,
+    authority: ReadAuthority,
     command: Extract<ClientMessage["command"], { readonly _tag: "AttachThread" }>,
     replay: Effect.Success<ReturnType<typeof store.replay>>,
   ) {
@@ -182,6 +205,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
     const baseCursor = replaySnapshot?.cursor ?? command.afterCursor
     let representedCursor = replayEvents.at(-1)?.cursor ?? baseCursor
     while (BigInt(representedCursor) < BigInt(replay.cursor)) {
+      if (!(yield* validate)) return yield* unavailable("Browser session is no longer authorized")
       const page = yield* store
         .replay({
           ownerId: authority.ownerId,
@@ -217,9 +241,18 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
 
   const attach: ProtocolConnectionState["attach"] = Effect.fn("HostedThreadProtocol.attach")(
     function* (command, requestId, receivedAt) {
-      const authority = yield* product
-        .authorizeThread(principal, command.threadId, "thread:view")
-        .pipe(Effect.mapError(productFailure))
+      if (!(yield* validate)) return yield* unavailable("Browser session is no longer authorized")
+      const authority: ReadAuthority =
+        "_tag" in principal
+          ? {
+              ...(yield* product
+                .authorizeReadThread(principal, command.threadId)
+                .pipe(Effect.mapError(productFailure))),
+              actor: { _tag: "BrowserRead", userId: principal.userId },
+            }
+          : yield* product
+              .authorizeThread(principal, command.threadId, "thread:view")
+              .pipe(Effect.mapError(productFailure))
       const notificationGeneration = changes.generation(command.threadId)
       yield* store
         .initializeThread({ ownerId: authority.ownerId, threadId: command.threadId, actor: authority.actor })
@@ -252,17 +285,20 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
             }
       const presenceNow = Timestamp.make(receivedAt)
       const attachedAtMillis = DateTime.toEpochMillis(DateTime.makeUnsafe(receivedAt))
-      const participants = yield* presenceViewing(authority, command.threadId, attachedAtMillis).pipe(
-        Effect.andThen(
-          presence.list({
-            ownerId: authority.ownerId,
-            threadId: command.threadId,
-            actor: authority.actor,
-            now: presenceNow,
-          }),
-        ),
-        Effect.orElseSucceed(() => []),
-      )
+      const participants =
+        authority.actor._tag === "BrowserRead"
+          ? []
+          : yield* presenceViewing(authority, command.threadId, attachedAtMillis).pipe(
+              Effect.andThen(
+                presence.list({
+                  ownerId: authority.ownerId,
+                  threadId: command.threadId,
+                  actor: authority.actor,
+                  now: presenceNow,
+                }),
+              ),
+              Effect.orElseSucceed(() => []),
+            )
       const attachmentPayload = {
         _tag: "ThreadAttached",
         requestId,

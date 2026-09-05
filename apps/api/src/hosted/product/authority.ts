@@ -1,5 +1,5 @@
 import { Clock, Crypto, DateTime, Effect } from "effect"
-import type { AuthorizationService } from "@rika/product/hosted-authorization"
+import type { AuthorizationAction, AuthorizationService } from "@rika/product/hosted-authorization"
 import type { HostedClientAuthorityService } from "@rika/product/hosted-client-authority"
 import {
   BetterAuthMemberId,
@@ -60,7 +60,7 @@ export const hostedProductAuthorityOperations = ({
   })
 
   const resolveOwner = Effect.fn("HostedProduct.resolveOwner")(function* (
-    principal: AuthenticatedPrincipal,
+    principal: Pick<AuthenticatedPrincipal, "userId">,
     selection: OwnerSelection,
   ) {
     return yield* repository
@@ -118,30 +118,52 @@ export const hostedProductAuthorityOperations = ({
     return { ownerId: OwnerId.make(authority.ownerId) }
   }, Effect.mapError(storeFailure))
 
+  const resolveThreadAuthority = Effect.fn("HostedProduct.resolveThreadAuthority")(function* (
+    principal: Pick<AuthenticatedPrincipal, "userId">,
+    threadId: string,
+    action: AuthorizationAction,
+  ) {
+    const resolved = yield* repository
+      .threadAuthority(principal.userId, threadId)
+      .pipe(Effect.mapError(repositoryFailure))
+    if (resolved === undefined)
+      return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
+    if (resolved.kind === "personal" && resolved.userId !== principal.userId) return yield* forbidden()
+    if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
+    if (resolved.kind === "organization") {
+      const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
+      const authorization = {
+        memberId: membershipId,
+        executorKind: resolved.executorKind,
+        inheritProjectGrants: resolved.inheritProjectGrants,
+      }
+      if (resolved.createdByUserId === principal.userId)
+        Object.assign(authorization, { threadCreatorMemberId: membershipId })
+      if (resolved.threadRole !== null) Object.assign(authorization, { threadRole: resolved.threadRole })
+      if (resolved.projectRole !== null) Object.assign(authorization, { projectRole: resolved.projectRole })
+      yield* policy.authorize(action, authorization).pipe(Effect.mapError(() => forbidden()))
+    }
+    return resolved
+  })
+
+  const authorizeReadOwner: HostedProductService["authorizeReadOwner"] = Effect.fn("HostedProduct.authorizeReadOwner")(
+    function* (principal, owner) {
+      const authority = yield* resolveOwner(principal, owner)
+      return { ownerId: OwnerId.make(authority.ownerId) }
+    },
+  )
+  const authorizeReadThread: HostedProductService["authorizeReadThread"] = Effect.fn(
+    "HostedProduct.authorizeReadThread",
+  )(function* (principal, threadId) {
+    const authority = yield* resolveThreadAuthority(principal, threadId, "thread:view")
+    return { ownerId: OwnerId.make(authority.ownerId) }
+  })
+
   const authorizeThread: HostedProductService["authorizeThread"] = Effect.fn("HostedProduct.authorizeThread")(
     function* (principal, threadId, action) {
       yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
-      const resolved = yield* repository
-        .threadAuthority(principal.userId, threadId)
-        .pipe(Effect.mapError(repositoryFailure))
-      if (resolved === undefined)
-        return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
+      const resolved = yield* resolveThreadAuthority(principal, threadId, action)
       const userId = BetterAuthUserId.make(principal.userId)
-      if (resolved.kind === "personal" && resolved.userId !== principal.userId) return yield* forbidden()
-      if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
-      if (resolved.kind === "organization") {
-        const membershipId = BetterAuthMemberId.make(resolved.membershipId!)
-        const authorization = {
-          memberId: membershipId,
-          executorKind: resolved.executorKind,
-          inheritProjectGrants: resolved.inheritProjectGrants,
-        }
-        if (resolved.createdByUserId === principal.userId)
-          Object.assign(authorization, { threadCreatorMemberId: membershipId })
-        if (resolved.threadRole !== null) Object.assign(authorization, { threadRole: resolved.threadRole })
-        if (resolved.projectRole !== null) Object.assign(authorization, { projectRole: resolved.projectRole })
-        yield* policy.authorize(action, authorization).pipe(Effect.mapError(() => forbidden()))
-      }
       const owner =
         resolved.kind === "personal"
           ? ({ _tag: "PersonalOwner", userId } as const)
@@ -189,5 +211,15 @@ export const hostedProductAuthorityOperations = ({
     Effect.mapError(storeFailure),
   )
 
-  return { activateClient, resolveOwner, projects, createProject, authorizeOwner, authorizeThread, activatePrincipal }
+  return {
+    activateClient,
+    resolveOwner,
+    projects,
+    createProject,
+    authorizeOwner,
+    authorizeReadOwner,
+    authorizeReadThread,
+    authorizeThread,
+    activatePrincipal,
+  }
 }

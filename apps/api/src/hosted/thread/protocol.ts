@@ -40,6 +40,7 @@ import {
   zeroCursor,
 } from "./protocol-contract"
 import { ticketOperations } from "./protocol-tickets"
+import { browserConnections } from "./browser/protocol"
 
 export {
   HostedThreadProtocol,
@@ -484,8 +485,16 @@ export const layerWithOptions = (
         },
       )
 
-      return HostedThreadProtocol.of({ issueTicket, connect })
+      const connectBrowser = browserConnections({
+        product,
+        operations,
+        store,
+        presence,
+        changes,
+        previews,
+        workspacePlacement: options.workspacePlacement,
+      })
+      return HostedThreadProtocol.of({ issueTicket, connect, connectBrowser })
     }),
   ).pipe(Layer.provide(ThreadProtocolNotificationService.layer), Layer.provide(HostedPreviewBus.memoryLayer))
-
 export const layer = layerWithOptions()

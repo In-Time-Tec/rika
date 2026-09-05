@@ -3,15 +3,7 @@ import { ThreadId } from "@rika/product/thread-record"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { HttpDependencies } from "../../server/http"
 import { RikaApi } from "../contract"
-import {
-  CurrentAccess,
-  Forbidden,
-  NotFound,
-  ServiceUnavailable,
-  Unauthorized,
-  authenticatedPrincipal,
-  hostedOwner,
-} from "../access"
+import { CurrentAccess, Forbidden, NotFound, ServiceUnavailable, authenticatedPrincipal, hostedOwner } from "../access"
 
 const authorizationFailure = (error: { readonly kind?: string; readonly message: string }) => {
   if (error.kind === "not-found") return NotFound.make({ message: "Thread is unavailable" })
@@ -30,19 +22,23 @@ export const threadsHandlers = (dependencies: HttpDependencies) =>
       listThreads: ({ payload }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
-          if (access.deviceId === undefined || access.principal.clientId === undefined)
-            return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.threadApplication === undefined)
             return yield* ServiceUnavailable.make({ message: "Thread service unavailable" })
-          const principal = authenticatedPrincipal(access)
-          const owner = yield* dependencies.product
-            .authorizeOwner(principal, hostedOwner(access)(payload.owner))
-            .pipe(Effect.mapError(ownerAuthorizationFailure))
+          const device = access.deviceId !== undefined && access.principal.clientId !== undefined
+          const principal = { userId: access.principal.userId }
+          const owner = yield* (
+            device
+              ? dependencies.product.authorizeOwner(authenticatedPrincipal(access), hostedOwner(access)(payload.owner))
+              : dependencies.product.authorizeReadOwner(principal, hostedOwner(access)(payload.owner))
+          ).pipe(Effect.mapError(ownerAuthorizationFailure))
           const candidates = yield* dependencies.threadApplication
             .threads(owner.ownerId, payload.project_id)
             .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Thread service unavailable" })))
           const threads = yield* Effect.filter(candidates, (summary) =>
-            dependencies.product.authorizeThread(principal, String(summary.id), "thread:view").pipe(
+            (device
+              ? dependencies.product.authorizeThread(authenticatedPrincipal(access), String(summary.id), "thread:view")
+              : dependencies.product.authorizeReadThread(principal, String(summary.id))
+            ).pipe(
               Effect.as(true),
               Effect.catch((error) =>
                 error.kind === "forbidden" || error.kind === "not-found"
@@ -56,13 +52,17 @@ export const threadsHandlers = (dependencies: HttpDependencies) =>
       previewThread: ({ params }) =>
         Effect.gen(function* () {
           const access = yield* CurrentAccess
-          if (access.deviceId === undefined || access.principal.clientId === undefined)
-            return yield* Unauthorized.make({ message: "CLI device authentication required" })
           if (dependencies.threadApplication === undefined)
             return yield* ServiceUnavailable.make({ message: "Thread service unavailable" })
-          const authority = yield* dependencies.product
-            .authorizeThread(authenticatedPrincipal(access), String(params.threadId), "thread:view")
-            .pipe(Effect.mapError(authorizationFailure))
+          const authority = yield* (
+            access.deviceId !== undefined && access.principal.clientId !== undefined
+              ? dependencies.product.authorizeThread(
+                  authenticatedPrincipal(access),
+                  String(params.threadId),
+                  "thread:view",
+                )
+              : dependencies.product.authorizeReadThread({ userId: access.principal.userId }, String(params.threadId))
+          ).pipe(Effect.mapError(authorizationFailure))
           const units = yield* dependencies.threadApplication
             .preview(authority.ownerId, ThreadId.make(params.threadId))
             .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Thread preview unavailable" })))

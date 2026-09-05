@@ -16,8 +16,10 @@ import { threadWebSocketAudience, type HostedThreadConnection } from "../hosted/
 import * as Http from "./http"
 import type { HttpDependencies } from "./http"
 import { pollAuthority, type Session, sessionTransport } from "./session"
+import { browserReviewConnection, browserThreadWebSocketPath } from "./browser-review"
 
 export { pollAuthority } from "./session"
+export { browserThreadWebSocketPath } from "./browser-review"
 
 export const canonicalPublicRequest = (input: { readonly request: Request; readonly baseUrl: string }): Request => {
   const incoming = new URL(input.request.url)
@@ -81,6 +83,16 @@ const threadSession = (
   let outboundBytes = 0
   let acceptingOutput = true
   let negotiatedVersion: ClientProtocolVersion | undefined
+  const validate = (socket: Socket) =>
+    (connection.validate ?? Effect.succeed(true)).pipe(
+      Effect.map((valid) => {
+        if (!valid) {
+          acceptingOutput = false
+          socket.close(1008, "Browser review access expired")
+        }
+        return valid && acceptingOutput
+      }),
+    )
   const enqueue = (socket: Socket, frames: ReadonlyArray<ServerFrame>) =>
     Effect.sync(() => {
       if (!acceptingOutput || frames.length === 0) return
@@ -98,7 +110,10 @@ const threadSession = (
       Effect.tap((frames) =>
         Effect.sync(() => {
           outboundBytes -= frames.bytes
-        }).pipe(Effect.andThen(sendEncodedThreadFrames(socket, frames))),
+        }).pipe(
+          Effect.andThen(validate(socket)),
+          Effect.flatMap((valid) => (valid ? sendEncodedThreadFrames(socket, frames) : Effect.void)),
+        ),
       ),
       Effect.forever,
     )
@@ -109,7 +124,12 @@ const threadSession = (
         Effect.andThen(connection.outbound),
         Effect.map((frames) => ({ _tag: "Outbound" as const, frames })),
         Effect.catch(() =>
-          Effect.sync(() => socket.close(1011, "Thread replay failed")).pipe(Effect.andThen(Effect.never)),
+          validate(socket).pipe(
+            Effect.tap((valid) =>
+              valid ? Effect.sync(() => socket.close(1011, "Thread replay failed")) : Effect.void,
+            ),
+            Effect.andThen(Effect.never),
+          ),
         ),
       ),
     ).pipe(
@@ -129,7 +149,13 @@ const threadSession = (
     )
   return sessionTransport.owned({
     kind: "thread",
-    opened: (socket) => Effect.raceFirst(write(socket), process(socket)),
+    opened: (socket) =>
+      Effect.raceFirst(
+        Effect.raceFirst(write(socket), process(socket)),
+        connection.validate === undefined
+          ? Effect.never
+          : Effect.sleep("1 second").pipe(Effect.andThen(validate(socket)), Effect.forever),
+      ),
     receive: (socket, message) => {
       const body = Buffer.from(message).toString("utf8")
       const inspected = inspectClientProtocolVersion(body)
@@ -159,7 +185,7 @@ const threadSession = (
       )
     },
     disconnected: () => connection.detach,
-    active: () => Effect.succeed(true),
+    active: () => connection.validate ?? Effect.succeed(true),
     maximumQueuedBytes: maximumThreadSocketBytes,
   })
 }
@@ -230,6 +256,28 @@ export const serveApi = (input: { readonly config: IdentityConfig; readonly depe
           fetch: (request, bunServer) => {
             if (stopping) return new Response("Server stopping", { status: 503 })
             const pathname = new URL(request.url).pathname
+            if (pathname === browserThreadWebSocketPath) {
+              return runRequest(
+                browserReviewConnection({ ...input, request }).pipe(
+                  Effect.map((connection) => {
+                    if (stopping) return new Response("Server stopping", { status: 503 })
+                    const current = threadSession(connection, runThreadCommand)
+                    sessions.add(current)
+                    if (
+                      bunServer.upgrade(request, {
+                        data: current,
+                        headers: { "sec-websocket-protocol": "rika.thread.v1" },
+                      })
+                    )
+                      return undefined
+                    sessions.delete(current)
+                    runSessionClose(current.drain())
+                    return new Response("WebSocket upgrade required", { status: 426 })
+                  }),
+                  Effect.catch(Effect.succeed),
+                ),
+              )
+            }
             if (pathname === threadWebSocketAudience) {
               if (request.method !== "GET") return new Response("Method not allowed", { status: 405 })
               const ticket = threadTicket(request)

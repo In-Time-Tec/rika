@@ -51,6 +51,7 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
   const identity: IdentityRuntime = {
     handle: () => Effect.die("unused"),
     identify: () => Effect.die("unused"),
+    browserSession: () => Effect.die("unused"),
     protectedResourceMetadata: Effect.die("unused"),
   }
   const directory: IdentityDirectory = {
@@ -69,6 +70,8 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
     ready,
     activatePrincipal: () => Effect.die("unused"),
     authorizeOwner: () => Effect.die("unused"),
+    authorizeReadOwner: () => Effect.die("unused"),
+    authorizeReadThread: () => Effect.die("unused"),
     authorizeThread: () => Effect.die("unused"),
     threadExecutionContext: () => Effect.die("unused"),
     projects: () => Effect.die("unused"),

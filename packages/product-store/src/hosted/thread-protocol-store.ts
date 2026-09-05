@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Layer } from "effect"
 import { rikaHostedThreadProtocolState, rikaHostedThreads } from "../database/schema/product"
-import { requireThreadAccess } from "./authority"
+import { requireThreadReadAccess } from "./authority"
 import { commandOperations } from "./thread-protocol/commands"
 import { connectionOperations } from "./thread-protocol/connections"
 import { eventOperations } from "./thread-protocol/events"
@@ -21,7 +21,7 @@ const make = Effect.gen(function* (): Effect.fn.Return<ThreadProtocolStoreServic
     yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
-          yield* requireThreadAccess(tx, input, "thread:view")
+          yield* requireThreadReadAccess(tx, input)
           const threads = yield* query(
             tx
               .select({ ownerId: rikaHostedThreads.ownerId, threadId: rikaHostedThreads.id })

@@ -1,4 +1,5 @@
-import type { ActorAttribution } from "@rika/product/hosted-model"
+import { BetterAuthMemberId, type ActorAttribution } from "@rika/product/hosted-model"
+import type { ThreadReader } from "@rika/product/thread-protocol-store"
 import { isAuthorized, type AuthorizationAction } from "@rika/product/hosted-authorization"
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm"
@@ -129,6 +130,68 @@ export const requireThreadAccess = Effect.fn("Authority.requireThreadAccess")(fu
   at?: string,
 ) {
   yield* requireActiveClient(executor, input, at)
+  yield* requireThreadGrant(
+    executor,
+    {
+      ...input,
+      userId: input.actor.userId,
+      membershipId: input.actor._tag === "OrganizationActor" ? input.actor.membershipId : undefined,
+    },
+    action,
+  )
+})
+
+export const requireThreadReadAccess = Effect.fn("Authority.requireThreadReadAccess")(function* (
+  executor: AuthorityExecutor,
+  input: { readonly ownerId: string; readonly threadId: string; readonly actor: ThreadReader },
+) {
+  if (input.actor._tag !== "BrowserRead")
+    return yield* requireThreadAccess(executor, { ...input, actor: input.actor }, "thread:view")
+  const owners = yield* query(
+    executor
+      .select({
+        kind: rikaHostedOwners.kind,
+        userId: rikaHostedOwners.userId,
+        organizationId: rikaHostedOwners.organizationId,
+      })
+      .from(rikaHostedOwners)
+      .where(eq(rikaHostedOwners.id, input.ownerId))
+      .for("key share"),
+  )
+  const owner = owners[0]
+  if (owner === undefined) return yield* failure("Resource is unavailable")
+  let membershipId: BetterAuthMemberId | undefined
+  if (owner.kind === "personal") {
+    if (owner.userId !== input.actor.userId) return yield* failure("Resource is unavailable")
+  } else {
+    const members = yield* query(
+      executor
+        .select({ id: identityMembers.id })
+        .from(identityMembers)
+        .where(
+          and(
+            eq(identityMembers.organizationId, owner.organizationId!),
+            eq(identityMembers.userId, input.actor.userId),
+          ),
+        )
+        .for("key share"),
+    )
+    if (members[0] === undefined) return yield* failure("Resource is unavailable")
+    membershipId = BetterAuthMemberId.make(members[0].id)
+  }
+  yield* requireThreadGrant(executor, { ...input, userId: input.actor.userId, membershipId }, "thread:view")
+})
+
+const requireThreadGrant = Effect.fn("Authority.requireThreadGrant")(function* (
+  executor: AuthorityExecutor,
+  input: {
+    readonly ownerId: string
+    readonly threadId: string
+    readonly userId: string
+    readonly membershipId: BetterAuthMemberId | undefined
+  },
+  action: AuthorizationAction,
+) {
   const threads = yield* query(
     executor
       .select({
@@ -143,7 +206,7 @@ export const requireThreadAccess = Effect.fn("Authority.requireThreadAccess")(fu
   )
   const thread = threads[0]
   if (thread === undefined) return yield* failure("Resource is unavailable")
-  if (input.actor._tag === "PersonalActor" || thread.createdByUserId === input.actor.userId) return
+  if (input.membershipId === undefined || thread.createdByUserId === input.userId) return
   const direct = yield* query(
     executor
       .select({ role: rikaHostedThreadGrants.role })
@@ -152,7 +215,7 @@ export const requireThreadAccess = Effect.fn("Authority.requireThreadAccess")(fu
         and(
           eq(rikaHostedThreadGrants.ownerId, input.ownerId),
           eq(rikaHostedThreadGrants.threadId, input.threadId),
-          eq(rikaHostedThreadGrants.membershipId, input.actor.membershipId),
+          eq(rikaHostedThreadGrants.membershipId, input.membershipId),
         ),
       )
       .for("key share", { of: rikaHostedThreadGrants }),
@@ -167,14 +230,14 @@ export const requireThreadAccess = Effect.fn("Authority.requireThreadAccess")(fu
               and(
                 eq(rikaHostedProjectGrants.ownerId, input.ownerId),
                 eq(rikaHostedProjectGrants.projectId, thread.projectId),
-                eq(rikaHostedProjectGrants.membershipId, input.actor.membershipId),
+                eq(rikaHostedProjectGrants.membershipId, input.membershipId),
               ),
             )
             .for("key share", { of: rikaHostedProjectGrants }),
         )
       : []
   const access = {
-    memberId: input.actor.membershipId,
+    memberId: input.membershipId,
     executorKind: thread.executorKind,
     inheritProjectGrants: thread.inheritProjectGrants,
   }

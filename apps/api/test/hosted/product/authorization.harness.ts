@@ -63,6 +63,11 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
         owner: organization("revoked-org"),
         executorKind: "orb",
       })
+      yield* product.authorizeReadThread({ userId: "member-user" }, organizationConnection.threadId)
+      yield* product.authorizeReadThread({ userId: "member-user" }, personalConnection.threadId)
+      expect(
+        yield* failureKind(product.authorizeReadThread({ userId: "foreign-user" }, personalConnection.threadId)),
+      ).toBe("forbidden")
       yield* product.admitRun({
         principal: principal("member-user"),
         threadId: organizationConnection.threadId,
@@ -70,6 +75,10 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
         prompt: "allowed",
       })
       yield* Effect.tryPromise(() => database.delete(identityMember).where(eq(identityMember.id, "revoked-membership")))
+      expect(
+        yield* failureKind(product.authorizeReadThread({ userId: "member-user" }, organizationConnection.threadId)),
+      ).toBe("forbidden")
+      yield* product.authorizeReadThread({ userId: "member-user" }, personalConnection.threadId)
       expect(
         yield* failureKind(
           product.admitRun({
@@ -150,6 +159,8 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
         operationKey: "operator-run",
         prompt: "operate",
       })
+      const read = product.authorizeReadThread({ userId: "operator-user" }, connection.threadId)
+      expect(yield* failureKind(read)).toBe("forbidden")
       expect(yield* failureKind(operate)).toBe("forbidden")
       const owners = yield* Effect.tryPromise(() =>
         database
@@ -170,6 +181,7 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
           updatedAt: createdAt,
         }),
       )
+      yield* read
       yield* operate
       const commands = yield* Effect.tryPromise(() =>
         database
@@ -183,6 +195,10 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
         membershipId: "operator-membership",
         owner: organization("grant-org"),
       })
+      yield* Effect.tryPromise(() =>
+        database.delete(rikaHostedThreadGrants).where(eq(rikaHostedThreadGrants.threadId, connection.threadId)),
+      )
+      expect(yield* failureKind(read)).toBe("forbidden")
     }),
   ),
 )

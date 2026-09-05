@@ -25,6 +25,7 @@ import { isRikaApiPath, makeRikaApiHandler } from "../../src/api"
 import { httpFixture } from "./http/fixture"
 import "./http/product.harness"
 import "./http/security.harness"
+import "./http/browser-read.harness"
 const { account, cliRegistrationBody, dependencies, devices, encodeJson, executor, execution, product, recovery } =
   httpFixture
 
@@ -64,6 +65,7 @@ describe("api HTTP", () => {
         identity: {
           handle: () => Effect.fail(IdentityRuntimeError.make({ kind: "unavailable" })),
           identify: () => Effect.fail(IdentityRuntimeError.make({ kind: "unavailable" })),
+          browserSession: () => Effect.die("unused"),
           protectedResourceMetadata: Effect.fail(IdentityRuntimeError.make({ kind: "unavailable" })),
         },
         directory: {

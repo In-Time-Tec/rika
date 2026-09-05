@@ -1,5 +1,4 @@
-import { Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { Effect, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import {
   type ClientCommand,
@@ -17,13 +16,6 @@ export class ThreadConnectionFailed extends Schema.TaggedError<ThreadConnectionF
   message: Schema.String,
 }) {}
 
-const Ticket = Schema.Struct({
-  ticket: Schema.String,
-  websocketUrl: Schema.String,
-  protocol: Schema.String,
-})
-type Ticket = typeof Ticket.Type
-
 const Json = Schema.fromJsonString(Schema.Unknown)
 const encodeJson = Schema.encodeSync(Json)
 const decodeFrame = Schema.decodeUnknownSync(Schema.fromJsonString(ServerFrame))
@@ -36,7 +28,7 @@ type ClientFrame = {
     | { readonly _tag: "ClientReconnecting"; readonly threadId: string | undefined }
     | { readonly _tag: "ClientReconnectFailed"; readonly threadId: string; readonly message: string }
 }
-type ThreadFrameDetail = ServerFrame | ClientFrame
+export type ThreadFrameDetail = (ServerFrame | ClientFrame) & { readonly view?: ThreadView.ThreadViewSnapshot }
 
 let socket: WebSocket | undefined
 let candidate: WebSocket | undefined
@@ -50,6 +42,8 @@ let generation = 0
 
 const failed = (message: string) => ThreadConnectionFailed.make({ message })
 const requestId = (kind: string) => `${kind}:${(sequence += 1)}`
+const semanticFrame = (frame: ServerFrame): ServerFrame & { readonly view?: ThreadView.ThreadViewSnapshot } =>
+  attachedView === undefined ? frame : { ...frame, view: attachedView.snapshot() }
 const emit = (detail: ThreadFrameDetail) => window.dispatchEvent(new CustomEvent(frameEventName, { detail }))
 const attachmentHasForeignIdentity = (payload: Attachment, threadId: string) =>
   String(payload.threadId) !== threadId ||
@@ -135,20 +129,6 @@ const quarantine = (current: WebSocket, reason: string) => {
   current.close(1002, reason)
 }
 
-const acknowledge = (current: WebSocket, threadId: string, cursor: bigint) => {
-  try {
-    current.send(
-      encodeJson({
-        protocolVersion,
-        requestId: requestId("ack"),
-        command: { _tag: "AcknowledgeCursor", threadId, cursor: cursor.toString() },
-      }),
-    )
-  } catch {
-    quarantine(current, "cursor acknowledgement failed")
-  }
-}
-
 const quarantinesForeignFrame = (payload: Payload) =>
   payload._tag === "CommandAccepted" ||
   payload._tag === "CommandRejected" ||
@@ -192,7 +172,6 @@ const applyThreadEvent = (current: WebSocket, payload: Extract<Payload, { readon
   }
   attachedCursor = cursor
   attachedVersion = version
-  acknowledge(current, attachedThreadId!, attachedCursor)
   return true
 }
 
@@ -213,7 +192,6 @@ const applyThreadSnapshot = (current: WebSocket, payload: Extract<Payload, { rea
   attachedCheckpointCursor = cursor
   attachedVersion = version
   attachedView = view.success
-  acknowledge(current, attachedThreadId!, attachedCursor)
   return true
 }
 
@@ -226,13 +204,15 @@ const applyActiveFrame = (current: WebSocket, frame: ServerFrame) => {
   }
   if (payload._tag === "ThreadEvent" && !applyThreadEvent(current, payload)) return
   if (payload._tag === "ThreadSnapshot" && !applyThreadSnapshot(current, payload)) return
-  emit(frame)
+  emit(semanticFrame(frame))
 }
 
-const open = (ticket: Ticket) =>
+const open = () =>
   Socket.WebSocketConstructor.use((makeWebSocket) =>
     Effect.callback<WebSocket, ThreadConnectionFailed>((resume) => {
-      const current = makeWebSocket(ticket.websocketUrl, [ticket.protocol, `rika.ticket.${ticket.ticket}`])
+      const url = new URL("/api/v1/threads/browser-socket", window.location.href)
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+      const current = makeWebSocket(url.href, ["rika.thread.v1"])
       const opened = () => resume(Effect.succeed(current))
       const rejected = () => resume(Effect.fail(failed("The Thread connection could not be opened")))
       current.addEventListener("open", opened, { once: true })
@@ -251,18 +231,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
   supersedeCandidate()
   const afterCursor = attachedThreadId === threadId ? attachedCursor : 0n
   const afterCheckpointCursor = attachedThreadId === threadId ? attachedCheckpointCursor : undefined
-  const httpClient = yield* Effect.scoped(Layer.build(FetchHttpClient.layer))
-  const response = yield* HttpClient.post("/api/v1/thread-sessions").pipe(
-    Effect.provideContext(httpClient),
-    Effect.mapError(() => failed("A Thread ticket could not be requested")),
-  )
-  if (response.status < 200 || response.status >= 300)
-    return yield* failed(`Thread ticket request failed with HTTP ${response.status}`)
-  const ticket = yield* response.json.pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Ticket)),
-    Effect.mapError(() => failed("The Thread ticket response was invalid")),
-  )
-  const current = yield* open(ticket)
+  const current = yield* open()
   if (selectedGeneration !== generation) {
     current.close(1000, "superseded")
     return yield* failed("The Thread connection was superseded")
@@ -310,7 +279,6 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
       attachedView = view
       active = true
       settled = true
-      acknowledge(current, threadId, attachedCursor)
       previous?.close(1000, "replaced")
       resume(Effect.succeed(frame))
     }
@@ -360,7 +328,7 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
                         payload: { _tag: "ClientReconnectFailed", threadId: recoveryThreadId, message: error.message },
                       })
                   }),
-                onSuccess: () => Effect.void,
+                onSuccess: (connected) => Effect.sync(() => emit(connected.frame)),
               }),
             ),
           )
@@ -384,52 +352,5 @@ export const connectThread = Effect.fn("ThreadSocket.connect")(function* (thread
       current.close(1000, "attachment interrupted")
     })
   })
-  return { threadId, frame: attachedFrame }
-})
-
-export const sendPrompt = Effect.fn("ThreadSocket.sendPrompt")(function* (input: {
-  readonly threadId: string
-  readonly threadVersion: string
-  readonly text: string
-}) {
-  const current = socket
-  if (current === undefined || current.readyState !== WebSocket.OPEN || attachedThreadId !== input.threadId)
-    return yield* failed("Connect to the Thread before sending a prompt")
-  const id = requestId("prompt")
-  yield* Effect.try({
-    try: () =>
-      current.send(
-        encodeJson({
-          protocolVersion,
-          requestId: `${id}:request`,
-          command: {
-            _tag: "SubmitPrompt",
-            threadId: input.threadId,
-            commandId: id,
-            idempotencyKey: id,
-            expectedThreadVersion: input.threadVersion,
-            text: input.text,
-          },
-        }),
-      ),
-    catch: () => failed("The prompt could not be sent"),
-  })
-})
-
-export const openPortal = Effect.fn("ThreadSocket.openPortal")(function* (port: number) {
-  const current = socket
-  const threadId = attachedThreadId
-  if (current === undefined || current.readyState !== WebSocket.OPEN || threadId === undefined)
-    return yield* failed("Connect to the Thread before opening a portal")
-  yield* Effect.try({
-    try: () =>
-      current.send(
-        encodeJson({
-          protocolVersion,
-          requestId: requestId("portal"),
-          command: { _tag: "OpenPortal", threadId, port },
-        }),
-      ),
-    catch: () => failed("The portal request could not be sent"),
-  })
+  return { threadId, frame: semanticFrame(attachedFrame) }
 })

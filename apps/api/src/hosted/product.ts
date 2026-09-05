@@ -51,6 +51,8 @@ export const layer = (options: {
         projects,
         createProject,
         authorizeOwner,
+        authorizeReadOwner,
+        authorizeReadThread,
         authorizeThread,
         activatePrincipal,
       } = hostedProductAuthorityOperations({ clientAuthority, repository, policy, crypto })
@@ -292,6 +294,8 @@ export const layer = (options: {
         cancelRunAdmission,
         cancelAuthorizedRunAdmission,
         authorizeOwner,
+        authorizeReadOwner,
+        authorizeReadThread,
         authorizeThread,
         threadExecutionContext,
         activatePrincipal,

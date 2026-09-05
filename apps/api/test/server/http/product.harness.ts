@@ -248,6 +248,7 @@ describe("api HTTP", () => {
           identity: { ...base.identity, identify: () => Effect.succeed(principal) },
           devices: { ...devices, authenticate: () => Effect.succeed("device-1") },
           threads: {
+            connectBrowser: () => Effect.die("unused"),
             issueTicket: (value) => {
               received = value
               return Effect.succeed({ ticket: "socket-ticket", expiresAt: "2026-08-19T00:01:00.000Z" })

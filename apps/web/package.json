@@ -16,7 +16,8 @@
     "@foldkit/ui": "catalog:",
     "@rika/product": "workspace:*",
     "effect": "catalog:",
-    "foldkit": "catalog:"
+    "foldkit": "catalog:",
+    "marked": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

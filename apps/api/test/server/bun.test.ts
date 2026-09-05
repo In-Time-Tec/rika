@@ -56,6 +56,8 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
       ready: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
       activatePrincipal: () => Effect.die("unused"),
       authorizeOwner: () => Effect.die("unused"),
+      authorizeReadOwner: () => Effect.die("unused"),
+      authorizeReadThread: () => Effect.die("unused"),
       authorizeThread: () => Effect.die("unused"),
       threadExecutionContext: () => Effect.die("unused"),
       projects: () => Effect.die("unused"),
@@ -72,6 +74,7 @@ it.effect("stops accepting work but lets an in-flight request drain", () =>
     const identity: IdentityRuntime = {
       handle: () => Effect.die("unused"),
       identify: () => Effect.die("unused"),
+      browserSession: () => Effect.die("unused"),
       protectedResourceMetadata: Effect.die("unused"),
     }
     const directory: IdentityDirectory = {
@@ -225,6 +228,7 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
           return new Response("ok")
         }),
       identify: () => Effect.die("unused"),
+      browserSession: () => Effect.die("unused"),
       protectedResourceMetadata: Effect.die("unused"),
     }
     const dependencies: HttpDependencies = {
@@ -242,6 +246,8 @@ it.effect("serves auth requests with the configured public HTTPS URL behind Rail
         ready: Effect.void,
         activatePrincipal: () => Effect.die("unused"),
         authorizeOwner: () => Effect.die("unused"),
+        authorizeReadOwner: () => Effect.die("unused"),
+        authorizeReadThread: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),
         projects: () => Effect.die("unused"),

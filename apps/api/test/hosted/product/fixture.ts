@@ -83,7 +83,7 @@ const requireAdmitted = <E, R>(effect: Effect.Effect<AdmittedRun, E, R>) =>
 
 const withDatabase = <A, E, R>(
   label: string,
-  use: (database: NodePgDatabase) => Effect.Effect<A, E, R | HostedProduct>,
+  use: (database: NodePgDatabase, pool: Pool) => Effect.Effect<A, E, R | HostedProduct>,
   promptAdmissionReadiness: Effect.Effect<boolean> = Effect.succeed(true),
 ) =>
   Effect.scoped(
@@ -119,7 +119,7 @@ const withDatabase = <A, E, R>(
             promptAdmissionReadiness,
           }).pipe(Layer.provide(BunCrypto.layer)),
         )
-        return yield* use(drizzle({ client: activePool })).pipe(Effect.provide(context))
+        return yield* use(drizzle({ client: activePool }), activePool).pipe(Effect.provide(context))
       } finally {
         const cleanupPool = pool
         yield* cleanupPool === undefined ? Effect.void : Effect.tryPromise(() => cleanupPool.end())

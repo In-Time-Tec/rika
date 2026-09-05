@@ -11,7 +11,7 @@ import {
   rikaHostedThreadProtocolState,
 } from "../../database/schema/product"
 import { decodeDerivedRow } from "../../database/derived-row"
-import { requireThreadAccess } from "../authority"
+import { requireThreadReadAccess } from "../authority"
 import {
   bigintText,
   bigintValue,
@@ -356,7 +356,7 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
     return yield* db
       .transaction((tx) =>
         Effect.gen(function* () {
-          yield* requireThreadAccess(tx, input, "thread:view")
+          yield* requireThreadReadAccess(tx, input)
           const state = (yield* query(
             tx
               .select({

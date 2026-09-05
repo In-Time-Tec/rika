@@ -166,6 +166,19 @@ it.layer(BunServices.layer)((test) => {
         expect(signedIn.status).toBe(200)
         const cookie = signedIn.headers.get("set-cookie")?.split(";", 1)[0]
         expect(cookie).toBeDefined()
+        yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
+        const browserRequest = request(baseUrl, "/api/v1/threads/browser-socket", undefined, cookie)
+        const browserSession = yield* runtime.browserSession(browserRequest)
+        if (browserSession === undefined) return yield* Effect.die("Cookie session unavailable")
+        expect(yield* browserSession.validate).toBe(true)
+        expect(yield* runtime.browserSession(request(baseUrl, "/api/v1/threads/browser-socket"))).toBeUndefined()
+        const bearerRequest = new Request(browserRequest, {
+          headers: { cookie: cookie!, authorization: "Bearer invalid" },
+        })
+        expect(yield* runtime.browserSession(bearerRequest)).toBeUndefined()
+        yield* TestClock.setTime(browserSession.expiresAt)
+        expect(yield* browserSession.validate).toBe(false)
+        yield* TestClock.setTime(yield* TestClock.withLive(Clock.currentTimeMillis))
         const organization = yield* runtime.handle(
           request(
             baseUrl,
@@ -313,6 +326,10 @@ it.layer(BunServices.layer)((test) => {
           }),
         )
         expect(refreshedPrincipal).toEqual(principal)
+        const signedOut = yield* runtime.handle(request(baseUrl, "/api/auth/sign-out", {}, cookie))
+        expect(signedOut.status).toBe(200)
+        expect(yield* browserSession.validate).toBe(false)
+        expect(yield* runtime.browserSession(browserRequest)).toBeUndefined()
       } finally {
         yield* Effect.tryPromise(() => server.stop(true))
         yield* Effect.tryPromise(() => pool.end())

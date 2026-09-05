@@ -4,10 +4,29 @@ import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import { type ClientMessage, ServerFrame, protocolVersion } from "@rika/product/client-protocol"
 import type { ThreadProtocolCommand } from "@rika/product/thread-protocol-store"
 import { HostedThreadApplicationError } from "./application"
-import { type AuthenticatedPrincipal, HostedProductError } from "../product"
+import { type AuthenticatedPrincipal, type HostedProductService, HostedProductError } from "../product"
 
 export const threadWebSocketAudience = "/api/v1/threads/socket"
 export const zeroCursor = ThreadEventCursor.make("0")
+
+export const validateBrowserRead = (input: {
+  readonly principal: AuthenticatedPrincipal | BrowserReadPrincipal
+  readonly threadId: string | undefined
+  readonly product: HostedProductService
+}) => {
+  const { principal, threadId, product } = input
+  if (!("_tag" in principal)) return Effect.succeed(true)
+  return principal.validate.pipe(
+    Effect.flatMap((valid) =>
+      !valid || threadId === undefined
+        ? Effect.succeed(valid)
+        : product.authorizeReadThread(principal, threadId).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          ),
+    ),
+  )
+}
 
 export class HostedThreadProtocolError extends Schema.TaggedError<HostedThreadProtocolError>()(
   "HostedThreadProtocolError",
@@ -104,6 +123,13 @@ export interface HostedThreadConnection {
   readonly receive: (message: ClientMessage) => Effect.Effect<ReadonlyArray<ServerFrame>, never>
   readonly outbound: Effect.Effect<ReadonlyArray<ServerFrame>, HostedThreadProtocolError>
   readonly detach: Effect.Effect<void>
+  readonly validate?: Effect.Effect<boolean>
+}
+
+export interface BrowserReadPrincipal {
+  readonly _tag: "BrowserRead"
+  readonly userId: string
+  readonly validate: Effect.Effect<boolean>
 }
 
 export interface HostedThreadProtocolService {
@@ -113,6 +139,9 @@ export interface HostedThreadProtocolService {
   readonly connect: (
     ticket: string,
     audience: string,
+  ) => Effect.Effect<HostedThreadConnection, HostedThreadProtocolError>
+  readonly connectBrowser: (
+    principal: BrowserReadPrincipal,
   ) => Effect.Effect<HostedThreadConnection, HostedThreadProtocolError>
 }
 

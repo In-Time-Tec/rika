@@ -130,11 +130,14 @@ export interface ThreadSocketTicketBinding {
   readonly expiresAt: Timestamp
 }
 
+/** Read capability only. Never accepted by command, presence, or acknowledgement writes. */
+export type ThreadReader = ActorAttribution | { readonly _tag: "BrowserRead"; readonly userId: string }
+
 export interface ThreadProtocolStoreService {
   readonly initializeThread: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
-    readonly actor: ActorAttribution
+    readonly actor: ThreadReader
   }) => Effect.Effect<void, HostedPersistenceError>
   readonly admitCommand: (input: {
     readonly ownerId: OwnerId
@@ -216,7 +219,7 @@ export interface ThreadProtocolStoreService {
   readonly replay: (input: {
     readonly ownerId: OwnerId
     readonly threadId: ThreadId
-    readonly actor: ActorAttribution
+    readonly actor: ThreadReader
     readonly afterCursor: ThreadEventCursor
     readonly afterCheckpointCursor?: ThreadEventCursor
     readonly throughCursor?: ThreadEventCursor

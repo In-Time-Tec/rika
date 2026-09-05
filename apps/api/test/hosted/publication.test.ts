@@ -109,6 +109,8 @@ it.effect("pushes an approved ref, creates the pull request through API authorit
       cancelAuthorizedRunAdmission: () => Effect.die("unused"),
       admitRun: () => Effect.die("unused"),
       authorizeOwner: () => Effect.die("unused"),
+      authorizeReadOwner: () => Effect.die("unused"),
+      authorizeReadThread: () => Effect.die("unused"),
       authorizeThread: () => Effect.succeed({ ownerId: OwnerId.make("owner-1"), actor }),
       threadExecutionContext: () => Effect.die("unused"),
       activatePrincipal: () => Effect.die("unused"),

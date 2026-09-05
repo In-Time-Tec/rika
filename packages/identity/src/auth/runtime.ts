@@ -2,7 +2,7 @@ import { oauthProviderResourceClient } from "@better-auth/oauth-provider/resourc
 import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider"
 import { betterAuth, type BetterAuthPlugin } from "better-auth"
 import { jwt, organization } from "better-auth/plugins"
-import { Cause, Context, Effect, Layer, Redacted, Schema } from "effect"
+import { Cause, Clock, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { runPromise } from "effect/Effect"
 import type { Pool } from "pg"
 import type { IdentityConfig } from "../config"
@@ -21,7 +21,15 @@ export interface IdentityPrincipal {
 export interface IdentityRuntime {
   readonly handle: (request: Request) => Effect.Effect<Response, IdentityRuntimeError>
   readonly identify: (request: Request) => Effect.Effect<IdentityPrincipal | undefined, IdentityRuntimeError>
+  readonly browserSession: (request: Request) => Effect.Effect<BrowserSession | undefined, IdentityRuntimeError>
   readonly protectedResourceMetadata: Effect.Effect<object, IdentityRuntimeError>
+}
+
+/** Server-only handle. Its validation closure retains credentials; never serialize it. */
+export interface BrowserSession {
+  readonly userId: string
+  readonly expiresAt: number
+  readonly validate: Effect.Effect<boolean, IdentityRuntimeError>
 }
 
 export class IdentityRuntimeService extends Context.Service<IdentityRuntimeService, IdentityRuntime>()(
@@ -200,6 +208,26 @@ export const makeBetterAuthIdentityRuntime = (input: {
   })
   const resource = oauthProviderResourceClient(auth).getActions()
   return {
+    browserSession: Effect.fn("BetterAuthRuntime.browserSession")(function* (request) {
+      if (request.headers.has("authorization")) return undefined
+      const headers = new Headers(request.headers)
+      const read = Effect.tryPromise({
+        try: () => auth.api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } }),
+        catch: () => IdentityRuntimeError.make({ kind: "unavailable" }),
+      })
+      const initial = yield* read
+      if (initial === null) return undefined
+      const expiresAt = initial.session.expiresAt.getTime()
+      return {
+        userId: initial.user.id,
+        expiresAt,
+        validate: Effect.gen(function* () {
+          if ((yield* Clock.currentTimeMillis) >= expiresAt) return false
+          const current = yield* read
+          return current !== null && current.session.id === initial.session.id && current.user.id === initial.user.id
+        }),
+      }
+    }),
     handle: Effect.fn("BetterAuthRuntime.handle")((request) =>
       Effect.tryPromise({
         try: () => auth.handler(request),

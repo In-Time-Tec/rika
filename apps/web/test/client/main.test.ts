@@ -1,163 +1,151 @@
 // @vitest-environment happy-dom
-
 import { describe, expect, it } from "vitest"
+import { Scene } from "foldkit/test"
+import { Schema } from "effect"
+import { ThreadSummary } from "@rika/product/thread-summary"
 import { protocolVersion } from "@rika/product/client-protocol"
 import {
-  ChangedDraft,
   ChangedThreadId,
   ClickedConnect,
   ConnectedThread,
   FailedThreadConnection,
   GotThreadFrame,
-  SubmittedPrompt,
+  RefreshThreads,
+  LoadedThreads,
   init,
   update,
+  view,
+  type Model,
+  type Message,
 } from "../../src/client/main"
+import { markdown, safeLink } from "../../src/client/transcript"
+import { reviewSnapshot } from "./review.fixture"
 
-describe("FoldKit Thread client story", () => {
-  it("connects, receives a durable cursor, and submits through one modeled command path", () => {
+describe("FoldKit Thread review", () => {
+  it("renders semantic roles, tool results and diffs with no mutation controls", () => {
     const [initial] = init()
-    const [withThread] = update(initial, ChangedThreadId({ value: "thread-1" }))
-    const [connecting, connectCommands] = update(withThread, ClickedConnect())
-    expect(connecting.connection).toBe("connecting")
-    expect(connectCommands.map(({ name }) => name)).toEqual(["ConnectThread"])
+    const loaded: Model = {
+      ...initial,
+      loadingThreads: false,
+      connection: "connected",
+      threadId: reviewSnapshot.thread.id,
+      attachedThreadId: reviewSnapshot.thread.id,
+      snapshot: reviewSnapshot,
+    }
+    Scene.scene<Model, Message>(
+      { update, view },
+      Scene.given(loaded),
+      Scene.expect(Scene.role("heading", { name: "User" })).toExist(),
+      Scene.expect(Scene.role("heading", { name: "Changes ready for review" })).toExist(),
+      Scene.expect(Scene.selector(".tool-complete")).toHaveText(/edit.*complete/),
+      Scene.expect(Scene.selector(".diff summary")).toHaveText(/src\/navigation.ts/),
+      Scene.expect(Scene.selector(".diff pre")).toHaveText(/await attachThread/),
+      Scene.expect(Scene.selector(".removed")).toHaveText(/clearTranscript/),
+      Scene.expect(Scene.selector("textarea")).toBeAbsent(),
+      Scene.expect(Scene.role("button", { name: "Cancel" })).toBeAbsent(),
+      Scene.expect(Scene.role("button", { name: "Approve" })).toBeAbsent(),
+    )
+  })
 
+  it("ignores superseded connections and foreign events, and recovers the committed identity", () => {
+    const [initial] = init()
+    const [a] = update(initial, ChangedThreadId({ value: "a" }))
+    const [connecting, commands] = update(a, ClickedConnect())
+    expect(commands[0]?.name).toBe("ConnectThread")
     const [connected] = update(
       connecting,
       ConnectedThread({
         epoch: 1,
-        threadId: "thread-1",
-        frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "thread-1", threadVersion: "6" } },
+        threadId: "a",
+        frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "a" } },
       }),
     )
-    expect(connected).toMatchObject({ attachedThreadId: "thread-1", connectionEpoch: 1, threadVersion: "6" })
-    const [withFrame] = update(
-      connected,
-      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadVersion: "7" } } }),
-    )
-    expect(withFrame.threadVersion).toBe("7")
-    expect(withFrame.frames).toHaveLength(2)
-
-    const [withEvent] = update(
-      withFrame,
-      GotThreadFrame({
-        frame: {
-          protocolVersion,
-          payload: {
-            _tag: "ThreadEvent",
-            event: { threadId: "thread-1", threadVersion: "8" },
-          },
-        },
-      }),
-    )
-    expect(withEvent.threadVersion).toBe("8")
-    const [afterStaleFrame] = update(
-      withEvent,
-      GotThreadFrame({
-        frame: {
-          protocolVersion,
-          payload: { _tag: "PortalOpened", threadId: "thread-old", threadVersion: "99", url: "https://stale" },
-        },
-      }),
-    )
-    expect(afterStaleFrame).toEqual(withEvent)
-
-    const [drafted] = update(withEvent, ChangedDraft({ value: "continue the refactor" }))
-    const [submitted, submitCommands] = update(drafted, SubmittedPrompt())
-    expect(submitted.draft).toBe("")
-    expect(submitCommands.map(({ name }) => name)).toEqual(["SubmitThreadPrompt"])
-    expect(submitCommands[0]?.args).toEqual({
-      threadId: "thread-1",
-      threadVersion: "8",
-      text: "continue the refactor",
-    })
-  })
-
-  it("keeps invalid connection and submission attempts inside explicit states", () => {
-    const [initial] = init()
-    const [rejected, commands] = update(initial, ClickedConnect())
-    expect(rejected).toMatchObject({ connection: "failed", error: "Enter a Thread ID" })
-    expect(commands).toEqual([])
-    expect(update(initial, SubmittedPrompt())).toEqual([initial, []])
-  })
-
-  it("keeps editable and committed identity separate and ignores superseded connection results", () => {
-    const [initial] = init()
-    const [withA] = update(initial, ChangedThreadId({ value: "thread-a" }))
-    const [connectingA] = update(withA, ClickedConnect())
-    const [withB] = update(connectingA, ChangedThreadId({ value: "thread-b" }))
-    const [connectingB] = update(withB, ClickedConnect())
-    const [connectedB] = update(
-      connectingB,
-      ConnectedThread({
-        epoch: 2,
-        threadId: "thread-b",
-        frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "thread-b", threadVersion: "2" } },
-      }),
-    )
-    const [afterLateFailure] = update(connectedB, FailedThreadConnection({ epoch: 1, message: "superseded A failed" }))
-    expect(afterLateFailure).toEqual(connectedB)
-
-    const [editingC] = update(connectedB, ChangedThreadId({ value: "thread-c" }))
-    const [afterBFrame] = update(
-      editingC,
-      GotThreadFrame({
-        frame: {
-          protocolVersion,
-          payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "3" },
-        },
-      }),
-    )
-    expect(afterBFrame).toMatchObject({ threadId: "thread-c", attachedThreadId: "thread-b", threadVersion: "3" })
-
-    const [connectingC] = update(editingC, ClickedConnect())
-    expect(connectingC).toMatchObject({ connection: "connecting", attachedThreadId: "thread-b", threadVersion: "2" })
-    const [duringCandidate] = update(
-      connectingC,
-      GotThreadFrame({
-        frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadId: "thread-b", threadVersion: "4" } },
-      }),
-    )
-    expect(duringCandidate).toMatchObject({
-      connection: "connecting",
-      attachedThreadId: "thread-b",
-      threadVersion: "4",
-    })
-    const [restored] = update(duringCandidate, FailedThreadConnection({ epoch: 3, message: "C mismatch" }))
-    expect(restored).toMatchObject({ connection: "connected", attachedThreadId: "thread-b", error: "C mismatch" })
-    const [drafted] = update(restored, ChangedDraft({ value: "still A" }))
-    const [, commands] = update(drafted, SubmittedPrompt())
-    expect(commands[0]?.args).toMatchObject({ threadId: "thread-b", threadVersion: "4" })
-
-    const [foreign] = update(
-      restored,
-      GotThreadFrame({
-        frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadId: "thread-c", threadVersion: "99" } },
-      }),
-    )
-    expect(foreign).toEqual(restored)
-  })
-
-  it("retains selected identity while unexpected-close recovery is active or has failed", () => {
-    const [initial] = init()
-    const selected = {
-      ...initial,
-      connection: "connected" as const,
-      threadId: "thread-a",
-      attachedThreadId: "thread-a",
-      threadVersion: "8",
-    }
+    expect(update(connected, FailedThreadConnection({ epoch: 0, message: "stale" }))[0]).toBe(connected)
+    expect(
+      update(
+        connected,
+        GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ThreadSnapshot", threadId: "b" } } }),
+      )[0],
+    ).toBe(connected)
     const [recovering] = update(
-      selected,
-      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ClientReconnecting", threadId: "thread-a" } } }),
+      connected,
+      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ClientReconnecting", threadId: "a" } } }),
     )
-    expect(recovering).toMatchObject({ connection: "connecting", attachedThreadId: "thread-a", threadVersion: "8" })
-    const [failed] = update(
+    expect(recovering.connection).toBe("connecting")
+    const [recovered] = update(
       recovering,
-      GotThreadFrame({
-        frame: { protocolVersion, payload: { _tag: "ClientReconnectFailed", threadId: "thread-a" } },
-      }),
+      GotThreadFrame({ frame: { protocolVersion, payload: { _tag: "ThreadAttached", threadId: "a" } } }),
     )
-    expect(failed).toMatchObject({ connection: "failed", attachedThreadId: "thread-a", threadVersion: "8" })
+    expect(recovered.connection).toBe("connected")
+  })
+
+  it("loads cross-session navigation, filters archived Threads, and ignores stale lists", () => {
+    const [initial] = init()
+    const threads = Schema.decodeSync(Schema.Array(ThreadSummary))([
+      {
+        id: "a",
+        workspace: "workspace",
+        title: "Active work",
+        status: "idle",
+        turnCount: 1,
+        lastActivityAt: 1,
+        pinned: false,
+        archived: false,
+        unread: false,
+      },
+      {
+        id: "b",
+        workspace: "workspace",
+        title: "Archived work",
+        status: "idle",
+        turnCount: 2,
+        lastActivityAt: 1,
+        pinned: false,
+        archived: true,
+        unread: false,
+      },
+    ])
+    const [loaded] = update(initial, LoadedThreads({ epoch: 1, threads }))
+    const [refreshing] = update(loaded, RefreshThreads())
+    expect(update(refreshing, LoadedThreads({ epoch: 1, threads: [] }))[0]).toBe(refreshing)
+    Scene.scene<Model, Message>(
+      { update, view },
+      Scene.given(loaded),
+      Scene.expect(Scene.role("button", { name: /Active work/ })).toExist(),
+      Scene.expect(Scene.role("button", { name: /Archived work/ })).toBeAbsent(),
+      Scene.click(Scene.role("button", { name: "Show archived Threads" })),
+      Scene.expect(Scene.role("button", { name: /Archived work/ })).toExist(),
+      Scene.expect(Scene.role("button", { name: "Send" })).toBeAbsent(),
+    )
+  })
+
+  it("renders Markdown without executable HTML, unsafe URLs or remote images", () => {
+    const render = (text: string) =>
+      Scene.scene(
+        { update: (state: string) => [state, []], view: markdown },
+        Scene.given(text),
+        Scene.expect(Scene.selector("script")).toBeAbsent(),
+        Scene.expect(Scene.selector("img")).toBeAbsent(),
+        Scene.expect(Scene.selector('a[href^="javascript:"]')).toBeAbsent(),
+        Scene.expect(Scene.selector('a[href^="data:"]')).toBeAbsent(),
+      )
+    render(
+      "<script>alert(1)</script>\n\n[bad](javascript:alert%281%29) ![remote](https://tracking.invalid/pixel) [bad](data:text/html,evil)",
+    )
+    for (const link of ["javascript:alert(1)", "data:text/html,x", "vbscript:msgbox(1)", "java\nscript:x"])
+      expect(safeLink(link)).toBe(false)
+    for (const partial of [
+      "**stream",
+      "**streamed** [reference][r]",
+      "**streamed** [reference][r]\n\n[r]: https://example.com",
+    ])
+      render(partial)
+    Scene.scene(
+      { update: (state: string) => [state, []], view: markdown },
+      Scene.given("**streamed** [reference][r]\n\n[r]: https://example.com"),
+      Scene.expect(Scene.selector("strong")).toHaveText("streamed"),
+      Scene.expect(Scene.role("link", { name: "reference" })).toHaveAttr("href", "https://example.com"),
+      Scene.expect(Scene.selector(".markdown")).toHaveText("streamed reference"),
+    )
   })
 })

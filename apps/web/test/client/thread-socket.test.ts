@@ -4,25 +4,21 @@ import { vi } from "vitest"
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result, Schema } from "effect"
 import { ClientMessage, protocolVersion } from "@rika/product/client-protocol"
-import { frameEventName, sendPrompt } from "../../src/client/thread-socket"
+import { frameEventName } from "../../src/client/thread-socket"
 import { type ObservedFrame, socketFixture, TestWebSocket } from "./thread-socket.fixture"
 
 const { attach, connectThread, nextConnection, snapshot, threadEvent } = socketFixture
 
-it.effect("acknowledges every committed attachment, event, and snapshot cursor", () =>
+it.effect("receives committed snapshots without sending acknowledgements or mutations", () =>
   Effect.gen(function* () {
     const connecting = yield* Effect.forkChild(Effect.result(connectThread("thread-ack")))
     const connection = yield* nextConnection(0)
     attach(connection, "thread-ack", "thread-ack", "3", "3")
-    yield* Fiber.join(connecting)
-    expect(connection.sent.at(-1)).toMatchObject({
-      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "3" },
-    })
+    expect(Result.getOrThrow(yield* Fiber.join(connecting)).frame.view?.thread.id).toBe("thread-ack")
+    expect(connection.sent).toHaveLength(1)
 
     connection.receive(threadEvent("thread-ack", "4", "4"))
-    expect(connection.sent.at(-1)).toMatchObject({
-      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "4" },
-    })
+    expect(connection.sent).toHaveLength(1)
     connection.receive({
       protocolVersion,
       payload: {
@@ -33,9 +29,7 @@ it.effect("acknowledges every committed attachment, event, and snapshot cursor",
         snapshot: snapshot("thread-ack"),
       },
     })
-    expect(connection.sent.at(-1)).toMatchObject({
-      command: { _tag: "AcknowledgeCursor", threadId: "thread-ack", cursor: "5" },
-    })
+    expect(connection.sent.map((message) => message.command._tag)).toEqual(["AttachThread"])
   }),
 )
 
@@ -87,7 +81,7 @@ it.effect("keeps A active while B attaches, then makes late A frames and close i
   }),
 )
 
-it.effect("leaves committed A and its prompt route usable when B is mismatched or rejected", () =>
+it.effect("leaves committed A readable when B is mismatched or rejected", () =>
   Effect.gen(function* () {
     const connectingA = yield* Effect.forkChild(Effect.result(connectThread("thread-a")))
     const committed = yield* nextConnection(0)
@@ -99,8 +93,7 @@ it.effect("leaves committed A and its prompt route usable when B is mismatched o
     attach(mismatchSocket, "thread-mismatch", "thread-wrong")
     expect(yield* Fiber.join(mismatched)).toMatchObject({ _tag: "Failure" })
     expect(mismatchSocket.readyState).toBe(TestWebSocket.CLOSED)
-    yield* sendPrompt({ threadId: "thread-a", threadVersion: "1", text: "still routed to A" })
-    expect(committed.sent.at(-1)).toMatchObject({ command: { _tag: "SubmitPrompt", threadId: "thread-a" } })
+    expect(committed.readyState).toBe(TestWebSocket.OPEN)
 
     const rejected = yield* Effect.forkChild(Effect.result(connectThread("thread-rejected")))
     const rejectedSocket = yield* nextConnection(2)
@@ -140,9 +133,7 @@ it.effect("lets C supersede pending B without disturbing committed A", () =>
     attach(third, "thread-c")
     expect(Result.getOrThrow(yield* Fiber.join(connectingC))).toMatchObject({ threadId: "thread-c" })
     expect(first.readyState).toBe(TestWebSocket.CLOSED)
-    expect(
-      yield* Effect.result(sendPrompt({ threadId: "thread-b", threadVersion: "1", text: "stale candidate" })),
-    ).toMatchObject({ _tag: "Failure" })
+    expect(third.sent.map((message) => message.command._tag)).toEqual(["AttachThread"])
   }),
 )
 
@@ -181,7 +172,6 @@ it.effect(
       attach(second, "thread-cursor", "thread-cursor", "1", "2")
       expect(yield* Fiber.join(reconnecting)).toMatchObject({ _tag: "Failure" })
       expect(first.readyState).toBe(TestWebSocket.OPEN)
-      yield* sendPrompt({ threadId: "thread-cursor", threadVersion: "2", text: "A advanced" })
     }),
 )
 
@@ -275,8 +265,7 @@ it.effect(
         expect(
           frames.flatMap((frame) => (frame.payload._tag === "ThreadEvent" ? [frame.payload.event.cursor] : [])),
         ).toEqual(["7"])
-        yield* sendPrompt({ threadId: "thread-a", threadVersion: "7", text: "still A" })
-        expect(replacement.sent.at(-1)).toMatchObject({ command: { _tag: "SubmitPrompt", threadId: "thread-a" } })
+        expect(replacement.sent.map((message) => message.command._tag)).toEqual(["AttachThread"])
       } finally {
         window.removeEventListener(frameEventName, receive)
       }
@@ -308,8 +297,7 @@ it.effect(
         })
         attach(replacement, "thread-a", "thread-a", "9", "9")
         yield* Effect.tryPromise(() => vi.waitFor(() => expect(replacement.readyState).toBe(TestWebSocket.OPEN)))
-        yield* sendPrompt({ threadId: "thread-a", threadVersion: "9", text: "still selected A" })
-        expect(replacement.sent.at(-1)).toMatchObject({ command: { _tag: "SubmitPrompt", threadId: "thread-a" } })
+        expect(replacement.sent.map((message) => message.command._tag)).toEqual(["AttachThread"])
 
         const connectingB = yield* Effect.forkChild(Effect.result(connectThread("thread-b")))
         const malformedCandidate = yield* nextConnection(2)
@@ -318,7 +306,6 @@ it.effect(
         expect(malformedCandidate.readyState).toBe(TestWebSocket.CLOSED)
         expect(TestWebSocket.instances).toHaveLength(3)
         expect(replacement.readyState).toBe(TestWebSocket.OPEN)
-        yield* sendPrompt({ threadId: "thread-a", threadVersion: "9", text: "candidate left A live" })
       } finally {
         window.removeEventListener(frameEventName, receive)
       }

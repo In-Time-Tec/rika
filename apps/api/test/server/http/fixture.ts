@@ -32,6 +32,7 @@ const account: Account = {
 const runtime = (userId: string | undefined): IdentityRuntime => ({
   handle: () => Effect.succeed(new Response(null, { status: 204 })),
   identify: () => Effect.succeed(userId === undefined ? undefined : { userId }),
+  browserSession: () => Effect.die("unused"),
   protectedResourceMetadata: Effect.succeed({
     resource: "https://api.example.com/api/v1",
     dpop_bound_access_tokens_required: true,
@@ -51,6 +52,8 @@ const product: HostedProductService = {
   ready: Effect.void,
   activatePrincipal: () => Effect.void,
   authorizeOwner: () => Effect.die("unused"),
+  authorizeReadOwner: () => Effect.die("unused"),
+  authorizeReadThread: () => Effect.die("unused"),
   authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
   threadExecutionContext: () => Effect.die("unused"),
   projects: () => Effect.succeed([]),
