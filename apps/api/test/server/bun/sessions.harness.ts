@@ -122,6 +122,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
         activatePrincipal: () => Effect.die("unused"),
         authorizeOwner: () => Effect.die("unused"),
         authorizeReadOwner: () => Effect.die("unused"),
+        authorizeThreadList: () => Effect.die("unused"),
         authorizeReadThread: () => Effect.die("unused"),
         authorizeThread: () => Effect.die("unused"),
         threadExecutionContext: () => Effect.die("unused"),

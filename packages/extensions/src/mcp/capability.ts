@@ -1,6 +1,7 @@
 import { Effect, Path, Schema } from "effect"
 import { Pins } from "generalist"
-import type { MCPClient } from "generalist/mcp"
+
+import type { MCPClient } from "generalist/unstable/mcp"
 import { Specialist, type Server } from "./configuration"
 import * as Discovery from "./discovery"
 import { McpRuntimeService } from "./runtime"

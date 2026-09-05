@@ -1,3 +1,4 @@
+import { snapshot } from "./thread-client/snapshot.fixture"
 import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { expect, it } from "@effect/vitest"
 import { ClientMessage, protocolVersion, ServerFrame } from "@rika/product/client-protocol"
@@ -46,7 +47,7 @@ const assistantEntry = (turnId: string, position: number, text: string): Transcr
 const turnChange = (
   turnId: string,
   status: ThreadView.ThreadViewTurnRecord["status"],
-): ThreadView.ThreadViewTurnChange => ({
+): Extract<ThreadView.ThreadViewTurnChange, { readonly _tag: "UpsertTurn" }> => ({
   _tag: "UpsertTurn",
   turn: {
     kind: "agent",
@@ -79,10 +80,50 @@ const viewPatch = (
   },
 })
 
+const sendPromptResponse = (
+  send: (value: string) => void,
+  queued: boolean,
+  accepted: string,
+  command: Extract<ClientMessage["command"], { readonly _tag: "SubmitPrompt" }>,
+) => {
+  const turnId = queued ? "turn-2" : "turn-1"
+  const answer = assistantEntry(turnId, 1, `answer for ${command.text}`)
+  if (queued) {
+    const { _tag, ...turn } = turnChange(turnId, "completed")
+    // A replacement snapshot can subsume admission and terminal events before the receipt reaches the client.
+    send(
+      encode({
+        protocolVersion,
+        payload: {
+          _tag: "ThreadSnapshot",
+          threadId: ThreadId.make("thread-1"),
+          threadVersion: ThreadVersion.make("2"),
+          cursor: ThreadEventCursor.make("5"),
+          snapshot: snapshot([{ ...turn, units: [answer] }]),
+        },
+      }),
+    )
+    send(accepted)
+    return
+  }
+  send(
+    threadEvent({
+      _tag: "SubmissionAdmitted",
+      threadId: Thread.ThreadId.make("thread-1"),
+      turnId: Turn.TurnId.make(turnId),
+      status: "active",
+      submissionId: command.commandId,
+    }),
+  )
+  send(accepted)
+  send(threadEvent(viewPatch(2, [assistantEntry(turnId, 1, "draft")], [turnChange(turnId, "running")])))
+  send(threadEvent(viewPatch(3, [answer], [turnChange(turnId, "completed")])))
+}
+
 it.effect("creates, attaches, submits, and replays admission through the authenticated Thread WebSocket protocol", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const commands: Array<ClientMessage["command"]> = []
+      const receivedCommands: Array<ClientMessage["command"]> = []
       const offeredProtocols: Array<string> = []
       const server = yield* Effect.acquireRelease(
         Effect.sync(() =>
@@ -101,7 +142,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
             websocket: {
               message: (socket, value) => {
                 const message = decode(String(value))
-                commands.push(message.command)
+                receivedCommands.push(message.command)
                 if (message.command._tag === "CreateThread") {
                   socket.send(
                     encode({
@@ -145,30 +186,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                         checkpoint: {
                           threadVersion: ThreadVersion.make("1"),
                           cursor: ThreadEventCursor.make("0"),
-                          snapshot: {
-                            executorKind: "runner",
-                            view: {
-                              thread: {
-                                id: Thread.ThreadId.make("thread-1"),
-                                workspace: "workspace-1",
-                                title: "Thread",
-                                labels: [],
-                                pinned: false,
-                                archived: false,
-                                lineage: { _tag: "Original" },
-                                createdAt: 1,
-                                updatedAt: 1,
-                              },
-                              revision: 0,
-                              source: { projectionVersion: ExecutionProjection.projectionVersion },
-                              turns: [],
-                              pending: [],
-                              hasOlder: false,
-                              hasNewer: false,
-                              usage: { state: ExecutionProjection.emptyUsageState() },
-                            },
-                            pendingAuthorizations: [],
-                          },
+                          snapshot: snapshot(),
                         },
                         events: [],
                         participants: [],
@@ -195,7 +213,11 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                       cursor: ThreadEventCursor.make("0"),
                       result:
                         message.command._tag === "SubmitPrompt"
-                          ? { _tag: "PromptAdmitted", status: queued ? "queued" : "accepted" }
+                          ? {
+                              _tag: "PromptAdmitted",
+                              status: queued ? "queued" : "accepted",
+                              turnId: Turn.TurnId.make(queued ? "turn-2" : "turn-1"),
+                            }
                           : { _tag: "Applied" },
                     },
                   })
@@ -203,30 +225,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
                     socket.send(accepted)
                     return
                   }
-                  const turnId = queued ? "turn-2" : "turn-1"
-                  const send = (event: InteractiveEvent) => socket.send(threadEvent(event))
-                  // The durable admission event may land before the command acknowledgement.
-                  send({
-                    _tag: "SubmissionAdmitted",
-                    threadId: Thread.ThreadId.make("thread-1"),
-                    turnId: Turn.TurnId.make(turnId),
-                    status: queued ? "queued" : "active",
-                    submissionId: message.command.commandId,
-                  })
-                  socket.send(accepted)
-                  // Text and settlement of the still-active earlier Turn must not be attributed to the queued one.
-                  if (queued)
-                    send(
-                      viewPatch(1, [assistantEntry("turn-1", 1, "earlier turn")], [turnChange("turn-1", "completed")]),
-                    )
-                  send(viewPatch(2, [assistantEntry(turnId, 1, "draft")], [turnChange(turnId, "running")]))
-                  send(
-                    viewPatch(
-                      3,
-                      [assistantEntry(turnId, 1, `answer for ${message.command.text}`)],
-                      [turnChange(turnId, "completed")],
-                    ),
-                  )
+                  sendPromptResponse((frame) => socket.send(frame), queued, accepted, message.command)
                   return
                 }
                 if (message.command._tag === "OpenPortal")
@@ -307,6 +306,8 @@ it.effect("creates, attaches, submits, and replays admission through the authent
           port: 3000,
         }),
       ).toBe("https://3000-orb.example.test")
+      const commands = receivedCommands.filter((command) => command._tag !== "AcknowledgeCursor")
+      expect(receivedCommands.some((command) => command._tag === "AcknowledgeCursor")).toBe(true)
       expect(commands.map((command) => command._tag)).toEqual([
         "CreateThread",
         "AttachThread",

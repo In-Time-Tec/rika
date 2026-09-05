@@ -36,7 +36,10 @@ const rejection = (payload: Extract<ServerFrameValue["payload"], { readonly _tag
   return failure(kind, payload.message)
 }
 
-export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket: ClientTicketResponse) {
+export const connect = Effect.fn("HostedThreadClient.connect")(function* (
+  ticket: ClientTicketResponse,
+  acknowledge: boolean = false,
+) {
   const socket = yield* Socket.makeWebSocket(ticket.websocketUrl, {
     protocols: [ticket.protocol, `rika.ticket.${ticket.ticket}`],
     openTimeout: "30 seconds",
@@ -77,7 +80,23 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
       whileConnected,
     )
 
-  const next = whileConnected(Queue.take(frames))
+  const next = whileConnected(Queue.take(frames)).pipe(
+    Effect.tap((frame) => {
+      if (!acknowledge) return Effect.void
+      const payload = frame.payload
+      let position
+      if (payload._tag === "ThreadEvent") position = payload.event
+      else if (payload._tag === "ThreadAttached" || payload._tag === "ThreadSnapshot") position = payload
+      if (position === undefined) return Effect.void
+      return send(
+        envelope(`ack:${position.threadId}:${position.cursor}`, {
+          _tag: "AcknowledgeCursor",
+          threadId: position.threadId,
+          cursor: position.cursor,
+        }),
+      )
+    }),
+  )
 
   return { send, next }
 })
@@ -89,18 +108,18 @@ const envelope = (requestId: string, command: ClientMessage["command"]): ClientM
 })
 
 type Connection = Effect.Success<ReturnType<typeof connect>>
-type ThreadEventPayload = Extract<ServerFrameValue["payload"], { readonly _tag: "ThreadEvent" }>
 
 const awaitCommand = Effect.fn("HostedThreadClient.awaitCommand")(function* (
   connection: Connection,
   requestId: string,
   commandId: string,
   threadId?: string,
-  held?: Array<ThreadEventPayload>,
+  held?: Array<InteractiveEvent>,
 ) {
   while (true) {
     const payload = (yield* connection.next).payload
-    if (payload._tag === "ThreadEvent") held?.push(payload)
+    const event = interactiveEventOf(payload, threadId)
+    if (event !== undefined) held?.push(event)
     if (
       (payload._tag === "CommandAdmitted" ||
         payload._tag === "CommandAccepted" ||
@@ -122,7 +141,7 @@ const applyCommand = Effect.fn("HostedThreadClient.applyCommand")(function* (
   message: ClientMessage,
   commandId: string,
   threadId?: string,
-  held?: Array<ThreadEventPayload>,
+  held?: Array<InteractiveEvent>,
 ) {
   yield* connection.send(message)
   while (true) {
@@ -141,11 +160,14 @@ const awaitTurn = Effect.fn("HostedThreadClient.awaitTurn")(function* (
   connection: Connection,
   threadId: string,
   commandId: string,
-  held: ReadonlyArray<ThreadEventPayload>,
+  held: ReadonlyArray<InteractiveEvent>,
+  turnId: string,
 ) {
-  const watch = new TurnWatch(threadId, commandId)
+  const watch = new TurnWatch(threadId, commandId, turnId)
   const nextEvent = (index: number) =>
-    index < held.length ? Effect.succeed(held[index]!.event.event) : connection.next.pipe(Effect.map(threadEventOf))
+    index < held.length
+      ? Effect.succeed(held[index])
+      : connection.next.pipe(Effect.map((frame) => interactiveEventOf(frame.payload, threadId)))
   for (let index = 0; ; index += 1) {
     const event = yield* nextEvent(index)
     if (event === undefined) continue
@@ -161,27 +183,23 @@ type TurnOutcome =
   | { readonly _tag: "Failed"; readonly kind: HostedError["kind"]; readonly message: string }
 
 class TurnWatch {
-  private turnId: string | undefined
   private readonly assistantText = new Map<string, string>()
 
   constructor(
     private readonly threadId: string,
     private readonly commandId: string,
+    private readonly turnId: string,
   ) {}
 
   observe(event: InteractiveEvent): TurnOutcome | undefined {
     if (event._tag === "SubmissionRejected" && event.submissionId === this.commandId)
       return { _tag: "Failed", kind: "protocol", message: event.message }
-    if (event._tag === "SubmissionAdmitted" && event.submissionId === this.commandId) {
-      if (String(event.threadId) !== this.threadId)
-        return { _tag: "Failed", kind: "protocol", message: "Submission admission identity did not match its Thread" }
-      this.turnId = String(event.turnId)
-      return undefined
-    }
-    if (this.turnId === undefined) return undefined
+    if (event._tag === "SubmissionAdmitted" && event.submissionId === this.commandId) return this.admission(event)
     if (event._tag === "ExecutionFailed" && event.turnId !== undefined && String(event.turnId) === this.turnId)
       return { _tag: "Failed", kind: "host", message: event.failure.message }
     if (event._tag === "ThreadViewPatch") {
+      if (String(event.patch.threadId) !== this.threadId)
+        return { _tag: "Failed", kind: "protocol", message: "Turn patch identifies a different Thread" }
       this.record(event.patch.upsert, event.patch.remove)
       const change = event.patch.turnChanges.find(
         (candidate) => candidate._tag === "UpsertTurn" && String(candidate.turn.id) === this.turnId,
@@ -189,12 +207,24 @@ class TurnWatch {
       return change?._tag === "UpsertTurn" ? this.settle(change.turn.status) : undefined
     }
     if (event._tag === "ThreadViewSnapshot") {
+      if (String(event.snapshot.thread.id) !== this.threadId)
+        return { _tag: "Failed", kind: "protocol", message: "Turn snapshot identifies a different Thread" }
       const entry = event.snapshot.turns.find((candidate) => String(candidate.turn.id) === this.turnId)
       if (entry === undefined) return undefined
       this.assistantText.clear()
       this.record(entry.units)
       return this.settle(entry.turn.status)
     }
+    return undefined
+  }
+
+  private admission(
+    event: Extract<InteractiveEvent, { readonly _tag: "SubmissionAdmitted" }>,
+  ): TurnOutcome | undefined {
+    if (String(event.threadId) !== this.threadId)
+      return { _tag: "Failed", kind: "protocol", message: "Submission admission identity did not match its Thread" }
+    if (String(event.turnId) !== this.turnId)
+      return { _tag: "Failed", kind: "protocol", message: "Submission Turn did not match its durable receipt" }
     return undefined
   }
 
@@ -206,7 +236,7 @@ class TurnWatch {
   }
 
   private settle(status: string): TurnOutcome | undefined {
-    if (status === "completed") return { _tag: "Settled", turnId: this.turnId!, text: lastValue(this.assistantText) }
+    if (status === "completed") return { _tag: "Settled", turnId: this.turnId, text: lastValue(this.assistantText) }
     if (status === "failed" || status === "cancelled")
       return { _tag: "Failed", kind: "host", message: `Turn ${status}` }
     return undefined
@@ -219,8 +249,20 @@ const lastValue = (values: ReadonlyMap<string, string>) => {
   return last
 }
 
-const threadEventOf = (frame: ServerFrameValue) =>
-  frame.payload._tag === "ThreadEvent" ? frame.payload.event.event : undefined
+const interactiveEventOf = (
+  payload: ServerFrameValue["payload"],
+  threadId: string | undefined,
+): InteractiveEvent | undefined => {
+  if (payload._tag === "ThreadEvent")
+    return String(payload.event.threadId) === threadId ? payload.event.event : undefined
+  if (
+    payload._tag === "ThreadSnapshot" &&
+    String(payload.threadId) === threadId &&
+    String(payload.snapshot.view.thread.id) === threadId
+  )
+    return { _tag: "ThreadViewSnapshot", snapshot: payload.snapshot.view }
+  return undefined
+}
 
 const attach = Effect.fn("HostedThreadClient.attach")(function* (
   connection: Connection,
@@ -257,7 +299,7 @@ export const layer = Layer.effect(
       create: (input) =>
         Effect.scoped(
           Effect.gen(function* () {
-            const connection = yield* connect(input.ticket)
+            const connection = yield* connect(input.ticket, true)
             const requestId = `${input.commandId}:create`
             const command: CreateThreadCommand = {
               _tag: "CreateThread",
@@ -287,7 +329,7 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const text = input.request.prompt.join("\n").trim()
             if (text.length === 0) return yield* failure("invalid-input", "Prompt must not be empty")
-            const connection = yield* connect(input.ticket)
+            const connection = yield* connect(input.ticket, true)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:submit`
             const command: SubmitPromptCommand = {
@@ -300,7 +342,7 @@ export const layer = Layer.effect(
             }
             if (input.request.mode !== undefined) command.mode = input.request.mode
             if (input.request.review !== undefined) command.review = input.request.review
-            const held: Array<ThreadEventPayload> = []
+            const held: Array<InteractiveEvent> = []
             const accepted = yield* applyCommand(
               connection,
               envelope(requestId, command),
@@ -310,14 +352,14 @@ export const layer = Layer.effect(
             )
             if (accepted.result._tag !== "PromptAdmitted")
               return yield* failure("protocol", "Prompt returned the wrong result")
-            const settled = yield* awaitTurn(connection, input.threadId, input.commandId, held)
+            const settled = yield* awaitTurn(connection, input.threadId, input.commandId, held, accepted.result.turnId)
             return { commandId: input.commandId, status: accepted.result.status, ...settled }
           }),
         ).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor)),
       ensureService: (input) =>
         Effect.scoped(
           Effect.gen(function* () {
-            const connection = yield* connect(input.ticket)
+            const connection = yield* connect(input.ticket, true)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:service`
             const accepted = yield* applyCommand(
@@ -340,7 +382,7 @@ export const layer = Layer.effect(
       stopService: (input) =>
         Effect.scoped(
           Effect.gen(function* () {
-            const connection = yield* connect(input.ticket)
+            const connection = yield* connect(input.ticket, true)
             const snapshot = yield* attach(connection, input.threadId, `${input.commandId}:attach`)
             const requestId = `${input.commandId}:service`
             const accepted = yield* applyCommand(
@@ -363,7 +405,7 @@ export const layer = Layer.effect(
       openPortal: (input) =>
         Effect.scoped(
           Effect.gen(function* () {
-            const connection = yield* connect(input.ticket)
+            const connection = yield* connect(input.ticket, true)
             yield* attach(connection, input.threadId, `${input.requestId}:attach`)
             yield* connection.send(
               envelope(input.requestId, {

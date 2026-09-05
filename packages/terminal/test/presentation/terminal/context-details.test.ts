@@ -113,3 +113,21 @@ test("uses a wider file sidebar with mode-accented title geometry and neutral co
   const fileLabel = rows[1]?.chunks.find((chunk) => chunk.text === "main.ts")
   expect(String(fileLabel?.fg)).toContain("0.75")
 })
+
+test("distinguishes unreported cache usage, measured misses, and partial reporting", () => {
+  const model = initial("/work", "high")
+  const context = { _tag: "Available" as const, inputTokens: 100, contextWindow: 1000, reserveTokens: 100 }
+  const render = (usage: typeof model.contextUsage) =>
+    text(contextDetails({ ...model, contextUsage: usage }, 80, 20, 0).chunks)
+  expect(render(context)).toContain("Cached     —")
+  expect(render({ ...context, inputTotal: 100, inputCacheRead: 0 })).toContain("Cached     0%")
+  expect(
+    render({
+      ...context,
+      inputTotal: 100,
+      inputCacheRead: 90,
+      cacheReportedAttempts: 2,
+      cacheTotalAttempts: 3,
+    }),
+  ).toContain("Cached     90% · 2/3 calls reported")
+})

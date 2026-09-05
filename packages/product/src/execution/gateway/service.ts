@@ -43,6 +43,7 @@ export interface Interface {
     input?: {
       readonly prompt?: string
       readonly checkpoint?: Checkpoint
+      readonly revision?: number
       readonly pricing?: "included" | "metered"
     },
   ) => Stream.Stream<WatchEvent, WatchTurnFailure>

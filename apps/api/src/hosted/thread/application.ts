@@ -273,15 +273,10 @@ export const layer = Layer.effect(
       threads: (ownerId, projectId) =>
         Effect.scoped(
           ownerRepositories.contextEffect(ownerId).pipe(
-            Effect.flatMap((context) => Context.get(context, ThreadSummaryRepository.Service).list()),
-            Effect.flatMap((summaries) =>
-              projectId === undefined
-                ? Effect.succeed(summaries)
-                : Effect.filter(summaries, (summary) =>
-                    hosted
-                      .readThread({ ownerId, threadId: HostedThreadId.make(summary.id) })
-                      .pipe(Effect.map((thread) => String(thread?.projectId) === projectId)),
-                  ),
+            Effect.flatMap((context) =>
+              Context.get(context, ThreadSummaryRepository.Service).list(
+                projectId === undefined ? undefined : { projectId },
+              ),
             ),
             Effect.mapError((error) => HostedThreadApplicationError.make({ message: String(error) })),
           ),

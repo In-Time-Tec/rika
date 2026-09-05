@@ -15,6 +15,7 @@ export interface ForegroundRunnerOptions {
 
 export class ForegroundRunnerError extends Schema.TaggedError<ForegroundRunnerError>()("ForegroundRunnerError", {
   message: Schema.String,
+  retryable: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export const ForegroundRunnerSnapshot = Schema.Struct({

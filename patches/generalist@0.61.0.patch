@@ -1,0 +1,128 @@
+diff --git a/dist/pg/run-schema.js b/dist/pg/run-schema.js
+index d38fb1244abe036fa400badb029ff7067c7a34b9..2f536ed2fd59a603589e3ef9003b0645191a79d0 100644
+--- a/dist/pg/run-schema.js
++++ b/dist/pg/run-schema.js
+@@ -3,6 +3,15 @@ import { Migrator, SqlClient } from "effect/unstable/sql";
+ import { checkSqlMigrationIdentity, checkSqlSchemaMeta, mapSqlError, SchemaMigrationFailed, planSqlSchema, } from "../runtime/sql-driver.js";
+ import { MIGRATION_NAME, MIGRATIONS_TABLE, SCHEMA_META_TABLE, SCHEMA_STATEMENTS, SCHEMA_TABLES, SCHEMA_VERSION, schemaChecksum, } from "./schema.js";
+ import { layerClient as postgresClient } from "./client.js";
++const LEGACY_VERSION = 4;
++const LEGACY_CHECKSUM = "c9ff31038d2758d3398dc9836880285b23a0428fd0a08c4c0752757a6e647d4a";
++const UPGRADE_STATEMENTS = [
++  ...SCHEMA_STATEMENTS,
++  "ALTER TABLE generalist_runs ADD COLUMN forked_from TEXT, ADD COLUMN fork_sequence INTEGER",
++  "ALTER TABLE generalist_run_events ADD COLUMN checkpoint_json TEXT, ADD COLUMN host_session_id TEXT REFERENCES generalist_host_sessions(session_id), ADD COLUMN host_session_sequence BIGINT, ADD UNIQUE (host_session_id, host_session_sequence)",
++  "ALTER TABLE generalist_run_operations ADD COLUMN checkpoint_json TEXT, ADD COLUMN completed_sequence INTEGER",
++];
++const canUpgrade = (meta) => meta.present && meta.version === LEGACY_VERSION && meta.checksum === LEGACY_CHECKSUM && !meta.dirty;
+ const migrationFailure = (source, fallback) => (error) => SchemaMigrationFailed.make({
+     source,
+     message: error.message || fallback,
+@@ -54,7 +63,24 @@ const runMigrations = (source) => {
+         ? Effect.interrupt
+         : SchemaMigrationFailed.make({ source, message: Cause.pretty(cause) || "migration failed" })));
+ };
+-export const plan = (source) => Effect.map(readMeta(source), (meta) => planSqlSchema(meta, SCHEMA_STATEMENTS));
++export const plan = (source) => Effect.map(readMeta(source), (meta) => ({
++  ...planSqlSchema(meta, SCHEMA_STATEMENTS),
++  ...(canUpgrade(meta) ? { statements: UPGRADE_STATEMENTS } : undefined),
++}));
++const upgrade = (source) => Effect.gen(function* () {
++  const sql = yield* SqlClient.SqlClient;
++  yield* sql.withTransaction(Effect.gen(function* () {
++    yield* sql`SELECT pg_advisory_xact_lock(1748259164, 9)`;
++    const meta = yield* readMeta(source);
++    if (!canUpgrade(meta)) return yield* check(source);
++    yield* verifyMigrationIdentity(source);
++    yield* sql`UPDATE generalist_schema_meta SET dirty = TRUE WHERE id = 1`;
++    for (const statement of UPGRADE_STATEMENTS) yield* sql.unsafe(statement);
++    const now = yield* DateTime.nowAsDate;
++    yield* sql`UPDATE generalist_schema_meta SET version = ${SCHEMA_VERSION}, checksum = ${schemaChecksum()}, dirty = FALSE, applied_at = ${now} WHERE id = 1`;
++    yield* check(source);
++  }));
++}).pipe(Effect.mapError(migrationFailure(source, "schema upgrade failed")));
+ export const check = (source) => Effect.gen(function* () {
+     const meta = yield* readMeta(source);
+     yield* checkSqlSchemaMeta(meta, source);
+@@ -62,6 +88,7 @@ export const check = (source) => Effect.gen(function* () {
+ });
+ export const apply = (source) => Effect.gen(function* () {
+     const meta = yield* readMeta(source);
++    if (canUpgrade(meta)) return yield* upgrade(source);
+     if (meta.present)
+         return yield* check(source);
+     const sql = yield* SqlClient.SqlClient;
+diff --git a/dist/pg/runs/claims.js b/dist/pg/runs/claims.js
+index 81fccc873ab85204bf0a22b376586d56c41ec70c..8e5ea5c5d8b57e7987fb2a12b1421f055d606c5d 100644
+--- a/dist/pg/runs/claims.js
++++ b/dist/pg/runs/claims.js
+@@ -54,7 +54,7 @@ export const postgresClaimMechanics = (input) => ({
+                 r.cancellation_requested = FALSE
+                 AND (
+                   (r.parent_run_id IS NULL AND
+-                    (r.status = 'running' OR EXISTS (SELECT 1 FROM generalist_lanes l WHERE l.head_run_id = r.run_id)))
++                    (r.status = 'running' OR r.attempt > 0 OR EXISTS (SELECT 1 FROM generalist_lanes l WHERE l.head_run_id = r.run_id)))
+                   OR EXISTS (
+                     SELECT 1 FROM generalist_run_links link
+                     WHERE link.child_run_id = r.run_id AND link.readiness = 'ready'
+diff --git a/dist/runtime/run/event.d.ts b/dist/runtime/run/event.d.ts
+index 593ad86f94258b3940b72348afb547ba17faa054..d4192bdbb91a67e53d7e310a1b062038d7af7102 100644
+--- a/dist/runtime/run/event.d.ts
++++ b/dist/runtime/run/event.d.ts
+@@ -122,7 +122,7 @@ export type ChildLinked = RunEventBase & {
+     readonly key?: string;
+     readonly label?: string;
+     readonly origin?: FanOutOrigin;
+-    readonly inherit: Inheritance;
++    readonly inherit?: Inheritance;
+     readonly budget?: BudgetLimits;
+ };
+ export type ChildReadinessChanged = RunEventBase & {
+@@ -190,7 +190,17 @@ export type Rewarded = RunEventBase & {
+ /** Reward payload accepted by the Runtime journal. */
+ export type RewardInput = Pick<Rewarded, "runId" | "leaf" | "value" | "source">;
+ export type LifecycleEvent = TriggerEvent | RunAccepted | BudgetExtended | BudgetSuspended | RunAttemptStarted | RunWaiting | RunResumed | Inbox | SteeringAccepted | SteeringConsumed | SteeringDiscarded | OperationUnknown | Substituted | ChildLinked | ChildReadinessChanged | ChildSettled | FanOutAdmitted | FanOutJoined | RunCompleted | RunFailed | RunCancellationRequested | RunCancelled | ProgramLog | Rewarded;
+-export type RunEvent = (RunEventBase & DurableAgentLoopEvent) | LifecycleEvent;
++/** Historical event retained for persisted pre-0.61 Run journals. */
++export type LegacyStructuredOutput = RunEventBase & {
++  readonly _tag: "StructuredOutput";
++  readonly turn: number;
++  readonly modelCallId: string;
++  readonly modelAttemptId: string;
++  readonly attempt: number;
++  readonly value: unknown;
++  readonly content: CompletedModelResponse["content"];
++};
++export type RunEvent = (RunEventBase & DurableAgentLoopEvent) | LifecycleEvent | LegacyStructuredOutput;
+ export declare const LifecycleTag: Schema.Literals<readonly ["Awaiting", "Duplicate", "TimedOut", "WakeReceived", "RunAccepted", "BudgetExtended", "BudgetSuspended", "RunAttemptStarted", "RunWaiting", "RunResumed", "Inbox", "SteeringAccepted", "SteeringConsumed", "SteeringDiscarded", "OperationUnknown", "Substituted", "ChildLinked", "ChildReadinessChanged", "ChildSettled", "FanOutAdmitted", "FanOutJoined", "RunCompleted", "RunFailed", "RunCancellationRequested", "RunCancelled", "ProgramLog", "Rewarded"]>;
+ export declare const CompletedModelResponse: Schema.Struct<{
+     readonly content: Schema.$Array<Schema.Union<readonly [Schema.Struct<{
+diff --git a/dist/runtime/run/event.js b/dist/runtime/run/event.js
+index 76bf23c7ac2111c3af11a349f5aa92d5a7db5220..bee6e68a025a241fa0cb9ab8fd3559e399fd0849 100644
+--- a/dist/runtime/run/event.js
++++ b/dist/runtime/run/event.js
+@@ -240,6 +240,15 @@ export const AgentLoopEventSchema = Schema.Union([
+         turn: Schema.Finite,
+         ...CompletionGateResult.fields,
+     }),
++    Schema.TaggedStruct("StructuredOutput", {
++        turn: Schema.Finite,
++        modelCallId: Schema.String,
++        modelAttemptId: Schema.String,
++        attempt: Schema.Finite,
++        value: Schema.Unknown,
++        content: Schema.Array(Part),
++        ...optionalMetadata,
++    }),
+     ModelTelemetryEventSchema,
+ ]);
+ const LifecycleEventSchema = Schema.Union([
+@@ -291,7 +300,7 @@ const LifecycleEventSchema = Schema.Union([
+         key: Schema.optionalKey(Schema.String),
+         label: Schema.optionalKey(Schema.String),
+         origin: Schema.optionalKey(FanOutMemberOrigin),
+-        inherit: Inheritance,
++        inherit: Schema.optionalKey(Inheritance),
+         budget: Schema.optionalKey(BudgetLimits),
+     }),
+     Schema.TaggedStruct("ChildReadinessChanged", { childRunId: RunId, readiness: ChildReadiness }),

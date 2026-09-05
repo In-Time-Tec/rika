@@ -1,10 +1,10 @@
-import { AiError, ModelRegistry, Response as AiResponse } from "generalist"
-import { TestModel } from "generalist/test"
+import { Response as AiResponse, AiError, LanguageModel, type Prompt } from "effect/unstable/ai"
+import { ModelRegistry } from "generalist"
+import { TestModel } from "generalist/testing"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import { Context, Effect, Layer, Ref, Scope, Stream } from "effect"
-import { LanguageModel, type Prompt } from "effect/unstable/ai"
 
 export type Profile =
   | "Root"

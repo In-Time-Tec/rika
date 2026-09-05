@@ -1,5 +1,5 @@
 import { step, laneExecutionRoute, makeLaneModels } from "@rika/execution/test-harness"
-import { TestModel } from "generalist/test"
+import { TestModel } from "generalist/testing"
 
 type NativeToolName = "bash" | "edit" | "read" | "shell_command_status"
 type NativeToolInput =

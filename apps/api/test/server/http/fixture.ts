@@ -53,6 +53,7 @@ const product: HostedProductService = {
   activatePrincipal: () => Effect.void,
   authorizeOwner: () => Effect.die("unused"),
   authorizeReadOwner: () => Effect.die("unused"),
+  authorizeThreadList: () => Effect.die("unused"),
   authorizeReadThread: () => Effect.die("unused"),
   authorizeThread: () => Effect.fail(HostedProductError.make({ kind: "not-found", message: "Thread unavailable" })),
   threadExecutionContext: () => Effect.die("unused"),

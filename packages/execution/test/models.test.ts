@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
-import * as Anthropic from "generalist/ai/anthropic"
-import * as OpenAiResponses from "generalist/ai/openai-responses"
+import * as Anthropic from "generalist/providers/anthropic"
+import * as OpenAiResponses from "generalist/providers/openai-responses"
 import * as Settings from "@rika/configuration/configuration-settings"
 import * as ExecutionRouteResolution from "@rika/product/execution-route-resolution"
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"

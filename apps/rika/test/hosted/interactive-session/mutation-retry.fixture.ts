@@ -1,3 +1,4 @@
+import { TurnId } from "@rika/product/turn-record"
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
@@ -86,7 +87,7 @@ it.effect("retries the exact mutation when the server reports a transient applic
                 threadId: message.command.threadId,
                 threadVersion: ThreadVersion.make("1"),
                 cursor: ThreadEventCursor.make("0"),
-                result: { _tag: "PromptAdmitted", status: "queued" },
+                result: { _tag: "PromptAdmitted", status: "queued", turnId: TurnId.make("turn-queued") },
               },
         )
       })
@@ -165,13 +166,23 @@ it.effect("targets the pending submission identity when cancellation happens bef
   ),
 )
 
-it.effect("forgets submission cancellation rendezvous after admission or rejection", () =>
+it.effect("retires rejected submissions while retaining exact cancellation targets after admission", () =>
   Effect.scoped(
     Effect.gen(function* () {
       let version = 0
       const harness = H.makeHarness((socket, message) => {
         if (message.command._tag === "AttachThread") {
           socket.frame(H.fixtures.attached(message, H.fixtures.snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag === "Cancel") {
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make(String(version)),
+          })
           return
         }
         if (message.command._tag !== "SubmitPrompt") return
@@ -210,7 +221,7 @@ it.effect("forgets submission cancellation rendezvous after admission or rejecti
       )
       expect(
         yield* Effect.result(hosted.session.cancel({ submissionId: "submission-admitted", threadId: "thread-1" })),
-      ).toMatchObject({ _tag: "Failure" })
+      ).toMatchObject({ _tag: "Success" })
 
       yield* hosted.session.submit("rejected", undefined, [], undefined, "submission-rejected")
       harness.sockets[0]!.frame({
@@ -236,7 +247,7 @@ it.effect("forgets submission cancellation rendezvous after admission or rejecti
       expect(
         yield* Effect.result(hosted.session.cancel({ submissionId: "submission-rejected", threadId: "thread-1" })),
       ).toMatchObject({ _tag: "Failure" })
-      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(0)
+      expect(harness.messages.filter((message) => message.command._tag === "Cancel")).toHaveLength(1)
       yield* hosted.session.quit
     }),
   ),

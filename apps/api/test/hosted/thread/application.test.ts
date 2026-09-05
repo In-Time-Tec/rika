@@ -17,6 +17,7 @@ import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { layer as hostedClientAuthorityLayer } from "@rika/product-store/client-authority"
 import {
   rikaHostedOwners,
+  rikaHostedProjects,
   rikaHostedThreads,
   rikaHostedWorkspaces,
   rikaThreads,
@@ -132,10 +133,18 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
         yield* aggregateDatabase.transaction((tx) =>
           Effect.gen(function* () {
+            yield* tx.insert(rikaHostedProjects).values({
+              id: "project-catalog",
+              ownerId: "personal-owner",
+              name: "Catalog",
+              createdByUserId: "owner-user",
+              createdAt,
+              updatedAt: createdAt,
+            })
             yield* tx.insert(rikaHostedWorkspaces).values({
               id: "workspace-1",
               ownerId: "personal-owner",
-              projectId: null,
+              projectId: "project-catalog",
               createdByUserId: "owner-user",
               executorKind: "runner",
               inheritProjectGrants: false,
@@ -145,7 +154,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
             yield* tx.insert(rikaHostedThreads).values({
               id: "owner-thread",
               ownerId: "personal-owner",
-              projectId: null,
+              projectId: "project-catalog",
               workspaceId: "workspace-1",
               createdByUserId: "owner-user",
               executorKind: "runner",
@@ -165,6 +174,11 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         const threadId = ThreadId.make("owner-thread")
         const thread = yield* application.thread(OwnerId.make("personal-owner"), threadId)
         expect(thread).toMatchObject({ workspace: "workspace-1", title: "New thread" })
+        expect(yield* application.threads(OwnerId.make("personal-owner"), "project-catalog")).toMatchObject([
+          { id: "owner-thread" },
+        ])
+        expect(yield* application.threads(OwnerId.make("personal-owner"), "missing-project")).toEqual([])
+        expect(yield* application.threads(OwnerId.make("other-owner"), "project-catalog")).toEqual([])
         expect(yield* application.thread(OwnerId.make("other-owner"), threadId)).toBeUndefined()
         yield* aggregateDatabase.transaction((tx) =>
           Effect.gen(function* () {

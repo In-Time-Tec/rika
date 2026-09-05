@@ -1,5 +1,5 @@
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
-import { OAuth } from "generalist/mcp"
+import { OAuth } from "generalist/unstable/mcp"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import {

@@ -1,7 +1,7 @@
 import { Service } from "@rika/product/thread-summary-repository"
 export { Service }
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
-import { and, asc, desc, eq, inArray, isNull, notExists, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, exists, inArray, isNull, notExists, or, sql } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { ThreadId } from "@rika/product/thread-record"
 import { EditTotals, RepairCandidate, ThreadSummary } from "@rika/product/thread-summary"
@@ -9,6 +9,7 @@ import { TurnId } from "@rika/product/turn-record"
 import { Status } from "@rika/product/execution-status"
 import * as ThreadState from "@rika/product/thread-state"
 import {
+  rikaHostedThreads,
   rikaThreadDeletionOutbox,
   rikaThreadPickerSummary,
   rikaThreadReadState,
@@ -22,6 +23,7 @@ export class RepositoryError extends Schema.TaggedError<RepositoryError>()("Thre
 }) {}
 
 export interface ListInput {
+  readonly projectId?: string
   readonly includeArchived?: boolean
   readonly limit?: number
 }
@@ -119,6 +121,21 @@ export const layerForOwner = (ownerId: string) =>
                 .where(eq(rikaThreadDeletionOutbox.threadId, rikaThreadPickerSummary.threadId)),
             ),
           ]
+          if (input.projectId !== undefined)
+            filters.push(
+              exists(
+                db
+                  .select({ id: rikaHostedThreads.id })
+                  .from(rikaHostedThreads)
+                  .where(
+                    and(
+                      eq(rikaHostedThreads.id, rikaThreadPickerSummary.threadId),
+                      eq(rikaHostedThreads.ownerId, ownerId),
+                      eq(rikaHostedThreads.projectId, input.projectId),
+                    ),
+                  ),
+              ),
+            )
           if (input.includeArchived !== true) filters.push(eq(rikaThreadPickerSummary.archived, 0))
           const rows = yield* db
             .select({

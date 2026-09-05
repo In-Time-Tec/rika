@@ -115,6 +115,11 @@ export interface ProductRepositoryService {
     userId: string,
     threadId: string,
   ) => Effect.Effect<ThreadAuthorityProjection | undefined, ProductRepositoryError>
+  readonly threadAuthorities: (
+    userId: string,
+    ownerId: string,
+    threadIds: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<ThreadAuthorityProjection & { readonly threadId: string }>, ProductRepositoryError>
   readonly threadExecutionContext: (
     ownerId: string,
     threadId: string,

@@ -79,12 +79,17 @@ const decodeRejectionReason = Schema.decodeUnknownOption(
 )
 
 const acceptedResult = (
-  result: ThreadProtocolCommand["result"],
+  command: ThreadProtocolCommand,
 ): Extract<ServerFrame["payload"], { readonly _tag: "CommandAccepted" }>["result"] => {
+  const result = command.result
   if (result?._tag === "ThreadCreated")
     return { _tag: "ThreadCreated", threadId: ThreadId.make(String(result.threadId)) }
-  if (result?._tag === "PromptAdmitted" && (result.status === "accepted" || result.status === "queued"))
-    return { _tag: "PromptAdmitted", status: result.status }
+  if (
+    result?._tag === "PromptAdmitted" &&
+    command.turnId !== undefined &&
+    (result.status === "accepted" || result.status === "queued")
+  )
+    return { _tag: "PromptAdmitted", status: result.status, turnId: command.turnId }
   return { _tag: "Applied" }
 }
 
@@ -115,7 +120,7 @@ export const commandResult: {
     threadId: command.threadId,
     threadVersion: command.threadVersion,
     cursor: command.cursor ?? zeroCursor,
-    result: acceptedResult(command.result),
+    result: acceptedResult(command),
   }
 })
 

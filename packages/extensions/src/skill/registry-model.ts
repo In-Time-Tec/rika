@@ -1,4 +1,5 @@
 import { SkillCatalog } from "generalist"
+
 import { Effect, Schema } from "effect"
 
 export interface Options {

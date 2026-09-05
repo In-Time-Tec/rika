@@ -46,7 +46,7 @@ export type CompletionStage =
   | "tool_execution"
 export const outcomes = ["success", "failure", "interrupted", "unknown"] as const
 export type Outcome = (typeof outcomes)[number]
-export const tokenKinds = ["input", "output"] as const
+export const tokenKinds = ["input", "output", "cache_read", "cache_write", "uncached"] as const
 export const healthSignalNames = [
   "stuck_queue_claim",
   "stale_lease",
@@ -175,28 +175,42 @@ export const observe = Effect.fnUntraced(function* <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   outcomeOf?: (value: A) => Outcome,
 ) {
-  const values = { ...annotations(correlation), "rika.hosted.stage": stage }
-  const startedAt = yield* Effect.exit(Clock.currentTimeMillis)
-  const exit = yield* Effect.exit(effect)
-  yield* bestEffort(
+  return yield* Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
-      const endedAt = yield* Clock.currentTimeMillis
-      const durationMillis = Exit.isSuccess(startedAt) ? Math.max(0, endedAt - startedAt.value) : 0
-      const outcome = yield* Effect.sync((): Outcome => {
-        if (Exit.isSuccess(exit)) return outcomeOf?.(exit.value) ?? "success"
-        return Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "failure"
-      })
-      yield* record(
-        stage,
-        outcome,
-        correlation,
-        durationMillis,
-        Exit.isFailure(exit) && outcome === "failure" ? exit.cause : undefined,
+      const values = { ...annotations(correlation), "rika.hosted.stage": stage }
+      const startedAt = yield* Effect.exit(Clock.currentTimeMillis)
+      const span = yield* Effect.exit(Effect.makeSpan(`rika.hosted.${stage}`, { attributes: values }))
+      const measured = Exit.isSuccess(span) ? Effect.withParentSpan(effect, span.value) : effect
+      const exit = yield* Effect.exit(restore(measured))
+      yield* bestEffort(
+        Effect.gen(function* () {
+          const endedAt = yield* Clock.currentTimeMillis
+          const durationMillis = Exit.isSuccess(startedAt) ? Math.max(0, endedAt - startedAt.value) : 0
+          const outcome = yield* Effect.sync((): Outcome => {
+            if (Exit.isSuccess(exit)) return outcomeOf?.(exit.value) ?? "success"
+            return Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "failure"
+          })
+          if (Exit.isSuccess(span))
+            yield* Effect.sync(() => {
+              span.value.attribute("rika.hosted.outcome", outcome)
+              span.value.attribute("rika.duration.millis", durationMillis)
+            })
+          yield* record(
+            stage,
+            outcome,
+            correlation,
+            durationMillis,
+            Exit.isFailure(exit) && outcome === "failure" ? exit.cause : undefined,
+          )
+        }).pipe(Effect.annotateLogs(values)),
       )
-      yield* Effect.annotateCurrentSpan({ "rika.hosted.outcome": outcome, "rika.duration.millis": durationMillis })
-    }).pipe(Effect.annotateLogs(values), Effect.withSpan(`rika.hosted.${stage}`, { attributes: values })),
+      if (Exit.isSuccess(span))
+        yield* bestEffort(
+          Clock.currentTimeNanos.pipe(Effect.flatMap((endedAt) => Effect.sync(() => span.value.end(endedAt, exit)))),
+        )
+      return yield* Exit.match(exit, { onFailure: Effect.failCause, onSuccess: Effect.succeed })
+    }),
   )
-  return yield* Exit.match(exit, { onFailure: Effect.failCause, onSuccess: Effect.succeed })
 })
 
 export const queueWaitObserved = Effect.fnUntraced(function* (correlation: Correlation, millis: number) {
@@ -217,11 +231,27 @@ export const replayLagObserved = Effect.fnUntraced(function* (correlation: Corre
   )
 })
 
+export interface ModelUsage {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadTokens?: number
+  readonly cacheWriteTokens?: number
+  readonly uncachedTokens?: number
+}
+
+const cacheAnnotations = (values: TelemetryAttributes, usage: ModelUsage | undefined) => {
+  if (usage?.cacheReadTokens !== undefined) values["rika.model.cache_read_tokens"] = usage.cacheReadTokens
+  if (usage?.cacheWriteTokens !== undefined) values["rika.model.cache_write_tokens"] = usage.cacheWriteTokens
+  if (usage?.uncachedTokens !== undefined) values["rika.model.uncached_tokens"] = usage.uncachedTokens
+  values["rika.model.cache_usage_reported"] =
+    usage?.inputTokens !== undefined && usage?.cacheReadTokens !== undefined ? 1 : 0
+}
+
 export const modelObserved = Effect.fnUntraced(function* (
   correlation: Correlation,
   outcome: "success" | "failure" | "interrupted",
   durationMillis: number,
-  usage?: { readonly inputTokens?: number; readonly outputTokens?: number },
+  usage?: ModelUsage,
 ) {
   const duration = Math.max(0, durationMillis)
   const inputTokens = usage?.inputTokens === undefined ? undefined : Math.max(0, usage.inputTokens)
@@ -234,13 +264,17 @@ export const modelObserved = Effect.fnUntraced(function* (
   }
   if (inputTokens !== undefined) values["rika.model.input_tokens"] = inputTokens
   if (outputTokens !== undefined) values["rika.model.output_tokens"] = outputTokens
-  const update = (kind: "input" | "output", value: number | undefined) =>
+  cacheAnnotations(values, usage)
+  const update = (kind: (typeof tokenKinds)[number], value: number | undefined) =>
     value === undefined ? Effect.void : Metric.update(Metric.withAttributes(modelTokens, { kind }), value)
   yield* bestEffort(
     Effect.gen(function* () {
       yield* record("model_terminal", outcome, correlation, duration)
       yield* update("input", inputTokens)
       yield* update("output", outputTokens)
+      yield* update("cache_read", usage?.cacheReadTokens)
+      yield* update("cache_write", usage?.cacheWriteTokens)
+      yield* update("uncached", usage?.uncachedTokens)
     }).pipe(Effect.annotateLogs(values), Effect.withSpan("rika.hosted.model_terminal", { attributes: values })),
   )
 })

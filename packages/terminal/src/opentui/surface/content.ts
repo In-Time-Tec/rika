@@ -212,15 +212,15 @@ const welcomeContentImpl = (
     [copyTop + 3, [bold(fg(colors.text)("ctrl+o")), fg(colors.muted)(" for commands")]],
     [copyTop + 4, [bold(fg(colors.text)("?")), fg(colors.muted)(" for shortcuts")]],
   ])
+  const paint = new Map(["●", "•", ":", "·", "."].map((glyph) => [glyph, fg(welcomeMarkColor(glyph, mode))]))
   for (let row = 0; row < visibleCanvas.length; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))
     chunks.push(fg(colors.text)(" ".repeat(logoLeft)))
     const line = visibleCanvas[row] ?? ""
-    for (const glyph of line) {
-      if (glyph === " ") chunks.push(fg(colors.text)(glyph))
-      else {
-        chunks.push(fg(welcomeMarkColor(glyph, mode))(glyph))
-      }
+    // Merge neighboring cells of the same shade so OpenTUI shapes runs rather than thousands of individual glyphs.
+    for (const run of line.match(/(.)\1*/gu) ?? []) {
+      const style = paint.get(run[0]!) ?? fg(colors.text)
+      chunks.push(style(run))
     }
     const suffix = copy.get(row)
     if (suffix !== undefined) {

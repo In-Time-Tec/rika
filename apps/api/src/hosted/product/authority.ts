@@ -10,7 +10,7 @@ import {
   OwnerId,
   ThreadId,
 } from "@rika/product/hosted-model"
-import type { ProductRepositoryService } from "@rika/product-store/product-repository"
+import type { ThreadAuthorityProjection, ProductRepositoryService } from "@rika/product-store/product-repository"
 import {
   type AuthenticatedPrincipal,
   forbidden,
@@ -118,16 +118,11 @@ export const hostedProductAuthorityOperations = ({
     return { ownerId: OwnerId.make(authority.ownerId) }
   }, Effect.mapError(storeFailure))
 
-  const resolveThreadAuthority = Effect.fn("HostedProduct.resolveThreadAuthority")(function* (
+  const authorizeResolvedThread = Effect.fn("HostedProduct.authorizeResolvedThread")(function* (
     principal: Pick<AuthenticatedPrincipal, "userId">,
-    threadId: string,
+    resolved: ThreadAuthorityProjection,
     action: AuthorizationAction,
   ) {
-    const resolved = yield* repository
-      .threadAuthority(principal.userId, threadId)
-      .pipe(Effect.mapError(repositoryFailure))
-    if (resolved === undefined)
-      return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
     if (resolved.kind === "personal" && resolved.userId !== principal.userId) return yield* forbidden()
     if (resolved.kind === "organization" && resolved.membershipId === null) return yield* forbidden()
     if (resolved.kind === "organization") {
@@ -143,6 +138,19 @@ export const hostedProductAuthorityOperations = ({
       if (resolved.projectRole !== null) Object.assign(authorization, { projectRole: resolved.projectRole })
       yield* policy.authorize(action, authorization).pipe(Effect.mapError(() => forbidden()))
     }
+  })
+
+  const resolveThreadAuthority = Effect.fn("HostedProduct.resolveThreadAuthority")(function* (
+    principal: Pick<AuthenticatedPrincipal, "userId">,
+    threadId: string,
+    action: AuthorizationAction,
+  ) {
+    const resolved = yield* repository
+      .threadAuthority(principal.userId, threadId)
+      .pipe(Effect.mapError(repositoryFailure))
+    if (resolved === undefined)
+      return yield* HostedProductError.make({ kind: "not-found", message: "Thread is unavailable" })
+    yield* authorizeResolvedThread(principal, resolved, action)
     return resolved
   })
 
@@ -204,6 +212,32 @@ export const hostedProductAuthorityOperations = ({
     Effect.mapError(storeFailure),
   )
 
+  const authorizeThreadList: HostedProductService["authorizeThreadList"] = Effect.fn(
+    "HostedProduct.authorizeThreadList",
+  )(function* (principal, ownerId, threadIds) {
+    const allowed = new Set<string>()
+    const unique = [...new Set(threadIds)]
+    for (let offset = 0; offset < unique.length; offset += 256) {
+      const rows = yield* repository
+        .threadAuthorities(principal.userId, ownerId, unique.slice(offset, offset + 256))
+        .pipe(Effect.mapError(repositoryFailure))
+      for (const row of rows) {
+        const permitted = yield* authorizeResolvedThread(principal, row, "thread:view").pipe(
+          Effect.as(true),
+          Effect.catch((error) => (error.kind === "forbidden" ? Effect.succeed(false) : Effect.fail(error))),
+        )
+        if (permitted) allowed.add(row.threadId)
+      }
+    }
+    // A device's owner-level client authority is checked once; every Thread still has its own grant check above.
+    const first = allowed.values().next().value
+    if ("clientId" in principal && first !== undefined) {
+      const authority = yield* authorizeThread(principal, first, "thread:view")
+      if (authority.ownerId !== ownerId) return yield* forbidden()
+    }
+    return allowed
+  })
+
   const activatePrincipal: HostedProductService["activatePrincipal"] = Effect.fn("HostedProduct.activatePrincipal")(
     function* (principal) {
       yield* activateClient(principal, BetterAuthUserId.make(principal.userId))
@@ -219,6 +253,7 @@ export const hostedProductAuthorityOperations = ({
     authorizeOwner,
     authorizeReadOwner,
     authorizeReadThread,
+    authorizeThreadList,
     authorizeThread,
     activatePrincipal,
   }

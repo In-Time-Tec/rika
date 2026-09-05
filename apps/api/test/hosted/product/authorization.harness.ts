@@ -1,3 +1,4 @@
+import { OwnerId } from "@rika/product/hosted-model"
 import {
   expect,
   it,
@@ -170,6 +171,16 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
       )
       const owner = owners[0]
       if (owner === undefined) return yield* Effect.die("Organization Thread owner was not persisted")
+      const catalogOwner = OwnerId.make(owner.owner_id)
+      const candidates = [connection.threadId, ...Array.from({ length: 600 }, (_, index) => `unavailable-${index}`)]
+      const list = (authenticated: boolean) =>
+        product.authorizeThreadList(
+          authenticated ? principal("operator-user") : { userId: "operator-user" },
+          catalogOwner,
+          candidates,
+        )
+      expect([...(yield* list(false))]).toEqual([])
+      expect([...(yield* list(true))]).toEqual([])
       yield* Effect.tryPromise(() =>
         database.insert(rikaHostedThreadGrants).values({
           ownerId: owner.owner_id,
@@ -182,6 +193,14 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
         }),
       )
       yield* read
+      expect([...(yield* list(false))]).toEqual([connection.threadId])
+      expect([...(yield* list(true))]).toEqual([connection.threadId])
+      expect([...(yield* product.authorizeThreadList({ userId: "foreign-user" }, catalogOwner, candidates))]).toEqual(
+        [],
+      )
+      expect([
+        ...(yield* product.authorizeThreadList(principal("operator-user"), OwnerId.make("foreign-owner"), candidates)),
+      ]).toEqual([])
       yield* operate
       const commands = yield* Effect.tryPromise(() =>
         database
@@ -199,6 +218,8 @@ it.effect.skipIf(!live)("requires a direct grant for a non-creator organization 
         database.delete(rikaHostedThreadGrants).where(eq(rikaHostedThreadGrants.threadId, connection.threadId)),
       )
       expect(yield* failureKind(read)).toBe("forbidden")
+      expect([...(yield* list(false))]).toEqual([])
+      expect([...(yield* list(true))]).toEqual([])
     }),
   ),
 )

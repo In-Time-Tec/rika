@@ -96,7 +96,7 @@ export const transcriptSqlWrites = {
                         projectorState: sql`excluded.projector_state`,
                         updatedAt: sql`excluded.updated_at`,
                       },
-                      setWhere: sql`${rikaTranscriptCheckpoints.projectionVersion} < excluded.projection_version OR (${rikaTranscriptCheckpoints.projectionVersion} = excluded.projection_version AND ${rikaTranscriptCheckpoints.revision} <= excluded.revision)`,
+                      setWhere: sql`${rikaTranscriptCheckpoints.projectionVersion} < excluded.projection_version OR (${rikaTranscriptCheckpoints.projectionVersion} = excluded.projection_version AND ${change.baseRevision === undefined ? sql`${rikaTranscriptCheckpoints.revision} <= excluded.revision` : eq(rikaTranscriptCheckpoints.revision, change.baseRevision)})`,
                     })
                     .returning({ turnId: rikaTranscriptCheckpoints.turnId })
                 : yield* tx

@@ -1,0 +1,147 @@
+diff --git a/dist/PgClient.js b/dist/PgClient.js
+index c22ec9dc600dbb0048a80fd6e8d4b1ed0555db31..83f48af519b2beaed3beb0c4fbbc71418cf8ecd3 100644
+--- a/dist/PgClient.js
++++ b/dist/PgClient.js
+@@ -179,7 +179,7 @@ export const fromPool = /*#__PURE__*/Effect.fnUntraced(function* (options) {
+         })));
+       }
+       function cleanup(cause) {
+-        if (!done) client?.release(cause);
++        if (!done && client) client.release(cause ?? (interruptedClients.has(client) ? true : undefined));
+         done = true;
+         client?.off("error", onError);
+       }
+@@ -239,9 +239,10 @@ export const fromPool = /*#__PURE__*/Effect.fnUntraced(function* (options) {
+         })));
+       }
+       client.on("error", onError);
+-      resume(Effect.as(Scope.addFinalizer(scope, Effect.sync(() => {
++      resume(Effect.as(Scope.addFinalizerExit(scope, exit => Effect.sync(() => {
+         client.off("error", onError);
+-        release(cause);
++        // A failed COMMIT has an ambiguous outcome. Never circulate its connection.
++        release(cause ?? (exit._tag === "Failure" || interruptedClients.has(client) ? true : undefined));
+       })), client));
+     });
+   });
+@@ -487,23 +488,33 @@ class ConnectionImpl {
+     })));
+   }
+ }
+-const cancelEffects = /*#__PURE__*/new WeakMap();
++const interruptedClients = new WeakSet();
++const cancelEffects = new WeakMap();
+ const makeCancel = (pool, client) => {
+-  if (cancelEffects.has(client)) {
+-    return cancelEffects.get(client);
+-  }
++  if (cancelEffects.has(client)) return cancelEffects.get(client);
+   const processId = client.processID;
+-  const eff = processId !== undefined
+-  // query cancelation is best-effort, so we don't fail if it doesn't work
+-  ? Effect.callback(resume => {
+-    if (pool.ending) return resume(Effect.void);
+-    pool.query(`SELECT pg_cancel_backend(${processId})`, () => {
+-      resume(Effect.void);
+-    });
+-  }).pipe(Effect.interruptible, Effect.timeoutOption(5000)) : undefined;
++  const eff = Effect.suspend(() => {
++    // A timed-out cancellation may arrive late. Its target must never be reused.
++    interruptedClients.add(client);
++    if (pool.ending || processId === undefined) return Effect.void;
++    // Cancellation cannot borrow from a pool exhausted by the work it must cancel.
++    return Effect.acquireUseRelease(
++      Effect.sync(() => {
++        const control = new Pg.Client({ ...pool.options, connectionTimeoutMillis: 1000, query_timeout: 1000 });
++        control.on("error", () => {});
++        return control;
++      }),
++      control => Effect.tryPromise(async () => {
++        await control.connect();
++        await control.query("SELECT pg_cancel_backend($1)", [processId]);
++      }).pipe(Effect.ignore),
++      control => Effect.promise(() => control.end()).pipe(Effect.timeoutOption(1000))
++    ).pipe(Effect.asVoid);
++  });
+   cancelEffects.set(client, eff);
+   return eff;
+ };
++
+ /**
+  * Creates a layer from an effect that acquires a `PgClient`, providing both `PgClient` and `SqlClient`.
+  *
+diff --git a/src/PgClient.ts b/src/PgClient.ts
+index 8fae62d0c81cf1c86a681a3f4b0c9fd42366945e..bdb0412dbe74c247f967b98db326f9693877bc9c 100644
+--- a/src/PgClient.ts
++++ b/src/PgClient.ts
+@@ -310,7 +310,7 @@ export const fromPool = Effect.fnUntraced(function*(
+             resume(Effect.fail(new SqlError({ reason: classifyError(cause, "Connection error", "acquireConnection") })))
+           }
+           function cleanup(cause?: Error) {
+-            if (!done) client?.release(cause)
++            if (!done && client) client.release(cause ?? (interruptedClients.has(client) ? true : undefined))
+             done = true
+             client?.off("error", onError)
+           }
+@@ -394,11 +394,12 @@ export const fromPool = Effect.fnUntraced(function*(
+       }
+       client.on("error", onError)
+       resume(Effect.as(
+-        Scope.addFinalizer(
++        Scope.addFinalizerExit(
+           scope,
+-          Effect.sync(() => {
++          (exit) => Effect.sync(() => {
+             client.off("error", onError)
+-            release(cause)
++            // A failed COMMIT has an ambiguous outcome. Never circulate its connection.
++            release(cause ?? (exit._tag === "Failure" || interruptedClients.has(client) ? true : undefined))
+           })
+         ),
+         client
+@@ -764,24 +765,29 @@ class ConnectionImpl implements Connection {
+   }
+ }
+ 
+-const cancelEffects = new WeakMap<Pg.PoolClient, Effect.Effect<void> | undefined>()
++const interruptedClients = new WeakSet<Pg.PoolClient>()
++const cancelEffects = new WeakMap<Pg.PoolClient, Effect.Effect<void>>()
+ const makeCancel = (pool: Pg.Pool, client: Pg.PoolClient) => {
+-  if (cancelEffects.has(client)) {
+-    return cancelEffects.get(client)!
+-  }
++  if (cancelEffects.has(client)) return cancelEffects.get(client)!
+   const processId = (client as any).processID
+-  const eff = processId !== undefined
+-    // query cancelation is best-effort, so we don't fail if it doesn't work
+-    ? Effect.callback<void>((resume) => {
+-      if (pool.ending) return resume(Effect.void)
+-      pool.query(`SELECT pg_cancel_backend(${processId})`, () => {
+-        resume(Effect.void)
+-      })
+-    }).pipe(
+-      Effect.interruptible,
+-      Effect.timeoutOption(5000)
+-    )
+-    : undefined
++  const eff = Effect.suspend(() => {
++    // A timed-out cancellation may arrive late. Its target must never be reused.
++    interruptedClients.add(client)
++    if (pool.ending || processId === undefined) return Effect.void
++    // Cancellation cannot borrow from a pool exhausted by the work it must cancel.
++    return Effect.acquireUseRelease(
++      Effect.sync(() => {
++        const control = new Pg.Client({ ...pool.options, connectionTimeoutMillis: 1000, query_timeout: 1000 })
++        control.on("error", () => {})
++        return control
++      }),
++      (control) => Effect.tryPromise(async () => {
++        await control.connect()
++        await control.query("SELECT pg_cancel_backend($1)", [processId])
++      }).pipe(Effect.ignore),
++      (control) => Effect.promise(() => control.end()).pipe(Effect.timeoutOption(1000))
++    ).pipe(Effect.asVoid)
++  })
+   cancelEffects.set(client, eff)
+   return eff
+ }

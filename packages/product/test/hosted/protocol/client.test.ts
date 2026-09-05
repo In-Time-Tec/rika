@@ -1,3 +1,4 @@
+import { TurnId } from "@rika/product/turn-record"
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import * as ExecutionProjection from "../../../src/execution/projection/contract"
@@ -99,8 +100,8 @@ describe("hosted Thread client protocol", () => {
     ).toThrow()
   })
 
-  it("uses protocol version 7 for prompt workspace readiness", () => {
-    expect(protocolVersion).toBe(8)
+  it("uses protocol version 9 for durable Turn receipts and cache coverage", () => {
+    expect(protocolVersion).toBe(9)
   })
 
   it("round trips every interactive command through one versioned envelope", () => {
@@ -287,7 +288,7 @@ describe("hosted Thread client protocol", () => {
           threadId,
           threadVersion: ThreadVersion.make("4"),
           cursor,
-          result: { _tag: "PromptAdmitted", status: "queued" },
+          result: { _tag: "PromptAdmitted", status: "queued", turnId: TurnId.make("turn-queued") },
         },
       },
       {

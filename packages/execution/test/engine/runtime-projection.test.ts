@@ -1,6 +1,8 @@
-import { ModelRegistry, Response as AiResponse } from "generalist"
+import { ModelRegistry } from "generalist"
+import { Response as AiResponse } from "effect/unstable/ai"
+
 import { Runtime } from "generalist/runtime"
-import { TestModel } from "generalist/test"
+import { TestModel } from "generalist/testing"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
@@ -157,6 +159,18 @@ it.live("observes hosted model telemetry once and never re-emits it from replaye
       const fromCheckpoint = yield* capture(watch({ prompt: "answer once", checkpoint: final.checkpoint }))
       expect(modelRecords(fromScratch)).toBe(0)
       expect(modelRecords(fromCheckpoint)).toBe(0)
+
+      // A title update or another watcher can advance the stored presentation revision independently
+      // of the Run-tree cursor. Replaying that same cursor must start a new, fenced revision chain.
+      const storedRevision = final.revision + 2
+      const resume = { prompt: "answer once", checkpoint: final.checkpoint, revision: storedRevision }
+      const resumed = (yield* watch(resume)).filter(
+        (event) => event._tag === "ProjectionSnapshot" || event._tag === "ProjectionPatch",
+      )
+      expect(resumed[0]).toMatchObject({ _tag: "ProjectionSnapshot", baseRevision: storedRevision })
+      expect(resumed[0]!.revision).toBeGreaterThan(storedRevision)
+      for (let index = 1; index < resumed.length; index++)
+        expect(resumed[index]).toMatchObject({ baseRevision: resumed[index - 1]!.revision })
     }),
   ),
 )

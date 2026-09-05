@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { MCPClient } from "generalist/mcp"
+import { MCPClient } from "generalist/unstable/mcp"
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as McpConfig from "@rika/extensions/mcp-configuration"

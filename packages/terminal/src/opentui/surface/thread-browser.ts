@@ -1,4 +1,5 @@
 import { BoxRenderable, StyledText, TextRenderable, dim, fg, type CliRenderer, type Clock } from "@opentui/core"
+import { relativeTime } from "../../presentation/terminal/relative-time"
 import { colors } from "../../presentation/terminal/theme"
 import { projectUnits } from "../../presentation/transcript/projection"
 import { selectedThreadMetadata } from "../../state/thread/navigation"
@@ -38,6 +39,9 @@ export class ThreadBrowser {
   private readonly list: TextRenderable
   private readonly preview: BoxRenderable
   private readonly status: TextRenderable
+  private listThreads: Model["threads"] | undefined
+  private listKey = ""
+  private statusKey = ""
   private previewValue: Model["threadPreview"] | undefined
   private previewWidth = 0
   private previewHeight = 0
@@ -114,7 +118,11 @@ export class ThreadBrowser {
     const innerWidth = Math.max(1, previewWidth - 2)
     const clipped = label.slice(0, innerWidth)
     const left = Math.max(0, Math.floor((innerWidth - clipped.length) / 2))
-    this.status.content = new StyledText([fg(colors.text)(" ".repeat(left)), dim(fg(colors.text)(clipped))])
+    const statusKey = `${left}:${clipped}`
+    if (statusKey !== this.statusKey) {
+      this.statusKey = statusKey
+      this.status.content = new StyledText([fg(colors.text)(" ".repeat(left)), dim(fg(colors.text)(clipped))])
+    }
     this.status.top = Math.max(0, Math.floor((previewHeight - 3) / 2))
     this.status.width = innerWidth
     this.status.visible = true
@@ -127,7 +135,19 @@ export class ThreadBrowser {
     const { horizontal, listWidth, listHeight, previewWidth, previewHeight } = this.previewLayout(model, width, height)
     this.list.width = listWidth
     this.list.height = listHeight
-    this.list.content = threadSwitcherListContent(model, listWidth, listHeight, now)
+    const listKey = JSON.stringify([
+      listWidth,
+      listHeight,
+      model.threadSwitcher.query,
+      model.threadSwitcher.selected,
+      model.threadsRefresh,
+      model.threads.map((thread) => relativeTime(now - thread.lastActivityAt)),
+    ])
+    if (this.listThreads !== model.threads || this.listKey !== listKey) {
+      this.listThreads = model.threads
+      this.listKey = listKey
+      this.list.content = threadSwitcherListContent(model, listWidth, listHeight, now)
+    }
     this.preview.left = horizontal ? listWidth + 2 : 0
     this.preview.top = horizontal ? 1 : listHeight
     this.preview.width = previewWidth
@@ -209,5 +229,7 @@ export class ThreadBrowser {
 
   destroy(): void {
     this.transcript.destroy()
+    this.listThreads = undefined
+    this.previewValue = undefined
   }
 }

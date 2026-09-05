@@ -1,5 +1,6 @@
 import { Agent, AgentManifest, ExecutableManifest, ModelRegistry, Pins } from "generalist"
-import * as ModelRoute from "generalist/ai/model-route"
+
+import * as ModelRoute from "generalist/unstable/providers/model-route"
 import { Errors, ExecutableRegistration, ExecutableResolver } from "generalist/runtime"
 import type { State } from "generalist/instructions"
 import * as NativeTools from "../tool/registry"

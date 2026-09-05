@@ -173,6 +173,11 @@ export interface HostedProductService {
     principal: Pick<AuthenticatedPrincipal, "userId">,
     threadId: string,
   ) => Effect.Effect<OwnerAuthority, HostedProductError>
+  readonly authorizeThreadList: (
+    principal: Pick<AuthenticatedPrincipal, "userId"> | AuthenticatedPrincipal,
+    ownerId: OwnerId,
+    threadIds: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlySet<string>, HostedProductError>
   readonly authorizeThread: (
     principal: AuthenticatedPrincipal,
     threadId: string,

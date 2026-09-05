@@ -177,10 +177,19 @@ const evaluate = Effect.fn("TuiPerformance.evaluate")(function* (options: {
     surface.update(model)
     yield* renderOnce(setup.renderOnce)
     const initialMilliseconds = elapsedMilliseconds(initialStartedAt, yield* Clock.currentTimeNanos)
+    // Exercise and draw every measured path before sampling retained memory or warm latency.
     for (let sample = 0; sample < warmupInteractions; sample += 1) {
       model = update(model, { _tag: "KeyPressed", key: key("t", { ctrl: true }) })
       surface.update(model)
+      yield* renderOnce(setup.renderOnce)
+      model = update(model, { _tag: "KeyPressed", key: key("down") })
+      model = update(model, { _tag: "KeyPressed", key: key("up") })
+      surface.update(model)
+      yield* renderOnce(setup.renderOnce)
       model = update(model, { _tag: "KeyPressed", key: key("return") })
+      surface.update(model)
+      yield* renderOnce(setup.renderOnce)
+      model = update(model, { _tag: "ScrollMoved", offset: sample % 2 === 0 ? -1 : 1 })
       surface.update(model)
       yield* renderOnce(setup.renderOnce)
     }

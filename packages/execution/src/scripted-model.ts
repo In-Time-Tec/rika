@@ -1,5 +1,6 @@
-import { AiError, ModelRegistry, Response as AiResponse } from "generalist"
-import { TestModel } from "generalist/test"
+import { Response as AiResponse, AiError } from "effect/unstable/ai"
+import { ModelRegistry } from "generalist"
+import { TestModel } from "generalist/testing"
 import { Effect, Layer, Schema } from "effect"
 
 const Part = Schema.Union([

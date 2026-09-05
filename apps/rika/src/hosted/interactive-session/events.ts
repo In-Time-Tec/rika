@@ -40,7 +40,7 @@ export const interactiveSessionEvents = (dependencies: {
   readonly setParticipants: (participants: number) => Effect.Effect<void>
   readonly settlePromptActivity: Effect.Effect<void>
   readonly commitSnapshot: (payload: Snapshot, connection: PhysicalConnection) => Effect.Effect<void, HostedError>
-  readonly reconcileSubmission: (threadId: string, submissionId: string) => Effect.Effect<void>
+  readonly reconcileSubmission: (threadId: string, submissionId: string, admitted: boolean) => Effect.Effect<void>
   readonly acknowledge: (connection: PhysicalConnection, threadId: string, cursor: string) => Effect.Effect<void>
   readonly threadCursors: Map<string, string>
   readonly failure: (message: string) => HostedError
@@ -96,7 +96,9 @@ export const interactiveSessionEvents = (dependencies: {
         (event._tag === "SubmissionAdmitted" || event._tag === "SubmissionRejected") &&
         event.submissionId !== undefined
       )
-        yield* Effect.uninterruptible(dependencies.reconcileSubmission(threadId, event.submissionId))
+        yield* Effect.uninterruptible(
+          dependencies.reconcileSubmission(threadId, event.submissionId, event._tag === "SubmissionAdmitted"),
+        )
       const nextView = eventView(projection, payload)
       if (Schema.is(HostedError)(nextView)) return yield* nextView
       const candidate = {

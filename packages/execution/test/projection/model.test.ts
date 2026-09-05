@@ -1,5 +1,6 @@
 import { expect, it, test } from "@effect/vitest"
 import { Pins } from "generalist"
+
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { Effect } from "effect"
 import * as Registration from "../../src/registration"

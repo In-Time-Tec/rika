@@ -11,8 +11,16 @@ const principal: AuthenticatedPrincipal = {
 }
 
 const executable = ExecutableManifest.makeTest("hosted-recovery", "1")
-const inspection = (status: Run.RunStatus): Run.RunInspection =>
-  Run.RunInspection.make({
+const inspection = (status: Run.RunStatus): Runtime.RuntimeInspection => ({
+  turn: 0,
+  usage: { inputTokens: 0, outputTokens: 0 },
+  usageFacts: [],
+  activeTools: [],
+  elapsed: 0,
+  budget: {},
+  gates: [],
+  children: [],
+  ...Run.RunInspection.make({
     runId: "run-1",
     status,
     executableRef: executable.ref,
@@ -22,7 +30,9 @@ const inspection = (status: Run.RunStatus): Run.RunInspection =>
     waits: [],
     lastSequence: 0,
     durability: "durable",
-  })
+    branches: [],
+  }),
+})
 
 const authorize = () => Effect.void
 

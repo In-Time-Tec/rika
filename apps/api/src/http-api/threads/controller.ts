@@ -34,19 +34,14 @@ export const threadsHandlers = (dependencies: HttpDependencies) =>
           const candidates = yield* dependencies.threadApplication
             .threads(owner.ownerId, payload.project_id)
             .pipe(Effect.mapError(() => ServiceUnavailable.make({ message: "Thread service unavailable" })))
-          const threads = yield* Effect.filter(candidates, (summary) =>
-            (device
-              ? dependencies.product.authorizeThread(authenticatedPrincipal(access), String(summary.id), "thread:view")
-              : dependencies.product.authorizeReadThread(principal, String(summary.id))
-            ).pipe(
-              Effect.as(true),
-              Effect.catch((error) =>
-                error.kind === "forbidden" || error.kind === "not-found"
-                  ? Effect.succeed(false)
-                  : Effect.fail(ServiceUnavailable.make({ message: "Thread service unavailable" })),
-              ),
-            ),
-          )
+          const allowed = yield* dependencies.product
+            .authorizeThreadList(
+              device ? authenticatedPrincipal(access) : principal,
+              owner.ownerId,
+              candidates.map((summary) => String(summary.id)),
+            )
+            .pipe(Effect.mapError(ownerAuthorizationFailure))
+          const threads = candidates.filter((summary) => allowed.has(String(summary.id)))
           return { threads }
         }),
       previewThread: ({ params }) =>

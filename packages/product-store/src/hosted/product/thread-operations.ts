@@ -1,6 +1,6 @@
 import { RepositoryCheckout, WorkspaceSeed } from "@rika/product/executor-assignment"
 import { identityMember } from "@rika/identity"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
 import {
   rikaHostedExecutorAssignments,
   rikaHostedOwners,
@@ -351,10 +351,11 @@ export const threadOperations = Effect.gen(function* () {
       .pipe(Effect.mapError((error) => (Schema.is(ProductRepositoryError)(error) ? error : databaseError(error))))
   }
 
-  const threadAuthority: ProductRepositoryService["threadAuthority"] = (userId, threadId) =>
+  const authorityRows = (userId: string, predicate: SQL) =>
     query(
       db
         .select({
+          threadId: rikaHostedThreads.id,
           ownerId: rikaHostedThreads.ownerId,
           kind: rikaHostedOwners.kind,
           userId: rikaHostedOwners.userId,
@@ -388,9 +389,18 @@ export const threadOperations = Effect.gen(function* () {
             eq(rikaHostedProjectGrants.membershipId, identityMember.id),
           ),
         )
-        .where(eq(rikaHostedThreads.id, threadId))
-        .limit(1),
-    ).pipe(Effect.map((rows) => rows[0]))
+        .where(predicate),
+    )
+
+  const threadAuthority: ProductRepositoryService["threadAuthority"] = (userId, threadId) =>
+    authorityRows(userId, eq(rikaHostedThreads.id, threadId)).pipe(Effect.map((rows) => rows[0]))
+  const threadAuthorities: ProductRepositoryService["threadAuthorities"] = (userId, ownerId, threadIds) =>
+    threadIds.length === 0
+      ? Effect.succeed([])
+      : authorityRows(
+          userId,
+          and(eq(rikaHostedThreads.ownerId, ownerId), inArray(rikaHostedThreads.id, [...threadIds]))!,
+        )
 
   const threadExecutionContext: ProductRepositoryService["threadExecutionContext"] = (ownerId, threadId) =>
     Effect.gen(function* () {
@@ -460,5 +470,5 @@ export const threadOperations = Effect.gen(function* () {
       }
     })
 
-  return { existingConnection, createConnection, threadAuthority, threadExecutionContext }
+  return { existingConnection, createConnection, threadAuthority, threadAuthorities, threadExecutionContext }
 })

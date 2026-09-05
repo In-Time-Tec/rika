@@ -108,15 +108,22 @@ const applySettlement = (
 type Usage = ThreadView.ThreadViewSnapshot["usage"]
 
 const contextUsage = (usage: Usage, started: boolean): NonNullable<Model["contextUsage"]> => {
-  if (usage.state.context !== undefined && usage.contextCapacity !== undefined)
-    return {
-      _tag: "Available",
+  if (usage.state.context !== undefined && usage.contextCapacity !== undefined) {
+    const context = {
+      _tag: "Available" as const,
       inputTokens: usage.state.context.inputTokens,
-      inputCacheRead: usage.state.tokens?.input.cacheRead ?? 0,
-      inputTotal: usage.state.tokens?.input.total ?? 0,
       contextWindow: usage.contextCapacity.contextWindow,
       reserveTokens: usage.contextCapacity.reserveTokens,
     }
+    if (usage.state.cache === undefined) return context
+    return {
+      ...context,
+      inputCacheRead: usage.state.cache.readTokens,
+      inputTotal: usage.state.cache.inputTokens,
+      cacheReportedAttempts: usage.state.cache.reportedAttempts,
+      cacheTotalAttempts: usage.state.countedAttempts + usage.state.uncountedAttempts,
+    }
+  }
   if (usage.state.contextPending) return { _tag: "Loading" }
   return started ? { _tag: "Unavailable" } : { _tag: "NotStarted" }
 }

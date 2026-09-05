@@ -49,6 +49,12 @@ it.effect("cookie reads filter Threads without creating device authority and den
           expect(owner).toMatchObject({ _tag: "PersonalOwner", userId: "user-1" })
           return Effect.succeed({ ownerId: OwnerId.make("owner-1") })
         },
+        authorizeThreadList: (principal, ownerId, ids) => {
+          expect(principal).toEqual({ userId: "user-1" })
+          expect(ownerId).toBe("owner-1")
+          expect(ids).toEqual(["visible", "foreign"])
+          return Effect.succeed(new Set(["visible"]))
+        },
         authorizeReadThread: (principal, id) => {
           expect(principal).toEqual({ userId: "user-1" })
           return id === "visible"

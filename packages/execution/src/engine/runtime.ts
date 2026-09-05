@@ -284,7 +284,7 @@ const make = (
         ).pipe(Effect.mapError((cause) => ExecutionGateway.CancelTurnFailure.make({ message: message(cause) }))),
       steerTurn: (link, input) =>
         runtime
-          .steer({ runId: link.runId, idempotencyKey: input.idempotencyKey, prompt: input.text })
+          .send(link.runId, input.text, { idempotencyKey: input.idempotencyKey, policy: "steer" })
           .pipe(Effect.mapError(steeringFailure)),
       approveTurn: (link, input) => respondToApproval("approve", link, input),
       denyTurn: (link, input) => respondToApproval("deny", link, input),

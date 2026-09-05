@@ -245,6 +245,7 @@ export abstract class TranscriptPaneRuntimeBase {
   }
 
   clear(): void {
+    this.virtualDocument.clear()
     this.handlers.clearWelcome?.()
     for (const child of this.children) {
       this.scroll.content.remove(child)

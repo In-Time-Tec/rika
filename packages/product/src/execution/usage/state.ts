@@ -20,9 +20,26 @@ export const ActiveTime = Schema.Union([
 ])
 export type ActiveTime = typeof ActiveTime.Type
 
+/** Cache reuse over attempts with both an authoritative input total and cache-read count. */
+export const CacheUsage = Schema.Struct({
+  reportedAttempts: Count,
+  hitAttempts: Count,
+  inputTokens: Count,
+  readTokens: Count,
+})
+export type CacheUsage = typeof CacheUsage.Type
+
+export const sumCacheUsage = (values: ReadonlyArray<CacheUsage>): CacheUsage => ({
+  reportedAttempts: values.reduce((sum, value) => sum + value.reportedAttempts, 0),
+  hitAttempts: values.reduce((sum, value) => sum + value.hitAttempts, 0),
+  inputTokens: values.reduce((sum, value) => sum + value.inputTokens, 0),
+  readTokens: values.reduce((sum, value) => sum + value.readTokens, 0),
+})
+
 export const UsageState = Schema.Struct({
   costNanoUsd: Schema.optionalKey(Count),
   tokens: Schema.optionalKey(TokenTotals),
+  cache: Schema.optionalKey(CacheUsage),
   pricedAttempts: Count,
   unpricedAttempts: Count,
   includedAttempts: Schema.optionalKey(Count),
@@ -51,6 +68,7 @@ export const aggregateUsage = (values: ReadonlyArray<UsageState>): UsageState =>
   const pricedAttempts = values.reduce((total, value) => total + value.pricedAttempts, 0)
   const costNanoUsd = addOptional(values.map((value) => value.costNanoUsd))
   const tokens = sumTokenTotals(values.map((value) => value.tokens))
+  const cache = values.flatMap((value) => (value.cache === undefined ? [] : [value.cache]))
   const availableActive = values.flatMap((value) => (value.active._tag === "Available" ? [value.active] : []))
   const context = values.toReversed().find((value) => value.context !== undefined)?.context
   let active: UsageState["active"] = { _tag: "Unavailable" }
@@ -74,6 +92,7 @@ export const aggregateUsage = (values: ReadonlyArray<UsageState>): UsageState =>
   }
   if (pricedAttempts > 0 && costNanoUsd !== undefined) aggregate = { ...aggregate, costNanoUsd }
   if (tokens !== undefined) aggregate = { ...aggregate, tokens }
+  if (cache.length > 0) aggregate = { ...aggregate, cache: sumCacheUsage(cache) }
   if (context !== undefined) aggregate = { ...aggregate, context }
   return aggregate
 }

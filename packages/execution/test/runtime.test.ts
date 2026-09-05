@@ -3,7 +3,8 @@ import { Chat, LanguageModel } from "effect/unstable/ai"
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { ModelRegistry } from "generalist"
-import * as OpenRouter from "generalist/ai/openrouter"
+
+import * as OpenRouter from "generalist/providers/openrouter"
 
 const captured: Array<{ readonly url: string; readonly body: string }> = []
 const ChatRequest = Schema.Struct({

@@ -10,6 +10,7 @@ type Transaction = Parameters<Parameters<PgDrizzle.EffectPgDatabase["transaction
 
 const OptionalSum = Schema.Struct({ sum: Schema.Finite, present: Schema.Int })
 const UsageAccumulator = Schema.Struct({
+  cache: Schema.optionalKey(ExecutionProjection.CacheUsage),
   contributions: Schema.Int,
   incomplete: Schema.Int,
   costNanoUsd: OptionalSum,
@@ -146,10 +147,28 @@ const replaceContribution = (
   costNanoUsd: replaceOptional(current.costNanoUsd, previous?.costNanoUsd, next.costNanoUsd),
   tokens: current.tokens - count(previous?.tokens !== undefined) + count(next.tokens !== undefined),
   ...replaceAttemptTotals(current, previous, next),
+  cache: replaceCache(current.cache, previous?.cache, next.cache),
   activeAvailable:
     current.activeAvailable - count(previous?.active._tag === "Available") + count(next.active._tag === "Available"),
   activeAccumulatedMillis: current.activeAccumulatedMillis - activeMillis(previous) + activeMillis(next),
 })
+
+const replaceCache = (
+  current: ExecutionProjection.CacheUsage | undefined,
+  previous: ExecutionProjection.CacheUsage | undefined,
+  next: ExecutionProjection.CacheUsage | undefined,
+): ExecutionProjection.CacheUsage => {
+  const zero = { reportedAttempts: 0, hitAttempts: 0, inputTokens: 0, readTokens: 0 }
+  const total = current ?? zero
+  const before = previous ?? zero
+  const after = next ?? zero
+  return {
+    reportedAttempts: total.reportedAttempts - before.reportedAttempts + after.reportedAttempts,
+    hitAttempts: total.hitAttempts - before.hitAttempts + after.hitAttempts,
+    inputTokens: total.inputTokens - before.inputTokens + after.inputTokens,
+    readTokens: total.readTokens - before.readTokens + after.readTokens,
+  }
+}
 
 const replaceAttemptTotals = (
   current: UsageAccumulator,
@@ -210,6 +229,8 @@ const summarize = (
     active: activeUsage(accumulator, activeSince),
   }
   const costNanoUsd = optional(accumulator.costNanoUsd)
+  if (accumulator.cache !== undefined && accumulator.cache.reportedAttempts > 0)
+    Object.assign(usage, { cache: accumulator.cache })
   if (accumulator.pricedAttempts > 0 && costNanoUsd !== undefined) Object.assign(usage, { costNanoUsd })
   if (accumulator.tokens > 0) {
     const tokens: ExecutionProjection.TokenTotals = { input, output }

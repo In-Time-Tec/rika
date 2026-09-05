@@ -4,10 +4,11 @@ import { SqlClient, type SqlClient as SqlClientService } from "effect/unstable/s
 import { afterAll, beforeAll } from "vitest"
 import { Pool } from "pg"
 import { Agent, Policy } from "generalist"
-import { TestModel } from "generalist/test"
+
+import { TestModel } from "generalist/testing"
 import { Address, ExecutableManifest, ExecutableRegistration, ExecutableResolver } from "generalist/runtime"
 import { RunClaims, type ClaimedRun } from "generalist/runtime/sql-driver"
-import { driverConformance, type Services } from "generalist/test/runtime-driver"
+import { runtimeDriver, type Services } from "generalist/testing/runtime-driver"
 import * as Postgres from "../../../src/postgres"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -124,7 +125,7 @@ const setup = Effect.tryPromise(() => {
     END $$`)
 }).pipe(Effect.orDie, Effect.andThen(Effect.void))
 
-driverConformance({
+runtimeDriver({
   name: "Rika PostgreSQL",
   address,
   layer,

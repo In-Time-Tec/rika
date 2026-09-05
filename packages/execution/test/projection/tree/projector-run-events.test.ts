@@ -4,7 +4,8 @@ import { resetEventPosition, treeEvent } from "../../support/projector-event.fix
 import { Address, RunEvent } from "generalist/runtime"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ModelRegistry } from "generalist"
-import { TestModel } from "generalist/test"
+
+import { TestModel } from "generalist/testing"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
@@ -268,3 +269,43 @@ it.live(
     }),
   30_000,
 )
+
+describe("current Generalist lifecycle projection", () => {
+  it("retains Inbox identity through consumption without duplicating the user entry", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-inbox", "start")
+    projector.apply(treeEvent("root", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(
+      treeEvent("root", {
+        _tag: "Inbox",
+        entryId: "inbox-1",
+        inboxSequence: 0,
+        idempotencyKey: "request-1",
+        digest: "digest-1",
+        message: Prompt.make("redirect"),
+        policy: "steer",
+        from: { system: true },
+      }),
+    )
+    expect(projector.snapshot().state.steering?.pending).toMatchObject([
+      { entryId: "inbox-1", requestId: "request-1", text: "redirect" },
+    ])
+    projector.apply(treeEvent("root", { _tag: "SteeringConsumed", entryIds: ["inbox-1"], operationId: "model-1" }))
+    expect(projector.snapshot().state.steering?.pending).toEqual([])
+    expect(projector.snapshot().state.steering?.settled).toMatchObject([{ entryId: "inbox-1", outcome: "consumed" }])
+    expect(
+      projector.snapshot().units.filter((unit) => unit.content._tag === "Entry" && unit.content.text === "redirect"),
+    ).toHaveLength(1)
+  })
+
+  it("exposes budget suspension and completion-check rejection", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-budget", "start")
+    projector.apply(treeEvent("root", { _tag: "RunAttemptStarted", attempt: 1 }))
+    projector.apply(treeEvent("root", { _tag: "GateResult", turn: 0, name: "tests", verdict: "fail", evidence: null }))
+    projector.apply(treeEvent("root", { _tag: "BudgetSuspended", budget: "tokens" }))
+    expect(projector.snapshot().state.status).toBe("waiting")
+    expect(JSON.stringify(projector.snapshot().units)).toContain("Completion check failed")
+    expect(JSON.stringify(projector.snapshot().units)).toContain("Execution budget reached")
+  })
+})

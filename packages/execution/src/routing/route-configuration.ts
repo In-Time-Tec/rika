@@ -4,13 +4,13 @@ import {
   Approvals,
   Compaction,
   ExecutableManifest,
-  LanguageModel,
   ModelRegistry,
   Permissions,
   Pins,
   ToolAuthorization,
 } from "generalist"
-import * as ModelRoute from "generalist/ai/model-route"
+import { LanguageModel } from "effect/unstable/ai"
+import * as ModelRoute from "generalist/unstable/providers/model-route"
 import { Errors, ExecutableRegistration } from "generalist/runtime"
 import * as LocalTools from "../tool/local"
 import * as NativeTools from "../tool/registry"

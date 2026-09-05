@@ -55,7 +55,10 @@ const staleChange = (current: Projection | undefined, change: ExecutionProjectio
   return (
     current !== undefined &&
     (current.projectionVersion > ExecutionProjection.projectionVersion ||
-      (current.projectionVersion === ExecutionProjection.projectionVersion && current.revision > change.revision))
+      (current.projectionVersion === ExecutionProjection.projectionVersion &&
+        (change.baseRevision === undefined
+          ? current.revision > change.revision
+          : current.revision !== change.baseRevision)))
   )
 }
 

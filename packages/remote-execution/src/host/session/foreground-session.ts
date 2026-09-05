@@ -12,7 +12,7 @@ export interface LocalSession {
   readonly cursor: { readonly sequence: number; readonly value: string }
 }
 
-const failure = (message: string) => ForegroundRunnerError.make({ message })
+const failure = (message: string, retryable = true) => ForegroundRunnerError.make({ message, retryable })
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
 
@@ -98,7 +98,7 @@ const waitForWelcome = (
 ): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
-    if (message._tag === "Fenced") return yield* failure(message.message)
+    if (message._tag === "Fenced") return yield* failure(message.message, false)
     if (message._tag === "ExecutorWelcome") return yield* sessionFromWelcome(message.welcome, processIncarnation)
     return yield* waitForWelcome(incoming, processIncarnation)
   })
@@ -110,7 +110,7 @@ const sessionFromReconnect = (
 ): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     if (!sameFence(welcome.fence, previous.fence) || welcome.fence.processIncarnation !== processIncarnation)
-      return yield* failure("Runner reconnect has a different fence")
+      return yield* failure("Runner reconnect has a different fence", false)
     return {
       ...previous,
       leaseEpoch: welcome.leaseEpoch,
@@ -127,7 +127,7 @@ const waitForReconnect = (
 ): Effect.Effect<LocalSession, ForegroundRunnerError> =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
-    if (message._tag === "Fenced") return yield* failure(message.message)
+    if (message._tag === "Fenced") return yield* failure(message.message, false)
     if (message._tag === "ExecutorReconnected")
       return yield* sessionFromReconnect(message.welcome, previous, processIncarnation)
     return yield* waitForReconnect(incoming, previous, processIncarnation)
@@ -142,7 +142,7 @@ const applyLeaseReceipt = (
     const current = yield* Ref.get(session)
     if (current === undefined) return yield* failure("Runner session is unavailable")
     if (!sameFence(current.fence, message.receipt.fence) || message.receipt.leaseEpoch !== current.leaseEpoch)
-      return yield* failure("Runner receipt has a stale session")
+      return yield* failure("Runner receipt has a stale session", false)
     if (message.receipt.cursor.sequence < current.cursor.sequence)
       return yield* failure("Runner receipt moved the cursor backwards")
     if (

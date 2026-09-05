@@ -241,6 +241,11 @@ describe("api HTTP", () => {
             expect(owner).toMatchObject({ _tag: "PersonalOwner", userId: "user-1" })
             return Effect.succeed({ ownerId: OwnerId.make("owner-1") })
           },
+          authorizeThreadList: (_receivedPrincipal, ownerId, ids) => {
+            expect(ownerId).toBe("owner-1")
+            expect(ids).toEqual(["thread-visible", "thread-hidden"])
+            return Effect.succeed(new Set(["thread-visible"]))
+          },
           authorizeThread: (_receivedPrincipal, threadId) =>
             threadId === "thread-hidden"
               ? Effect.fail(HostedProductError.make({ kind: "forbidden", message: "hidden" }))

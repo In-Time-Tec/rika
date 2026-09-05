@@ -155,7 +155,7 @@ describe("runtime model terminal telemetry", () => {
       outcome: "success",
       durationMillis: 15,
       syntheticStart: false,
-      usage: { inputTokens: 12, outputTokens: 7 },
+      usage: { inputTokens: 12, outputTokens: 7, cacheReadTokens: 3, cacheWriteTokens: 4, uncachedTokens: 9 },
     })
     expect(telemetry.terminal(event)).toBeUndefined()
   })

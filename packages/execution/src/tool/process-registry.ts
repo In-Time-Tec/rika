@@ -172,8 +172,15 @@ export const layer = Layer.effect(
         const handle = yield* spawner
           .spawn(
             ChildProcess.make(
-              "/bin/bash",
-              ["--noprofile", "--norc", "--posix", "-c", supervisor, "rika-process", command, ...args],
+              process.platform === "darwin" ? "/bin/zsh" : "/bin/bash",
+              [
+                ...(process.platform === "darwin" ? ["-f"] : ["--noprofile", "--norc", "--posix"]),
+                "-c",
+                supervisor,
+                "rika-process",
+                command,
+                ...args,
+              ],
               {
                 cwd,
                 detached: true,

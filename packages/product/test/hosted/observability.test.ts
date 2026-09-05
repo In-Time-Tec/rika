@@ -1,3 +1,4 @@
+import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Inspectable, Logger, Metric, Schema, Tracer } from "effect"
 import * as Observability from "@rika/product/hosted-observability"
@@ -77,6 +78,37 @@ describe("HostedObservability", () => {
       assert.strictEqual(interrupted?.level, "INFO")
       assert.notProperty(interrupted?.annotations, "rika.failure.message")
     }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([logger])))
+  })
+
+  it.effect("opens the stage span before product work and closes it with its real exit", () => {
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    return Effect.gen(function* () {
+      const result = yield* Observability.observe(
+        "attach",
+        {},
+        Effect.gen(function* () {
+          const current = yield* Effect.currentSpan
+          assert.strictEqual(current.name, "rika.hosted.attach")
+          assert.strictEqual(current.status._tag, "Started")
+          yield* TestClock.adjust("250 millis")
+          return "attached"
+        }),
+      )
+      assert.strictEqual(result, "attached")
+      const stage = spans.find((span) => span.name === "rika.hosted.attach")!
+      assert.strictEqual(stage.status._tag, "Ended")
+      if (stage.status._tag === "Ended") {
+        assert.strictEqual(stage.status.endTime - stage.status.startTime, 250_000_000n)
+        assert.isTrue(Exit.isSuccess(stage.status.exit))
+      }
+    }).pipe(Effect.provideService(Tracer.Tracer, tracer))
   })
 
   it.effect("separates immediate milestones from measured completion and redacts annotations", () => {

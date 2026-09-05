@@ -1,5 +1,5 @@
-import { MCPClient, OAuth } from "generalist/mcp"
-import * as MCPHttp from "generalist/mcp/client/http"
+import { MCPClient, OAuth } from "generalist/unstable/mcp"
+import * as MCPHttp from "generalist/unstable/mcp/client/http"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Context, Crypto, Effect, Layer, Schema, Scope } from "effect"
 import type { Server } from "./configuration"

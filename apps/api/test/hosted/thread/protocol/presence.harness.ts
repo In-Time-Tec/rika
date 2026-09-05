@@ -44,6 +44,7 @@ it.effect("keeps an attached viewer's presence live and marks it away when the s
     createConnection: () => Effect.die("unused"),
     authorizeOwner: () => Effect.die("unused"),
     authorizeReadOwner: () => Effect.die("unused"),
+    authorizeThreadList: () => Effect.die("unused"),
     authorizeReadThread: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () => Effect.die("unused"),

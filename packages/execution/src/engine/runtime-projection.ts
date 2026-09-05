@@ -81,7 +81,7 @@ const applyTitle = (projector: Projector, snapshot: Run.RunSnapshot | null | und
   const change =
     snapshot === undefined || snapshot === null
       ? projector.applyTitle(undefined, [])
-      : projector.applyTitle(titleText(snapshot), snapshot.usage)
+      : projector.applyTitle(titleText(snapshot), snapshot.usageFacts)
   return change === undefined ? [] : [{ change }]
 }
 
@@ -121,7 +121,7 @@ const refreshUsage = (
 ) =>
   Effect.gen(function* () {
     if (pending?.cursor === event.event.cursor) {
-      projector.replaceUsage(event.event.rootRunId, pending.inspection.usage)
+      projector.replaceUsage(event.event.rootRunId, pending.inspection.usageFacts)
       return undefined
     }
     if (pending !== undefined) return pending
@@ -129,7 +129,7 @@ const refreshUsage = (
     if (runEvent._tag !== "ModelAttemptCompleted" && runEvent._tag !== "ModelAttemptFailed") return undefined
     const checkpoint = yield* runtime.treeCheckpoint(event.event.rootRunId)
     if (checkpoint.cursor !== event.event.cursor) return checkpoint
-    projector.replaceUsage(event.event.rootRunId, checkpoint.inspection.usage)
+    projector.replaceUsage(event.event.rootRunId, checkpoint.inspection.usageFacts)
     return undefined
   })
 
@@ -151,7 +151,7 @@ const projectEvents = (runtime: Runtime.Service, projector: Projector) => {
       if (!rootProjected) {
         if (event.event.cursor !== event.checkpoint.cursor) return []
         rootProjected = true
-        projector.replaceUsage(event.event.rootRunId, event.checkpoint.inspection.usage)
+        projector.replaceUsage(event.event.rootRunId, event.checkpoint.inspection.usageFacts)
         const changes: Array<Projection> = [{ change: projector.snapshot() }]
         changes.push(...projector.previewRunIds().map((childRunId) => ({ childRunId })))
         if (pendingTitle !== undefined) {
@@ -228,7 +228,22 @@ const watchTurn = (
     Stream.flatMap(Stream.fromIterable),
     Stream.mapError((cause) => ExecutionGateway.WatchTurnFailure.make({ message: watchFailureMessage(cause) })),
   )
-  return output(runtime, projector, link, projected)
+  let revisionOffset = 0
+  return output(runtime, projector, link, projected).pipe(
+    Stream.map((event) => {
+      if (event._tag === "ProjectionSnapshot" && input?.revision !== undefined) {
+        revisionOffset = Math.max(0, input.revision + 1 - event.revision)
+        return { ...event, baseRevision: input.revision, revision: event.revision + revisionOffset }
+      }
+      if (event._tag === "ProjectionPatch")
+        return {
+          ...event,
+          baseRevision: event.baseRevision + revisionOffset,
+          revision: event.revision + revisionOffset,
+        }
+      return event
+    }),
+  )
 }
 
 export const RuntimeProjection = { watchTurn }

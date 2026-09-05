@@ -27,6 +27,7 @@ it.effect("streams a contiguous tail and resets compacted cursors from a durable
     createConnection: () => Effect.die("unused"),
     authorizeOwner: () => Effect.die("unused"),
     authorizeReadOwner: () => Effect.die("unused"),
+    authorizeThreadList: () => Effect.die("unused"),
     authorizeReadThread: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () => Effect.die("unused"),

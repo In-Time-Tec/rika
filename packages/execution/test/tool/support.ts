@@ -109,9 +109,14 @@ export const makeEnvironment = (): TestEnvironment => {
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((spawnedCommand) => {
       if (spawnedCommand._tag === "PipedCommand") return Effect.fail(platformError("spawn", "pipeline"))
+      const marker = spawnedCommand.args.indexOf("rika-process")
       const command =
-        spawnedCommand.args[5] === "rika-process"
-          ? ChildProcess.make(spawnedCommand.args[6]!, spawnedCommand.args.slice(7), spawnedCommand.options)
+        marker >= 0
+          ? ChildProcess.make(
+              spawnedCommand.args[marker + 1]!,
+              spawnedCommand.args.slice(marker + 2),
+              spawnedCommand.options,
+            )
           : spawnedCommand
       const recorded = { command: command.command, args: command.args }
       commands.push(command.options.cwd === undefined ? recorded : { ...recorded, cwd: command.options.cwd })

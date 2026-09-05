@@ -1,7 +1,8 @@
 import { expect, it } from "@effect/vitest"
 import { ModelRegistry } from "generalist"
-import * as OpenAi from "generalist/ai/openai"
-import * as OpenAiResponses from "generalist/ai/openai-responses"
+
+import * as OpenAi from "generalist/providers/openai"
+import * as OpenAiResponses from "generalist/providers/openai-responses"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { Chat, LanguageModel } from "effect/unstable/ai"

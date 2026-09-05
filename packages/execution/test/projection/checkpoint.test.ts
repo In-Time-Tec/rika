@@ -1,5 +1,6 @@
 import { ModelRegistry } from "generalist"
-import { TestModel } from "generalist/test"
+
+import { TestModel } from "generalist/testing"
 import { expect, it } from "@effect/vitest"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"

@@ -11,6 +11,7 @@ const completed = (input: {
   readonly attempt: string
   readonly input: number
   readonly output: number
+  readonly cacheRead?: number
 }): Run.RawUsageFact => ({
   _tag: "Completed",
   runId: input.runId ?? "raw-root-run",
@@ -21,7 +22,12 @@ const completed = (input: {
   attempt: 0,
   usageAt: input.turn,
   usage: {
-    inputTokens: { total: input.input, uncached: input.input, cacheRead: 0, cacheWrite: 0 },
+    inputTokens: {
+      total: input.input,
+      uncached: input.input - (input.cacheRead ?? 0),
+      cacheRead: input.cacheRead ?? 0,
+      cacheWrite: 0,
+    },
     outputTokens: { total: input.output, text: input.output, reasoning: 0 },
   },
 })
@@ -65,6 +71,21 @@ describe("Generalist checkpoint usage presentation", () => {
         },
       }),
     )
+  })
+
+  it("keeps cache reuse and reporting coverage separate from total usage", () => {
+    const projector = TreeProjector.make("turn-cache", "facts")
+    const hit = completed({ turn: 0, call: "hit", attempt: "hit", input: 100, output: 2, cacheRead: 90 })
+    const miss = completed({ turn: 1, call: "miss", attempt: "miss", input: 20, output: 2 })
+    projector.replaceUsage("raw-root-run", [hit, miss, failed])
+    expect(projector.snapshot().state.usage.cache).toEqual({
+      reportedAttempts: 2,
+      hitAttempts: 1,
+      inputTokens: 120,
+      readTokens: 90,
+    })
+    projector.replaceUsage("raw-root-run", [failed])
+    expect(projector.snapshot().state.usage.cache).toBeUndefined()
   })
 
   it("replaces rather than recounts a newer Generalist checkpoint", () => {

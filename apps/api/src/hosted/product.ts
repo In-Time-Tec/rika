@@ -53,6 +53,7 @@ export const layer = (options: {
         authorizeOwner,
         authorizeReadOwner,
         authorizeReadThread,
+        authorizeThreadList,
         authorizeThread,
         activatePrincipal,
       } = hostedProductAuthorityOperations({ clientAuthority, repository, policy, crypto })
@@ -296,6 +297,7 @@ export const layer = (options: {
         authorizeOwner,
         authorizeReadOwner,
         authorizeReadThread,
+        authorizeThreadList,
         authorizeThread,
         threadExecutionContext,
         activatePrincipal,

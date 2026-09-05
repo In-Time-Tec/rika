@@ -23,7 +23,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 8 as const
+export const protocolVersion = 9 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 export const ClientProtocolVersion = Schema.Literal(protocolVersion)
@@ -331,7 +331,7 @@ export type PromptAdmissionStatus = typeof PromptAdmissionStatus.Type
 
 export const CommandResult = Schema.Union([
   strict(Schema.TaggedStruct("ThreadCreated", { threadId: ThreadId })),
-  strict(Schema.TaggedStruct("PromptAdmitted", { status: PromptAdmissionStatus })),
+  strict(Schema.TaggedStruct("PromptAdmitted", { status: PromptAdmissionStatus, turnId: Turn.TurnId })),
   strict(Schema.TaggedStruct("Applied", {})),
 ])
 export type CommandResult = typeof CommandResult.Type

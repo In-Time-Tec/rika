@@ -130,6 +130,13 @@ export const make = (options: Options) =>
     const crypto = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const workspaceHome = (yield* spawner
+      .string(ChildProcess.make("sudo", ["-n", "-H", "-u", options.workspaceUser, "--", "printenv", "HOME"]))
+      .pipe(
+        Effect.mapError(() => NativeToolSubprocessError.make({ message: "Could not resolve workspace user home" })),
+      )).trim()
+    if (!workspaceHome.startsWith("/"))
+      return yield* NativeToolSubprocessError.make({ message: "Workspace user home must be an absolute path" })
     const executablePath = yield* Config.string("PATH").pipe(Config.withDefault("/usr/local/bin:/usr/bin:/bin"))
     const language = yield* Config.string("LANG").pipe(Config.withDefault("C.UTF-8"))
     const githubConfig = yield* Config.string("GH_CONFIG_DIR").pipe(Config.withDefault("/run/rika/gh"))
@@ -146,7 +153,7 @@ export const make = (options: Options) =>
               options.workspaceUser,
               "--",
               "env",
-              `HOME=/home/${options.workspaceUser}`,
+              `HOME=${workspaceHome}`,
               `PATH=${executablePath}`,
               "bun",
               "run",
@@ -163,7 +170,7 @@ export const make = (options: Options) =>
         child,
         socketPath,
         environment: {
-          HOME: `/home/${options.workspaceUser}`,
+          HOME: workspaceHome,
           PATH: executablePath,
           LANG: language,
           GH_CONFIG_DIR: githubConfig,

@@ -24,18 +24,33 @@ export class TranscriptVirtualDocument {
   private width = 0
   private indexValue: TranscriptVirtualIndex | undefined
 
+  clear(): void {
+    this.items = undefined
+    this.entries = undefined
+    this.blocks = undefined
+    this.expandedRowKeys = undefined
+    this.explicitlyCollapsedRowKeys = undefined
+    this.indexValue = undefined
+    this.width = 0
+  }
+
   itemAtRow(model: Model, row: number): number {
     return itemPositionAtVirtualRow(this.index(model), row)
   }
 
   metrics(input: TranscriptVirtualMetricsInput) {
     const { model } = input
-    if (model === undefined) return { scrollHeight: input.physicalScrollHeight, rowsAbove: 0 }
+    if (model === undefined) {
+      this.clear()
+      return { scrollHeight: input.physicalScrollHeight, rowsAbove: 0 }
+    }
     if (
       model.items.length === 0 ||
       (model.items.length <= maxMountedTranscriptEntries && input.bandRowsBefore === 0 && input.bandRowsAfter === 0)
-    )
+    ) {
+      this.clear()
       return { scrollHeight: input.physicalScrollHeight, rowsAbove: 0 }
+    }
     const index = this.index(model)
     const windowStartItem = Math.max(0, input.windowEnd - maxMountedTranscriptEntries)
     const estimatedStart = virtualRowOfItemPosition(index, windowStartItem)

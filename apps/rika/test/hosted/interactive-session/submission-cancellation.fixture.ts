@@ -12,6 +12,59 @@ import * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import * as H from "./harness"
 
+it.effect("cancels the exact submitted command after its admission event has reconciled the provisional identity", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const harness = H.makeHarness((socket, message) => {
+        if (message.command._tag === "AttachThread") {
+          socket.frame(H.fixtures.attached(message, H.fixtures.snapshot("thread-1", 0)))
+          return
+        }
+        if (message.command._tag === "SubmitPrompt" || message.command._tag === "Cancel")
+          socket.frame({
+            _tag: "CommandAdmitted",
+            requestId: message.requestId,
+            commandId: message.command.commandId,
+            threadId: message.command.threadId,
+            threadVersion: ThreadVersion.make("1"),
+          })
+      })
+      let admissionDelivered = false
+      const hosted = yield* H.runSession(harness, (event) => {
+        if (event._tag === "SubmissionAdmitted") admissionDelivered = true
+      })
+      yield* hosted.session.submit("first prompt", undefined, [], undefined, "submission-admitted")
+      const submitted = harness.messages.find((message) => message.command._tag === "SubmitPrompt")!
+      if (submitted.command._tag !== "SubmitPrompt") return yield* Effect.die("Expected a submitted prompt")
+      harness.sockets[0]!.frame({
+        _tag: "ThreadEvent",
+        event: {
+          ...H.fixtures.event("thread-1", "1"),
+          event: {
+            _tag: "SubmissionAdmitted",
+            threadId: Thread.ThreadId.make("thread-1"),
+            turnId: Turn.TurnId.make("turn-admitted"),
+            status: "active",
+            submissionId: "submission-admitted",
+          },
+        },
+      })
+      yield* H.eventually(() => admissionDelivered)
+      // A newer prompt must not become the fallback target of a cancellation for the first one.
+      yield* hosted.session.submit("second prompt", undefined, [], undefined, "submission-newer")
+      yield* hosted.session.cancel({ threadId: "thread-1", submissionId: "submission-admitted" })
+      yield* hosted.session.cancel({ threadId: "thread-1", submissionId: "submission-admitted" })
+      const cancels = harness.messages.filter((message) => message.command._tag === "Cancel")
+      expect(cancels).toHaveLength(2)
+      for (const cancel of cancels)
+        expect(cancel.command).toMatchObject({
+          target: { _tag: "Command", commandId: submitted.command.commandId },
+        })
+      yield* hosted.session.quit
+    }),
+  ),
+)
+
 it.effect("releases a submission identity interrupted before any connection can send it", () =>
   Effect.scoped(
     Effect.gen(function* () {

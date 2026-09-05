@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "generalist"
+
 import * as NativeTools from "../../../src/tool/registry"
 import { ExecutableRegistration } from "generalist/runtime"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
@@ -161,8 +162,8 @@ it.effect("keeps one finite recursive profile registry for every configured dept
       })
       const root = agentEntries(configured).find(({ pin }) => pin === configured.executable.ref.active)!
       expect(root.manifest.children).toHaveLength(conversationalProfiles.length)
-      expect(root.manifest.budget.childRuns).toBeUndefined()
-      expect(root.manifest.budget.depth).toBeUndefined()
+      expect(root.manifest.budget.children).toBeUndefined()
+      expect(root.manifest.budget).toEqual({})
       expect(configured.profiles.Task!.manifest.children).toEqual(root.manifest.children)
       expect(configured.executable.manifest.profiles).toHaveLength(conversationalProfiles.length)
       expect(configured.executable.manifest.entries).toHaveLength(1 + conversationalProfiles.length)
@@ -183,7 +184,7 @@ it.effect("leaves active-capacity gating to the pinned runtime tree policy", () 
     const root = agentEntries(configured).find(({ pin }) => pin === configured.executable.ref.active)!
     expect(root.manifest.children).toHaveLength(conversationalProfiles.length)
     expect(root.manifest.tools.map(({ name }) => name)).toEqual(nativeToolNames)
-    expect(root.manifest.budget.childRuns).toBeUndefined()
+    expect(root.manifest.budget.children).toBeUndefined()
     expect(configured.executable.manifest.entries).toHaveLength(1 + conversationalProfiles.length)
     expect(configured.resolverEntries).toHaveLength(2 + conversationalProfiles.length)
   }),

@@ -18,8 +18,19 @@ const time = (model: Model, now: number): string =>
   model.usageTime?._tag === "Available" ? formatActiveTime(activeTimeAt(model.usageTime, now)) : `${activeTimeIcon} —`
 const cached = (model: Model): string => {
   const context = model.contextUsage
-  if (context?._tag !== "Available" || context.inputTotal === 0) return "—"
-  return `${Math.round((context.inputCacheRead / context.inputTotal) * 100)}%`
+  if (
+    context?._tag !== "Available" ||
+    context.inputTotal === undefined ||
+    context.inputTotal <= 0 ||
+    context.inputCacheRead === undefined
+  )
+    return "—"
+  const reuse = `${Math.round((context.inputCacheRead / context.inputTotal) * 100)}%`
+  return context.cacheReportedAttempts !== undefined &&
+    context.cacheTotalAttempts !== undefined &&
+    context.cacheReportedAttempts < context.cacheTotalAttempts
+    ? `${reuse} · ${context.cacheReportedAttempts}/${context.cacheTotalAttempts} calls reported`
+    : reuse
 }
 
 type DetailLine = (text?: string, style?: (value: string) => TextChunk) => void

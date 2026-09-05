@@ -17,6 +17,7 @@ export const fakeProduct = (overrides: Partial<HostedProductService> = {}): Host
   cancelAuthorizedRunAdmission: () => Effect.die("unused"),
   authorizeOwner: () => Effect.die("unused"),
   authorizeReadOwner: () => Effect.die("unused"),
+  authorizeThreadList: () => Effect.die("unused"),
   authorizeReadThread: () => Effect.die("unused"),
   authorizeThread: () => Effect.die("unused"),
   threadExecutionContext: () => Effect.die("unused"),

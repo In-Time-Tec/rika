@@ -13,6 +13,7 @@ export class RepositoryError extends Schema.TaggedError<RepositoryError>()("Thre
 }) {}
 
 export interface ListInput {
+  readonly projectId?: string
   readonly includeArchived?: boolean
   readonly limit?: number
 }
@@ -61,6 +62,8 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
   const readAt = yield* Ref.make(new Map<ThreadId, number>())
 
   const list = Effect.fn("ThreadSummaryRepository.list")(function* (input: ListInput = {}) {
+    // The local in-memory repository has no hosted Project associations.
+    if (input.projectId !== undefined) return []
     const threadValues = yield* threads
       .list({ includeArchived: true, limit: 100 })
       .pipe(Effect.mapError((error) => RepositoryError.make({ message: String(error) })))

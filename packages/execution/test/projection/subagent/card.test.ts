@@ -1,7 +1,7 @@
 import "./card-lifecycle.fixture"
 import "./card-group.fixture"
 import { describe, expect, it } from "@effect/vitest"
-import { Prompt, Response } from "generalist"
+import { Prompt, Response } from "effect/unstable/ai"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"

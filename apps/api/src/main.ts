@@ -2,7 +2,7 @@ import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
-import { Console, Context, Effect, Layer, Redacted } from "effect"
+import { Context, Effect, Layer, Logger, Redacted } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
   closePostgresPool,
@@ -98,9 +98,13 @@ const program = Effect.scoped(
       config,
       dependencies,
     })
-    yield* Console.log(`Rika API listening on port ${config.port}`)
+    yield* Effect.logInfo("api.listening").pipe(Effect.annotateLogs({ "rika.server.port": config.port }))
     return yield* Effect.never
   }),
 )
 
-BunRuntime.runMain(program.pipe(Effect.provide(Layer.merge(FetchHttpClient.layer, BunCrypto.layer))))
+BunRuntime.runMain(
+  program.pipe(
+    Effect.provide(Layer.mergeAll(FetchHttpClient.layer, BunCrypto.layer, Logger.layer([Logger.consoleJson]))),
+  ),
+)

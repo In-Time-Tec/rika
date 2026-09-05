@@ -13,6 +13,7 @@ import {
   FileSystem,
   Layer,
   Queue,
+  Random,
   Ref,
   Schema,
   Semaphore,
@@ -42,6 +43,17 @@ const encodeRunnerMessage = Schema.encodeSync(Schema.fromJsonString(RunnerMessag
 const localCapabilities = { nativeTools: true, checkpoints: false, pty: false } as const
 const initialCursors: ResumeCursors = { command: 0, event: 0, pty: 0 }
 
+const socketFailure = (error: Socket.SocketError | ForegroundRunnerError) => {
+  if (Schema.is(ForegroundRunnerError)(error)) return error
+  const reason = error.reason
+  if (reason._tag === "SocketCloseError")
+    return failure(
+      `Runner controller connection closed (${reason.code})`,
+      reason.code !== 1002 && reason.code !== 1003 && reason.code !== 1008,
+    )
+  return failure("Runner controller connection failed")
+}
+
 const isOperationMessage = (message: IncomingMessage): message is Parameters<Operations.Interface["dispatch"]>[0] =>
   message._tag === "MachineExecute" || message._tag === "MachineCancel"
 
@@ -56,7 +68,7 @@ const consumeApi = (
     yield* runnerEvent("runner.message.received", messageCorrelation(message))
     if (message._tag === "Fenced") {
       yield* runnerWarning("runner.fenced", messageCorrelation(message))
-      return yield* failure(message.message)
+      return yield* failure(message.message, false)
     }
     if (message._tag === "LeaseReceipt") yield* applyLeaseReceipt(message, session, persist)
     if (isOperationMessage(message))
@@ -77,6 +89,7 @@ const connected = (
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
+  onConnected: (at: number) => void,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -123,7 +136,7 @@ const connected = (
         .runString(
           (frame) =>
             decodeApiMessage(frame).pipe(
-              Effect.mapError(() => failure("Controller sent an invalid Runner frame")),
+              Effect.mapError(() => failure("Controller sent an invalid Runner frame", false)),
               Effect.flatMap((message) => Queue.offer(incoming, message)),
             ),
           { onOpen },
@@ -134,8 +147,8 @@ const connected = (
           ? yield* Effect.raceFirst(
               Deferred.await(handshakeResult).pipe(Effect.andThen(waitForWelcome(incoming, processIncarnation))),
               Fiber.join(reader).pipe(
+                Effect.mapError(socketFailure),
                 Effect.flatMap(() => failure("Runner controller connection closed before welcome")),
-                Effect.catch(() => failure("Runner controller connection failed before welcome")),
               ),
             ).pipe(
               Effect.timeoutOrElse({
@@ -148,8 +161,8 @@ const connected = (
                 Effect.andThen(waitForReconnect(incoming, previous, processIncarnation)),
               ),
               Fiber.join(reader).pipe(
+                Effect.mapError(socketFailure),
                 Effect.flatMap(() => failure("Runner controller connection closed before reconnect")),
-                Effect.catch(() => failure("Runner controller connection failed before reconnect")),
               ),
             ).pipe(
               Effect.timeoutOrElse({
@@ -159,6 +172,7 @@ const connected = (
             )
       yield* Ref.set(sessions, session)
       yield* Ref.set(activeWriter, writer)
+      onConnected(yield* Clock.currentTimeMillis)
       yield* runnerEvent(previous === undefined ? "runner.socket.welcome" : "runner.socket.reconnected", {})
       yield* persist()
       if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
@@ -185,7 +199,7 @@ const connected = (
         if (current === undefined) return yield* failure("Runner session is unavailable")
         const now = yield* Clock.currentTimeMillis
         const delay = current.leaseExpiresAt - current.heartbeatIntervalMillis - now
-        if (delay <= 0) return yield* failure("Runner controller stopped renewing the executor lease")
+        if (delay <= 0) return yield* failure("Runner controller stopped renewing the executor lease", false)
         yield* Effect.sleep(delay)
       }).pipe(
         Effect.forever,
@@ -194,7 +208,8 @@ const connected = (
       return yield* Effect.raceFirst(
         Fiber.join(reader).pipe(
           Effect.tapError(() => runnerWarning("runner.socket.closed", {})),
-          Effect.mapError(() => failure("Runner controller connection closed")),
+          Effect.mapError(socketFailure),
+          Effect.flatMap(() => failure("Runner controller connection closed")),
         ),
         Effect.raceFirst(
           consumeApi(incoming, sessions, operations, persist),
@@ -334,6 +349,8 @@ export const runForegroundRunner = (
         nativeTools: true,
         pty: false,
       })
+      let failedAttempts = 0
+      let connectedAt: number | undefined
       const connection = connected(
         options,
         url,
@@ -343,14 +360,24 @@ export const runForegroundRunner = (
         activeWriter,
         operations,
         persist,
+        (at) => {
+          connectedAt = at
+        },
       ).pipe(
         Effect.catch((error: ForegroundRunnerError) =>
           Effect.gen(function* () {
-            if ((yield* Ref.get(sessions)) === undefined) return yield* error
+            if (error.retryable === false || (yield* Ref.get(sessions)) === undefined) return yield* error
+            const now = yield* Clock.currentTimeMillis
+            if (connectedAt !== undefined && now - connectedAt >= 30_000) failedAttempts = 0
+            connectedAt = undefined
+            const ceiling = Math.min(30_000, 250 * 2 ** Math.min(failedAttempts++, 7))
+            const delay = Math.round(ceiling * (0.75 + (yield* Random.next) * 0.25))
             yield* runnerWarning("runner.socket.reconnecting", {
               "rika.outcome": consumeFailureKind(error.message),
+              "rika.reconnect.delay.ms": delay,
+              "rika.reconnect.attempt": failedAttempts,
             })
-            yield* Effect.sleep("250 millis")
+            yield* Effect.sleep(delay)
           }),
         ),
       )

@@ -1,5 +1,5 @@
 import { OpenAiClient as OpenAIClient, OpenAiSchema as OpenAISchema } from "@effect/ai-openai"
-import * as OpenAi from "generalist/ai/openai"
+import * as OpenAi from "generalist/providers/openai"
 import type * as OpenAiAuthContract from "@rika/product/openai-auth-contract"
 import type * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Effect, Function, Layer, Redacted, Schema, Stream } from "effect"

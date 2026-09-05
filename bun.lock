@@ -70,7 +70,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.12.8",
+      "version": "0.12.9",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -343,6 +343,10 @@
   "trustedDependencies": [
     "@ast-grep/cli",
   ],
+  "patchedDependencies": {
+    "generalist@0.61.0": "patches/generalist@0.61.0.patch",
+    "@effect/sql-pg@4.0.0-rc.112": "patches/@effect%2Fsql-pg@4.0.0-rc.112.patch",
+  },
   "overrides": {
     "@effect/sql-d1": "4.0.0-rc.112",
     "@effect/sql-sqlite-do": "4.0.0-rc.112",
@@ -395,7 +399,7 @@
     "e2b": "2.41.0",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.148.2",
-    "generalist": "0.46.1",
+    "generalist": "0.61.0",
     "happy-dom": "20.10.6",
     "jose": "6.2.9",
     "marked": "17.0.1",
@@ -1448,7 +1452,7 @@
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
 
-    "generalist": ["generalist@0.46.1", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-mysql2": "4.0.0-rc.112", "@effect/sql-pg": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/sql-sqlite-do": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "pg": "8.23.0", "rivetkit": "2.3.10", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-mysql2", "@effect/sql-pg", "@effect/sql-sqlite-bun", "@effect/sql-sqlite-do", "@effect/vitest", "@modelcontextprotocol/sdk", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "pg", "rivetkit", "vitest"] }, "sha512-CY91vkGlD+EjdlZKenA5qOidJ9QbDMtGgoyz7PQbocT1hNW1jwYxNfE735RrdXaY54+ApiTWnn/5Gf8RF8zn2g=="],
+    "generalist": ["generalist@0.61.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/sql-mysql2": "4.0.0-rc.112", "@effect/sql-pg": "4.0.0-rc.112", "@effect/sql-sqlite-bun": "4.0.0-rc.112", "@effect/sql-sqlite-do": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@rivet-dev/agentos": "0.2.19", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "modal": "0.10.0", "rivetkit": "2.3.10", "vitest": "4.1.11" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/sql-mysql2", "@effect/sql-pg", "@effect/sql-sqlite-bun", "@effect/sql-sqlite-do", "@effect/vitest", "@modelcontextprotocol/sdk", "@rivet-dev/agentos", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "modal", "rivetkit", "vitest"] }, "sha512-s9xCYWlfYWT5mR9CUOCfmuVqsK2NGtUbJmjWEPfcgoz2U4sr8C6UJssrx0Ktvea1x/LnEGHy55MOVsq586goZQ=="],
 
     "get-caller-file": ["get-caller-file@2.0.5", "", {}, "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg=="],
 

@@ -7,6 +7,7 @@ import {
   SkillRegistryError,
 } from "./registry-model"
 import { SkillCatalog } from "generalist"
+
 import { FileSystemCatalog } from "generalist/instructions/skills"
 import { Crypto, Effect, Encoding, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { SkillFileSystem } from "./file-system"

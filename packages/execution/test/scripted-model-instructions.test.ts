@@ -87,15 +87,7 @@ it.effect("gives every conversational agent the native inspect-edit-run contract
   ),
 )
 
-const budgetDimensions = [
-  "modelCalls",
-  "toolCalls",
-  "totalTokens",
-  "childRuns",
-  "handoffs",
-  "depth",
-  "deadline",
-] as const
+const budgetDimensions = ["tokens", "usd", "duration", "toolCalls", "children"] as const
 
 it.effect(
   "resolves every live agent with an unlimited budget so the execution host can never substitute a ceiling",

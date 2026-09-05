@@ -389,6 +389,7 @@ it.effect("reloads the committed checkpoint when another projector makes a chang
     const commits = new Array<ExecutionProjection.Change>()
     const delivered = new Array<ExecutionProjection.Change>()
     const cursors = new Array<string | undefined>()
+    const revisions = new Array<number | undefined>()
     const owner = yield* make(
       TurnRepository.Service.of({ get: () => Effect.succeed(turn) }),
       TranscriptRepository.Service.of({
@@ -428,6 +429,7 @@ it.effect("reloads the committed checkpoint when another projector makes a chang
       ExecutionGateway.Service.of({
         watchTurn: (_link, input) => {
           cursors.push(input?.checkpoint?.cursor)
+          revisions.push(input?.revision)
           return Stream.succeed(input?.checkpoint?.cursor === "winner" ? completed : running)
         },
         inspectTurn: () => Effect.succeed({ status: "completed" as const, cursor: "completed" }),
@@ -442,6 +444,7 @@ it.effect("reloads the committed checkpoint when another projector makes a chang
     const result = yield* Fiber.join(fiber)
 
     expect(cursors).toEqual([undefined, "winner"])
+    expect(revisions).toEqual([0, 1])
     expect(commits).toEqual([running, completed])
     expect(delivered).toEqual([completed])
     expect(result).toMatchObject({

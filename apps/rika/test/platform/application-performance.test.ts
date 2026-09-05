@@ -4,6 +4,17 @@ import { clientRuntime, matchesClientProcess } from "../../src/platform/performa
 import { observedClientRow, processSubtreeRss, type PsRow } from "../../src/platform/process-table"
 
 describe("performance process observation", () => {
+  test("does not mistake a PTY or shell wrapper for the source client", () => {
+    const runtime = clientRuntime({ packaged: false, executable: "/bin/bun", sourceDirectory: "/repo/apps/rika/src" })
+    expect(matchesClientProcess({ command: "/bin/bun /repo/apps/rika/src/client-main.ts", runtime })).toBe(true)
+    expect(
+      matchesClientProcess({ command: "/bin/sh -c exec /bin/bun /repo/apps/rika/src/client-main.ts", runtime }),
+    ).toBe(false)
+    expect(
+      matchesClientProcess({ command: "script -q /dev/null /bin/bun /repo/apps/rika/src/client-main.ts", runtime }),
+    ).toBe(false)
+  })
+
   test("locates the source client entrypoint", () => {
     const runtime = clientRuntime({
       packaged: false,

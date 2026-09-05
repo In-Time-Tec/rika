@@ -7,6 +7,7 @@ import { Effect, Layer, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import type { Capability } from "@rika/extensions/mcp-capability-contract"
 import { ToolExecutor } from "generalist"
+
 import * as ProcessRegistry from "./process-registry"
 import { toolkit } from "./registry"
 import { layerWithProcessRegistry } from "./runtime"

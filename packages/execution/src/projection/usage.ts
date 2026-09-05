@@ -161,6 +161,19 @@ export const makeUsageAccounting = (pricing: "included" | "metered" = "metered")
       seen.add(key)
       const totals = factTotals(fact)
       addFactTokens(next, totals)
+      if (totals.inputTotal !== undefined && totals.inputCacheRead !== undefined) {
+        Object.assign(next, {
+          cache: Projection.sumCacheUsage([
+            ...(next.cache === undefined ? [] : [next.cache]),
+            {
+              reportedAttempts: 1,
+              hitAttempts: totals.inputCacheRead > 0 ? 1 : 0,
+              inputTokens: totals.inputTotal,
+              readTokens: totals.inputCacheRead,
+            },
+          ]),
+        })
+      }
       accountFact(next, fact, totals.attemptTotal, pricing)
       const candidate = contextFrom(rootRunId, fact, totals.inputTotal)
       if (candidate !== undefined && (context === undefined || candidate.requestOrdinal >= context.requestOrdinal))

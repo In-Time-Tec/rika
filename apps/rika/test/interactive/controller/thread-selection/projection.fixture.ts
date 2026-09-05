@@ -169,6 +169,7 @@ describe("interactive ThreadView controller", () => {
         usage: {
           state: {
             costNanoUsd: 375_000_000,
+            cache: { reportedAttempts: 2, hitAttempts: 1, inputTokens: 25, readTokens: 5 },
             tokens: {
               total: 42,
               input: { total: 30, cacheRead: 5 },

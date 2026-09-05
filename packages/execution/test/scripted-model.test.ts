@@ -1,6 +1,7 @@
 import "./support/root-fragments/scripted-model-policy.fixture"
 import { expect, it } from "@effect/vitest"
 import { ExecutableManifest } from "generalist"
+
 import * as NativeTools from "../src/tool/registry"
 import { ExecutableRegistration } from "generalist/runtime"
 import * as Settings from "@rika/configuration/configuration-settings"
@@ -302,7 +303,7 @@ it.effect("never pins a routed token budget into an Agent manifest", () =>
     })
     expect(
       executable.executable.manifest.entries.every(
-        (entry) => entry._tag !== "Agent" || entry.manifest.budget.totalTokens === undefined,
+        (entry) => entry._tag !== "Agent" || entry.manifest.budget.tokens === undefined,
       ),
     ).toBe(true)
   }),

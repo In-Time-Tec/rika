@@ -174,7 +174,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     setParticipants,
     settlePromptActivity,
     commitSnapshot,
-    reconcileSubmission: (threadId, submissionId) => commands.reconcileSubmission(threadId, submissionId),
+    reconcileSubmission: (threadId, submissionId, admitted) =>
+      commands.reconcileSubmission(threadId, submissionId, admitted),
     acknowledge,
     threadCursors,
     failure,

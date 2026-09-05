@@ -201,21 +201,21 @@ test("repeated short commands release supervisor pipes and report cleanup overhe
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         yield* Effect.gen(function* () {
           const registry = yield* ProcessRegistry.Service
-          const warmup = yield* registry.start("/bin/true", [], process.cwd())
+          const warmup = yield* registry.start("true", [], process.cwd())
           yield* registry.poll(warmup, 2_000, 100)
           const descriptors = process.platform === "linux" ? readdirSync("/proc/self/fd").length : undefined
           const directTimes: Array<number> = []
           for (let index = 0; index < 20; index++) {
             const start = yield* Clock.currentTimeMillis
             yield* Effect.scoped(
-              spawner.spawn(ChildProcess.make("/bin/true")).pipe(Effect.flatMap((handle) => handle.exitCode)),
+              spawner.spawn(ChildProcess.make("true")).pipe(Effect.flatMap((handle) => handle.exitCode)),
             )
             directTimes.push((yield* Clock.currentTimeMillis) - start)
           }
           const supervisedTimes: Array<number> = []
           for (let index = 0; index < 20; index++) {
             const start = yield* Clock.currentTimeMillis
-            const id = yield* registry.start("/bin/true", [], process.cwd())
+            const id = yield* registry.start("true", [], process.cwd())
             expect(yield* registry.poll(id, 2_000, 100)).toMatchObject({ running: false, exitCode: 0 })
             supervisedTimes.push((yield* Clock.currentTimeMillis) - start)
           }
@@ -244,7 +244,7 @@ test("reports a missing executable as shell status 127 while invalid cwd remains
         const registry = yield* ProcessRegistry.Service
         const id = yield* registry.start("/rika-does-not-exist/command", [], process.cwd())
         expect(yield* registry.poll(id, 2_000, 1_000)).toMatchObject({ running: false, exitCode: 127 })
-        expect(yield* Effect.result(registry.start("/bin/true", [], "/rika-does-not-exist/workspace"))).toMatchObject({
+        expect(yield* Effect.result(registry.start("true", [], "/rika-does-not-exist/workspace"))).toMatchObject({
           _tag: "Failure",
           failure: { _tag: "PlatformError" },
         })

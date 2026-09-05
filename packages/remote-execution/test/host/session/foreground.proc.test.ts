@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
-import { Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
 import { foregroundRunnerLayer, runForegroundRunner } from "../../../src/host/session/foreground"
 import {
   ApiMessage,
@@ -18,6 +18,7 @@ const hasTag =
 
 class FakeWebSocket {
   static current: FakeWebSocket | undefined
+  static instances: Array<FakeWebSocket> = []
   readonly readyState = 1
   readonly sent: Array<RunnerMessageValue> = []
   closed = false
@@ -25,6 +26,7 @@ class FakeWebSocket {
 
   constructor(_url: string) {
     FakeWebSocket.current = this
+    FakeWebSocket.instances.push(this)
   }
 
   addEventListener(type: string, listener: EventListener) {
@@ -82,6 +84,79 @@ const machineResult = (socket: FakeWebSocket, machineId: string, occurrence = 0)
   eventually(() => socket.messages("MachineResult").filter((message) => message.machineId === machineId)[occurrence])
 
 describe("foreground Runner", { concurrent: false }, () => {
+  for (const rejection of ["policy-close", "fenced", "transient"] as const)
+    it.live(`handles ${rejection} during reconnect without a tight retry loop`, () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const original = globalThis.WebSocket
+          FakeWebSocket.current = undefined
+          FakeWebSocket.instances = []
+          Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: FakeWebSocket, writable: true })
+          return original
+        }),
+        () =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const context = yield* Layer.build(foregroundRunnerLayer)
+              const fileSystem = yield* FileSystem.FileSystem
+              const workspacePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-reconnect-" })
+              const runner = yield* runForegroundRunner({
+                workspacePath,
+                resume: {
+                  version: 1,
+                  workspaceIdentity: "reconnect-workspace",
+                  executorUrl: "wss://controller.example.test/api/v1/runners",
+                  access: {
+                    version: 1,
+                    fence: {
+                      target: "runner",
+                      assignmentId: "assignment-1",
+                      assignmentGeneration: 1,
+                      instanceId: "device-1",
+                      executorId: "executor-1",
+                      processIncarnation: "incarnation-1",
+                    },
+                    leaseEpoch: 1,
+                    sessionToken: "session-1",
+                  },
+                  leaseExpiresAt: 9_999_999_999_999,
+                  heartbeatIntervalMillis: 60_000,
+                  cursor: { sequence: 0, value: "" },
+                  machines: [],
+                },
+              }).pipe(Effect.provide(context), Effect.forkScoped)
+              const created: Array<number> = []
+              const attempts = rejection === "transient" ? 4 : 1
+              for (let attempt = 0; attempt < attempts; attempt++) {
+                const socket = yield* eventually(() => FakeWebSocket.instances[attempt])
+                const reconnect = yield* eventually(() => socket.messages("ExecutorReconnect")[0])
+                created.push(yield* Clock.currentTimeMillis)
+                if (rejection === "fenced")
+                  socket.message({ _tag: "Fenced", fence: reconnect.access.fence, message: "assignment replaced" })
+                else socket.emit("close", new CloseEvent("close", { code: rejection === "policy-close" ? 1008 : 1006 }))
+              }
+              if (rejection === "transient") {
+                expect(created[1]! - created[0]!).toBeGreaterThanOrEqual(170)
+                expect(created[2]! - created[1]!).toBeGreaterThanOrEqual(350)
+                expect(created[3]! - created[2]!).toBeGreaterThanOrEqual(700)
+                yield* Fiber.interrupt(runner)
+              } else {
+                const exit = yield* Fiber.await(runner).pipe(Effect.timeout("1 second"))
+                expect(exit._tag).toBe("Failure")
+                yield* Effect.sleep("350 millis")
+                expect(FakeWebSocket.instances).toHaveLength(1)
+              }
+            }),
+          ).pipe(provideLayer(BunFileSystem.layer)),
+        (original) =>
+          Effect.sync(() => {
+            Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original, writable: true })
+            FakeWebSocket.current = undefined
+            FakeWebSocket.instances = []
+          }),
+      ),
+    )
+
   it.live("bounds waiting for a missing Runner message", () =>
     Effect.gen(function* () {
       const result = yield* Effect.result(eventually(() => undefined))

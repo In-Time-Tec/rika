@@ -33,11 +33,6 @@ const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
 const ephemeral = Flag.boolean("ephemeral").pipe(Flag.withDefault(false))
 const prompt = Argument.variadic(Argument.string("prompt"))
-const streamFlags = {
-  streamJson: Flag.boolean("stream-json").pipe(Flag.withDefault(false)),
-  streamJsonInput: Flag.boolean("stream-json-input").pipe(Flag.withDefault(false)),
-  streamJsonThinking: Flag.boolean("stream-json-thinking").pipe(Flag.withDefault(false)),
-}
 const optionalValue = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value)
 
 const updateCommand = Command.make("update", {}, () =>
@@ -97,7 +92,6 @@ export const command = Command.make(
     noTui: Flag.boolean("no-tui").pipe(Flag.withDefault(false)),
     allowRemoteThreadCreation: Flag.boolean("allow-remote-thread-creation").pipe(Flag.withDefault(false)),
     denyRemoteThreadCreation: Flag.boolean("deny-remote-thread-creation").pipe(Flag.withDefault(false)),
-    ...streamFlags,
     prompt,
   },
   (values): Effect.Effect<void, CliError.UserError, FileSystem.FileSystem | CliOperationService | Stdio.Stdio> => {
@@ -122,13 +116,6 @@ export const command = Command.make(
       return RunnerCommand.dispatch({ workspace: optionalValue(values.workspace), remoteThreadCreation })
     }
     if (values.execute) return executeRun(values)
-    if (values.streamJson || values.streamJsonInput || values.streamJsonThinking)
-      return Effect.fail(
-        CliError.UserError.make({
-          cause: "Stream flags require non-interactive execution",
-          userMessage: "stream flags require --execute or the run command",
-        }),
-      )
     return interactiveCommand(values)
   },
 ).pipe(

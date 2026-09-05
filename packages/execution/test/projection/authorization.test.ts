@@ -1,6 +1,8 @@
 import { expect, it } from "@effect/vitest"
-import { ModelRegistry, Response as AiResponse } from "generalist"
-import { TestModel } from "generalist/test"
+import { ModelRegistry } from "generalist"
+import { Response as AiResponse } from "effect/unstable/ai"
+
+import { TestModel } from "generalist/testing"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"

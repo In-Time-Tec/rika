@@ -2,13 +2,12 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { OperationUnavailable } from "@rika/product/product-operation"
 import { Service } from "@rika/product/product-operation-service"
 import type { Input as ProductInput } from "@rika/product/product-operation"
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Scope, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Scope } from "effect"
 import { TestConsole } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect, it } from "@effect/vitest"
 import { run as runClient } from "../../../src/client/process"
 import { clientProcessExitCode } from "../../../src/client/process-exit"
-import { parseJsonLines, readStreamInput } from "../../../src/command/root/noninteractive"
 import { run } from "../../../src/command/root/rika"
 import * as HostedCommand from "../../../src/command/root/hosted"
 import * as RunnerCommand from "../../../src/command/root/runner"
@@ -101,39 +100,8 @@ it.effect("dispatches native review to hosted execution, not a substituted ordin
   }),
 )
 
-it("parses JSONL prompt input and reports malformed physical source lines", () => {
-  expect(parseJsonLines('\n"one"\n  \n{"prompt":"two"}\n')).toEqual(["one", "two"])
-  expect(() => parseJsonLines('\n"one"\n  \nnot-json\n')).toThrow("Invalid JSON on stdin line 4")
-  expect(() => parseJsonLines("\n\n42")).toThrow("JSON on stdin line 3 must be a string or prompt object")
-})
-
-const streamInput = (prompt: ReadonlyArray<string> = []) => ({
-  _tag: "Run" as const,
-  prompt,
-  ephemeral: false,
-  streamJson: true,
-  streamJsonInput: true,
-  streamJsonThinking: false,
-})
-
-const validChunks = () => Stream.toAsyncIterable(Stream.make('"one"\n', '{"prompt":"two"}\n'))
-
-it.effect("reads valid, invalid, and empty JSONL stream input", () =>
+it.effect("maps dispatch failures", () =>
   Effect.gen(function* () {
-    expect((yield* readStreamInput(streamInput(), validChunks())).prompt).toEqual(["one", "two"])
-    expect((yield* readStreamInput(streamInput(), Stream.toAsyncIterable(Stream.empty))).prompt).toEqual([])
-    expect(
-      (yield* Effect.result(readStreamInput(streamInput(), Stream.toAsyncIterable(Stream.make("bad")))))._tag,
-    ).toBe("Failure")
-    expect((yield* readStreamInput(streamInput(["existing"]), validChunks())).prompt).toEqual(["existing"])
-  }),
-)
-
-it.effect("maps stdin failures and dispatch failures", () =>
-  Effect.gen(function* () {
-    const broken = Stream.toAsyncIterable(Stream.fail(new Error("stdin unavailable")))
-    const read = yield* Effect.result(readStreamInput(streamInput(), broken))
-    expect(read._tag === "Failure" && read.failure.message).toContain("Unable to read JSON input")
     const layer = Layer.mergeAll(
       BunServices.layer,
       FetchHttpClient.layer,

@@ -45,6 +45,7 @@ it.effect("admits authorization decisions without applying them in the socket se
     createConnection: () => Effect.die("unused"),
     authorizeOwner: () => Effect.die("unused"),
     authorizeReadOwner: () => Effect.die("unused"),
+    authorizeThreadList: () => Effect.die("unused"),
     authorizeReadThread: () => Effect.die("unused"),
     authorizeThread: () => Effect.succeed({ ownerId, actor }),
     threadExecutionContext: () =>

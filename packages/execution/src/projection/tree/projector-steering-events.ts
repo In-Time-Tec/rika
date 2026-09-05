@@ -12,11 +12,60 @@ const noOpTags = new Set([
   "FanOutAdmitted",
   "FanOutJoined",
   "ChildReadinessChanged",
+  // These facts accompany RunWaiting/RunResumed or describe execution metadata,
+  // without adding transcript content or changing the Run lifecycle themselves.
+  "Awaiting",
+  "Duplicate",
+  "TimedOut",
+  "WakeReceived",
+  "BudgetExtended",
+  "Rewarded",
 ])
+
+const handleExecutionNotice: ProjectorEventHandler = (context, treeEvent, node) => {
+  const event = treeEvent.event
+  switch (event._tag) {
+    case "GateResult":
+      if (event.verdict === "fail")
+        context.diagnostics.notice(node, "completion-gate", "Completion check failed", event.name, event.eventId)
+      return true
+    case "BudgetSuspended":
+      context.usage.deactivate(node, event, "waiting")
+      node.status = "waiting"
+      if (node.parentRawRunId === undefined) context.core.rootStatus = "waiting"
+      context.diagnostics.notice(
+        node,
+        "budget",
+        "Execution budget reached",
+        `Waiting for an increase to the ${event.budget} budget.`,
+        event.eventId,
+      )
+      return true
+    case "Substituted":
+      context.diagnostics.notice(
+        node,
+        "operation",
+        "Operation result replaced",
+        `The fork uses a supplied result for operation ${event.operationId}.`,
+        event.eventId,
+      )
+      return true
+    default:
+      return false
+  }
+}
 
 const handleSteeringNoopEvent: ProjectorEventHandler = (context, treeEvent, node) => {
   const event = treeEvent.event
   switch (event._tag) {
+    case "Inbox":
+      context.steering.accept(treeEvent.runId, {
+        entryId: event.entryId,
+        idempotencyKey: event.idempotencyKey,
+        prompt: event.message,
+        steeringSequence: event.inboxSequence,
+      })
+      return true
     case "SteeringAccepted":
       context.steering.accept(treeEvent.runId, event)
       return true
@@ -44,6 +93,9 @@ const handleSteeringNoopEvent: ProjectorEventHandler = (context, treeEvent, node
   }
 }
 
-export const SteeringNoopEvents = { handle: handleSteeringNoopEvent } satisfies {
+export const SteeringNoopEvents = {
+  handle: (context, event, node) =>
+    handleExecutionNotice(context, event, node) || handleSteeringNoopEvent(context, event, node),
+} satisfies {
   readonly handle: ProjectorEventHandler
 }

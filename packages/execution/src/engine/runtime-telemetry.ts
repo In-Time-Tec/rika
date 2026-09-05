@@ -13,7 +13,7 @@ export interface ModelTerminalObservation {
   readonly outcome: "success" | "failure" | "interrupted"
   readonly durationMillis: number
   readonly syntheticStart: boolean
-  readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number }
+  readonly usage?: HostedObservability.ModelUsage
 }
 
 const tokenTotal = (value: number | undefined) => {
@@ -34,10 +34,21 @@ const terminalUsage = (event: ModelTerminalEvent): ModelTerminalObservation["usa
   const outputTokens = tokenTotal(
     event._tag === "ModelAttemptCompleted" ? event.usage.outputTokens.total : event.providerUsage?.outputTokens,
   )
-  if (inputTokens !== undefined && outputTokens !== undefined) return { inputTokens, outputTokens }
-  if (inputTokens !== undefined) return { inputTokens }
-  if (outputTokens !== undefined) return { outputTokens }
-  return undefined
+  const cacheReadTokens = tokenTotal(
+    event._tag === "ModelAttemptCompleted" ? event.usage.inputTokens.cacheRead : undefined,
+  )
+  const cacheWriteTokens = tokenTotal(
+    event._tag === "ModelAttemptCompleted" ? event.usage.inputTokens.cacheWrite : undefined,
+  )
+  const uncachedTokens = tokenTotal(
+    event._tag === "ModelAttemptCompleted" ? event.usage.inputTokens.uncached : undefined,
+  )
+  const usage = Object.fromEntries(
+    Object.entries({ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, uncachedTokens }).filter(
+      ([, value]) => value !== undefined,
+    ),
+  )
+  return Object.keys(usage).length === 0 ? undefined : usage
 }
 
 export const makeModelTerminalTelemetry = (limit = 256) => {

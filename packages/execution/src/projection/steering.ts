@@ -4,11 +4,13 @@ import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { Node } from "./model"
 import { boundedInsert } from "./tree/nodes"
 
+type SteeringAdmission = Pick<RunEvent.SteeringAccepted, "entryId" | "idempotencyKey" | "prompt" | "steeringSequence">
+
 export interface SteeringProjection {
   readonly pending: Map<string, Projection.PendingSteering>
   readonly settled: Map<string, Projection.SteeringDisposition>
   readonly summary: (steeringMessages: number, followUpMessages: number) => Projection.SteeringSummary
-  readonly accept: (runId: string, event: RunEvent.SteeringAccepted) => void
+  readonly accept: (runId: string, event: SteeringAdmission) => void
   readonly consume: (runId: string, event: RunEvent.SteeringConsumed, node: Node) => void
   readonly discard: (runId: string, event: RunEvent.SteeringDiscarded) => void
 }
@@ -50,7 +52,7 @@ export const makeSteeringProjection = (input: {
     return steering
   }
 
-  const accept = (runId: string, event: RunEvent.SteeringAccepted) => {
+  const accept = (runId: string, event: SteeringAdmission) => {
     const text = event.prompt.content
       .flatMap((message) =>
         message.role === "user" ? message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])) : [],

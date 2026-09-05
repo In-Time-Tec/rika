@@ -50,6 +50,17 @@ export const interactiveSessionCommands = (dependencies: {
 }) => {
   const latestSubmitCommandIds = new Map<string, string>()
   const pendingSubmitCommandIds = new Map<string, Map<string, PendingSubmission>>()
+  // Admission events can reach this layer before the TUI removes its provisional draft.
+  // Retain exact sent identities for that race, including repeat cancellation receipts.
+  const sentSubmissionCommandIds = new Map<string, string>()
+  const submissionKey = (threadId: string, submissionId: string) => JSON.stringify([threadId, submissionId])
+  const rememberSentSubmission = (threadId: string, submissionId: string, commandId: string) => {
+    const key = submissionKey(threadId, submissionId)
+    sentSubmissionCommandIds.delete(key)
+    sentSubmissionCommandIds.set(key, commandId)
+    if (sentSubmissionCommandIds.size > 512)
+      sentSubmissionCommandIds.delete(sentSubmissionCommandIds.keys().next().value!)
+  }
   const unsupported = (operation: string, message = "This action is unavailable in the current Thread") =>
     Effect.fail(OperationUnavailable.make({ operation, message }))
   const pendingSubmission = (threadId: string, submissionId: string) => {
@@ -63,11 +74,12 @@ export const interactiveSessionCommands = (dependencies: {
     submissions.set(submissionId, created)
     return created
   }
-  const forgetSubmission = (threadId: string, submissionId: string) =>
+  const forgetSubmission = (threadId: string, submissionId: string, admitted = false) =>
     Effect.sync(() => {
       const submissions = pendingSubmitCommandIds.get(threadId)
       submissions?.delete(submissionId)
       if (submissions?.size === 0) pendingSubmitCommandIds.delete(threadId)
+      if (!admitted) sentSubmissionCommandIds.delete(submissionKey(threadId, submissionId))
     })
   const admittedOutcome = (outcome: CommandOutcome) =>
     outcome._tag === "CommandAdmitted" || outcome._tag === "CommandAccepted"
@@ -205,7 +217,11 @@ export const interactiveSessionCommands = (dependencies: {
       let targetCommandId = latestSubmitCommandIds.get(selectedThreadId)
       if (requested.submissionId !== undefined) {
         const pending = pendingSubmitCommandIds.get(selectedThreadId)?.get(requested.submissionId)
-        if (pending === undefined) return yield* unsupported("InteractiveSession.cancel")
+        if (pending === undefined) {
+          const sent = sentSubmissionCommandIds.get(submissionKey(selectedThreadId, requested.submissionId))
+          if (sent === undefined) return yield* unsupported("InteractiveSession.cancel")
+          return { _tag: "Command" as const, commandId: CommandId.make(sent) }
+        }
         targetCommandId = yield* Effect.raceFirst(
           Deferred.await(pending.commandId),
           Deferred.await(dependencies.closed).pipe(Effect.andThen(unsupported("InteractiveSession.cancel"))),
@@ -273,6 +289,7 @@ export const interactiveSessionCommands = (dependencies: {
             : Effect.sync(() => {
                 const pending = pendingSubmitCommandIds.get(selectedThreadId)?.get(submissionId)
                 if (pending !== undefined) pending.sending = true
+                rememberSentSubmission(selectedThreadId, submissionId, commandId)
               }),
           () => (submissionId === undefined ? Effect.void : forgetSubmission(selectedThreadId, submissionId)),
         ).pipe(
@@ -378,7 +395,8 @@ export const interactiveSessionCommands = (dependencies: {
           (threadId, version) => ({ _tag: "Cancel", ...versioned(commandId, threadId, version), target }),
           true,
         )
-        if (requested.submissionId !== undefined) yield* forgetSubmission(selectedThreadId, requested.submissionId)
+        if (requested.submissionId !== undefined)
+          yield* forgetSubmission(selectedThreadId, requested.submissionId, true)
       }),
   }
   const reconcilePendingSubmissions = (prepared: PreparedAttachment) =>
@@ -387,7 +405,11 @@ export const interactiveSessionCommands = (dependencies: {
         const value = event.event
         return (value._tag === "SubmissionAdmitted" || value._tag === "SubmissionRejected") &&
           value.submissionId !== undefined
-          ? forgetSubmission(String(prepared.attachment.threadId), value.submissionId)
+          ? forgetSubmission(
+              String(prepared.attachment.threadId),
+              value.submissionId,
+              value._tag === "SubmissionAdmitted",
+            )
           : Effect.void
       }).pipe(Effect.asVoid),
     )

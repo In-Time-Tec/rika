@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Prompt } from "generalist"
+import { Prompt } from "effect/unstable/ai"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 

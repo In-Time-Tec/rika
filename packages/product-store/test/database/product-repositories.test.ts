@@ -1,3 +1,6 @@
+import { applyMigrations } from "./product-repositories-migrations.fixture"
+import { assertProjectionRebaseAcrossStores } from "./product-repositories-projection.fixture"
+import "./product-repositories-cancellation.fixture"
 import * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import { OwnerId } from "@rika/product/hosted-model"
@@ -17,14 +20,10 @@ import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Pool } from "pg"
-import { identityMigrations } from "../../../identity/src/database/migrations"
-import { runMigration } from "../../../identity/src/database/postgres"
 import * as ProductRepositories from "../../src/database/product-repositories"
 import { transcriptSqlWrites } from "../../src/transcript/sql-writes"
-import { migrations } from "../../src/hosted/migrations"
 import { identityOrganization, identityUser } from "@rika/identity"
 import * as schema from "../../src/database/schema/product"
-import { readFileString } from "../hosted/assignments.support"
 import { expectLegacyUnitsSkipped } from "./legacy-units.harness"
 import { expectBoundedStructure } from "./transcript-window.harness"
 
@@ -48,16 +47,6 @@ const createTurn = (
     id: Turn.TurnId.make(input.id),
     queueCapacity: input.queueCapacity ?? 128,
     executionRoute: ExecutionRouteSnapshot.testExecutionRoute(),
-  })
-
-const applyMigrations = (url: string) =>
-  Effect.gen(function* () {
-    const pool = yield* Effect.sync(() => new Pool({ connectionString: url }))
-    for (const migration of [...identityMigrations, ...migrations]) {
-      const sql = yield* readFileString(migration.url)
-      yield* runMigration({ pool, id: migration.id, checksum: migration.checksum, sql })
-    }
-    return pool
   })
 
 const repositoryLayer = (url: string, ownerId: OwnerId) => {
@@ -304,6 +293,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           const firstUsage = {
             ...ExecutionProjection.emptyUsageState(),
             costNanoUsd: 10,
+            cache: { reportedAttempts: 1, hitAttempts: 1, inputTokens: 7, readTokens: 3 },
             tokens: { total: 11, input: { total: 7 }, output: { total: 4 } },
             pricedAttempts: 1,
             countedAttempts: 1,
@@ -437,6 +427,8 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
             units: [{ key, content: { text: "reprojected" } }],
           })
           expect((yield* transcripts.get(active.id))?.units.map((unit) => unit.key)).toEqual([key])
+
+          yield* assertProjectionRebaseAcrossStores(transcripts, completedActive)
 
           expect(yield* ThreadRepository.Service.pipe(Effect.provide(organization))).toEqual(
             expect.objectContaining({}),

@@ -30,7 +30,7 @@ export const approvalFailure = (cause: unknown): ExecutionGateway.ApprovalRespon
   return ExecutionGateway.ApprovalResponseFailure.make({ kind, message: failureMessage })
 }
 
-export const steeringFailure = (cause: Runtime.SteerError): ExecutionGateway.SteeringFailure =>
+export const steeringFailure = (cause: Runtime.RunSendError): ExecutionGateway.SteeringFailure =>
   ExecutionGateway.SteeringFailure.make({
     kind:
       cause._tag === "generalist/runtime/RunNotFound" ||

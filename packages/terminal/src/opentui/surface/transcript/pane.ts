@@ -38,6 +38,7 @@ export class TranscriptPane extends TranscriptPaneRuntime {
     this.staticContent = false
     this.model = model
     if (!plan.threadChanged) return
+    this.virtualDocument.clear()
     this.manualScrollPosition = false
     this.cancelWheelReport()
   }

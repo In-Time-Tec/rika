@@ -6,6 +6,7 @@ import { ProjectionState } from "./state"
 const Revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 export const Snapshot = Schema.TaggedStruct("ProjectionSnapshot", {
+  baseRevision: Schema.optionalKey(Revision),
   revision: Revision,
   checkpoint: Schema.optionalKey(Checkpoint),
   units: Schema.Array(TranscriptUnit.Unit).check(Schema.isMaxLength(limits.snapshotUnits)),

@@ -1,4 +1,5 @@
 import { ModelRegistry } from "generalist"
+
 import type { State } from "generalist/instructions"
 import type * as ExecutionPins from "../harness/execution-pins"
 import type { ProviderCredentialStore } from "@rika/product/provider-credential-store"

@@ -54,4 +54,5 @@ const executableName = (command: string) => {
 export const matchesClientProcess = (input: { readonly command: string; readonly runtime: ClientRuntime }): boolean =>
   input.runtime.kind === "packaged"
     ? executableName(input.runtime.executable) === executableName(input.command)
-    : input.command.includes(input.runtime.evidencePath)
+    : executableName(input.runtime.executable) === executableName(input.command) &&
+      input.command.includes(input.runtime.evidencePath)
