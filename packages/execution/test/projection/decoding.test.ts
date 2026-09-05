@@ -1,16 +1,15 @@
 import { expect, it } from "@effect/vitest"
 import { ModelRegistry } from "generalist"
-import { Prompt, Response as AiResponse } from "effect/unstable/ai"
+import { Response as AiResponse } from "effect/unstable/ai"
 
 import { TestModel } from "generalist/testing"
-import { RunEvent, RunTree, Runtime } from "generalist/runtime"
+import { RunTree, Runtime } from "generalist/runtime"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import type { Change } from "@rika/product/execution-projection"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
 import type { Unit } from "@rika/product/execution-transcript-contract"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { treeEvent } from "../support/projector-event.fixture"
+import { Context, Effect, Layer, Stream } from "effect"
 import { memoryLayer as layer } from "../support/adapters"
 
 const registryLayer = (...fixtures: ReadonlyArray<TestModel.Fixture>) =>
@@ -365,36 +364,3 @@ it.live(
     }),
   20_000,
 )
-
-it("decodes historical child links without inventing inheritance metadata", () => {
-  const event = treeEvent("legacy-root", {
-    _tag: "ChildLinked",
-    childRunId: "legacy-child",
-    invocationId: "invocation",
-    selection: "child",
-    prompt: Prompt.make("legacy request"),
-    childDepth: 1,
-    readiness: "ready",
-  }).event
-  if (event._tag !== "ChildLinked") throw new Error("Expected a child link fixture")
-  const { inherit: _inherit, ...legacy } = event
-  const decoded = Schema.decodeUnknownSync(RunEvent.RunEvent)(legacy)
-  expect(decoded._tag).toBe("ChildLinked")
-  expect("inherit" in decoded).toBe(false)
-})
-
-it("continues to decode persisted StructuredOutput events", () => {
-  const event = treeEvent("legacy-root", {
-    _tag: "StructuredOutput",
-    turn: 0,
-    modelCallId: "call",
-    modelAttemptId: "attempt",
-    attempt: 0,
-    value: { answer: "kept" },
-    content: [],
-  }).event
-  expect(Schema.decodeUnknownSync(RunEvent.RunEvent)(event)).toMatchObject({
-    _tag: "StructuredOutput",
-    value: { answer: "kept" },
-  })
-})

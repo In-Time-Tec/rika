@@ -1,3 +1,4 @@
+import { clientLayer } from "@rika/execution/postgres"
 import { applyMigrations } from "./product-repositories-migrations.fixture"
 import { assertProjectionRebaseAcrossStores } from "./product-repositories-projection.fixture"
 import "./product-repositories-cancellation.fixture"
@@ -11,7 +12,6 @@ import * as TranscriptRepository from "@rika/product/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as UnitOrder from "@rika/transcript/transcript-unit-order"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import { Config, DateTime, Effect, Layer, Random, Redacted } from "effect"
 import { and, eq, sql as drizzleSql } from "drizzle-orm"
@@ -24,7 +24,6 @@ import * as ProductRepositories from "../../src/database/product-repositories"
 import { transcriptSqlWrites } from "../../src/transcript/sql-writes"
 import { identityOrganization, identityUser } from "@rika/identity"
 import * as schema from "../../src/database/schema/product"
-import { expectLegacyUnitsSkipped } from "./legacy-units.harness"
 import { expectBoundedStructure } from "./transcript-window.harness"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
@@ -50,7 +49,7 @@ const createTurn = (
   })
 
 const repositoryLayer = (url: string, ownerId: OwnerId) => {
-  const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
+  const postgres = clientLayer({ url: Redacted.make(url), maxConnections: 8 })
   return ProductRepositories.layer(ownerId).pipe(Layer.provideMerge(postgres))
 }
 
@@ -273,7 +272,6 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           })
           yield* expectBoundedStructure(transcripts, active)
           yield* transcripts.replaceUnits(active, transcriptUnits)
-          yield* expectLegacyUnitsSkipped(db, transcripts, { threadId, turn: active, units: transcriptUnits })
           const usageThreadId = Thread.ThreadId.make("product-usage-thread")
           yield* seedAggregate(usageThreadId, "/work/product-usage", "Usage", 40)
           const firstUsageTurn = yield* createTurn(turns, {

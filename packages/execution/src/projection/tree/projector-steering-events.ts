@@ -2,7 +2,6 @@ import type { ProjectorEventHandler } from "./projector-event-context"
 
 const noOpTags = new Set([
   "TurnCompleted",
-  "StructuredOutput",
   "HandoffRequested",
   "HandoffCompleted",
   "HandoffRejected",

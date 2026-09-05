@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest"
 import { Response } from "effect/unstable/ai"
 import { completeTool, makeTool } from "../../../src/projection/tool/state"
 import { TreeProjector } from "../../../src/projection/tree/projector"
-import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+import {
+  block,
+  modelResponse,
+  resetEventPosition,
+  toolResultPart,
+  treeEvent,
+} from "../../support/projector-event.fixture"
 
 describe("native tool projection", () => {
   it("projects observed native tool lifecycle states", () => {
@@ -63,7 +69,7 @@ describe("native tool projection", () => {
       _tag: "ToolExecutionCompleted",
       turn: 0,
       call: Response.toolCallPart(bashCall),
-      result: Response.toolResultPart({
+      result: toolResultPart({
         id: bashCall.id,
         name: bashCall.name,
         isFailure: false,

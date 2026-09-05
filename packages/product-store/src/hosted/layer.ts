@@ -1,3 +1,4 @@
+import { clientLayer } from "@rika/execution/postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { Layer } from "effect"
 import { TypeOverrides, types } from "pg"
@@ -30,4 +31,4 @@ export const layer = (config: PgClient.PgPoolConfig) =>
     runnerRegistrationsLayer,
     threadProtocolStoreLayer,
     workspacePreparationLayer,
-  ).pipe(Layer.provideMerge(PgClient.layer({ ...config, types: postgresTypes })))
+  ).pipe(Layer.provideMerge(clientLayer({ ...config, types: postgresTypes })))

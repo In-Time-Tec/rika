@@ -1,3 +1,4 @@
+import { clientLayer } from "@rika/execution/postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import { Clock, Config, Context, Deferred, Effect, Exit, Fiber, Layer, Redacted } from "effect"
@@ -7,7 +8,7 @@ const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATA
 const live = it.live.skipIf(databaseUrl === "")
 
 const clients = Effect.gen(function* () {
-  const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(databaseUrl), maxConnections: 1 }))
+  const context = yield* Layer.build(clientLayer({ url: Redacted.make(databaseUrl), maxConnections: 1 }))
   const sql = Context.get(context, PgClient.PgClient)
   const admin = yield* Effect.acquireRelease(
     Effect.sync(() => new Pool({ connectionString: databaseUrl, max: 1 })),

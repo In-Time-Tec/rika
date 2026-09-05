@@ -1,3 +1,4 @@
+import { clientLayer } from "@rika/execution/postgres"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import * as PgClient from "@effect/sql-pg/PgClient"
@@ -88,7 +89,7 @@ it.effect.skipIf(databaseUrl === "")("reconstructs a complete owner-scoped hoste
         const releaseXCancellation = yield* Deferred.make<void>()
         const yCancellationEntered = yield* Deferred.make<void>()
         const gateway = Context.get(yield* Layer.build(ExecutionGateway.layerTest()), ExecutionGateway.Service)
-        const databaseLayer = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
+        const databaseLayer = clientLayer({ url: Redacted.make(url), maxConnections: 8 })
         const dependencies = Layer.mergeAll(
           databaseLayer,
           hostedClientAuthorityLayer.pipe(Layer.provide(databaseLayer)),

@@ -1,7 +1,7 @@
+import { clientLayer } from "@rika/execution/postgres"
 import { expect, it } from "@effect/vitest"
 
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMember, identityOrganization, identityUser } from "@rika/identity"
 import { asc, eq, sql as drizzleSql } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
@@ -37,7 +37,7 @@ it.effect.skipIf(databaseUrl === "")("creates fresh personal and organization ow
       parsed.pathname = `/${database}`
       const pool = new Pool({ connectionString: parsed.toString() })
       const databaseClient = drizzle({ client: pool })
-      const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(parsed.toString()), maxConnections: 4 }))
+      const context = yield* Layer.build(clientLayer({ url: Redacted.make(parsed.toString()), maxConnections: 4 }))
       const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
       const rejects = (sql: string, code: string) =>
         Effect.tryPromise(() => expect(pool.query(sql)).rejects.toMatchObject({ code }))

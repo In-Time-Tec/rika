@@ -1,4 +1,4 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
+import { clientLayer } from "@rika/execution/postgres"
 import { BunCrypto } from "@effect/platform-bun"
 import { expect, it } from "@effect/vitest"
 import { installationTestLayer } from "@rika/github-app/installation-service"
@@ -161,7 +161,7 @@ it.effect.skipIf(databaseUrl === "")(
             }),
           ),
         )
-        const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 4 })
+        const postgres = clientLayer({ url: Redacted.make(url), maxConnections: 4 })
         const dependencies = Layer.mergeAll(
           BunCrypto.layer,
           postgres,

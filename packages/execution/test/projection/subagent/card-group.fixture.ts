@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Response } from "effect/unstable/ai"
 import { TreeProjector } from "../../../src/projection/tree/projector"
-import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+import {
+  block,
+  modelResponse,
+  resetEventPosition,
+  toolResultPart,
+  treeEvent,
+} from "../../support/projector-event.fixture"
 
 describe("blocking child-group projection", () => {
   it("settles blocking group answers from the durable ordered mixed result", () => {
@@ -27,7 +33,7 @@ describe("blocking child-group projection", () => {
         _tag: "ToolExecutionCompleted",
         turn: 0,
         call: Response.toolCallPart(call),
-        result: Response.toolResultPart({
+        result: toolResultPart({
           id: call.id,
           name: call.name,
           isFailure: false,
@@ -120,7 +126,7 @@ describe("blocking child-group projection", () => {
       _tag: "ToolExecutionCompleted",
       turn: 0,
       call: Response.toolCallPart(call),
-      result: Response.toolResultPart({
+      result: toolResultPart({
         id: call.id,
         name: call.name,
         isFailure: false,

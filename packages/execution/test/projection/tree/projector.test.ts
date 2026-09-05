@@ -5,7 +5,14 @@ import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { compareUnitOrder } from "@rika/transcript/transcript-unit-order"
 import { Prompt, Response } from "effect/unstable/ai"
-import { block, modelResponse, occurredAt, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+import {
+  block,
+  modelResponse,
+  occurredAt,
+  resetEventPosition,
+  toolResultPart,
+  treeEvent,
+} from "../../support/projector-event.fixture"
 
 type RunEventInput = {
   [Tag in RunEvent.RunEvent["_tag"]]: Partial<Extract<RunEvent.RunEvent, { readonly _tag: Tag }>> & {
@@ -132,7 +139,7 @@ describe("Generalist tree projector", () => {
           providerExecuted: false,
           metadata: {},
         }),
-        result: Response.toolResultPart({
+        result: toolResultPart({
           id: "read-call",
           name: "read",
           isFailure: false,
@@ -174,7 +181,7 @@ describe("Generalist tree projector", () => {
           providerExecuted: false,
           metadata: {},
         }),
-        result: Response.toolResultPart({
+        result: toolResultPart({
           id: "edit-call",
           name: "edit",
           isFailure: false,
@@ -216,7 +223,7 @@ describe("Generalist tree projector", () => {
             providerExecuted: false,
             metadata: {},
           }),
-          result: Response.makePart("tool-result", {
+          result: toolResultPart({
             id: "bash-call",
             name: "bash",
             result: { running: false, processId: "p1", exitCode: 0, stdout },

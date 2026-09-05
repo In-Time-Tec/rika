@@ -1,7 +1,7 @@
+import { clientLayer } from "@rika/execution/postgres"
 import { expect } from "@effect/vitest"
 
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import { identityMember, identityOrganization, identityUser } from "@rika/identity"
 import { AssignmentRevision, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
 import type { Version } from "@rika/product/executor-assignments"
@@ -124,7 +124,7 @@ export const isolated = <A, E, R>(
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
       const databaseClient = drizzle({ client: pool })
-      const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+      const context = yield* Layer.build(clientLayer({ url: Redacted.make(url), maxConnections: 4 }))
       const effectDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(context))
       const statements: Array<string> = []
       const defaults = yield* Layer.build(PgDrizzle.DefaultServices)

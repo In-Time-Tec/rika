@@ -1,4 +1,4 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
+import { clientLayer } from "@rika/execution/postgres"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
 import * as ExecutionRequest from "@rika/product/execution-request"
@@ -78,7 +78,7 @@ const isolated = <A, E, R>(run: (url: string) => Effect.Effect<A, E, R>) =>
   })
 
 const postgresLayer = (url: string) => {
-  const postgres = PgClient.layer({ url: Redacted.make(url), maxConnections: 8 })
+  const postgres = clientLayer({ url: Redacted.make(url), maxConnections: 8 })
   return TurnRepository.layer.pipe(Layer.provideMerge(postgres))
 }
 

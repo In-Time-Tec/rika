@@ -4,7 +4,13 @@ import { describe, expect, it } from "@effect/vitest"
 import { Prompt, Response } from "effect/unstable/ai"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import { TreeProjector } from "../../../src/projection/tree/projector"
-import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
+import {
+  block,
+  modelResponse,
+  resetEventPosition,
+  toolResultPart,
+  treeEvent,
+} from "../../support/projector-event.fixture"
 
 const subagentCard = (unit: Unit | undefined) =>
   unit?.content._tag === "Block" && unit.content.block._tag === "SubagentCard" ? unit.content.block : undefined
@@ -274,7 +280,7 @@ describe("Generalist subagent card projection", () => {
         _tag: "ToolExecutionCompleted",
         turn: 0,
         call: Response.toolCallPart(call),
-        result: Response.toolResultPart({
+        result: toolResultPart({
           id: call.id,
           name: call.name,
           isFailure: true,

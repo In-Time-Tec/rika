@@ -1,4 +1,4 @@
-import { RuntimeSchema, layer as upstreamLayer } from "generalist/pg"
+import { RuntimeSchema, layerClientPool, layer as upstreamLayer } from "generalist/pg"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { Cause, Clock, Context, Effect, Function, Layer, Option, Schema, Scope } from "effect"
@@ -289,3 +289,5 @@ export const layer = (
       }),
     ),
   )
+
+export const clientLayer = layerClientPool

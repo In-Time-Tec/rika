@@ -1,4 +1,4 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
+import { clientLayer } from "@rika/execution/postgres"
 import {
   cliRegistration,
   identityMember,
@@ -440,7 +440,7 @@ export const isolated = <A, E, R>(
       pool = activePool
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          const context = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+          const context = yield* Layer.build(clientLayer({ url: Redacted.make(url), maxConnections: 4 }))
           return yield* run({ url, databaseClient: drizzle({ client: activePool }) }).pipe(Effect.provide(context))
         }),
       )

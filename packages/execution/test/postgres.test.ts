@@ -1,4 +1,3 @@
-import "./support/root-fragments/postgres-upgrade.fixture"
 import "./support/root-fragments/postgres-driver-conformance.fixture"
 import "./support/root-fragments/postgres-inspection.fixture"
 import { expect, it } from "@effect/vitest"

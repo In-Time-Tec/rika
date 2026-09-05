@@ -1,3 +1,4 @@
+import { clientLayer } from "@rika/execution/postgres"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import * as ExecutionGateway from "@rika/product/execution-gateway"
@@ -69,7 +70,7 @@ it.live.skipIf(!live)(
             )
           }
 
-          const data = PgClient.layer({
+          const data = clientLayer({
             url: Redacted.make(url),
             maxConnections: 10,
             applicationName: "rika-contention",

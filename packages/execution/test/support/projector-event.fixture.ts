@@ -1,3 +1,4 @@
+import { Response } from "effect/unstable/ai"
 import { RunEvent, RunTree } from "generalist/runtime"
 import { DateTime, Function, Schema } from "effect"
 import { TreeProjector } from "../../src/projection/tree/projector"
@@ -183,3 +184,8 @@ export const block: {
   (change: Change, tag: string): ReturnType<typeof blockImpl>
   (tag: string): (change: Change) => ReturnType<typeof blockImpl>
 } = Function.dual(2, blockImpl)
+
+export const toolResultPart = (input: Parameters<typeof Response.toolResultPart>[0]) => ({
+  ...Response.makePart("tool-result", input),
+  taint: [],
+})

@@ -71,7 +71,8 @@
     "@rika/transcript": "workspace:*",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "pg": "catalog:"
+    "pg": "catalog:",
+    "@rika/execution": "workspace:*"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",

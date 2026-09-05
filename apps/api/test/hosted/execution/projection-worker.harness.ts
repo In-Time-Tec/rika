@@ -1,4 +1,4 @@
-import * as PgClient from "@effect/sql-pg/PgClient"
+import { clientLayer } from "@rika/execution/postgres"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
 import { identityMigrations, identityUser, runMigration } from "@rika/identity"
@@ -118,7 +118,7 @@ it.effect.skipIf(databaseUrl === "")("resumes hosted projection from its Postgre
           sql,
         })
       }
-      const aggregateContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+      const aggregateContext = yield* Layer.build(clientLayer({ url: Redacted.make(url), maxConnections: 4 }))
       const aggregateDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(aggregateContext))
       const notificationScope = yield* Scope.make()
       const listenerContext = yield* Layer.buildWithScope(

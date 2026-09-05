@@ -23,13 +23,14 @@
     "@rika/extensions": "workspace:*",
     "@rika/product": "workspace:*",
     "effect": "catalog:",
-    "generalist": "catalog:"
+    "generalist": "catalog:",
+    "pg": "catalog:",
+    "pg-cursor": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@rika/configuration": "workspace:*",
     "@types/bun": "catalog:",
-    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

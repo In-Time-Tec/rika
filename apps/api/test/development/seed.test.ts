@@ -1,5 +1,5 @@
+import { clientLayer } from "@rika/execution/postgres"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
 import {
   identityMember,
@@ -54,7 +54,7 @@ it.effect.skipIf(databaseUrl === "")("seeds one stable encrypted development acc
       parsed.pathname = `/${database}`
       const url = parsed.toString()
       const pool = new Pool({ connectionString: url })
-      const databaseContext = yield* Layer.build(PgClient.layer({ url: Redacted.make(url), maxConnections: 4 }))
+      const databaseContext = yield* Layer.build(clientLayer({ url: Redacted.make(url), maxConnections: 4 }))
       const identityDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(databaseContext))
       const databaseClient = drizzle({ client: pool })
       try {

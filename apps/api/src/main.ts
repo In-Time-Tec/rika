@@ -1,6 +1,6 @@
+import { clientLayer } from "@rika/execution/postgres"
 import { BunCrypto } from "@effect/platform-bun"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import * as PgClient from "@effect/sql-pg/PgClient"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Context, Effect, Layer, Logger, Redacted } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
@@ -50,7 +50,7 @@ const program = Effect.scoped(
       ssl: config.databaseSsl === "disable" ? false : { rejectUnauthorized: config.databaseSsl === "verify-full" },
       maxConnections: 10,
     }
-    const postgresContext = yield* Layer.build(PgClient.layer(postgres))
+    const postgresContext = yield* Layer.build(clientLayer(postgres))
     const identityDatabase = yield* PgDrizzle.makeWithDefaults().pipe(Effect.provideContext(postgresContext))
     const applicationOptions: MutableHostedApplicationOptions = {
       database: postgres,
