@@ -127,6 +127,5 @@
     "types": ["bun"],
     "verbatimModuleSyntax": true
   },
-  "include": ["*.ts", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "infra/**/*.ts"],
-  "exclude": ["repos"]
+  "include": ["*.ts", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "infra/**/*.ts"]
 }

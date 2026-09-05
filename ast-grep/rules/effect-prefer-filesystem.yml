@@ -27,4 +27,3 @@ ignores:
   - "**/generated/**"
   - "apps/rika/src/platform/diagnostic-file-host.ts"
   - "node_modules/**"
-  - "repos/**"

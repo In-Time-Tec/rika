@@ -15,6 +15,5 @@ ignores:
   - "**/dist/**"
   - "**/coverage/**"
   - "node_modules/**"
-  - "repos/effect/**"
   - "apps/rika/src/release/relaunch-argument.ts"
   - "scripts/packaging/package-target.ts"

@@ -5,7 +5,6 @@ coverage/
 .cache/
 tmp/
 artifacts/
-repos/
 docs/generated/
 **/*.snap
 **/*.snapshot.*

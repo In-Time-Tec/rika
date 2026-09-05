@@ -19,4 +19,3 @@ ignores:
   - "**/coverage/**"
   - "**/generated/**"
   - "node_modules/**"
-  - "repos/**"

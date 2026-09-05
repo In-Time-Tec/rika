@@ -62,7 +62,7 @@ The exhaustive local Runner, Orb, restart, cancellation, and recovery acceptance
 - `packages/e2b-executor`, `packages/remote-execution`, and `infra/e2b` own Orb execution. E2B is the only remote workspace provider; see [the E2B decision](docs/decisions/e2b-remote-execution.md).
 - `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract.
 
-Use released Generalist, Effect, FoldKit, and OpenTUI package exports. Do not edit, import from, format, build, or test anything under `repos/`. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
+Use released Generalist, Effect, FoldKit, and OpenTUI package exports. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
 
 Keep temporary run state under a distinct `.agents/state/<run>/` directory. It is ignored and must never become implemented product truth or be force-added to Git.
 

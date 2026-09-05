@@ -219,5 +219,5 @@
       }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "repos", "tools/oxlint/anti-slop"]
+  "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "tools/oxlint/anti-slop"]
 }
