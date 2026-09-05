@@ -76,7 +76,14 @@ it.effect.skipIf(databaseUrl === "")("fans a maximum UTF-8 preview between API r
           Effect.forever,
           Effect.forkChild,
         )
-        const delivered = yield* subscription.take.pipe(Effect.timeout("5 seconds"))
+        // LISTEN can attach halfway through a fragmented publication. Its Reset is
+        // intentional; require a complete subsequent preview within the same deadline.
+        const delivered = yield* Effect.gen(function* () {
+          while (true) {
+            const delivery = yield* subscription.take
+            if (delivery._tag === "Preview") return delivery
+          }
+        }).pipe(Effect.timeout("5 seconds"))
         yield* Fiber.interrupt(publishing)
         expect(delivered).toEqual({ _tag: "Preview", value: large })
       }),
