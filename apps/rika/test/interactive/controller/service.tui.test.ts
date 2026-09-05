@@ -82,7 +82,7 @@ test(
 
         yield* app.clickComposer
         yield* Effect.tryPromise(() => app.type("Run the shell tool."))
-        expect(app.frame()).not.toContain("Context & Usage")
+        expect(yield* app.waitGone("Context & Usage")).not.toContain("Context & Usage")
         app.pressEnter()
         expect(yield* app.waitFrame("Waiting")).toMatch(/ctx [ᗧᗤ]/u)
         const shellCompleted = yield* app.waitFrame("BASH_COMPLETE")
