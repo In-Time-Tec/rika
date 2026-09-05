@@ -89,6 +89,7 @@ const dependencies = (gateway: Gateway, ready: Effect.Effect<void> = Effect.void
       receive: gateway.receive,
       disconnected: gateway.disconnected,
       active: gateway.active,
+      withReadySession: () => Effect.die("unused"),
       execute: () => Effect.die("unused"),
       cancel: (input) => gateway.cancel(input).pipe(Effect.map((result) => ({ ...result, eventPersisted: true }))),
     } satisfies RunnerGateway,

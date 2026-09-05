@@ -237,31 +237,47 @@ export const service = Layer.effect(
                 yield* Effect.sleep(100)
                 return yield* awaitActive()
               })
-            const active = yield* awaitActive()
-            const capabilities = active.capabilities!
-            const admitted = yield* operations
-              .admitWorkspaceCapabilities({
-                threadId: input.threadId,
-                turnId: input.turnId,
-                assignmentId: active.id,
-                workspaceId: input.workspaceId,
-                assignmentGeneration: Number(active.generation),
-                environmentDigest: capabilities.environmentDigest,
-                requiredCapabilities: [...requiredWorkspaceCapabilities],
-              })
-              .pipe(
-                Effect.mapError(() =>
-                  ControllerError.make({
-                    kind: "repository",
-                    message: "Could not persist workspace capability admission",
-                  }),
-                ),
-              )
-            if (!admitted)
-              return yield* ControllerError.make({
-                kind: "fenced",
-                message: "Run capability admission conflicts with the current assignment environment",
-              })
+            const admitCapabilities = Effect.gen(function* () {
+              const active = yield* awaitActive()
+              const capabilities = active.capabilities!
+              const admitted = yield* operations
+                .admitWorkspaceCapabilities({
+                  threadId: input.threadId,
+                  turnId: input.turnId,
+                  assignmentId: active.id,
+                  workspaceId: input.workspaceId,
+                  assignmentGeneration: Number(active.generation),
+                  environmentDigest: capabilities.environmentDigest,
+                  requiredCapabilities: [...requiredWorkspaceCapabilities],
+                })
+                .pipe(
+                  Effect.mapError(() =>
+                    ControllerError.make({
+                      kind: "repository",
+                      message: "Could not persist workspace capability admission",
+                    }),
+                  ),
+                )
+              if (!admitted)
+                return yield* ControllerError.make({
+                  kind: "fenced",
+                  message: "Run capability admission conflicts with the current assignment environment",
+                })
+            })
+            if (initial.placement._tag === "RunnerPlacement")
+              return yield* runnerGateway
+                .withReadySession(initial.id, (generation) => {
+                  expectedGeneration = FencingGeneration.make(String(generation))
+                  return admitCapabilities
+                })
+                .pipe(
+                  Effect.mapError((error) =>
+                    Schema.is(ControllerError)(error)
+                      ? error
+                      : ControllerError.make({ kind: "assignment-conflict", message: error.message }),
+                  ),
+                )
+            return yield* admitCapabilities
           }),
         )
       }),

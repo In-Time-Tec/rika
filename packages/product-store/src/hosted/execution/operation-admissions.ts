@@ -3,6 +3,7 @@ import { and, asc, eq, exists, gt, isNotNull, isNull, or, sql } from "drizzle-or
 import { Effect } from "effect"
 import { cliRegistration, identityMember } from "@rika/identity"
 import {
+  rikaHostedExecutorAssignments,
   rikaHostedOwners,
   rikaHostedRunnerAdmissions,
   rikaHostedRunnerRegistrations,
@@ -16,6 +17,27 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
     db
       .transaction((tx) =>
         Effect.gen(function* () {
+          // Readiness may have been checked before a replacement committed. Serialize admission
+          // with assignment transitions and never pin a Turn to an already retired generation.
+          const assignments = yield* query(
+            tx
+              .select({ id: rikaHostedExecutorAssignments.id })
+              .from(rikaHostedExecutorAssignments)
+              .where(
+                and(
+                  eq(rikaHostedExecutorAssignments.id, input.assignmentId),
+                  eq(rikaHostedExecutorAssignments.threadId, input.threadId),
+                  eq(rikaHostedExecutorAssignments.workspaceId, input.workspaceId),
+                  eq(rikaHostedExecutorAssignments.lifecycle, "active"),
+                  eq(rikaHostedExecutorAssignments.generation, input.assignmentGeneration),
+                  eq(rikaHostedExecutorAssignments.capabilityGeneration, input.assignmentGeneration),
+                  gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql`clock_timestamp()`),
+                  sql`${rikaHostedExecutorAssignments.capabilitySnapshot}->>'environmentDigest' = ${input.environmentDigest}`,
+                ),
+              )
+              .for("update"),
+          )
+          if (assignments[0] === undefined) return false
           yield* query(tx.insert(rikaHostedWorkspaceCapabilityAdmissions).values(input).onConflictDoNothing())
           const rows = yield* query(
             tx

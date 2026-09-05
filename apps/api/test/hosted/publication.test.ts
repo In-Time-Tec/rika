@@ -163,6 +163,7 @@ it.effect("pushes an approved ref, creates the pull request through API authorit
         receive: () => Effect.die("unused"),
         disconnected: () => Effect.die("unused"),
         active: () => Effect.die("unused"),
+        withReadySession: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
         execute: () => Effect.die("unused"),
       },

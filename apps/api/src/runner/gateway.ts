@@ -3,7 +3,7 @@ import {
   layer as hostedExecutionOperationsLayer,
 } from "@rika/product-store/executor-operations"
 import { redactAccess, type AccessWire } from "@rika/remote-execution/protocol"
-import { Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Semaphore } from "effect"
+import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Semaphore } from "effect"
 import { GatewayError, type OperationIdentity, type Socket, type SocketFrame } from "../executor/gateway"
 import { gatewayExecutionFactory } from "../executor/gateway/execution"
 import { gatewayProtocol } from "../executor/gateway/protocol"
@@ -24,6 +24,10 @@ export interface RunnerGateway {
   readonly receive: (socket: Socket, frame: SocketFrame) => Effect.Effect<void>
   readonly disconnected: (socket: Socket) => Effect.Effect<void>
   readonly active: (socket: Socket) => Effect.Effect<boolean>
+  readonly withReadySession: <A, E, R>(
+    assignmentId: string,
+    use: (generation: number) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | GatewayError, R>
   readonly execute: (input: LocalExecuteInput) => Effect.Effect<FinalResult, GatewayError>
   readonly cancel: (input: OperationIdentity) => Effect.Effect<FinalResult, GatewayError>
 }
@@ -206,6 +210,20 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   const withPersistenceDisposition = (
     result: Effect.Effect<import("../executor/gateway").ExecutionResult, GatewayError>,
   ) => result.pipe(Effect.map((value) => ({ ...value, eventPersisted: false as const })))
+  // Keep readiness and capability admission in the same session critical section. An Active
+  // database lease alone is not evidence that the Runner is connected. The durable command
+  // worker owns waiting, its admission deadline, and cancellation; no Run is admitted here
+  // while disconnected. The store separately locks the assignment against generation changes.
+  const withReadySession: RunnerGateway["withReadySession"] = (assignmentId, use) =>
+    gatewayLock.withPermits(1)(
+      Effect.gen(function* () {
+        const session = (yield* Ref.get(sessions)).get(assignmentId)
+        if (session === undefined || !session.ready || (yield* Clock.currentTimeMillis) >= session.leaseExpiresAt)
+          return yield* failure("disconnected", "Runner is reconnecting; waiting for a current workspace session")
+        yield* authority.validateAccess(redactAccess(session.access)).pipe(Effect.mapError(accessFailure))
+        return yield* use(session.access.fence.assignmentGeneration)
+      }),
+    )
   const active: RunnerGateway["active"] = (socket) =>
     Effect.gen(function* () {
       const assignmentId = (yield* Ref.get(assignments)).get(socket)
@@ -221,6 +239,7 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     receive,
     disconnected,
     active,
+    withReadySession,
     execute: (input) => withPersistenceDisposition(execution.execute(input)),
     cancel: (input) => withPersistenceDisposition(execution.cancel(input)),
   } satisfies RunnerGateway

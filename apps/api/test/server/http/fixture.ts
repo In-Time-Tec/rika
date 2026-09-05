@@ -108,6 +108,7 @@ const unusedRunnerGateway: RunnerGateway = {
   receive: () => Effect.die("unused"),
   disconnected: () => Effect.die("unused"),
   active: () => Effect.die("unused"),
+  withReadySession: () => Effect.die("unused"),
   execute: () => Effect.die("unused"),
   cancel: () => Effect.die("unused"),
 }

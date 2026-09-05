@@ -197,6 +197,7 @@ it.effect("exchanges canonical Thread frames and finishes accepted commands afte
           receive: () => Effect.void,
           disconnected: () => Effect.void,
           active: () => Effect.succeed(true),
+          withReadySession: () => Effect.die("unused"),
           execute: () => Effect.die("unused"),
           cancel: () => Effect.die("unused"),
         },

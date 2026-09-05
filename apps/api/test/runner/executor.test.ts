@@ -10,14 +10,15 @@ import {
   rikaHostedThreads,
   rikaHostedWorkspaceCapabilityAdmissions,
 } from "@rika/product-store/database-schema"
-import { emptyCursor } from "@rika/remote-execution/protocol"
+import { emptyCursor, RunnerMessage } from "@rika/remote-execution/protocol"
 import { and, count, eq, sql } from "drizzle-orm"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Exit, Redacted, Schema } from "effect"
 import { Executor } from "../../src/executor/service"
 import { HostedProduct } from "../../src/hosted/product"
 import { RunnerExecutor } from "../../src/runner/executor"
 
 import { executorFixture } from "./executor.fixture"
+import { socket } from "./gateway/harness"
 const {
   accessFrom,
   availableHostedEnvironment,
@@ -32,6 +33,86 @@ const {
   seedPrincipal,
   unusedController,
 } = executorFixture
+
+it.effect.skipIf(!live)(
+  "refuses offline Runner admission despite a live old lease, then admits the replacement generation",
+  () =>
+    isolated("recovery", (databaseClient) =>
+      Effect.gen(function* () {
+        const owner = principal("recovery-user", "recovery-client", "10000000-0000-4000-8000-000000000051")
+        yield* seedPrincipal(databaseClient, owner)
+        const authority = yield* RunnerExecutor
+        const executor = yield* Executor
+        const connection = yield* localConnection(owner, personal(owner.userId), "recovery-workspace")
+        const admission = yield* authority.admit({
+          threadId: connection.threadId,
+          workspaceFingerprint: connection.checkoutFingerprint,
+          principal: owner,
+          executorUrl: "ws://executor.test/local",
+        })
+        const welcome = yield* authority.hello({
+          admissionId: admission.admissionId,
+          ticket: admission.ticket,
+          processIncarnation: "recovery-process-1",
+          ...helloReadiness,
+        })
+        const request = {
+          threadId: connection.threadId,
+          turnId: "recovery-turn",
+          workspaceId: admission.workspaceIdentity,
+        }
+        const offline = yield* executor.admitRun(request).pipe(Effect.exit)
+        expect(Exit.isFailure(offline)).toBe(true)
+        expect(
+          yield* Effect.tryPromise(() => databaseClient.select().from(rikaHostedWorkspaceCapabilityAdmissions)),
+        ).toEqual([])
+
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(rikaHostedExecutorAssignments)
+            .set({ leaseExpiresAt: sql`clock_timestamp() - interval '1 second'` })
+            .where(eq(rikaHostedExecutorAssignments.id, admission.assignmentId)),
+        )
+        const replacement = yield* authority.admit({
+          threadId: connection.threadId,
+          workspaceFingerprint: connection.checkoutFingerprint,
+          principal: owner,
+          executorUrl: "ws://executor.test/local",
+        })
+        const replacementWelcome = yield* authority.hello({
+          admissionId: replacement.admissionId,
+          ticket: replacement.ticket,
+          processIncarnation: "recovery-process-2",
+          ...helloReadiness,
+        })
+        expect(replacementWelcome.fence.assignmentGeneration).toBe(welcome.fence.assignmentGeneration + 1)
+        const target = socket()
+        yield* executor.runnerGateway.receive(
+          target,
+          yield* Schema.encodeEffect(Schema.fromJsonString(RunnerMessage))({
+            _tag: "ExecutorReconnect",
+            protocolVersion: helloReadiness.protocolVersion,
+            access: {
+              ...accessFrom(replacementWelcome),
+              sessionToken: Redacted.value(replacementWelcome.sessionToken),
+            },
+          }),
+        )
+        yield* executor.admitRun(request)
+        expect(
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select({ generation: rikaHostedWorkspaceCapabilityAdmissions.assignmentGeneration })
+              .from(rikaHostedWorkspaceCapabilityAdmissions),
+          ),
+        ).toEqual([{ generation: 2 }])
+        yield* executor.runnerGateway.disconnected(target)
+        expect(
+          Exit.isFailure(yield* executor.admitRun({ ...request, turnId: "disconnected-turn" }).pipe(Effect.exit)),
+        ).toBe(true)
+      }),
+    ),
+)
 
 it.effect.skipIf(!live)("keeps real personal local authority active without organization membership", () =>
   isolated("personal", (databaseClient) =>
@@ -158,6 +239,15 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         access: { ...access, leaseEpoch: reconnected.leaseEpoch },
         cursor: reconnected.cursor,
       })
+      const executor = yield* Executor
+      yield* executor.runnerGateway.receive(
+        socket(),
+        yield* Schema.encodeEffect(Schema.fromJsonString(RunnerMessage))({
+          _tag: "ExecutorReconnect",
+          protocolVersion: helloReadiness.protocolVersion,
+          access: { ...access, leaseEpoch: reconnected.leaseEpoch, sessionToken: Redacted.value(access.sessionToken) },
+        }),
+      )
       const admitted = yield* product.admitRun({
         principal: owner,
         threadId: connection.threadId,
@@ -165,15 +255,11 @@ it.effect.skipIf(!live)("keeps real personal local authority active without orga
         prompt: "personal prompt",
       })
       if (admitted._tag !== "Admitted") return yield* Effect.die("Runner prompt was cancelled unexpectedly")
-      yield* Executor.pipe(
-        Effect.flatMap((executor) =>
-          executor.admitRun({
-            threadId: connection.threadId,
-            turnId: admitted.turnId,
-            workspaceId: workspaceRow.workspaceId,
-          }),
-        ),
-      )
+      yield* executor.admitRun({
+        threadId: connection.threadId,
+        turnId: admitted.turnId,
+        workspaceId: workspaceRow.workspaceId,
+      })
       expect(
         (yield* Effect.tryPromise(() =>
           databaseClient.select({ consumedAt: rikaHostedRunnerAdmissions.consumedAt }).from(rikaHostedRunnerAdmissions),
