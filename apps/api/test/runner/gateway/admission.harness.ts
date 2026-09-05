@@ -9,6 +9,7 @@ import * as HostedPostgres from "@rika/product-store/layer"
 import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import { eq, sql } from "drizzle-orm"
 import { Deferred, Effect, Fiber, Layer, Redacted } from "effect"
+import { Client } from "pg"
 import { isolated, seed } from "./database.harness"
 import {
   access,
@@ -22,6 +23,81 @@ import {
   threadId,
   workspaceCapabilities,
 } from "./harness"
+
+it.effect.skipIf(!live)("rejects admission when its lease expires while waiting for an unchanged assignment lock", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* seed(databaseClient, "admission-lock-expiry")
+        const context = yield* Layer.build(operationsLayer)
+        const operations = yield* HostedExecutionOperations.pipe(Effect.provide(context))
+        const blocker = yield* Effect.acquireRelease(
+          Effect.gen(function* () {
+            const client = new Client({ connectionString: url })
+            yield* Effect.tryPromise(() => client.connect())
+            return client
+          }),
+          (client) => Effect.tryPromise(() => client.end()).pipe(Effect.orDie),
+        )
+        yield* Effect.tryPromise(() => blocker.query("BEGIN"))
+        yield* Effect.tryPromise(() =>
+          blocker.query(
+            "UPDATE rika_hosted_executor_assignments SET lease_expires_at = clock_timestamp() + interval '2 seconds' WHERE id = $1",
+            [assignmentId],
+          ),
+        )
+        yield* Effect.tryPromise(() => blocker.query("COMMIT"))
+        yield* Effect.tryPromise(() => blocker.query("BEGIN"))
+        const locked = yield* Effect.tryPromise(() =>
+          blocker.query<{ pid: number }>(
+            "SELECT pg_backend_pid() AS pid FROM rika_hosted_executor_assignments WHERE id = $1 FOR UPDATE",
+            [assignmentId],
+          ),
+        )
+        const admission = yield* operations
+          .admitWorkspaceCapabilities({
+            threadId,
+            turnId: "lock-expiry-turn",
+            assignmentId,
+            workspaceId: "workspace-local-gateway",
+            assignmentGeneration: 1,
+            environmentDigest,
+            requiredCapabilities: ["filesystem"],
+          })
+          .pipe(Effect.forkChild)
+        // Observe the actual database lock wait, not a scheduler delay.
+        let waiting = false
+        while (!waiting) {
+          const result = yield* Effect.tryPromise(() =>
+            blocker.query<{ waiting: boolean }>(
+              "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS waiting",
+              [locked.rows[0]!.pid],
+            ),
+          )
+          waiting = result.rows[0]!.waiting
+          if (!waiting) yield* Effect.yieldNow
+        }
+        yield* Effect.tryPromise(() =>
+          blocker.query(
+            "SELECT pg_sleep(greatest(0, extract(epoch FROM lease_expires_at - clock_timestamp())) + 0.05) FROM rika_hosted_executor_assignments WHERE id = $1",
+            [assignmentId],
+          ),
+        )
+        // Release without UPDATE: PostgreSQL must not get a new tuple to trigger predicate re-evaluation.
+        yield* Effect.tryPromise(() => blocker.query("COMMIT"))
+        expect(yield* Fiber.join(admission)).toBe(false)
+        expect(
+          yield* Effect.tryPromise(() =>
+            databaseClient
+              .select()
+              .from(rikaHostedWorkspaceCapabilityAdmissions)
+              .where(eq(rikaHostedWorkspaceCapabilityAdmissions.turnId, "lock-expiry-turn")),
+          ),
+        ).toEqual([])
+      }),
+    ),
+  ),
+)
 
 it.effect.skipIf(!live)(
   "serializes Runner capability admission with disconnect and releases the lock on interruption",

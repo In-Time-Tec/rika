@@ -31,13 +31,26 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
                   eq(rikaHostedExecutorAssignments.lifecycle, "active"),
                   eq(rikaHostedExecutorAssignments.generation, input.assignmentGeneration),
                   eq(rikaHostedExecutorAssignments.capabilityGeneration, input.assignmentGeneration),
-                  gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql`clock_timestamp()`),
                   sql`${rikaHostedExecutorAssignments.capabilitySnapshot}->>'environmentDigest' = ${input.environmentDigest}`,
                 ),
               )
               .for("update"),
           )
           if (assignments[0] === undefined) return false
+          // The locking SELECT may evaluate its WHERE before waiting on an unchanged row.
+          // Check wall time only after owning the lock, in this same transaction.
+          const live = yield* query(
+            tx
+              .select({ id: rikaHostedExecutorAssignments.id })
+              .from(rikaHostedExecutorAssignments)
+              .where(
+                and(
+                  eq(rikaHostedExecutorAssignments.id, input.assignmentId),
+                  gt(rikaHostedExecutorAssignments.leaseExpiresAt, sql`clock_timestamp()`),
+                ),
+              ),
+          )
+          if (live[0] === undefined) return false
           yield* query(tx.insert(rikaHostedWorkspaceCapabilityAdmissions).values(input).onConflictDoNothing())
           const rows = yield* query(
             tx

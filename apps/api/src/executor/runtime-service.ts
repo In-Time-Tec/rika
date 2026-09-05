@@ -220,6 +220,13 @@ export const service = Layer.effect(
                   if (current.placement._tag !== "OrbPlacement") return yield* unavailableFailure
                   yield* awaitOrbPreparation(current, unavailableFailure)
                 } else {
+                  // Runner admission holds the session semaphore. Only Orb preparation may
+                  // poll; a Runner must release it so its next handshake can register.
+                  if (current.placement._tag === "RunnerPlacement")
+                    return yield* ControllerError.make({
+                      kind: "assignment-conflict",
+                      message: "Runner workspace is not active; waiting for a current workspace session",
+                    })
                   if (current.lifecycle._tag !== "Provisioning" && current.lifecycle._tag !== "AwaitingBootstrap")
                     return yield* ControllerError.make({
                       kind: "assignment-conflict",
