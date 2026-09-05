@@ -3,7 +3,33 @@ import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { Surface } from "../../../../src/opentui/surface/service"
 import { initial, type Model } from "../../../../src/state/model"
+import { toolUnitsFor } from "../../../../src/opentui/rendering/tool/detail"
 import { openTui, _insertText, _streamingShell, _giantSubagentModel, _collapsedSubagentModel } from "./detail.fixture"
+test("prepares only requested tool blocks without revalidating their output", () => {
+  let outputReads = 0
+  const blocks = Array.from({ length: 30 }, (_, index): Model["blocks"][number] => ({
+    _tag: "ToolCall",
+    id: `read-${index}`,
+    name: "read",
+    input: "{}",
+    status: "complete",
+    presentation: { family: "explore", action: "read", activeLabel: "Reading", completeLabel: "Read" },
+    detail: "src/main.ts",
+    get result() {
+      outputReads += 1
+      return { text: "x".repeat(20 * 1_024) }
+    },
+    files: [],
+  }))
+  const prepared = toolUnitsFor(
+    { ...initial("/work"), blocks },
+    blocks.map((_, index) => index),
+  )
+  expect(prepared).toHaveLength(30)
+  expect(outputReads).toBe(0)
+  expect(prepared.every((unit, index) => unit.block === blocks[index])).toBe(true)
+})
+
 test("mounts entries appended below a detached transcript that fits the mount budget", () =>
   Effect.runPromise(
     Effect.gen(function* () {

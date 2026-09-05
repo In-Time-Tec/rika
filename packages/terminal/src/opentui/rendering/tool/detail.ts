@@ -1,6 +1,6 @@
 import { Function, Schema } from "effect"
 import type { Model } from "../../../state/model"
-import { decodeTranscriptBlocks, type TranscriptBlock } from "../../../state/transcript/model"
+import type { TranscriptBlock } from "../../../state/transcript/model"
 import { inputValue, toolKind } from "../../../presentation/transcript/tool/detail"
 import type { ToolKind } from "../../../presentation/transcript/tool/kinds"
 
@@ -73,7 +73,7 @@ export const exploreChildLabel = (unit: ToolUnit): string => {
 const toolUnitsForImpl = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
   indices
     .map((index) => {
-      const block = decodeTranscriptBlocks(model.blocks)[index]
+      const block = model.blocks[index]
       if (block?._tag !== "ToolCall") return undefined
       return { kind: toolKind(block.name, undefined), block, index }
     })

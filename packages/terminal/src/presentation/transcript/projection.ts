@@ -9,15 +9,7 @@ export interface UnitDelta {
 import { outcomeShadow, updateExecutionOutcomes } from "./projection-outcomes"
 import type { Model } from "../../state/model"
 import type { TranscriptItem as TranscriptItemModel } from "../../state/transcript/model"
-import {
-  isBlock,
-  isTranscriptItem,
-  knownIndexesFor,
-  ProjectionIndexCache,
-  recordArrayCopy,
-  validBlocks,
-  validItems,
-} from "./projection-cache"
+import { knownIndexesFor, ProjectionIndexCache, recordArrayCopy } from "./projection-cache"
 
 export { resetTranscriptProjectionDiagnostics, transcriptProjectionDiagnostics } from "./projection-cache"
 
@@ -95,12 +87,7 @@ const cancelParentRows = (model: Model, parentIds: ReadonlySet<string>): Model =
   if (parentIds.size === 0) return model
   let changed = false
   const blocks = model.blocks.map((candidate) => {
-    if (
-      !isBlock(candidate) ||
-      candidate._tag !== "ToolCall" ||
-      candidate.status !== "running" ||
-      !parentIds.has(candidate.id)
-    )
+    if (candidate._tag !== "ToolCall" || candidate.status !== "running" || !parentIds.has(candidate.id))
       return candidate
     changed = true
     const cancelled: Block = { ...candidate, status: "cancelled" }
@@ -164,14 +151,14 @@ const itemContextChanged = (
   current.order === undefined
 
 const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: string, rootTurnId?: string): Model => {
-  const modelBlocks = validBlocks(model.blocks)
+  const modelBlocks = model.blocks
   const parentCancelled = parentIsCancelled(modelBlocks, parentId)
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const cancellationActive = parentCancelled || cancellation.units !== units || cancellation.parentIds.size > 0
   const projectedModel = cancelParentRows(model, cancellation.parentIds)
   let entries: ReadonlyArray<Model["entries"][number]> = projectedModel.entries
-  let blocks: ReadonlyArray<Block> = validBlocks(projectedModel.blocks)
-  let items: ReadonlyArray<TranscriptItem> = validItems(projectedModel.items)
+  let blocks: ReadonlyArray<Block> = projectedModel.blocks
+  let items: ReadonlyArray<TranscriptItem> = projectedModel.items
   let mutableEntries: Array<Model["entries"][number]> | undefined
   let mutableBlocks: Array<Block> | undefined
   let mutableItems: Array<TranscriptItem> | undefined
@@ -313,7 +300,7 @@ interface RemovedUnits {
 }
 
 const removedUnits = (model: Model, keys: ReadonlyArray<string>): RemovedUnits => {
-  const known = knownIndexesFor(validItems(model.items))
+  const known = knownIndexesFor(model.items)
   const removedPositions = new Set<number>()
   const removedEntryIndexes = new Set<number>()
   const removedBlockIndexes = new Set<number>()
@@ -322,7 +309,7 @@ const removedUnits = (model: Model, keys: ReadonlyArray<string>): RemovedUnits =
     const position = known.get(key)
     if (position === undefined) continue
     const item = model.items[position]
-    if (!isTranscriptItem(item)) continue
+    if (item === undefined) continue
     removedPositions.add(position)
     if (item._tag === "Entry") {
       removedEntryIndexes.add(item.index)
@@ -331,7 +318,6 @@ const removedUnits = (model: Model, keys: ReadonlyArray<string>): RemovedUnits =
       removedBlockIndexes.add(item.index)
       removedRowKeys.add(`block:${key}`)
       const block = model.blocks[item.index]
-      if (!isBlock(block)) continue
       if (block?._tag === "ToolCall") removedRowKeys.add(`tool:${block.id}`)
     }
   }
@@ -366,7 +352,6 @@ const removeUnits = (model: Model, keys: ReadonlyArray<string>): Model => {
   })
   const items: Array<TranscriptItem> = []
   for (const [position, candidate] of updatedModel.items.entries()) {
-    if (!isTranscriptItem(candidate)) continue
     const item = candidate
     if (removedPositions.has(position)) continue
     const index = item._tag === "Entry" ? entryIndexes.get(item.index) : blockIndexes.get(item.index)
@@ -432,16 +417,14 @@ export const projectChildUnits: {
   ): (model: import("../../state/model").Model) => import("../../state/model").Model
 } = Function.dual(3, (model: import("../../state/model").Model, parentId: string, units: ReadonlyArray<Unit>) => {
   const projected = projectUnitsImpl(model, units, parentId)
-  const parentCancelled = validBlocks(projected.blocks).some(
+  const parentCancelled = projected.blocks.some(
     (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
   )
   if (!parentCancelled) return projected
   const childIndexes = new Set(
-    projected.items
-      .filter(isTranscriptItem)
-      .flatMap((item) => (item._tag === "Block" && item.parentId === parentId ? [item.index] : [])),
+    projected.items.flatMap((item) => (item._tag === "Block" && item.parentId === parentId ? [item.index] : [])),
   )
-  const blocks = [...validBlocks(projected.blocks)]
+  const blocks = [...projected.blocks]
   for (const index of childIndexes) {
     const block = blocks[index]
     if (block === undefined) continue

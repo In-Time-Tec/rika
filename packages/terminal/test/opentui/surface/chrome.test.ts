@@ -143,8 +143,8 @@ describe("semantic subagent and authorization transcript rows", () => {
     const settled: Model = {
       ...selected,
       blocks: [
-        selected.blocks[0],
-        selected.blocks[1],
+        selected.blocks[0]!,
+        selected.blocks[1]!,
         {
           _tag: "AuthorizationCard",
           id: "authorization-local",

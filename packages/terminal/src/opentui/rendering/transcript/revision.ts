@@ -1,4 +1,4 @@
-import { Function, Schema } from "effect"
+import { Function } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
 import { StyledText, type TextChunk, type TextRenderable } from "@opentui/core"
 import type { Model } from "../../../state/model"
@@ -20,11 +20,7 @@ const identityRevision = (value: TranscriptIdentity): number => {
   transcriptIdentityRevisions.set(value, transcriptIdentityCounter)
   return transcriptIdentityCounter
 }
-const decodeBlock = Schema.decodeUnknownSync(Block)
-const blockAt = (model: Model, index: number): Block => {
-  const block = model.blocks[index]
-  return Schema.is(Block)(block) ? block : decodeBlock(block)
-}
+const blockAt = (model: Model, index: number): Block => model.blocks[index]!
 
 export const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
   state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome

@@ -391,7 +391,6 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
               completeLabel: "Subagent finished",
             },
             detail: "Wait then run the checks",
-            childId: "child",
             files: [],
           },
           {

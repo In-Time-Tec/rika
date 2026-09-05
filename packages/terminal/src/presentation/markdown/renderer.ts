@@ -286,24 +286,41 @@ const blockTokenLines = (token: Token, depth: number, plain: boolean, width: num
   }
 }
 
-const blockLinesCache = new Map<string, Lines>()
+const blockLinesCache = new Map<string, { readonly signature: string; readonly lines: Lines }>()
 const blockLinesCacheLimit = 256
+let blockCacheComparisons = 0
+let blockCacheHits = 0
+let blockPreparations = 0
+let cacheKeyCharacters = 0
 
 const cachedBlockTokenLines = (token: Token, depth: number, plain: boolean, width: number): Lines => {
-  const key = `${plain ? "p" : "m"}:${width}:${depth}:${JSON.stringify(token)}`
-  const cached = blockLinesCache.get(key)
-  if (cached !== undefined) return cached
+  // Raw text narrows the lookup, but is not proof of equal output: a later reference
+  // definition can change resolved inline tokens without changing this block's raw text.
+  // Keep the resolved signature out of the Map key so lookup only hashes the raw source.
+  const key =
+    token.raw.length <= 4_096 ? `${plain ? "p" : "m"}:${width}:${depth}:${token.type}:${token.raw}` : undefined
+  cacheKeyCharacters += key?.length ?? 0
+  const cached = key === undefined ? undefined : blockLinesCache.get(key)
+  const signature = key === undefined ? "" : JSON.stringify(token)
+  if (cached !== undefined) {
+    blockCacheComparisons += 1
+    if (cached.signature === signature) {
+      blockCacheHits += 1
+      return cached.lines
+    }
+  }
+  blockPreparations += 1
   const lines = blockTokenLines(token, depth, plain, width).flatMap((line) => {
     const safe = line.map((chunk) => ({ ...chunk, text: terminalSafeText(chunk.text) }))
     const lineWidth = safe.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
     return lineWidth <= width ? [safe] : wrapChunkLine(safe, width)
   })
-  if (token.raw.length <= 4_096) {
-    if (blockLinesCache.size >= blockLinesCacheLimit) {
+  if (key !== undefined) {
+    if (!blockLinesCache.has(key) && blockLinesCache.size >= blockLinesCacheLimit) {
       const oldest = blockLinesCache.keys().next().value
       if (oldest !== undefined) blockLinesCache.delete(oldest)
     }
-    blockLinesCache.set(key, lines)
+    blockLinesCache.set(key, { signature, lines })
   }
   return lines
 }
@@ -346,32 +363,40 @@ const renderLinesCacheLimit = 128
 const renderLinesCacheSourceLimit = 4_096
 
 const renderLines = (source: string, plain: boolean, width: number): Lines => {
+  if (source.length > renderLinesCacheSourceLimit) return renderLinesUncached(source, plain, width)
   const key = `${plain ? "p" : "m"}:${width}:${source}`
+  cacheKeyCharacters += key.length
   const cached = renderLinesCache.get(key)
   if (cached !== undefined) return cached
   const lines = renderLinesUncached(source, plain, width)
-  if (source.length <= renderLinesCacheSourceLimit) {
-    if (renderLinesCache.size >= renderLinesCacheLimit) {
-      const oldest = renderLinesCache.keys().next().value
-      if (oldest !== undefined) {
-        markdownCacheBytes -= oldest.length * 2
-        renderLinesCache.delete(oldest)
-      }
+  if (renderLinesCache.size >= renderLinesCacheLimit) {
+    const oldest = renderLinesCache.keys().next().value
+    if (oldest !== undefined) {
+      markdownCacheBytes -= oldest.length * 2
+      renderLinesCache.delete(oldest)
     }
-    renderLinesCache.set(key, lines)
-    markdownCacheBytes += key.length * 2
   }
+  renderLinesCache.set(key, lines)
+  markdownCacheBytes += key.length * 2
   return lines
 }
 
 export const markdownRendererDiagnostics = () => ({
   lexerInvocations: markdownLexerInvocations,
+  blockCacheComparisons,
+  blockCacheHits,
+  blockPreparations,
+  cacheKeyCharacters,
   cacheEntries: renderLinesCache.size,
   cacheBytes: markdownCacheBytes,
 })
 
 export const resetMarkdownRendererDiagnostics = (): void => {
   markdownLexerInvocations = 0
+  blockCacheComparisons = 0
+  blockCacheHits = 0
+  blockPreparations = 0
+  cacheKeyCharacters = 0
   markdownCacheBytes = 0
   renderLinesCache.clear()
   blockLinesCache.clear()

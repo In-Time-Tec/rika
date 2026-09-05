@@ -7,7 +7,6 @@ import { runningToolsActivity, streamActivity, type Activity } from "../activity
 import { filteredFiles, filteredThreads, selectedThreadMetadata, renameThread } from "../thread/navigation"
 import { composerEdit } from "../composer/edit"
 
-const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
 const ThreadItemSchema = Schema.Struct({
   archived: Schema.Boolean,
   id: Schema.String,
@@ -22,20 +21,6 @@ const ThreadItemSchema = Schema.Struct({
   ),
 })
 const decodeThreadItem = Schema.decodeUnknownSync(ThreadItemSchema)
-const decodeTranscriptItem = Schema.decodeUnknownOption(
-  Schema.Union([
-    Schema.TaggedStruct("Entry", {
-      id: Schema.optionalKey(Schema.String),
-      index: Schema.Finite,
-      turnId: Schema.optionalKey(Schema.String),
-    }),
-    Schema.TaggedStruct("Block", {
-      id: Schema.optionalKey(Schema.String),
-      index: Schema.Finite,
-      turnId: Schema.optionalKey(Schema.String),
-    }),
-  ]),
-)
 type ReplayedEvent = Extract<Message, { readonly _tag: "EventReplayed" }>["event"]
 
 const reduceComposerData = (model: Model, message: Message): Model | undefined => {
@@ -228,9 +213,9 @@ const replayToolCall = (
 }
 
 const replayTranscriptEvent = (model: Model, event: ReplayedEvent) => {
-  const blocks = model.blocks.map((block) => decodeTranscriptBlock(block))
+  const blocks = [...model.blocks]
   const items = [...model.items]
-  const lastItem = Option.getOrUndefined(decodeTranscriptItem(items.at(-1)))
+  const lastItem = items.at(-1)
   const last = lastItem?._tag === "Block" ? blocks[lastItem.index] : undefined
   if (
     event.block._tag === "Reasoning" &&

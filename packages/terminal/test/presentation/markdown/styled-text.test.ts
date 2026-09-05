@@ -22,6 +22,18 @@ const hasAttribute = (chunk: TextChunk, attribute: number): boolean =>
   ((chunk.attributes ?? TextAttributes.NONE) & attribute) === attribute
 
 describe("transcript renderers", () => {
+  test("reuses settled block preparation while parsing a changed document", () => {
+    resetMarkdownRendererDiagnostics()
+    const prefix = "## Stable heading\n\n- first **bold**\n- second\n\n"
+    renderMarkdown(prefix + "tail one")
+    const before = markdownRendererDiagnostics()
+    renderMarkdown(prefix + "tail two")
+    const after = markdownRendererDiagnostics()
+    expect(after.lexerInvocations - before.lexerInvocations).toBe(1)
+    expect(after.blockCacheHits).toBeGreaterThan(before.blockCacheHits)
+    expect(after.blockPreparations - before.blockPreparations).toBe(1)
+  })
+
   test("renders terminal-safe Markdown structure", () => {
     expect(
       renderMarkdown(
@@ -64,6 +76,7 @@ describe("transcript renderers", () => {
     const source = Array.from({ length: 1_000 }, (_, index) => `physical-line-${index}`).join("\n")
     expect(renderMarkdown(source, 100)).toBe(source)
     expect(markdownRendererDiagnostics().lexerInvocations).toBe(0)
+    expect(markdownRendererDiagnostics().cacheKeyCharacters).toBe(0)
     const heading = renderMarkdownStyled("Heading\n---")
     expect(hasAttribute(chunkFor(heading.chunks, "Heading"), TextAttributes.BOLD)).toBe(true)
     expect(renderMarkdown("- item\n- other", 100)).toBe("- item\n- other")

@@ -6,7 +6,6 @@ import { transcriptUnitId, transcriptUnits } from "../../presentation/transcript
 import { composerEdit } from "../composer/edit"
 import { reduceKeyboardPrelude } from "./keyboard-prelude"
 import { reduceKeyboardPicker } from "./keyboard-picker"
-import { decodeTranscriptBlocks, decodeTranscriptItems } from "../transcript/model"
 import { expandPastedText } from "../composer/paste"
 
 type Update = (model: Model, message: Message) => Model
@@ -27,12 +26,10 @@ const selectedAuthorization = (
     (candidate) => candidate.kind === "block" && transcriptUnitId(model, candidate) === model.detailSelection,
   )
   if (unit?.kind !== "block") return undefined
-  const block = decodeTranscriptBlocks(model.blocks)[unit.block]
+  const block = model.blocks[unit.block]
   if (block === undefined) return undefined
   if (block._tag !== "AuthorizationCard" || block.status !== "pending") return undefined
-  const item = decodeTranscriptItems(model.items).find(
-    (candidate) => candidate._tag === "Block" && candidate.index === unit.block,
-  )
+  const item = model.items.find((candidate) => candidate._tag === "Block" && candidate.index === unit.block)
   const turnId = item?.rootTurnId ?? item?.turnId
   return turnId === undefined ? undefined : { turnId, authorizationId: block.id }
 }

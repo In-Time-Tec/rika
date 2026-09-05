@@ -117,7 +117,7 @@ test.each(["tool-a", "unit:tool-a"])("trimTranscriptTimeline bounds oversized su
     ],
   }
   const trimmed = trimTranscriptTimeline(model, 5)
-  const keptItems = Schema.decodeUnknownSync(TranscriptItems)(trimmed.items)
+  const keptItems = Schema.decodeSync(TranscriptItems)(trimmed.items)
   const keptKeys = keptItems.map((item) => item.id)
   expect(keptKeys).toContain(unitKey)
   expect(keptKeys.filter((key) => key?.startsWith("child-"))).toEqual(["child-4", "child-5", "child-6", "child-7"])

@@ -1,6 +1,15 @@
 import { describe, expect, test } from "vitest"
+import { Schema } from "effect"
 import { buildTranscript } from "../../src/opentui/rendering/renderer"
-import { initial, type Model } from "../../src/state/model"
+import { initial, Model } from "../../src/state/model"
+
+test("validates transcript data at the model boundary and preserves local submission identity", () => {
+  const base = initial("/work")
+  expect(Schema.is(Model)({ ...base, blocks: [{ _tag: "Notification", title: "missing detail" }] })).toBe(false)
+  expect(Schema.is(Model)({ ...base, items: [{ _tag: "Block", index: "invalid" }] })).toBe(false)
+  const item = { _tag: "Entry" as const, index: 0, submissionId: "local", provisional: true }
+  expect(Schema.decodeSync(Model)({ ...base, items: [item] }).items).toEqual([item])
+})
 
 const webBlock = {
   _tag: "ToolCall" as const,

@@ -31,7 +31,6 @@ test("matches Amp cancelled subagent and shell treatment", () => {
           completeLabel: "Subagent finished",
         },
         detail: "Wait then run the checks",
-        childId: "child",
         files: [],
       },
       {
@@ -91,7 +90,6 @@ test("keeps hidden nested web output inline", () => {
           completeLabel: "Subagent finished",
         },
         detail: "Research documentation",
-        childId: "child",
         files: [],
       },
       {

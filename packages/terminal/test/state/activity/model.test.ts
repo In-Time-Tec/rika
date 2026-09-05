@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { formatActivity, runningToolsActivity } from "../../../src/state/activity/model"
 import { initial, type Model } from "../../../src/state/model"
-import type { TranscriptItem } from "../../../src/state/transcript/model"
+import type { TranscriptBlock, TranscriptItem } from "../../../src/state/transcript/model"
 
 const tool = (id: string, status: "running" | "complete") => ({
   _tag: "ToolCall" as const,
@@ -19,7 +19,7 @@ const tool = (id: string, status: "running" | "complete") => ({
   files: [],
 })
 
-const card = (id: string, status: string) => ({
+const card = (id: string, status: Extract<TranscriptBlock, { _tag: "SubagentCard" }>["status"]): TranscriptBlock => ({
   _tag: "SubagentCard",
   id,
   name: "Task",

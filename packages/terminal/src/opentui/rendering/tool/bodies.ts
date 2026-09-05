@@ -1,7 +1,6 @@
 import { bold, dim, fg, italic, strikethrough, StyledText, type TextChunk } from "@opentui/core"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
-import { decodeTranscriptBlocks } from "../../../state/transcript/model"
 import { colors } from "../../../presentation/terminal/theme"
 import { escapeControlCharacters, plural } from "../../../presentation/terminal/format"
 import { highlightShellCommand, wrapStyledLine } from "../text-adapter"
@@ -74,7 +73,7 @@ const editBodyState = (model: Model, units: ReadonlyArray<ToolUnit>, diffs: Read
   let added = files.reduce((total, file) => total + file.additions, 0)
   let removed = files.reduce((total, file) => total + file.deletions, 0)
   for (const diffIndex of diffs) {
-    const diff = decodeTranscriptBlocks(model.blocks)[diffIndex]
+    const diff = model.blocks[diffIndex]
     if (diff?._tag !== "Diff") continue
     const [diffAdded, diffRemoved] = diffCounts(diff.patch)
     added += diffAdded
@@ -255,7 +254,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
   }
   const renderEditDiffs = (diffs: ReadonlyArray<number>) => {
     for (const diffIndex of diffs) {
-      const diff = decodeTranscriptBlocks(model.blocks)[diffIndex]
+      const diff = model.blocks[diffIndex]
       if (diff?._tag !== "Diff") continue
       append(fg(colors.text)("\n"))
       const start = context.line()

@@ -8,8 +8,6 @@ import {
   type TextChunk,
 } from "@opentui/core"
 import stringWidth from "string-width"
-import { Option, Schema } from "effect"
-import { Block } from "@rika/transcript/transcript-presentation-model"
 import {
   mountedStreamingTranscriptRowBudget,
   mountedTranscriptRowBudget,
@@ -306,7 +304,7 @@ const tentativeUnit = (model: Model, unit: TranscriptUnit, unitKey: string) => {
   if (unitKey.startsWith("entry:tentative:") && unit.kind === "entry")
     return { text: model.entries[unit.entry]?.text ?? "", tone: "answer" as const }
   if (!unitKey.startsWith("block:tentative:") || unit.kind !== "reasoning") return undefined
-  const block = Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[unit.block]))
+  const block = model.blocks[unit.block]
   return { text: block?._tag === "Reasoning" ? block.text : "", tone: "reasoning" as const }
 }
 

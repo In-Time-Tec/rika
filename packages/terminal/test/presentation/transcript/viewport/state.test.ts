@@ -71,7 +71,7 @@ const detailCases = [
           },
           detail: "printf output",
           files: [],
-          output: "output\n".repeat(50),
+          result: "output\n".repeat(50),
         },
         "tool:shell-detail",
       ),

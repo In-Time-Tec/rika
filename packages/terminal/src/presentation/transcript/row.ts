@@ -1,6 +1,4 @@
-import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
-import * as TranscriptUnitModel from "@rika/transcript/transcript-unit"
-import { Function, Schema } from "effect"
+import { Function } from "effect"
 import { agentResponseState, isToolOutputDisplayed } from "./agent-response"
 import { toolResultText } from "./tool/body"
 import type { Model } from "../../state/model"
@@ -10,39 +8,9 @@ import type { NestedTranscriptUnit, TranscriptUnit, TranscriptUnitId } from "./t
 import type { ToolGroupKind, ToolKind, AgentResponseState } from "./tool/kinds"
 const groupOf = (kind: ToolKind): ToolGroupKind => (kind === "read" || kind === "search" ? "explore" : kind)
 
-const TranscriptItemSchema = Schema.Union([
-  Schema.TaggedStruct("Entry", {
-    index: Schema.Finite,
-    id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
-    rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
-    order: Schema.optionalKey(TranscriptUnitModel.UnitOrder),
-  }),
-  Schema.TaggedStruct("Block", {
-    index: Schema.Finite,
-    id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
-    rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
-    order: Schema.optionalKey(TranscriptUnitModel.UnitOrder),
-  }),
-])
-const decodeTranscriptItems = Schema.decodeUnknownSync(Schema.Array(TranscriptItemSchema))
-const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
-const decodedItemsCache = new WeakMap<ReadonlyArray<unknown>, ReadonlyArray<TranscriptItem>>()
-const transcriptItems = (items: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItem> => {
-  const cached = decodedItemsCache.get(items)
-  if (cached !== undefined) return cached
-  const decoded = decodeTranscriptItems(items)
-  decodedItemsCache.set(items, decoded)
-  decodedItemsCache.set(decoded, decoded)
-  return decoded
-}
-
 export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptItem> =>
   model.items.length > 0
-    ? transcriptItems(model.items)
+    ? model.items
     : [
         ...model.entries.map((_, index) => ({ _tag: "Entry" as const, index })),
         ...model.blocks.map((_, index) => ({ _tag: "Block" as const, index })),
@@ -64,7 +32,7 @@ const rowsCacheFor = (model: Model): RowsCache | undefined => {
   if (cached !== undefined && cached.blocks === model.blocks && cached.entries === model.entries) return cached
   const entryItemByIndex = new Map<number, TranscriptItem>()
   const blockItemByIndex = new Map<number, TranscriptItem>()
-  for (const item of transcriptItems(model.items)) {
+  for (const item of model.items) {
     const byIndex = item._tag === "Entry" ? entryItemByIndex : blockItemByIndex
     if (!byIndex.has(item.index)) byIndex.set(item.index, item)
   }
@@ -94,10 +62,10 @@ const continuationIsFolded = (
   block.presentation.action !== "status" &&
   (block.status !== "failed" ||
     (block.parentId !== undefined &&
-      blocks.some((value) => {
-        const candidate = decodeTranscriptBlock(value)
-        return candidate._tag === "ToolCall" && candidate.id === block.parentId && candidate.status === "failed"
-      })))
+      blocks.some(
+        (candidate) =>
+          candidate._tag === "ToolCall" && candidate.id === block.parentId && candidate.status === "failed",
+      )))
 
 const toolUnitHasStructuralDetail = (unit: Extract<TranscriptUnit, { kind: "tool" }>): boolean =>
   (unit.children?.length ?? 0) > 0 ||
@@ -115,7 +83,7 @@ const toolIsStandalone = (
 /** Nested units point at their parent's block id (not its unit key), so collect loaded block ids. */
 const loadedBlockId = (model: Model, item: TranscriptItem): ReadonlyArray<string> => {
   if (item._tag !== "Block") return []
-  const block = decodeTranscriptBlock(model.blocks[item.index])
+  const block = model.blocks[item.index]!
   return "id" in block ? [block.id] : []
 }
 
@@ -171,7 +139,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const nestedUnits = (parentId: string): ReadonlyArray<NestedTranscriptUnit> =>
     (childItems.get(parentId) ?? []).flatMap((item): ReadonlyArray<NestedTranscriptUnit> => {
       if (item._tag !== "Block") return []
-      const block = decodeTranscriptBlock(model.blocks[item.index])
+      const block = model.blocks[item.index]!
       if (block._tag === "SubagentGroup")
         return [{ kind: "subagent-group", block: item.index, children: nestedUnits(block.id) }]
       if (block._tag === "SubagentCard") {
@@ -224,7 +192,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
       units.push({ kind: "entry", entry: item.index })
       return
     }
-    const block = decodeTranscriptBlock(model.blocks[item.index])
+    const block = model.blocks[item.index]!
     if (block._tag === "ToolCall" && continuationIsFolded(block, model.blocks)) return
     if (block._tag === "ToolCall") {
       const children = nestedUnits(block.id)
@@ -274,11 +242,11 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
 
 const isAutoExpandedUnitImpl = (model: Model, unit: TranscriptUnit): boolean => {
   if (unit.kind === "subagent-group") {
-    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    const block = model.blocks[unit.block]!
     return block._tag === "SubagentGroup" && (block.status === "running" || block.status === "cancelling")
   }
   if (unit.kind === "subagent") {
-    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    const block = model.blocks[unit.block]!
     return (
       block._tag === "SubagentCard" &&
       (block.status === "running" || block.status === "waiting" || block.status === "cancelling")
@@ -286,7 +254,7 @@ const isAutoExpandedUnitImpl = (model: Model, unit: TranscriptUnit): boolean => 
   }
   if (unit.kind !== "tool") return false
   return unit.blocks.some((index) => {
-    const block = decodeTranscriptBlock(model.blocks[index])
+    const block = model.blocks[index]!
     return block._tag === "ToolCall" && block.status === "running" && unit.group === "edit"
   })
 }
@@ -313,14 +281,14 @@ export const isExpandableUnit: {
 } = Function.dual(2, (model: Model, unit: TranscriptUnit): boolean => {
   if (unit.kind !== "tool") {
     if (unit.kind === "block") {
-      const block = decodeTranscriptBlock(model.blocks[unit.block])
+      const block = model.blocks[unit.block]!
       return block._tag === "AuthorizationCard" && (block.status === "pending" || block.input.length > 0)
     }
     return unit.kind === "diff" || unit.kind === "subagent" || unit.kind === "subagent-group"
   }
   if (toolUnitHasStructuralDetail(unit)) return true
   return unit.blocks.some((index) => {
-    const block = decodeTranscriptBlock(model.blocks[index])
+    const block = model.blocks[index]!
     if (block._tag !== "ToolCall") return false
     return (
       (block.presentation.family === "agent" && (block.status === "running" || block.detail.length > 0)) ||
@@ -341,7 +309,7 @@ const appendToolChildRowIds = (
 ) => {
   if (unit.group === "edit") {
     const files = unit.blocks.flatMap((index) => {
-      const block = decodeTranscriptBlock(model.blocks[index])
+      const block = model.blocks[index]!
       return block._tag === "ToolCall" ? block.files : []
     })
     if (files.length > 1) for (const file of files) ids.push(`file:${file.key}`)
@@ -350,7 +318,7 @@ const appendToolChildRowIds = (
   if (!((unit.group === "shell" && unit.blocks.length > 1) || (unit.group === "explore" && unit.blocks.length > 1)))
     return
   for (const index of unit.blocks) {
-    const block = decodeTranscriptBlock(model.blocks[index])
+    const block = model.blocks[index]!
     if (block._tag !== "ToolCall") continue
     if (isToolOutputDisplayed(block) && (toolResultText(block.result)?.length ?? 0) > 0)
       ids.push(`tool-child:${block.id}`)
@@ -394,7 +362,7 @@ const entryUnitId = (
 }
 
 const blockUnitId = (model: Model, blockIndex: number, cache: RowsCache | undefined): TranscriptUnitId => {
-  const block = decodeTranscriptBlock(model.blocks[blockIndex])
+  const block = model.blocks[blockIndex]!
   const item =
     cache !== undefined
       ? cache.blockItemByIndex.get(blockIndex)
@@ -411,17 +379,17 @@ export const transcriptUnitId: {
   const cache = rowsCacheFor(model)
   if (unit.kind === "entry") return entryUnitId(model, unit, cache)
   if (unit.kind === "subagent-group") {
-    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    const block = model.blocks[unit.block]!
     return block._tag === "SubagentGroup" ? `subagent-group:${block.id}` : `subagent-group:missing:${unit.block}`
   }
   if (unit.kind === "subagent") {
-    const block = decodeTranscriptBlock(model.blocks[unit.block])
+    const block = model.blocks[unit.block]!
     return block._tag === "SubagentCard" ? `subagent:${block.id}` : `subagent:missing:${unit.block}`
   }
   if (unit.kind === "tool") {
     const first = unit.blocks[0]
     if (first === undefined) return "tool:missing"
-    const block = decodeTranscriptBlock(model.blocks[first])
+    const block = model.blocks[first]!
     return block._tag === "ToolCall" ? `tool:${block.id}` : `tool:missing:${first}`
   }
   return blockUnitId(model, unit.block, cache)

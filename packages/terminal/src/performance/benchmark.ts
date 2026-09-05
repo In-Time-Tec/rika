@@ -29,6 +29,9 @@ export interface TerminalBenchmarkMetric {
   readonly renderablesCreated: number
   readonly renderablesDestroyed: number
   readonly markdownLexerInvocations: number
+  readonly markdownBlockCacheHits: number
+  readonly markdownBlockPreparations: number
+  readonly markdownCacheKeyCharacters: number
   readonly transcriptBytesCopiedPerEvent: number
   readonly fullTranscriptCopiesPerEvent: number
 }
@@ -161,6 +164,9 @@ const metric = (
     renderablesCreated: renderables.created,
     renderablesDestroyed: renderables.destroyed,
     markdownLexerInvocations: markdown.lexerInvocations,
+    markdownBlockCacheHits: markdown.blockCacheHits,
+    markdownBlockPreparations: markdown.blockPreparations,
+    markdownCacheKeyCharacters: markdown.cacheKeyCharacters,
     transcriptBytesCopiedPerEvent: events === 0 ? 0 : projection.copiedTranscriptBytes / events,
     fullTranscriptCopiesPerEvent: events === 0 ? 0 : projection.fullTranscriptArrayCopies / events,
   }
@@ -477,6 +483,9 @@ export const terminalBenchmarkTable = (result: TerminalBenchmarkResult) =>
     retained_B_event: current.retainedHeapBytesPerEvent.toFixed(0),
     renderables: `${current.renderablesCreated}/${current.renderablesDestroyed}`,
     lexer: current.markdownLexerInvocations,
+    block_hits: current.markdownBlockCacheHits,
+    block_preparations: current.markdownBlockPreparations,
+    cache_key_chars: current.markdownCacheKeyCharacters,
     copied_B_event: current.transcriptBytesCopiedPerEvent.toFixed(1),
     copies_event: current.fullTranscriptCopiesPerEvent.toFixed(2),
   }))

@@ -8,7 +8,6 @@ import * as InteractiveFeed from "@rika/product/interactive-feed"
 import * as Turn from "@rika/product/turn-record"
 import { create as createTui } from "@rika/terminal/opentui-surface"
 import { initial, withModeConfiguration, type ModeConfiguration } from "@rika/terminal/terminal-state"
-import type { ThreadItem } from "@rika/terminal/terminal-state"
 import { update } from "@rika/terminal/terminal-state-reducer"
 import {
   Context,
@@ -20,7 +19,6 @@ import {
   FiberHandle,
   FiberSet,
   Layer,
-  Schema,
   Scope,
   Stream,
   SubscriptionRef,
@@ -45,22 +43,6 @@ class Runtime extends Context.Service<Runtime, { readonly make: typeof ProcessRu
 const processServices = Layer.merge(
   Layer.succeed(EventRouter, EventRouter.of({ make: ProcessEvents.makeEventRouter })),
   Layer.succeed(Runtime, Runtime.of({ make: ProcessRuntime.makeProcessRuntime })),
-)
-
-const ThreadItems = Schema.Array(
-  Schema.Struct({
-    id: Schema.String,
-    title: Schema.String,
-    workspace: Schema.String,
-    pinned: Schema.Boolean,
-    archived: Schema.Boolean,
-    status: Schema.Literals(["idle", "error", "queued", "running"]),
-    unread: Schema.Boolean,
-    lastActivityAt: Schema.Finite,
-    editTotals: Schema.optionalKey(
-      Schema.Struct({ added: Schema.Finite, modified: Schema.Finite, removed: Schema.Finite }),
-    ),
-  }),
 )
 
 export interface InteractiveTuiOptions {
@@ -146,8 +128,8 @@ export const interactiveTui =
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => stdout.write(sequence))
         const refreshTerminalTitle = () => {
           const threadId = loop.model.currentThreadId
-          const threads: ReadonlyArray<ThreadItem> = Schema.decodeSync(ThreadItems)(loop.model.threads)
-          const title = loop.model.currentThreadTitle ?? threads.find((thread) => thread.id === threadId)?.title
+          const title =
+            loop.model.currentThreadTitle ?? loop.model.threads.find((thread) => thread.id === threadId)?.title
           if (title !== undefined)
             writeTerminalTitle(
               terminalTitleSequence(title, loop.model.workspace, loop.model.busy ? loop.workingFrame : undefined),

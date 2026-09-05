@@ -24,7 +24,7 @@ type MutableSubmissionItem = { -readonly [Key in keyof SubmissionItem]: Submissi
 
 export interface SubmissionReference {
   readonly submissionId?: string
-  readonly turnId?: string
+  readonly turnId?: string | undefined
 }
 
 const isSubmissionItem = (item: Model["items"][number]): item is SubmissionItem =>
@@ -63,7 +63,7 @@ const reconcileUserEntryImpl = (
 ): ReconcileResult => {
   const position = itemPosition(model, reference, false)
   if (position < 0) return { model, found: false }
-  const item = model.items[position]
+  const item = model.items[position]!
   if (!isSubmissionItem(item)) return { model, found: false }
   const entry = model.entries[item.index]
   if (entry?.role !== "user") return { model, found: false }
@@ -92,7 +92,7 @@ const hasProvisionalUserEntryImpl = (model: Model, reference: SubmissionReferenc
 const settleProvisionalUserEntryImpl = (model: Model, reference: SubmissionReference, restore: boolean): Model => {
   const position = itemPosition(model, reference, true)
   if (position < 0) return model
-  const item = model.items[position]
+  const item = model.items[position]!
   if (!isSubmissionItem(item)) return model
   if (!restore) {
     const { provisional: _, ...settled } = item

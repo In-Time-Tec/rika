@@ -98,20 +98,20 @@ test("shows omitted group membership and clears history feedback after a complet
             },
           },
           ...Array.from({ length: 4 }, (_, index) => ({
-            _tag: "SubagentCard",
+            _tag: "SubagentCard" as const,
             id: `card-${index}`,
             name: `AGENT_${index}`,
             prompt: "Review",
             promptTruncated: false,
             summary: "",
-            status: "complete",
+            status: "complete" as const,
             activity: [],
           })),
         ],
         items: [
           { _tag: "Block", index: 0, id: "group-unit" },
           ...Array.from({ length: 4 }, (_, index) => ({
-            _tag: "Block",
+            _tag: "Block" as const,
             index: index + 1,
             id: `card-unit-${index}`,
             parentId: "group",

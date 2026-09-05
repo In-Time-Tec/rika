@@ -12,6 +12,7 @@ import { QueueItem as QueueItemSchema } from "./queue/item"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Entry } from "./message"
 import { ContextUsage } from "./context/usage"
+import { TranscriptBlock, TranscriptItem } from "./transcript/model"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -117,8 +118,8 @@ export const Model = Schema.Struct({
   rememberedMode: Schema.optional(Mode),
   modeRoutes: modeRouteMapSchema,
   entries: Schema.Array(Entry),
-  blocks: Schema.Array(Schema.Unknown),
-  items: Schema.Array(Schema.Unknown),
+  blocks: Schema.Array(TranscriptBlock),
+  items: Schema.Array(TranscriptItem),
   transcriptTruncated: Schema.optional(Schema.Boolean),
   input: Schema.String,
   cursor: Schema.Finite,

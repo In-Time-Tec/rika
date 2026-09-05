@@ -14,7 +14,6 @@ interface ExecutionOutcomeSource {
 export const outcomeShadow = new WeakMap<Block, { readonly outcome: ExecutionOutcome; readonly applied: Block }>()
 const outcomeBase = new WeakMap<Block, Block>()
 const outcomeSources = new WeakMap<object, ReadonlyMap<string, ExecutionOutcomeSource>>()
-const decodeBlocks = Schema.decodeUnknownSync(Schema.Array(Block))
 const ExecutionOutcomeSchema = Schema.Struct({
   status: Schema.Literals(["cancelled", "complete", "failed"]),
   reason: Schema.optionalKey(Schema.String),
@@ -22,7 +21,7 @@ const ExecutionOutcomeSchema = Schema.Struct({
 const decodeOutcomes = Schema.decodeUnknownSync(Schema.Record(Schema.String, ExecutionOutcomeSchema))
 
 const applyExecutionOutcome = (model: Model, parentId: string, outcome: ExecutionOutcome): Model => {
-  const blocks = [...decodeBlocks(model.blocks)]
+  const blocks = [...model.blocks]
   const index = blocks.findIndex(
     (block) =>
       (block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent") ||
@@ -52,7 +51,7 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
 }
 
 const restoreExecutionOutcome = (model: Model, parentId: string): Model => {
-  const blocks = decodeBlocks(model.blocks)
+  const blocks = model.blocks
   const index = blocks.findIndex(
     (block) => block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent",
   )

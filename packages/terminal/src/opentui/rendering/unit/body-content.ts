@@ -1,5 +1,3 @@
-import { Option, Schema } from "effect"
-import { Block } from "@rika/transcript/transcript-presentation-model"
 import type { Model } from "../../../state/model"
 import { toolDetails } from "../../../presentation/transcript/tool/detail"
 import type {
@@ -21,8 +19,7 @@ type TranscriptUnitRenderer = {
   readonly isUnitVisible: (unit: TranscriptUnit) => boolean
 }
 
-const blockAt = (model: Model, index: number) =>
-  Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[index]))
+const blockAt = (model: Model, index: number) => model.blocks[index]
 
 const animated = (model: Model, unit: TranscriptUnit): boolean => {
   if (unit.kind === "tool") return toolUnitsFor(model, unit.blocks).some((tool) => tool.block.status === "running")

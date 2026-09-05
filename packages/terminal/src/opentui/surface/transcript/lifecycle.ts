@@ -1,16 +1,13 @@
 import { Function } from "effect"
 import type { TranscriptItem } from "../../../state/transcript/model"
-import { decodeTranscriptItems } from "../../../state/transcript/model"
 import { classifyTranscriptContent } from "../../../presentation/transcript/content-change"
 
 const prependedTranscriptItemsImpl = (
-  previousItems: ReadonlyArray<unknown>,
-  currentItems: ReadonlyArray<unknown>,
+  previousItems: ReadonlyArray<TranscriptItem>,
+  currentItems: ReadonlyArray<TranscriptItem>,
 ): number => {
-  const identities = (items: ReadonlyArray<unknown>) =>
-    decodeTranscriptItems(items).flatMap((item: TranscriptItem) =>
-      item.id === undefined ? [] : [{ id: `${item._tag}:${item.id}` }],
-    )
+  const identities = (items: ReadonlyArray<TranscriptItem>) =>
+    items.flatMap((item) => (item.id === undefined ? [] : [{ id: `${item._tag}:${item.id}` }]))
   return classifyTranscriptContent(identities(previousItems), identities(currentItems)).prepended.length
 }
 

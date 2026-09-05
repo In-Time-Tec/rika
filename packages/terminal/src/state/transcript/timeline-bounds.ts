@@ -1,7 +1,6 @@
 import { Function } from "effect"
 import type { Model } from "../model"
 import type { TranscriptItem } from "./model"
-import { decodeTranscriptBlocks, decodeTranscriptItems } from "./model"
 
 export const maxInMemoryTranscriptUnits = 20_000
 
@@ -9,9 +8,9 @@ export const trimTranscriptTimeline: {
   (cap: number): (model: Model) => Model
   (model: Model, cap: number): Model
 } = Function.dual(2, (model: Model, cap: number): Model => {
-  const items = decodeTranscriptItems(model.items)
+  const items = model.items
   if (items.length <= cap) return model
-  const blocks = decodeTranscriptBlocks(model.blocks)
+  const blocks = model.blocks
   const byBlockId = new Map<string, number>()
   const identity = (item: TranscriptItem, id: string) => `${item.turnId ?? ""}\0${id}`
   items.forEach((item, position) => {
@@ -59,7 +58,7 @@ export const trimTranscriptTimeline: {
     if (index === undefined) {
       index = keptBlocks.length
       blockIndices.set(item.index, index)
-      keptBlocks.push(model.blocks[item.index])
+      keptBlocks.push(model.blocks[item.index]!)
     }
     remapped.push({ ...item, index })
   }

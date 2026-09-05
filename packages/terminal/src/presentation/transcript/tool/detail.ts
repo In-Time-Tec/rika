@@ -1,4 +1,3 @@
-import * as TranscriptPresentationModel from "@rika/transcript/transcript-presentation-model"
 import { Function, Option, Schema } from "effect"
 import { escapeControlCharacters } from "../../terminal/format"
 import type { Model } from "../../../state/model"
@@ -31,7 +30,6 @@ const ToolInput = Schema.Struct({
 })
 type ToolInput = typeof ToolInput.Type
 const ToolInputJson = Schema.fromJsonString(ToolInput)
-const decodeTranscriptBlock = Schema.decodeUnknownSync(TranscriptPresentationModel.Block)
 
 const summary = (primary: string, secondary?: string): ToolSummary => {
   if (secondary === undefined || secondary.length === 0) return { primary }
@@ -157,7 +155,7 @@ export const toolDetails: {
   2,
   (model: Model, unit: Extract<TranscriptUnit, { kind: "tool" }>): ReadonlyArray<ToolDetail> =>
     unit.blocks.flatMap((block) => {
-      const call = decodeTranscriptBlock(model.blocks[block])
+      const call = model.blocks[block]!
       return call._tag === "ToolCall" ? [toolDetail(block, call)] : []
     }),
 )

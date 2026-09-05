@@ -58,7 +58,6 @@ test("renders a subagent tool tree and expands each child independently", () =>
             status: "complete",
             presentation: presentation.agent,
             detail: "Review the code",
-            childId: "child:oracle",
             files: [],
           },
           {

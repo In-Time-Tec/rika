@@ -13,6 +13,25 @@ import type { TranscriptBlock, TranscriptItem } from "../../../../src/state/tran
 import { handlers, model } from "./window.fixture"
 import { openTui, styledTextValue } from "../../../support/surface/transcript/pane-geometry.fixture"
 
+test("selects all window overloads without validating unrelated model fields", () => {
+  let routeReads = 0
+  const base = model()
+  const state: Model = {
+    ...base,
+    get modeRoutes() {
+      routeReads += 1
+      return base.modeRoutes
+    },
+  }
+  const direct = boundedTranscriptModel(state)
+  const explicit = boundedTranscriptModel(state, state.items.length)
+  const curried = boundedTranscriptModel(state.items.length)(state)
+  expect(direct.items).toEqual(explicit.items)
+  expect(curried.items).toEqual(explicit.items)
+  // Each result spreads the model once; overload dispatch must not walk its schema.
+  expect(routeReads).toBe(3)
+})
+
 test("reflows mounted assistant markdown when the terminal width shrinks", () =>
   Effect.runPromise(
     Effect.gen(function* () {

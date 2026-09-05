@@ -5,51 +5,28 @@ import * as TranscriptPresentationModel from "@rika/transcript/transcript-presen
 export type TranscriptBlock = TranscriptPresentationModel.Block
 export const TranscriptBlock = TranscriptPresentationModel.Block
 
-export type TranscriptItem =
-  | {
-      readonly _tag: "Entry"
-      readonly index: number
-      readonly id?: string
-      readonly turnId?: string
-      readonly rootTurnId?: string
-      readonly parentId?: string
-      readonly order?: TranscriptUnit.UnitOrder
-    }
-  | {
-      readonly _tag: "Block"
-      readonly index: number
-      readonly id?: string
-      readonly turnId?: string
-      readonly rootTurnId?: string
-      readonly parentId?: string
-      readonly order?: TranscriptUnit.UnitOrder
-    }
-
 export const TranscriptItem = Schema.Union([
   Schema.TaggedStruct("Entry", {
     index: Schema.Finite,
     id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
+    turnId: Schema.optional(Schema.String),
     rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
+    parentId: Schema.optional(Schema.String),
     order: Schema.optionalKey(TranscriptUnit.UnitOrder),
+    submissionId: Schema.optionalKey(Schema.String),
+    provisional: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.TaggedStruct("Block", {
     index: Schema.Finite,
     id: Schema.optionalKey(Schema.String),
-    turnId: Schema.optionalKey(Schema.String),
+    turnId: Schema.optional(Schema.String),
     rootTurnId: Schema.optionalKey(Schema.String),
-    parentId: Schema.optionalKey(Schema.String),
+    parentId: Schema.optional(Schema.String),
     order: Schema.optionalKey(TranscriptUnit.UnitOrder),
   }),
 ])
 
-const TranscriptBlocks = Schema.Array(TranscriptBlock)
-const TranscriptItems = Schema.Array(TranscriptItem)
-export const decodeTranscriptBlocks = (input: ReadonlyArray<unknown>): ReadonlyArray<TranscriptBlock> =>
-  Schema.decodeUnknownSync(TranscriptBlocks)(input)
-export const decodeTranscriptItems = (input: ReadonlyArray<unknown>): ReadonlyArray<TranscriptItem> =>
-  Schema.decodeUnknownSync(TranscriptItems)(input)
+export type TranscriptItem = typeof TranscriptItem.Type
 
 export const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
   blocks.map((block) => {

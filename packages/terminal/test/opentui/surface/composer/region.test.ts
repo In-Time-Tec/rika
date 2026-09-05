@@ -314,7 +314,9 @@ test("keeps the welcome orb cadence independent from global ViewState animation"
   expect(animationActive(welcome)).toBe(false)
   expect(text(welcomeContent(120, 30, 0, "high").chunks)).not.toBe(text(welcomeContent(120, 30, 1, "high").chunks))
   expect(welcomeAnimationActive({ ...welcome, entries: [{ role: "user", text: "hello" }] })).toBe(false)
-  expect(welcomeAnimationActive({ ...welcome, blocks: [{ _tag: "Notification", title: "hello" }] })).toBe(false)
+  expect(welcomeAnimationActive({ ...welcome, blocks: [{ _tag: "Notification", title: "hello", detail: "" }] })).toBe(
+    false,
+  )
   expect(welcomeAnimationActive({ ...welcome, height: 12 })).toBe(false)
 })
 

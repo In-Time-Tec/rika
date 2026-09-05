@@ -1,4 +1,4 @@
-import { Function, Schema } from "effect"
+import { Function } from "effect"
 import type { Model } from "../../../state/model"
 import { TranscriptBlock, type TranscriptItem } from "../../../state/transcript/model"
 import { spacing } from "../../terminal/theme"
@@ -45,7 +45,7 @@ const blockText = (block: TranscriptBlock | undefined): string => {
 
 const itemRows = (item: TranscriptItem, model: Model, wrapWidth: number): number => {
   if (item._tag === "Entry") return textRows(model.entries[item.index]?.text ?? "", wrapWidth)
-  return 1 + textRows(blockText(Schema.decodeUnknownSync(TranscriptBlock)(model.blocks[item.index])), wrapWidth)
+  return 1 + textRows(blockText(model.blocks[item.index]), wrapWidth)
 }
 
 export const transcriptVirtualIndex: {

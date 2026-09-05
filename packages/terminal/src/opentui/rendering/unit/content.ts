@@ -1,6 +1,5 @@
-import { Function, Option, Schema } from "effect"
+import { Function } from "effect"
 import { bold, dim, fg, italic, StyledText, type TextChunk } from "@opentui/core"
-import { Block } from "@rika/transcript/transcript-presentation-model"
 import stringWidth from "string-width"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
@@ -35,7 +34,7 @@ const displayedToolOutput = (block: ToolUnit["block"]): string | undefined => {
 }
 
 const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
-  const blockAt = (index: number) => Option.getOrUndefined(Schema.decodeUnknownOption(Block)(model.blocks[index]))
+  const blockAt = (index: number) => model.blocks[index]
   let chunks: Array<TextChunk> = []
   let line = 0
   const append = (chunk: TextChunk | TerminalTextChunk) => {

@@ -202,14 +202,11 @@ const reduceSubmissionRejection = (model: Model, message: Message): Model | unde
       const settled = settleProvisionalUserEntry(model, reference, true)
       const queue = dropProvisionalQueueItem(settled, taken.draft?.submissionId ?? message.submissionId)
       const remainsBusy = model.activeTurnId !== undefined || taken.rest.length > 0
-      const rejected = {
+      const rejected: Model = {
         ...settled,
         ...queue,
         submittedDrafts: taken.rest,
-        blocks: [
-          ...settled.blocks,
-          { _tag: "Error", title: "Message failed", detail: message.message, recovery: "Press Enter to try again." },
-        ],
+        blocks: [...settled.blocks, { _tag: "Error", title: "Message failed", detail: message.message }],
         items: [...settled.items, { _tag: "Block", index: settled.blocks.length }],
         cancelPending: model.activeTurnId === undefined ? false : model.cancelPending,
         busy: remainsBusy,

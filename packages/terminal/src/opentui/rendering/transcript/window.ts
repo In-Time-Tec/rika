@@ -1,6 +1,6 @@
-import { Function, Schema } from "effect"
+import { Function, Predicate } from "effect"
 import { Block } from "@rika/transcript/transcript-presentation-model"
-import { Model } from "../../../state/model"
+import type { Model } from "../../../state/model"
 import type { TranscriptItem } from "../../../state/transcript/model"
 import { orderedTranscriptItems } from "../../../presentation/transcript/row"
 import type { TextChunk } from "@opentui/core"
@@ -51,7 +51,7 @@ const projectItems = (model: Model, source: ReadonlyArray<TranscriptItem>): Boun
       index = values.length
       indices.set(item.index, index)
       if (item._tag === "Entry") entries.push(model.entries[item.index]!)
-      else blocks.push(model.blocks[item.index])
+      else blocks.push(model.blocks[item.index]!)
     }
     items.push({ ...item, index })
   }
@@ -62,8 +62,7 @@ const parentProjection = (model: Model, items: ReadonlyArray<TranscriptItem>): P
   const itemPositionByBlockId = new Map<string, number>()
   for (const [position, item] of items.entries()) {
     if (item._tag !== "Block") continue
-    const candidate = model.blocks[item.index]
-    const block = candidate === undefined ? undefined : Schema.decodeUnknownSync(Block)(candidate)
+    const block = model.blocks[item.index]
     if (block?._tag === "ToolCall" || block?._tag === "SubagentCard" || block?._tag === "SubagentGroup")
       itemPositionByBlockId.set(block.id, position)
   }
@@ -234,7 +233,7 @@ export const boundedTranscriptModel: {
   (model: Model, end: number): BoundedTranscriptModel
   (end: number): (model: Model) => BoundedTranscriptModel
 } = Function.dual(
-  (args) => Schema.is(Model)(args[0]),
+  (args) => !Predicate.isNumber(args[0]),
   (model: Model, end: number = model.items.length): BoundedTranscriptModel => {
     const boundedEnd = end
     const limit = maxMountedTranscriptEntries
@@ -257,10 +256,7 @@ export const boundedTranscriptModel: {
     const unitMembers = groupUnitPositions(allItems, windowEnd, projection.itemPositionByBlockId)
     const expandedRows = new Set(model.expandedRowKeys)
     const explicitlyCollapsed = new Set(model.explicitlyCollapsedRowKeys)
-    for (const block of model.blocks.flatMap((value) => {
-      const decoded = Schema.decodeUnknownOption(Block)(value)
-      return decoded._tag === "Some" ? [decoded.value] : []
-    })) {
+    for (const block of model.blocks) {
       const id = autoExpandedRowId(block)
       if (id !== undefined && !explicitlyCollapsed.has(id)) expandedRows.add(id)
     }
