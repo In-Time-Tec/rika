@@ -1,9 +1,10 @@
+import stringWidth from "string-width"
 import { Function } from "effect"
-import { bold, fg, underline, type StyledText, type TextChunk } from "@opentui/core"
+import { bold, dim, fg, underline, type StyledText, type TextChunk } from "@opentui/core"
 import type { TranscriptBlock } from "../../../state/transcript/model"
 import type { Model } from "../../../state/model"
 import { colors } from "../../../presentation/terminal/theme"
-import { renderDiffStyled, renderPierreDiff } from "../diff-text-adapter"
+import { renderDiffStyled, renderPartialDiffStyled, renderPierreDiff } from "../diff-text-adapter"
 import { isToolOutputDisplayed } from "../../../presentation/transcript/agent-response"
 import { diffCounts } from "../tool/detail"
 import { completedCompactionIcon, renderBlock } from "../block"
@@ -92,3 +93,33 @@ export const renderPlainBody: {
     arg3: Parameters<typeof renderPlainBodyImpl>[3],
   ): ReturnType<typeof renderPlainBodyImpl>
 } = Function.dual(4, renderPlainBodyImpl)
+
+export const renderNestedPatches = ({
+  block,
+  indent,
+  width,
+  append,
+}: {
+  readonly block: Extract<TranscriptBlock, { _tag: "ToolCall" }>
+  readonly indent: string
+  readonly width: number
+  readonly append: Append
+}): boolean => {
+  const patches = block.files.filter((file) => file.patch.length > 0)
+  for (const patch of patches) {
+    const options = { width: Math.max(1, width - stringWidth(indent)), indent: 0 }
+    const diff =
+      renderPierreDiff(patch.patch, options) ??
+      (patch.preview ? renderPartialDiffStyled(patch.patch, options) : undefined) ??
+      renderDiffStyled(patch.patch, options)
+    append(dim(fg(colors.subtle)(`\n${indent}`)))
+    for (const chunk of diff.chunks) {
+      const parts = chunk.text.split("\n")
+      for (const [index, part] of parts.entries()) {
+        if (index > 0) append(dim(fg(colors.subtle)(`\n${indent}`)))
+        if (part.length > 0) append({ ...chunk, text: part })
+      }
+    }
+  }
+  return patches.length > 0
+}

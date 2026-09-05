@@ -7,7 +7,7 @@ import { plural, truncateToWidth } from "../../../presentation/terminal/format"
 import { renderMarkdownStyled, toOpenChunk } from "../text-adapter"
 import { renderReadFile } from "../diff-text-adapter"
 import type { TerminalTextChunk } from "../../../presentation/markdown/styled-text"
-import { renderDiffBody, renderPlainBody, toolOutputDisplayed } from "./bodies"
+import { renderDiffBody, renderNestedPatches, renderPlainBody, toolOutputDisplayed } from "./bodies"
 import { toolDetail } from "../../../presentation/transcript/tool/detail"
 import { isExpandableUnit, isTranscriptUnitExpanded, transcriptUnitId } from "../../../presentation/transcript/row"
 import type {
@@ -138,6 +138,7 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     expanded: boolean,
   ) => {
     if (!expanded) return
+    if (renderNestedPatches({ block, indent: bodyIndent, width: rowWidth, append })) return
     const file = readFileBody(block)
     if (block.presentation.family === "agent" && block.detail.length > 0)
       agentContent.renderAgentPrompt(block.detail, bodyIndent)
@@ -163,7 +164,9 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
     const children = unit.children ?? []
     const agent = block.presentation.family === "agent"
     const output = displayedToolOutput(block)
-    const expandable = bodyContent.nestedToolExpandable(unit, agent, running, block.detail, output)
+    const expandable =
+      block.files.some((file) => file.patch.length > 0) ||
+      bodyContent.nestedToolExpandable(unit, agent, running, block.detail, output)
     const rowWidth = transcriptWrapWidth(model.width)
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 12))
     const branchPrefix = `${visiblePrefix}${last ? "└" : "├"} `
@@ -184,6 +187,12 @@ const transcriptUnitBuilderImpl = (model: Model, spinnerFrame: string) => {
       shellContinuationPrefix,
       detail.target !== undefined,
     )
+    if (block.files.length > 0) {
+      const added = block.files.reduce((total, file) => total + file.additions, 0)
+      const removed = block.files.reduce((total, file) => total + file.deletions, 0)
+      append(fg(colors.green)(` +${added}`))
+      append(fg(colors.red)(` -${removed}`))
+    }
     if (expandable) disclose(rowStart, expanded)
     const headerEnd = line
     const rangeIndex = nestedRanges.length

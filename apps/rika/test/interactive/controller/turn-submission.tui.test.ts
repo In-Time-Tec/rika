@@ -25,6 +25,17 @@ test(
               profile: "Task",
               steps: [
                 model.turn([model.tool("read", { path: "nested.txt" }, "nested-read")]),
+                model.turn([
+                  model.tool(
+                    "edit",
+                    {
+                      path: "nested.txt",
+                      old_str: "NESTED_TOOL_CONTENT",
+                      new_str: "NESTED_EDIT_CONTENT\nADDED_EDIT_LINE",
+                    },
+                    "nested-edit",
+                  ),
+                ]),
                 model.text("PARENT_AGENT_FINAL"),
               ],
             },
@@ -97,6 +108,15 @@ test(
         app.pressEnter()
         const reexpanded = yield* app.waitFrame("PARENT_AGENT_FINAL")
         expect(reexpanded.match(/PARENT_AGENT_PROMPT/g) ?? []).toHaveLength(1)
+        expect(reexpanded).toContain("nested.txt +2 -1")
+        expect(reexpanded).not.toContain("NESTED_EDIT_CONTENT")
+        app.pressKey("\t")
+        app.pressKey("\t")
+        app.pressEnter()
+        const edit = yield* app.waitFrame("NESTED_EDIT_CONTENT")
+        expect(edit).toContain("NESTED_TOOL_CONTENT")
+        expect(edit).toContain("ADDED_EDIT_LINE")
+        expect(edit).not.toContain("Successfully replaced text")
         yield* app.quit
       }),
     ),

@@ -1,3 +1,4 @@
+import { buildTranscript } from "../../../../src/opentui/rendering/renderer"
 import "./content-sidebar.fixture"
 import { nonSpaceBounds } from "./content.fixture"
 import { createTestRenderer } from "@opentui/core/testing"
@@ -366,3 +367,67 @@ for (const [width, height] of [
       }),
     ))
 }
+
+const editModel = (expanded: boolean): Model => ({
+  ...initial("/workspace", "medium"),
+  width: 100,
+  blocks: [
+    {
+      _tag: "SubagentCard",
+      id: "review",
+      name: "Review",
+      prompt: "Fix the greeting",
+      promptTruncated: false,
+      summary: "",
+      status: "complete",
+      activity: [],
+    },
+    {
+      _tag: "ToolCall",
+      id: "edit",
+      name: "edit",
+      input: '{"path":"greeting.ts"}',
+      status: "complete",
+      detail: "greeting.ts",
+      presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
+      result: { text: "Successfully replaced text in greeting.ts" },
+      files: [
+        {
+          key: "edit:0",
+          path: "greeting.ts",
+          kind: "update",
+          additions: 2,
+          deletions: 1,
+          preview: false,
+          status: "complete",
+          patch:
+            '--- a/greeting.ts\n+++ b/greeting.ts\n@@ -1,1 +1,2 @@\n-const greeting = "before"\n+const greeting = "after"\n+export { greeting }',
+        },
+      ],
+    },
+  ],
+  items: [
+    { _tag: "Block", index: 0, id: "review", turnId: "turn" },
+    { _tag: "Block", index: 1, id: "edit", turnId: "turn", parentId: "review" },
+  ],
+  expandedRowKeys: ["subagent:review", ...(expanded ? ["tool:edit"] : [])],
+  explicitlyCollapsedRowKeys: expanded ? [] : ["tool:edit"],
+})
+
+test("nested edit headers show additions and deletions while collapsed", () => {
+  const text = buildTranscript(editModel(false))
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(text).toContain("greeting.ts +2 -1")
+  expect(text).not.toContain('const greeting = "after"')
+})
+
+test("expanded nested edits show the actual patch instead of the success message", () => {
+  const text = buildTranscript(editModel(true))
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(text).toContain('const greeting = "before"')
+  expect(text).toContain('const greeting = "after"')
+  expect(text).toContain("export { greeting }")
+  expect(text).not.toContain("Successfully replaced")
+})
