@@ -65,9 +65,12 @@ class EventuallyTimeout extends Schema.TaggedError<EventuallyTimeout>()("Eventua
 }) {}
 
 const eventually = <A>(read: () => A | undefined): Effect.Effect<A, EventuallyTimeout> =>
-  Effect.suspend(() => {
-    const value = read()
-    return value === undefined ? Effect.yieldNow.pipe(Effect.andThen(eventually(read))) : Effect.succeed(value)
+  Effect.gen(function* () {
+    for (;;) {
+      const value = read()
+      if (value !== undefined) return value
+      yield* Effect.sleep("10 millis")
+    }
   }).pipe(
     Effect.timeoutOrElse({
       duration: "2 seconds",
@@ -79,6 +82,13 @@ const machineResult = (socket: FakeWebSocket, machineId: string, occurrence = 0)
   eventually(() => socket.messages("MachineResult").filter((message) => message.machineId === machineId)[occurrence])
 
 describe("foreground Runner", { concurrent: false }, () => {
+  it.live("bounds waiting for a missing Runner message", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.result(eventually(() => undefined))
+      expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "EventuallyTimeout" } })
+    }),
+  )
+
   it.live("executes, cancels, receipts, and persists native machine calls", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
