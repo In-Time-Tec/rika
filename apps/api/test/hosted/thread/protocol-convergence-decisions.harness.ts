@@ -169,15 +169,13 @@ export const continueConvergence = Effect.fn("ProtocolTest.continueConvergence")
   const attachedReplay = attachedPayload(replay[0])
   expect(attachedReplay).toMatchObject({
     _tag: "ThreadAttached",
-    baseCursor: "3",
-    checkpoint: { cursor: "3" },
+    baseCursor: "1005",
+    checkpoint: { cursor: "1005", snapshot: state.currentSnapshot },
     threadVersion: "7",
     cursor: "1005",
   })
   expect(Array.isArray(attachedReplay.participants)).toBe(true)
-  expect(attachedReplay.events).toHaveLength(1_002)
-  expect(attachedReplay.events[0]?.cursor).toBe("4")
-  expect(attachedReplay.events.at(-1)?.cursor).toBe("1005")
+  expect(attachedReplay.events).toEqual([])
   expect(
     (yield* replayController.receive({
       protocolVersion,

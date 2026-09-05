@@ -24,8 +24,12 @@ import {
 } from "./protocol-contract"
 
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const maximumAttachmentEvents = 10_000
 const maximumAttachmentBytes = 32 * 1024 * 1024
+const maximumReplayBytes = 4 * 1024 * 1024
+type Replay = Effect.Success<ReturnType<ThreadProtocolStore["Service"]["replay"]>>
+const encodedBytes = (value: ServerFrame | Replay) => new TextEncoder().encode(encodeUnknownJson(value)).byteLength
+const checkpointReplay = (replay: Replay) =>
+  replay.hasMore || (replay.events.length > 0 && encodedBytes(replay) > maximumReplayBytes)
 
 const replayDistance = (cursor: string, afterCursor: string) => {
   const distance = BigInt(cursor) - BigInt(afterCursor)
@@ -171,7 +175,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
         afterCursor !== zeroCursor &&
         (afterCursor === replay.cursor ||
           replay.events[0]?.cursor === ThreadEventCursor.make((BigInt(afterCursor) + 1n).toString()))
-      if (replay.snapshot !== undefined || directTail) return replay
+      if ((replay.snapshot !== undefined || directTail) && !checkpointReplay(replay)) return replay
       const currentSnapshot = yield* operations
         .snapshot(authority.ownerId, ProductThreadId.make(threadId))
         .pipe(Effect.mapError(operationFailure))
@@ -190,40 +194,32 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
           createdAt,
         })
         .pipe(Effect.result)
-      if (saved._tag === "Success") return yield* readReplay
+      if (saved._tag === "Success")
+        return {
+          ...replay,
+          events: [],
+          hasMore: false,
+          snapshot: {
+            ownerId: authority.ownerId,
+            threadId,
+            threadVersion: replay.threadVersion,
+            cursor: replay.cursor,
+            snapshot,
+            createdAt: Timestamp.make(createdAt),
+          },
+        }
       if (saved.failure.reason !== "conflict") return yield* storeFailure(saved.failure)
     }
   })
 
   const completeAttachmentReplay = Effect.fn("HostedThreadProtocol.completeAttachmentReplay")(function* (
-    authority: ReadAuthority,
     command: Extract<ClientMessage["command"], { readonly _tag: "AttachThread" }>,
     replay: Effect.Success<ReturnType<typeof store.replay>>,
   ) {
     const replaySnapshot = replay.snapshot
     const replayEvents = [...replay.events]
     const baseCursor = replaySnapshot?.cursor ?? command.afterCursor
-    let representedCursor = replayEvents.at(-1)?.cursor ?? baseCursor
-    while (BigInt(representedCursor) < BigInt(replay.cursor)) {
-      if (!(yield* validate)) return yield* unavailable("Browser session is no longer authorized")
-      const page = yield* store
-        .replay({
-          ownerId: authority.ownerId,
-          threadId: command.threadId,
-          actor: authority.actor,
-          afterCursor: representedCursor,
-          throughCursor: replay.cursor,
-          includeSnapshot: false,
-          limit: 1_000,
-        })
-        .pipe(Effect.mapError(storeFailure))
-      if (page.events.length === 0)
-        return yield* unavailable("Thread replay does not continuously represent its cursor")
-      replayEvents.push(...page.events)
-      if (replayEvents.length > maximumAttachmentEvents)
-        return yield* unavailable("Thread replay exceeds the attachment event limit")
-      representedCursor = page.events.at(-1)!.cursor
-    }
+    const representedCursor = replayEvents.at(-1)?.cursor ?? baseCursor
     let expectedCursor = BigInt(baseCursor) + 1n
     for (const event of replayEvents) {
       if (BigInt(event.cursor) !== expectedCursor)
@@ -272,7 +268,6 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
           threshold: HostedObservability.replayLagAlertEvents,
         })
       const { replaySnapshot, replayEvents, baseCursor, representedCursor } = yield* completeAttachmentReplay(
-        authority,
         command,
         replay,
       )
@@ -325,7 +320,7 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
           },
         })
       const attachment = frame(attachmentPayload)
-      if (new TextEncoder().encode(encodeUnknownJson(attachment)).byteLength > maximumAttachmentBytes)
+      if (encodedBytes(attachment) > maximumAttachmentBytes)
         return yield* unavailable("Thread replay exceeds the attachment byte limit")
       const previewSubscription = yield* previews.subscribe(command.threadId)
       if (attached !== undefined) yield* attached.previewSubscription.close
@@ -376,6 +371,10 @@ export const protocolConnectionState = (dependencies: ProtocolConnectionDependen
       limit: 1_000,
     }
     let replay = yield* store.replay(input).pipe(Effect.mapError(storeFailure))
+    if (checkpointReplay(replay)) {
+      replay = yield* materializeSnapshot(current.authority, current.threadId, zeroCursor)
+      return { replay, reset: true }
+    }
     let expectedCursor = BigInt(current.cursor) + 1n
     let reset =
       (replay.snapshot !== undefined && BigInt(replay.snapshot.cursor) > BigInt(current.checkpointCursor)) ||
