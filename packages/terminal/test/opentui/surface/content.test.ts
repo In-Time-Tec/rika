@@ -9,6 +9,13 @@ const model = (): Model => ({
   height: 40,
 })
 
+it("shows truncated history when idle without running an animation", () => {
+  const partial = { ...model(), transcriptTruncated: true }
+  expect(styledTextValue(statusContent(partial, 0, 0))).toContain("History truncated")
+  expect(animationActive(partial)).toBe(false)
+  expect(styledTextValue(statusContent(model(), 0, 0))).not.toContain("History truncated")
+})
+
 it("keeps the Unicode spinner but hides an internal finishing label without prior model activity", () => {
   const finishing = { ...model(), busy: true, activity: { _tag: "Finishing" as const } }
 

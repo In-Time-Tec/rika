@@ -228,15 +228,24 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
           projection.turn.status === "queued" ||
           (options.projectionVersion !== undefined && projection.projectionVersion !== options.projectionVersion)
             ? []
-            : projection.units.map((unit) => ({ projection, unit, cursor: cursorFor(projection, unit) })),
+            : projection.units
+                .filter(
+                  (unit) =>
+                    options.structuralTurnId === undefined ||
+                    (projection.turn.id === options.structuralTurnId &&
+                      (unit.parentId === undefined ||
+                        (unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard"))),
+                )
+                .map((unit) => ({ projection, unit, cursor: cursorFor(projection, unit) })),
         )
         .toSorted((left, right) => compareCursor(left.cursor, right.cursor))
       const boundaryIndex = (predicate: (cursor: PageCursor) => boolean) => {
         const index = ordered.findIndex(({ cursor }) => predicate(cursor))
         return index < 0 ? ordered.length : index
       }
-      const afterStart =
+      let afterStart =
         options.after === undefined ? undefined : boundaryIndex((cursor) => compareCursor(cursor, options.after!) > 0)
+      if (options.structuralTurnId !== undefined) afterStart = 0
       let end: number
       if (afterStart !== undefined) end = Math.min(ordered.length, afterStart + limit)
       else if (options.before === undefined) end = ordered.length
@@ -247,6 +256,7 @@ export const makeMemory = Effect.fn("TranscriptRepository.makeMemory")(function*
         turn: clone(projection.turn),
         unit: clone(unit),
         projectionRevision: projection.revision,
+        projectionGeneration: projection.checkpointGeneration,
         projectionModelPhase: -1,
         projectionState: clone(projection.state),
       }))

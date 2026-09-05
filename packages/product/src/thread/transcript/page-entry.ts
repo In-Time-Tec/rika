@@ -7,6 +7,7 @@ export interface Entry {
   readonly turn: Turn
   readonly unit: TranscriptUnit.Unit
   readonly projectionRevision: number
+  readonly projectionGeneration?: number
   readonly projectionModelPhase: number
   readonly projectionState: ExecutionProjection.ProjectionState
 }

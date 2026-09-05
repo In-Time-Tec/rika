@@ -83,6 +83,7 @@ export const lifecycleLabel: {
 } = Function.dual(2, lifecycleLabelImpl)
 
 const statusContentImpl = (model: Model, phase: number, currentTimeMillis: number): StyledText | string => {
+  const history = model.transcriptTruncated === true ? [dim(fg(toOpenColor(colors.text))(" History truncated "))] : []
   if (model.editingTurnId !== undefined)
     return new StyledText([
       fg(toOpenColor(colors.text))(" "),
@@ -92,6 +93,7 @@ const statusContentImpl = (model: Model, phase: number, currentTimeMillis: numbe
       dim(fg(toOpenColor(colors.text))(" save · ")),
       fg(toOpenColor(colors.blue))("Esc"),
       dim(fg(toOpenColor(colors.text))(" cancel ")),
+      ...history,
     ])
   const lifecycle = lifecycleLabel(model, currentTimeMillis)
   if (lifecycle === undefined && model.activity?._tag === "Finishing")
@@ -99,11 +101,13 @@ const statusContentImpl = (model: Model, phase: number, currentTimeMillis: numbe
       fg(toOpenColor(colors.text))(" "),
       fg(toOpenColor(colors.blue))(loaderFrame("", phase)),
       fg(toOpenColor(colors.text))(" "),
+      ...history,
     ])
-  if (lifecycle === undefined) return ""
+  if (lifecycle === undefined) return history.length === 0 ? "" : new StyledText(history)
   const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]
   chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
   chunks.push(dim(fg(toOpenColor(colors.text))(` ${lifecycle} `)))
+  chunks.push(...history)
   return new StyledText(chunks)
 }
 

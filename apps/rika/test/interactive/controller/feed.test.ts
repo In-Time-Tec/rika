@@ -58,6 +58,7 @@ it("projects a full snapshot beyond the old 120-unit window bound without trunca
   expect(keys).toHaveLength(130)
   expect(keys[0]).toBe("opening")
   expect(keys.at(-1)).toBe("final")
+  expect(state.model.transcriptTruncated).toBe(true)
   expect(state.model.entries.map((value) => value.text)).toEqual([
     "opening",
     ...Array.from({ length: 128 }, (_, index) => `unit ${index}`),
@@ -113,6 +114,7 @@ it("bounds the in-memory timeline to the newest units when a snapshot exceeds th
       state = InteractiveController.update(state, event).state
 
   expect(state.model.items.length).toBe(maxInMemoryTranscriptUnits)
+  expect(state.model.transcriptTruncated).toBe(true)
   expect(state.model.entries[0]?.text).toBe(`unit:${String(5).padStart(6, "0")}`)
   expect(state.model.entries.at(-1)?.text).toBe(`unit:${String(maxInMemoryTranscriptUnits + 4).padStart(6, "0")}`)
 })

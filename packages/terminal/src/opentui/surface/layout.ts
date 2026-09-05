@@ -253,7 +253,14 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const title = workspaceTitle(model)
     const panelLoadingLabel = panelLoading(model)
     const statusChanged =
-      modelFieldsChanged(previousModel, model, ["activity", "connection", "retryCountdown", "busy", "editingTurnId"]) ||
+      modelFieldsChanged(previousModel, model, [
+        "activity",
+        "connection",
+        "retryCountdown",
+        "busy",
+        "editingTurnId",
+        "transcriptTruncated",
+      ]) ||
       (previousModel !== undefined && panelLoading(previousModel) !== panelLoadingLabel)
     if (statusChanged) {
       this.inputBox.bottomTitle = ""

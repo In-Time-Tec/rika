@@ -12,46 +12,33 @@ export const trimTranscriptTimeline: {
   const items = decodeTranscriptItems(model.items)
   if (items.length <= cap) return model
   const blocks = decodeTranscriptBlocks(model.blocks)
-  const childrenByParent = new Map<string, Array<number>>()
-  for (const [position, item] of items.entries())
-    if (item.parentId !== undefined) {
-      const children = childrenByParent.get(item.parentId) ?? []
-      children.push(position)
-      childrenByParent.set(item.parentId, children)
+  const byBlockId = new Map<string, number>()
+  const identity = (item: TranscriptItem, id: string) => `${item.turnId ?? ""}\0${id}`
+  items.forEach((item, position) => {
+    if (item._tag === "Block") {
+      const block = blocks[item.index]!
+      if ("id" in block) byBlockId.set(identity(item, block.id), position)
     }
-  const subtreeSize = (root: number): number => {
-    let size = 0
-    const stack = [root]
-    while (stack.length > 0) {
-      const position = stack.pop()!
-      size += 1
-      const item = items[position]!
-      if (item._tag === "Block") {
-        const block = blocks[item.index]!
-        if ("id" in block) for (const child of childrenByParent.get(block.id) ?? []) stack.push(child)
-      }
+  })
+  const kept = new Set<number>()
+  const ancestry = (index: number): Set<number> | undefined => {
+    const needed = new Set<number>()
+    let position: number | undefined = index
+    while (position !== undefined && !kept.has(position)) {
+      if (needed.has(position)) return undefined
+      needed.add(position)
+      const item: TranscriptItem = items[position]!
+      position = item.parentId === undefined ? undefined : byBlockId.get(identity(item, item.parentId))
+      if (item.parentId !== undefined && position === undefined) return undefined
     }
-    return size
+    return needed
   }
-  let dropEnd = 0
-  let remaining = items.length
-  while (dropEnd < items.length && remaining > cap) {
-    const root = items[dropEnd]!
-    if (root.parentId !== undefined) {
-      dropEnd += 1
-      remaining -= 1
-      continue
-    }
-    const size = subtreeSize(dropEnd)
-    if (remaining - size >= cap) {
-      dropEnd += size
-      remaining -= size
-      continue
-    }
-    break
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (kept.has(index)) continue
+    const needed = ancestry(index)
+    if (needed !== undefined && kept.size + needed.size <= cap) for (const candidate of needed) kept.add(candidate)
   }
-  if (dropEnd === 0) return model
-  const keptItems = items.slice(dropEnd)
+  const keptItems = items.filter((_, index) => kept.has(index))
   const entryIndices = new Map<number, number>()
   const blockIndices = new Map<number, number>()
   const entries: Array<Model["entries"][number]> = []
@@ -76,5 +63,5 @@ export const trimTranscriptTimeline: {
     }
     remapped.push({ ...item, index })
   }
-  return { ...model, entries, blocks: keptBlocks, items: remapped }
+  return { ...model, entries, blocks: keptBlocks, items: remapped, transcriptTruncated: true }
 })

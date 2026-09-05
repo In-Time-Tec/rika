@@ -119,6 +119,7 @@ export const Model = Schema.Struct({
   entries: Schema.Array(Entry),
   blocks: Schema.Array(Schema.Unknown),
   items: Schema.Array(Schema.Unknown),
+  transcriptTruncated: Schema.optional(Schema.Boolean),
   input: Schema.String,
   cursor: Schema.Finite,
   pastedText: Schema.Array(PastedTextAttachmentSchema),

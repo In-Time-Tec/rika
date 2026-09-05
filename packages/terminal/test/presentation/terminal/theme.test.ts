@@ -311,6 +311,12 @@ test("renders a real SubagentGroup with live cards and streamed answers", () => 
     .join("")
   expect(complete).toContain("2 agents finished")
   expect(complete).toContain("Do not show this tentative answer yet.")
+  expect(complete).not.toContain("outside this window")
+  const partial = buildTranscript({ ...settled, items: settled.items.slice(0, -1) })
+    .styled.chunks.map((chunk) => chunk.text)
+    .join("")
+  expect(partial).toContain("2 agents finished")
+  expect(partial).toContain("1 member card outside this window")
 })
 
 test("summarizes SubagentGroup progress as running and finished agents", () => {

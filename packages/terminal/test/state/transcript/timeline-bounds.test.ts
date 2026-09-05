@@ -57,7 +57,7 @@ test("trimTranscriptTimeline keeps the newest units and remaps entry indexes", (
   expect(model.items).toHaveLength(12)
 })
 
-test.each(["tool-a", "unit:tool-a"])("trimTranscriptTimeline keeps whole subtrees with unit key %s", (unitKey) => {
+test.each(["tool-a", "unit:tool-a"])("trimTranscriptTimeline bounds oversized subtrees with unit key %s", (unitKey) => {
   const parent = {
     _tag: "Block" as const,
     block: {
@@ -120,9 +120,10 @@ test.each(["tool-a", "unit:tool-a"])("trimTranscriptTimeline keeps whole subtree
   const keptItems = Schema.decodeUnknownSync(TranscriptItems)(trimmed.items)
   const keptKeys = keptItems.map((item) => item.id)
   expect(keptKeys).toContain(unitKey)
-  expect(keptKeys.filter((key) => key?.startsWith("child-"))).toHaveLength(8)
+  expect(keptKeys.filter((key) => key?.startsWith("child-"))).toEqual(["child-4", "child-5", "child-6", "child-7"])
   expect(keptKeys.filter((key) => key?.startsWith("leading-"))).toHaveLength(0)
-  expect(keptKeys).toHaveLength(9)
+  expect(keptKeys).toHaveLength(5)
+  expect(trimmed.transcriptTruncated).toBe(true)
   for (const item of keptItems) if (item.parentId !== undefined) expect(item.parentId).toBe(parent.block.id)
 })
 

@@ -4,7 +4,7 @@ import * as ExecutionProjection from "@rika/product/execution-projection"
 import { RepositoryError, type Interface } from "@rika/product/transcript-repository"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
 import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import { and, asc, desc, eq, gt, gte, lt, lte, ne, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, isNull, lt, lte, ne, or, sql, type SQL } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
 import { decodeDerivedRow } from "../database/derived-row"
@@ -42,6 +42,7 @@ const PageRow = Schema.Struct({
   unit_json: Schema.String,
   unit_order_key: Schema.String,
   projection_revision: Schema.Finite,
+  projection_generation: Schema.Finite,
   state_json: Schema.String,
 })
 const error = (cause: unknown) =>
@@ -131,6 +132,24 @@ const validatePageOptions = (options: Parameters<Interface["page"]>[1]) => {
     : RepositoryError.make({ message: `Transcript page limit must be from 1 to ${maximumTranscriptUnits}` })
 }
 
+const pageConditions = (threadId: ThreadId, options: NonNullable<Parameters<Interface["page"]>[1]>) => {
+  const conditions = [eq(rikaTranscriptUnits.threadId, threadId), ne(rikaTurns.status, "queued")]
+  if (options.projectionVersion !== undefined)
+    conditions.push(eq(rikaTranscriptCheckpoints.projectionVersion, options.projectionVersion))
+  if (options.structuralTurnId !== undefined) {
+    conditions.push(eq(rikaTranscriptUnits.turnId, options.structuralTurnId))
+    conditions.push(
+      or(
+        isNull(rikaTranscriptUnits.parentId),
+        sql`${rikaTranscriptUnits.unitJson}::jsonb #>> '{content,block,_tag}' = 'SubagentCard'`,
+      )!,
+    )
+  }
+  if (options.after !== undefined) conditions.push(after(options.after))
+  if (options.before !== undefined) conditions.push(before(options.before))
+  return conditions
+}
+
 const decodeEntry = (raw: typeof PageRow.Encoded) =>
   Effect.gen(function* () {
     const row = yield* Schema.decodeEffect(PageRow)(raw).pipe(Effect.mapError(error))
@@ -149,7 +168,14 @@ const decodeEntry = (raw: typeof PageRow.Encoded) =>
     if (unit.turnId !== turn.id || TranscriptOrdering.encodeUnitOrder(unit.order) !== cursor.orderKey)
       return yield* RepositoryError.make({ message: `Transcript unit ${unit.key} does not match its durable identity` })
     const projectionState = yield* Schema.decodeEffect(StateJson)(row.state_json).pipe(Effect.mapError(error))
-    return { turn, unit, cursor, revision: row.projection_revision, projectionState }
+    return {
+      turn,
+      unit,
+      cursor,
+      revision: row.projection_revision,
+      generation: row.projection_generation,
+      projectionState,
+    }
   })
 
 export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Interface, "page" | "usage"> => {
@@ -168,24 +194,20 @@ export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Inte
       const validated = validatePageOptions(options)
       if (Schema.is(RepositoryError)(validated)) return yield* validated
       const limit = validated
-      const conditions = [eq(rikaTranscriptUnits.threadId, threadId), ne(rikaTurns.status, "queued")]
-      if (options.projectionVersion !== undefined)
-        conditions.push(eq(rikaTranscriptCheckpoints.projectionVersion, options.projectionVersion))
-      if (options.after !== undefined) conditions.push(after(options.after))
-      if (options.before !== undefined) conditions.push(before(options.before))
-      const newestFirst = options.after === undefined
+      const newestFirst = options.structuralTurnId === undefined && options.after === undefined
       const loaded = yield* db
         .select({
           unit_json: rikaTranscriptUnits.unitJson,
           unit_order_key: rikaTranscriptUnits.unitOrderKey,
           projection_revision: rikaTranscriptCheckpoints.revision,
+          projection_generation: rikaTranscriptCheckpoints.checkpointGeneration,
           state_json: rikaTranscriptCheckpoints.stateJson,
           ...turnSelection,
         })
         .from(rikaTranscriptUnits)
         .innerJoin(rikaTranscriptCheckpoints, eq(rikaTranscriptCheckpoints.turnId, rikaTranscriptUnits.turnId))
         .innerJoin(rikaTurns, eq(rikaTurns.id, rikaTranscriptUnits.turnId))
-        .where(and(...conditions))
+        .where(and(...pageConditions(threadId, options)))
         .orderBy(
           newestFirst ? desc(rikaTranscriptUnits.createdAt) : asc(rikaTranscriptUnits.createdAt),
           newestFirst ? desc(rikaTranscriptUnits.turnId) : asc(rikaTranscriptUnits.turnId),
@@ -217,14 +239,16 @@ export const makeTranscriptSqlPage = (db: PgDrizzle.EffectPgDatabase): Pick<Inte
             Effect.mapError(error),
           )
       }
-      const hasOlder = options.after === undefined ? hasExtra : yield* boundaryExists(atOrBefore(options.after))
-      let hasNewer = false
+      let hasOlder = options.after === undefined ? hasExtra : yield* boundaryExists(atOrBefore(options.after))
+      if (options.structuralTurnId !== undefined) hasOlder = false
+      let hasNewer = options.structuralTurnId !== undefined && hasExtra
       if (options.after !== undefined) hasNewer = hasExtra
       else if (options.before !== undefined) hasNewer = yield* boundaryExists(atOrAfter(options.before))
-      const entries: ReadonlyArray<Entry> = selected.map(({ turn, unit, revision, projectionState }) => ({
+      const entries: ReadonlyArray<Entry> = selected.map(({ turn, unit, revision, generation, projectionState }) => ({
         turn,
         unit,
         projectionRevision: revision,
+        projectionGeneration: generation,
         projectionModelPhase: -1,
         projectionState,
       }))

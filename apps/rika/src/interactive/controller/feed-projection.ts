@@ -55,6 +55,7 @@ const clearTimeline = (model: Model): Model => ({
   entries: [],
   blocks: [],
   items: [],
+  transcriptTruncated: false,
   seenEventIds: [],
   childExecutionOutcomes: {},
   eventCursor: undefined,
@@ -185,6 +186,7 @@ const snapshotBase = (
   const steering = snapshotSteering(model, snapshot)
   return {
     ...clearTimeline(model),
+    transcriptTruncated: snapshot.hasOlder,
     currentThreadId: String(snapshot.thread.id),
     currentThreadTitle: snapshot.thread.title,
     activeTurnId: active === undefined ? undefined : String(active.turn.id),
@@ -313,8 +315,10 @@ const projectPatch = (
   const active = view.activeTurn()
   const editing = model.editingTurnId !== undefined && view.pending.some((item) => item.id === model.editingTurnId)
   const steering = patchSteering(model, delta)
+  const projected = applyUnitDeltas(model, delta, previousPreviewUnits, nextPreviewUnits)
   let next: Model = {
-    ...applyUnitDeltas(model, delta, previousPreviewUnits, nextPreviewUnits),
+    ...projected,
+    transcriptTruncated: projected.transcriptTruncated === true || view.hasOlder,
     currentThreadId: String(view.thread.id),
     currentThreadTitle: view.thread.title,
     activeTurnId: active === undefined ? undefined : String(active.turn.id),

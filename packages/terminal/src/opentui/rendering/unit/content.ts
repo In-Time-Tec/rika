@@ -320,6 +320,22 @@ ${bodyIndent}· ${truncateToWidth(activity, width)}`),
     ].filter((part): part is string => part !== undefined)
     const label = progress.length === 0 ? plural(counts.total, "agent") : progress.join(", ")
     append(fg(colors.text)(` ${truncateToWidth(label, Math.max(1, width - 2))}`))
+    const available = new Set(
+      unit.children.flatMap((child) => {
+        if (child.kind !== "subagent") return []
+        const member = blockAt(child.block)
+        return member?._tag === "SubagentCard" ? [member.id] : []
+      }),
+    )
+    const omitted = block.memberIds.filter((id) => !available.has(id)).length
+    if (omitted > 0)
+      append(
+        dim(
+          fg(colors.subtle)(
+            `\n  ${truncateToWidth(`${plural(omitted, "member card")} outside this window`, Math.max(1, width - 2))}`,
+          ),
+        ),
+      )
   }
   const renderSubagentGroupContents = (unit: SubagentGroupTranscriptUnit, prefix: string) => {
     for (const [childIndex, child] of unit.children.entries())

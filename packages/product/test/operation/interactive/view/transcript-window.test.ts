@@ -9,8 +9,6 @@ import { initialTranscriptWindow } from "../../../../src/operation/interactive/v
 import { makeSelectionState } from "../../../../src/operation/interactive/view/selection"
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-/** The windowed turn has no projection to complete from in these tests. */
-const missingProjection: TranscriptPage.Projection | undefined = undefined
 
 const thread: Thread.Thread = {
   id: Thread.ThreadId.make("thread-window"),
@@ -23,7 +21,7 @@ const thread: Thread.Thread = {
   updatedAt: 1,
 }
 
-it.effect("loads one fixed transcript page with bounded serialized size and truthful boundaries", () =>
+it.effect("loads bounded history and structure pages without replacing contiguous cursors", () =>
   Effect.gen(function* () {
     let reads = 0
     const usage = { usage: { ...ExecutionProjection.emptyUsageState(), sourceComplete: true } }
@@ -65,13 +63,23 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
     const window = yield* initialTranscriptWindow({
       state: makeSelectionState(thread, 1),
       transcripts: {
-        get: () => Effect.succeed(missingProjection),
         page: (_threadId, options) => {
           reads += 1
-          expect(options).toEqual({
+          expect(options).toMatchObject({
             limit: TranscriptPage.maximumTranscriptUnits,
             projectionVersion: ExecutionProjection.projectionVersion,
           })
+          if (options?.structuralTurnId !== undefined) {
+            expect(options.structuralTurnId).toBe(entries[0]!.turn.id)
+            return Effect.succeed({
+              entries: [],
+              hasOlder: false,
+              hasNewer: false,
+              oldestCursor: undefined,
+              newestCursor: undefined,
+              usage,
+            })
+          }
           return Effect.succeed({
             entries,
             hasOlder: true,
@@ -85,7 +93,7 @@ it.effect("loads one fixed transcript page with bounded serialized size and trut
       encodeJson,
       fail: (message) => Effect.die(message),
     })
-    expect(reads).toBe(1)
+    expect(reads).toBe(2)
     expect(window.entries).toHaveLength(600)
     expect(window.hasOlder).toBe(true)
     expect(window.hasNewer).toBe(false)

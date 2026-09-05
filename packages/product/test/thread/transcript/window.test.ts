@@ -102,6 +102,7 @@ const entry = (unit: TranscriptUnit.Unit, record: Turn): TranscriptPage.Entry =>
   turn: record,
   unit,
   projectionRevision: 7,
+  projectionGeneration: 0,
   projectionModelPhase: -1,
   projectionState,
 })
@@ -142,9 +143,10 @@ it.effect("retains every member card when a page starts inside a grouped subagen
       newestCursor: undefined,
       usage: { usage: ExecutionProjection.emptyUsageState() },
     }
-    const completed = yield* completeLeadingTurn(page, {
-      get: () => Effect.succeed({ ...projection(), units: [prompt, group, ...members, ...children] }),
+    const repository = yield* makeMemory({
+      initial: [{ ...projection(), units: [prompt, group, ...members, ...children] }],
     })
+    const completed = yield* completeLeadingTurn(page, repository)
     for (const member of members) expect(completed.entries.map((item) => item.unit.key)).toContain(member.key)
     expect(completed.entries).toHaveLength(86)
   }),
@@ -179,6 +181,82 @@ it.effect("bounds initial hosted-sized snapshots by bytes as well as unit count"
   }),
 )
 
+it.effect("enforces the final count budget even when one leading Turn contains only root entries", () =>
+  Effect.gen(function* () {
+    const timeline = Array.from({ length: maximumTranscriptUnits + 1 }, (_, index) =>
+      entryUnit(turnId, `answer:${index}`, index, "assistant"),
+    )
+    const repository = yield* makeMemory({ initial: [{ ...projection(), units: timeline }] })
+    const page = yield* loadTranscriptWindow(threadId, repository)
+    expect(page.entries).toHaveLength(maximumTranscriptUnits)
+    expect(page.entries[0]?.unit.key).toBe("answer:1")
+    expect(page.entries.at(-1)?.unit.key).toBe(`answer:${maximumTranscriptUnits}`)
+    expect(page.hasOlder).toBe(true)
+  }),
+)
+
+it.effect.each([
+  { members: maximumTranscriptUnits, promptBytes: 0, retained: maximumTranscriptUnits - 2 },
+  { members: 3, promptBytes: 12 * 1024 * 1024, retained: 2 },
+])("retains group ancestry within count and byte budgets: %j", ({ members, promptBytes, retained }) =>
+  Effect.gen(function* () {
+    const group: TranscriptUnit.Unit = {
+      ...card(0, "oversized-group"),
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "SubagentGroup",
+          id: "oversized-group",
+          name: "Task",
+          status: "complete",
+          settled: true,
+          memberIds: Array.from({ length: members }, (_, index) => `member-${index}`),
+          counts: {
+            total: members,
+            complete: members,
+            queued: 0,
+            running: 0,
+            waiting: 0,
+            cancelling: 0,
+            failed: 0,
+            cancelled: 0,
+          },
+        },
+      },
+    }
+    const memberUnits = Array.from(
+      { length: members },
+      (_, index): TranscriptUnit.Unit => ({
+        ...card(index + 1, `member-${index}`),
+        parentId: "oversized-group",
+        content: {
+          _tag: "Block",
+          block: {
+            _tag: "SubagentCard",
+            id: `member-${index}`,
+            name: "Task",
+            prompt: "x".repeat(promptBytes),
+            promptTruncated: false,
+            summary: "",
+            status: "complete",
+            activity: [],
+          },
+        },
+      }),
+    )
+    const repository = yield* makeMemory({ initial: [{ ...projection(), units: [prompt, group, ...memberUnits] }] })
+    const page = yield* loadTranscriptWindow(threadId, repository)
+    expect(page.entries.length).toBeLessThanOrEqual(maximumTranscriptUnits)
+    const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(page.entries)
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(maximumTranscriptPayloadBytes)
+    expect(page.entries.map(({ unit }) => unit.key)).toContain(prompt.key)
+    expect(page.entries.map(({ unit }) => unit.key)).toContain(group.key)
+    expect(page.entries.filter(({ unit }) => unit.parentId === "oversized-group")).toHaveLength(retained)
+    expect(page.entries.at(-1)?.unit.key).toBe(memberUnits.at(-1)?.key)
+    expect(page.hasOlder).toBe(true)
+  }),
+)
+
 it.effect("completeLeadingTurn adds only the structure a windowed turn is missing", () =>
   Effect.gen(function* () {
     const record = turn(turnId, 20)
@@ -190,7 +268,7 @@ it.effect("completeLeadingTurn adds only the structure a windowed turn is missin
       newestCursor: undefined,
       usage: { usage: ExecutionProjection.emptyUsageState() },
     })
-    const transcripts = { get: () => Effect.succeed(projection()) }
+    const transcripts = yield* makeMemory({ initial: [projection()] })
     // Only the children of the first card are windowed: every root unit is added, but no other card's children.
     const firstCardChildren = children.filter((unit) => unit.parentId === "card-1")
     const partial = yield* completeLeadingTurn(window(firstCardChildren), transcripts)
@@ -218,11 +296,13 @@ it.effect("completeLeadingTurn adds the prompt and parent cards when a page star
       newestCursor: undefined,
       usage: { usage: ExecutionProjection.emptyUsageState() },
     }
+    const repository = yield* makeMemory({ initial: [projection()] })
     const completed = yield* completeLeadingTurn(page, {
-      get: (requested) => {
+      page: (requested, options) => {
         reads += 1
-        expect(requested).toBe(turnId)
-        return Effect.succeed(projection())
+        expect(requested).toBe(threadId)
+        expect(options).toMatchObject({ structuralTurnId: turnId, limit: maximumTranscriptUnits })
+        return repository.page(requested, options)
       },
     })
     expect(reads).toBe(1)
@@ -231,7 +311,7 @@ it.effect("completeLeadingTurn adds the prompt and parent cards when a page star
     expect(keys.slice(0, 2)).toEqual([prompt.key, intro.key])
     for (const cardUnit of cards) expect(keys).toContain(cardUnit.key)
     expect(keys.at(-1)).toBe(children.at(-1)!.key)
-    expect(completed.entries.every((item) => item.turn === record)).toBe(true)
+    for (const item of completed.entries) expect(item.turn).toEqual(record)
     expect(completed.oldestCursor).toEqual(page.oldestCursor)
     expect(completed.hasOlder).toBe(true)
   }),
@@ -253,9 +333,9 @@ it.effect("completeLeadingTurn leaves pages alone when the leading turn already 
       newestCursor: undefined,
       usage: { usage: ExecutionProjection.emptyUsageState() },
     }
-    const completed = yield* completeLeadingTurn(page, { get: () => Effect.die("must not read") })
+    const completed = yield* completeLeadingTurn(page, { page: () => Effect.die("must not read") })
     expect(completed).toBe(page)
     const full = { ...page, hasOlder: false, entries: [entry(intro, record)] }
-    expect(yield* completeLeadingTurn(full, { get: () => Effect.die("must not read") })).toBe(full)
+    expect(yield* completeLeadingTurn(full, { page: () => Effect.die("must not read") })).toBe(full)
   }),
 )

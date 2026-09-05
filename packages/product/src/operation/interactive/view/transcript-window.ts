@@ -42,7 +42,7 @@ export const boundedTranscriptPage = (input: {
 
 export const initialTranscriptWindow = (input: {
   readonly state: SelectionEpochState
-  readonly transcripts: Pick<TranscriptRepository.Interface, "page" | "get">
+  readonly transcripts: Pick<TranscriptRepository.Interface, "page">
   readonly encodeJson: <Value>(value: Value) => string
   readonly fail: (message: string) => Effect.Effect<never, OperationError, never>
 }) =>
