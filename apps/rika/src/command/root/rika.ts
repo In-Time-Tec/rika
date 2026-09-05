@@ -6,6 +6,14 @@ import { authCommand } from "../product/auth"
 import { credentialCommand } from "../product/credential"
 import { debugCommand } from "../product/debug"
 import { diagnosticsCommand } from "../product/diagnostics"
+import {
+  configCommand,
+  doctorCommand,
+  extensionsCommand,
+  mcpCommand,
+  skillsCommand,
+  toolsCommand,
+} from "../product/local"
 import { organizationCommand } from "../product/organization"
 import { projectCommand } from "../product/project"
 import { providerCommand } from "../product/provider"
@@ -136,6 +144,12 @@ export const command = Command.make(
     diagnosticsCommand,
     debugCommand,
     updateCommand,
+    doctorCommand,
+    mcpCommand,
+    skillsCommand,
+    extensionsCommand,
+    configCommand,
+    toolsCommand,
     Command.make("version", {}, () => Console.log(version)),
   ]),
 )

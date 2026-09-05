@@ -99,11 +99,17 @@ const dispatcherLayer = () =>
           yield* HostedObservability.event("process_start", "success", {})
           if (input._tag !== "Interactive") yield* startLogging.pipe(Effect.orDie)
           return yield* Effect.gen(function* () {
-            if (input._tag !== "Interactive")
-              return yield* ProductOperation.OperationUnavailable.make({
-                operation: input._tag,
-                message: `${input._tag} is not implemented`,
+            if (input._tag !== "Interactive") {
+              const local = yield* Effect.tryPromise({
+                try: () => import("./local-operations"),
+                catch: () =>
+                  ProductOperation.OperationUnavailable.make({
+                    operation: input._tag,
+                    message: "Local command support could not be loaded",
+                  }),
               })
+              return yield* local.run(input)
+            }
             return yield* Effect.scoped(
               Effect.gen(function* () {
                 const unavailable = "Interactive support could not be loaded"

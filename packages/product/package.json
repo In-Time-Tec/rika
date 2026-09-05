@@ -11,6 +11,7 @@
     "./native-tool-result": "./src/execution/tool/result.ts",
     "./native-tool-runtime": "./src/execution/tool/runtime.ts",
     "./configuration-operation": "./src/operation/contract/configuration.ts",
+    "./extension-operation": "./src/operation/contract/extension.ts",
     "./edit-file-tool": "./src/execution/tool/edit.ts",
     "./execution-authority-reconciliation": "./src/execution/authority/reconciliation.ts",
     "./execution-gateway": "./src/execution/gateway/service.ts",
