@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { animationActive, lifecycleLabel, statusContent } from "../../../src/opentui/surface/content"
 import { initial, type Model } from "../../../src/state/model"
 import { styledTextValue } from "../../support/surface/transcript/pane-geometry.fixture"
+import "./status.fixture"
 
 const model = (): Model => ({
   ...initial("/work", "high"),
