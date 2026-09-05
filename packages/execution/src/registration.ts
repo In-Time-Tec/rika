@@ -3,6 +3,7 @@ import { Errors, ExecutableRegistration } from "generalist/runtime"
 import * as ExecutionRoute from "@rika/product/execution-route-snapshot"
 import { Effect, Function, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
+import { Catalog } from "@rika/extensions/mcp-capability-contract"
 
 export interface Codec<A, I> {
   readonly codec: string
@@ -26,6 +27,7 @@ const ToolPayload = Schema.Struct({
 
 const ApplicationContextPayload = Schema.Struct({
   workspace: Schema.String.check(Schema.isNonEmpty()),
+  mcp: Schema.optionalKey(Catalog),
   executionIdentity: Schema.optionalKey(
     Schema.Struct({
       threadId: Schema.String.check(Schema.isNonEmpty()),

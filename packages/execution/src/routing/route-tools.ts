@@ -8,6 +8,9 @@ import { NestedOperation, ToolContext, ToolExecutor } from "generalist"
 import * as RemoteTools from "../remote-tools"
 import * as NativeTools from "../tool/registry"
 import { terminalUnknownKind, TerminalUnknownFailure } from "./terminal-unknown"
+import type { Capability } from "@rika/extensions/mcp-capability-contract"
+import { Toolkit } from "effect/unstable/ai"
+import * as Mcp from "../tool/mcp"
 
 interface ExecutionIdentity {
   readonly threadId: string
@@ -97,7 +100,15 @@ const decodeFailure = (tool: string, error: Schema.SchemaError) =>
 const runtimeRequest = Effect.fn("RemoteTools.runtimeRequest")(function* (
   tool: string,
   input: UnparsedToolInput,
+  mcp: ReadonlyArray<Capability> = [],
 ): Effect.fn.Return<NativeToolRuntime.Request, ToolExecutor.FrameworkFailure> {
+  const capability = mcp.find((entry) => entry.name === tool)
+  if (capability !== undefined) {
+    const value = yield* Schema.decodeUnknownEffect(Schema.Json)(input).pipe(
+      Effect.mapError((error) => decodeFailure(tool, error)),
+    )
+    return { _tag: "McpCall", capability, input: value }
+  }
   switch (tool) {
     case "bash": {
       const value = yield* Schema.decodeUnknownEffect(Bash.tool.parametersSchema)(input).pipe(
@@ -150,12 +161,13 @@ export const remoteToolExecutor = (options: {
   readonly route: Layer.Layer<RemoteTools.Service>
   readonly workspace: string
   readonly executionIdentity: ExecutionIdentity | undefined
+  readonly mcp?: ReadonlyArray<Capability>
 }): Layer.Layer<ToolExecutor.ToolExecutor> =>
   Layer.effect(
     ToolExecutor.ToolExecutor,
     Effect.map(RemoteTools.Service, (service) => {
       const base = ToolExecutor.remote({
-        toolkit: NativeTools.toolkit,
+        toolkit: Toolkit.make(...Object.values(NativeTools.toolkit.tools), ...(options.mcp ?? []).map(Mcp.tool)),
         idempotent: true,
         // Generalist checks this key stays stable across attempts; the endpoint deduplicates on the durable
         // ToolContext operation key, which is derived from the same tool call id.
@@ -183,7 +195,7 @@ export const remoteToolExecutor = (options: {
             )
             const deadlineAt =
               context.deadline === undefined || toolDeadline < context.deadline ? toolDeadline : context.deadline
-            const nativeRequest = yield* runtimeRequest(request.call.name, request.call.params)
+            const nativeRequest = yield* runtimeRequest(request.call.name, request.call.params, options.mcp)
             const toolCallId = context.toolCallId ?? request.call.id
             return yield* service
               .execute({
@@ -218,9 +230,11 @@ export const remoteToolExecutor = (options: {
         Effect.gen(function* () {
           if (options.executionIdentity === undefined)
             return yield* cancellationFailure(request.toolName, "remote tool cancellation requires thread identity")
-          const nativeRequest = yield* runtimeRequest(request.toolName, request.execution.call.params).pipe(
-            Effect.mapError((error) => cancellationFailure(request.toolName, error.message)),
-          )
+          const nativeRequest = yield* runtimeRequest(
+            request.toolName,
+            request.execution.call.params,
+            options.mcp,
+          ).pipe(Effect.mapError((error) => cancellationFailure(request.toolName, error.message)))
           const response = yield* service
             .cancel({
               operationKey: request.operationKey,

@@ -34,7 +34,7 @@ const editFailure = NativeToolRuntime.ToolError.make({
 })
 
 /** A Runner reports a failed tool through the wire, so the API sees the decoded `ToolError` class instance. */
-const receivedFailure = (): MachineOutcome => {
+const receivedFailure = (failure: NativeToolRuntime.ToolError = editFailure): MachineOutcome => {
   const message = decodeRunnerMessage(
     encodeRunnerMessage({
       _tag: "MachineResult",
@@ -43,7 +43,7 @@ const receivedFailure = (): MachineOutcome => {
       attempt: 1,
       machineId: "b".repeat(64),
       requestDigest: "c".repeat(64),
-      outcome: { _tag: "Failure", failure: editFailure },
+      outcome: { _tag: "Failure", failure },
     }),
   )
   if (message._tag !== "MachineResult") throw new Error("expected a MachineResult")
@@ -66,6 +66,30 @@ it("records a Runner tool failure received over the wire as a failed domain resu
       nextAction: editFailure.nextAction,
     },
   })
+})
+
+it("keeps a possibly applied MCP wire failure unknown rather than permitting ordinary failure replay", () => {
+  const failure = NativeToolRuntime.ToolError.make({
+    ...editFailure,
+    tool: "mcp",
+    message: "MCP capability unknown",
+    outcome: "unknown",
+    recovery: "never",
+  })
+  const terminal = failure.pipe(receivedFailure, machineTerminal)
+  expect(terminal.outcome).toBe("unknown")
+  expect(terminal.response).toMatchObject({
+    _tag: "DomainFailure",
+    failure: { tool: "mcp", outcome: "unknown", recovery: "never" },
+  })
+  expect(
+    NativeToolRuntime.ToolError.make({
+      ...failure,
+      message: "MCP capability denied",
+      outcome: "known",
+      recovery: "after_change",
+    }).pipe(receivedFailure, machineTerminal).outcome,
+  ).toBe("failed")
 })
 
 const pendingOperation = (result: Deferred.Deferred<ExecutionResult, GatewayError>): PendingOperation => {

@@ -186,6 +186,7 @@
         "@aws-sdk/credential-provider-node": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-pg": "catalog:",
+        "@rika/extensions": "workspace:*",
         "@rika/product": "workspace:*",
         "effect": "catalog:",
         "generalist": "catalog:",

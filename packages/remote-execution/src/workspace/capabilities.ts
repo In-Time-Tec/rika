@@ -1,4 +1,5 @@
-import { WorkspaceCapability, type WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import { WorkspaceCapability, WorkspaceCapabilitySnapshot } from "@rika/product/executor-assignment"
+import * as Mcp from "@rika/execution/mcp-tools"
 import { Clock, Crypto, DateTime, Effect, Encoding, FileSystem, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
@@ -22,6 +23,7 @@ const encodeIdentity = Schema.encodeSync(
         browser: WorkspaceCapability,
         services: WorkspaceCapability,
         workspaceLifecycle: WorkspaceCapability,
+        mcp: WorkspaceCapabilitySnapshot.fields.mcp,
       }),
     }),
   ),
@@ -49,6 +51,19 @@ export const directoryVisibleTo = (input: {
     }),
   ).pipe(Effect.orElseSucceed(() => false))
 
+const inspectMcp = (input: {
+  readonly workspacePath: string
+  readonly mcp?: Effect.Effect<NonNullable<WorkspaceCapabilitySnapshot["mcp"]>>
+}) =>
+  input.mcp ??
+  Mcp.capture(input.workspacePath).pipe(
+    Effect.map((catalog) => ({ _tag: "Ready" as const, catalog })),
+    Effect.orElseSucceed(() => ({
+      _tag: "Unavailable" as const,
+      reason: "MCP discovery failed; check Executor-local configuration",
+    })),
+  )
+
 export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.inspect")(function* (input: {
   readonly target: "runner" | "orb"
   readonly workspacePath: string
@@ -58,6 +73,7 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
   readonly services?: boolean
   /** A fallback directory probe, such as `directoryVisibleTo`, used when a direct stat of the workspace fails. */
   readonly workspaceVisible?: Effect.Effect<boolean>
+  readonly mcp?: Effect.Effect<NonNullable<WorkspaceCapabilitySnapshot["mcp"]>>
 }) {
   const fileSystem = yield* FileSystem.FileSystem
   const crypto = yield* Crypto.Crypto
@@ -72,6 +88,7 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
     .find((path) => path !== null)
   const agentBrowserExecutable = Bun.which("agent-browser")
   const browserReady = input.browser ?? (browserExecutable !== undefined && agentBrowserExecutable !== null)
+  const mcp = yield* inspectMcp(input)
   const states = {
     filesystem: workspaceExists
       ? ready("workspace filesystem available")
@@ -91,6 +108,7 @@ export const inspectWorkspaceCapabilities = Effect.fn("WorkspaceCapabilities.ins
     workspaceLifecycle: workspaceExists
       ? ready("workspace lifecycle ready")
       : unavailable("workspace lifecycle is not ready"),
+    mcp,
   } as const
   const identity = encodeIdentity({
     target: input.target,

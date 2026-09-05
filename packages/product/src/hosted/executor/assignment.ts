@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { Catalog } from "@rika/extensions/mcp-capability-contract"
 import {
   AssignmentLeaseEpoch,
   CheckpointId,
@@ -45,6 +46,12 @@ export const WorkspaceCapabilitySnapshot = Schema.Struct({
   browser: WorkspaceCapability,
   services: WorkspaceCapability,
   workspaceLifecycle: WorkspaceCapability,
+  mcp: Schema.optionalKey(
+    Schema.Union([
+      Schema.TaggedStruct("Ready", { catalog: Catalog }),
+      Schema.TaggedStruct("Unavailable", { reason: Schema.String }),
+    ]),
+  ),
 })
 export type WorkspaceCapabilitySnapshot = typeof WorkspaceCapabilitySnapshot.Type
 

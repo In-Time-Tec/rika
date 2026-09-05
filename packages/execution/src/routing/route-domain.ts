@@ -14,6 +14,7 @@ import { nativeToolInstructions, profileInstructions } from "../agent-instructio
 import * as Models from "../models"
 import * as Registration from "../registration"
 import * as RemoteTools from "../remote-tools"
+import type { Capability } from "@rika/extensions/mcp-capability-contract"
 
 type ModelSnapshot = ExecutionRoute.ExecutionRouteModelSnapshot
 type RouteSnapshot = ExecutionRoute.ExecutionRouteSnapshot
@@ -25,7 +26,7 @@ export interface RemoteToolRoute {
     readonly threadId: string
     readonly turnId: string
     readonly workspaceId: string
-  }) => Effect.Effect<void, RemoteTools.AdmissionFailure>
+  }) => Effect.Effect<ReadonlyArray<Capability> | void, RemoteTools.AdmissionFailure>
 }
 
 export type ToolRoute = { readonly _tag: "Local" } | RemoteToolRoute
@@ -40,6 +41,7 @@ export interface ConfigureOptions {
     readonly turnId: string
   }
   readonly tools?: ToolRoute
+  readonly mcp?: ReadonlyArray<Capability>
   readonly skills?: ReadonlyArray<ExecutionPins.SkillPin>
   readonly harnessSnapshot?: State.GuidanceState
   readonly modelServices?: Layer.Layer<ModelRegistry.ModelRegistry>
@@ -110,10 +112,12 @@ const applicationPin = (
   route: RouteSnapshot,
   workspace: string,
   executionIdentity: ConfigureOptions["executionIdentity"],
+  mcp: ReadonlyArray<Capability> = [],
 ) => {
   const payload = Object.assign(
     { ...Registration.codecs.applicationContext.identity, route, workspace },
     executionIdentity === undefined ? undefined : { executionIdentity },
+    mcp.length === 0 ? undefined : { mcp },
   )
   return Pins.makeCapability(payload)
 }

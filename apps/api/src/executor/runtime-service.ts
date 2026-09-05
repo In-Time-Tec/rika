@@ -18,6 +18,7 @@ import * as RunnerGatewayModule from "../runner/gateway"
 import type { RunnerGateway } from "../runner/gateway"
 import { LifecycleStores } from "./lifecycle-store"
 import { HostedGateway } from "./hosted-gateway"
+import { Pins } from "generalist"
 
 export { Executor, orphanReaper } from "./contract"
 import { Executor, orphanReaper } from "./contract"
@@ -33,6 +34,28 @@ const maxPreparationAttempts = 3
 
 const NativeToolPayload = Schema.Struct({ toolName: Schema.String, request: NativeToolRuntime.Request })
 const encodeNativeToolPayload = Schema.encodeSync(Schema.fromJsonString(NativeToolPayload))
+
+const validateMcpCapability = (
+  input: RemoteTools.Request,
+  capabilities: NonNullable<ExecutorAssignment["capabilities"]>,
+) =>
+  Effect.gen(function* () {
+    if (input.request._tag === "McpDiscover")
+      return yield* ControllerError.make({ kind: "fenced", message: "MCP discovery is Executor-local admission only" })
+    if (input.request._tag !== "McpCall") return
+    const requested = input.request.capability
+    const mcp = capabilities.mcp
+    if (
+      input.runId === input.rootRunId ||
+      input.toolName !== requested.name ||
+      mcp?._tag !== "Ready" ||
+      !mcp.catalog.some((capability) => Pins.digest(capability) === Pins.digest(requested))
+    )
+      return yield* ControllerError.make({
+        kind: "fenced",
+        message: "MCP capability is outside the admitted specialist catalog",
+      })
+  })
 
 class HostedRunnerGateway extends Context.Service<HostedRunnerGateway, RunnerGateway>()(
   "@rika/api/executor/runtime-service/HostedRunnerGateway",
@@ -99,7 +122,7 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Executor workspace identity does not match the Run workspace",
           })
-        yield* HostedObservability.observe(
+        return yield* HostedObservability.observe(
           "attach",
           { ownerId: initial.ownerId, threadId: input.threadId, turnId: input.turnId, assignmentId: initial.id },
           Effect.gen(function* () {
@@ -247,6 +270,11 @@ export const service = Layer.effect(
             const admitCapabilities = Effect.gen(function* () {
               const active = yield* awaitActive()
               const capabilities = active.capabilities!
+              if (capabilities.mcp?._tag === "Unavailable")
+                return yield* ControllerError.make({
+                  kind: "protocol",
+                  message: "Executor MCP discovery is unavailable",
+                })
               const admitted = yield* operations
                 .admitWorkspaceCapabilities({
                   threadId: input.threadId,
@@ -270,6 +298,7 @@ export const service = Layer.effect(
                   kind: "fenced",
                   message: "Run capability admission conflicts with the current assignment environment",
                 })
+              return capabilities.mcp?._tag === "Ready" ? capabilities.mcp.catalog : []
             })
             if (initial.placement._tag === "RunnerPlacement")
               return yield* runnerGateway
@@ -324,6 +353,7 @@ export const service = Layer.effect(
             kind: "fenced",
             message: "Run capability admission no longer matches the assignment environment",
           })
+        yield* validateMcpCapability(input, assignment.capabilities)
         const correlation = {
           ownerId: assignment.ownerId,
           threadId: input.threadId,

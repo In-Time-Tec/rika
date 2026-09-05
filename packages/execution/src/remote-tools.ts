@@ -1,5 +1,6 @@
 import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import { Context, Effect, Layer, Schema } from "effect"
+export type { Capability as McpCapability } from "@rika/extensions/mcp-capability-contract"
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty())
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))

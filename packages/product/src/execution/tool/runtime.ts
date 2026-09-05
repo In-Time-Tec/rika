@@ -5,6 +5,7 @@ import * as Edit from "./edit"
 import * as Read from "./read"
 import * as ShellCommandStatus from "./shell-command-status"
 import * as NativeToolResult from "./result"
+import { Capability } from "@rika/extensions/mcp-capability-contract"
 
 /** Private compatibility request used by recorded `!` shell turns. It is not model-facing or catalogued. */
 export const RecordedShellRequest = Schema.Struct({
@@ -22,6 +23,8 @@ export const Request = Schema.Union([
   Read.Request,
   Edit.Request,
   RecordedShellRequest,
+  Schema.TaggedStruct("McpDiscover", {}),
+  Schema.TaggedStruct("McpCall", { capability: Capability, input: Schema.Json }),
 ])
 export type Request = typeof Request.Type
 export type Result = NativeToolResult.Result

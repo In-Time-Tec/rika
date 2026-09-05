@@ -29,6 +29,7 @@ export const makeResolver = (options: ResolverOptions): ExecutableResolver.Servi
         const configureOptions: ConfigureOptions = {
           executionRoute: context.executionRoute,
           workspace: context.workspace,
+          mcp: context.mcp ?? [],
         }
         if (context.executionIdentity !== undefined)
           Object.assign(configureOptions, { executionIdentity: context.executionIdentity })

@@ -43,7 +43,7 @@ export const machineTerminal = (outcome: MachineOutcome): NativeTerminal => {
     case "Failure":
       return {
         response: { _tag: "DomainFailure", failure: toolFailureValue(outcome.failure) },
-        outcome: "failed",
+        outcome: outcome.failure.tool === "mcp" && outcome.failure.outcome === "unknown" ? "unknown" : "failed",
       }
     case "Cancelled":
       return {

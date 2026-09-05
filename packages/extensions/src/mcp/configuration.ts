@@ -3,6 +3,17 @@ import { Crypto, Effect, Encoding, Schema } from "effect"
 export const Source = Schema.Union([Schema.Literal("workspace"), Schema.TemplateLiteral(["skill:", Schema.String])])
 export type Source = typeof Source.Type
 
+export const Specialist = Schema.Literals(["Oracle", "Librarian", "Painter", "Review", "Surgeon", "Task"])
+const GrantedTools = Schema.optionalKey(Schema.Array(Schema.NonEmptyString))
+export const SpecialistGrants = Schema.Struct({
+  Oracle: GrantedTools,
+  Librarian: GrantedTools,
+  Painter: GrantedTools,
+  Review: GrantedTools,
+  Surgeon: GrantedTools,
+  Task: GrantedTools,
+})
+
 export interface LocalServer {
   readonly kind: "local"
   readonly name: string
@@ -12,6 +23,7 @@ export interface LocalServer {
   readonly cwd?: string
   readonly source: Source
   readonly sourceDigest: string
+  readonly specialists?: typeof SpecialistGrants.Type
 }
 
 export interface RemoteServer {
@@ -21,6 +33,7 @@ export interface RemoteServer {
   readonly headers: Readonly<Record<string, string>>
   readonly source: Source
   readonly sourceDigest: string
+  readonly specialists?: typeof SpecialistGrants.Type
 }
 
 export type Server = LocalServer | RemoteServer
@@ -35,6 +48,7 @@ export const Server = Schema.Union([
     cwd: Schema.optionalKey(Schema.String),
     source: Source,
     sourceDigest: Schema.String,
+    specialists: Schema.optionalKey(SpecialistGrants),
   }),
   Schema.Struct({
     kind: Schema.Literal("remote"),
@@ -43,6 +57,7 @@ export const Server = Schema.Union([
     headers: Schema.Record(Schema.String, Schema.String),
     source: Source,
     sourceDigest: Schema.String,
+    specialists: Schema.optionalKey(SpecialistGrants),
   }),
 ]) satisfies Schema.Schema<Server>
 
@@ -68,6 +83,7 @@ const ServerInput = Schema.Struct({
   env: Schema.optionalKey(StringRecord),
   cwd: Schema.optionalKey(Schema.String),
   headers: Schema.optionalKey(StringRecord),
+  specialists: Schema.optionalKey(SpecialistGrants),
 })
 const ServerInputs = Schema.Record(Schema.String, ServerInput)
 const Document = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
@@ -101,6 +117,7 @@ const parse = (content: string, source: Source, digest: string): Effect.Effect<R
               source,
               sourceDigest: digest,
             }
+            if (raw.specialists !== undefined) Object.assign(server, { specialists: raw.specialists })
             if (raw.cwd !== undefined) parsed.push({ ...server, cwd: raw.cwd })
             else parsed.push(server)
             continue
@@ -115,7 +132,16 @@ const parse = (content: string, source: Source, digest: string): Effect.Effect<R
                   message: cause instanceof Error ? cause.message : String(cause),
                 }),
             })
-            parsed.push({ kind: "remote", name, url, headers: raw.headers ?? {}, source, sourceDigest: digest })
+            const server: RemoteServer = {
+              kind: "remote",
+              name,
+              url,
+              headers: raw.headers ?? {},
+              source,
+              sourceDigest: digest,
+            }
+            if (raw.specialists !== undefined) Object.assign(server, { specialists: raw.specialists })
+            parsed.push(server)
             continue
           }
           return yield* ConfigError.make({ source, message: `Server requires command or url: ${name}` })

@@ -9,8 +9,10 @@ import * as LocalPath from "@rika/product/local-path"
 import * as LocalSafetyPolicy from "./local-safety"
 import * as ProcessRegistry from "./process-registry"
 import { unifiedDiff } from "./unified-diff"
+import * as Mcp from "./mcp"
 
 type Result = NativeToolResult.Result
+type NativeRequest = Exclude<ToolRuntime.Request, { _tag: "McpCall" | "McpDiscover" }>
 
 interface FailureDetails {
   readonly category: NativeToolResult.FailureCategory
@@ -25,11 +27,11 @@ class RuntimeOperationError extends Data.TaggedError("RuntimeOperationError")<Fa
 const bounded = (text: string): Result => ({ text, truncated: false })
 const policyForName = (name: string) =>
   ToolRuntime.registrations.find((registration) => registration.tool.name === name)?.policy
-const toolName = (request: ToolRuntime.Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
-const contract = (request: ToolRuntime.Request): ToolPolicy.Policy =>
+const toolName = (request: NativeRequest) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
+const contract = (request: NativeRequest): ToolPolicy.Policy =>
   policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
 
-const outputRecovery = (request: ToolRuntime.Request): string => {
+const outputRecovery = (request: NativeRequest): string => {
   switch (request._tag) {
     case "Read":
       return "request a smaller read_range"
@@ -71,7 +73,7 @@ const boundFields = (result: Result, limit: number, totalBytes: number, recovery
   return answer
 }
 
-const boundResult = (request: ToolRuntime.Request, result: Result): Result => {
+const boundResult = (request: NativeRequest, result: Result): Result => {
   const values = [result.text, result.stdout, result.stderr, result.diff].filter(
     (value): value is string => value !== undefined,
   )
@@ -114,7 +116,7 @@ const actionableMessage = (details: FailureDetails) =>
     details.outcome === "known" ? "The call did not change state." : "The call may have changed state."
   }`
 
-const toolError = (request: ToolRuntime.Request, cause: unknown, kind: "operation" | "timeout") => {
+const toolError = (request: NativeRequest, cause: unknown, kind: "operation" | "timeout") => {
   const unsafe = contract(request).idempotency === "unsafe"
   let details: FailureDetails
   if (kind !== "timeout") details = operationError(cause)
@@ -359,7 +361,7 @@ export const layerWithProcessRegistry = (workspace: string) =>
         return { ...status, text: `${stdout}${stderr}` }
       })
       const executeOperation = (
-        request: ToolRuntime.Request,
+        request: NativeRequest,
       ): Effect.Effect<
         Result,
         RuntimeOperationError | PlatformError.PlatformError | ProcessRegistry.ProcessNotFound
@@ -379,6 +381,7 @@ export const layerWithProcessRegistry = (workspace: string) =>
       }
       return ToolRuntime.Service.of({
         run: (request) => {
+          if (request._tag === "McpCall" || request._tag === "McpDiscover") return Mcp.execute(workspace, request)
           const operation = executeOperation(request).pipe(
             Effect.map((result) => boundResult(request, result)),
             Effect.mapError((cause) => toolError(request, cause, "operation")),

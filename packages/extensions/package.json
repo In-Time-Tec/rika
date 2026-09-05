@@ -6,6 +6,8 @@
   "type": "module",
   "exports": {
     "./execution-extension-service": "./src/plugin/execution-service.ts",
+    "./mcp-capability": "./src/mcp/capability.ts",
+    "./mcp-capability-contract": "./src/mcp/capability-contract.ts",
     "./mcp-configuration": "./src/mcp/configuration.ts",
     "./mcp-discovery": "./src/mcp/discovery.ts",
     "./mcp-oauth-service": "./src/mcp/oauth-service.ts",

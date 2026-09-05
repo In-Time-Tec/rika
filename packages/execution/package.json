@@ -8,6 +8,7 @@
     ".": "./src/engine/runtime.ts",
     "./route": "./src/routing/route.ts",
     "./local-tools": "./src/tool/local.ts",
+    "./mcp-tools": "./src/tool/mcp.ts",
     "./remote-tools": "./src/remote-tools.ts",
     "./postgres": "./src/postgres.ts",
     "./scripted-model": "./src/scripted-model.ts",
@@ -19,6 +20,7 @@
     "@effect/platform-bun": "catalog:",
     "@aws-sdk/client-bedrock-runtime": "catalog:",
     "@aws-sdk/credential-provider-node": "catalog:",
+    "@rika/extensions": "workspace:*",
     "@rika/product": "workspace:*",
     "effect": "catalog:",
     "generalist": "catalog:"

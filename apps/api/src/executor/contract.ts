@@ -20,7 +20,7 @@ export interface Runtime {
     readonly threadId: string
     readonly turnId: string
     readonly workspaceId: string
-  }) => Effect.Effect<void, ControllerError>
+  }) => Effect.Effect<ReadonlyArray<RemoteTools.McpCapability>, ControllerError>
   readonly runTool: (
     input: RemoteTools.Request,
   ) => Effect.Effect<ExecutionResult & { readonly eventPersisted: boolean }, ControllerError | GatewayError>

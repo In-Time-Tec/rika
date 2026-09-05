@@ -1,6 +1,6 @@
 import { MCPClient, OAuth } from "generalist/mcp"
 import * as MCPHttp from "generalist/mcp/client/http"
-import * as MCPStdio from "generalist/mcp/client/stdio"
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Context, Crypto, Effect, Layer, Schema, Scope } from "effect"
 import type { Server } from "./configuration"
 import * as McpOAuth from "./oauth-service"
@@ -52,9 +52,15 @@ export const layerWithStore: Layer.Layer<McpRuntimeService, never, OAuth.TokenSt
           }
           return yield* Layer.build(
             server.kind === "local"
-              ? MCPStdio.layer({
+              ? MCPClient.layer({
                   name: server.name,
-                  transport: { command: server.command, args: server.args, env: { ...server.environment } },
+                  transport: new StdioClientTransport({
+                    command: server.command,
+                    args: [...server.args],
+                    env: { ...server.environment },
+                    cwd: server.cwd ?? process.cwd(),
+                    stderr: "ignore",
+                  }),
                 })
               : MCPHttp.layer({
                   name: server.name,

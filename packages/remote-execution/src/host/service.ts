@@ -23,6 +23,8 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
 import * as Operations from "../protocol/operations"
 import { NativeToolService, nativeToolLayer } from "./machinery/native-tool"
+import * as NativeToolSubprocess from "./machinery/native-tool-subprocess"
+import * as Mcp from "@rika/execution/mcp-tools"
 import {
   Manager as PtyManager,
   driverLayer as ptyDriverLayer,
@@ -145,6 +147,23 @@ const host = Effect.scoped(
           pty: ptyReady,
           browser: capabilities.browser,
           services: capabilities.services,
+          mcp: Effect.scoped(
+            Effect.gen(function* () {
+              const process = yield* NativeToolSubprocess.make({ workspace: root, workspaceUser, environment: {} })
+              const outcome = yield* process.execute({ _tag: "McpDiscover" })
+              if (outcome._tag !== "Success") return { _tag: "Unavailable" as const, reason: "MCP discovery failed" }
+              const catalog = yield* Schema.decodeEffect(Schema.fromJsonString(Mcp.Catalog))(outcome.value.result.text)
+              return { _tag: "Ready" as const, catalog }
+            }),
+          ).pipe(
+            // The isolated workspace-user subprocess owns its complete platform lifetime.
+            // oxlint-disable-next-line effecttsgo/strict-effect-provide
+            Effect.provide(BunServices.layer),
+            Effect.orElseSucceed(() => ({
+              _tag: "Unavailable" as const,
+              reason: "MCP discovery failed; check Executor-local configuration",
+            })),
+          ),
         })
         const workspaceCapabilities = yield* inspectCapabilities
         const runtimeOptions = {

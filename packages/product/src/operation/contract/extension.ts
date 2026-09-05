@@ -293,6 +293,7 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
                   kind: server.kind,
                   source: server.source,
                   enabled: !disabled.has(server.name),
+                  specialists: server.specialists,
                 })),
               ),
             )

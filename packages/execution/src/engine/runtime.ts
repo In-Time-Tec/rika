@@ -18,6 +18,7 @@ import { Cause, Context, Effect, Layer, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { type ConfigureOptions, type RemoteToolRoute, configure } from "../routing/route"
 import * as Route from "../routing/route"
+import * as Mcp from "../tool/mcp"
 import * as Postgres from "../postgres"
 import { TreeProjector } from "../projection/tree/projector"
 import { RuntimeProjection } from "./runtime-projection"
@@ -93,14 +94,21 @@ const make = (
     const prepareTurn: ExecutionGateway.Interface["prepareTurn"] = Effect.fn("ExecutionGateway.prepareTurn")(function* (
       input,
     ) {
-      if (options.tools?._tag === "Remote")
-        yield* options.tools.admit({ threadId: input.threadId, turnId: input.turnId, workspaceId: input.workspaceId })
+      const mcp =
+        options.tools?._tag === "Remote"
+          ? ((yield* options.tools.admit({
+              threadId: input.threadId,
+              turnId: input.turnId,
+              workspaceId: input.workspaceId,
+            })) ?? [])
+          : yield* Mcp.capture(input.workspaceId)
       const turnCapabilities =
         options.capabilities === undefined ? undefined : yield* options.capabilities(input.workspaceId)
       const configureOptions: ConfigureOptions = {
         executionRoute: input.executionRoute,
         workspace: input.workspaceId,
         executionIdentity: { threadId: input.threadId, turnId: input.turnId },
+        mcp,
       }
       Object.assign(configureOptions, {
         tools: options.tools === undefined ? { _tag: "Local" as const } : options.tools,
