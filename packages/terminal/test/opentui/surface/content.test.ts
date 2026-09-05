@@ -16,17 +16,19 @@ it("shows truncated history when idle without running an animation", () => {
   expect(styledTextValue(statusContent(model(), 0, 0))).not.toContain("History truncated")
 })
 
-it("keeps the Unicode spinner but hides an internal finishing label without prior model activity", () => {
+it("labels finishing even without prior model activity", () => {
   const finishing = { ...model(), busy: true, activity: { _tag: "Finishing" as const } }
 
-  expect(lifecycleLabel(finishing, 0)).toBeUndefined()
-  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ ")
-  expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ ")
+  expect(lifecycleLabel(finishing, 0)).toBe("Finishing")
+  expect(styledTextValue(statusContent(finishing, 0, 0))).toBe(" ∼ Finishing ")
+  expect(styledTextValue(statusContent(finishing, 2, 0))).toBe(" ≋ Finishing ")
 })
 
 it.each([
   ["Thinking", 12, "Thinking ~3 tok"],
   ["Streaming", 16, "Streaming ~4 tok"],
+  ["Thinking", 0, "Thinking ~0 tok"],
+  ["Streaming", 0, "Streaming ~0 tok"],
 ] as const)("keeps %s visible while the turn finishes", (tag, bytes, expected) => {
   const finishing = {
     ...model(),

@@ -8,7 +8,7 @@ import { colors, modeColor, spacing } from "../../presentation/terminal/theme"
 import { formatActivity, transcriptAnimationActive } from "../../state/activity/model"
 import { loaderFrame } from "../rendering/spinner"
 import { toOpenColor } from "../rendering/text-adapter"
-import { homeRelativePath } from "../../presentation/terminal/format"
+import { clipToWidth, homeRelativePath } from "../../presentation/terminal/format"
 import { orbGeometry, orbRows, type OrbImpulse } from "./welcome/orb"
 export const panelLoading = (model: Model): string | undefined => {
   if (model.currentThreadId !== undefined && model.refoldingThreadIds.includes(model.currentThreadId))
@@ -96,18 +96,17 @@ const statusContentImpl = (model: Model, phase: number, currentTimeMillis: numbe
       ...history,
     ])
   const lifecycle = lifecycleLabel(model, currentTimeMillis)
-  if (lifecycle === undefined && model.activity?._tag === "Finishing")
-    return new StyledText([
-      fg(toOpenColor(colors.text))(" "),
-      fg(toOpenColor(colors.blue))(loaderFrame("", phase)),
-      fg(toOpenColor(colors.text))(" "),
-      ...history,
-    ])
   if (lifecycle === undefined) return history.length === 0 ? "" : new StyledText(history)
+  // The footer starts one cell in from the edge. Prefer text alone when the
+  // complete icon + label cannot fit on this row; never clip to an orphan icon.
+  const width = Math.max(0, model.width - 2)
+  if (width < 3) return ""
+  const showIcon = stringWidth(lifecycle) + 4 <= width
+  const label = clipToWidth(lifecycle, width - (showIcon ? 4 : 2))
   const chunks: Array<TextChunk> = [fg(toOpenColor(colors.text))(" ")]
-  chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
-  chunks.push(dim(fg(toOpenColor(colors.text))(` ${lifecycle} `)))
-  chunks.push(...history)
+  if (showIcon) chunks.push(fg(toOpenColor(colors.blue))(loaderFrame(lifecycle, phase)))
+  chunks.push(dim(fg(toOpenColor(colors.text))(`${showIcon ? " " : ""}${label} `)))
+  if (stringWidth([...chunks, ...history].map((chunk) => chunk.text).join("")) <= width) chunks.push(...history)
   return new StyledText(chunks)
 }
 

@@ -254,6 +254,7 @@ export abstract class SurfaceLayout extends SurfaceTranscriptMount {
     const panelLoadingLabel = panelLoading(model)
     const statusChanged =
       modelFieldsChanged(previousModel, model, [
+        "width",
         "activity",
         "connection",
         "retryCountdown",
