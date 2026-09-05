@@ -1,8 +1,20 @@
 import * as Turn from "@rika/product/turn-record"
 import { Effect } from "effect"
+import type { Prompt } from "effect/unstable/ai"
 import { expect, test } from "vitest"
 import * as TuiApp from "../../../support/tui-app.harness"
 import { model } from "../../../support/tui-model.fixture"
+
+const promptText = (prompt: Prompt.Prompt): string =>
+  prompt.content
+    .flatMap((message) => {
+      if (message.role === "user" || message.role === "assistant")
+        return message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      if (message.role === "tool")
+        return message.content.flatMap((part) => (part.type === "tool-result" ? [JSON.stringify(part.result)] : []))
+      return []
+    })
+    .join("\n")
 
 test(
   "a blocking child remains durable and nested under its parent Run",
@@ -101,6 +113,11 @@ test(
             : undefined
         expect(groupId).toBeDefined()
         expect(cardUnits.every((unit) => unit.parentId === groupId)).toBe(true)
+        const resumedRootPrompt = (yield* app.modelPrompts)
+          .map(promptText)
+          .find((prompt) => prompt.includes("ORACLE_GROUP_RESULT"))
+        expect(resumedRootPrompt).toContain("ORACLE_GROUP_RESULT")
+        expect(resumedRootPrompt).toContain("LIBRARIAN_GROUP_RESULT")
         yield* app.quit
       }),
     ),

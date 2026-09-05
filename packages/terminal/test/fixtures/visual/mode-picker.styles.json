@@ -1838,7 +1838,7 @@
           "width": 1
         },
         {
-          "text": "Agent     GPT-5.6 Sol medium",
+          "text": "Agent     GPT-6 Astra medium",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2094,7 +2094,7 @@
           "width": 1
         },
         {
-          "text": "Oracle    GPT-5.6 Sol high",
+          "text": "Oracle    GPT-6 Astra high",
           "fg": {
             "buffer": {
               "0": 1984,

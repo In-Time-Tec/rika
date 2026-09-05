@@ -375,7 +375,7 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         setup.mockInput.pressKey("s", { ctrl: true })
         yield* openTui(() => setup.renderOnce())
         const modeFrame = setup.captureCharFrame()
-        expect(modeFrame).toContain("GPT-5.6 Sol")
+        expect(modeFrame).toContain("GPT-6 Astra")
         expect(modeFrame).toContain("Deep reasoning for hard tasks")
         model = update(model, {
           _tag: "KeyPressed",

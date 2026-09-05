@@ -32,6 +32,13 @@ export const catalog = {
     limits: { contextWindow: 272_000, maxInputTokens: 258_400, maxOutputTokens: 128_000 },
     efforts: supportedEfforts,
   },
+  gpt6Astra: {
+    source: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+    id: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+    efforts: supportedEfforts,
+  },
   gpt55: {
     source,
     id: "gpt-5.5",

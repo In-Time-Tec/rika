@@ -47,13 +47,13 @@ export const settingsDefaults: ConfigurationSettings = {
       agents: {},
     },
     high: {
-      main: { alias: "sol", effort: "medium" },
-      oracle: { alias: "sol", effort: "high" },
+      main: { alias: "astra", effort: "medium" },
+      oracle: { alias: "astra", effort: "high" },
       agents: {},
     },
     ultra: {
-      main: { alias: "sol", effort: "xhigh" },
-      oracle: { alias: "sol", effort: "max" },
+      main: { alias: "astra", effort: "xhigh" },
+      oracle: { alias: "astra", effort: "max" },
       agents: {},
     },
   },

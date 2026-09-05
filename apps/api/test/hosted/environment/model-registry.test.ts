@@ -49,12 +49,36 @@ it.effect("pins every hosted mode to the owner's OpenAI account", () =>
         }
       }
     }
-    expect(required).toEqual(["owner-1", "owner-1", "owner-1", "owner-1"])
+    const high = yield* registry.resolve("owner-1", "high")
+    expect(high.main).toMatchObject({
+      selection: "astra",
+      effort: "medium",
+      compaction: { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+      candidates: [{ model: "gpt-6-astra", providerOptions: { reasoning: { effort: "medium", summary: "auto" } } }],
+    })
+    expect(high.oracle).toMatchObject({
+      selection: "astra",
+      effort: "high",
+      candidates: [{ model: "gpt-6-astra", providerOptions: { reasoning: { effort: "high", summary: "auto" } } }],
+    })
+    const ultra = yield* registry.resolve("owner-1", "ultra")
+    expect(ultra.main).toMatchObject({
+      selection: "astra",
+      effort: "xhigh",
+      candidates: [{ model: "gpt-6-astra", providerOptions: { reasoning: { effort: "xhigh", summary: "auto" } } }],
+    })
+    expect(ultra.oracle).toMatchObject({
+      selection: "astra",
+      effort: "max",
+      compaction: { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+      candidates: [{ model: "gpt-6-astra", providerOptions: { reasoning: { effort: "max", summary: "auto" } } }],
+    })
+    expect(required).toEqual(["owner-1", "owner-1", "owner-1", "owner-1", "owner-1", "owner-1"])
     // A mode declared only in a Workspace settings file is refused by name, before any credential lookup.
     const refused = yield* registry.resolve("owner-1", "load").pipe(Effect.flip)
     expect(refused.kind).toBe("invalid")
     expect(refused.message).toBe('Mode "load" is not a hosted mode; hosted modes are low, medium, high, ultra')
-    expect(required).toHaveLength(4)
+    expect(required).toHaveLength(6)
   }),
 )
 

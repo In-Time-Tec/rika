@@ -61,14 +61,14 @@ describe("ConfigService", () => {
       expect(routes.map((route) => route.providerConnection.baseUrl)).toEqual(
         Array.from({ length: routes.length }, () => "https://workspace.models.test/v1"),
       )
-      expect(
-        routes.every(
-          (route) =>
-            route.compaction.contextWindow === 272_000 &&
-            route.compaction.reserveTokens === 13_600 &&
-            route.compaction.keepRecentTokens === 32_000,
-        ),
-      ).toBe(true)
+      expect(routes.map((route) => route.compaction)).toEqual([
+        { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
+        { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
+        { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+        { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+        { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
+        { contextWindow: 272_000, reserveTokens: 13_600, keepRecentTokens: 32_000 },
+      ])
     }).pipe(
       provideLayer(
         ConfigurationService.memoryConfigurationLayer({

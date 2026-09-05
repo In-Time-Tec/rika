@@ -25,6 +25,12 @@ describe("ConfigContract", () => {
     })
     expect(ConfigContract.defaults.subagents).toEqual({ maxDepth: 1, maxSubagents: 4 })
     expect(Models.catalog.gpt56Sol.limits.contextWindow).toBe(272_000)
+    expect(Models.catalog.gpt6Astra).toMatchObject({
+      source: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      id: "gpt-6-astra",
+      limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    })
     expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")).toMatchObject({
       selection: "terra",
       displayName: "GPT-5.6 Terra",
@@ -37,6 +43,34 @@ describe("ConfigContract", () => {
       selection: "sol",
       model: "gpt-5.6-sol",
       effort: "xhigh",
+    })
+    expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "main")).toMatchObject({
+      selection: "astra",
+      model: "gpt-6-astra",
+      effort: "medium",
+      options: { reasoning: { effort: "medium", summary: "auto" } },
+      compaction: { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+      maxOutputTokens: 128_000,
+    })
+    expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")).toMatchObject({
+      selection: "astra",
+      model: "gpt-6-astra",
+      effort: "high",
+      options: { reasoning: { effort: "high", summary: "auto" } },
+    })
+    expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "main")).toMatchObject({
+      selection: "astra",
+      model: "gpt-6-astra",
+      effort: "xhigh",
+      options: { reasoning: { effort: "xhigh", summary: "auto" } },
+    })
+    expect(ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "oracle")).toMatchObject({
+      selection: "astra",
+      model: "gpt-6-astra",
+      effort: "max",
+      options: { reasoning: { effort: "max", summary: "auto" } },
+      compaction: { contextWindow: 1_050_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
+      maxOutputTokens: 128_000,
     })
   })
 
@@ -313,7 +347,7 @@ describe("ConfigContract", () => {
     ).toThrow(/effort low must set normal options/)
   })
 
-  it("resolves every default route through a reusable gpt-5.6 policy bundle", () => {
+  it("resolves every default route through a reusable OpenAI policy bundle", () => {
     const modes = ["low", "medium", "high", "ultra"] as const
     const roles = ["main", "oracle"] as const
     const routes = [
@@ -324,7 +358,7 @@ describe("ConfigContract", () => {
       ConfigContract.resolveCompactionSummaryRoute(ConfigContract.defaults),
     ]
     for (const route of routes) {
-      expect(route.model).toMatch(/^gpt-5\.6-/)
+      expect(route.model).toMatch(/^gpt-(?:5\.6-|6-astra$)/)
       expect(route.providerId).toBe("openai")
       expect(route.options).toHaveProperty("reasoning")
     }

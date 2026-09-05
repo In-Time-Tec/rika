@@ -11,6 +11,11 @@ const openAiEfforts = {
   max: "xhigh",
 } satisfies Readonly<Record<ModelRoute.Effort, string>>
 
+const astraEfforts = {
+  ...openAiEfforts,
+  max: "max",
+} satisfies Readonly<Record<ModelRoute.Effort, string>>
+
 const claudeEfforts = {
   low: "low",
   medium: "medium",
@@ -19,10 +24,13 @@ const claudeEfforts = {
   max: "max",
 } satisfies Readonly<Record<ModelRoute.Effort, string>>
 
-const gptVariants = (efforts: ReadonlyArray<ModelRoute.Effort>): ModelRoute.ModelAlias["variants"] =>
+const gptVariants = (
+  efforts: ReadonlyArray<ModelRoute.Effort>,
+  providerEfforts: Readonly<Record<ModelRoute.Effort, string>> = openAiEfforts,
+): ModelRoute.ModelAlias["variants"] =>
   Object.fromEntries(
     efforts.map((effort) => {
-      const reasoning = { effort: openAiEfforts[effort], summary: "auto" }
+      const reasoning = { effort: providerEfforts[effort], summary: "auto" }
       return [
         effort,
         {
@@ -77,13 +85,16 @@ const limits = (model: CatalogModel, keepRecentTokens: number) => ({
   keepRecentTokens,
 })
 
-const gpt = (model: CatalogModel): ModelRoute.ModelAlias => ({
+const gpt = (
+  model: CatalogModel,
+  providerEfforts: Readonly<Record<ModelRoute.Effort, string>> = openAiEfforts,
+): ModelRoute.ModelAlias => ({
   displayName: model.displayName,
   supportsMedia: true,
   provider: "openai",
   candidates: [model.id],
   limits: limits(model, presets.openai.limits.keepRecentTokens),
-  variants: gptVariants(model.efforts),
+  variants: gptVariants(model.efforts, providerEfforts),
 })
 
 const claude = (model: CatalogModel, candidates: ReadonlyArray<string>): ModelRoute.ModelAlias => ({
@@ -99,6 +110,7 @@ export const builtInAliases = {
   luna: gpt(catalog.gpt56Luna),
   terra: gpt(catalog.gpt56Terra),
   sol: gpt(catalog.gpt56Sol),
+  astra: gpt(catalog.gpt6Astra, astraEfforts),
   fable: claude(catalog.claudeFable5, [catalog.claudeFable5.id, catalog.claudeOpus48.id]),
   opus5: claude(catalog.claudeOpus5, [catalog.claudeOpus5.id, catalog.claudeFable5.id]),
   opus: claude(catalog.claudeOpus48, [catalog.claudeOpus48.id]),
