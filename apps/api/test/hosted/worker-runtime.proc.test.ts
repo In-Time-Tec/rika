@@ -19,7 +19,7 @@ it.live.skipIf(!live)(
     Effect.gen(function* () {
       const configured = new URL(yield* Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL"))
       expect(["localhost", "127.0.0.1", "[::1]"]).toContain(configured.hostname)
-      yield* withDatabase((pool, url) =>
+      const exit = yield* withDatabase((pool, url) =>
         Effect.gen(function* () {
           const protocol = yield* setup(pool)
           for (let index = 0; index < 32; index += 1) {
@@ -320,8 +320,10 @@ it.live.skipIf(!live)(
               expect(result.live).toBe(result.expected)
             }
           }).pipe(Effect.scoped, Effect.provide(context))
-        }),
+        }).pipe(Effect.scoped, Effect.timeout(23_000), Effect.exit),
       )
+      // Let the fixture close its pools and drop the database before surfacing a failed experiment.
+      if (exit._tag === "Failure") return yield* Effect.failCause(exit.cause)
     }).pipe(Effect.timeout(25_000)),
   30_000,
 )
