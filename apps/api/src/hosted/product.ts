@@ -5,6 +5,7 @@ import * as ExecutionGateway from "@rika/product/execution-gateway"
 import { BetterAuthUserId, CommandId, IdempotencyKey, JsonObject, ThreadId } from "@rika/product/hosted-model"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
 import { provisionalThreadTitle } from "@rika/product/thread-title-policy"
+import { reviewIntent } from "@rika/product/review-policy"
 import { TurnId } from "@rika/product/turn-record"
 import { layer as postgresLayer } from "@rika/product-store/layer"
 import { ProductRepository } from "@rika/product-store/product-repository"
@@ -161,6 +162,7 @@ export const layer = (options: {
           executionRoute,
         }
         if (input.promptParts !== undefined) Object.assign(startInput, { promptParts: input.promptParts })
+        if (input.review === true) Object.assign(startInput, { reviewIntent: reviewIntent(input.prompt) })
         if (firstPromptTitle !== undefined)
           Object.assign(startInput, {
             titleIntent: { _tag: "GenerateThreadTitle" as const, expectedTitle: firstPromptTitle },
@@ -213,6 +215,7 @@ export const layer = (options: {
           text: input.prompt,
         }
         if (input.mode !== undefined) Object.assign(command, { mode: input.mode })
+        if (input.review !== undefined) Object.assign(command, { review: input.review })
         if (attachments !== undefined && attachments.length > 0) Object.assign(command, { attachments })
         const admission = yield* protocol
           .admitServerCommand({

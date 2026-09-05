@@ -134,6 +134,7 @@ export interface HostedProductService {
     readonly prompt: string
     readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
+    readonly review?: true
   }) => Effect.Effect<AdmittedRun, HostedProductError>
   readonly admitAuthorizedRun: (input: {
     readonly authority: ThreadAuthority
@@ -145,6 +146,7 @@ export interface HostedProductService {
     readonly prompt: string
     readonly promptParts?: ReadonlyArray<PromptPart>
     readonly mode?: string
+    readonly review?: true
   }) => Effect.Effect<AdmittedRun, HostedProductError>
   readonly cancelRunAdmission: (input: {
     readonly principal: AuthenticatedPrincipal

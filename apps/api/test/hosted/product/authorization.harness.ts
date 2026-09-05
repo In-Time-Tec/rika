@@ -77,6 +77,7 @@ it.effect.skipIf(!live)("revokes organization admission immediately without affe
             threadId: organizationConnection.threadId,
             operationKey: "org-after-revocation",
             prompt: "denied",
+            review: true,
           }),
         ),
       ).toBe("forbidden")

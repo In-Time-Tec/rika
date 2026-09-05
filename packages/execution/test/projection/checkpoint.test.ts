@@ -100,7 +100,7 @@ it.live(
       )
       const runs = cancelled.tree.runs.map(({ run }) => run)
       expect(runs).toHaveLength(4)
-      expect(["cancelling", "cancelled"]).toContain(runs.find(({ depth }) => depth === 0)?.status)
+      for (const run of runs) expect(["cancelling", "cancelled"]).toContain(run.status)
     }),
   60_000,
 )

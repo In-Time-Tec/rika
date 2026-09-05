@@ -1,6 +1,6 @@
 # Native reviews
 
-`rika review` runs one review Turn for the supplied request. The Turn has one root execution and an immutable initial fan-out with three ordered lanes:
+`rika review --thread <thread-id> [--mode <mode>] "request"` runs one durable review Turn in an existing Thread and prints its result. It uses that Thread's Runner or Orb workspace. The CLI sends a validated `review: true` discriminator, not custom lanes or a special model mode; the server derives the fixed review policy. Ordinary prompt submissions omit the discriminator and remain ordinary Turns. The Turn has one root execution and an immutable initial fan-out with three ordered lanes:
 
 - `correctness` checks behavioral defects, regressions, invalid assumptions, and missing acceptance coverage.
 - `security` checks authority leaks, unsafe inputs, sensitive-data exposure, and denial-of-service risks.

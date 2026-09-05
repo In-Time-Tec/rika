@@ -305,6 +305,7 @@ export const layer = Layer.effect(
               text,
             }
             if (input.request.mode !== undefined) command.mode = input.request.mode
+            if (input.request.review !== undefined) command.review = input.request.review
             const held: Array<ThreadEventPayload> = []
             const accepted = yield* applyCommand(
               connection,

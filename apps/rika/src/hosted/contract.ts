@@ -182,6 +182,7 @@ export type RecoveryResolution =
 export const RunRequest = Schema.Struct({
   prompt: Schema.Array(Schema.String),
   mode: Schema.optionalKey(Schema.String),
+  review: Schema.optionalKey(Schema.Literal(true)),
 })
 export type RunRequest = typeof RunRequest.Type
 

@@ -17,6 +17,7 @@ import {
 import { organizationCommand } from "../product/organization"
 import { projectCommand } from "../product/project"
 import { providerCommand } from "../product/provider"
+import { reviewCommand } from "../product/review"
 import { secretCommand } from "../product/secret"
 import { threadCommand } from "../product/thread"
 import { dispatch, type CliOperationService } from "./cli-operation"
@@ -134,6 +135,7 @@ export const command = Command.make(
   Command.withDescription("Rika coding agent"),
   Command.withSubcommands([
     runCommand,
+    reviewCommand,
     threadCommand,
     organizationCommand,
     authCommand,

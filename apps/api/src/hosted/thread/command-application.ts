@@ -239,6 +239,7 @@ export const commandApplication = (options: {
         Object.assign(admission, { promptParts: [{ type: "text" as const, text: command.text }, ...images] })
       }
       if (command.mode !== undefined) Object.assign(admission, { mode: command.mode })
+      if (command.review !== undefined) Object.assign(admission, { review: command.review })
       return yield* product.admitAuthorizedRun(admission)
     })
 

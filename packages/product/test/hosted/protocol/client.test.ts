@@ -79,6 +79,26 @@ describe("hosted owner and actor attribution", () => {
 })
 
 describe("hosted Thread client protocol", () => {
+  it("accepts only the fixed review discriminator and leaves old prompts ordinary", () => {
+    const command = { _tag: "SubmitPrompt" as const, ...mutation, text: "review this" }
+    expect(roundTrip(ClientMessage, envelope(command)).command).toEqual(command)
+    expect(roundTrip(ClientMessage, envelope({ ...command, review: true })).command).toEqual({
+      ...command,
+      review: true,
+    })
+    for (const review of [false, "true", "security", {}, { lanes: [] }])
+      expect(() =>
+        Schema.decodeUnknownSync(ClientMessage)({ protocolVersion, requestId, command: { ...command, review } }),
+      ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)({
+        protocolVersion,
+        requestId,
+        command: { ...command, reviewIntent: { lanes: [] } },
+      }),
+    ).toThrow()
+  })
+
   it("uses protocol version 7 for prompt workspace readiness", () => {
     expect(protocolVersion).toBe(7)
   })

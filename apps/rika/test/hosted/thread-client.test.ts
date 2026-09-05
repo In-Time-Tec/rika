@@ -278,7 +278,7 @@ it.effect("creates, attaches, submits, and replays admission through the authent
         yield* threads.submit({
           ticket,
           threadId: "thread-1",
-          request: { prompt: ["replayed prompt"] },
+          request: { prompt: ["replayed prompt"], review: true },
           commandId: "submit-replay",
         }),
       ).toEqual({
@@ -331,6 +331,8 @@ it.effect("creates, attaches, submits, and replays admission through the authent
         text: "hello",
         mode: "low",
       })
+      expect(commands[2]).not.toHaveProperty("review")
+      expect(commands[4]).toMatchObject({ _tag: "SubmitPrompt", review: true, text: "replayed prompt" })
       expect(commands[6]).toMatchObject({
         threadId: "thread-1",
         expectedThreadVersion: "1",

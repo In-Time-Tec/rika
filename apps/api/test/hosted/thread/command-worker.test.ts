@@ -42,6 +42,7 @@ it.effect("leaves an unavailable command claimed until its durable retry lease e
   Effect.scoped(
     Effect.gen(function* () {
       let releases = 0
+      const submissions: Array<Parameters<HostedProduct["Service"]["admitAuthorizedRun"]>[0]> = []
       const memory = memoryStore()
       const protocol = ThreadProtocolStore.of({
         ...memory,
@@ -65,8 +66,10 @@ it.effect("leaves an unavailable command claimed until its durable retry lease e
           Layer.succeed(
             HostedProduct,
             fakeProduct({
-              admitAuthorizedRun: () =>
-                Effect.fail(HostedProductError.make({ kind: "unavailable", message: "temporarily unavailable" })),
+              admitAuthorizedRun: (input) => {
+                submissions.push(input)
+                return Effect.fail(HostedProductError.make({ kind: "unavailable", message: "temporarily unavailable" }))
+              },
             }),
           ),
           Layer.succeed(HostedThreadApplication, fakeApplication()),
@@ -84,10 +87,12 @@ it.effect("leaves an unavailable command claimed until its durable retry lease e
           _tag: "SubmitPrompt" as const,
           text: "retry later",
           submissionId: "submission-1",
+          review: true,
         },
       }
 
       expect((yield* Effect.exit(execute(admitted, "claim-1").pipe(Effect.provide(services))))._tag).toBe("Failure")
+      expect(submissions).toMatchObject([{ review: true, prompt: "retry later", submissionId: "submission-1" }])
       expect(releases).toBe(0)
     }),
   ),

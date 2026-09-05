@@ -87,6 +87,20 @@ const failsWithoutDispatch = (argv: ReadonlyArray<string>) =>
     expect(yield* Ref.get(calls)).toEqual([])
   })
 
+it.effect("dispatches native review to hosted execution, not a substituted ordinary prompt", () =>
+  Effect.gen(function* () {
+    expect(yield* capture(["review", "--thread", "thread-1", "--mode", "high", "inspect changes"])).toEqual([
+      {
+        _tag: "RemoteRun",
+        threadId: "thread-1",
+        request: { prompt: ["inspect changes"], mode: "high", review: true },
+      },
+    ])
+    yield* failsWithoutDispatch(["review", "inspect changes"])
+    yield* failsWithoutDispatch(["review", "--thread", "thread-1", " "])
+  }),
+)
+
 it("parses JSONL prompt input and reports malformed physical source lines", () => {
   expect(parseJsonLines('\n"one"\n  \n{"prompt":"two"}\n')).toEqual(["one", "two"])
   expect(() => parseJsonLines('\n"one"\n  \nnot-json\n')).toThrow("Invalid JSON on stdin line 4")

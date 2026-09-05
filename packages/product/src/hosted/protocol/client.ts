@@ -127,6 +127,7 @@ export const MutatingThreadCommand = Schema.Union([
       text: Schema.NonEmptyString,
       submissionId: Schema.optionalKey(Schema.NonEmptyString),
       mode: Schema.optionalKey(Schema.NonEmptyString),
+      review: Schema.optionalKey(Schema.Literal(true)),
       attachments: Schema.optionalKey(Schema.Array(Attachment)),
     }),
   ),
