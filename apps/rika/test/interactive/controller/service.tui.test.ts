@@ -97,11 +97,8 @@ test(
   tuiTestTimeout,
 )
 
-// Rika provides no Approvals service, so Generalist approves every declared capability without asking
-// and no authorization can reach the transcript. See docs/tradeoffs/declared-capabilities-that-do-not-act.md;
-// this describes the behaviour that lane would have and runs when it is connected.
-test.fails(
-  "approves a pending edit authorization from the transcript and denies the next one",
+test(
+  "applies edits in the selected workspace without presenting unsupported authorization controls",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -110,51 +107,24 @@ test.fails(
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
           height: 44,
-          workspaceFiles: { "approved.txt": "ORIGINAL", "denied.txt": "ORIGINAL" },
+          workspaceFiles: { "edited.txt": "ORIGINAL", "untouched.txt": "ORIGINAL" },
           script: [
             model.turn([
-              model.tool(
-                "edit",
-                { path: "approved.txt", old_str: "ORIGINAL", new_str: "APPROVED_BODY" },
-                "edit-approved",
-              ),
+              model.tool("edit", { path: "edited.txt", old_str: "ORIGINAL", new_str: "EDITED_BODY" }, "edit-file"),
             ]),
-            model.text("APPROVED_WRITE_COMPLETE"),
-            model.turn([
-              model.tool("edit", { path: "denied.txt", old_str: "ORIGINAL", new_str: "DENIED_BODY" }, "edit-denied"),
-            ]),
-            model.text("DENIED_WRITE_COMPLETE"),
+            model.text("EDIT_WRITE_COMPLETE"),
           ],
         })
 
-        yield* Effect.tryPromise(() => app.type("Edit the approved file."))
+        yield* Effect.tryPromise(() => app.type("Edit the selected file."))
         app.pressEnter()
-        const pending = yield* app.waitFrame("Authorization pending", 3_000)
-        expect(pending).toContain("edit")
-        expect(pending, "controls stay hidden until the card is selected").not.toContain("[a] Approve")
-
-        app.pressKey("\t")
-        app.pressKey("\t")
-        const selected = yield* app.waitFrame("[a] Approve")
-        expect(selected).toContain("[d] Deny")
-
-        app.pressKey("a")
-        yield* app.waitFrame("APPROVED_WRITE_COMPLETE", 20_000)
+        const completed = yield* app.waitFrame("EDIT_WRITE_COMPLETE", 20_000)
+        expect(completed).not.toContain("Authorization pending")
+        expect(completed).not.toContain("[a] Approve")
+        expect(completed).not.toContain("[d] Deny")
         yield* app.settled
-        expect(yield* fileSystem.readFileString(path.join(app.workspace, "approved.txt"))).toBe("APPROVED_BODY")
-        expect(app.frame()).toContain("Authorization approved")
-
-        yield* app.clickComposer
-        yield* Effect.tryPromise(() => app.type("Edit the denied file."))
-        app.pressEnter()
-        yield* app.waitFrame("Authorization pending", 3_000)
-        app.pressKey("\t")
-        app.pressKey("\t")
-        yield* app.waitFrame("[d] Deny")
-        app.pressKey("d")
-        yield* app.waitFrame("Authorization denied", 20_000)
-        yield* app.settled
-        expect(yield* fileSystem.readFileString(path.join(app.workspace, "denied.txt"))).toBe("ORIGINAL")
+        expect(yield* fileSystem.readFileString(path.join(app.workspace, "edited.txt"))).toBe("EDITED_BODY")
+        expect(yield* fileSystem.readFileString(path.join(app.workspace, "untouched.txt"))).toBe("ORIGINAL")
         yield* app.quit
       }),
     ),

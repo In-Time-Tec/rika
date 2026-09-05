@@ -320,7 +320,8 @@ const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean,
 }
 
 const isPlainLine = (source: string): boolean => {
-  if (/[\\`*{}[\]<>()#+\-.!|>~:/@]/u.test(source)) return false
+  // An interior hyphen is plain text; a leading dash can introduce a list, rule, or Setext heading.
+  if (/[\\`*{}[\]<>()#+.!|>~:/@]/u.test(source) || /^\s*-/u.test(source)) return false
   for (let index = source.indexOf("_"); index >= 0; index = source.indexOf("_", index + 1)) {
     if (!/[\p{L}\p{N}]/u.test(source[index - 1] ?? "") || !/[\p{L}\p{N}]/u.test(source[index + 1] ?? "")) return false
   }

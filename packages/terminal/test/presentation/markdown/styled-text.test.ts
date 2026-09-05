@@ -3,7 +3,12 @@ import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Clock, Effect } from "effect"
-import { renderMarkdown, renderMarkdownStyled } from "../../../src/presentation/markdown/renderer"
+import {
+  markdownRendererDiagnostics,
+  resetMarkdownRendererDiagnostics,
+  renderMarkdown,
+  renderMarkdownStyled,
+} from "../../../src/presentation/markdown/renderer"
 import { renderDiff } from "../../../src/presentation/tool/diff-renderer"
 import { colors } from "../../../src/presentation/terminal/theme"
 
@@ -52,6 +57,18 @@ describe("transcript renderers", () => {
 
     const styled = renderMarkdownStyled("alpha_beta\ngamma delta", 12)
     expect(styled.chunks.map((chunk) => chunk.text).join("")).toBe("alpha_beta\ngamma delta")
+  })
+
+  test("renders hyphenated plain lines without lexing while retaining dash Markdown semantics", () => {
+    resetMarkdownRendererDiagnostics()
+    const source = Array.from({ length: 1_000 }, (_, index) => `physical-line-${index}`).join("\n")
+    expect(renderMarkdown(source, 100)).toBe(source)
+    expect(markdownRendererDiagnostics().lexerInvocations).toBe(0)
+    const heading = renderMarkdownStyled("Heading\n---")
+    expect(hasAttribute(chunkFor(heading.chunks, "Heading"), TextAttributes.BOLD)).toBe(true)
+    expect(renderMarkdown("- item\n- other", 100)).toBe("- item\n- other")
+    expect(renderMarkdown("before\n\n---\n\nafter", 100)).toBe("before\n\n---\n\nafter")
+    expect(markdownRendererDiagnostics().lexerInvocations).toBe(3)
   })
 
   test("measures CJK, emoji, and combining marks by terminal cell width", () => {
