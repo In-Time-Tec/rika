@@ -5,7 +5,7 @@ import { NativeToolService, NativeToolState, nativeToolLayer } from "../../../sr
 import { provideLayer } from "../layer"
 
 describe("checkout native tool operations", () => {
-  it.effect("executes filesystem and process work once beside the checkout and fences conflicting ids", () =>
+  it.live("executes filesystem and process work once beside the checkout and fences conflicting ids", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem

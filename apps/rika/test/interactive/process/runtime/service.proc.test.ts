@@ -31,7 +31,7 @@ const toolContext = ToolContext.layerTest({
   sessionId: "local-tools-process",
 })
 
-layer(BunServices.layer)("local tool process registry", (it) => {
+layer(BunServices.layer, { excludeTestServices: true })("local tool process registry", (it) => {
   it.effect("polls a model-started process through the recorded-shell runtime", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem

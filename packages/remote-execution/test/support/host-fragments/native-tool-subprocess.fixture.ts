@@ -77,7 +77,9 @@ describe("workspace native tool subprocess", () => {
           const crashed = yield* Effect.result(
             nativeTool.execute({
               _tag: "Bash",
-              command: 'kill -KILL "$PPID" "$$"',
+              // The command's parent is the process-group supervisor; crash
+              // the delegated worker above it, not just this tool command.
+              command: `worker=$(ps -o ppid= -p "$PPID" | tr -d ' '); kill -KILL "$worker" "$PPID" "$$"`,
               timeoutMillis: 5_000,
             }),
           )

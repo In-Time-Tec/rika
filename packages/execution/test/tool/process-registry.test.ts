@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Layer, Queue, Sink, Stream } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Queue, Scope, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as ProcessRegistry from "../../src/tool/process-registry"
@@ -13,7 +13,7 @@ interface ControlledProcess {
   readonly exit: Deferred.Deferred<ChildProcessSpawner.ExitCode>
 }
 
-const controlledSpawner = (kills: Array<string>) => {
+const controlledSpawner = (kills: Array<string>, cleanup: Effect.Effect<void> = Effect.void) => {
   const spawned: Array<ControlledProcess> = []
   return {
     spawned,
@@ -25,7 +25,7 @@ const controlledSpawner = (kills: Array<string>) => {
           const stderr = yield* Queue.unbounded<Uint8Array>()
           const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>()
           spawned.push({ stdoutQueue: stdout, stderrQueue: stderr, exit })
-          return ChildProcessSpawner.makeHandle({
+          const handle = ChildProcessSpawner.makeHandle({
             pid: ChildProcessSpawner.ProcessId(1),
             exitCode: Deferred.await(exit),
             isRunning: Deferred.poll(exit).pipe(Effect.map((value) => value._tag === "None")),
@@ -41,9 +41,16 @@ const controlledSpawner = (kills: Array<string>) => {
             stderr: Stream.fromQueue(stderr),
             all: Stream.empty,
             getInputFd: () => Sink.drain,
-            getOutputFd: () => Stream.empty,
+            getOutputFd: () => Stream.fromEffect(Deferred.await(exit).pipe(Effect.map((code) => bytes(`${code}\n`)))),
             unref: Effect.succeed(Effect.void),
           })
+          yield* Effect.addFinalizer(() =>
+            Effect.gen(function* () {
+              if (!(yield* Deferred.isDone(exit))) yield* handle.kill({ killSignal: "SIGTERM" }).pipe(Effect.orDie)
+              yield* cleanup
+            }),
+          )
+          return handle
         }),
       ),
     ),
@@ -60,6 +67,41 @@ const finish = (process: ControlledProcess, exitCode = 0) =>
 const bytes = (text: string) => new TextEncoder().encode(text)
 
 describe("ProcessRegistry", () => {
+  for (const initiator of ["completion", "scope"] as const) {
+    it.effect(`cancellation joins cleanup already started by ${initiator}`, () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const cancelled = yield* Deferred.make<void>()
+        const scope = yield* Scope.make()
+        const spawner = controlledSpawner(
+          [],
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        yield* Effect.gen(function* () {
+          const context = yield* Layer.build(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer))).pipe(
+            Effect.provideService(Scope.Scope, scope),
+          )
+          const registry = Context.get(context, ProcessRegistry.Service)
+          const id = yield* registry.start("command", [], "/workspace")
+          if (initiator === "completion") yield* finish(spawner.spawned[0]!)
+          else yield* Effect.forkChild(Scope.close(scope, Exit.void))
+          yield* Deferred.await(started)
+          const cancel = yield* Effect.forkChild(
+            registry.cancel(id).pipe(Effect.tap(() => Deferred.succeed(cancelled, undefined))),
+          )
+          yield* Effect.yieldNow
+          expect(yield* Deferred.isDone(cancelled)).toBe(false)
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(cancel)
+          expect(yield* Deferred.isDone(cancelled)).toBe(true)
+        }).pipe(
+          Effect.ensuring(Deferred.succeed(release, undefined).pipe(Effect.andThen(Scope.close(scope, Exit.void)))),
+        )
+      }),
+    )
+  }
+
   it.effect("counts retained multibyte output linearly across 10,000 chunks", () =>
     Effect.gen(function* () {
       const original = RuntimeFilesystem.byteLength

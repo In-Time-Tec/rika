@@ -28,7 +28,7 @@ interface Output {
 }
 
 interface Entry {
-  readonly process: ChildProcessSpawner.ChildProcessHandle
+  readonly close: Effect.Effect<void>
   readonly output: Ref.Ref<PendingOutput>
   readonly exit: Deferred.Deferred<number>
   readonly startedAtNanos: bigint
@@ -55,6 +55,25 @@ interface PendingOutput {
 
 export const pendingOutputLimit = 64 * 1024
 const terminalOutputLimit = 128
+
+// Keep the detached group leader alive until the spawner's TERM/KILL cleanup
+// finishes, even when the user's shell exits first. FD 3 carries only the real
+// command's status; FD 4 parks the leader without spawning a sleep process.
+// Neither descriptor is inherited by the user's command.
+const supervisor = `
+trap 'interrupted=1' TERM INT HUP
+exec 5<&0
+(trap - INT QUIT; exec "$@") <&5 3>&- 4<&- 5<&- &
+exec 5<&-
+wait "$!"
+printf '%s\\n' "$?" >&3
+exec 3>&-
+while :; do
+  interrupted=0
+  read -r _ <&4
+  if [ "$interrupted" -eq 0 ]; then kill -KILL -$$; fi
+done
+`
 
 const retainTerminalOutput = (
   states: ReadonlyMap<string, EntryState>,
@@ -136,28 +155,38 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const scope = yield* Scope.Scope
+    const scope = yield* Scope.fork(yield* Scope.Scope, "parallel")
     const entries = yield* Ref.make(new Map<string, EntryState>())
     let nextId = 1
-    yield* Effect.addFinalizer(() =>
-      Ref.get(entries).pipe(
-        Effect.flatMap((current) =>
-          Effect.forEach(
-            current.values(),
-            (state) =>
-              state._tag === "Active"
-                ? state.entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" }).pipe(Effect.ignore)
-                : Effect.void,
-            { concurrency: "unbounded", discard: true },
-          ),
-        ),
-      ),
-    )
     return Service.of({
       start: Effect.fn("ProcessRegistry.start")(function* (command, args, cwd) {
+        const processScope = yield* Scope.fork(scope)
+        // Scope.close is idempotent but does not join an in-progress close.
+        // Registered first, this marker runs after the spawner's finalizer.
+        const cleanupDone = yield* Deferred.make<void>()
+        yield* Scope.addFinalizer(processScope, Deferred.succeed(cleanupDone, undefined).pipe(Effect.asVoid))
+        const close = Scope.close(processScope, Exit.void).pipe(
+          Effect.andThen(Deferred.await(cleanupDone)),
+          Effect.uninterruptible,
+        )
         const handle = yield* spawner
-          .spawn(ChildProcess.make(command, args, { cwd }))
-          .pipe(Effect.provideService(Scope.Scope, scope))
+          .spawn(
+            ChildProcess.make(
+              "/bin/bash",
+              ["--noprofile", "--norc", "--posix", "-c", supervisor, "rika-process", command, ...args],
+              {
+                cwd,
+                detached: true,
+                killSignal: "SIGTERM",
+                forceKillAfter: "100 millis",
+                additionalFds: { fd3: { type: "output" }, fd4: { type: "input" } },
+              },
+            ),
+          )
+          .pipe(
+            Effect.provideService(Scope.Scope, processScope),
+            Effect.onExit((exit) => (Exit.isFailure(exit) ? close : Effect.void)),
+          )
         const output = yield* Ref.make<PendingOutput>({
           stdout: "",
           stderr: "",
@@ -170,7 +199,7 @@ export const layer = Layer.effect(
         const startedAtNanos = yield* Clock.currentTimeNanos
         const admission = yield* Semaphore.make(1)
         const processId = String(nextId++)
-        const entry = { process: handle, output, exit, startedAtNanos, admission }
+        const entry = { close, output, exit, startedAtNanos, admission }
         yield* Ref.update(entries, (current) => new Map(current).set(processId, { _tag: "Active", entry }))
         yield* Effect.forkIn(
           Effect.gen(function* () {
@@ -190,13 +219,23 @@ export const layer = Layer.effect(
               [
                 Effect.exit(drain("stdout", stdoutDecoder, handle.stdout)),
                 Effect.exit(drain("stderr", stderrDecoder, handle.stderr)),
-                Effect.exit(handle.exitCode),
+                Effect.exit(
+                  collectBoundedText(handle.getOutputFd(3), 16).pipe(
+                    Effect.map(({ text }) => (/^\d+\n$/.test(text) ? Number(text) : -1)),
+                    Effect.ensuring(close),
+                  ),
+                ),
               ],
               { concurrency: 3 },
             )
-            if (Exit.isFailure(stdoutExit) || Exit.isFailure(stderrExit) || Exit.isFailure(processExit))
+            if (
+              Exit.isFailure(stdoutExit) ||
+              Exit.isFailure(stderrExit) ||
+              Exit.isFailure(processExit) ||
+              processExit.value === -1
+            )
               yield* Ref.update(output, (pending) => ({ ...pending, truncated: true }))
-            yield* Deferred.succeed(exit, Exit.isSuccess(processExit) ? Number(processExit.value) : -1)
+            yield* Deferred.succeed(exit, Exit.isSuccess(processExit) ? processExit.value : -1)
           }),
           scope,
         )
@@ -258,7 +297,7 @@ export const layer = Layer.effect(
         if (state === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
         if (state._tag === "Terminal")
           return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        yield* state.entry.process.kill({ killSignal: "SIGTERM", forceKillAfter: "100 millis" })
+        yield* state.entry.close
         yield* Ref.update(entries, (current) => {
           const next = new Map(current)
           next.delete(processId)

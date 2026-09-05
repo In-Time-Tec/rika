@@ -79,7 +79,7 @@ const machineResult = (socket: FakeWebSocket, machineId: string, occurrence = 0)
   eventually(() => socket.messages("MachineResult").filter((message) => message.machineId === machineId)[occurrence])
 
 describe("foreground Runner", { concurrent: false }, () => {
-  it.effect("executes, cancels, receipts, and persists native machine calls", () =>
+  it.live("executes, cancels, receipts, and persists native machine calls", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const original = globalThis.WebSocket

@@ -1,6 +1,6 @@
 import * as ToolRuntime from "@rika/product/native-tool-runtime"
 import { Effect, FileSystem, Function, Layer, Option, Path, PlatformError, Scope, Sink, Stream } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as NativeRuntime from "../../src/tool/runtime"
 
 export const workspace = "/workspace"
@@ -62,7 +62,7 @@ const processHandle = ({ stdout, stderr, exitCode }: ProcessResult, onKill: () =
     stderr: Stream.make(encoder.encode(stderr)),
     all: Stream.make(encoder.encode(`${stdout}${stderr}`)),
     getInputFd: () => Sink.drain,
-    getOutputFd: () => Stream.empty,
+    getOutputFd: () => Stream.make(encoder.encode(`${exitCode}\n`)),
     unref: Effect.succeed(Effect.void),
   })
 }
@@ -107,8 +107,12 @@ export const makeEnvironment = (): TestEnvironment => {
   })
   const spawner = Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make((command) => {
-      if (command._tag === "PipedCommand") return Effect.fail(platformError("spawn", "pipeline"))
+    ChildProcessSpawner.make((spawnedCommand) => {
+      if (spawnedCommand._tag === "PipedCommand") return Effect.fail(platformError("spawn", "pipeline"))
+      const command =
+        spawnedCommand.args[5] === "rika-process"
+          ? ChildProcess.make(spawnedCommand.args[6]!, spawnedCommand.args.slice(7), spawnedCommand.options)
+          : spawnedCommand
       const recorded = { command: command.command, args: command.args }
       commands.push(command.options.cwd === undefined ? recorded : { ...recorded, cwd: command.options.cwd })
       const executed = command.command === "/bin/bash" ? (command.args[1] ?? "") : command.command
@@ -125,7 +129,9 @@ export const makeEnvironment = (): TestEnvironment => {
         return Effect.succeed(processHandle({ stdout: fixtureOutput, stderr: "", exitCode: 0 }))
       if (executed === "running") {
         const handle = processHandle({ stdout: "partial", stderr: "", exitCode: 0 }, () => killed.push(executed))
-        return Effect.succeed({ ...handle, exitCode: Effect.never })
+        return Effect.addFinalizer(() => handle.kill().pipe(Effect.orDie)).pipe(
+          Effect.as({ ...handle, exitCode: Effect.never, getOutputFd: () => Stream.never }),
+        )
       }
       if (executed === "stream-failure") {
         const handle = processHandle({ stdout: "", stderr: "", exitCode: 0 })
