@@ -47,3 +47,11 @@ The latest source diagnostic uses 5,005 transcript items, 100 warmup interaction
 RSS was 365.72 MiB after loading and grew 24.03 MiB during the measured interactions. JavaScript heap growth was 0.21 MiB. RSS therefore still exceeds the audit's 350 MiB loaded target and 10 MiB growth target; the wider built-in 500 MiB ceiling must not be mistaken for passing the stricter audit. The isolated unauthenticated client exited before idle sampling, so idle CPU and client RSS are not established by this diagnostic.
 
 The release still needs production queue/edit/dequeue/steer/cancel/reconnect and noninteractive acceptance, actual Orb preparation, installed Mac resource measurements, and refreshed latency distributions. Full command-to-draw correlation, complete provider wire/cache coverage, and the audit's long-duration and concurrency targets are not certified by these local suites. The original audit budgets remain unchanged.
+
+### Additional packaged and memory-region probes
+
+The packaged binary's standard diagnostic measured 292.66 MiB loaded RSS and 35.42 MiB interaction growth, with picker-open p95 0.28 ms and streamed-update p95 5.11 ms. A separate run using Bun's reduced-memory mode measured 311.42 MiB loaded RSS and 18.66 MiB growth, with streamed-update p95 5.81 ms. Both fail the growth target, so this experiment does not justify changing the release's runtime configuration. These are individual exploratory runs, not a repeated comparison establishing a reliable improvement.
+
+A separate source-renderer probe captured macOS `vmmap -summary` at the loaded and interactions-completed boundaries. Physical footprint changed from 131.8 to 132.1 MiB. The resident portion of Memory Tag 240 grew from 193.6 to 220.8 MiB, while that region's dirty memory decreased from 104.3 to 103.2 MiB. JIT resident code grew by only 48 KiB. This points toward allocator residency contributing to RSS growth rather than a comparably sized increase in retained application data. It does not establish the allocation owner, prove a long-term plateau, or replace the RSS acceptance target. Probe output is saved as `vmmap-loaded.txt` and `vmmap-interactions-completed.txt` in the repair evidence directory.
+
+After these diagnostics exited, the Mac process table contained no Rika executable processes.
