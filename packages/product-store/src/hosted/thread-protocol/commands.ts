@@ -46,6 +46,38 @@ export const commandOperations = ({
       .transaction((tx) =>
         Effect.gen(function* () {
           yield* requireThreadAccess(tx, input, "thread:control", input.admittedAt)
+          const readExisting = Effect.gen(function* () {
+            const rows = yield* query(
+              tx
+                .select(commandFields)
+                .from(rikaHostedThreadProtocolCommands)
+                .where(
+                  and(
+                    eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
+                    or(
+                      eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
+                      eq(rikaHostedThreadProtocolCommands.idempotencyKey, input.idempotencyKey),
+                    ),
+                  ),
+                ),
+            )
+            if (rows.length === 0) return undefined
+            if (rows.length !== 1) return yield* failure("conflict", "Command identities refer to different commands")
+            const existing = yield* commandRow(rows[0]!)
+            if (
+              existing.commandId !== input.commandId ||
+              existing.idempotencyKey !== input.idempotencyKey ||
+              (expectedVersion !== undefined && existing.expectedThreadVersion !== expectedVersion) ||
+              !actorEquivalent(existing.actor, input.actor) ||
+              !jsonEquivalent(existing.command, input.command)
+            )
+              return yield* failure("conflict", "Command identity was reused with incompatible input")
+            return { _tag: "Duplicate" as const, command: existing }
+          })
+          // Receipt reads must not lock the lane that the command worker claims with SKIP LOCKED.
+          // Releasing a read-only transaction emits no notification to wake a skipped worker.
+          const existing = yield* readExisting
+          if (existing !== undefined) return existing
           const state = (yield* query(
             tx
               .select({ version: bigintText(rikaHostedThreadProtocolState.version) })
@@ -59,35 +91,9 @@ export const commandOperations = ({
               .for("update"),
           ))[0]
           if (state === undefined) return yield* failure("not-found", "Thread protocol state is unavailable")
-          const existingRows = yield* query(
-            tx
-              .select(commandFields)
-              .from(rikaHostedThreadProtocolCommands)
-              .where(
-                and(
-                  eq(rikaHostedThreadProtocolCommands.threadId, input.threadId),
-                  or(
-                    eq(rikaHostedThreadProtocolCommands.commandId, input.commandId),
-                    eq(rikaHostedThreadProtocolCommands.idempotencyKey, input.idempotencyKey),
-                  ),
-                ),
-              )
-              .for("update"),
-          )
-          if (existingRows.length > 0) {
-            if (existingRows.length !== 1)
-              return yield* failure("conflict", "Command identities refer to different commands")
-            const existing = yield* commandRow(existingRows[0]!)
-            if (
-              existing.commandId !== input.commandId ||
-              existing.idempotencyKey !== input.idempotencyKey ||
-              (expectedVersion !== undefined && existing.expectedThreadVersion !== expectedVersion) ||
-              !actorEquivalent(existing.actor, input.actor) ||
-              !jsonEquivalent(existing.command, input.command)
-            )
-              return yield* failure("conflict", "Command identity was reused with incompatible input")
-            return { _tag: "Duplicate" as const, command: existing }
-          }
+          // Another admission may have committed while this transaction waited for the lane.
+          const concurrent = yield* readExisting
+          if (concurrent !== undefined) return concurrent
           const currentVersion = ThreadVersion.make(state.version)
           if (expectedVersion !== undefined && currentVersion !== expectedVersion)
             return yield* failure(

@@ -18,6 +18,51 @@ import {
   workspaceId,
 } from "./protocol/values.harness"
 
+it.effect.skipIf(!live)("reads a duplicate command receipt without acquiring the command lane lock", () =>
+  withDatabase((pool) =>
+    Effect.gen(function* () {
+      const protocol = yield* setup(pool)
+      const input = command("duplicate-receipt", "0")
+      yield* protocol.admitCommand(input)
+      const client = yield* Effect.tryPromise(() => pool.connect())
+      yield* Effect.gen(function* () {
+        yield* Effect.tryPromise(() => client.query("BEGIN"))
+        const locked = yield* Effect.tryPromise(() =>
+          client.query<{ pid: number }>(
+            `SELECT pg_backend_pid() AS pid FROM rika_hosted_thread_protocol_state
+            WHERE thread_id = $1 FOR UPDATE`,
+            [threadId],
+          ),
+        )
+        const duplicate = yield* protocol.admitCommand(input).pipe(Effect.forkScoped)
+        // Wait for either the receipt or a database-observed lock wait, not a timing guess.
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const result = duplicate.pollUnsafe()
+          if (result !== undefined) {
+            expect(result).toMatchObject({ _tag: "Success", value: { _tag: "Duplicate" } })
+            return
+          }
+          const blocked = yield* Effect.tryPromise(() =>
+            pool.query(`SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, [locked.rows[0]!.pid]),
+          )
+          expect(blocked.rows, "Receipt reads must not compete with cancellation claims for the Thread lane").toEqual(
+            [],
+          )
+          yield* Effect.yieldNow
+        }
+        return yield* Effect.die("Duplicate receipt did not complete")
+      }).pipe(
+        Effect.ensuring(
+          Effect.tryPromise(() => client.query("ROLLBACK")).pipe(
+            Effect.ignore,
+            Effect.ensuring(Effect.sync(() => client.release())),
+          ),
+        ),
+      )
+    }),
+  ),
+)
+
 it.effect.skipIf(!live)("keeps same-Thread order and Turn identity stable across worker interruption", () =>
   withDatabase((pool) =>
     Effect.gen(function* () {
