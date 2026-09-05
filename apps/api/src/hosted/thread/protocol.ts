@@ -41,6 +41,7 @@ import {
 } from "./protocol-contract"
 import { ticketOperations } from "./protocol-tickets"
 import { browserConnections } from "./browser/protocol"
+import { threadReadCommands } from "./protocol/reads"
 
 export {
   HostedThreadProtocol,
@@ -59,7 +60,7 @@ const authorizationAction = (command: ClientMessage["command"]): AuthorizationAc
   if (command._tag === "InspectWorkspaceFile") return "workspace:file:view"
   if (["EnsureRepositoryService", "StopRepositoryService", "OpenPortal"].includes(command._tag))
     return "workspace:service:control"
-  if (command._tag === "AcknowledgeCursor") return "thread:view"
+  if (command._tag === "AcknowledgeCursor" || command._tag === "ReadThreadHistory") return "thread:view"
   return command._tag === "UpdatePresence" ? "presence:update" : "thread:control"
 }
 
@@ -97,6 +98,7 @@ export const layerWithOptions = (
       const product = yield* HostedProduct
       const operations = yield* HostedThreadApplication
       const workspace = yield* HostedWorkspace
+      const readCommand = threadReadCommands({ operations, workspace })
       const store = yield* ThreadProtocolStore
       const presence = yield* HostedPresence
       const crypto = yield* Crypto.Crypto
@@ -271,6 +273,9 @@ export const layerWithOptions = (
               .authorizeThread(principal, threadId, authorizationAction(command))
               .pipe(Effect.mapError(productFailure))
 
+            if (command._tag === "ReadThreadHistory" || command._tag === "InspectWorkspaceFile")
+              return yield* readCommand({ ...message, command }, authority)
+
             if (command._tag === "UpdatePresence") {
               const now = Timestamp.make(receivedAt)
               yield* presence
@@ -313,37 +318,6 @@ export const layerWithOptions = (
                   threadId,
                   port: command.port,
                   url,
-                }),
-              ]
-            }
-
-            if (command._tag === "InspectWorkspaceFile") {
-              const inspection = yield* workspace
-                .execute(threadId, {
-                  _tag: "WorkspaceFileInspect",
-                  requestId: String(message.requestId),
-                  path: command.path,
-                  maximumBytes: command.maximumBytes,
-                })
-                .pipe(
-                  Effect.mapError((error) =>
-                    HostedThreadProtocolError.make({
-                      kind: error.kind === "unsupported" ? "invalid" : "unavailable",
-                      message: error.message,
-                    }),
-                  ),
-                )
-              if (inspection._tag !== "WorkspaceFileContent" && inspection._tag !== "WorkspaceFileRejected")
-                return yield* HostedThreadProtocolError.make({
-                  kind: "unavailable",
-                  message: "Executor returned an invalid file inspection result",
-                })
-              return [
-                frame({
-                  _tag: "WorkspaceFileInspected",
-                  requestId: message.requestId,
-                  threadId,
-                  inspection,
                 }),
               ]
             }

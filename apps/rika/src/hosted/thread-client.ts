@@ -3,7 +3,6 @@ import {
   type ClientTicketResponse,
   protocolMismatchMessage,
   protocolVersion,
-  ServerFrame,
   type ServerFrame as ServerFrameValue,
 } from "@rika/product/client-protocol"
 import {
@@ -20,12 +19,12 @@ import type * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Deferred, Effect, Layer, Queue, Schema } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import { HostedError, HostedThreadId, ThreadClient, type ThreadClientInterface } from "./contract"
+import { decodeThreadFrame } from "./thread-client/frame-decoder"
 
 const encodeClientMessage = Schema.encodeSync(Schema.fromJsonString(ClientMessage))
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
 type CreateThreadCommand = Mutable<Extract<ClientMessage["command"], { readonly _tag: "CreateThread" }>>
 type SubmitPromptCommand = Mutable<Extract<ClientMessage["command"], { readonly _tag: "SubmitPrompt" }>>
-const decodeServerFrame = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerFrame))
 
 const failure = (kind: HostedError["kind"], message: string) => HostedError.make({ kind, message })
 
@@ -50,14 +49,9 @@ export const connect = Effect.fn("HostedThreadClient.connect")(function* (ticket
   const whileConnected = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.raceFirst(effect, disconnectedEffect)
 
   yield* socket
-    .runString(
-      (value) =>
-        decodeServerFrame(value).pipe(
-          Effect.mapError(() => failure("protocol", "Thread server sent an invalid frame")),
-          Effect.flatMap((frame) => Queue.offer(frames, frame)),
-        ),
-      { onOpen: Deferred.succeed(opened, undefined).pipe(Effect.asVoid) },
-    )
+    .runString((value) => decodeThreadFrame(value).pipe(Effect.flatMap((frame) => Queue.offer(frames, frame))), {
+      onOpen: Deferred.succeed(opened, undefined).pipe(Effect.asVoid),
+    })
     .pipe(
       Effect.catch((error) =>
         Deferred.fail(

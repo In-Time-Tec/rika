@@ -4,7 +4,6 @@ import { expect, test } from "vitest"
 import { Surface } from "../../../src/opentui/surface/service"
 import { mountedTranscriptRowBudget, transcriptRenderableBandRows } from "../../../src/presentation/transcript/window"
 import { initial, type Model } from "../../../src/state/model"
-import { trimTranscriptTimeline } from "../../../src/state/transcript/timeline-bounds"
 import { openTui } from "../transcript/projection.fixture"
 
 const giantEntryModel = (lines: number): Model => ({
@@ -120,12 +119,16 @@ test("shows omitted group membership and clears history feedback after a complet
         expandedRowKeys: ["subagent-group:group"],
       }
       try {
-        surface.update(trimTranscriptTimeline(base, 3))
+        surface.update({
+          ...base,
+          transcriptTruncated: true,
+          items: base.items.filter((item) => item.index === 0 || item.index >= 3),
+        })
         yield* openTui(() => setup.flush())
         const partial = setup.captureCharFrame()
         expect(partial).toContain("4 agents finished")
         expect(partial).toContain("2 member cards outside this window")
-        expect(partial).toContain("History truncated")
+        expect(partial).toContain("Loading earlier history")
         expect(partial).toContain("AGENT_2")
         expect(partial).toContain("AGENT_3")
         expect(partial).not.toContain("AGENT_0")
@@ -133,7 +136,7 @@ test("shows omitted group membership and clears history feedback after a complet
         yield* openTui(() => setup.flush())
         const complete = setup.captureCharFrame()
         expect(complete).not.toContain("outside this window")
-        expect(complete).not.toContain("History truncated")
+        expect(complete).not.toContain("Loading earlier history")
         for (let index = 0; index < 4; index++) expect(complete).toContain(`AGENT_${index}`)
       } finally {
         surface.destroy()

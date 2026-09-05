@@ -10,11 +10,14 @@ const model = (): Model => ({
   height: 40,
 })
 
-it("shows truncated history when idle without running an animation", () => {
+it("shows earlier history loading when idle without running an animation", () => {
   const partial = { ...model(), transcriptTruncated: true }
-  expect(styledTextValue(statusContent(partial, 0, 0))).toContain("History truncated")
+  expect(styledTextValue(statusContent(partial, 0, 0))).toContain("Loading earlier history")
+  expect(styledTextValue(statusContent({ ...partial, historyStatus: "failed" }, 0, 0))).toContain(
+    "reopen Thread to retry",
+  )
   expect(animationActive(partial)).toBe(false)
-  expect(styledTextValue(statusContent(model(), 0, 0))).not.toContain("History truncated")
+  expect(styledTextValue(statusContent(model(), 0, 0))).not.toContain("Loading earlier history")
 })
 
 it("labels finishing even without prior model activity", () => {

@@ -1,4 +1,5 @@
 import "./protocol/authorization.harness"
+import "./protocol/history/read.harness"
 import "./protocol/presence.harness"
 import "./protocol/replay.harness"
 import "./protocol/session.harness"

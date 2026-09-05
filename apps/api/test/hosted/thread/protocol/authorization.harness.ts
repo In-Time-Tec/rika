@@ -76,6 +76,7 @@ it.effect("admits authorization decisions without applying them in the socket se
         return persist({ events: [], snapshot: currentSnapshot })
       }),
     snapshot: () => Effect.succeed(currentSnapshot),
+    history: () => Effect.die("unused"),
     projectionCommitted: () => Effect.die("unused"),
   }
 

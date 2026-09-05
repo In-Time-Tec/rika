@@ -1,7 +1,0 @@
-# Authorization
-
-Every operation derives an immutable principal from its authenticated session or Executor credential, then authorizes the full Hosted Owner, optional Project, Workspace Identity, Thread, and Turn ancestry. Caller-supplied owner, member, actor, and resource identifiers locate candidates only; authenticated server state determines attribution and authorization. Cross-owner misses do not reveal whether a resource exists, and every mutation revalidates the current user or membership and grants while holding the rows it changes.
-
-Personal authorization requires the authenticated user to match the Personal Owner. Organization authorization requires an active membership and applicable role or grant. Organization roles govern membership and integration administration. Product roles are `viewer`, `controller`, `operator`, and `owner`. Organization grants reference a Better Auth membership identifier, so removing and re-adding a person cannot resurrect old access. A local Thread is creator-only by default; an E2B Thread may inherit Project grants. A Thread may add a principal from the same Hosted Owner but cannot add a cross-owner or public principal.
-
-An Organization owner has audited break-glass owner access. An Organization admin may manage integrations, credentials, and grants but does not silently receive Thread content. Human credentials never authorize an Executor, and an Executor principal is restricted to its current Workspace assignment, lease, and protocol actions.

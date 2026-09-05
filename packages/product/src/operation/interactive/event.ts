@@ -7,6 +7,10 @@ import { Schema } from "effect"
 import { Failure } from "../failure"
 
 export const InteractiveEventSchema = Schema.Union([
+  Schema.TaggedStruct("ThreadHistoryStatus", {
+    threadId: Thread.ThreadId,
+    status: Schema.Literals(["loading", "failed", "idle"]),
+  }),
   Schema.Struct({ _tag: Schema.tag("ThreadViewSnapshot"), snapshot: ThreadView.ThreadViewSnapshot }),
   Schema.Struct({ _tag: Schema.tag("ThreadViewPatch"), patch: ThreadView.ThreadViewPatch }),
   ThreadView.ResyncRequired,

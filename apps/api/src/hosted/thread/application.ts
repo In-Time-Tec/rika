@@ -32,6 +32,7 @@ import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
 import { loadTranscriptWindow } from "@rika/product/transcript-window"
+import type { PageCursor } from "@rika/product/transcript-page"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
 import { ThreadProtocolStore } from "@rika/product/thread-protocol-store"
@@ -74,6 +75,11 @@ export interface HostedThreadApplicationService {
     ownerId: OwnerId,
     threadId: ThreadId,
   ) => Effect.Effect<HostedThreadSnapshot, HostedThreadApplicationError>
+  readonly history: (
+    ownerId: OwnerId,
+    threadId: ThreadId,
+    before: PageCursor,
+  ) => Effect.Effect<HostedThreadSnapshot["view"], HostedThreadApplicationError>
   readonly projectionCommitted: (
     threadId: ThreadId,
     change: ExecutionProjection.Change,
@@ -164,6 +170,7 @@ export const layer = Layer.effect(
     const repositorySnapshot = Effect.fn("HostedThreadApplication.repositorySnapshot")(function* (
       ownerId: OwnerId,
       threadId: ThreadId,
+      before?: PageCursor,
     ) {
       return yield* Effect.scoped(
         ownerRepositories.contextEffect(ownerId).pipe(
@@ -179,7 +186,7 @@ export const layer = Layer.effect(
               if (hostedThread === undefined)
                 return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
               const queue = yield* turns.readQueue(threadId)
-              const page = yield* loadTranscriptWindow(threadId, transcripts)
+              const page = yield* loadTranscriptWindow(threadId, transcripts, before)
               const active = yield* turns.findActive(threadId)
               const activeProjection = active === undefined ? undefined : yield* transcripts.get(active.id)
               const loadedAt = yield* Clock.currentTimeMillis
@@ -203,7 +210,7 @@ export const layer = Layer.effect(
               }
               if (page.oldestCursor !== undefined) Object.assign(loaded, { oldestCursor: page.oldestCursor })
               if (page.newestCursor !== undefined) Object.assign(loaded, { newestCursor: page.newestCursor })
-              if (active !== undefined) Object.assign(loaded, { activeTurn: active })
+              if (active !== undefined && before === undefined) Object.assign(loaded, { activeTurn: active })
               feed.publish(loaded)
               const view = feed.current()
               if (view === undefined)
@@ -391,6 +398,8 @@ export const layer = Layer.effect(
           )
         }),
       snapshot: currentSnapshot,
+      history: (ownerId, threadId, before) =>
+        repositorySnapshot(ownerId, threadId, before).pipe(Effect.map((snapshot) => snapshot.view)),
       projectionCommitted: (threadId, change, titleExpected) =>
         Effect.gen(function* () {
           const hostedThread = yield* hosted.findThread(HostedThreadId.make(threadId))

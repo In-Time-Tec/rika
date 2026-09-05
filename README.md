@@ -8,16 +8,27 @@ Rika is a collaborative coding-agent CLI and terminal application. Every Turn ru
 curl -fsSL https://raw.githubusercontent.com/In-Time-Tec/rika/main/install.sh | sh
 ```
 
-Or from npm:
+Or with a package manager:
 
 ```bash
 npm install -g @rikafx/cli
+# or
+bun add -g @rikafx/cli
 ```
 
-Both install the same binaries and give you a `rika` command. The curl installer puts them under
+All three install the same binaries and give you a `rika` command. The curl installer puts them under
 `~/.local/share/rika/current` with a link at `~/.local/bin/rika`; set `RIKA_VERSION`,
-`RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to change the version or locations. macOS and Linux on arm64
-and x86_64 are supported.
+`RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to change the version or locations. Supported targets are
+macOS arm64, Linux arm64, and Linux x64.
+
+Update any of these installs with:
+
+```bash
+rika update
+```
+
+Rika uses npm or Bun for package-managed installs and verified release archives for curl installs.
+It updates the existing installation, not a second copy elsewhere on PATH.
 
 ## Setup
 
@@ -30,6 +41,7 @@ bun run dev
 ```
 
 The standard repository commands are `build`, `check`, `dev`, `format`, `test`, and `typecheck`.
+See [the script map](scripts/README.md) for what each development and packaging helper does.
 
 ### Personal Railway stack
 

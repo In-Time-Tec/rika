@@ -85,6 +85,7 @@ export const makeSessionFixture = () => {
     preview: () => Effect.die("unused"),
     thread: () => Effect.succeed(snapshot.view.thread),
     snapshot: () => Effect.succeed(snapshot),
+    history: () => Effect.die("unused"),
     projectionCommitted: () => Effect.die("unused"),
     interactive: (input, persist) => {
       applied.push(input.commandId)

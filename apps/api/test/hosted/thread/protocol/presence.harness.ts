@@ -61,6 +61,7 @@ it.effect("keeps an attached viewer's presence live and marks it away when the s
     thread: () => Effect.succeed(snapshot.view.thread),
     interactive: () => Effect.die("unused"),
     snapshot: () => Effect.succeed(snapshot),
+    history: () => Effect.die("unused"),
     projectionCommitted: () => Effect.die("unused"),
   }
   const dependencies = Layer.mergeAll(

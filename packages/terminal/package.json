@@ -11,7 +11,6 @@
     "./terminal-session": "./src/terminal-session.ts",
     "./terminal-state": "./src/state/model.ts",
     "./terminal-state-reducer": "./src/state/reducer/model.ts",
-    "./terminal-timeline-bounds": "./src/state/transcript/timeline-bounds.ts",
     "./terminal-transcript-presentation": "./src/presentation/transcript/formatter.ts",
     "./transcript-viewport": "./src/presentation/transcript/viewport/model.ts",
     "./terminal-submission-state": "./src/state/submission.ts"

@@ -191,18 +191,22 @@ const localStack = Alchemy.Stack(
       start: true,
     })
 
-    const containersReady = yield* Command.Exec("WaitForDevelopmentServices", {
-      command: "bun scripts/development/wait-for-services.ts",
+    const services = yield* Command.Exec("PrepareDevelopmentServices", {
+      command: "bun scripts/development/prepare.ts",
       env: {
         DATABASE_URL: databaseUrl,
+        AWS_ACCESS_KEY_ID: "rika-development",
+        AWS_SECRET_ACCESS_KEY: minioSecret,
+        AWS_REGION: "us-east-1",
+        RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
         RIKA_DEV_OBJECT_STORE_URL: "http://127.0.0.1:19000",
         RIKA_DEV_POSTGRES_CONTAINER: Output.map(Output.of(postgres), () => "ready"),
         RIKA_DEV_MINIO_CONTAINER: Output.map(Output.of(minio), () => "ready"),
       },
       memo: false,
-      timeout: "1 minute",
+      timeout: "2 minutes",
     })
-    const serviceDependency = Output.map(Output.of(containersReady), () => "ready")
+    const serviceDependency = Output.map(Output.of(services), () => "ready")
     const migrations = yield* Command.Exec("MigrateDevelopmentDatabase", {
       command: "bun --cwd apps/api migrate",
       env: {
@@ -213,19 +217,6 @@ const localStack = Alchemy.Stack(
       },
       memo: false,
       timeout: "2 minutes",
-    })
-    const objectStore = yield* Command.Exec("InitializeDevelopmentObjectStore", {
-      command: "bun scripts/development/initialize-object-store.ts",
-      env: {
-        AWS_ACCESS_KEY_ID: "rika-development",
-        AWS_SECRET_ACCESS_KEY: minioSecret,
-        AWS_REGION: "us-east-1",
-        RIKA_DEV_OBJECT_STORE_URL: "http://127.0.0.1:19000",
-        RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
-        RIKA_DEV_SERVICES: serviceDependency,
-      },
-      memo: false,
-      timeout: "1 minute",
     })
     const executorTemplate =
       e2b === undefined
@@ -268,7 +259,6 @@ const localStack = Alchemy.Stack(
       AWS_SECRET_ACCESS_KEY: minioSecret,
       AWS_REGION: "us-east-1",
       RIKA_DEV_MIGRATIONS: Output.map(Output.of(migrations), () => "ready"),
-      RIKA_DEV_OBJECT_STORE: Output.map(Output.of(objectStore), () => "ready"),
     }
     const developmentModel = Bun.env.RIKA_DEV_MODEL?.trim()
     const modelEnvironment =

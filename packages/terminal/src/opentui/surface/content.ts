@@ -83,7 +83,18 @@ export const lifecycleLabel: {
 } = Function.dual(2, lifecycleLabelImpl)
 
 const statusContentImpl = (model: Model, phase: number, currentTimeMillis: number): StyledText | string => {
-  const history = model.transcriptTruncated === true ? [dim(fg(toOpenColor(colors.text))(" History truncated "))] : []
+  const history =
+    model.transcriptTruncated === true
+      ? [
+          dim(
+            fg(toOpenColor(colors.text))(
+              model.historyStatus === "failed"
+                ? " Earlier history unavailable · reopen Thread to retry "
+                : " Loading earlier history… ",
+            ),
+          ),
+        ]
+      : []
   if (model.editingTurnId !== undefined)
     return new StyledText([
       fg(toOpenColor(colors.text))(" "),

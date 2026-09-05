@@ -3,6 +3,7 @@ import * as ExecutionGateway from "../../execution/gateway/service"
 import * as ExecutionProjection from "../../execution/projection/contract"
 import { InteractiveEventSchema, type InteractiveEvent } from "../../operation/interactive/event"
 import * as Turn from "../../thread/turn/record"
+import { PageCursor } from "../../thread/transcript/page"
 import * as ThreadView from "../../thread/view/model"
 import {
   ActorAttribution,
@@ -22,7 +23,7 @@ import {
 import { RunnerTarget } from "../executor/runner-registration"
 import { RepositoryService, WorkspaceFileInspection } from "../environment/workspace-capability"
 
-export const protocolVersion = 7 as const
+export const protocolVersion = 8 as const
 export const protocolMismatchCloseCode = 1003
 export const protocolMismatchMessage = "Client outdated, upgrade rika"
 export const ClientProtocolVersion = Schema.Literal(protocolVersion)
@@ -74,6 +75,7 @@ export const protocolMismatchFrame = (inspection: ProtocolInspection): string =>
 
 export const isDurableThreadEvent = (event: InteractiveEvent) =>
   event._tag !== "ExecutionModelPreviewChanged" &&
+  event._tag !== "ThreadHistoryStatus" &&
   event._tag !== "ThreadPreviewLoaded" &&
   event._tag !== "ThreadPreviewFailed" &&
   Schema.is(InteractiveEventSchema)(event)
@@ -224,6 +226,7 @@ export const ClientCommand = Schema.Union([
     }),
   ),
   MutatingThreadCommand,
+  strict(Schema.TaggedStruct("ReadThreadHistory", { threadId: ThreadId, before: PageCursor })),
   strict(
     Schema.TaggedStruct("InspectWorkspaceFile", {
       threadId: ThreadId,
@@ -393,6 +396,14 @@ export const ServerPayload = Schema.Union([
       threadVersion: ThreadVersion,
       cursor: ThreadEventCursor,
       snapshot: HostedThreadSnapshot,
+    }),
+  ),
+  strict(
+    Schema.TaggedStruct("ThreadHistory", {
+      requestId: RequestId,
+      threadId: ThreadId,
+      before: PageCursor,
+      view: ThreadView.ThreadViewSnapshot,
     }),
   ),
   strict(Schema.TaggedStruct("ThreadEvent", { event: ThreadProtocolEvent })),

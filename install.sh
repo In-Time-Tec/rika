@@ -1,177 +1,97 @@
 #!/bin/sh
-# Install or upgrade Rika.
-#
-#   curl -fsSL https://raw.githubusercontent.com/In-Time-Tec/rika/main/install.sh | sh
-#
-# Environment:
-#   RIKA_VERSION       version to install, without a leading "v" (default: latest release)
-#   RIKA_INSTALL_ROOT  install directory (default: $HOME/.local/share/rika/current)
-#   RIKA_BIN_DIR       directory for the rika command (default: $HOME/.local/bin)
-#   RIKA_FORCE_LINK    set to 1 to replace a rika command this installer does not own
-#   RIKA_RELEASE_API_URL   override the latest-release lookup (used by tests)
-#   RIKA_RELEASE_BASE_URL  override the release download location (used by tests)
-
+# curl -fsSL https://raw.githubusercontent.com/In-Time-Tec/rika/main/install.sh | sh
+# Optional: RIKA_VERSION, RIKA_INSTALL_ROOT, RIKA_BIN_DIR, RIKA_FORCE_LINK=1.
+# RIKA_RELEASE_BASE_URL overrides the download directory for offline verification.
 set -eu
 
-repository="In-Time-Tec/rika"
-
-fail() {
-  echo "rika: $1" >&2
-  exit 1
-}
-
-detect_target() {
-  kernel="$(uname -s)"
-  machine="$(uname -m)"
-  case "$kernel" in
-    Darwin) os="darwin" ;;
-    Linux) os="linux" ;;
-    *) fail "unsupported operating system: $kernel (supported: macOS, Linux)" ;;
-  esac
-  case "$machine" in
-    arm64 | aarch64) architecture="arm64" ;;
-    x86_64 | amd64) architecture="x64" ;;
-    *) fail "unsupported architecture: $machine (supported: arm64, x86_64)" ;;
-  esac
-  case "${os}-${architecture}" in
-    darwin-arm64 | linux-arm64 | linux-x64) ;;
-    *) fail "no Rika build for ${os}-${architecture} (supported: darwin-arm64, linux-arm64, linux-x64)" ;;
-  esac
-  echo "${os}-${architecture}"
-}
-
-resolve_version() {
-  if [ -n "${RIKA_VERSION:-}" ]; then
-    echo "${RIKA_VERSION#v}"
-    return
-  fi
-  api_url="${RIKA_RELEASE_API_URL:-https://api.github.com/repos/${repository}/releases/latest}"
-  release_json="$(curl -fsSL "$api_url" 2>/dev/null || echo)"
-  [ -n "$release_json" ] || fail "could not read the latest release from ${api_url}.
-  Check your network and the GitHub API rate limit, or set RIKA_VERSION to install a specific release."
-  tag="$(printf '%s' "$release_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$tag" ] || fail "${api_url} returned no release tag; set RIKA_VERSION to install a specific release."
-  echo "${tag#v}"
-}
-
-verify_checksum() {
-  archive_path="$1"
-  sums_path="$2"
-  archive_file="$3"
-  expected="$(awk -v name="$archive_file" '$2 == name { print $1 }' "$sums_path" | head -n 1)"
-  [ -n "$expected" ] || fail "$archive_file is not listed in SHA256SUMS"
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$archive_path" | awk '{ print $1 }')"
-  elif command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$archive_path" | awk '{ print $1 }')"
-  else
-    fail "neither sha256sum nor shasum is available to verify the download"
-  fi
-  [ "$expected" = "$actual" ] ||
-    fail "checksum mismatch for $archive_file
-  expected $expected
-  actual   $actual"
-}
-
-verify_archive_inventory() {
-  archive_path="$1"
-  archive_root="$2"
-  actual="$(tar -tzf "$archive_path" | LC_ALL=C sort)"
-  expected="$(printf '%s\n' "${archive_root}/" "${archive_root}/INSTALL" "${archive_root}/bin/" "${archive_root}/bin/rika" | LC_ALL=C sort)"
-  [ "$actual" = "$expected" ] || fail "release archive has unexpected contents"
-}
-
-command -v curl >/dev/null 2>&1 || fail "curl is required"
-command -v tar >/dev/null 2>&1 || fail "tar is required"
+fail() { echo "rika: $*" >&2; exit 1; }
+for tool in curl tar; do command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"; done
 [ -n "${HOME:-}" ] || fail "HOME is not set"
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) target=darwin-arm64 ;;
+  Linux-aarch64|Linux-arm64) target=linux-arm64 ;;
+  Linux-x86_64|Linux-amd64) target=linux-x64 ;;
+  *) fail "supported platforms: darwin-arm64, linux-arm64, linux-x64" ;;
+esac
+if command -v sha256sum >/dev/null 2>&1; then checksum="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then checksum="shasum -a 256"
+else fail "sha256sum or shasum is required"; fi
 
-target="$(detect_target)"
 install_root="${RIKA_INSTALL_ROOT:-$HOME/.local/share/rika/current}"
 bin_dir="${RIKA_BIN_DIR:-$HOME/.local/bin}"
+for directory in "$install_root" "$bin_dir"; do
+  case "$directory" in /) fail "an install directory cannot be /" ;; /*) ;; *) fail "install directories must be absolute paths" ;; esac
+done
 command_path="$bin_dir/rika"
-install_parent="$(dirname "$install_root")"
-
-# An upgrade replaces only the install this script published. Anything else is
-# owned by another installer and is never overwritten silently.
 if [ -e "$command_path" ] || [ -L "$command_path" ]; then
-  owned=0
-  if [ -L "$command_path" ]; then
-    link_target="$(readlink "$command_path" 2>/dev/null || echo)"
-    if [ "$link_target" = "${install_root}/bin/rika" ]; then
-      owned=1
-    fi
-  fi
-  if [ "$owned" -eq 0 ] && [ "${RIKA_FORCE_LINK:-}" != 1 ]; then
-    fail "$command_path already exists and was not installed by this script.
-  Remove it, or re-run with RIKA_FORCE_LINK=1 to replace it."
+  [ ! -d "$command_path" ] || fail "$command_path is a directory"
+  if [ "$(readlink "$command_path" 2>/dev/null || true)" != "$install_root/bin/rika" ]; then
+    [ "${RIKA_FORCE_LINK:-}" = 1 ] || fail "$command_path belongs to another install. Use rika update, or set RIKA_FORCE_LINK=1 to replace this command."
   fi
 fi
 
-version="$(resolve_version)"
-archive_file="rika-${version}-${target}.tar.gz"
-archive_root="rika-${version}-${target}"
-base_url="${RIKA_RELEASE_BASE_URL:-https://github.com/${repository}/releases/download/v${version}}"
+releases="https://github.com/In-Time-Tec/rika/releases"
+requested="${RIKA_VERSION:-}"
+requested="${requested#v}"
+case "$requested" in *[!0-9A-Za-z.-]*) fail "invalid RIKA_VERSION" ;; esac
+base="${RIKA_RELEASE_BASE_URL:-${releases}/latest/download}"
+if [ -n "$requested" ]; then base="${RIKA_RELEASE_BASE_URL:-${releases}/download/v${requested}}"; fi
 
-echo "rika: installing ${version} for ${target}"
-
-mkdir -p "$install_parent" "$bin_dir"
-
-# Stage beside the install root so every publish step is a same-filesystem
-# rename, and keep the replaced install outside the staging directory so an
-# interrupt can never delete the only working copy.
-staging=""
-previous=""
+parent="$(dirname "$install_root")"
+mkdir -p "$parent" "$bin_dir"
+staging="$(mktemp -d "$parent/.rika-install-XXXXXX")"
+previous="$parent/.rika-previous-$$"
+staged_command=""
 cleanup() {
-  if [ -n "$previous" ] && [ -d "$previous" ]; then
-    if [ -e "$install_root" ]; then
-      rm -rf "$previous" || true
-    else
-      mv "$previous" "$install_root" || true
-    fi
+  if [ -e "$previous" ]; then
+    if [ -e "$install_root" ]; then rm -rf "$previous"
+    else mv "$previous" "$install_root" || { echo "rika: previous install retained at $previous" >&2; return; }; fi
   fi
-  if [ -n "$staging" ]; then
-    rm -rf "$staging" || true
-  fi
+  rm -rf "$staging"
+  if [ -n "$staged_command" ]; then rm -f "$staged_command"; fi
 }
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
+[ ! -e "$previous" ] || fail "backup path already exists: $previous"
+trap cleanup 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-staging="$(mktemp -d "${install_parent}/.rika-install-XXXXXX")"
+# The checksum index selects the version and target; no GitHub API or JSON parser.
+curl -fsSL "$base/SHA256SUMS" -o "$staging/SHA256SUMS" || fail "could not download release checksums"
+entry="$(awk -v target="$target" '$2 ~ ("^rika-[0-9][0-9A-Za-z.-]*-" target "\\.tar\\.gz$") { print $1, $2 }' "$staging/SHA256SUMS")"
+set -f
+set -- $entry
+[ "$#" -eq 2 ] || fail "release must contain exactly one archive for $target"
+expected="$1"
+archive="$2"
+case "$expected" in *[!0-9a-f]*|'') fail "invalid SHA256 checksum" ;; esac
+[ "${#expected}" -eq 64 ] || fail "invalid SHA256 checksum"
+root="${archive%.tar.gz}"
+version="${root#rika-}"
+version="${version%-$target}"
+[ -z "$requested" ] || [ "$requested" = "$version" ] || fail "release does not match RIKA_VERSION"
+# Pin the archive request even if GitHub's latest release changes in between requests.
+base="${RIKA_RELEASE_BASE_URL:-${releases}/download/v${version}}"
+echo "rika: installing $version for $target"
+curl -fsSL "$base/$archive" -o "$staging/$archive" || fail "could not download $archive"
+actual="$($checksum "$staging/$archive" | awk '{ print $1 }')"
+[ "$expected" = "$actual" ] || fail "checksum mismatch for $archive; install unchanged"
 
-curl -fsSL "${base_url}/${archive_file}" -o "${staging}/${archive_file}" ||
-  fail "could not download ${archive_file} from release v${version}"
-curl -fsSL "${base_url}/SHA256SUMS" -o "${staging}/SHA256SUMS" ||
-  fail "could not download SHA256SUMS from release v${version}"
+inventory="$(tar -tzf "$staging/$archive" | LC_ALL=C sort)"
+[ "$inventory" = "$(printf '%s\n' "$root/" "$root/INSTALL" "$root/bin/" "$root/bin/rika" | LC_ALL=C sort)" ] || fail "unexpected archive contents"
+tar -xzf "$staging/$archive" -C "$staging"
+binary="$staging/$root/bin/rika"
+[ -f "$binary" ] && [ ! -L "$binary" ] && [ -x "$binary" ] || fail "archive is missing the native executable"
+[ "$(env -i HOME="$HOME" PATH="$PATH" TERM=dumb "$binary" --version)" = "rika v$version" ] || fail "release executable failed its version check"
 
-verify_checksum "${staging}/${archive_file}" "${staging}/SHA256SUMS" "$archive_file"
-verify_archive_inventory "${staging}/${archive_file}" "$archive_root"
-
-tar -xzf "${staging}/${archive_file}" -C "$staging"
-[ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
-staged_version="$(env -i HOME="$HOME" PATH="$PATH" TERM=dumb "${staging}/${archive_root}/bin/rika" --version)" ||
-  fail "release executable did not start"
-[ "$staged_version" = "rika v${version}" ] || fail "release executable reported an unexpected version: $staged_version"
-
-previous="${install_parent}/.rika-previous-$$"
-if [ -e "$install_root" ]; then
-  mv "$install_root" "$previous"
-fi
-mv "${staging}/${archive_root}" "$install_root" ||
-  fail "could not publish the install to $install_root"
-
-# Swap the command symlink atomically.
-staged_command="${bin_dir}/.rika-install-$$"
-ln -sfn "${install_root}/bin/rika" "$staged_command"
-mv -f "$staged_command" "$command_path"
-
-echo "rika: installed to $install_root"
-echo "rika: linked $command_path"
-
-case ":${PATH}:" in
-  *":${bin_dir}:"*) ;;
-  *)
-    echo "rika: $bin_dir is not on your PATH. Add this to your shell profile:"
-    echo "  export PATH=\"$bin_dir:\$PATH\""
-    ;;
+# Same-filesystem renames preserve the previous install until publication succeeds.
+if [ -e "$install_root" ]; then mv "$install_root" "$previous"; fi
+mv "$staging/$root" "$install_root"
+link="$bin_dir/.rika-install-$$"
+ln -s "$install_root/bin/rika" "$link"
+staged_command="$link"
+mv -f "$link" "$command_path"
+echo "rika: installed $version. Run rika update for future updates."
+case ":$PATH:" in
+  *":$bin_dir:"*) ;;
+  *) echo "rika: add $bin_dir to PATH: export PATH=\"$bin_dir:\$PATH\"" ;;
 esac

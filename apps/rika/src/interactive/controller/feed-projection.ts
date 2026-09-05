@@ -1,7 +1,6 @@
 import * as ThreadView from "@rika/product/thread-view"
 import { steeringUnitKeyPrefix } from "@rika/product/execution-projection"
 import * as ExecutionStatus from "@rika/product/execution-status"
-import { maxInMemoryTranscriptUnits, trimTranscriptTimeline } from "@rika/terminal/terminal-timeline-bounds"
 import { finishingActivity, runningToolsActivity as transcriptActivity } from "@rika/terminal/terminal-message"
 import { applyRootUnits, applyTurnDelta } from "@rika/terminal/terminal-transcript-presentation"
 import type { Model } from "@rika/terminal/terminal-state"
@@ -139,22 +138,19 @@ const applyUsage = (model: Model, usage: Usage, started: boolean): Model => {
     _tag: "ContextUsageReplaced",
     contextUsage: contextUsage(usage, started),
   })
-  return trimTranscriptTimeline(
-    {
-      ...withContext,
-      usageCost: usageCost(usage),
-      usageTokens:
-        usage.state.tokens?.total === undefined
-          ? { _tag: "Unavailable" }
-          : {
-              _tag: "Available",
-              total: usage.state.tokens.total,
-              uncountedAttempts: usage.state.uncountedAttempts,
-            },
-      usageTime: usage.state.active,
-    },
-    maxInMemoryTranscriptUnits,
-  )
+  return {
+    ...withContext,
+    usageCost: usageCost(usage),
+    usageTokens:
+      usage.state.tokens?.total === undefined
+        ? { _tag: "Unavailable" }
+        : {
+            _tag: "Available",
+            total: usage.state.tokens.total,
+            uncountedAttempts: usage.state.uncountedAttempts,
+          },
+    usageTime: usage.state.active,
+  }
 }
 
 const snapshotSteering = (model: Model, snapshot: ThreadView.ThreadViewSnapshot) => {
@@ -188,6 +184,7 @@ const snapshotBase = (
   return {
     ...clearTimeline(model),
     transcriptTruncated: snapshot.hasOlder,
+    historyStatus: snapshot.hasOlder ? "loading" : "idle",
     currentThreadId: String(snapshot.thread.id),
     currentThreadTitle: snapshot.thread.title,
     activeTurnId: active === undefined ? undefined : String(active.turn.id),

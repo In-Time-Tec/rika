@@ -1,7 +1,0 @@
-# Hosted observability
-
-Hosted telemetry uses one closed stage vocabulary. `event()` records immediate milestones without duration: `process_start`, `first_draw`, `connection_ready`, `admission`, `turn_claim`, `run_created`, `run_claim`, `model_start`, and `terminal`. `observe()` records completion, outcome, and duration for `connection_ticket`, `connection_socket`, `target_resolution`, `attach`, `attach_response`, `attach_projection`, `attach_refresh`, `attach_ack`, `model_terminal`, and `tool_execution`.
-
-Telemetry is best-effort operational evidence, not a transactional outbox. Instrumentation cannot change product flow. Durable product state remains authoritative. Structured logs and spans may contain only validated opaque Thread, Turn, Run, operation, tool-call, and model-attempt identifiers. The emitted correlation shape is `rika.thread.id`, `rika.turn.id`, `rika.run.id`, `rika.operation.id`, `rika.tool_call.id`, and `rika.model_attempt.id`. Prompts, commands, tool inputs and output, credentials, failure payloads, and arbitrary annotations are never recorded. Identifiers never label metrics.
-
-Authentication and reconnect diagnostics may additionally record bounded HTTP status, retry delay, reconnect attempt, reconnect delay, and closed failure category. Metric labels are closed stage, outcome, token-kind, and health-signal sets. Duration and lag summaries retain at most 1,024 samples per series for 15 minutes; exporters own longer retention.

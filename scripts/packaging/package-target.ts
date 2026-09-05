@@ -2,6 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { buildNpmPackages } from "./npm-package"
 import {
   archiveName,
   archiveRoot,
@@ -49,13 +50,7 @@ const program = Effect.gen(function* () {
     .readFileString(path.join(root, "apps/rika/package.json"))
     .pipe(Effect.flatMap(Schema.decodeUnknownEffect(PackageManifestJson)))
 
-  /**
-   * A compiled binary embeds whatever is installed in node_modules, not what the catalog pins. A
-   * stale install therefore ships a product built against dependency versions the repository never
-   * resolved, and nothing downstream can detect it: the source, the lockfile, and the version
-   * string all look correct. Compare the installed manifest of every catalog-pinned dependency
-   * against the version the catalog names, and refuse to build on any mismatch.
-   */
+  // Compiled binaries embed node_modules. Reject stale Generalist installs in every importer.
   const assertInstalledDependencies = Effect.fn("Package.assertInstalledDependencies")(() =>
     Effect.gen(function* () {
       const catalog = yield* fileSystem
@@ -217,7 +212,7 @@ const program = Effect.gen(function* () {
   const aggregate = Effect.fn("Package.aggregate")(() =>
     Effect.gen(function* () {
       validateArchiveSet(manifest.version, yield* fileSystem.readDirectory(artifacts))
-      const { revision } = yield* buildIdentity()
+      const revision = (yield* spawner.string(ChildProcess.make("git", ["rev-parse", "HEAD"], { cwd: root }))).trim()
       const releaseArtifacts = yield* Effect.forEach(
         targetNames,
         (target) =>
@@ -248,6 +243,7 @@ const program = Effect.gen(function* () {
       )
       const encodedEvidence = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(evidence)
       yield* fileSystem.writeFileString(path.join(artifacts, "release-evidence.json"), encodedEvidence + "\n")
+      yield* buildNpmPackages()
     }),
   )
 

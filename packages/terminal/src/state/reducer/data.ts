@@ -42,6 +42,8 @@ const reduceComposerData = (model: Model, message: Message): Model | undefined =
 
 const reduceThreadReplacement = (model: Model, message: Message): Model | undefined => {
   switch (message._tag) {
+    case "ThreadHistoryStatus":
+      return model.currentThreadId === message.threadId ? { ...model, historyStatus: message.status } : model
     case "ThreadsRefreshChanged":
       return { ...model, threadsRefresh: message.status }
     case "ThreadsReplaced": {

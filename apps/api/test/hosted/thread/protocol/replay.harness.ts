@@ -44,6 +44,7 @@ it.effect("streams a contiguous tail and resets compacted cursors from a durable
     thread: () => Effect.succeed(currentSnapshot.view.thread),
     interactive: () => Effect.die("unused"),
     snapshot: () => Effect.succeed(currentSnapshot),
+    history: () => Effect.die("unused"),
     projectionCommitted: () => Effect.die("unused"),
   }
   const dependencies = Layer.mergeAll(

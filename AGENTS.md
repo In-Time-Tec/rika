@@ -48,7 +48,7 @@ Use a published install from [README.md](README.md), or run the current checkout
 - **Continue work:** submit another prompt with Enter. If a Turn is active, Enter durably queues a Pending Turn; `rika run --thread <thread-id> "<prompt>"` submits one noninteractive follow-up to an existing Thread. See [execution control](docs/features/execution-control.md) and [the pending queue](docs/features/pending-turn-queue.md).
 - **Cancel:** while work is active, Ctrl+C sends a durable cancellation request; a second Ctrl+C force-quits the client. There is no CLI cancellation subcommand. When idle, Ctrl+C opens the exit menu instead. See [terminal lifecycle](docs/features/terminal-lifecycle.md).
 
-The exhaustive local Runner, Orb, restart, cancellation, and recovery acceptance contract is [VERIFICATION.md](VERIFICATION.md). Use the `testing-with-pilotty` skill for fast interaction checks and `testing-with-agent-tty` for reviewer-facing recordings.
+Use the `testing-with-pilotty` skill for fast interaction checks and `testing-with-agent-tty` for reviewer-facing recordings.
 
 ## Sources of truth
 

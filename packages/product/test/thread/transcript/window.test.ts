@@ -116,6 +116,40 @@ const projection = (): TranscriptPage.Projection => ({
   projectionVersion: ExecutionProjection.projectionVersion,
 })
 
+it.effect("does not spend an older page's byte budget on newer structural member cards", () =>
+  Effect.gen(function* () {
+    const parent = cards[0]!
+    const child = childTool(parent, "card-1", 0)
+    const future = cards[1]!
+    const before = { createdAt: 20, turnId, orderKey: TranscriptOrdering.encodeUnitOrder(future.order) }
+    const contiguous = { createdAt: 20, turnId, orderKey: TranscriptOrdering.encodeUnitOrder(child.order) }
+    const record = turn(turnId, 20)
+    const oversizedFuture: TranscriptUnit.Unit = {
+      ...future,
+      content: { _tag: "Entry", role: "assistant", text: "x".repeat(maximumTranscriptPayloadBytes) },
+    }
+    const page = yield* loadTranscriptWindow(
+      threadId,
+      {
+        page: (_thread, options) =>
+          Effect.succeed({
+            entries: (options?.structuralTurnId === undefined ? [child] : [prompt, parent, oversizedFuture]).map(
+              (unit) => entry(unit, record),
+            ),
+            hasOlder: true,
+            hasNewer: true,
+            oldestCursor: contiguous,
+            newestCursor: contiguous,
+            usage: { usage: ExecutionProjection.emptyUsageState() },
+          }),
+      },
+      before,
+    )
+    expect(page.entries.map((item) => item.unit.key)).toEqual([prompt.key, parent.key, child.key])
+    expect(page.oldestCursor).toEqual(contiguous)
+  }),
+)
+
 it.effect("retains every member card when a page starts inside a grouped subagent", () =>
   Effect.gen(function* () {
     const group: TranscriptUnit.Unit = {
@@ -178,6 +212,9 @@ it.effect("bounds initial hosted-sized snapshots by bytes as well as unit count"
     const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(page.entries)
     expect(Buffer.byteLength(encoded)).toBeLessThan(maximumTranscriptPayloadBytes)
     expect(page.oldestCursor?.turnId).toBe(turnId)
+    const earlier = yield* loadTranscriptWindow(threadId, repository, page.oldestCursor)
+    expect(earlier.hasOlder).toBe(false)
+    expect(earlier.entries.map((item) => item.unit.key)).toEqual(["large:0"])
   }),
 )
 
@@ -192,6 +229,9 @@ it.effect("enforces the final count budget even when one leading Turn contains o
     expect(page.entries[0]?.unit.key).toBe("answer:1")
     expect(page.entries.at(-1)?.unit.key).toBe(`answer:${maximumTranscriptUnits}`)
     expect(page.hasOlder).toBe(true)
+    const earlier = yield* loadTranscriptWindow(threadId, repository, page.oldestCursor)
+    expect(earlier.hasOlder).toBe(false)
+    expect(new Set([...earlier.entries, ...page.entries].map((item) => item.unit.key)).size).toBe(timeline.length)
   }),
 )
 

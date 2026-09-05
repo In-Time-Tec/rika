@@ -100,7 +100,7 @@ describe("hosted Thread client protocol", () => {
   })
 
   it("uses protocol version 7 for prompt workspace readiness", () => {
-    expect(protocolVersion).toBe(7)
+    expect(protocolVersion).toBe(8)
   })
 
   it("round trips every interactive command through one versioned envelope", () => {

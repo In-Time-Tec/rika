@@ -1,7 +1,4 @@
-import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import * as BunServices from "@effect/platform-bun/BunServices"
-import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
-import { dual } from "effect/Function"
+import { Data, Effect, FileSystem, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   archiveName,
@@ -12,7 +9,7 @@ import {
   type PackageTarget,
 } from "./package-contract"
 
-export class NpmPackageError extends Data.TaggedError("NpmPackageError")<{
+class NpmPackageError extends Data.TaggedError("NpmPackageError")<{
   readonly step: string
   readonly message: string
 }> {}
@@ -21,21 +18,16 @@ const npmPackageError = (step: string, message: string) => new NpmPackageError({
 
 const PackageManifestJson = Schema.fromJsonString(Schema.Struct({ version: Schema.String }))
 
-export const scope = "@rikafx"
+const scope = "@rikafx"
 
-export const launcherName = `${scope}/cli`
+const launcherName = `${scope}/cli`
 
-export const platformPackageName = (target: PackageTarget): string => `${scope}/cli-${target}`
+const platformPackageName = (target: PackageTarget): string => `${scope}/cli-${target}`
 
-export const platformConstraints = (target: PackageTarget) => {
+const platformConstraints = (target: PackageTarget) => {
   const [os, cpu] = target.split("-")
   return { os: os!, cpu: cpu! }
 }
-
-export const packedName: {
-  (version: string): (name: string) => string
-  (name: string, version: string): string
-} = dual(2, (name: string, version: string): string => `${name.replace("@", "").replace("/", "-")}-${version}.tgz`)
 
 const sharedManifest = (version: string) => ({
   version,
@@ -45,7 +37,7 @@ const sharedManifest = (version: string) => ({
   engines: { node: ">=18" },
 })
 
-export const launcherManifest = (version: string) => ({
+const launcherManifest = (version: string) => ({
   name: launcherName,
   description: "Rika — a local durable coding agent for your terminal",
   ...sharedManifest(version),
@@ -56,7 +48,7 @@ export const launcherManifest = (version: string) => ({
   ),
 })
 
-export const launcherShim = `#!/usr/bin/env node
+const launcherShim = `#!/usr/bin/env node
 "use strict"
 
 const { spawnSync } = require("node:child_process")
@@ -85,17 +77,14 @@ if (typeof result.signal === "string") process.kill(process.pid, result.signal)
 process.exit(result.status === null ? 1 : result.status)
 `
 
-export const platformManifest: {
-  (version: string): (target: PackageTarget) => Schema.JsonObject
-  (target: PackageTarget, version: string): Schema.JsonObject
-} = dual(2, (target: PackageTarget, version: string) => ({
+const platformManifest = (target: PackageTarget, version: string) => ({
   name: platformPackageName(target),
   description: `Rika binaries for ${target}`,
   ...sharedManifest(version),
   ...platformConstraints(target),
   files: packageBinEntries.map((entry) => `bin/${entry}`),
   preferUnplugged: true,
-}))
+})
 
 const writeJson = Effect.fn("NpmPackage.writeJson")(function* (file: string, value: Schema.Json) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -118,9 +107,7 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
   yield* fileSystem.remove(output, { recursive: true, force: true })
   yield* fileSystem.makeDirectory(output, { recursive: true })
 
-  const readme = yield* fileSystem
-    .readFileString(path.join(root, "README.md"))
-    .pipe(Effect.orElseSucceed(() => "# Rika\n"))
+  const readme = yield* fileSystem.readFileString(path.join(root, "README.md"))
   const license = yield* fileSystem.readFileString(path.join(root, "LICENSE"))
 
   const launcher = path.join(output, "cli")
@@ -130,10 +117,8 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
   yield* fileSystem.writeFileString(path.join(launcher, "README.md"), readme)
   yield* fileSystem.writeFileString(path.join(launcher, "LICENSE"), license)
 
-  const built: Array<string> = []
   for (const target of targetNames) {
     const archive = path.join(artifacts, archiveName(version, target))
-    if (!(yield* fileSystem.exists(archive))) continue
     const directory = path.join(output, `cli-${target}`)
     yield* fileSystem.makeDirectory(directory, { recursive: true })
     const staging = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-npm-" })
@@ -156,19 +141,7 @@ export const buildNpmPackages = Effect.fn("NpmPackage.build")(function* () {
     })
     yield* writeJson(path.join(directory, "package.json"), platformManifest(target, version))
     yield* fileSystem.writeFileString(path.join(directory, "LICENSE"), license)
-    built.push(target)
   }
 
-  if (built.length === 0)
-    return yield* npmPackageError("collect", `no release archives found in ${artifacts}; run \`bun run package\` first`)
-
-  yield* Effect.log(`Built npm packages for ${built.join(", ")} at version ${version}`)
-  return { version, targets: built, output }
+  yield* Effect.log(`Assembled npm packages for ${targetNames.join(", ")} at version ${version}`)
 })
-
-if (import.meta.main)
-  BunRuntime.runMain(
-    Effect.scoped(
-      Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(buildNpmPackages(), context)),
-    ),
-  )

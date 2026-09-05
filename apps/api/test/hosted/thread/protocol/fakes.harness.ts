@@ -32,6 +32,7 @@ export const fakeApplication = (
   thread: () => Effect.die("unused"),
   interactive: () => Effect.die("unused"),
   snapshot: () => Effect.die("unused"),
+  history: () => Effect.die("unused"),
   projectionCommitted: () => Effect.die("unused"),
   ...overrides,
 })

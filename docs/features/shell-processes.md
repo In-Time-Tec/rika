@@ -1,5 +1,0 @@
-# Shell processes
-
-The model uses `bash` to run one shell command string and `shell_command_status` to read new output from a background command. Both use the same scoped process registry. `bash` accepts an optional working directory and an initial wait from 0 to 60,000 milliseconds; zero starts in the background. A running result includes a process id. `shell_command_status` can wait up to 10,000 milliseconds per poll and completed results remain readable.
-
-Commands run with the authority of the OS user who invoked Rika. The selected Workspace is the default working directory, but commands and explicit working directories may access any path allowed to that OS user. A hardcoded circuit breaker refuses recursive deletion of the filesystem root or home directory and shell fork bombs. These guards are not a sandbox. Output is drained continuously and bounded in memory and responses. Processes still running when their owning scope closes are terminated. An ambiguous effect is reported as unknown and is never blindly replayed.

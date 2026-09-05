@@ -121,6 +121,7 @@ export const Model = Schema.Struct({
   blocks: Schema.Array(TranscriptBlock),
   items: Schema.Array(TranscriptItem),
   transcriptTruncated: Schema.optional(Schema.Boolean),
+  historyStatus: Schema.optional(Schema.Literals(["loading", "failed", "idle"])),
   input: Schema.String,
   cursor: Schema.Finite,
   pastedText: Schema.Array(PastedTextAttachmentSchema),

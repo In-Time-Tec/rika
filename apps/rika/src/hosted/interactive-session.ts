@@ -1,5 +1,4 @@
 import { hostedThreadSnapshotMatches } from "@rika/product/client-protocol"
-import type { InteractiveEvent } from "@rika/product/interactive-event"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { CredentialStore, HostedError, Http, ProfileStore } from "./contract"
 import { reconnectDelay, retryableConnectionFailure } from "./reconnect-policy"
@@ -8,6 +7,7 @@ import {
   type PendingAttachment,
   type PhysicalConnection,
 } from "./interactive-session/connection"
+import { threadHistoryState } from "./interactive-session/history"
 import { interactiveSessionCommands } from "./interactive-session/commands"
 import { interactivePreviewState, interactiveSessionEvents, threadCatalogRefresh } from "./interactive-session/events"
 import {
@@ -48,7 +48,8 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     yield* interactiveSessionStatus
   const closed = yield* Deferred.make<void>()
   let selection: SelectionState = { _tag: "Loading", token: {}, threadId: input.threadId, authority: undefined }
-  let dispatch: (event: InteractiveEvent) => void = () => undefined
+  const history = yield* threadHistoryState
+  const dispatch = history.dispatch
   let consumerAttached = false
   let stopped = false
   let current: PhysicalConnection | undefined
@@ -62,6 +63,7 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     connecting = undefined
     Deferred.doneUnsafe(connectionChanged, Effect.void)
     connectionChanged = Deferred.makeUnsafe<void>()
+    if (value !== undefined) history.resume()
   }
   const awaitConnection: Effect.Effect<PhysicalConnection, HostedError> = Effect.suspend(() => {
     if (stopped) return Effect.fail(failure("Interactive session is closed"))
@@ -423,7 +425,9 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
         ),
       )
     })
-  const connectionLoop = superviseConnection(false, 0)
+  const connectionLoop = Effect.scoped(
+    history.run(awaitConnection).pipe(Effect.forkScoped, Effect.andThen(superviseConnection(false, 0))),
+  )
 
   const nextCommandId = (prefix: string) =>
     crypto.randomUUIDv4.pipe(
@@ -469,11 +473,11 @@ export const makeHostedInteractiveSession = Effect.fn("HostedInteractiveSession.
     consumerAttached: () => consumerAttached,
     attachConsumer: (next) => {
       consumerAttached = true
-      dispatch = next
+      history.attach(next)
     },
     detachConsumer: () => {
       consumerAttached = false
-      dispatch = () => undefined
+      history.attach(() => undefined)
     },
     unavailable,
     quit,

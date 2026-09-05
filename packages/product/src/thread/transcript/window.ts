@@ -43,15 +43,30 @@ export const completeLeadingTurn = Effect.fn("TranscriptWindow.completeLeadingTu
   return { ...page, entries: [...added, ...page.entries].toSorted(compareEntries) }
 })
 
+const precedes = (entry: TranscriptPage.Entry, before: TranscriptPage.PageCursor): boolean => {
+  const order =
+    entry.turn.createdAt - before.createdAt ||
+    Order.String(String(entry.turn.id), String(before.turnId)) ||
+    Order.String(TranscriptOrdering.encodeUnitOrder(entry.unit.order), before.orderKey)
+  return order < 0
+}
+
 /** Shared initial/reload read: bounded storage reads followed by structural count/byte selection. */
 export const loadTranscriptWindow = Effect.fn("TranscriptWindow.load")(function* (
   threadId: ThreadId,
   transcripts: Pick<TranscriptRepositoryInterface, "page">,
+  before?: TranscriptPage.PageCursor,
 ) {
-  const page = yield* completeLeadingTurn(
-    yield* transcripts.page(threadId, { limit: TranscriptPage.maximumTranscriptUnits, projectionVersion }),
+  const completed = yield* completeLeadingTurn(
+    yield* transcripts.page(threadId, { limit: TranscriptPage.maximumTranscriptUnits, projectionVersion, before }),
     transcripts,
   )
+  // Structural completion reads the whole leading Turn. Never let later member cards
+  // consume an older page's budget or move its cursor back into already loaded history.
+  const page =
+    before === undefined
+      ? completed
+      : { ...completed, entries: completed.entries.filter((entry) => precedes(entry, before)) }
   const bounded = boundTranscriptEntries(page.entries, JSON.stringify)
   if (bounded.oversizedEntry)
     return yield* RepositoryError.make({ message: "Transcript entry exceeds the transcript event limit" })

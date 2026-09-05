@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Run publish validation without publishing to npm
+        description: Build and validate without publishing to npm or GitHub
         required: true
         type: boolean
         default: true
       skip_ci_gate:
-        description: Publish even though CI did not pass for this commit (records who overrode the gate)
+        description: Override failed CI for this tag (records the actor and commit)
         required: true
         type: boolean
         default: false
@@ -30,95 +30,42 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
-      actions: write
+      actions: read
+      checks: read
     steps:
-      - name: Require a green CI run for the commit being published
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify tag and require green CI
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ github.sha }}
           OVERRIDE: ${{ inputs.skip_ci_gate }}
-          REQUIRED_JOBS: quality tui proc
-          RETRY_JOB: tui
-          RETRY_LIMIT: "2"
         run: |
           set -euo pipefail
-
-          decide() {
-            {
-              echo "### CI gate"
-              echo
-              echo "- commit: \`$COMMIT\`"
-              echo "- decision: $1"
-              echo "- detail: $2"
-            } >> "$GITHUB_STEP_SUMMARY"
-          }
-
-          if [ "${GITHUB_REF#refs/tags/}" = "$GITHUB_REF" ]; then
-            decide "not evaluated" "$GITHUB_REF is not a tag, so no artifact is published"
-            exit 0
-          fi
-
+          # Branch dispatches validate artifacts only; they never publish.
+          [[ "$GITHUB_REF" == refs/tags/* ]] || exit 0
+          version="$(python3 -c 'import json; print(json.load(open("apps/rika/package.json"))["version"])')"
+          test "$GITHUB_REF_NAME" = "v$version"
           run_id=""
-          for _attempt in 1 2 3 4 5 6 7 8 9 10; do
-            run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$COMMIT&per_page=1" --jq '.workflow_runs[0].id // empty')"
-            if [ -n "$run_id" ]; then break; fi
+          for attempt in {1..10}; do
+            run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=1" --jq '.workflow_runs[0].id // empty')"
+            [ -z "$run_id" ] || break
             sleep 20
           done
-          if [ -z "$run_id" ]; then
-            decide "blocked" "no ci workflow run exists for $COMMIT; push the commit to main and let CI finish"
-            echo "::error::No ci run exists for $COMMIT. A tag may only publish a commit CI has checked."
+          [ -n "$run_id" ] || { echo "::error::No CI run exists for $GITHUB_SHA"; exit 1; }
+          passed=true
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --interval 30 --exit-status || passed=false
+          jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[] | select(.conclusion == "success") | .name')"
+          for job in quality tui proc; do
+            printf '%s\n' "$jobs" | grep -Fxq "$job" || passed=false
+          done
+          if [ "$passed" = true ]; then
+            echo "CI passed for $GITHUB_SHA (run $run_id)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${OVERRIDE:-false}" = true ]; then
+            echo "::warning::CI overridden by $GITHUB_ACTOR for $GITHUB_SHA"
+            echo "CI overridden by **$GITHUB_ACTOR** for $GITHUB_SHA (run $run_id)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::CI must pass quality, tui, and proc. Retry CI, or explicitly dispatch this tag with skip_ci_gate."
             exit 1
           fi
-          run_url="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.html_url')"
-
-          retries=0
-          while true; do
-            while [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status')" != completed ]; do
-              echo "waiting for $run_url"
-              sleep 30
-            done
-            failed="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[] | select(.conclusion != "success") | .name' | sort -u | tr '\n' ' ')"
-            blocking=""
-            for job in $REQUIRED_JOBS; do
-              case " $failed " in
-                *" $job "*) blocking="$blocking $job" ;;
-              esac
-            done
-            blocking="$(echo "$blocking" | xargs || true)"
-            if [ -z "$blocking" ]; then
-              conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.conclusion')"
-              if [ "$conclusion" = success ] || [ -z "$failed" ]; then
-                decide "passed" "$run_url is green after $retries retry attempt(s)"
-                exit 0
-              fi
-              decide "blocked" "$run_url concluded $conclusion"
-              echo "::error::ci run $run_url concluded $conclusion."
-              break
-            fi
-            if [ "$blocking" = "$RETRY_JOB" ] && [ "$retries" -lt "$RETRY_LIMIT" ]; then
-              retries=$((retries + 1))
-              echo "::warning::Only the known-flaky $RETRY_JOB lane failed; re-running it (attempt $retries of $RETRY_LIMIT)."
-              gh run rerun "$run_id" --failed --repo "$GITHUB_REPOSITORY"
-              for _restart in 1 2 3 4 5 6 7 8 9 10; do
-                if [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status')" != completed ]; then
-                  break
-                fi
-                sleep 15
-              done
-              continue
-            fi
-            decide "blocked" "$run_url has failing required job(s): $blocking"
-            echo "::error::ci run $run_url has failing required job(s): $blocking"
-            break
-          done
-
-          if [ "${OVERRIDE:-false}" = true ]; then
-            decide "overridden" "$GITHUB_ACTOR published $COMMIT with skip_ci_gate despite a red ci run at $run_url"
-            echo "::warning::CI gate overridden by $GITHUB_ACTOR for $COMMIT ($run_url)."
-            exit 0
-          fi
-          echo "::error::Re-run this workflow on the tag with skip_ci_gate to publish anyway."
-          exit 1
 
   package:
     name: package-${{ matrix.target }}
@@ -149,78 +96,33 @@ jobs:
       ENV: /dev/null
       BASH_ENV: /dev/null
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Setup Bun
-        id: setup-bun
-        continue-on-error: true
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Retry Bun download
-        if: steps.setup-bun.outcome == 'failure' && runner.os == 'macOS'
-        run: |
-          version="$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          archive="$RUNNER_TEMP/bun.zip"
-          directory="$RUNNER_TEMP/bun"
-          curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output "$archive" "https://github.com/oven-sh/bun/releases/download/bun-v$version/bun-darwin-aarch64.zip"
-          unzip -q "$archive" -d "$directory"
-          echo "$directory/bun-darwin-aarch64" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Ensure native packages for the target
+      - name: Package native target
+        id: package
         env:
           TARGET: ${{ matrix.target }}
-        run: |
-          resolves() { (cd apps/rika && bun -e "require.resolve('@opentui/core-$TARGET/package.json')") >/dev/null 2>&1; }
-          if ! resolves; then
-            echo "::warning::@opentui/core-$TARGET did not resolve after --frozen-lockfile; optional dependency installs fail silently, retrying unfrozen"
-            bun install
-          fi
-          resolves || {
-            echo "::error::@opentui/core-$TARGET is unavailable on this runner"
-            exit 1
-          }
-          (cd apps/rika && bun -e "console.log(require.resolve('@opentui/core-$TARGET/package.json'))")
-      - name: Prepare Linux login shells
-        if: runner.os == 'Linux'
-        run: |
-          sudo rm -f /etc/profile.d/blacksmith.sh
-          echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
-      - name: Verify native runner
-        env:
           EXPECTED_OS: ${{ matrix.os }}
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
+          set -euo pipefail
           test "$(uname -s)" = "$EXPECTED_OS"
           test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
           if [ "$EXPECTED_OS" = Darwin ]; then
             test "$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)" = 0
           fi
-      - name: Package
-        id: package
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          bun run package -- --target "$TARGET"
+          (cd apps/rika && bun -e "require.resolve('@opentui/core-$TARGET/package.json')")
+          bun run package --target "$TARGET"
           version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
           archive="artifacts/rika-$version-$TARGET.tar.gz"
           test -f "$archive"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
-      - name: Verify executable architecture
+      - name: Verify inventory, architecture, version, and help
         env:
           ARCHIVE: ${{ steps.package.outputs.archive }}
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
-        run: |
-          directory="$(mktemp -d)"
-          tar -xzf "$ARCHIVE" -C "$directory"
-          executable="$directory/$(basename "$ARCHIVE" .tar.gz)/bin/rika"
-          file "$executable"
-          case "$EXPECTED_ARCHITECTURE" in
-            x86_64) file "$executable" | grep -Eq 'x86[-_ ]64|x86_64' ;;
-            arm64|aarch64) file "$executable" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
-          esac
-      - name: Smoke extracted release
-        env:
-          ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           set -euo pipefail
           directory="$(mktemp -d)"
@@ -233,8 +135,12 @@ jobs:
           tar -xzf "$ARCHIVE" -C "$directory"
           binary="$directory/$root/bin/rika"
           test -x "$binary"
+          case "$EXPECTED_ARCHITECTURE" in
+            x86_64) file "$binary" | grep -Eq 'x86[-_ ]64|x86_64' ;;
+            arm64|aarch64) file "$binary" | grep -Eq 'arm64|aarch64|ARM aarch64' ;;
+          esac
           version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
-          env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version | grep -Fq "$version"
+          test "$(env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --version)" = "rika v$version"
           help="$(env -i HOME="$home" PATH="$PATH" TERM=dumb "$binary" --help)"
           printf '%s\n' "$help" | grep -Fqi rika
           if printf '%s\n' "$help" | grep -Fqi relay; then
@@ -245,43 +151,36 @@ jobs:
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: ${{ steps.package.outputs.archive }}
-      - name: Upload archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rika-${{ matrix.target }}
           path: ${{ steps.package.outputs.archive }}
           compression-level: 0
           if-no-files-found: error
 
-  aggregate:
-    name: aggregate-release
+  release:
+    name: assemble-and-publish
     needs: package
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
       id-token: write
       attestations: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Download archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: rika-*
           path: artifacts
           merge-multiple: true
-      - name: Validate release identity
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
-          test "$GITHUB_REF_NAME" = "v$version"
-      - name: Aggregate release metadata
-        run: bun run package -- --aggregate
       - name: Verify producer attestations
         env:
           GH_TOKEN: ${{ github.token }}
@@ -289,130 +188,60 @@ jobs:
           for archive in artifacts/*.tar.gz; do
             gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY"
           done
+      - name: Assemble checksums, evidence, and npm packages
+        run: bun run package --aggregate
+      - name: Verify checksums
+        working-directory: artifacts
+        run: sha256sum --check SHA256SUMS
       - name: Attest release metadata
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: |-
             artifacts/SHA256SUMS
             artifacts/release-evidence.json
-      - name: Upload release metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-metadata
-          path: |-
-            artifacts/SHA256SUMS
-            artifacts/release-evidence.json
-          if-no-files-found: error
-
-  npm:
-    name: publish-npm
-    needs: aggregate
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Download archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: rika-*
-          path: artifacts
-          merge-multiple: true
-      - name: Download release metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: release-metadata
-          path: artifacts
-      - name: Verify checksums
-        working-directory: artifacts
-        run: sha256sum --check SHA256SUMS
-      - name: Build npm packages
-        run: bun run npm-package
-      - name: Pack npm packages
-        id: pack
+      - name: Pack and verify npm packages
         run: |
-          version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
           for directory in artifacts/npm/*/; do
             (cd "$directory" && npm pack)
           done
           test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 4
-      - name: Verify every platform package matches the binary inventory
-        run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
             entries="$(tar -tzf "$archive")"
             while IFS= read -r required; do
-              printf '%s\n' "$entries" | grep -qx "$required"
+              printf '%s\n' "$entries" | grep -Fxq "$required"
             done < <(bun -e 'import { packageBinEntries } from "./scripts/packaging/package-contract"; for (const entry of packageBinEntries) console.log(`package/bin/${entry}`)')
           done
-      - name: Dry-run publish
+      - name: Validate npm publication
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for archive in artifacts/npm/cli-*/*.tgz artifacts/npm/cli/*.tgz; do
             npm publish --access public --dry-run "$archive"
           done
-      - name: Upload npm packages
+      - name: Upload assembled release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: npm-packages-${{ steps.pack.outputs.version }}
-          path: artifacts/npm/*/*.tgz
+          name: release-assets
+          path: |-
+            artifacts/SHA256SUMS
+            artifacts/release-evidence.json
+            artifacts/npm/*/*.tgz
           if-no-files-found: error
-      - name: Publish platform packages
+      - name: Publish npm platforms, then launcher
         if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for archive in artifacts/npm/cli-*/*.tgz; do
+          for archive in artifacts/npm/cli-*/*.tgz artifacts/npm/cli/*.tgz; do
             npm publish --access public "$archive"
           done
-      - name: Publish launcher
+      - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public artifacts/npm/cli/*.tgz
-
-  publish:
-    name: publish-release
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: aggregate
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - name: Download archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: rika-*
-          path: artifacts
-          merge-multiple: true
-      - name: Download release metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: release-metadata
-          path: artifacts
-      - name: Verify checksums
-        working-directory: artifacts
-        run: sha256sum --check SHA256SUMS
-      - name: Create and publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(find artifacts -maxdepth 1 -type f | wc -l)" -eq 5
-          gh release create "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --verify-tag
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" artifacts/*.tar.gz artifacts/SHA256SUMS artifacts/release-evidence.json --repo "$GITHUB_REPOSITORY" --draft --generate-notes --verify-tag
           test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 5
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

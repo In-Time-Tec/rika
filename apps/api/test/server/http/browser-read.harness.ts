@@ -62,6 +62,7 @@ it.effect("cookie reads filter Threads without creating device authority and den
         thread: () => Effect.die("unused"),
         interactive: () => Effect.die("unused"),
         snapshot: () => Effect.die("unused"),
+        history: () => Effect.die("unused"),
         projectionCommitted: () => Effect.die("unused"),
       },
     }

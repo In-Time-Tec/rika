@@ -31,7 +31,10 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
   const configuredRoot = yield* Config.option(Config.string(installRootEnv)).pipe(
     Effect.mapError((error) => failWith("install-failed", `Cannot read ${installRootEnv}: ${error.message}`)),
   )
-  const binDirectory = path.dirname(executable)
+  const realExecutable = yield* fileSystem
+    .realPath(executable)
+    .pipe(Effect.mapError(platformFailure("locate the running Rika")))
+  const binDirectory = path.dirname(realExecutable)
   const derivedRoot = path.dirname(binDirectory)
   const installRoot = Option.isSome(configuredRoot) ? path.resolve(configuredRoot.value) : derivedRoot
   if (Option.isNone(configuredRoot) && path.basename(binDirectory) !== "bin")
@@ -42,7 +45,7 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
   if (installRoot.split(path.sep).includes("node_modules"))
     return yield* failWith(
       "unmanaged-install",
-      `This Rika was installed from npm at ${installRoot}. Update it with your package manager, for example: npm install -g @rikafx/cli@latest`,
+      `${installRoot} belongs to a package manager and cannot be replaced with a release archive.`,
     )
   const layout: InstallLayout = {
     installRoot,
@@ -55,6 +58,14 @@ export const installLayout = Effect.fn("ReleaseInstall.layout")(function* (execu
     return yield* failWith(
       "unmanaged-install",
       `${installRoot} does not contain the released Rika executable, so it is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
+    )
+  const realBinary = yield* fileSystem
+    .realPath(layout.binary)
+    .pipe(Effect.mapError(platformFailure("locate the installed Rika")))
+  if (realBinary !== realExecutable)
+    return yield* failWith(
+      "unmanaged-install",
+      `${installRoot} does not own the running Rika; unset ${installRootEnv} and retry.`,
     )
   return layout
 })

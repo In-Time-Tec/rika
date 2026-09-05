@@ -1,10 +1,11 @@
 import * as InteractiveController from "../../../src/interactive/controller/service"
 import * as ExecutionProjection from "@rika/product/execution-projection"
 import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import { maxInMemoryTranscriptUnits } from "@rika/terminal/terminal-timeline-bounds"
 import { makeThreadViewFeed } from "@rika/product/interactive-thread-view-feed"
 import { it, expect } from "vitest"
 import { thread, entries, initialState } from "./feed.fixture"
+
+const formerTimelineLimit = 20_000
 
 const entry = (unitKey: string, sequence: number, text: string) => ({
   turn: entries("partial", 2)[0]!.turn,
@@ -129,10 +130,10 @@ it("projects a full snapshot beyond the old 120-unit window bound without trunca
   ])
 })
 
-it("bounds the in-memory timeline to the newest units when a snapshot exceeds the cap", () => {
+it("retains every unit when a snapshot exceeds the former in-memory cap", () => {
   const feed = makeThreadViewFeed(() => 1)
   const turn = entries("huge", 1)[0]!.turn
-  const units = Array.from({ length: maxInMemoryTranscriptUnits + 5 }, (_, index) => {
+  const units = Array.from({ length: formerTimelineLimit + 5 }, (_, index) => {
     const key = `unit:${String(index).padStart(6, "0")}`
     return {
       turn,
@@ -176,8 +177,8 @@ it("bounds the in-memory timeline to the newest units when a snapshot exceeds th
     )
       state = InteractiveController.update(state, event).state
 
-  expect(state.model.items.length).toBe(maxInMemoryTranscriptUnits)
-  expect(state.model.transcriptTruncated).toBe(true)
-  expect(state.model.entries[0]?.text).toBe(`unit:${String(5).padStart(6, "0")}`)
-  expect(state.model.entries.at(-1)?.text).toBe(`unit:${String(maxInMemoryTranscriptUnits + 4).padStart(6, "0")}`)
+  expect(state.model.items.length).toBe(formerTimelineLimit + 5)
+  expect(state.model.transcriptTruncated).toBe(false)
+  expect(state.model.entries[0]?.text).toBe("unit:000000")
+  expect(state.model.entries.at(-1)?.text).toBe(`unit:${String(formerTimelineLimit + 4).padStart(6, "0")}`)
 })

@@ -4,6 +4,8 @@ import {
   protocolVersion,
   type ServerFrame,
 } from "@rika/product/client-protocol"
+import type { PageCursor } from "@rika/product/transcript-page"
+import type { ThreadViewSnapshot } from "@rika/product/thread-view"
 import { RequestId, ThreadEventCursor, ThreadId } from "@rika/product/hosted-model"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import { authenticated } from "../account"
@@ -31,6 +33,7 @@ const envelope = (requestId: string, command: ClientCommand): ClientMessage => (
 })
 
 export interface PhysicalConnection {
+  readonly history: (threadId: string, before: PageCursor) => Effect.Effect<ThreadViewSnapshot, HostedError>
   readonly command: (
     requestId: string,
     command: ClientCommand,
@@ -94,6 +97,14 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
   const socket = yield* HostedObservability.observe("connection_socket", {}, connect(ticket))
   const outcomes = new Map<string, CommandWaiter>()
   const attachments = new Map<string, AttachmentWaiter>()
+  const histories = new Map<
+    string,
+    {
+      readonly threadId: string
+      readonly before: PageCursor
+      readonly response: Deferred.Deferred<ThreadViewSnapshot, HostedError>
+    }
+  >()
   const disconnected = yield* Deferred.make<never, HostedError>()
   const failPending = (error: HostedError) =>
     Effect.sync(() => {
@@ -101,6 +112,8 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
         Deferred.doneUnsafe(waiter.response, Effect.fail(error))
         Deferred.doneUnsafe(waiter.processed, Effect.fail(error))
       }
+      for (const waiter of histories.values()) Deferred.doneUnsafe(waiter.response, Effect.fail(error))
+      histories.clear()
       outcomes.clear()
       attachments.clear()
       Deferred.doneUnsafe(disconnected, Effect.fail(error))
@@ -167,6 +180,18 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
       }
     })
   const physical: PhysicalConnection = {
+    history: (threadId, before) =>
+      Effect.gen(function* () {
+        const requestId = `history:${yield* randomId}`
+        const response = yield* Deferred.make<ThreadViewSnapshot, HostedError>()
+        histories.set(requestId, { threadId, before, response })
+        return yield* socket
+          .send(envelope(requestId, { _tag: "ReadThreadHistory", threadId: ThreadId.make(threadId), before }))
+          .pipe(
+            Effect.andThen(Deferred.await(response)),
+            Effect.ensuring(Effect.sync(() => histories.delete(requestId))),
+          )
+      }),
     command,
     acknowledge: (requestId, threadId, cursor) =>
       socket.send(
@@ -183,11 +208,36 @@ export const physicalConnection = Effect.fn("HostedInteractiveSession.physical")
     }),
     done: Deferred.await(disconnected),
   }
+  const receiveHistory = (payload: Payload) =>
+    Effect.gen(function* () {
+      if (payload._tag === "CommandRejected") {
+        const waiter = histories.get(payload.requestId)
+        if (waiter !== undefined)
+          yield* Deferred.fail(
+            waiter.response,
+            protocolFailure("Earlier history could not be loaded; reopen the Thread to retry"),
+          )
+      }
+      if (payload._tag !== "ThreadHistory") return false
+      const waiter = histories.get(payload.requestId)
+      if (waiter === undefined) return true
+      if (
+        String(payload.threadId) !== waiter.threadId ||
+        String(payload.view.thread.id) !== waiter.threadId ||
+        payload.before.createdAt !== waiter.before.createdAt ||
+        payload.before.turnId !== waiter.before.turnId ||
+        payload.before.orderKey !== waiter.before.orderKey
+      )
+        return yield* failure("Thread history identity did not match its request")
+      yield* Deferred.succeed(waiter.response, payload.view)
+      return true
+    })
   yield* Effect.gen(function* () {
     while (true) {
       const frame = yield* socket.next
       const payload = frame.payload
       yield* input.receive(payload, physical)
+      if (yield* receiveHistory(payload)) continue
       if (payload._tag === "ThreadAttached") {
         const waiter = attachments.get(payload.requestId)
         if (waiter === undefined) return yield* failure("Thread attachment response was not requested")

@@ -1,6 +1,7 @@
 import { Config, Crypto, Effect, Encoding, Function, Option } from "effect"
 import { downloadedBytes, downloadedText, failWith, latestReleaseVersion, releaseBaseUrlEnv } from "./download"
 import { installLayout, publishInstall } from "./install"
+import { packageInstall, updatePackage } from "./package-manager"
 
 const releaseRepository = "In-Time-Tec/rika"
 const releaseTargets = ["darwin-arm64", "linux-arm64", "linux-x64"] as const
@@ -86,20 +87,27 @@ interface UpdateOptions {
 type UpdateOutcome =
   | { readonly _tag: "AlreadyCurrent"; readonly current: string; readonly latest: string }
   | { readonly _tag: "Updated"; readonly current: string; readonly latest: string; readonly installRoot: string }
+  | {
+      readonly _tag: "PackageUpdated"
+      readonly current: string
+      readonly latest: string
+      readonly manager: "npm" | "bun"
+      readonly installRoot: string
+    }
 
-export const updateReport = (outcome: UpdateOutcome): string =>
-  outcome._tag === "AlreadyCurrent"
-    ? [
-        `Current version: ${outcome.current}`,
-        `Latest release: ${outcome.latest}`,
-        "Already up to date; nothing was downloaded.",
-      ].join("\n")
-    : [
-        `Current version: ${outcome.current}`,
-        `Latest release: ${outcome.latest}`,
-        `Replaced ${outcome.installRoot} with ${outcome.latest} after verifying its published SHA256 checksum.`,
-        "Run rika again to start the new build.",
-      ].join("\n")
+export const updateReport = (outcome: UpdateOutcome): string => {
+  const versions = [`Current version: ${outcome.current}`, `Latest release: ${outcome.latest}`]
+  if (outcome._tag === "AlreadyCurrent") return [...versions, "Already up to date; nothing was downloaded."].join("\n")
+  const packageDetail = (managed: Extract<UpdateOutcome, { readonly _tag: "PackageUpdated" }>) =>
+    managed.current === managed.latest
+      ? `Already up to date via ${managed.manager} in ${managed.installRoot}.`
+      : `${managed.manager} updated Rika in ${managed.installRoot} to ${managed.latest}.`
+  const detail =
+    outcome._tag === "PackageUpdated"
+      ? packageDetail(outcome)
+      : `Replaced ${outcome.installRoot} with ${outcome.latest} after verifying its published SHA256 checksum.`
+  return [...versions, detail, "Run rika again to start the new build."].join("\n")
+}
 
 export const update = Effect.fn("ReleaseUpdate.update")(function* (options: UpdateOptions) {
   const target = hostReleaseTarget(options.host)
@@ -108,6 +116,17 @@ export const update = Effect.fn("ReleaseUpdate.update")(function* (options: Upda
       "unsupported-platform",
       `Rika has no release for ${options.host.platform}-${options.host.architecture}. Supported platforms: ${releaseTargets.join(", ")}.`,
     )
+  const managed = yield* packageInstall(options.executable)
+  if (managed !== undefined) {
+    const latest = yield* Effect.scoped(updatePackage(managed))
+    return {
+      _tag: "PackageUpdated",
+      current: options.currentVersion,
+      latest,
+      manager: managed.manager,
+      installRoot: managed.directory,
+    } satisfies UpdateOutcome
+  }
   const layout = yield* installLayout(options.executable)
   const latest = yield* latestReleaseVersion(options.currentVersion)
   if (!updateAvailable({ current: options.currentVersion, latest }))
