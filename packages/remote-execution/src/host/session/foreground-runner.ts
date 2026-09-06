@@ -29,7 +29,11 @@ import {
   type ResumeCursors,
 } from "../../protocol/messages"
 import { inspectWorkspaceCapabilities } from "../../workspace/capabilities"
-import type { ForegroundRunnerOptions, ForegroundRunnerSnapshot } from "./foreground-contract"
+import type {
+  ForegroundRunnerOptions,
+  ForegroundRunnerSnapshot,
+  RetainedProcessObservation,
+} from "./foreground-contract"
 import { ForegroundRunnerError } from "./foreground-contract"
 import { ForegroundSession, type LocalSession } from "./foreground-session"
 
@@ -62,6 +66,7 @@ const consumeApi = (
   session: Ref.Ref<LocalSession | undefined>,
   operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
+  observations: Ref.Ref<Map<string, RetainedProcessObservation>>,
 ) =>
   Effect.gen(function* () {
     const message = yield* Queue.take(incoming)
@@ -71,6 +76,14 @@ const consumeApi = (
       return yield* failure(message.message, false)
     }
     if (message._tag === "LeaseReceipt") yield* applyLeaseReceipt(message, session, persist)
+    if (message._tag === "ProcessObservationAck") {
+      yield* Ref.update(observations, (current) => {
+        const next = new Map(current)
+        next.delete(`${message.machineId}\u0000${message.processId}`)
+        return next
+      })
+      yield* persist()
+    }
     if (isOperationMessage(message))
       yield* operations.dispatch(message).pipe(Effect.mapError((error) => failure(error.message)))
   }).pipe(
@@ -89,6 +102,7 @@ const connected = (
   activeWriter: Ref.Ref<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>,
   operations: Operations.Interface,
   persist: () => Effect.Effect<void, ForegroundRunnerError>,
+  observations: Ref.Ref<Map<string, RetainedProcessObservation>>,
   onConnected: (at: number) => void,
 ) =>
   Effect.scoped(
@@ -175,6 +189,10 @@ const connected = (
       onConnected(yield* Clock.currentTimeMillis)
       yield* runnerEvent(previous === undefined ? "runner.socket.welcome" : "runner.socket.reconnected", {})
       yield* persist()
+      for (const observation of (yield* Ref.get(observations)).values())
+        yield* writer(
+          encodeRunnerMessage({ _tag: "ProcessObservation", ...observation, access: access(session) }),
+        ).pipe(Effect.mapError(() => failure("Could not replay Runner process observation")))
       if (options.ready !== undefined) yield* Deferred.succeed(options.ready, undefined)
       const heartbeat = Effect.sleep(session.heartbeatIntervalMillis).pipe(
         Effect.andThen(
@@ -212,7 +230,7 @@ const connected = (
           Effect.flatMap(() => failure("Runner controller connection closed")),
         ),
         Effect.raceFirst(
-          consumeApi(incoming, sessions, operations, persist),
+          consumeApi(incoming, sessions, operations, persist, observations),
           Effect.raceFirst(heartbeat, leaseWatchdog),
         ),
       )
@@ -251,6 +269,14 @@ export const runForegroundRunner = (
         ))
       const sessions = yield* Ref.make<LocalSession | undefined>(initialSessionFor(options.resume))
       const nativeToolStates = yield* Ref.make(initialNativeToolStates(options.resume))
+      const processObservations = yield* Ref.make(
+        new Map(
+          (options.resume?.observations ?? []).map((observation) => [
+            `${observation.machineId}\u0000${observation.observation.processId}`,
+            observation,
+          ]),
+        ),
+      )
       const activeWriter = yield* Ref.make<((chunk: string) => Effect.Effect<void, Socket.SocketError>) | undefined>(
         undefined,
       )
@@ -277,6 +303,7 @@ export const runForegroundRunner = (
                   machineId,
                   state,
                 })),
+                observations: Array.from((yield* Ref.get(processObservations)).values()),
               })
             })
       const persist = () => persistLock.withPermits(1)(saveSnapshot())
@@ -304,7 +331,20 @@ export const runForegroundRunner = (
       const operations = yield* Operations.make({
         access: currentAccess,
         emit: (event) =>
-          Ref.get(activeWriter).pipe(
+          (event._tag === "ProcessObservation"
+            ? Ref.update(processObservations, (current) =>
+                new Map(current).set(`${event.machineId}\u0000${event.observation.processId}`, {
+                  operationKey: event.operationKey,
+                  attempt: event.attempt,
+                  machineId: event.machineId,
+                  requestDigest: event.requestDigest,
+                  observation: event.observation,
+                }),
+              ).pipe(Effect.andThen(persist()))
+            : Effect.void
+          ).pipe(
+            Effect.mapError((error) => Operations.OperationError.make({ kind: "transport", message: error.message })),
+            Effect.andThen(Ref.get(activeWriter)),
             Effect.flatMap((writer) =>
               writer === undefined
                 ? Effect.fail(
@@ -328,6 +368,14 @@ export const runForegroundRunner = (
                 requestDigest: input.requestDigest,
                 request: input.request,
               })
+              .pipe(
+                Effect.mapError((error) =>
+                  Operations.OperationError.make({ kind: "execution", message: error.message }),
+                ),
+              ),
+          observe: (processId) =>
+            nativeTool
+              .observe(processId)
               .pipe(
                 Effect.mapError((error) =>
                   Operations.OperationError.make({ kind: "execution", message: error.message }),
@@ -360,6 +408,7 @@ export const runForegroundRunner = (
         activeWriter,
         operations,
         persist,
+        processObservations,
         (at) => {
           connectedAt = at
         },

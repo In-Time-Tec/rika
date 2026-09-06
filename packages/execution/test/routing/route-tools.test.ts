@@ -5,7 +5,9 @@ import { Response } from "effect/unstable/ai"
 import { NestedOperation, ToolContext, ToolExecutor } from "generalist"
 
 import * as RemoteTools from "../../src/remote-tools"
+import { TreeProjector } from "../../src/projection/tree/projector"
 import { remoteToolExecutor } from "../../src/routing/route-tools"
+import { block, resetEventPosition, toolResultPart, treeEvent } from "../support/projector-event.fixture"
 
 const toolCall = (name: string, params: Readonly<Record<string, string>>) =>
   Schema.decodeSync(Response.ToolCallPart(name, Schema.Unknown))({
@@ -43,11 +45,12 @@ it.effect("routes a native call through the durable remote operation identity", 
   Effect.scoped(
     Effect.gen(function* () {
       const seen: Array<RemoteTools.Request> = []
+      const storedResponse = { _tag: "Success" as const, result: { text: "1:hello", truncated: false } }
       const remote = RemoteTools.layer({
         execute: (input) =>
           Effect.sync(() => {
             seen.push(input)
-            return { _tag: "Success" as const, result: { text: "1:hello", truncated: false } }
+            return storedResponse
           }),
         cancel: () => Effect.succeed({ _tag: "Cancelled" as const }),
       })
@@ -62,7 +65,39 @@ it.effect("routes a native call through the durable remote operation identity", 
       const execution = request("read", { path: "README.md" })
       const outcome = yield* executor.execute(execution).pipe(Effect.provide(toolContext))
 
-      expect(outcome).toMatchObject({ _tag: "Success", result: { text: "1:hello", truncated: false } })
+      expect(outcome).toMatchObject({
+        _tag: "Success",
+        result: { text: "1:hello", truncated: false, operationId: "operation-one" },
+      })
+      expect(storedResponse.result).not.toHaveProperty("operationId")
+
+      resetEventPosition()
+      const projector = TreeProjector.make("turn-one", "read")
+      projector.apply(
+        treeEvent("run-one", { _tag: "ToolExecutionStarted", turn: 0, call: execution.call }),
+      )
+      if (outcome._tag === "Success") {
+        const projected = projector.apply(
+          treeEvent("run-one", {
+            _tag: "ToolExecutionCompleted",
+            turn: 0,
+            call: execution.call,
+            result: toolResultPart({
+              id: execution.call.id,
+              name: execution.call.name,
+              isFailure: false,
+              result: outcome.result,
+              encodedResult: outcome.encodedResult,
+              providerExecuted: false,
+              preliminary: false,
+              metadata: {},
+            }),
+          }),
+        )
+        expect(block(projected, "ToolCall")).toMatchObject({
+          block: { operationId: "operation-one", toolCallId: "call-read" },
+        })
+      }
       expect(seen).toHaveLength(1)
       expect(seen[0]).toMatchObject({
         operationKey: "operation-one",
@@ -196,8 +231,8 @@ it.effect("returns exact remote cancellation and retained terminal outcomes", ()
         _tag: "AlreadyTerminal",
         outcome: {
           _tag: "Success",
-          result: { text: "done", truncated: false },
-          encodedResult: { text: "done", truncated: false },
+          result: { text: "done", truncated: false, operationId: "operation-one" },
+          encodedResult: { text: "done", truncated: false, operationId: "operation-one" },
         },
       })
     }),

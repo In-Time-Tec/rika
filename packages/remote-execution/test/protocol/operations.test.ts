@@ -45,6 +45,8 @@ const machineExecute = (access: AccessWire, operationKey = "operation-1", machin
 
 interface HarnessOptions {
   readonly execute?: Effect.Effect<MachineOutcome, Operations.OperationError>
+  readonly observe?: Operations.Options["machine"]["observe"]
+  readonly emit?: Operations.Options["emit"]
   readonly cancel?: (input: {
     readonly machineId: string
     readonly requestDigest: string
@@ -58,23 +60,91 @@ const makeHarness = (target: AdapterTarget, options: HarnessOptions = {}) =>
     const emitted = yield* Ref.make<ReadonlyArray<Operations.Event>>([])
     const executeCount = yield* Ref.make(0)
     const cancelCount = yield* Ref.make(0)
+    const baseMachine = {
+      execute: () =>
+        Ref.update(executeCount, (count) => count + 1).pipe(Effect.andThen(options.execute ?? Effect.never)),
+      cancel: (input: Parameters<NonNullable<Operations.Options["machine"]["cancel"]>>[0]) =>
+        Ref.update(cancelCount, (count) => count + 1).pipe(
+          Effect.andThen(options.cancel?.(input) ?? Effect.succeed({ _tag: "Cancelled" as const })),
+        ),
+    }
+    const machine: Operations.Options["machine"] =
+      options.observe === undefined ? baseMachine : { ...baseMachine, observe: options.observe }
     const operations = yield* Operations.make({
       access: Ref.get(access),
-      emit: (event) => Ref.update(emitted, (events) => [...events, event]),
-      machine: {
-        execute: () =>
-          Ref.update(executeCount, (count) => count + 1).pipe(Effect.andThen(options.execute ?? Effect.never)),
-        cancel: (input) =>
-          Ref.update(cancelCount, (count) => count + 1).pipe(
-            Effect.andThen(options.cancel?.(input) ?? Effect.succeed({ _tag: "Cancelled" as const })),
-          ),
-      },
+      emit: (event) =>
+        Ref.update(emitted, (events) => [...events, event]).pipe(Effect.andThen(options.emit?.(event) ?? Effect.void)),
+      machine,
     })
     return { access, emitted, executeCount, cancelCount, operations }
   })
 
 for (const target of ["runner", "orb"] as const) {
   describe(`${target} native machine operations`, () => {
+    it.effect("emits a separately correlated terminal process observation", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeHarness(target, {
+            execute: Effect.succeed({
+              _tag: "Success",
+              value: { _tag: "NativeTool", result: { text: "", truncated: false, running: true, processId: "7" } },
+            }),
+            observe: (processId) => Effect.succeed({ processId, exitCode: 4, elapsedMillis: 25, truncated: false }),
+          })
+          const execute = machineExecute(yield* Ref.get(harness.access))
+          yield* harness.operations.dispatch(execute)
+          const observation = yield* eventually(
+            Ref.get(harness.emitted).pipe(
+              Effect.map((events) => events.find((event) => event._tag === "ProcessObservation")),
+            ),
+          )
+          expect(observation).toMatchObject({
+            _tag: "ProcessObservation",
+            operationKey: execute.operationKey,
+            machineId: execute.machineId,
+            observation: { processId: "7", exitCode: 4 },
+          })
+        }),
+      ),
+    )
+
+    it.effect("starts observation after result send failure without suppressing result replay", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const observed = yield* Deferred.make<void>()
+          let resultAttempts = 0
+          const harness = yield* makeHarness(target, {
+            execute: Effect.succeed({
+              _tag: "Success",
+              value: { _tag: "NativeTool", result: { text: "", truncated: false, running: true, processId: "8" } },
+            }),
+            observe: (processId) =>
+              Deferred.succeed(observed, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.as({ processId, exitCode: 0, elapsedMillis: 30, truncated: false }),
+              ),
+            emit: (event) => {
+              if (event._tag !== "MachineResult" || ++resultAttempts > 1) return Effect.void
+              return Effect.fail(Operations.OperationError.make({ kind: "transport", message: "connection dropped" }))
+            },
+          })
+          const execute = machineExecute(yield* Ref.get(harness.access))
+          yield* harness.operations.dispatch(execute)
+          yield* Deferred.await(observed)
+          yield* Effect.yieldNow
+          yield* harness.operations.dispatch(execute)
+          yield* eventually(
+            Ref.get(harness.emitted).pipe(
+              Effect.map((events) =>
+                events.filter((event) => event._tag === "MachineResult").length === 2 ? true : undefined,
+              ),
+            ),
+          )
+          expect(yield* Ref.get(harness.executeCount)).toBe(2)
+        }),
+      ),
+    )
+
     it.effect("deduplicates execute and retains direct cancellation", () =>
       Effect.scoped(
         Effect.gen(function* () {

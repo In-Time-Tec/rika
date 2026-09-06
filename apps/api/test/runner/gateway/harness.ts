@@ -5,8 +5,7 @@ import type { Socket } from "../../../src/executor/gateway"
 import type { RunnerExecutorAuthority } from "../../../src/runner/executor"
 import { makeRunnerGateway as makeRunnerGatewayService } from "../../../src/runner/gateway"
 
-export const makeRunnerGateway: (authority: RunnerExecutorAuthority) => ReturnType<typeof makeRunnerGatewayService> =
-  makeRunnerGatewayService
+export const makeRunnerGateway = makeRunnerGatewayService
 
 export const databaseUrl = Effect.runSync(
   Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")),

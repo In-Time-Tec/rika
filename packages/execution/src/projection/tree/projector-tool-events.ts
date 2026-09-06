@@ -21,9 +21,11 @@ const toolStarted = (context: ProjectorEventContext, treeEvent: SemanticTreeEven
       optionalString(input.label) || undefined,
     )
     context.remove(context.tools.toolState(node, event.call.id).key)
-  } else if (event.call.name === projectorNames.runChildGroup) {
+  } else if (event.call.name === projectorNames.runChildGroup || event.call.name === projectorNames.startChildGroup) {
     const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
     if (Option.isSome(params)) context.subagents.groupCards(node, event.call.id, params.value)
+    context.remove(context.tools.toolState(node, event.call.id).key)
+  } else if (event.call.name === projectorNames.awaitChildGroup) {
     context.remove(context.tools.toolState(node, event.call.id).key)
   } else if (event.call.name === "shell_command_status") {
     context.tools.linkProcessCheck(node, event.call.id, encoded(event.call.params))
@@ -44,10 +46,58 @@ const toolCompleted = (context: ProjectorEventContext, treeEvent: SemanticTreeEv
       )
   } else if (event.call.name === projectorNames.runChildGroup) {
     completeGroup(context, event, node)
-  } else
+  } else if (event.call.name === projectorNames.startChildGroup) {
+    completeStartedGroup(context, event, node)
+  } else if (event.call.name === projectorNames.awaitChildGroup) {
+    context.remove(context.tools.toolState(node, event.call.id).key)
+    completeAwaitedGroup(context, event, node)
+  } else {
+    // Resolved/resumed operations can complete without a fresh start event.
+    // Correlate from the authoritative call on completion too, not just declaration.
+    if (event.call.name === "shell_command_status")
+      context.tools.linkProcessCheck(node, event.call.id, encoded(event.call.params))
+    else context.tools.putTool(node, event.call.id, event.call.name, encoded(event.call.params))
     context.tools.updateTool(node, event.call.id, (tool) =>
-      completeTool(tool, event.result.result, event.result.isFailure),
+      completeTool(tool, event.result.result, event.result.isFailure, event.call.name),
     )
+  }
+}
+
+const completeStartedGroup = (
+  context: ProjectorEventContext,
+  event: Extract<SemanticTreeEvent["event"], { _tag: "ToolExecutionCompleted" }>,
+  node: Node,
+): void => {
+  const params = Schema.decodeUnknownOption(SubagentCard.SubagentGroupParams)(event.call.params)
+  if (Option.isSome(params)) context.subagents.groupCards(node, event.call.id, params.value)
+  if (event.result.isFailure) {
+    if (Option.isSome(params)) {
+      const detail = optionalString(record(event.result.result).message)
+      for (const card of context.subagents.groupCards(node, event.call.id, params.value))
+        if (card.rawChildRunId === undefined) context.subagents.updateCard(card, "failed", detail)
+    }
+    context.subagents.settleGroup(node, event.call.id, undefined, true)
+    return
+  }
+  const receipt = Schema.decodeUnknownOption(SubagentCard.SubagentGroupReceipt)(event.result.result)
+  if (Option.isSome(receipt)) context.subagents.bindGroupReceipt(node, event.call.id, receipt.value)
+}
+
+const completeAwaitedGroup = (
+  context: ProjectorEventContext,
+  event: Extract<SemanticTreeEvent["event"], { _tag: "ToolExecutionCompleted" }>,
+  node: Node,
+): void => {
+  const groupId = optionalString(record(event.call.params).groupId)
+  const rawToolCallId = context.subagents.toolCallIdForGroup(node, groupId)
+  if (rawToolCallId === undefined) return
+  const result = Schema.decodeUnknownOption(SubagentCard.SubagentGroupResult)(event.result.result)
+  context.subagents.settleGroup(
+    node,
+    rawToolCallId,
+    Option.isSome(result) ? result.value : undefined,
+    event.result.isFailure,
+  )
 }
 
 const completeGroup = (

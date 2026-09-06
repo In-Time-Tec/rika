@@ -44,7 +44,7 @@ const fail = (context: ProjectorEventContext, node: Node, event: RunEvent.RunFai
   const failure: Parameters<ProjectorEventContext["diagnostics"]["executionFailureError"]>[2] =
     event.error.message.length === 0 ? { status: "failed" } : { reason: event.error.message, status: "failed" }
   context.diagnostics.executionFailureError(node, event.error.message, failure)
-  context.settleNode(node, "failed", event, event.error.message)
+  context.settleNode(node, "failed", event.error.message)
 }
 
 const complete = (context: ProjectorEventContext, node: Node, event: RunEvent.RunCompleted): void => {
@@ -53,7 +53,7 @@ const complete = (context: ProjectorEventContext, node: Node, event: RunEvent.Ru
   if (node.hidden) {
     node.status = "completed"
     if ("text" in event.result) context.core.title = { text: event.result.text }
-  } else context.settleNode(node, "completed", event)
+  } else context.settleNode(node, "completed")
 }
 
 const cancel = (context: ProjectorEventContext, node: Node, event: RunEvent.RunCancelled): void => {
@@ -61,7 +61,7 @@ const cancel = (context: ProjectorEventContext, node: Node, event: RunEvent.RunC
   context.usage.settleCalls(node)
   context.authorization.settleAuthorizations(node, "cancelled")
   if (node.hidden) node.status = "cancelled"
-  else context.settleNode(node, "cancelled", event, event.reason)
+  else context.settleNode(node, "cancelled", event.reason)
 }
 
 const handleRunProgressEvent: ProjectorEventHandler = (context, treeEvent, node) => {

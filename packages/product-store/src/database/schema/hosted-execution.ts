@@ -339,6 +339,41 @@ export const rikaHostedExecutorOperations = pgTable(
     check("rika_hosted_executor_operations_workspace_id_check", sql`(length(workspace_id) > 0)`),
   ],
 )
+export const rikaHostedExecutorProcessObservations = pgTable(
+  "rika_hosted_executor_process_observations",
+  {
+    assignmentId: text("assignment_id").notNull(),
+    operationKey: text("operation_key").notNull(),
+    attempt: bigint({ mode: "number" }).notNull(),
+    processId: text("process_id").notNull(),
+    observation: jsonb().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .default(sql`transaction_timestamp()`)
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.assignmentId, table.operationKey, table.attempt, table.processId],
+      name: "rika_hosted_executor_process_observations_pkey",
+    }),
+    foreignKey({
+      columns: [table.assignmentId, table.operationKey, table.attempt],
+      foreignColumns: [
+        rikaHostedExecutorOperations.assignmentId,
+        rikaHostedExecutorOperations.operationKey,
+        rikaHostedExecutorOperations.attempt,
+      ],
+      name: "rika_hosted_executor_process_observations_operation_fkey",
+    }).onDelete("cascade"),
+    check("rika_hosted_executor_process_observations_attempt_check", sql`(attempt >= 0)`),
+    check("rika_hosted_executor_process_observations_process_id_check", sql`(length(process_id) > 0)`),
+    check(
+      "rika_hosted_executor_process_observations_json_check",
+      sql`(jsonb_typeof(observation) = 'object' AND observation ->> 'processId' = process_id)`,
+    ),
+  ],
+)
+
 export const rikaHostedRunnerAdmissions = pgTable(
   "rika_hosted_runner_admissions",
   {

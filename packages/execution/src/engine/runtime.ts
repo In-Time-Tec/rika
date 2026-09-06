@@ -295,9 +295,17 @@ const make = (
           Effect.map((checkpoint) => {
             const inspection = checkpoint.inspection
             const root = inspection.runs.find(({ run }) => run.runId === link.runId)
-            return root === undefined
-              ? { status: "unavailable" as const }
-              : { status: status(root.run.status), cursor: checkpoint.cursor }
+            if (root === undefined) return { status: "unavailable" as const }
+            let turnStatus = status(root.run.status)
+            if (
+              inspection._tag === "Active" &&
+              (turnStatus === "completed" || turnStatus === "failed" || turnStatus === "cancelled")
+            ) {
+              const active = new Set(inspection.activeRunIds)
+              const runs = inspection.runs.filter(({ run }) => active.has(run.runId))
+              turnStatus = runs.every(({ run }) => run.status === "waiting") ? "waiting" : "running"
+            }
+            return { status: turnStatus, cursor: checkpoint.cursor }
           }),
           Effect.catchTag("generalist/runtime/RunNotFound", () => Effect.succeed({ status: "unavailable" as const })),
           Effect.mapError((cause) => ExecutionGateway.InspectTurnFailure.make({ message: message(cause) })),

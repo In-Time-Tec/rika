@@ -46,17 +46,20 @@ const serve = Effect.fn("NativeToolSubprocess.serve")(function* (workspace: stri
     ),
   )
   const execute = (text: string) =>
-    decodeRequest(text).pipe(
-      Effect.flatMap((input) =>
-        Effect.flatMap(NativeToolRuntime.Service, (runtime) => runtime.run(input.request)).pipe(
-          Effect.match({
-            onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
-            onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "NativeTool" as const, result } }),
-          }),
-          Effect.provideService(RequestEnvironment, input.environment),
-        ),
-      ),
-      Effect.map((outcome) => encodeResponse({ outcome })),
+    Effect.gen(function* () {
+      const input = yield* decodeRequest(text)
+      const runtime = yield* NativeToolRuntime.Service
+      if (input._tag === "Observe") return { observation: yield* runtime.observeProcess(input.processId) }
+      const outcome = yield* runtime.run(input.request).pipe(
+        Effect.match({
+          onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
+          onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "NativeTool" as const, result } }),
+        }),
+        Effect.provideService(RequestEnvironment, input.environment),
+      )
+      return { outcome }
+    }).pipe(
+      Effect.map(encodeResponse),
       Effect.orElseSucceed(() => encodeResponse({ error: "Native tool subprocess request failed" })),
       Effect.provide(context),
     )

@@ -102,6 +102,11 @@ const connect = Effect.fn("Host.connect")(function* (options: ConnectionOptions)
     : { _tag: "ExecutorReconnect" as const, access: yield* runtime.reconnect }
   yield* writer(encodeExecutorMessage(opening))
   yield* waitForWelcome(incoming, options.store)
+  const replayAccess = yield* runtime.access
+  for (const observation of yield* runtime.observations)
+    yield* writer(encodeExecutorMessage({ _tag: "ProcessObservation", ...observation, access: replayAccess })).pipe(
+      Effect.mapError(() => HostError.make({ message: "Could not replay executor process observation" })),
+    )
   const session = yield* runtime.persistedSession
   yield* Effect.sleep(session.heartbeatIntervalMillis).pipe(
     Effect.andThen(

@@ -10,6 +10,7 @@ import { operationsStore as dispatchOperations } from "./operation-dispatch"
 import { operationsStore as lifecycleOperations } from "./operation-lifecycle"
 import { operationsStore as finalizationOperations } from "./operation-finalization"
 import { operationsStore as admissionOperations } from "./operation-admissions"
+import { operationsStore as processObservationOperations } from "./process-observation"
 
 export * from "./operation-contract"
 
@@ -20,6 +21,7 @@ const make = Effect.gen(function* () {
     ...lifecycleOperations(db),
     ...finalizationOperations(db),
     ...admissionOperations(db),
+    ...processObservationOperations(db),
   })
 })
 

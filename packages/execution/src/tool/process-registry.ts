@@ -17,7 +17,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { RuntimeFilesystem } from "./filesystem"
 
-interface Output {
+export interface Output {
   readonly processId: string
   readonly stdout: string
   readonly stderr: string
@@ -27,17 +27,23 @@ interface Output {
   readonly truncated: boolean
 }
 
+interface ProcessExit {
+  readonly exitCode: number
+  readonly elapsedMillis: number
+  readonly truncated: boolean
+}
+
 interface Entry {
   readonly close: Effect.Effect<void>
   readonly output: Ref.Ref<PendingOutput>
-  readonly exit: Deferred.Deferred<number>
+  readonly exit: Deferred.Deferred<ProcessExit>
   readonly startedAtNanos: bigint
   readonly admission: Semaphore.Semaphore
 }
 
 type EntryState =
   | { readonly _tag: "Active"; readonly entry: Entry }
-  | { readonly _tag: "Terminal"; readonly output: Output }
+  | { readonly _tag: "Terminal"; readonly output: Output; readonly exit: ProcessExit }
 
 interface BoundedText {
   readonly text: string
@@ -79,10 +85,11 @@ const retainTerminalOutput = (
   states: ReadonlyMap<string, EntryState>,
   processId: string,
   output: Output,
+  exit: ProcessExit,
 ): Map<string, EntryState> => {
   const next = new Map(states)
   next.delete(processId)
-  next.set(processId, { _tag: "Terminal", output })
+  next.set(processId, { _tag: "Terminal", output, exit })
   let terminalCount = 0
   for (const state of next.values()) if (state._tag === "Terminal") terminalCount += 1
   if (terminalCount <= terminalOutputLimit) return next
@@ -146,6 +153,15 @@ export interface Interface {
     cwd: string,
   ) => Effect.Effect<string, PlatformError.PlatformError>
   readonly poll: (processId: string, waitMillis: number, outputLimit: number) => Effect.Effect<Output, ProcessNotFound>
+  readonly observe: (processId: string) => Effect.Effect<
+    {
+      readonly processId: string
+      readonly exitCode: number
+      readonly elapsedMillis: number
+      readonly truncated: boolean
+    },
+    ProcessNotFound
+  >
   readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
@@ -183,6 +199,10 @@ export const layer = Layer.effect(
               ],
               {
                 cwd,
+                // Native commands have no input operation. An open, unwritable
+                // pipe makes stdin readers (cat, rg without a path) wait forever.
+                // Commands can still provide input with pipes or redirections.
+                stdin: "ignore",
                 detached: true,
                 killSignal: "SIGTERM",
                 forceKillAfter: "100 millis",
@@ -202,7 +222,7 @@ export const layer = Layer.effect(
           retainedBytes: 0,
           truncated: false,
         })
-        const exit = yield* Deferred.make<number>()
+        const exit = yield* Deferred.make<ProcessExit>()
         const startedAtNanos = yield* Clock.currentTimeNanos
         const admission = yield* Semaphore.make(1)
         const processId = String(nextId++)
@@ -242,7 +262,13 @@ export const layer = Layer.effect(
               processExit.value === -1
             )
               yield* Ref.update(output, (pending) => ({ ...pending, truncated: true }))
-            yield* Deferred.succeed(exit, Exit.isSuccess(processExit) ? processExit.value : -1)
+            // Freeze terminal metadata once. Re-observation after reconnect or
+            // output polling must reproduce the same durable receipt.
+            yield* Deferred.succeed(exit, {
+              exitCode: Exit.isSuccess(processExit) ? processExit.value : -1,
+              elapsedMillis: Math.max(0, Number(((yield* Clock.currentTimeNanos) - startedAtNanos) / 1_000_000n)),
+              truncated: (yield* Ref.get(output)).truncated,
+            })
           }),
           scope,
         )
@@ -262,7 +288,7 @@ export const layer = Layer.effect(
             if (waitMillis > 0)
               yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
             const pendingExit = yield* Deferred.poll(entry.exit)
-            const exit = Option.isSome(pendingExit) ? Option.some(yield* pendingExit.value) : Option.none<number>()
+            const exit = Option.isSome(pendingExit) ? Option.some(yield* pendingExit.value) : Option.none<ProcessExit>()
             const output = yield* Ref.getAndSet(entry.output, {
               stdout: "",
               stderr: "",
@@ -280,10 +306,9 @@ export const layer = Layer.effect(
               totalBytes,
             )
             const capacityTruncated = bounded.truncated
-            const elapsedMillis = Math.max(
-              0,
-              Number(((yield* Clock.currentTimeNanos) - entry.startedAtNanos) / 1_000_000n),
-            )
+            const elapsedMillis = Option.isSome(exit)
+              ? exit.value.elapsedMillis
+              : Math.max(0, Number(((yield* Clock.currentTimeNanos) - entry.startedAtNanos) / 1_000_000n))
             const base: Output = {
               processId,
               stdout: capacityTruncated ? bounded.text : output.stdout,
@@ -292,12 +317,18 @@ export const layer = Layer.effect(
               elapsedMillis,
               truncated: output.truncated || capacityTruncated,
             }
-            const result: Output = Option.isSome(exit) ? { ...base, exitCode: exit.value } : base
+            const result: Output = Option.isSome(exit) ? { ...base, exitCode: exit.value.exitCode } : base
             if (Option.isSome(exit))
-              yield* Ref.update(entries, (states) => retainTerminalOutput(states, processId, result))
+              yield* Ref.update(entries, (states) => retainTerminalOutput(states, processId, result, exit.value))
             return result
           }),
         )
+      }),
+      observe: Effect.fn("ProcessRegistry.observe")(function* (processId) {
+        const state = (yield* Ref.get(entries)).get(processId)
+        if (state === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        const exit = state._tag === "Terminal" ? state.exit : yield* Deferred.await(state.entry.exit)
+        return { processId, ...exit }
       }),
       cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
         const state = (yield* Ref.get(entries)).get(processId)

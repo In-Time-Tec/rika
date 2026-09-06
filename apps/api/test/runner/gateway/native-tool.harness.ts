@@ -1,6 +1,10 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { expect, it } from "@effect/vitest"
-import { rikaHostedExecutorOperationFrames, rikaHostedExecutorOperations } from "@rika/product-store/database-schema"
+import {
+  rikaHostedExecutorAssignments,
+  rikaHostedExecutorOperationFrames,
+  rikaHostedExecutorOperations,
+} from "@rika/product-store/database-schema"
 import * as HostedPostgres from "@rika/product-store/layer"
 import { runnerProtocolVersion } from "@rika/product/runner-registration"
 import type { MachineOutcome } from "@rika/remote-execution/protocol"
@@ -78,6 +82,40 @@ it.effect.skipIf(!live)("executes a native Runner tool directly", () =>
               .orderBy(rikaHostedExecutorOperationFrames.cursor),
           ),
         ).toEqual([{ kind: "Accepted" }, { kind: "Started" }, { kind: "Terminal" }])
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("accepts an authorized duplicate MachineResult without overwriting its outcome", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "native-tool-completed-duplicate"
+        const request = toolRequest(operationKey)
+        yield* seed(databaseClient, operationKey, { request, state: "accepted" })
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority()).pipe(Effect.provide(context))
+        const target = yield* connect(gateway)
+        const running = yield* Effect.forkChild(gateway.execute(request))
+        const delivery = yield* machineDelivery(target, operationKey)
+        if (delivery._tag !== "MachineExecute") return yield* Effect.die("native machine request was not sent")
+        yield* completeMachine(gateway, target, delivery, {
+          _tag: "Success",
+          value: { _tag: "NativeTool", result: nativeResult },
+        })
+        yield* Fiber.join(running)
+        yield* completeMachine(gateway, target, delivery, { _tag: "Cancelled" })
+        const rows = yield* Effect.tryPromise(() =>
+          databaseClient
+            .select({ response: rikaHostedExecutorOperations.response })
+            .from(rikaHostedExecutorOperations)
+            .where(eq(rikaHostedExecutorOperations.operationKey, operationKey)),
+        )
+        expect(rows).toEqual([{ response: { _tag: "Success", result: nativeResult } }])
+        expect(target.closed).toEqual([])
       }),
     ),
   ),
@@ -169,6 +207,45 @@ it.effect.skipIf(!live)("retains and replays one native Runner machine call thro
         const results = yield* Effect.all([Fiber.join(first), Fiber.join(retained)])
         expect(results[0]).toEqual(results[1])
         expect(results[0]).toMatchObject({ outcome: "completed", eventPersisted: false })
+      }),
+    ),
+  ),
+)
+
+it.effect.skipIf(!live)("recovers a retained result through PostgreSQL in a fresh gateway process", () =>
+  isolated(({ url, databaseClient }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const operationKey = "native-tool-fresh-gateway"
+        const request = toolRequest(operationKey)
+        yield* seed(databaseClient, operationKey, { request, state: "dispatched", leaseEpoch: 1 })
+        yield* Effect.tryPromise(() =>
+          databaseClient
+            .update(rikaHostedExecutorAssignments)
+            .set({ leaseEpoch: 2, lastLeaseEpoch: 2 })
+            .where(eq(rikaHostedExecutorAssignments.id, request.assignmentId)),
+        )
+        const context = yield* Layer.build(
+          Layer.merge(HostedPostgres.layer({ url: Redacted.make(url), maxConnections: 8 }), BunCrypto.layer),
+        )
+        const gateway = yield* makeRunnerGateway(authority({ renewedLeaseEpoch: 2 })).pipe(Effect.provide(context))
+        const target = yield* connect(gateway)
+        const delivery = yield* machineDelivery(target, operationKey)
+        if (delivery._tag !== "MachineExecute") return yield* Effect.die("retained native request was not replayed")
+        const refreshedAccess = { ...access, leaseEpoch: 2 }
+        yield* gateway.receive(
+          target,
+          encode({
+            _tag: "MachineResult",
+            access: refreshedAccess,
+            operationKey,
+            attempt: delivery.attempt,
+            machineId: delivery.machineId,
+            requestDigest: delivery.requestDigest,
+            outcome: { _tag: "Success", value: { _tag: "NativeTool", result: nativeResult } },
+          }),
+        )
+        expect(yield* operationState(databaseClient, operationKey)).toEqual([{ state: "completed", events: 0 }])
       }),
     ),
   ),

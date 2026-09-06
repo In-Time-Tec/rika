@@ -38,6 +38,7 @@ const ToolInput = Schema.Struct({
 type ToolInput = typeof ToolInput.Type
 
 const ToolOutput = Schema.Struct({
+  operationId: Schema.optionalKey(Schema.String),
   text: Schema.optionalKey(Schema.String),
   status: Schema.optionalKey(Schema.String),
   running: Schema.optionalKey(Schema.Boolean),
@@ -186,7 +187,7 @@ const makeToolImpl = (id: string, rawId: string, name: string, input: string, pr
 }
 
 const processFrom = (value: typeof ToolOutput.Type): NonNullable<Tool["process"]> => {
-  const { status: _status, diff: _diff, text: _text, ...process } = value
+  const { operationId: _operationId, status: _status, diff: _diff, text: _text, ...process } = value
   return process
 }
 
@@ -213,11 +214,43 @@ const completionStatus = (statusText: string, process: NonNullable<Tool["process
   return { tool: "complete", file: "complete" } as const
 }
 
-const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean): Tool => {
+const hasProcessOutput = (output: NonNullable<Tool["process"]>): boolean =>
+  output.running !== undefined ||
+  output.processId !== undefined ||
+  output.exitCode !== undefined ||
+  output.elapsedMillis !== undefined ||
+  output.stdout !== undefined ||
+  output.stderr !== undefined
+
+const attributeOperation = (tool: Tool, operationId: string | undefined, sourceToolName: string): Tool =>
+  operationId !== undefined && sourceToolName === tool.name ? { ...tool, operationId } : tool
+
+const mergeProcess = (tool: Tool, process: NonNullable<Tool["process"]>): Tool => {
+  if (tool.process === undefined && !hasProcessOutput(process)) return tool
+  const mergedProcess = { ...tool.process, ...process }
+  if (tool.name === "bash" && process.running === true) Object.assign(mergedProcess, { background: true })
+  return { ...tool, process: mergedProcess }
+}
+
+const completeToolImpl = <Output>(
+  tool: Tool,
+  output: Output,
+  isFailure: boolean,
+  sourceToolName: string = tool.name,
+): Tool => {
   const decoded = Schema.decodeUnknownOption(ToolOutput)(output)
   const value = Option.isSome(decoded) ? decoded.value : emptyOutput
   const statusText = (value.status ?? "").toLowerCase()
   const process = processFrom(value)
+  // A resumed batch can re-emit the original bash result after a later status
+  // check has observed exit. Process ids do not restart within their registry.
+  if (
+    tool.process?.running === false &&
+    process.running === true &&
+    process.processId !== undefined &&
+    process.processId === tool.process.processId
+  )
+    return tool
   const status = completionStatus(statusText, process, isFailure)
   const resolved = value.diff ?? ""
   const json = Schema.decodeUnknownOption(Schema.Json)(output)
@@ -232,20 +265,11 @@ const completeToolImpl = <Output>(tool: Tool, output: Output, isFailure: boolean
       return { ...file, ...applied, preview: false, status: status.file }
     }),
   }
-  const { stderr, stdout } = process
-  const hasProcess =
-    tool.process !== undefined ||
-    process.running !== undefined ||
-    process.processId !== undefined ||
-    process.exitCode !== undefined ||
-    process.elapsedMillis !== undefined ||
-    stdout !== undefined ||
-    stderr !== undefined
-  if (hasProcess) {
-    const mergedProcess = { ...tool.process, ...process }
-    if (tool.name === "bash" && process.running === true) Object.assign(mergedProcess, { background: true })
-    completed = { ...completed, process: mergedProcess }
-  }
+  completed = mergeProcess(completed, process)
+  // A shell_command_status result is folded into its launching bash block. Its
+  // operation identifies the poll, not the command, so it must not replace or
+  // backfill the launching operation's attribution.
+  completed = attributeOperation(completed, value.operationId, sourceToolName)
   if (value.truncated !== undefined) completed = { ...completed, truncated: value.truncated }
   return completed
 }
@@ -278,4 +302,15 @@ export const completeTool: {
     arg1: Parameters<typeof completeToolImpl>[1],
     arg2: Parameters<typeof completeToolImpl>[2],
   ): (arg0: Parameters<typeof completeToolImpl>[0]) => ReturnType<typeof completeToolImpl>
-} = Function.dual(3, completeToolImpl)
+  (
+    arg0: Parameters<typeof completeToolImpl>[0],
+    arg1: Parameters<typeof completeToolImpl>[1],
+    arg2: Parameters<typeof completeToolImpl>[2],
+    arg3: Parameters<typeof completeToolImpl>[3],
+  ): ReturnType<typeof completeToolImpl>
+  (
+    arg1: Parameters<typeof completeToolImpl>[1],
+    arg2: Parameters<typeof completeToolImpl>[2],
+    arg3: Parameters<typeof completeToolImpl>[3],
+  ): (arg0: Parameters<typeof completeToolImpl>[0]) => ReturnType<typeof completeToolImpl>
+} = Function.dual((args) => args.length >= 3 && Schema.is(Schema.Boolean)(args[2]), completeToolImpl)

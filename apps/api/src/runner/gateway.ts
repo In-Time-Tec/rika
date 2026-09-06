@@ -2,10 +2,12 @@ import {
   HostedExecutionOperations,
   layer as hostedExecutionOperationsLayer,
 } from "@rika/product-store/executor-operations"
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import { redactAccess, type AccessWire } from "@rika/remote-execution/protocol"
-import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Semaphore } from "effect"
+import { Clock, Crypto, DateTime, Deferred, Effect, Encoding, Layer, Ref, Schema, Semaphore } from "effect"
 import { GatewayError, type OperationIdentity, type Socket, type SocketFrame } from "../executor/gateway"
 import { gatewayExecutionFactory } from "../executor/gateway/execution"
+import { persistNativeOutcome } from "../executor/gateway/native-tool"
 import { gatewayProtocol } from "../executor/gateway/protocol"
 import { sendFrame } from "../executor/gateway/send-frame"
 import { gatewaySessionAwaiter } from "../executor/gateway/sessions"
@@ -32,11 +34,14 @@ export interface RunnerGateway {
   readonly cancel: (input: OperationIdentity) => Effect.Effect<FinalResult, GatewayError>
 }
 
-const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function* (authority: RunnerExecutorAuthority) {
+const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function* (
+  authority: RunnerExecutorAuthority,
+  publishSnapshot: (threadId: string) => Effect.Effect<void, GatewayError>,
+) {
   const operations = yield* HostedExecutionOperations
   const crypto = yield* Crypto.Crypto
   const scope = yield* Effect.scope
-  const lifecycle = LifecycleStores.build(operations, crypto)
+  const lifecycle = LifecycleStores.build(operations, crypto, publishSnapshot)
   const sessions = yield* Ref.make(new Map<string, Session>())
   const assignments = yield* Ref.make(new Map<Socket, string>())
   const pending = yield* Ref.make(new Map<string, PendingOperation>())
@@ -49,6 +54,20 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
     return Encoding.encodeHex(bytes)
   })
   const machineIdFor = (operationKey: string, attempt: number) => digest(`${attempt}\u0000${operationKey}`)
+  const decodeNativeToolPayload = Schema.decodeUnknownEffect(
+    Schema.fromJsonString(Schema.Struct({ toolName: Schema.String, request: NativeToolRuntime.Request })),
+  )
+  const recoverRequest = Effect.fn("RunnerGateway.recoverRequest")(function* (
+    operation: import("@rika/product-store/executor-operations").OperationRecord,
+  ) {
+    const payload = yield* decodeNativeToolPayload(operation.code).pipe(
+      Effect.mapError(() => failure("fenced", "Persisted Runner native operation request is invalid")),
+    )
+    return {
+      ...operation,
+      machineRequest: { _tag: "NativeTool" as const, request: payload.request },
+    }
+  })
   const nativeOperations = yield* nativeOperationEndpoint({
     digest,
     encodeRequest: gatewayModel.encodeMachineRequest,
@@ -64,8 +83,67 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
       ),
     sameAccess: same,
     send: (session, message) => sendFrame(session.socket, gatewayModel.encode(message), "Runner native operation"),
+    accept: (session, input) =>
+      Effect.gen(function* () {
+        const operation = yield* operations
+          .findOperation(input)
+          .pipe(Effect.mapError(() => failure("transport", "Could not inspect retained Runner operation")))
+        if (
+          operation === undefined ||
+          (operation.state !== "dispatched" && operation.state !== "completed" && operation.state !== "unknown")
+        )
+          return yield* failure("fenced", "Retained Runner operation is unavailable")
+        const request = yield* recoverRequest(operation)
+        const expectedMachineId = yield* machineIdFor(input.operationKey, input.attempt)
+        const expectedDigest = yield* digest(gatewayModel.encodeMachineRequest(request.machineRequest))
+        if (input.machineId !== expectedMachineId || input.requestDigest !== expectedDigest)
+          return yield* failure("fenced", "Retained Runner operation identity conflicts with its durable request")
+        if (
+          operation.dispatchedGeneration !== session.access.fence.assignmentGeneration ||
+          operation.dispatchedExecutorInstanceId !== session.access.fence.executorId ||
+          operation.dispatchedProcessIncarnation !== session.access.fence.processIncarnation
+        )
+          return yield* failure("fenced", "Retained Runner operation is owned by another executor incarnation")
+        if (operation.state === "dispatched") yield* lifecycle.dispatch(request, session.access)
+        yield* persistNativeOutcome(lifecycle, session.access, request, input.outcome)
+      }),
   })
   const calls = {
+    receiveProcessObservation: Effect.fn("RunnerGateway.receiveProcessObservation")(function* (
+      socket: Socket,
+      presented: AccessWire,
+      operationKey: string,
+      attempt: number,
+      machineId: string,
+      requestDigest: string,
+      observation: import("@rika/remote-execution/protocol").ProcessTerminalObservation,
+    ) {
+      const foundAssignmentId = (yield* Ref.get(assignments)).get(socket)
+      const session = foundAssignmentId === undefined ? undefined : (yield* Ref.get(sessions)).get(foundAssignmentId)
+      if (session === undefined || session.socket !== socket || !same(session.access, presented))
+        return yield* failure("fenced", "Runner process observation has no current executor")
+      const assignmentId = foundAssignmentId!
+      if (machineId !== (yield* machineIdFor(operationKey, attempt)))
+        return yield* failure("fenced", "Runner process observation has a conflicting machine identity")
+      const result = yield* lifecycle.observeProcess!(presented, {
+        assignmentId,
+        operationKey,
+        attempt,
+        machineId,
+        requestDigest,
+        observation,
+      })
+      if (result === "missing") return yield* failure("fenced", "Runner process observation operation is unavailable")
+      yield* sendFrame(
+        session.socket,
+        gatewayModel.encode({
+          _tag: "ProcessObservationAck",
+          machineId,
+          processId: observation.processId,
+        }),
+        "Runner process observation acknowledgement",
+      )
+    }),
     receiveMachine: Effect.fn("RunnerGateway.receiveNativeOperation")(function* (
       socket: Socket,
       presented: AccessWire,
@@ -132,7 +210,30 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
       }),
     )
   })
-  const replayPending = (session: Session) => nativeOperations.reconnected(session)
+  const replayPending = Effect.fn("RunnerGateway.replayPending")(function* (session: Session) {
+    const queued = yield* operations
+      .replayQueue(session.access.fence.assignmentId)
+      .pipe(Effect.mapError(() => failure("transport", "Could not load retained Runner operations")))
+    for (const item of queued) {
+      const operation = yield* operations
+        .findOperation({ ...item, assignmentId: session.access.fence.assignmentId })
+        .pipe(Effect.mapError(() => failure("transport", "Could not load retained Runner operation")))
+      if (operation === undefined) continue
+      const request = yield* recoverRequest(operation)
+      yield* lifecycle.dispatch(request, session.access)
+      yield* nativeOperations.restore(
+        {
+          assignmentId: operation.assignmentId,
+          operationKey: operation.operationKey,
+          attempt: operation.attempt,
+          machineId: yield* machineIdFor(operation.operationKey, operation.attempt),
+          request: request.machineRequest,
+          deadlineAtMillis: DateTime.toEpochMillis(DateTime.makeUnsafe(operation.deadlineAt)),
+        },
+        session,
+      )
+    }
+  })
   const disconnected = Effect.fn("RunnerGateway.disconnected")(function* (socket: Socket) {
     yield* gatewayLock.withPermits(1)(
       Effect.gen(function* () {
@@ -245,7 +346,10 @@ const makeRunnerGatewayWithOperations = Effect.fn("RunnerGateway.make")(function
   } satisfies RunnerGateway
 })
 
-export const makeRunnerGateway = Effect.fn("RunnerGateway.makeLive")(function* (authority: RunnerExecutorAuthority) {
+export const makeRunnerGateway = Effect.fn("RunnerGateway.makeLive")(function* (
+  authority: RunnerExecutorAuthority,
+  publishSnapshot: (threadId: string) => Effect.Effect<void, GatewayError> = () => Effect.void,
+) {
   const context = yield* Layer.build(hostedExecutionOperationsLayer)
-  return yield* makeRunnerGatewayWithOperations(authority).pipe(Effect.provideContext(context))
+  return yield* makeRunnerGatewayWithOperations(authority, publishSnapshot).pipe(Effect.provideContext(context))
 })

@@ -28,6 +28,8 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
     const activeAccess = yield* Semaphore.make(1)
     const active = yield* Ref.make(new Map<string, ActiveMachine>())
     const workers = yield* FiberSet.make<void, OperationError>()
+    const observing = yield* Ref.make(new Set<string>())
+    const operationScope = yield* Effect.scope
 
     const requireAccess = Effect.fn("Operations.requireAccess")(function* (provided: Parameters<typeof sameAccess>[1]) {
       const current = yield* options.access
@@ -36,7 +38,8 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
       return current
     })
 
-    const emit = (event: Omit<Event, "access">) =>
+    type EventWithoutAccess = Event extends infer E ? (E extends Event ? Omit<E, "access"> : never) : never
+    const emit = (event: EventWithoutAccess) =>
       Effect.flatMap(options.access, (access) => options.emit({ ...event, access }))
 
     const removeActive = (key: string) =>
@@ -64,6 +67,41 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
           yield* Ref.update(active, (current) => new Map(current).set(key, { command, fiber }))
           yield* Deferred.succeed(gate, undefined)
           return true
+        }),
+      )
+
+    const startObservation = (
+      command: Extract<Command, { readonly _tag: "MachineExecute" }>,
+      processId: string,
+      afterResultDelivery: Deferred.Deferred<void>,
+    ) =>
+      activeAccess.withPermits(1)(
+        Effect.gen(function* () {
+          if ((yield* Ref.get(observing)).has(command.machineId) || options.machine.observe === undefined) return
+          yield* Ref.update(observing, (current) => new Set(current).add(command.machineId))
+          yield* Effect.forkIn(
+            Deferred.await(afterResultDelivery).pipe(
+              Effect.andThen(options.machine.observe(processId)),
+              Effect.flatMap((observation) =>
+                emit({
+                  _tag: "ProcessObservation",
+                  operationKey: command.operationKey,
+                  attempt: command.attempt,
+                  machineId: command.machineId,
+                  requestDigest: command.requestDigest,
+                  observation,
+                }),
+              ),
+              Effect.ensuring(
+                Ref.update(observing, (current) => {
+                  const next = new Set(current)
+                  next.delete(command.machineId)
+                  return next
+                }),
+              ),
+            ),
+            operationScope,
+          )
         }),
       )
 
@@ -95,6 +133,14 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
             "rika.outcome": outcome._tag,
             "rika.duration.millis": Math.max(0, (yield* Clock.currentTimeMillis) - startedAt),
           })
+          const resultDelivery = yield* Deferred.make<void>()
+          if (
+            outcome._tag === "Success" &&
+            outcome.value._tag === "NativeTool" &&
+            outcome.value.result.running === true &&
+            outcome.value.result.processId !== undefined
+          )
+            yield* startObservation(command, outcome.value.result.processId, resultDelivery)
           yield* emit({
             _tag: "MachineResult",
             operationKey: command.operationKey,
@@ -102,7 +148,7 @@ export const make = (options: Options): Effect.Effect<Interface, never, Scope.Sc
             machineId: command.machineId,
             requestDigest: command.requestDigest,
             outcome,
-          })
+          }).pipe(Effect.ignore, Effect.ensuring(Deferred.succeed(resultDelivery, undefined)))
         }),
       )
     })

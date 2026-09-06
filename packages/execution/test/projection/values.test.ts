@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { bounded, boundedHead } from "../../src/projection/values"
+import { bounded, boundedHead, projectorNames } from "../../src/projection/values"
 
 describe("projector value bounds", () => {
   it("keeps the tail for streamed text so the newest content survives", () => {
@@ -20,5 +20,14 @@ describe("projector value bounds", () => {
   it("returns short values unchanged", () => {
     expect(boundedHead("short", 100)).toBe("short")
     expect(bounded("short", 100)).toBe("short")
+  })
+
+  it("names blocking and nonblocking child lifecycle tools", () => {
+    expect(projectorNames).toMatchObject({
+      runChild: "run_child",
+      runChildGroup: "run_child_group",
+      startChildGroup: "start_child_group",
+      awaitChildGroup: "await_child_group",
+    })
   })
 })

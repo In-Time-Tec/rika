@@ -18,6 +18,9 @@ describe("native tool projection", () => {
     expect(completeTool(running, {}, true).status).toBe("failed")
     expect(completeTool(running, { status: "rejected" }, false).status).toBe("rejected")
     expect(completeTool(running, { status: "cancelled" }, false).status).toBe("cancelled")
+    expect(completeTool({ operationId: "native-operation" }, false, "bash")(running)).toEqual(
+      completeTool(running, { operationId: "native-operation" }, false, "bash"),
+    )
   })
 
   it("does not invent an operation identity for either of two running tools", () => {
@@ -141,6 +144,90 @@ describe("native tool projection", () => {
     expect(block(unknown, "ToolCall")).toBeUndefined()
     expect(unknown.state.status).toBe("waiting")
   })
+
+  for (const { exitCode, declareCheck } of [
+    { exitCode: 0, declareCheck: true },
+    { exitCode: 7, declareCheck: true },
+    { exitCode: 0, declareCheck: false },
+  ]) {
+    it(`keeps background completion stable through checks and replay (exit ${exitCode}, declared ${declareCheck})`, () => {
+      resetEventPosition()
+      const projector = TreeProjector.make("turn-background", "run")
+      const bash = Response.toolCallPart({
+        id: "bash",
+        name: "bash",
+        params: { command: "echo done", timeout_ms: 0 },
+        providerExecuted: false,
+        metadata: {},
+      })
+      const check = Response.toolCallPart({
+        id: "check",
+        name: "shell_command_status",
+        params: { processId: "1", waitMillis: 10 },
+        providerExecuted: false,
+        metadata: {},
+      })
+      const complete = (
+        call: typeof bash | typeof check,
+        result: { running: boolean; processId: string; exitCode?: number; operationId: string },
+      ) =>
+        treeEvent("raw-root-run", {
+          _tag: "ToolExecutionCompleted",
+          turn: 0,
+          call,
+          result: toolResultPart({
+            id: call.id,
+            name: call.name,
+            result,
+            encodedResult: result,
+            isFailure: false,
+            providerExecuted: false,
+            preliminary: false,
+            metadata: {},
+          }),
+        })
+      projector.apply(treeEvent("raw-root-run", { _tag: "ToolExecutionStarted", turn: 0, call: bash }))
+      const running = complete(bash, {
+        running: true,
+        processId: "1",
+        operationId: "operation-bash",
+      })
+      projector.apply(running)
+      if (declareCheck) projector.apply(modelResponse("raw-root-run", check))
+      projector.apply(
+        complete(check, {
+          running: false,
+          processId: "1",
+          exitCode,
+          operationId: "operation-status-check",
+        }),
+      )
+      const assertCompleted = () => {
+        const tools = projector
+          .snapshot()
+          .units.flatMap((unit) =>
+            unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
+          )
+        expect(tools).toHaveLength(1)
+        expect(tools[0]).toMatchObject({
+          name: "bash",
+          toolCallId: "bash",
+          operationId: "operation-bash",
+          status: exitCode === 0 ? "complete" : "failed",
+          process: { running: false, exitCode },
+        })
+      }
+      assertCompleted()
+      // A repeated declaration or a new read of a retained terminal result must not restart the command.
+      projector.apply(modelResponse("raw-root-run", check))
+      assertCompleted()
+      projector.apply(modelResponse("raw-root-run", { ...check, id: "check-again" }))
+      assertCompleted()
+      // Generalist can re-emit completed calls while resuming a batch.
+      projector.apply(running)
+      assertCompleted()
+    })
+  }
 
   it("labels a read by the lines it returned when the file ends before the requested range", () => {
     const input = JSON.stringify({ path: "README.md", read_range: [1, 80] })

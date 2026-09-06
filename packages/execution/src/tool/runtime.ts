@@ -380,6 +380,10 @@ export const layerWithProcessRegistry = (workspace: string) =>
         }
       }
       return ToolRuntime.Service.of({
+        observeProcess: (processId) =>
+          processes
+            .observe(processId)
+            .pipe(Effect.mapError((cause) => toolError({ _tag: "ShellCommandStatus", processId }, cause, "operation"))),
         run: (request) => {
           if (request._tag === "McpCall" || request._tag === "McpDiscover") return Mcp.execute(workspace, request)
           const operation = executeOperation(request).pipe(

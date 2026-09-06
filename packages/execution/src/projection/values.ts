@@ -3,6 +3,8 @@ export const projectorNames = {
   titleInvocationId: "rika.thread-title",
   runChild: "run_child",
   runChildGroup: "run_child_group",
+  startChildGroup: "start_child_group",
+  awaitChildGroup: "await_child_group",
 } as const
 
 export const textLimit = 8_192

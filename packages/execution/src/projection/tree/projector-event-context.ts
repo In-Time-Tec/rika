@@ -1,4 +1,3 @@
-import type { RunEvent } from "generalist/runtime"
 import type { Unit } from "@rika/product/execution-transcript-contract"
 import type { AuthorizationProjection } from "../authorization"
 import type { DiagnosticProjection } from "../diagnostic"
@@ -23,12 +22,7 @@ export interface ProjectorEventContext {
   readonly put: (unit: Unit) => void
   readonly remove: (key: string) => void
   readonly unit: (node: Node, key: string, content: Unit["content"], part?: number) => Unit
-  readonly settleNode: (
-    node: Node,
-    status: "completed" | "failed" | "cancelled",
-    event: RunEvent.RunEvent,
-    detail?: string,
-  ) => void
+  readonly settleNode: (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => void
   readonly authorization: Pick<
     AuthorizationProjection,
     "putAuthorization" | "resolveAuthorization" | "settleAuthorizations"
@@ -36,7 +30,7 @@ export interface ProjectorEventContext {
   readonly diagnostics: Pick<DiagnosticProjection, "notice" | "error" | "modelFailureError" | "executionFailureError">
   readonly subagents: Pick<
     SubagentCardProjection,
-    "cardFor" | "updateCard" | "groupCards" | "settleGroup" | "bindChild"
+    "cardFor" | "updateCard" | "groupCards" | "settleGroup" | "bindGroupReceipt" | "toolCallIdForGroup" | "bindChild"
   >
   readonly tools: Pick<ToolUnitProjection, "toolState" | "putTool" | "updateTool" | "linkProcessCheck">
 }

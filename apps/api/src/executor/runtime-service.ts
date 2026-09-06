@@ -13,9 +13,11 @@ import { FencingGeneration, ThreadId } from "@rika/product/hosted-model"
 import { WorkspacePreparations } from "@rika/product/workspace-preparation"
 import { Clock, Context, Crypto, Effect, Layer, Schema } from "effect"
 import { HostedEnvironment } from "../hosted/environment/runtime"
+import { make as makeSnapshotPublication } from "../hosted/thread/protocol/snapshot-publication"
 import { RunnerExecutor } from "../runner/executor"
 import * as RunnerGatewayModule from "../runner/gateway"
 import type { RunnerGateway } from "../runner/gateway"
+import { GatewayError } from "./gateway"
 import { LifecycleStores } from "./lifecycle-store"
 import { HostedGateway } from "./hosted-gateway"
 import { Pins } from "generalist"
@@ -70,6 +72,7 @@ export const service = Layer.effect(
     const preparations = yield* WorkspacePreparations
     const sql = yield* PgClient.PgClient
     const crypto = yield* Crypto.Crypto
+    const snapshotPublication = yield* makeSnapshotPublication
     const scope = yield* Effect.scope
     const operationsContext = yield* Layer.buildWithScope(
       hostedExecutionOperationsLayer.pipe(Layer.provide(Layer.succeed(PgClient.PgClient, sql))),
@@ -95,11 +98,15 @@ export const service = Layer.effect(
       ),
     )
     yield* orphanReaper(reapOrphans, DefaultOrphanGraceMillis).pipe(Effect.forkIn(scope))
-    const lifecycle = LifecycleStores.build(operations, crypto)
+    const publishSnapshot = (threadId: string) =>
+      snapshotPublication
+        .publish(threadId)
+        .pipe(Effect.mapError((error) => GatewayError.make({ kind: "transport", message: error.message })))
+    const lifecycle = LifecycleStores.build(operations, crypto, publishSnapshot)
     const gateway = yield* HostedGateway.build(lifecycle, crypto, scope)
     const runner = yield* RunnerExecutor
     const runnerGatewayContext = yield* Layer.buildWithScope(
-      Layer.effect(HostedRunnerGateway, RunnerGatewayModule.makeRunnerGateway(runner)),
+      Layer.effect(HostedRunnerGateway, RunnerGatewayModule.makeRunnerGateway(runner, publishSnapshot)),
       scope,
     )
     const runnerGateway = Context.get(runnerGatewayContext, HostedRunnerGateway)

@@ -169,4 +169,48 @@ describe("Runtime", () => {
       layer({ fence, bootstrapToken: Redacted.make("bootstrap"), ...options }),
     ),
   )
+
+  it.effect("retains Orb observations through renewed access and removes them on acknowledgement", () => {
+    const observation = {
+      operationKey: "operation-1",
+      attempt: 0,
+      machineId: "machine-1",
+      requestDigest: "a".repeat(64),
+      observation: { processId: "process-1", exitCode: 0, elapsedMillis: 25, truncated: false },
+    }
+    return run(
+      Effect.gen(function* () {
+        const runtime = yield* Runtime
+        yield* runtime.retainObservation(observation)
+        yield* runtime.reconnected({
+          version: 1,
+          fence,
+          leaseEpoch: 2,
+          leaseExpiresAt: 30_000,
+          heartbeatIntervalMillis: 20_000,
+          cursor: { sequence: 2, value: "executor:2" },
+        })
+        expect(yield* runtime.observations).toEqual([observation])
+        expect((yield* runtime.access).leaseEpoch).toBe(2)
+        expect((yield* runtime.persistedSession).observations).toEqual([observation])
+        yield* runtime.acknowledgeObservation("machine-1", "process-1")
+        expect(yield* runtime.observations).toEqual([])
+        expect((yield* runtime.persistedSession).observations).toEqual([])
+      }),
+      layer({
+        fence,
+        bootstrapToken: Redacted.make("consumed-bootstrap"),
+        ...options,
+        restoredSession: {
+          version: 1,
+          fence,
+          leaseEpoch: 1,
+          sessionToken: "session-secret",
+          heartbeatIntervalMillis: 20_000,
+          cursor: { sequence: 2, value: "executor:2" },
+          observations: [observation],
+        },
+      }),
+    )
+  })
 })

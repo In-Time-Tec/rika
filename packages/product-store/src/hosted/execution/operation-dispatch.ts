@@ -145,13 +145,30 @@ export const operationsStore = (db: PgDrizzle.EffectPgDatabase) => {
           const rows = yield* query(operationRows.select(tx, input, "update"))
           const row = rows[0]
           if (row === undefined) return "missing"
-          if (row.state === "dispatched")
-            return row.dispatchedGeneration === fence.assignmentGeneration &&
-              row.dispatchedLeaseEpoch === fence.leaseEpoch &&
-              row.dispatchedExecutorInstanceId === fence.executorInstanceId &&
-              row.dispatchedProcessIncarnation === fence.processIncarnation
-              ? "same-fence"
-              : "fenced"
+          if (row.state === "dispatched") {
+            if (
+              row.dispatchedGeneration !== fence.assignmentGeneration ||
+              row.dispatchedExecutorInstanceId !== fence.executorInstanceId ||
+              row.dispatchedProcessIncarnation !== fence.processIncarnation
+            )
+              return "fenced"
+            if (row.dispatchedLeaseEpoch !== fence.leaseEpoch)
+              yield* query(
+                tx
+                  .update(rikaHostedExecutorOperations)
+                  .set({ dispatchedLeaseEpoch: fence.leaseEpoch, updatedAt: sql`clock_timestamp()` })
+                  .where(
+                    and(
+                      operationKey(input),
+                      eq(rikaHostedExecutorOperations.state, "dispatched"),
+                      eq(rikaHostedExecutorOperations.dispatchedGeneration, fence.assignmentGeneration),
+                      eq(rikaHostedExecutorOperations.dispatchedExecutorInstanceId, fence.executorInstanceId),
+                      eq(rikaHostedExecutorOperations.dispatchedProcessIncarnation, fence.processIncarnation),
+                    ),
+                  ),
+              )
+            return "same-fence"
+          }
           if (row.state !== "accepted") return "fenced"
           const updated = yield* query(
             tx

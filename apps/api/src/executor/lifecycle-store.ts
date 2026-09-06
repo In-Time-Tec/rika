@@ -1,4 +1,5 @@
 import type { HostedExecutionOperationsService, OperationRecord } from "@rika/product-store/executor-operations"
+import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
 import { ToolOperationResponse } from "@rika/product/tool-operation-lifecycle"
 import { Crypto, Effect, Encoding, Schema } from "effect"
 import {
@@ -8,6 +9,7 @@ import {
   type LifecycleStore,
   type OperationIdentity,
 } from "./gateway"
+import { gatewayProtocol } from "./gateway/protocol"
 
 const OperationIdentity = Schema.Struct({
   workspaceId: Schema.String,
@@ -22,6 +24,8 @@ const OperationIdentity = Schema.Struct({
   replayPolicy: Schema.Literals(["pure", "provider-idempotent", "never"]),
 })
 const encodeOperationIdentity = Schema.encodeSync(Schema.fromJsonString(OperationIdentity))
+const NativeToolPayload = Schema.Struct({ toolName: Schema.String, request: NativeToolRuntime.Request })
+const decodeNativeToolPayload = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeToolPayload))
 const matchesLifecycle = (
   operation: OperationRecord,
   attribution: {
@@ -53,7 +57,11 @@ const matchesLifecycle = (
   operation.dispatchedProcessIncarnation === access.fence.processIncarnation
 
 export const LifecycleStores = {
-  build: (operations: HostedExecutionOperationsService, crypto: Crypto.Crypto) => {
+  build: (
+    operations: HostedExecutionOperationsService,
+    crypto: Crypto.Crypto,
+    publishSnapshot: (threadId: string) => Effect.Effect<void, GatewayError> = () => Effect.void,
+  ) => {
     const decodeResponse = Schema.decodeUnknownEffect(ToolOperationResponse)
     const identifyOperation = (input: OperationIdentity) =>
       crypto
@@ -107,6 +115,48 @@ export const LifecycleStores = {
     const persistenceFailure = (message: string) =>
       Effect.mapError(() => GatewayError.make({ kind: "transport", message }))
     const lifecycle: LifecycleStore = {
+      observeProcess: (access, input) =>
+        Effect.gen(function* () {
+          const operation = yield* operations
+            .findOperation(input)
+            .pipe(persistenceFailure("Could not inspect executor process observation"))
+          if (operation === undefined)
+            return yield* GatewayError.make({ kind: "fenced", message: "Executor operation is unavailable" })
+          const payload = yield* decodeNativeToolPayload(operation.code).pipe(
+            Effect.mapError(() =>
+              GatewayError.make({ kind: "fenced", message: "Executor operation request is invalid" }),
+            ),
+          )
+          const machineRequest = gatewayProtocol.encodeMachineRequest({ _tag: "NativeTool", request: payload.request })
+          const expectedDigest = yield* crypto
+            .digest("SHA-256", new TextEncoder().encode(machineRequest))
+            .pipe(Effect.map(Encoding.encodeHex), persistenceFailure("Could not identify executor process observation"))
+          const expectedMachineId = yield* crypto
+            .digest("SHA-256", new TextEncoder().encode(`${input.attempt}\u0000${input.operationKey}`))
+            .pipe(Effect.map(Encoding.encodeHex), persistenceFailure("Could not identify executor process observation"))
+          if (input.requestDigest !== expectedDigest || input.machineId !== expectedMachineId)
+            return yield* GatewayError.make({
+              kind: "fenced",
+              message: "Executor process observation conflicts with its durable machine request",
+            })
+          const result = yield* operations
+            .recordProcessObservation({
+              ...input,
+              assignmentGeneration: access.fence.assignmentGeneration,
+              leaseEpoch: access.leaseEpoch,
+              executorInstanceId: access.fence.executorId,
+              processIncarnation: access.fence.processIncarnation,
+            })
+            .pipe(persistenceFailure("Could not record executor process observation"))
+          if (result === "recorded" || result === "duplicate") yield* publishSnapshot(operation.threadId)
+          return result
+        }).pipe(
+          Effect.flatMap((result) =>
+            result === "fenced"
+              ? GatewayError.make({ kind: "fenced", message: "Executor process observation is fenced" })
+              : Effect.succeed(result),
+          ),
+        ),
       append: (access, frame) =>
         Effect.gen(function* () {
           const key = {

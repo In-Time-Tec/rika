@@ -218,7 +218,10 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
           const countedTranscripts = transcriptSqlWrites.make(countingDatabase, transcripts.get)
           statements.length = 0
           yield* countedTranscripts.replaceUnits(active, transcriptUnits)
-          expect(statements).toHaveLength(11)
+          expect(statements).toHaveLength(12)
+          expect(
+            statements.some((statement) => statement.includes('from "rika_turns"') && statement.includes("for update")),
+          ).toBe(true)
           expect(
             statements.filter((statement) => statement.startsWith('insert into "rika_transcript_units"')),
           ).toHaveLength(1)
@@ -238,7 +241,7 @@ it.effect.skipIf(databaseUrl === "")("runs product repository contracts against 
               },
             }),
           ).toBe("committed")
-          expect(statements).toHaveLength(12)
+          expect(statements).toHaveLength(13)
           expect(
             statements.filter((statement) => statement.startsWith('delete from "rika_transcript_units"')),
           ).toHaveLength(1)

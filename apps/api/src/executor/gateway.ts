@@ -259,6 +259,40 @@ export const makeGateway = Effect.fn("ExecutorGateway.make")(function* (
           : nativeOperations.receive(session, { ...message, assignmentId: message.access.fence.assignmentId }),
       )
     },
+    receiveProcessObservation: (socket, message) => {
+      const current = Ref.get(sessions).pipe(
+        Effect.map((registered) => registered.get(message.access.fence.assignmentId)),
+      )
+      return Effect.flatMap(current, (session) => {
+        if (session === undefined || session.socket !== socket || !sameAccess(session.access, message.access))
+          return GatewayError.make({ kind: "fenced", message: "Process observation came from an unknown executor" })
+        if (lifecycle.observeProcess === undefined)
+          return GatewayError.make({ kind: "transport", message: "Process observations are unavailable" })
+        return lifecycle
+          .observeProcess(message.access, {
+            ...message,
+            assignmentId: message.access.fence.assignmentId,
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              result === "missing"
+                ? GatewayError.make({
+                    kind: "fenced",
+                    message: "Process observation operation is unavailable",
+                  })
+                : Effect.sync(() =>
+                    socket.send(
+                      encode({
+                        _tag: "ProcessObservationAck",
+                        machineId: message.machineId,
+                        processId: message.observation.processId,
+                      }),
+                    ),
+                  ),
+            ),
+          )
+      })
+    },
     receiveWorkspace: (socket, message) => workspaceRpc.receive(socket, message.access, message.response),
     receiveBranchPush: (socket, message) =>
       branchPushRpc.receive(

@@ -1,5 +1,6 @@
 import * as Bash from "@rika/product/bash-tool"
 import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
+import * as NativeToolResult from "@rika/product/native-tool-result"
 import * as Edit from "@rika/product/edit-file-tool"
 import * as Read from "@rika/product/read-file-tool"
 import * as ShellCommandStatus from "@rika/product/shell-command-status-tool"
@@ -50,9 +51,24 @@ const unavailableSchedule = Schedule.exponential("250 millis").pipe(
   Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(2)))),
 )
 
-const terminalOutcomeFrom = (response: RemoteTools.TerminalResponse): ToolExecutor.TerminalOutcome =>
+const attributedResult = (result: Schema.Json, operationId: string): Schema.Json => {
+  const candidate: unknown = result
+  return Schema.is(NativeToolResult.Result)(candidate) ? { ...candidate, operationId } : result
+}
+
+const attributeSuccess = (response: RemoteTools.Response, operationId: string): RemoteTools.Response =>
+  response._tag === "Success" ? { ...response, result: attributedResult(response.result, operationId) } : response
+
+const terminalOutcomeFrom = (
+  response: RemoteTools.TerminalResponse,
+  operationId: string,
+): ToolExecutor.TerminalOutcome =>
   response._tag === "Success"
-    ? { _tag: "Success", result: response.result, encodedResult: response.result }
+    ? {
+        _tag: "Success",
+        result: attributedResult(response.result, operationId),
+        encodedResult: attributedResult(response.result, operationId),
+      }
     : { _tag: "DomainFailure", failure: response.failure, encodedFailure: response.failure }
 
 type UnparsedToolInput = ToolExecutor.Request["call"]["params"]
@@ -224,6 +240,7 @@ export const remoteToolExecutor = (options: {
                     Schema.is(RemoteTools.Unavailable)(error) && error.retryable !== true,
                   (error) => placementFailure(request.call.name, error.message),
                 ),
+                Effect.map((response) => attributeSuccess(response, operationKey)),
               )
           }),
       })
@@ -265,7 +282,10 @@ export const remoteToolExecutor = (options: {
             )
           return response._tag === "Cancelled"
             ? ({ _tag: "Cancelled" } as const)
-            : ({ _tag: "AlreadyTerminal", outcome: terminalOutcomeFrom(response.response) } as const)
+            : ({
+                _tag: "AlreadyTerminal",
+                outcome: terminalOutcomeFrom(response.response, request.operationKey),
+              } as const)
         })
       return ToolExecutor.ToolExecutor.of({
         replayPolicy: () => "provider-idempotent",

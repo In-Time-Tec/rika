@@ -177,3 +177,21 @@ it.effect("reports a delivery failure and safely retries the stable operation id
     expect(yield* Fiber.join(replay)).toEqual(success)
   }),
 )
+
+it.effect("accepts a retained result without a process-local waiter", () =>
+  Effect.gen(function* () {
+    const current = { socket: socket(), access: access(2) }
+    let accepted = 0
+    const endpoint = yield* nativeOperationEndpoint({
+      digest: (value) => Effect.succeed(value),
+      encodeRequest,
+      session: () => Effect.succeed(current),
+      authorize: () => Effect.succeed(true),
+      sameAccess: (left, right) => left.leaseEpoch === right.leaseEpoch,
+      send: () => Effect.void,
+      accept: () => Effect.sync(() => accepted++).pipe(Effect.asVoid),
+    })
+    yield* endpoint.receive(current, { ...identity, requestDigest: readRequestDigest, outcome: success })
+    expect(accepted).toBe(1)
+  }),
+)

@@ -3,7 +3,16 @@ import { expect, test } from "vitest"
 import * as TuiApp from "../../support/tui-app.harness"
 import { model } from "../../support/tui-model.fixture"
 
-const childTools = ["bash", "edit", "read", "run_child", "run_child_group", "shell_command_status"]
+const childTools = [
+  "await_child_group",
+  "bash",
+  "edit",
+  "read",
+  "run_child",
+  "run_child_group",
+  "shell_command_status",
+  "start_child_group",
+]
 const leafTools = ["bash", "edit", "read", "shell_command_status"]
 
 test.each([

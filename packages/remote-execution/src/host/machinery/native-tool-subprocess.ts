@@ -1,14 +1,22 @@
 import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
+import { ProcessTerminalObservation } from "@rika/product/process-observation"
 import { Config, Crypto, Deferred, Effect, FileSystem, Ref, Schema, Semaphore } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { MachineOutcome, type MachineOutcome as MachineOutcomeValue } from "../../protocol/messages"
+import { MachineOutcome } from "../../protocol/messages"
 
-const Request = Schema.Struct({
-  environment: Schema.Record(Schema.String, Schema.String),
-  request: NativeToolRuntime.Request,
-})
+const Request = Schema.Union([
+  Schema.TaggedStruct("Execute", {
+    environment: Schema.Record(Schema.String, Schema.String),
+    request: NativeToolRuntime.Request,
+  }),
+  Schema.TaggedStruct("Observe", { processId: Schema.String }),
+])
 
-const Response = Schema.Union([Schema.Struct({ outcome: MachineOutcome }), Schema.Struct({ error: Schema.String })])
+const Response = Schema.Union([
+  Schema.Struct({ outcome: MachineOutcome }),
+  Schema.Struct({ observation: ProcessTerminalObservation }),
+  Schema.Struct({ error: Schema.String }),
+])
 
 const encodeRequest = Schema.encodeSync(Schema.fromJsonString(Request))
 const decodeResponse = Schema.decodeUnknownEffect(Schema.fromJsonString(Response))
@@ -30,12 +38,12 @@ interface ConnectionState {
 const connect = (
   socketPath: string,
   input: typeof Request.Type,
-): Effect.Effect<MachineOutcomeValue, NativeToolSubprocessError> =>
+): Effect.Effect<typeof Response.Type, NativeToolSubprocessError> =>
   Effect.gen(function* () {
     const decoder = new TextDecoder()
     const state: ConnectionState = { text: "" }
-    const result = yield* Deferred.make<MachineOutcomeValue, NativeToolSubprocessError>()
-    const complete = (effect: Effect.Effect<MachineOutcomeValue, NativeToolSubprocessError>) => {
+    const result = yield* Deferred.make<typeof Response.Type, NativeToolSubprocessError>()
+    const complete = (effect: Effect.Effect<typeof Response.Type, NativeToolSubprocessError>) => {
       Deferred.doneUnsafe(result, effect)
     }
     const socket = yield* Effect.tryPromise({
@@ -56,11 +64,6 @@ const connect = (
                 decodeResponse(opened.data.text.trim()).pipe(
                   Effect.mapError(() =>
                     NativeToolSubprocessError.make({ message: "Native tool subprocess returned an invalid response" }),
-                  ),
-                  Effect.flatMap((response) =>
-                    "outcome" in response
-                      ? Effect.succeed(response.outcome)
-                      : Effect.fail(NativeToolSubprocessError.make({ message: response.error })),
                   ),
                 ),
               )
@@ -189,7 +192,8 @@ export const make = (options: Options) =>
         execute: (request: NativeToolRuntime.Request) =>
           Effect.gen(function* () {
             const running = yield* Ref.get(state)
-            return yield* connect(running.socketPath, {
+            const response = yield* connect(running.socketPath, {
+              _tag: "Execute",
               environment: { ...running.environment, ...options.environment },
               request,
             }).pipe(
@@ -204,6 +208,23 @@ export const make = (options: Options) =>
                 ),
               ),
             )
+            if ("error" in response) return yield* NativeToolSubprocessError.make({ message: response.error })
+            if (!("outcome" in response))
+              return yield* NativeToolSubprocessError.make({
+                message: "Native tool subprocess returned an invalid outcome",
+              })
+            return response.outcome
+          }),
+        observe: (processId: string) =>
+          Effect.gen(function* () {
+            const running = yield* Ref.get(state)
+            const response = yield* connect(running.socketPath, { _tag: "Observe", processId })
+            if ("error" in response) return yield* NativeToolSubprocessError.make({ message: response.error })
+            if (!("observation" in response))
+              return yield* NativeToolSubprocessError.make({
+                message: "Native tool subprocess returned an invalid observation",
+              })
+            return response.observation
           }),
       })),
     )

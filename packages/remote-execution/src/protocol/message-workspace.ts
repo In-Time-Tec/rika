@@ -14,11 +14,13 @@ import {
   LeaseEpoch,
   ProtocolVersion,
   PtyData,
+  RequestDigest,
   ResumeCursors,
   Sequence,
   Sha256,
   Timestamp,
 } from "./message-core"
+import { ProcessTerminalObservation } from "./message-execution"
 
 export const FilesystemCheckpoint = Schema.Struct({
   version: ProtocolVersion,
@@ -105,6 +107,15 @@ export const ReceiptWire = Schema.Struct({
 })
 export type ReceiptWire = typeof ReceiptWire.Type
 
+export const RetainedProcessObservation = Schema.Struct({
+  operationKey: Identifier,
+  attempt: Sequence,
+  machineId: Identifier,
+  requestDigest: RequestDigest,
+  observation: ProcessTerminalObservation,
+})
+export type RetainedProcessObservation = typeof RetainedProcessObservation.Type
+
 export const SessionWire = Schema.Struct({
   version: ProtocolVersion,
   fence: Fence,
@@ -112,6 +123,7 @@ export const SessionWire = Schema.Struct({
   sessionToken: Identifier,
   heartbeatIntervalMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   cursor: Cursor,
+  observations: Schema.optionalKey(Schema.Array(RetainedProcessObservation)),
 })
 export type SessionWire = typeof SessionWire.Type
 

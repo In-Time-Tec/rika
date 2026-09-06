@@ -1,21 +1,12 @@
 import * as Turn from "@rika/product/turn-record"
 import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
+import { TestModel } from "generalist/testing"
 import * as TuiApp from "../../support/tui-app.harness"
 import { model } from "../../support/tui-model.fixture"
 
 /** Exercises process-result folding through the hosted feed projection. */
 const tuiTestTimeout = 60_000
-const spinnerFor = (frame: string, marker: string): string | undefined => {
-  const lines = frame.split("\n")
-  const sourceLine = lines.findIndex((line) => line.includes(marker))
-  if (sourceLine < 0) return undefined
-  return lines[sourceLine]?.match(/[⠀-⣿]/u)?.[0] ?? lines[sourceLine - 1]?.match(/[⠀-⣿]/u)?.[0]
-}
-const spinnerChanged = (frame: string, marker: string, previous: string | undefined): boolean => {
-  const current = spinnerFor(frame, marker)
-  return current !== undefined && current !== previous
-}
 
 test(
   "settles repeated process waits on the launching bash tool",
@@ -41,26 +32,24 @@ test(
         yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
         const running = yield* app.waitFrameMatch(
-          (frame) => frame.includes("detached") && spinnerFor(frame, command) !== undefined,
+          (frame) => frame.includes(`⇢ $ ${command}`),
           20_000,
         )
-        const collapsedGlyph = spinnerFor(running, command)
-        expect(collapsedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, collapsedGlyph), 5_000)
+        expect(running).not.toContain("detached")
 
         yield* app.clickText(command)
         const expanded = yield* app.waitFrame("EARLY_OUTPUT")
-        const expandedGlyph = spinnerFor(expanded, command)
-        expect(expandedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, expandedGlyph), 5_000)
+        expect(expanded).toContain(`⇢ $ ${command}`)
+        expect(expanded).not.toContain("detached")
 
         yield* app.clickText(command)
-        const recollapsed = yield* app.waitFrame("detached")
-        const recollapsedGlyph = spinnerFor(recollapsed, command)
-        expect(recollapsedGlyph).toBeDefined()
-        yield* app.waitFrameMatch((frame) => spinnerChanged(frame, command, recollapsedGlyph), 5_000)
+        const recollapsed = yield* app.waitFrame(`⇢ $ ${command}`)
+        expect(recollapsed).not.toContain("detached")
         yield* app.waitFrame("SHELL_WAIT_COMPLETE", 20_000)
-        yield* app.settled
+        const settled = yield* app.settled
+        expect(settled).toContain(`✓ $ ${command}`)
+        expect(settled).not.toContain("⇢")
+        expect(settled).not.toContain("detached")
 
         const tools = (yield* app.transcript(Turn.TurnId.make("tui-turn-0")))?.units.flatMap((unit) =>
           unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
@@ -93,6 +82,52 @@ test(
         expect(completed).not.toContain("Waited for")
         expect(completed).not.toContain("Waiting for")
         expect(completed.split(command).length - 1).toBeLessThanOrEqual(1)
+        yield* app.quit
+      }),
+    ),
+  tuiTestTimeout,
+)
+
+test(
+  "receives a background child-group receipt without blocking on the child",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          lanes: [
+            {
+              steps: [
+                model.turn([
+                  TestModel.toolCall(
+                    "start_child_group",
+                    {
+                      members: [{ key: "background", selection: "Task", prompt: "BACKGROUND_CHILD_PROMPT" }],
+                      concurrency: 1,
+                    },
+                    { id: "start-background-child" },
+                  ),
+                ]),
+                model.text("BACKGROUND_RECEIPT_OBSERVED"),
+              ],
+            },
+            { profile: "Task", steps: [model.text("BACKGROUND_CHILD_DONE", 3_000)] },
+          ],
+          height: 40,
+        })
+
+        yield* Effect.tryPromise(() => app.type("Start independent child work."))
+        app.pressEnter()
+        const receipt = yield* app.waitFrameMatch(
+          (frame) => frame.includes("BACKGROUND_RECEIPT_OBSERVED") && frame.includes("Running 1 subagent"),
+          20_000,
+        )
+        expect(receipt).not.toContain("BACKGROUND_CHILD_DONE")
+
+        yield* app.waitFrame("1 agent finished", 20_000)
+        yield* app.clickText("1 agent finished")
+        yield* app.waitFrame("Subagent finished")
+        yield* app.clickText("Subagent finished")
+        yield* app.waitFrame("BACKGROUND_CHILD_DONE")
         yield* app.quit
       }),
     ),

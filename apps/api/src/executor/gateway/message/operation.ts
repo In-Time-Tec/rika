@@ -8,6 +8,7 @@ type Message = Extract<
   {
     readonly _tag:
       | "MachineResult"
+      | "ProcessObservation"
       | "WorkspaceResponse"
       | "BranchPushResult"
       | "PtyOpened"
@@ -23,6 +24,10 @@ export interface GatewayOperationMessageDependencies {
   readonly receiveMachine: (
     socket: Socket,
     message: Extract<Message, { readonly _tag: "MachineResult" }>,
+  ) => Effect.Effect<void, ControllerError | GatewayError>
+  readonly receiveProcessObservation: (
+    socket: Socket,
+    message: Extract<Message, { readonly _tag: "ProcessObservation" }>,
   ) => Effect.Effect<void, ControllerError | GatewayError>
   readonly receiveWorkspace: (
     socket: Socket,
@@ -44,6 +49,10 @@ export const gatewayOperationMessageHandler = (dependencies: GatewayOperationMes
       case "MachineResult":
         yield* dependencies.controller.validateAccess(redactAccess(message.access))
         yield* dependencies.receiveMachine(socket, message)
+        return true
+      case "ProcessObservation":
+        yield* dependencies.controller.validateAccess(redactAccess(message.access))
+        yield* dependencies.receiveProcessObservation(socket, message)
         return true
       case "WorkspaceResponse":
         yield* dependencies.receiveWorkspace(socket, message)

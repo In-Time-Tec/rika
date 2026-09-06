@@ -296,6 +296,70 @@ describe("foreground Runner", { concurrent: false }, () => {
               machineId: "machine-cancel",
               state: { _tag: "Completed", requestDigest, outcome: { _tag: "Cancelled" } },
             })
+            socket.message({
+              _tag: "MachineExecute",
+              access,
+              operationKey: "operation-background",
+              attempt: 0,
+              machineId: "machine-background",
+              requestDigest,
+              request: {
+                _tag: "NativeTool",
+                request: {
+                  _tag: "Bash",
+                  command: "while [ ! -f finish ]; do sleep 0.02; done; printf preserved; exit 7",
+                  timeoutMillis: 0,
+                },
+              },
+            })
+            expect((yield* machineResult(socket, "machine-background")).outcome).toMatchObject({
+              _tag: "Success",
+              value: { result: { running: true } },
+            })
+            socket.emit("close", new CloseEvent("close", { code: 1006 }))
+            const reconnected = yield* eventually(() =>
+              FakeWebSocket.current !== socket ? FakeWebSocket.current : undefined,
+            )
+            yield* eventually(() => reconnected.messages("ExecutorReconnect")[0])
+            yield* fileSystem.writeFileString(`${workspacePath}/finish`, "finish")
+            const retained = yield* eventually(() => latestSnapshot?.observations?.[0])
+            expect(retained.observation).toMatchObject({ exitCode: 7 })
+            reconnected.message({
+              _tag: "ExecutorReconnected",
+              welcome: {
+                version: 1,
+                fence: access.fence,
+                leaseEpoch: 2,
+                leaseExpiresAt: 9_999_999_999_999,
+                heartbeatIntervalMillis: 60_000,
+                cursor: { sequence: 1, value: "receipt-1" },
+              },
+            })
+            const replayed = yield* eventually(() => reconnected.messages("ProcessObservation")[0])
+            expect(replayed.observation).toEqual(retained.observation)
+            expect(replayed.access.leaseEpoch).toBe(2)
+            reconnected.message({
+              _tag: "ProcessObservationAck",
+              machineId: retained.machineId,
+              processId: retained.observation.processId,
+            })
+            yield* eventually(() => (latestSnapshot?.observations?.length === 0 ? true : undefined))
+            reconnected.message({
+              _tag: "MachineExecute",
+              access: { ...access, leaseEpoch: 2 },
+              operationKey: "operation-output",
+              attempt: 0,
+              machineId: "machine-output",
+              requestDigest,
+              request: {
+                _tag: "NativeTool",
+                request: { _tag: "ShellCommandStatus", processId: retained.observation.processId },
+              },
+            })
+            expect((yield* machineResult(reconnected, "machine-output")).outcome).toMatchObject({
+              _tag: "Success",
+              value: { result: { text: "preserved", running: false, exitCode: 7 } },
+            })
             yield* Fiber.interrupt(runner)
             expect(yield* eventually(() => (socket.closed ? true : undefined))).toBe(true)
           }),

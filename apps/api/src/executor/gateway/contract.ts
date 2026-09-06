@@ -121,6 +121,7 @@ export interface Gateway extends ExecutorDataPlane {
 }
 
 export interface LifecycleStore {
+  readonly observeProcess?: HostedProcessObservation
   readonly append: (
     access: AccessWire,
     frame: ToolOperationLifecycleFrame,
@@ -159,6 +160,18 @@ export interface LifecycleStore {
     GatewayError
   >
 }
+
+export type HostedProcessObservation = (
+  access: AccessWire,
+  input: {
+    readonly assignmentId: string
+    readonly operationKey: string
+    readonly attempt: number
+    readonly machineId: string
+    readonly requestDigest: string
+    readonly observation: import("@rika/remote-execution/protocol").ProcessTerminalObservation
+  },
+) => Effect.Effect<"recorded" | "duplicate" | "missing", GatewayError>
 
 export const cancelledResponse: ToolOperationResponse = {
   _tag: "DomainFailure",

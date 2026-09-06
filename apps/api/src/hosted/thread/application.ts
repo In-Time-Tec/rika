@@ -19,7 +19,6 @@ import { ThreadId as HostedThreadId, type OwnerId } from "@rika/product/hosted-m
 import type { InteractiveInvocation } from "@rika/product/interactive-command"
 import type { InteractiveEvent } from "@rika/product/interactive-event"
 import type { InteractiveSession } from "@rika/product/interactive-session"
-import { makeThreadViewFeed } from "@rika/product/interactive-thread-view-feed"
 import { operationError } from "@rika/product/operation-error"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as ProductOperationService from "@rika/product/product-operation-service"
@@ -31,7 +30,6 @@ import { applyGeneratedTitle } from "@rika/product/thread-title-operation"
 import { TurnId, type Turn } from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product/turn-repository"
 import * as TranscriptRepository from "@rika/product/transcript-repository"
-import { loadTranscriptWindow } from "@rika/product/transcript-window"
 import type { PageCursor } from "@rika/product/transcript-page"
 import type { HostedThreadSnapshot } from "@rika/product/client-protocol"
 import { HostedClientAuthority } from "@rika/product/hosted-client-authority"
@@ -40,11 +38,8 @@ import * as ProductRepositories from "@rika/product-store/product-repositories"
 import { identityKey } from "@rika/transcript/transcript-unit-identity"
 import type { Unit } from "@rika/transcript/transcript-unit"
 import { HostedModelRegistry } from "../environment/model-registry"
-import {
-  interactiveSessionBuffer,
-  interactiveSessionSnapshot,
-  type PendingInteractiveInvocation,
-} from "./interactive-session-buffer"
+import { interactiveSessionBuffer, type PendingInteractiveInvocation } from "./interactive-session-buffer"
+import { make as makeSnapshotPublication } from "./protocol/snapshot-publication"
 
 export class HostedThreadApplicationError extends Schema.TaggedError<HostedThreadApplicationError>()(
   "HostedThreadApplicationError",
@@ -153,6 +148,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const hosted = yield* HostedClientAuthority
     const store = yield* ThreadProtocolStore
+    const snapshotPublication = yield* makeSnapshotPublication
     const modelRegistry = yield* HostedModelRegistry
     const ownerScope = yield* Effect.scope
     const projectionAdmissions = yield* RcMap.make({
@@ -167,79 +163,8 @@ export const layer = Layer.effect(
         message: error.message,
       })
     const ownerRepositories = yield* LayerMap.make((ownerId: OwnerId) => ProductRepositories.layer(ownerId))
-    const repositorySnapshot = Effect.fn("HostedThreadApplication.repositorySnapshot")(function* (
-      ownerId: OwnerId,
-      threadId: ThreadId,
-      before?: PageCursor,
-    ) {
-      return yield* Effect.scoped(
-        ownerRepositories.contextEffect(ownerId).pipe(
-          Effect.flatMap((context) =>
-            Effect.gen(function* () {
-              const threads = Context.get(context, ThreadRepository.Service)
-              const turns = Context.get(context, TurnRepository.Service)
-              const transcripts = Context.get(context, TranscriptRepository.Service)
-              const thread = yield* threads.get(threadId)
-              if (thread === undefined)
-                return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
-              const hostedThread = yield* hosted.readThread({ ownerId, threadId: HostedThreadId.make(threadId) })
-              if (hostedThread === undefined)
-                return yield* HostedThreadApplicationError.make({ message: "Thread is unavailable" })
-              const queue = yield* turns.readQueue(threadId)
-              const page = yield* loadTranscriptWindow(threadId, transcripts, before)
-              const active = yield* turns.findActive(threadId)
-              const activeProjection = active === undefined ? undefined : yield* transcripts.get(active.id)
-              const loadedAt = yield* Clock.currentTimeMillis
-              const feed = makeThreadViewFeed(() => loadedAt)
-              const loaded: Extract<Parameters<typeof feed.publish>[0], { readonly _tag: "SelectionLoaded" }> = {
-                _tag: "SelectionLoaded",
-                selectionEpoch: 0,
-                activitySequence: 0,
-                thread,
-                entries: page.entries,
-                hasOlder: page.hasOlder,
-                hasNewer: page.hasNewer,
-                usage: page.usage,
-                queueRevision: queue.revision,
-                queuedCount: queue.queuedCount,
-                queue: queue.turns.map((turn) => ({ id: turn.id, prompt: turn.prompt, createdAt: turn.createdAt })),
-                projectionCheckpoints:
-                  activeProjection?.projectorCheckpoint === undefined
-                    ? []
-                    : [{ turnId: activeProjection.turn.id, checkpoint: activeProjection.projectorCheckpoint }],
-              }
-              if (page.oldestCursor !== undefined) Object.assign(loaded, { oldestCursor: page.oldestCursor })
-              if (page.newestCursor !== undefined) Object.assign(loaded, { newestCursor: page.newestCursor })
-              if (active !== undefined && before === undefined) Object.assign(loaded, { activeTurn: active })
-              feed.publish(loaded)
-              const view = feed.current()
-              if (view === undefined)
-                return yield* HostedThreadApplicationError.make({ message: "Thread checkpoint is invalid" })
-              const authorizations = interactiveSessionSnapshot.pendingAuthorizations(
-                HostedThreadId.make(threadId),
-                view,
-                (turnId) =>
-                  activeProjection !== undefined && turnId === String(activeProjection.turn.id)
-                    ? activeProjection.projectorCheckpoint
-                    : undefined,
-              )
-              if (authorizations === undefined)
-                return yield* HostedThreadApplicationError.make({
-                  message: "Pending authorization has no durable execution checkpoint",
-                })
-              return {
-                executorKind: hostedThread.executorKind,
-                view,
-                pendingAuthorizations: authorizations,
-              }
-            }).pipe(Effect.provide(context)),
-          ),
-          Effect.mapError((error) =>
-            Schema.is(HostedThreadApplicationError)(error) ? error : applicationFailure(error),
-          ),
-        ),
-      )
-    })
+    const repositorySnapshot = (ownerId: OwnerId, threadId: ThreadId, before?: PageCursor) =>
+      snapshotPublication.snapshot(ownerId, threadId, before).pipe(Effect.mapError(applicationFailure))
     const sessionBuffer = yield* interactiveSessionBuffer({
       store,
       ownerScope,
@@ -253,12 +178,8 @@ export const layer = Layer.effect(
     ) {
       const key = `${ownerId}:${threadId}`
       yield* sessionBuffer.awaitProjection(key)
-      const state = interactiveSessions.get(key)
-      const current =
-        state?.session === undefined
-          ? undefined
-          : interactiveSessionSnapshot.sessionSnapshot(state.executorKind, HostedThreadId.make(threadId), state.session)
-      if (current !== undefined) return current
+      // A live session can retain a running process after its terminal
+      // observation commits out of band. Reconnect from durable projection.
       return yield* repositorySnapshot(ownerId, threadId)
     })
     const owners = yield* LayerMap.make((ownerId: OwnerId) =>

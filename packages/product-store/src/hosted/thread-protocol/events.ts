@@ -12,6 +12,7 @@ import {
 } from "../../database/schema/product"
 import { decodeDerivedRow } from "../../database/derived-row"
 import { requireThreadReadAccess } from "../authority"
+import { processObservationProjection } from "./process-observation-projection"
 import {
   bigintText,
   bigintValue,
@@ -132,7 +133,8 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
       readonly createdAt: Timestamp
     },
   ) {
-    const written = input.events.map((event, index): ThreadProtocolEvent => {
+    const projected = yield* Effect.forEach(input.events, (event) => processObservationProjection.event(tx, event))
+    const written = projected.map((event, index): ThreadProtocolEvent => {
       const sequence = (input.firstCursor + BigInt(index)).toString()
       return {
         ownerId: input.ownerId,
@@ -191,29 +193,32 @@ export const eventOperations = (db: PgDrizzle.EffectPgDatabase) => {
       readonly replayRequired?: boolean
     },
   ) =>
-    query(
-      tx
-        .insert(rikaHostedThreadProtocolSnapshots)
-        .values({
-          ownerId: input.ownerId,
-          threadId: input.threadId,
-          threadVersion: bigintValue(input.threadVersion),
-          cursor: bigintValue(input.cursor),
-          snapshot: input.snapshot,
-          replayRequired: input.replayRequired ?? false,
-          createdAt: timestampValue(input.createdAt),
-        })
-        .onConflictDoUpdate({
-          target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
-          set: {
+    Effect.gen(function* () {
+      const snapshot = yield* processObservationProjection.snapshot(tx, input.snapshot)
+      yield* query(
+        tx
+          .insert(rikaHostedThreadProtocolSnapshots)
+          .values({
+            ownerId: input.ownerId,
+            threadId: input.threadId,
+            threadVersion: bigintValue(input.threadVersion),
             cursor: bigintValue(input.cursor),
-            snapshot: input.snapshot,
-            replayRequired: sql`${rikaHostedThreadProtocolSnapshots.replayRequired} OR excluded.replay_required`,
+            snapshot,
+            replayRequired: input.replayRequired ?? false,
             createdAt: timestampValue(input.createdAt),
-          },
-          setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
-        }),
-    ).pipe(Effect.asVoid)
+          })
+          .onConflictDoUpdate({
+            target: [rikaHostedThreadProtocolSnapshots.threadId, rikaHostedThreadProtocolSnapshots.threadVersion],
+            set: {
+              cursor: bigintValue(input.cursor),
+              snapshot,
+              replayRequired: sql`${rikaHostedThreadProtocolSnapshots.replayRequired} OR excluded.replay_required`,
+              createdAt: timestampValue(input.createdAt),
+            },
+            setWhere: lte(rikaHostedThreadProtocolSnapshots.cursor, sql<number>`excluded.cursor`),
+          }),
+      )
+    })
 
   const checkpointDue = Effect.fn("ThreadProtocolStore.checkpointDue")(function* (
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],

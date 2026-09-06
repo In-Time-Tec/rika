@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, Schema } from "effect"
+import { Effect, FileSystem, Option, Schema, Semaphore } from "effect"
 import type { SessionWire } from "../protocol/messages"
 import { SessionWire as SessionWireSchema } from "../protocol/messages"
 import { HostError } from "./error"
@@ -16,6 +16,7 @@ export interface SessionStore {
 export const sessionStore = (stateDirectory: string): Effect.Effect<SessionStore, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
+    const saveAccess = yield* Semaphore.make(1)
     const filename = `${stateDirectory}/session.json`
     const restrictDirectory = fileSystem.makeDirectory(stateDirectory, { recursive: true, mode: directoryMode }).pipe(
       Effect.andThen(fileSystem.chmod(stateDirectory, directoryMode)),
@@ -56,5 +57,7 @@ export const sessionStore = (stateDirectory: string): Effect.Effect<SessionStore
         Effect.mapError(() => HostError.make({ message: "Could not persist executor session state" })),
       )
     })
-    return { load, save } satisfies SessionStore
+    // Lease receipts and process observations can arrive together and share
+    // the same atomic-write temporary file.
+    return { load, save: (session) => saveAccess.withPermits(1)(save(session)) } satisfies SessionStore
   })

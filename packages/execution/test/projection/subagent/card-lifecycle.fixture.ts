@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
+import { RunEvent } from "generalist/runtime"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import { block, modelResponse, resetEventPosition, treeEvent } from "../../support/projector-event.fixture"
 
@@ -117,68 +119,95 @@ describe("Generalist subagent card projection", () => {
     expect(late?.parentId).toBeDefined()
   })
 
-  it("rebuilds cancelled descendant cards after durable replay", () => {
-    resetEventPosition()
-    const events = [
-      treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }),
-      treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
-      modelResponse("raw-root-run", {
-        type: "tool-call",
-        id: "provider-call-1",
-        name: "run_child",
-        params: { selection: "Task", prompt: "Inspect the tree" },
-        providerExecuted: false,
-        metadata: {},
-      }),
-      treeEvent("raw-root-run", {
-        _tag: "ChildLinked",
-        childRunId: "raw-child-run",
-        invocationId: "provider-call-1",
-        selection: "Task",
-        prompt: Prompt.make("Inspect the tree"),
-        childDepth: 1,
-        readiness: "ready",
-      }),
-      treeEvent(
-        "raw-child-run",
-        { _tag: "RunAttemptStarted", attempt: 1 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-      treeEvent(
-        "raw-child-run",
-        { _tag: "TurnStarted", turn: 0 },
-        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
-      ),
-    ]
-    const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
-    projector.applyAll(events)
-    const running = projector
-      .snapshot()
-      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
-    expect(
-      running?.content._tag === "Block" && running.content.block._tag === "SubagentCard"
-        ? running.content.block.status
-        : undefined,
-    ).toBe("running")
+  for (const terminal of ["completed", "failed", "cancelled"] as const)
+    it(`keeps child state authoritative after parent ${terminal}, including durable replay`, () => {
+      resetEventPosition()
+      const events = [
+        treeEvent("raw-root-run", { _tag: "RunAttemptStarted", attempt: 1 }),
+        treeEvent("raw-root-run", { _tag: "TurnStarted", turn: 0 }),
+        modelResponse("raw-root-run", {
+          type: "tool-call",
+          id: "provider-call-1",
+          name: "run_child",
+          params: { selection: "Task", prompt: "Inspect the tree" },
+          providerExecuted: false,
+          metadata: {},
+        }),
+        treeEvent("raw-root-run", {
+          _tag: "ChildLinked",
+          childRunId: "raw-child-run",
+          invocationId: "provider-call-1",
+          selection: "Task",
+          prompt: Prompt.make("Inspect the tree"),
+          childDepth: 1,
+          readiness: "ready",
+        }),
+        treeEvent(
+          "raw-child-run",
+          { _tag: "RunAttemptStarted", attempt: 1 },
+          { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+        ),
+        treeEvent(
+          "raw-child-run",
+          { _tag: "TurnStarted", turn: 0 },
+          { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+        ),
+      ]
+      const projector = TreeProjector.make("turn-parent-cancel", "delegate this")
+      projector.applyAll(events)
+      const running = projector
+        .snapshot()
+        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+      expect(
+        running?.content._tag === "Block" && running.content.block._tag === "SubagentCard"
+          ? running.content.block.status
+          : undefined,
+      ).toBe("running")
 
-    const cancellation = treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" })
-    const cancelled = projector.apply(cancellation)
-    const cancelledCard = block(cancelled, "SubagentCard")
-    expect(
-      cancelledCard?._tag === "Block" && cancelledCard.block._tag === "SubagentCard"
-        ? cancelledCard.block.status
-        : undefined,
-    ).toBe("cancelled")
+      let parentTerminal = treeEvent("raw-root-run", { _tag: "RunCancelled", reason: "Cancelled by user" })
+      if (terminal === "completed")
+        parentTerminal = treeEvent("raw-root-run", {
+          _tag: "RunCompleted",
+          result: { text: "parent done", turns: 1, session: { sessionId: "root-session", leafId: null } },
+        })
+      if (terminal === "failed")
+        parentTerminal = treeEvent("raw-root-run", {
+          _tag: "RunFailed",
+          error: Schema.decodeSync(RunEvent.RunFailure)({
+            _tag: "generalist/runtime/AgentExecutionFailure",
+            message: "parent failed",
+          }),
+        })
+      const parentChange = projector.apply(parentTerminal)
+      expect(block(parentChange, "SubagentCard")).toBeUndefined()
+      expect(projector.snapshot().state.status).toBe("running")
+      const stillActive = TreeProjector.make("turn-parent-cancel", "delegate this")
+      stillActive.applyAll([...events, parentTerminal])
+      expect(stillActive.snapshot()).toEqual(projector.snapshot())
 
-    const resumed = TreeProjector.make("turn-parent-cancel", "delegate this")
-    resumed.applyAll([...events, cancellation])
-    const restored = resumed
-      .snapshot()
-      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
-    expect(
-      restored?.content._tag === "Block" && restored.content.block._tag === "SubagentCard"
-        ? restored.content.block.status
-        : undefined,
-    ).toBe("cancelled")
-  })
+      const cancellation = treeEvent(
+        "raw-child-run",
+        { _tag: "RunCancelled", reason: "Child explicitly cancelled" },
+        { parentRunId: "raw-root-run", invocationId: "provider-call-1" },
+      )
+      const cancelled = projector.apply(cancellation)
+      const cancelledCard = block(cancelled, "SubagentCard")
+      expect(
+        cancelledCard?._tag === "Block" && cancelledCard.block._tag === "SubagentCard"
+          ? cancelledCard.block.status
+          : undefined,
+      ).toBe("cancelled")
+      expect(projector.snapshot().state.status).toBe(terminal)
+
+      const resumed = TreeProjector.make("turn-parent-cancel", "delegate this")
+      resumed.applyAll([...events, parentTerminal, cancellation])
+      const restored = resumed
+        .snapshot()
+        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+      expect(
+        restored?.content._tag === "Block" && restored.content.block._tag === "SubagentCard"
+          ? restored.content.block.status
+          : undefined,
+      ).toBe("cancelled")
+    })
 })

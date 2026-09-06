@@ -5,6 +5,7 @@ import type {
   ToolOperationTerminalOutcome as ToolOperationTerminalOutcomeValue,
 } from "@rika/product/tool-operation-lifecycle"
 import { rikaHostedRunnerAdmissions } from "../../database/schema/product"
+import type { ProcessTerminalObservation } from "@rika/product/process-observation"
 
 export class HostedExecutionOperationsError extends Schema.TaggedError<HostedExecutionOperationsError>()(
   "HostedExecutionOperationsError",
@@ -89,6 +90,18 @@ export type FinalizeOperationResult =
     }
 
 export interface HostedExecutionOperationsService {
+  readonly recordProcessObservation: (input: {
+    readonly assignmentId: string
+    readonly operationKey: string
+    readonly attempt: number
+    readonly machineId: string
+    readonly requestDigest: string
+    readonly assignmentGeneration: number
+    readonly leaseEpoch: number
+    readonly executorInstanceId: string
+    readonly processIncarnation: string
+    readonly observation: ProcessTerminalObservation
+  }) => Effect.Effect<"recorded" | "duplicate" | "missing" | "fenced", HostedExecutionOperationsError>
   readonly findOperation: (
     key: Pick<OperationIdentity, "assignmentId" | "operationKey" | "attempt">,
     lock?: "update",

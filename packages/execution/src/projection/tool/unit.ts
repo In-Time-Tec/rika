@@ -123,7 +123,9 @@ export const makeToolUnitProjection = (dependencies: ToolUnitProjectionInput): T
     node.tools.set(rawId, alias)
     updateTool(node, originRawId, (tool) => {
       const checks = [...(tool.process?.checks ?? []).filter((candidate) => candidate.toolCallId !== rawId), check]
-      return { ...tool, status: "running", process: { ...tool.process, checks } }
+      // Checking a retained terminal result does not start the command again.
+      // Declarations may also be replayed after the check has completed.
+      return { ...tool, process: { ...tool.process, checks } }
     })
   }
 

@@ -8,8 +8,9 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import type * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Clock, Effect, Schema } from "effect"
-import { rikaTranscriptCheckpoints, rikaTranscriptUnits } from "../database/schema/product"
+import { rikaTranscriptCheckpoints, rikaTranscriptUnits, rikaTurns } from "../database/schema/product"
 import { updateThreadUsage } from "./sql-usage"
+import { ProcessObservationProjection } from "../hosted/execution/process-observation"
 
 const error = (cause: unknown) =>
   Schema.is(RepositoryError)(cause) ? cause : RepositoryError.make({ message: String(cause) })
@@ -48,14 +49,17 @@ export const transcriptSqlWrites = {
     get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>,
   ): Pick<Interface, "commitProjection" | "replaceUnits"> => ({
     commitProjection: Effect.fn("TranscriptRepository.commitProjection")(function* (turn, change, withinTransaction) {
-      const upserts = projectionUpserts(change)
-      yield* validateUnits(turn.id, upserts)
+      const projectedUpserts = projectionUpserts(change)
+      yield* validateUnits(turn.id, projectedUpserts)
       const clock = yield* Clock.Clock
       return yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
             const checkpoint = change.checkpoint
             const now = clock.currentTimeMillisUnsafe()
+            // The Turn exists even before its first projection checkpoint. Share
+            // this lock with process observations so first projection cannot race exit.
+            yield* tx.select({ id: rikaTurns.id }).from(rikaTurns).where(eq(rikaTurns.id, turn.id)).for("update")
             const storedCheckpoint = (yield* tx
               .select({
                 projectionVersion: rikaTranscriptCheckpoints.projectionVersion,
@@ -65,6 +69,9 @@ export const transcriptSqlWrites = {
               .where(eq(rikaTranscriptCheckpoints.turnId, turn.id))
               .for("update")
               .limit(1))[0]
+            const upserts = yield* ProcessObservationProjection.overlay(tx, turn.id, projectedUpserts).pipe(
+              Effect.mapError(error),
+            )
             const replacingOlderProjection =
               storedCheckpoint !== undefined &&
               storedCheckpoint.projectionVersion < ExecutionProjection.projectionVersion
@@ -176,8 +183,17 @@ export const transcriptSqlWrites = {
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
+            yield* tx
+              .select({ turnId: rikaTurns.id })
+              .from(rikaTurns)
+              .where(eq(rikaTurns.id, turn.id))
+              .for("update")
+              .limit(1)
+            const overlaidUnits = yield* ProcessObservationProjection.overlay(tx, turn.id, units).pipe(
+              Effect.mapError(error),
+            )
             const now = clock.currentTimeMillisUnsafe()
-            const revision = units.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0)
+            const revision = overlaidUnits.reduce((maximum, unit) => Math.max(maximum, unit.revision), 0)
             yield* tx
               .insert(rikaTranscriptCheckpoints)
               .values({
@@ -207,9 +223,9 @@ export const transcriptSqlWrites = {
               })
             yield* updateThreadUsage(tx, turn, state.usage, now)
             yield* tx.delete(rikaTranscriptUnits).where(eq(rikaTranscriptUnits.turnId, turn.id))
-            if (units.length > 0)
+            if (overlaidUnits.length > 0)
               yield* tx.insert(rikaTranscriptUnits).values(
-                units.map((unit) => ({
+                overlaidUnits.map((unit) => ({
                   turnId: turn.id,
                   unitKey: unit.key,
                   threadId: turn.threadId,

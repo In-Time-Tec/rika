@@ -103,6 +103,13 @@ const shellGroupState = (units: ReadonlyArray<ToolUnit>) => ({
     (unit) => unit.block.status === "failed" || unit.block.status === "rejected" || unit.block.status === "unknown",
   ).length,
   cancelledCount: units.filter((unit) => unit.block.status === "cancelled").length,
+  allActiveBackground: units.every(
+    (unit) => unit.block.status !== "running" || unit.block.process?.background === true,
+  ),
+  label: plural(
+    units.length,
+    units.every((unit) => unit.block.process?.background === true) ? "background command" : "command",
+  ),
 })
 
 export const createToolBodyRenderer = (context: ToolBodyContext) => {
@@ -339,10 +346,15 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       append(italic(fg(tone)(suffix)))
     }
   }
+  // Background commands are still active, but are not foreground tool waits.
+  const shellStatusIcon = (unit: ToolUnit) =>
+    unit.block.status === "running" && unit.block.process?.background === true
+      ? fg(colors.blue)("⇢")
+      : statusIcon(unit.block.status)
   const renderShellSingleBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
     const output = isToolOutputDisplayed(unit.block) ? toolResultText(unit.block.result) : undefined
     const inlineOutput = unit.block.presentation.outputDisplay === "inline"
-    append(selected ? bold(statusIcon(unit.block.status)) : statusIcon(unit.block.status))
+    append(selected ? bold(shellStatusIcon(unit)) : shellStatusIcon(unit))
     append(fg(colors.text)(" "))
     append(bold(fg(colors.gold)("$")))
     append(fg(colors.text)(" "))
@@ -361,7 +373,7 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
     append(fg(colors.text)("\n  "))
     const rowStart = context.mark()
     const start = context.line()
-    append(statusIcon(unit.block.status))
+    append(shellStatusIcon(unit))
     append(fg(colors.text)(" "))
     append(bold(fg(colors.gold)("$")))
     append(fg(colors.text)(" "))
@@ -380,14 +392,15 @@ export const createToolBodyRenderer = (context: ToolBodyContext) => {
       renderShellSingleBody(units[0]!, selected, expanded)
       return
     }
-    const { status, failedCount, cancelledCount } = shellGroupState(units)
+    const { status, failedCount, cancelledCount, allActiveBackground, label } = shellGroupState(units)
     const running = status === "running"
-    const summary = `${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}`
-    if (selected) highlight(`${rowStatusIcon(status, spinnerFrame)} ${summary}`)
+    const backgroundRunning = running && allActiveBackground
+    const summary = `${running ? "Running" : "Ran"} ${label}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}`
+    if (selected) highlight(`${backgroundRunning ? "⇢" : rowStatusIcon(status, spinnerFrame)} ${summary}`)
     else {
-      append(statusIcon(status))
+      append(backgroundRunning ? fg(colors.blue)("⇢") : statusIcon(status))
       for (const chunk of renderToolSummary(
-        { primary: running ? "Running" : "Ran", secondary: ` ${plural(units.length, "command")}` },
+        { primary: running ? "Running" : "Ran", secondary: ` ${label}` },
         { leading: " " },
       )[0]!)
         append(chunk)

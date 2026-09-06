@@ -1,4 +1,4 @@
-import type { Run, RunEvent } from "generalist/runtime"
+import type { Run } from "generalist/runtime"
 import * as Projection from "@rika/product/execution-projection"
 import * as UnitOrder from "@rika/product/execution-transcript-contract"
 import type { Unit } from "@rika/product/execution-transcript-contract"
@@ -32,7 +32,6 @@ const make = (
   const localId = (family: string, ...parts: ReadonlyArray<string | number>): string =>
     scopedId(family, turnId, ...parts)
   const usage = Usage.makeUsageAccounting(options.pricing)
-  const { deactivate, settleCalls } = usage
   const core: ProjectorCore = {
     revision: 0,
     checkpoint: undefined,
@@ -58,34 +57,47 @@ const make = (
   let titleSettled = options.titleExpected !== true
 
   const projectionState = (): Projection.ProjectionState => {
+    let status = core.rootStatus
+    if (status === "completed" || status === "failed" || status === "cancelled") {
+      const activeChildren = [...cardsByChild.values()].flatMap((card) => {
+        const content = units.get(card.unitKey)?.content
+        if (content?._tag !== "Block" || content.block._tag !== "SubagentCard") return []
+        const childStatus = content.block.status
+        return childStatus === "queued" ||
+          childStatus === "running" ||
+          childStatus === "waiting" ||
+          childStatus === "cancelling"
+          ? [childStatus]
+          : []
+      })
+      if (activeChildren.length > 0)
+        status = activeChildren.every((child) => child === "waiting") ? "waiting" : "running"
+    }
+    const sourceComplete = titleSettled && (status === "completed" || status === "failed" || status === "cancelled")
     const state: Projection.ProjectionState =
       core.title === undefined
         ? {
-            status: core.rootStatus,
+            status,
             usage: {
               ...structuredClone(usage.usage()),
-              sourceComplete:
-                titleSettled &&
-                (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
+              sourceComplete,
               contextPending: usage.contextPending(),
               active: usage.activeTime(),
             },
             steering: steering.summary(core.steeringMessages, core.followUpMessages),
           }
         : {
-            status: core.rootStatus,
+            status,
             steering: steering.summary(core.steeringMessages, core.followUpMessages),
             title: core.title,
             usage: {
               ...structuredClone(usage.usage()),
-              sourceComplete:
-                titleSettled &&
-                (core.rootStatus === "completed" || core.rootStatus === "failed" || core.rootStatus === "cancelled"),
+              sourceComplete,
               contextPending: usage.contextPending(),
               active: usage.activeTime(),
             },
           }
-    return (core.rootStatus === "running" || core.rootStatus === "waiting") &&
+    return (status === "running" || status === "waiting") &&
       [...nodes.values()].some((node) => node.needsResolution === true && node.status === "waiting")
       ? { ...state, needsResolution: true }
       : state
@@ -158,17 +170,18 @@ const make = (
     unit,
   })
 
-  const { cardFor, updateCard, groupCards, settleGroup, bindChild } = SubagentCard.makeSubagentCardProjection({
-    core,
-    units,
-    nodes,
-    unitKeysByRun,
-    cardsByInvocation,
-    cardsByChild,
-    localId,
-    put,
-    unit,
-  })
+  const { cardFor, updateCard, groupCards, settleGroup, bindGroupReceipt, toolCallIdForGroup, bindChild } =
+    SubagentCard.makeSubagentCardProjection({
+      core,
+      units,
+      nodes,
+      unitKeysByRun,
+      cardsByInvocation,
+      cardsByChild,
+      localId,
+      put,
+      unit,
+    })
 
   const semanticResponse = SemanticResponse.makeSemanticResponseProjection({
     localId,
@@ -219,7 +232,7 @@ const make = (
     return created
   }
 
-  const settleNodeState = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
+  const settleNode = (node: Node, status: "completed" | "failed" | "cancelled", detail?: string) => {
     node.status = status
     for (const rawId of runningToolIds(node))
       updateTool(node, rawId, (tool) =>
@@ -230,34 +243,6 @@ const make = (
     const card = cardsByChild.get(node.rawRunId)
     if (card !== undefined) updateCard(card, status === "completed" ? "complete" : status, detail)
     if (node.parentRawRunId === undefined) core.rootStatus = status
-  }
-
-  const settleNode = (
-    node: Node,
-    status: "completed" | "failed" | "cancelled",
-    event: RunEvent.RunEvent,
-    detail?: string,
-  ) => {
-    settleNodeState(node, status, detail)
-    const descendants: Array<Node> = []
-    const collect = (id: string): void => {
-      for (const candidate of nodes.values()) {
-        if (candidate.parentRawRunId !== id) continue
-        descendants.push(candidate)
-        collect(candidate.rawRunId)
-      }
-    }
-    collect(node.rawRunId)
-    for (const candidate of descendants) {
-      if (candidate.status === "completed" || candidate.status === "failed" || candidate.status === "cancelled")
-        continue
-      if (candidate.lifecycle !== "terminal") {
-        deactivate(candidate, event, "terminal")
-        settleCalls(candidate)
-        settleAuthorizations(candidate, "cancelled")
-      }
-      settleNodeState(candidate, "cancelled")
-    }
   }
 
   const eventContext: ProjectorEventContext = {
@@ -276,7 +261,15 @@ const make = (
     settleNode,
     authorization: { putAuthorization, resolveAuthorization, settleAuthorizations },
     diagnostics: { notice, error, modelFailureError, executionFailureError },
-    subagents: { cardFor, updateCard, groupCards, settleGroup, bindChild },
+    subagents: {
+      cardFor,
+      updateCard,
+      groupCards,
+      settleGroup,
+      bindGroupReceipt,
+      toolCallIdForGroup,
+      bindChild,
+    },
     tools: { toolState, putTool, updateTool, linkProcessCheck },
   }
   const eventHandlers: ReadonlyArray<ProjectorEventHandler> = [

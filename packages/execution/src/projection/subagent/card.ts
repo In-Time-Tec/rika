@@ -33,6 +33,19 @@ export const SubagentGroupResult = Schema.Struct({
   ),
 })
 export type SubagentGroupResult = typeof SubagentGroupResult.Type
+export const SubagentGroupReceipt = Schema.Struct({
+  groupId: Schema.String,
+  children: Schema.Array(
+    Schema.Struct({
+      key: Schema.String,
+      selection: Schema.String,
+      label: Schema.optionalKey(Schema.String),
+      childRunId: Schema.String,
+      readiness: Schema.String,
+    }),
+  ),
+})
+export type SubagentGroupReceipt = typeof SubagentGroupReceipt.Type
 type ChildLinked = Extract<RunEvent.RunEvent, { readonly _tag: "ChildLinked" }>
 type CardStatus = Extract<Block, { readonly _tag: "SubagentCard" }>["status"]
 type GroupStatus = Extract<Block, { readonly _tag: "SubagentGroup" }>["status"]
@@ -77,6 +90,8 @@ export interface SubagentCardProjection {
     result: SubagentGroupResult | undefined,
     isFailure: boolean,
   ) => void
+  readonly bindGroupReceipt: (node: Node, rawToolCallId: string, receipt: SubagentGroupReceipt) => void
+  readonly toolCallIdForGroup: (node: Node, groupId: string) => string | undefined
   readonly bindChild: (
     parent: Node,
     childRawRunId: string,
@@ -116,6 +131,7 @@ const invocationIdFor = (linked: {
 
 export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): SubagentCardProjection => {
   const { core, units, nodes, unitKeysByRun, cardsByInvocation, cardsByChild, localId, put, unit } = input
+  const toolCallsByGroup = new Map<string, string>()
 
   type CardBlock = Extract<Block, { readonly _tag: "SubagentCard" }>
   type GroupBlock = Extract<Block, { readonly _tag: "SubagentGroup" }>
@@ -148,16 +164,21 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     if (counts.cancelled > 0 || group.status === "cancelled") return "cancelled"
     return "complete"
   }
+  const terminalCount = (counts: GroupBlock["counts"]) => counts.complete + counts.failed + counts.cancelled
   const syncGroups = (memberId?: string) => {
     for (const candidate of units.values()) {
       if (candidate.content._tag !== "Block" || candidate.content.block._tag !== "SubagentGroup") continue
       const group = candidate.content.block
       if (memberId !== undefined && !group.memberIds.includes(memberId)) continue
       const counts = groupCounts(group.memberIds)
+      const settled = group.settled || (counts.total > 0 && terminalCount(counts) === counts.total)
       put({
         ...candidate,
         revision: core.revision,
-        content: { _tag: "Block", block: { ...group, counts, status: groupStatus(group, counts) } },
+        content: {
+          _tag: "Block",
+          block: { ...group, settled, counts, status: groupStatus({ ...group, settled }, counts) },
+        },
       })
     }
   }
@@ -296,6 +317,33 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     })
   }
 
+  const bindCard = (card: Card, childRawRunId: string) => {
+    if (card.rawChildRunId !== undefined && card.rawChildRunId !== childRawRunId) return
+    card.rawChildRunId = childRawRunId
+    cardsByChild.set(childRawRunId, card)
+    const child = nodes.get(childRawRunId)
+    if (child === undefined) return
+    nodes.set(childRawRunId, { ...child, parentUnitKey: card.unitKey, parentBlockId: card.blockId })
+    for (const key of unitKeysByRun.get(childRawRunId) ?? []) {
+      const candidate = units.get(key)
+      if (candidate !== undefined && candidate.parentId === undefined)
+        put({ ...candidate, revision: core.revision, parentId: card.blockId })
+    }
+    if (child.lifecycle !== "unknown" && child.lifecycle !== "accepted")
+      updateCard(card, child.status === "completed" ? "complete" : child.status)
+  }
+
+  const bindGroupReceipt = (node: Node, rawToolCallId: string, receipt: SubagentGroupReceipt) => {
+    toolCallsByGroup.set(`${node.rawRunId}\u0000${receipt.groupId}`, rawToolCallId)
+    for (const member of receipt.children) {
+      const card = cardsByInvocation.get(`${node.rawRunId}\u0000${rawToolCallId}:${member.key}`)
+      if (card === undefined) continue
+      bindCard(card, member.childRunId)
+    }
+  }
+
+  const toolCallIdForGroup = (node: Node, groupId: string) => toolCallsByGroup.get(`${node.rawRunId}\u0000${groupId}`)
+
   const fillPrompt = (card: Card, displayPrompt: string) => {
     if (card.prompt.length > 0 || displayPrompt.length === 0) return
     card.prompt = bounded(displayPrompt, toolTextLimit)
@@ -330,20 +378,8 @@ export const makeSubagentCardProjection = (input: SubagentCardProjectionInput): 
     if (card === undefined && invocationId !== projectorNames.titleInvocationId)
       card = cardFor(parent, invocationId, linked.selection, displayPrompt, linked.label, linked.key)
     if (card !== undefined) fillPrompt(card, displayPrompt)
-    if (card === undefined || card.rawChildRunId !== undefined) return
-    card.rawChildRunId = childRawRunId
-    cardsByChild.set(childRawRunId, card)
-    const child = nodes.get(childRawRunId)
-    if (child !== undefined) {
-      const linkedChild = { ...child, parentUnitKey: card.unitKey, parentBlockId: card.blockId }
-      nodes.set(childRawRunId, linkedChild)
-      for (const key of unitKeysByRun.get(childRawRunId) ?? []) {
-        const candidate = units.get(key)
-        if (candidate !== undefined && candidate.parentId === undefined)
-          put({ ...candidate, revision: core.revision, parentId: card.blockId })
-      }
-    }
+    if (card !== undefined) bindCard(card, childRawRunId)
   }
 
-  return { cardFor, updateCard, groupCards, settleGroup, bindChild }
+  return { cardFor, updateCard, groupCards, settleGroup, bindGroupReceipt, toolCallIdForGroup, bindChild }
 }

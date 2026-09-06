@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Response } from "effect/unstable/ai"
+import { Prompt, Response } from "effect/unstable/ai"
 import { TreeProjector } from "../../../src/projection/tree/projector"
 import {
   block,
@@ -10,6 +10,159 @@ import {
 } from "../../support/projector-event.fixture"
 
 describe("blocking child-group projection", () => {
+  it("keeps a started group active while the parent progresses, then correlates its explicit await", () => {
+    resetEventPosition()
+    const projector = TreeProjector.make("turn-background-group", "start independent work")
+    const members = [{ key: "research", selection: "Oracle", prompt: "Research independently" }]
+    const startCall = {
+      type: "tool-call" as const,
+      id: "start-background",
+      name: "start_child_group",
+      params: { members, concurrency: 1 },
+      providerExecuted: false,
+      metadata: {},
+    }
+    projector.apply(modelResponse("raw-root-run", startCall))
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionStarted",
+        turn: 0,
+        call: Response.toolCallPart(startCall),
+      }),
+    )
+    projector.apply(
+      modelResponse(
+        "background-child",
+        { type: "text", text: "Early child progress", metadata: {} },
+        { parentRunId: "raw-root-run", invocationId: "background-invocation" },
+      ),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 0,
+        call: Response.toolCallPart(startCall),
+        result: toolResultPart({
+          id: startCall.id,
+          name: startCall.name,
+          isFailure: false,
+          result: {
+            groupId: "durable-background-group",
+            children: [
+              {
+                key: "research",
+                selection: "Oracle",
+                childRunId: "background-child",
+                depth: 1,
+                readiness: "ready",
+              },
+            ],
+          },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ChildLinked",
+        childRunId: "background-child",
+        invocationId: "background-invocation",
+        selection: "Oracle",
+        prompt: Prompt.make(members[0]!.prompt),
+        key: "research",
+        origin: { parentToolCallId: startCall.id },
+        childDepth: 1,
+        readiness: "ready",
+      }),
+    )
+    const earlyChild = projector
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Entry" && unit.content.text.includes("Early child progress"))
+    const childCard = projector
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(earlyChild?.parentId).toBeDefined()
+    expect(earlyChild?.parentId).toBe(
+      childCard?.content._tag === "Block" && childCard.content.block._tag === "SubagentCard"
+        ? childCard.content.block.id
+        : undefined,
+    )
+
+    const parentProgress = projector.apply(
+      modelResponse("raw-root-run", { type: "text", text: "Parent continued independently", metadata: {} }),
+    )
+    expect(parentProgress.upsert.some((unit) => unit.content._tag === "Entry")).toBe(true)
+    expect(block(parentProgress, "SubagentGroup")).toBeUndefined()
+    expect(
+      projector
+        .snapshot()
+        .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentGroup")?.content,
+    ).toMatchObject({ _tag: "Block", block: { status: "queued", settled: false } })
+
+    const awaitCall = {
+      type: "tool-call" as const,
+      id: "await-background",
+      name: "await_child_group",
+      params: { groupId: "durable-background-group" },
+      providerExecuted: false,
+      metadata: {},
+    }
+    projector.apply(modelResponse("raw-root-run", awaitCall))
+    projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionStarted",
+        turn: 1,
+        call: Response.toolCallPart(awaitCall),
+      }),
+    )
+    const awaited = projector.apply(
+      treeEvent("raw-root-run", {
+        _tag: "ToolExecutionCompleted",
+        turn: 1,
+        call: Response.toolCallPart(awaitCall),
+        result: toolResultPart({
+          id: awaitCall.id,
+          name: awaitCall.name,
+          isFailure: false,
+          result: {
+            groupId: "durable-background-group",
+            status: "succeeded",
+            children: [
+              {
+                key: "research",
+                selection: "Oracle",
+                childRunId: "background-child",
+                depth: 1,
+                readiness: "settled",
+                status: "succeeded",
+                text: "Research result",
+              },
+            ],
+          },
+          encodedResult: {},
+          providerExecuted: false,
+          preliminary: false,
+          metadata: {},
+        }),
+      }),
+    )
+    expect(block(awaited, "SubagentGroup")).toMatchObject({
+      _tag: "Block",
+      block: { status: "complete", settled: true, counts: { total: 1, complete: 1 } },
+    })
+    const card = projector
+      .snapshot()
+      .units.find((unit) => unit.content._tag === "Block" && unit.content.block._tag === "SubagentCard")
+    expect(card?.content).toMatchObject({
+      _tag: "Block",
+      block: { status: "complete", summary: "Research result" },
+    })
+    expect(JSON.stringify(projector.snapshot().units)).not.toContain("await_child_group")
+  })
+
   it("settles blocking group answers from the durable ordered mixed result", () => {
     resetEventPosition()
     const projector = TreeProjector.make("turn-mixed-group", "fan out")

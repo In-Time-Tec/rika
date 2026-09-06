@@ -51,7 +51,6 @@ export const shellMetadata = (block: Extract<TranscriptBlock, { _tag: "ToolCall"
   const script = inputString(value, ["script"])
   const metadata: Array<string> = []
   if (workdir !== undefined) metadata.push(`cwd ${workdir}`)
-  if (block.process?.background === true) metadata.push("detached")
   if ((script !== undefined && script.length > 0) || command.includes("\n")) metadata.push("script")
   return metadata
 }

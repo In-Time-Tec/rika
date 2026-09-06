@@ -54,14 +54,18 @@ it.effect("carries a harness refinement into the instructions the root agent is 
   }),
 )
 
-it("documents blocking flat child groups and routes local evidence to capable roles", () => {
+it("documents nonblocking independent child groups and explicit dependency waits", () => {
   for (const prompt of [profileInstructions.root, profileInstructions.Task]) {
     expect(prompt).toContain("Before spawning a child")
     expect(prompt).toContain("same native workspace tools")
     expect(prompt).toContain("Use Task or Oracle")
     expect(prompt).toContain("{ members: [{ key, selection, label?, prompt }], concurrency }")
-    expect(prompt).toContain("run_child_group")
-    expect(prompt).toContain("resume this same Run")
+    expect(prompt).toContain("start_child_group")
+    expect(prompt).toContain("successful receipt means the children were admitted, not that they finished")
+    expect(prompt).toContain("Keep investigating or implementing")
+    expect(prompt).toContain("await_child_group")
+    expect(prompt).toContain("run_child or run_child_group")
+    expect(prompt).toContain("next step immediately depends")
     expect(prompt).toContain("never JSON-stringify it or nest it under another members field")
   }
   expect(profileInstructions.Task).toContain("delegate recursively")
@@ -79,8 +83,9 @@ it.effect("gives every conversational agent the native inspect-edit-run contract
         const instructions = entry.agent.open((agent) => agent.instructions)
         expect(instructions).toContain("exactly four native workspace tools")
         expect(instructions).toContain('Workspace: "/actual/workspace"')
-        expect(instructions).toContain("call shell_command_status explicitly")
-        expect(instructions).toContain("completion is never pushed")
+        expect(instructions).toContain("Call shell_command_status explicitly when its output becomes a dependency")
+        expect(instructions).toContain("UI receives terminal status independently")
+        expect(instructions).toContain("continue reasoning or other work without waiting")
         expect(instructions).toContain("Never repeat an unchanged bash or edit after an unknown outcome")
       }
     }),

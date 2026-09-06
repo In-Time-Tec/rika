@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { AccessWire, ApiMessage, MachineOutcome, MachineRequest } from "./messages"
+import type { AccessWire, ApiMessage, MachineOutcome, MachineRequest, ProcessTerminalObservation } from "./messages"
 
 export class OperationError extends Schema.TaggedError<OperationError>()("OperationError", {
   kind: Schema.Literals(["authorization", "execution", "fenced", "transport"]),
@@ -8,15 +8,25 @@ export class OperationError extends Schema.TaggedError<OperationError>()("Operat
 
 export type Command = Extract<ApiMessage, { readonly _tag: "MachineExecute" | "MachineCancel" }>
 
-export interface Event {
-  readonly _tag: "MachineResult"
-  readonly access: AccessWire
-  readonly operationKey: string
-  readonly attempt: number
-  readonly machineId: string
-  readonly requestDigest: string
-  readonly outcome: MachineOutcome
-}
+export type Event =
+  | {
+      readonly _tag: "MachineResult"
+      readonly access: AccessWire
+      readonly operationKey: string
+      readonly attempt: number
+      readonly machineId: string
+      readonly requestDigest: string
+      readonly outcome: MachineOutcome
+    }
+  | {
+      readonly _tag: "ProcessObservation"
+      readonly access: AccessWire
+      readonly operationKey: string
+      readonly attempt: number
+      readonly machineId: string
+      readonly requestDigest: string
+      readonly observation: ProcessTerminalObservation
+    }
 
 interface MachineExecutionInput {
   readonly operationKey: string
@@ -31,6 +41,7 @@ export interface Options {
   readonly emit: (event: Event) => Effect.Effect<void, OperationError>
   readonly machine: {
     readonly execute: (input: MachineExecutionInput) => Effect.Effect<MachineOutcome, OperationError>
+    readonly observe?: (processId: string) => Effect.Effect<ProcessTerminalObservation, OperationError>
     readonly cancel: (input: {
       readonly machineId: string
       readonly requestDigest: string

@@ -19,7 +19,7 @@ import {
   Sequence,
   Sha256,
 } from "./message-core"
-import { HeartbeatWire, MachineOutcome, MachineRequest } from "./message-execution"
+import { HeartbeatWire, MachineOutcome, MachineRequest, ProcessTerminalObservation } from "./message-execution"
 import {
   BranchPushOutcome,
   BranchPushRequest,
@@ -55,6 +55,14 @@ export const RunnerMessage = Schema.Union([
     machineId: Identifier,
     requestDigest: RequestDigest,
     outcome: MachineOutcome,
+  }),
+  Schema.TaggedStruct("ProcessObservation", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
+    observation: ProcessTerminalObservation,
   }),
 ])
 export type RunnerMessage = typeof RunnerMessage.Type
@@ -182,6 +190,14 @@ export const ExecutorMessage = Schema.Union([
     requestDigest: RequestDigest,
     outcome: MachineOutcome,
   }),
+  Schema.TaggedStruct("ProcessObservation", {
+    access: AccessWire,
+    operationKey: Identifier,
+    attempt: Sequence,
+    machineId: Identifier,
+    requestDigest: RequestDigest,
+    observation: ProcessTerminalObservation,
+  }),
 ])
 export type ExecutorMessage = typeof ExecutorMessage.Type
 
@@ -238,6 +254,10 @@ export const ApiMessage = Schema.Union([
     attempt: Sequence,
     machineId: Identifier,
     requestDigest: RequestDigest,
+  }),
+  Schema.TaggedStruct("ProcessObservationAck", {
+    machineId: Identifier,
+    processId: Identifier,
   }),
   Schema.TaggedStruct("Fenced", { fence: Fence, message: Schema.String }),
 ])

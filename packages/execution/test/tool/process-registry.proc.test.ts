@@ -84,6 +84,19 @@ for (const cleanup of ["cancel", "scope", "completion"] as const) {
   }
 }
 
+test("commands without an input API receive EOF instead of waiting forever on stdin", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry.Service
+        const id = yield* registry.start("/bin/sh", ["-c", "cat; printf eof"], process.cwd())
+        const result = yield* registry.poll(id, 2_000, 100)
+        expect(result).toMatchObject({ running: false, stdout: "eof", exitCode: 0 })
+        expect(yield* registry.poll(id, 0, 100)).toEqual(result)
+      }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(BunServices.layer)))),
+    ),
+  ))
+
 test("normal completion preserves output and nonzero exit status", () =>
   Effect.runPromise(
     Effect.scoped(
@@ -96,6 +109,26 @@ test("normal completion preserves output and nonzero exit status", () =>
           stderr: "error",
           exitCode: 7,
         })
+      }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(BunServices.layer)))),
+    ),
+  ))
+
+test("terminal observation does not require polling or consume unread output", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry.Service
+        const id = yield* registry.start("/bin/sh", ["-c", "printf unread; exit 9"], process.cwd())
+        const observation = yield* registry.observe(id)
+        expect(observation).toMatchObject({ processId: id, exitCode: 9 })
+        yield* Effect.sleep("30 millis")
+        expect(yield* registry.observe(id)).toEqual(observation)
+        expect(yield* registry.poll(id, 0, 100)).toMatchObject({
+          running: false,
+          stdout: "unread",
+          exitCode: 9,
+        })
+        expect(yield* registry.observe(id)).toEqual(observation)
       }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(BunServices.layer)))),
     ),
   ))
@@ -127,7 +160,9 @@ test("preserves cwd, environment, literal arguments, stdin, exec and signal stat
             [
               "-c",
               `
-        IFS= read -r line
+        IFS= read -r line <<'INPUT'
+input line
+INPUT
         printf '%s\\n' "$PWD" "$PATH" "$1" "$line"
         if (: >&3) 2>/dev/null; then printf 'leaked fd3'; fi
         if (: <&4) 2>/dev/null; then printf 'leaked fd4'; fi
@@ -139,7 +174,6 @@ test("preserves cwd, environment, literal arguments, stdin, exec and signal stat
             ],
             process.cwd(),
           )
-          yield* Stream.run(Stream.make(new TextEncoder().encode("input line\n")), handles[0]!.stdin)
           const result = yield* registry.poll(id, 2_000, 10_000)
           const [observedCwd, ...output] = result.stdout.split("\n")
           // Shell PWD can preserve different casing for the same macOS directory.

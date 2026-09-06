@@ -1,5 +1,6 @@
 import * as NativeToolResult from "@rika/product/native-tool-result"
 import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
+import { ProcessTerminalObservation } from "@rika/product/process-observation"
 import { Schema } from "effect"
 import { AccessWire, Cursor, ProtocolVersion, redactAccess } from "./message-core"
 import type { Access } from "./message-core"
@@ -19,6 +20,7 @@ export const MachineOutcome = Schema.Union([
   Schema.TaggedStruct("Fenced", { message: Schema.String }),
 ])
 export type MachineOutcome = typeof MachineOutcome.Type
+export { ProcessTerminalObservation }
 
 export const HeartbeatWire = Schema.Struct({
   version: ProtocolVersion,

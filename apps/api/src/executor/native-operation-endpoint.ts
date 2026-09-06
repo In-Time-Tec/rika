@@ -36,6 +36,10 @@ interface NativeOperationEndpointOptions {
   ) => Effect.Effect<boolean, GatewayError>
   readonly sameAccess: (left: AccessWire, right: AccessWire) => boolean
   readonly send: (session: NativeOperationSession, message: ApiMessage) => Effect.Effect<void, GatewayError>
+  readonly accept?: (
+    session: NativeOperationSession,
+    input: NativeOperationIdentity & { readonly requestDigest: string; readonly outcome: MachineOutcome },
+  ) => Effect.Effect<void, GatewayError>
 }
 
 const callKey = (input: NativeOperationIdentity) =>
@@ -135,9 +139,7 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
             Ref.update(pending, (current) => {
               const known = current.get(key)
               if (known?.result !== operation.result || known.session?.socket !== session.socket) return current
-              const next = new Map(current)
-              next.delete(key)
-              return next
+              return new Map(current).set(key, { ...known, session: undefined })
             }),
           ),
         ),
@@ -241,6 +243,37 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
     return yield* awaitOutcome(key, operation)
   })
 
+  const restore = Effect.fn("NativeOperationEndpoint.restore")(function* (
+    input: NativeOperationRequest,
+    session: NativeOperationSession,
+  ) {
+    const key = callKey(input)
+    const requestDigest = yield* options.digest(options.encodeRequest(input.request))
+    const operation = yield* lock.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* Ref.get(pending)
+        const known = current.get(key)
+        if (known !== undefined && known.requestDigest !== requestDigest) return yield* conflict()
+        if (known !== undefined) {
+          const connected = { ...known, session }
+          yield* Ref.set(pending, new Map(current).set(key, connected))
+          return connected
+        }
+        const recovered: PendingNativeOperation = {
+          ...input,
+          requestDigest,
+          session,
+          cancelling: false,
+          result: yield* Deferred.make<MachineOutcome, GatewayError>(),
+        }
+        yield* Ref.set(pending, new Map(current).set(key, recovered))
+        return recovered
+      }),
+    )
+    if ((yield* Clock.currentTimeMillis) >= operation.deadlineAtMillis) yield* fail(key, operation, deadline())
+    else yield* deliver(key, operation, session)
+  })
+
   const receive = Effect.fn("NativeOperationEndpoint.receive")(function* (
     session: NativeOperationSession,
     input: NativeOperationIdentity & { readonly requestDigest: string; readonly outcome: MachineOutcome },
@@ -248,9 +281,11 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
     const key = callKey(input)
     const operation = (yield* Ref.get(pending)).get(key)
     if (operation === undefined)
-      return yield* Effect.logInfo("native-operation.result-unmatched").pipe(
-        Effect.annotateLogs({ ...annotations(input), "rika.outcome.tag": input.outcome._tag }),
-      )
+      return yield* options.accept === undefined
+        ? Effect.logInfo("native-operation.result-unmatched").pipe(
+            Effect.annotateLogs({ ...annotations(input), "rika.outcome.tag": input.outcome._tag }),
+          )
+        : options.accept(session, input)
     if (
       operation.requestDigest !== input.requestDigest ||
       operation.session?.socket !== session.socket ||
@@ -258,6 +293,7 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
     )
       return yield* conflict()
     if ((yield* Clock.currentTimeMillis) >= operation.deadlineAtMillis) return yield* fail(key, operation, deadline())
+    if (options.accept !== undefined) yield* options.accept(session, input)
     return yield* settle(key, operation, input.outcome)
   })
 
@@ -306,5 +342,5 @@ export const nativeOperationEndpoint = Effect.fn("NativeOperationEndpoint.make")
     }
   })
 
-  return { cancel, disconnected, invoke, receive, reconnected, refreshed }
+  return { cancel, disconnected, invoke, receive, reconnected, refreshed, restore }
 })

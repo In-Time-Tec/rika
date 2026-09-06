@@ -19,6 +19,10 @@ import {
   _giantSubagentModel,
   _collapsedSubagentModel,
 } from "./detail.fixture"
+import { backgroundCommandTests } from "./bodies-background.fixture"
+import { backgroundRuntimeTest } from "./background-runtime.fixture"
+backgroundCommandTests()
+backgroundRuntimeTest()
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

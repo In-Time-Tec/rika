@@ -216,7 +216,31 @@ const host = Effect.scoped(
             Effect.mapError((error) => Operations.OperationError.make({ kind: "execution", message: error.message })),
           ),
           emit: (event) =>
-            Ref.get(activeWriter).pipe(
+            (event._tag === "ProcessObservation"
+              ? executorRuntime
+                  .retainObservation({
+                    operationKey: event.operationKey,
+                    attempt: event.attempt,
+                    machineId: event.machineId,
+                    requestDigest: event.requestDigest,
+                    observation: event.observation,
+                  })
+                  .pipe(
+                    Effect.mapError((error) =>
+                      Operations.OperationError.make({ kind: "execution", message: error.message }),
+                    ),
+                    Effect.andThen(
+                      executorRuntime.persistedSession.pipe(
+                        Effect.flatMap(store.save),
+                        Effect.mapError((error) =>
+                          Operations.OperationError.make({ kind: "transport", message: error.message }),
+                        ),
+                      ),
+                    ),
+                  )
+              : Effect.void
+            ).pipe(
+              Effect.andThen(Ref.get(activeWriter)),
               Effect.flatMap((writer) =>
                 writer === undefined
                   ? Effect.fail(
@@ -274,6 +298,12 @@ const host = Effect.scoped(
                     ),
                   )
               }),
+            observe: (processId) =>
+              Effect.flatMap(makeNativeTool, (nativeTool) => nativeTool.observe(processId)).pipe(
+                Effect.mapError((error) =>
+                  Operations.OperationError.make({ kind: "execution", message: error.message }),
+                ),
+              ),
             cancel: (input) =>
               Effect.flatMap(makeNativeTool, (nativeTool) => nativeTool.cancel(input)).pipe(
                 Effect.mapError((error) =>

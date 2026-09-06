@@ -5,6 +5,7 @@ import * as Edit from "./edit"
 import * as Read from "./read"
 import * as ShellCommandStatus from "./shell-command-status"
 import * as NativeToolResult from "./result"
+import type { ProcessTerminalObservation } from "./process-observation"
 import { Capability } from "@rika/extensions/mcp-capability-contract"
 
 /** Private compatibility request used by recorded `!` shell turns. It is not model-facing or catalogued. */
@@ -41,6 +42,8 @@ export class ToolError extends Schema.TaggedError<ToolError>()("ToolError", {
 
 export interface Interface {
   readonly run: (request: Request) => Effect.Effect<Result, ToolError>
+  /** Waits without consuming output. Only process ids returned by this runtime are valid. */
+  readonly observeProcess: (processId: string) => Effect.Effect<ProcessTerminalObservation, ToolError>
 }
 
 /** Executor-owned implementations provide this product port. */
@@ -55,4 +58,22 @@ export const registrations = [
 
 export const toolkit = Toolkit.make(Bash.tool, ShellCommandStatus.tool, Read.tool, Edit.tool)
 
-export const testLayer = (run: Interface["run"]) => Layer.succeed(Service, Service.of({ run }))
+export const testLayer = (run: Interface["run"]) =>
+  Layer.succeed(
+    Service,
+    Service.of({
+      run,
+      observeProcess: (processId) =>
+        Effect.fail(
+          ToolError.make({
+            tool: "bash",
+            kind: "operation",
+            category: "not_found",
+            outcome: "known",
+            recovery: "never",
+            message: `Unknown process id: ${processId}. The call did not change state.`,
+            nextAction: "Use a process id returned by this runtime",
+          }),
+        ),
+    }),
+  )

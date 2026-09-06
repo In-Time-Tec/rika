@@ -1,4 +1,10 @@
-import { redactAccess, redactHeartbeat, type AccessWire, type MachineOutcome } from "@rika/remote-execution/protocol"
+import {
+  redactAccess,
+  redactHeartbeat,
+  type AccessWire,
+  type MachineOutcome,
+  type ProcessTerminalObservation,
+} from "@rika/remote-execution/protocol"
 import { Effect, Redacted } from "effect"
 import type { GatewayError, Socket, SocketFrame } from "../executor/gateway"
 import { undecodableFrame } from "../executor/gateway/undecodable-frame"
@@ -22,6 +28,15 @@ interface MessageDependencies {
       machineId: string,
       requestDigest: string,
       outcome: MachineOutcome,
+    ) => Effect.Effect<void, GatewayError>
+    readonly receiveProcessObservation: (
+      socket: Socket,
+      access: AccessWire,
+      operationKey: string,
+      attempt: number,
+      machineId: string,
+      requestDigest: string,
+      observation: ProcessTerminalObservation,
     ) => Effect.Effect<void, GatewayError>
   }
 }
@@ -72,9 +87,14 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                   ready: true,
                   environmentDigest: null,
                 }
-                return Effect.sync(() => {
-                  socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
-                }).pipe(Effect.andThen(register(session)), Effect.andThen(replayPending(session)))
+                return register(session).pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      socket.send(encode({ _tag: "ExecutorReconnected", welcome }))
+                    }),
+                  ),
+                  Effect.andThen(replayPending(session)),
+                )
               }),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
             )
@@ -110,6 +130,21 @@ export const runnerGatewayMessages = (dependencies: MessageDependencies) => {
                 ),
               ),
               Effect.catch(() => Effect.sync(() => socket.close(1008, "fenced"))),
+            )
+          if (message._tag === "ProcessObservation")
+            return authority.validateAccess(redactAccess(message.access)).pipe(
+              Effect.andThen(
+                calls.receiveProcessObservation(
+                  socket,
+                  message.access,
+                  message.operationKey,
+                  message.attempt,
+                  message.machineId,
+                  message.requestDigest,
+                  message.observation,
+                ),
+              ),
+              Effect.catch(() => Effect.sync(() => socket.close(1011, "process-observation-unavailable"))),
             )
           if (message._tag === "RunnerGoodbye")
             return shutdown(socket, message.access).pipe(

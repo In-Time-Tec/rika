@@ -177,6 +177,17 @@ const consumeOperation = (message: IncomingMessage, dependencies: ApiDispatchDep
     ? dependencies.operationLifecycle.dispatch(message).pipe(Effect.mapError(hostFailure))
     : Effect.void
 
+const consumeObservationAck = Effect.fn("Host.consumeObservationAck")(function* (
+  message: IncomingMessage,
+  dependencies: ApiDispatchDependencies,
+  functions: ApiDispatchFunctions,
+) {
+  if (message._tag !== "ProcessObservationAck") return
+  const runtime = yield* Runtime
+  yield* runtime.acknowledgeObservation(message.machineId, message.processId).pipe(Effect.mapError(hostFailure))
+  yield* functions.persistSession(dependencies.store)
+})
+
 const consumeQuiesce = Effect.fn("Host.consumeQuiesce")(function* (
   message: IncomingMessage,
   dependencies: ApiDispatchDependencies,
@@ -233,6 +244,7 @@ const consumeMessage = Effect.fn("Host.consumeApiMessage")(function* (
     )
   yield* consumeBranchPush(message, dependencies, functions)
   yield* consumeOperation(message, dependencies)
+  yield* consumeObservationAck(message, dependencies, functions)
   yield* consumeQuiesce(message, dependencies, functions)
 })
 

@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as LocalTools from "@rika/execution/local-tools"
 import * as NativeToolRuntime from "@rika/product/native-tool-runtime"
+import type { ProcessTerminalObservation } from "@rika/product/process-observation"
 import { Cause, Context, Deferred, Effect, Layer, Ref, Schema } from "effect"
 import { MachineOutcome, MachineRequest, type MachineOutcome as MachineOutcomeValue } from "../../protocol/messages"
 import * as NativeToolSubprocess from "./native-tool-subprocess"
@@ -31,6 +32,7 @@ interface Interface {
     readonly requestDigest: string
     readonly admitted?: boolean
   }) => Effect.Effect<MachineOutcomeValue, NativeToolError>
+  readonly observe: (processId: string) => Effect.Effect<ProcessTerminalObservation, NativeToolError>
 }
 
 export class NativeToolService extends Context.Service<NativeToolService, Interface>()(
@@ -45,6 +47,7 @@ interface Entry {
 const layerWith = <R>(
   options: Options,
   executeRequest: (request: MachineRequest) => Effect.Effect<MachineOutcomeValue, never, R>,
+  observeProcess: (processId: string) => Effect.Effect<ProcessTerminalObservation, NativeToolError, R>,
 ): Layer.Layer<NativeToolService, never, R> =>
   Layer.effect(
     NativeToolService,
@@ -117,18 +120,28 @@ const layerWith = <R>(
         yield* Deferred.succeed(entry.result, outcome)
         return outcome
       })
-      return NativeToolService.of({ execute, cancel })
+      return NativeToolService.of({
+        execute,
+        cancel,
+        observe: (processId) => observeProcess(processId).pipe(Effect.provideContext(services)),
+      })
     }),
   )
 
 const layer = (options: Options): Layer.Layer<NativeToolService, never, NativeToolRuntime.Service> =>
-  layerWith(options, (request) =>
-    Effect.flatMap(NativeToolRuntime.Service, (runtime) => runtime.run(request.request)).pipe(
-      Effect.match({
-        onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
-        onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "NativeTool" as const, result } }),
-      }),
-    ),
+  layerWith(
+    options,
+    (request) =>
+      Effect.flatMap(NativeToolRuntime.Service, (runtime) => runtime.run(request.request)).pipe(
+        Effect.match({
+          onFailure: (failure) => ({ _tag: "Failure" as const, failure }),
+          onSuccess: (result) => ({ _tag: "Success" as const, value: { _tag: "NativeTool" as const, result } }),
+        }),
+      ),
+    (processId) =>
+      Effect.flatMap(NativeToolRuntime.Service, (runtime) => runtime.observeProcess(processId)).pipe(
+        Effect.mapError((error) => NativeToolError.make({ message: error.message })),
+      ),
   )
 
 export const nativeToolLayer = (
@@ -158,10 +171,16 @@ export const nativeToolLayer = (
         environment: options.environment ?? {},
       }).pipe(Effect.orDie)
       const context = yield* Layer.build(
-        layerWith(options, (request) =>
-          process
-            .execute(request.request)
-            .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
+        layerWith(
+          options,
+          (request) =>
+            process
+              .execute(request.request)
+              .pipe(Effect.catch((error) => Effect.succeed({ _tag: "Unknown" as const, message: error.message }))),
+          (processId) =>
+            process
+              .observe(processId)
+              .pipe(Effect.mapError((error) => NativeToolError.make({ message: error.message }))),
         ),
       )
       return Context.get(context, NativeToolService)

@@ -9,6 +9,7 @@ import {
   ProtocolError,
   type ReceiptWire,
   type ReconnectWelcomeWire,
+  type RetainedProcessObservation,
   type ResumeCursors,
   type SessionWire,
   type WelcomeWire,
@@ -30,6 +31,7 @@ interface Session {
   readonly leaseEpoch: number
   readonly heartbeatIntervalMillis: number
   readonly cursor: Cursor
+  readonly observations: ReadonlyArray<RetainedProcessObservation>
 }
 
 export interface Interface {
@@ -43,6 +45,9 @@ export interface Interface {
   readonly access: Effect.Effect<AccessWire, ProtocolError>
   readonly cursor: Effect.Effect<Cursor, ProtocolError>
   readonly persistedSession: Effect.Effect<SessionWire, ProtocolError>
+  readonly retainObservation: (observation: RetainedProcessObservation) => Effect.Effect<void, ProtocolError>
+  readonly acknowledgeObservation: (machineId: string, processId: string) => Effect.Effect<void, ProtocolError>
+  readonly observations: Effect.Effect<ReadonlyArray<RetainedProcessObservation>, ProtocolError>
 }
 
 export class Runtime extends Context.Service<Runtime, Interface>()("@rika/remote-execution/host/runtime") {}
@@ -75,6 +80,7 @@ export const layer = (options: Options): Layer.Layer<Runtime, ProtocolError> =>
               leaseEpoch: options.restoredSession.leaseEpoch,
               heartbeatIntervalMillis: options.restoredSession.heartbeatIntervalMillis,
               cursor: options.restoredSession.cursor,
+              observations: options.restoredSession.observations ?? [],
             }
       const session = yield* Ref.make<Session | undefined>(restored)
 
@@ -121,6 +127,7 @@ export const layer = (options: Options): Layer.Layer<Runtime, ProtocolError> =>
           leaseEpoch: input.leaseEpoch,
           heartbeatIntervalMillis: input.heartbeatIntervalMillis,
           cursor: input.cursor,
+          observations: [],
         })
       })
 
@@ -188,7 +195,34 @@ export const layer = (options: Options): Layer.Layer<Runtime, ProtocolError> =>
         sessionToken: Redacted.value(current.token),
         heartbeatIntervalMillis: current.heartbeatIntervalMillis,
         cursor: current.cursor,
+        observations: current.observations,
       }))
+      const retainObservation = Effect.fn("Runtime.retainObservation")(function* (
+        observation: RetainedProcessObservation,
+      ) {
+        const current = yield* connected()
+        const key = `${observation.machineId}\u0000${observation.observation.processId}`
+        yield* Ref.set(session, {
+          ...current,
+          observations: [
+            ...current.observations.filter((item) => `${item.machineId}\u0000${item.observation.processId}` !== key),
+            observation,
+          ],
+        })
+      })
+      const acknowledgeObservation = Effect.fn("Runtime.acknowledgeObservation")(function* (
+        machineId: string,
+        processId: string,
+      ) {
+        const current = yield* connected()
+        yield* Ref.set(session, {
+          ...current,
+          observations: current.observations.filter(
+            (observation) => observation.machineId !== machineId || observation.observation.processId !== processId,
+          ),
+        })
+      })
+      const observations = Effect.map(connected(), (current) => current.observations)
 
       return Runtime.of({
         hasSession,
@@ -201,6 +235,9 @@ export const layer = (options: Options): Layer.Layer<Runtime, ProtocolError> =>
         access,
         cursor,
         persistedSession,
+        retainObservation,
+        acknowledgeObservation,
+        observations,
       })
     }),
   )

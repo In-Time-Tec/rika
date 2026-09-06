@@ -31,6 +31,8 @@ export type ToolFailure = typeof ToolFailure.Type
 
 /** The structured result shared by Rika's four native Workspace tools and recorded shell turns. */
 export const Result = Schema.Struct({
+  /** Rika-owned durable operation identity, added by the execution route after the Executor responds. */
+  operationId: Schema.optionalKey(Schema.String),
   text: Schema.String,
   truncated: Schema.Boolean,
   running: Schema.optionalKey(Schema.Boolean),

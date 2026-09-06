@@ -222,4 +222,9 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "f170cf30f7c04dc0418b2c7ee78ed7587aa8f09441325437731bb9d21b4606c2",
     url: new URL("../../migrations/postgres/0043-drop-unused-hosted-tables.sql", import.meta.url),
   },
+  {
+    id: "product/0044_process_observations",
+    checksum: "54a9c8d279c705903271c58a298eae7efe71261eb1551e74debeb8912a290fca",
+    url: new URL("../../migrations/postgres/0044-process-observations.sql", import.meta.url),
+  },
 ]
