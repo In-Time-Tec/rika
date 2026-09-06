@@ -79,6 +79,7 @@
   "overrides": {
     "@effect/sql-d1": "4.0.0-rc.112",
     "@effect/sql-sqlite-do": "4.0.0-rc.112",
+    "fast-uri": "3.1.6",
     "fast-xml-parser": "5.5.6"
   },
   "trustedDependencies": [
