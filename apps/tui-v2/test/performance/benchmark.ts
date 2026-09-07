@@ -4,7 +4,7 @@ import { Console, Effect, Layer, Schema } from "effect"
 import { CliError, Command, Flag } from "effect/unstable/cli"
 import { cpus, freemem, totalmem } from "node:os"
 import { measure } from "./measure"
-import { scales } from "./workload"
+import { scales } from "../../src/scenarios/stress"
 
 const command = Command.make(
   "render-benchmark",

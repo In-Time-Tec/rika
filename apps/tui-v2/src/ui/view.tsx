@@ -196,7 +196,12 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
         />
       </Show>
       <Show when={overlay() === "context"}>
-        <ContextOverlay thread={selectedThread} close={closeOverlay} contentWidth={contentWidth()} />
+        <ContextOverlay
+          thread={selectedThread}
+          close={closeOverlay}
+          contentWidth={contentWidth()}
+          mode={props.client.state.mode}
+        />
       </Show>
       <Show when={overlay() === "file-picker"}>
         <FileCompletionOverlay entries={fileEntries()} index={filePickerIndex} choose={chooseFile} />

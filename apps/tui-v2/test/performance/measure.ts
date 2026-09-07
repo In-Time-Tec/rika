@@ -2,7 +2,7 @@ import { testRender } from "@opentui/solid"
 import { Clock, Effect } from "effect"
 import { createComponent } from "solid-js"
 import { App } from "../../src/app"
-import { createWorkload, type WorkloadSize } from "./workload"
+import { createWorkload, type WorkloadSize } from "../../src/scenarios/stress"
 
 export interface MeasureOptions extends WorkloadSize {
   readonly iterations: number

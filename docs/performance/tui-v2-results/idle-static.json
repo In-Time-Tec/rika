@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "description": "Headless Solid App rendering; deterministic batched concurrent stream updates, no model/network/workspace execution. Input timing includes the stream burst and flush, excludes assertion capture. Native timings are not terminal I/O throughput.",
+  "runtime": {
+    "bun": "1.4.0",
+    "versions": {
+      "node": "26.3.0",
+      "bun": "1.4.0",
+      "boringssl": "2288897e2e716330490893d226b4f079f9da9e0c",
+      "openssl": "1.1.0",
+      "llhttp": "9.3.0",
+      "libarchive": "ded82291ab41d5e355831b96b0e1ff49e24d8939",
+      "mimalloc": "6a14aee24315e503fa295a1fa90fe8b24ad91774",
+      "picohttpparser": "066d2b1e9ab820703db0837a7255d92d30f0c9f5",
+      "uwebsockets": "34cbb9a40b4bd1bd767d134a7065e66c2432a676",
+      "webkit": "0f966e81b78c84bb23213e391bc679c4ef83e56b",
+      "zig": "04e7f6ac1e009525bc00934f20199c68f04e0a24",
+      "zlib": "12731092979c6d07f42da27da673a9f6c7b13586",
+      "tinycc": "05f0fafaa3be31e31d7b4b5c17dc60f62c991171",
+      "lolhtml": "725ce499aa9b71e38b7a2d0a9fbb6d7294a4079e",
+      "ares": "c7a3138dcfe3bb0eaaf10c0c24c36dc66dc790ab",
+      "libdeflate": "c8c56a20f8f621e6a966b716b31f1dedab6a41e3",
+      "usockets": "34cbb9a40b4bd1bd767d134a7065e66c2432a676",
+      "lshpack": "8905c024b6d052f083a3d11d0a169b3c2735c8a1",
+      "zstd": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+      "v8": "14.6.202.34-node.20",
+      "uv": "1.48.0",
+      "napi": "10",
+      "icu": "78.3",
+      "unicode": "17.0",
+      "sqlite": "3.53.2",
+      "modules": "147"
+    }
+  },
+  "hardware": {
+    "cpu": "AMD EPYC",
+    "logicalCpus": 4,
+    "totalMemoryBytes": 16795611136,
+    "freeMemoryBytes": 15673905152,
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "viewport": { "width": 216, "height": 62 },
+  "scale": "medium",
+  "result": {
+    "workload": {
+      "items": 1000,
+      "children": 100,
+      "queued": 100,
+      "scale": "medium",
+      "iterations": 10,
+      "threads": 8,
+      "streams": 8,
+      "streamPlacement": "oldest",
+      "idleMs": 2000,
+      "animate": false,
+      "idleOnly": true,
+      "toolCalls": 668,
+      "streamingToolCount": 8,
+      "transcriptItems": 1108,
+      "activeUpdatesPerBurst": 24,
+      "pendingOperationsPerBurst": { "edits": 1, "appends": 1, "dequeues": 1 },
+      "bursts": 0
+    },
+    "seedMs": 2.324155,
+    "mountMs": 255.329264,
+    "idle": {
+      "wallMs": 2003.459444,
+      "cpuMicros": { "user": 14692, "system": 7629 },
+      "frames": 0,
+      "framesDuringSleep": 0,
+      "framesDuringFlush": 0,
+      "before": {
+        "nativeLastFrameTime": 18171,
+        "nativeAverageFrameTime": 84275.33333333333,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 33,
+        "nativeStdoutWriteTime": 0
+      },
+      "after": {
+        "nativeLastFrameTime": 18171,
+        "nativeAverageFrameTime": 84275.33333333333,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 33,
+        "nativeStdoutWriteTime": 0
+      },
+      "afterFlush": {
+        "nativeLastFrameTime": 18171,
+        "nativeAverageFrameTime": 84275.33333333333,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 33,
+        "nativeStdoutWriteTime": 0
+      }
+    },
+    "updateFlushMs": { "samples": [], "p50": 0, "p95": 0, "max": 0 },
+    "synchronousMutationMs": { "samples": [], "p50": 0, "p95": 0, "max": 0 },
+    "flushWaitMs": { "samples": [], "p50": 0, "p95": 0, "max": 0 },
+    "inputWithStreamingMs": {
+      "mode": { "samples": [], "p50": 0, "p95": 0, "max": 0 },
+      "palette": { "samples": [], "p50": 0, "p95": 0, "max": 0 }
+    },
+    "nativeSamples": [],
+    "cpuMicros": { "user": 623524, "system": 51985 },
+    "wallMs": 2261.949231,
+    "memory": {
+      "rssBytes": [182652928, 225468416],
+      "maxSampledRssBytes": 225468416,
+      "final": {
+        "rss": 215502848,
+        "heapTotal": 56111104,
+        "heapUsed": 61981135,
+        "external": 19720319,
+        "arrayBuffers": 2760
+      },
+      "maxRssKiB": 223604
+    }
+  }
+}

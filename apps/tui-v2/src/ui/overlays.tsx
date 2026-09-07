@@ -1,9 +1,10 @@
 import type { ColorInput, ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { For, Show, createEffect, createMemo } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { Accessor, JSX } from "solid-js"
 import type { Mode, ThreadView } from "../client/model"
 import { colors, modeColor } from "./theme"
+import { contextPercent } from "./composer/usage"
 
 export interface PaletteEntry {
   readonly id: string
@@ -82,12 +83,22 @@ export function OverlayFrame(props: OverlayFrameProps) {
 export function CommandPalette(props: PaletteProps) {
   const dimensions = useTerminalDimensions()
   const width = () => Math.max(1, Math.min(78, dimensions().width - 4))
+  const visibleRows = () => Math.max(1, Math.min(14, dimensions().height) - 5)
+  const [scrollTop, setScrollTop] = createSignal(0)
+  const windowStart = createMemo(() =>
+    Math.max(0, Math.min(Math.floor(scrollTop()) - 8, props.entries().length - visibleRows())),
+  )
+  const windowEnd = createMemo(() => Math.min(props.entries().length, windowStart() + visibleRows() + 16))
+  const visibleEntries = createMemo(() => props.entries().slice(windowStart(), windowEnd()))
   let list: ScrollBoxRenderable | undefined
+  const trackScroll = (event: { readonly position: number }) => setScrollTop(event.position)
+  onCleanup(() => list?.verticalScrollBar.off("change", trackScroll))
   createEffect(() => {
-    const index = props.index()
+    const index = Math.max(0, Math.min(props.index(), props.entries().length - 1))
+    const rows = visibleRows()
     if (list === undefined) return
     if (index < list.scrollTop) list.scrollTo(index)
-    else if (index >= list.scrollTop + list.height) list.scrollTo(index - list.height + 1)
+    else if (index >= list.scrollTop + rows) list.scrollTo(index - rows + 1)
   })
   return (
     <OverlayFrame
@@ -116,21 +127,25 @@ export function CommandPalette(props: PaletteProps) {
       </box>
       <box height={2} flexShrink={0} />
       <scrollbox
+        id="command-palette-list"
         scrollX={false}
         scrollbarOptions={{ visible: false }}
         ref={(node) => {
           list = node
+          node.verticalScrollBar.on("change", trackScroll)
         }}
         width="100%"
         flexGrow={1}
         minHeight={0}
         contentOptions={{ flexDirection: "column" }}
       >
-        <For each={props.entries()}>
+        <box height={windowStart()} flexShrink={0} />
+        <For each={visibleEntries()}>
           {(entry, index) => {
-            const active = () => index() === props.index()
+            const active = () => windowStart() + index() === props.index()
             return (
               <box
+                id={`command-palette-entry-${entry.id}`}
                 height={1}
                 flexShrink={0}
                 width="100%"
@@ -167,6 +182,7 @@ export function CommandPalette(props: PaletteProps) {
             )
           }}
         </For>
+        <box height={Math.max(0, props.entries().length - windowEnd())} flexShrink={0} />
         <Show when={props.entries().length === 0}>
           <text width="100%" fg={colors.muted} content="No matching actions" />
         </Show>
@@ -321,11 +337,12 @@ function OverlaySection(props: { readonly title: string; readonly width: number 
 
 export function ContextOverlay(props: {
   readonly contentWidth?: number
+  readonly mode?: Mode
   readonly thread: Accessor<ThreadView | undefined>
   readonly close: () => void
 }) {
   const dimensions = useTerminalDimensions()
-  const used = createMemo(() => Math.min(99, (props.thread()?.items.length ?? 0) * 7))
+  const used = createMemo(() => contextPercent(props.thread()))
   const composerTop = () => Math.max(0, dimensions().height - 5)
   const width = () => Math.max(1, Math.min(68, (props.contentWidth ?? dimensions().width) - 4))
   const height = () => Math.min(18, Math.max(1, composerTop()))
@@ -336,7 +353,7 @@ export function ContextOverlay(props: {
       width={width()}
       left={Math.max(0, (props.contentWidth ?? dimensions().width) - width() - 2)}
       top={Math.max(0, composerTop() - height() - 1)}
-      color={colors.green}
+      color={modeColor(props.mode ?? "medium")}
       footer="Ctrl+Y toggle ── esc"
     >
       <scrollbox flexGrow={1} minHeight={0} width="100%" scrollX={false} scrollbarOptions={{ visible: false }}>
@@ -344,7 +361,7 @@ export function ContextOverlay(props: {
         <text
           width="100%"
           height={1}
-          fg={colors.green}
+          fg={modeColor(props.mode ?? "medium")}
           content={`${"━".repeat(Math.floor(used() / 5))}ᗧ${"·".repeat(20 - Math.floor(used() / 5))} ${used()}%`}
         />
         <box height={1} flexShrink={0} />

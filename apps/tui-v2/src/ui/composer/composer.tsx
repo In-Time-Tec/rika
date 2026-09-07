@@ -5,6 +5,7 @@ import type { Accessor } from "solid-js"
 import type { Mode, ThreadView } from "../../client/model"
 import { colors, modeColor } from "../theme"
 import type { Drafts, FocusPanel } from "../types"
+import { contextPercent } from "./usage"
 
 export interface ComposerProps {
   readonly thread: Accessor<ThreadView | undefined>
@@ -57,7 +58,11 @@ export function Composer(props: ComposerProps) {
       borderStyle="rounded"
       borderColor={colors.text}
       backgroundColor={colors.surface}
-      title={dimensions().width < 50 ? ` ${props.mode()} ` : ` ctx ᗧ······· 0% ─ ${props.mode()} `}
+      title={
+        dimensions().width < 50
+          ? ` ${props.mode()} `
+          : ` ctx ${"━".repeat(Math.floor((contextPercent(props.thread()) * 7) / 100))}ᗧ${"·".repeat(7 - Math.floor((contextPercent(props.thread()) * 7) / 100))} ${contextPercent(props.thread())}% ─ ${props.mode()} `
+      }
       titleColor={modeColor(props.mode())}
       titleAlignment="right"
       onMouseDown={() => props.setFocus("composer")}

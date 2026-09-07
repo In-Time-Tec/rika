@@ -26,6 +26,11 @@ rules:
     - source: "apps/*/test/**/*.tui.test.ts"
       target: "apps/*/src/**/*.ts"
       pattern: "*.tui.test.ts -> *.ts"
+      exclude:
+        - "apps/tui-v2/test/**/*.tui.test.ts"
+    - source: "apps/tui-v2/test/**/*.tui.test.ts"
+      target: "apps/tui-v2/src/**/*.tsx"
+      pattern: "*.tui.test.ts -> *.tsx"
     - source: "apps/*/test/**/*.proc.test.ts"
       target: "apps/*/src/**/*.ts"
       pattern: "*.proc.test.ts -> *.ts"

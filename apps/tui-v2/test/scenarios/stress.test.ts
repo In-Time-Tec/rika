@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { createWorkload, scales } from "./workload"
+import { createWorkload, scales } from "../../src/scenarios/stress"
 
 test("seeds exact bounded workload counts and updates selected and background streams", () => {
   const workload = createWorkload({ items: 12, children: 4, queued: 3, threads: 2, streams: 2 })

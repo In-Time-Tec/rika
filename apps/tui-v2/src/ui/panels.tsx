@@ -140,7 +140,11 @@ export function PendingQueue(props: PendingQueueProps): JSX.Element {
   const maxHeight = createMemo(() => Math.max(3, dimensions().height - 7))
   const height = createMemo(() => {
     const width = Math.max(1, dimensions().width - 4)
-    const rows = pending().reduce((total, item) => total + promptRows(queueLabel(item), width), 0)
+    let rows = 0
+    for (const item of pending()) {
+      rows += promptRows(queueLabel(item), width)
+      if (rows >= maxHeight() - 2) return maxHeight()
+    }
     return Math.min(maxHeight(), Math.max(3, rows + 2))
   })
   return (

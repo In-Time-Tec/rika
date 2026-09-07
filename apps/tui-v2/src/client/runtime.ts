@@ -336,7 +336,7 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     const threadId = nextId(`thread-${target}`)
     const thread: StoreThread = {
       id: threadId,
-      title: `New ${target === "runner" ? "Runner" : "Orb"} thread`,
+      title: target === "runner" ? "New thread" : "New thread in Orb",
       target,
       activity: "idle",
       items: [],

@@ -65,10 +65,10 @@ const createController = (props: AppProps) => {
     createDrafts(selectedId, () => editing()?.id)
   const hasTranscript = () => (selectedThread()?.items.length ?? 0) > 0
   const narrow = () => dimensions().width < 60
-  const contextual = () => {
+  const contextual = createMemo(() => {
     const thread = selectedThread()
     return thread !== undefined && (thread.approval !== null || thread.items.some((item) => item.kind === "child"))
-  }
+  })
   const changedItems = createMemo<readonly TranscriptItem[]>(
     () => selectedThread()?.items.filter((item) => item.kind === "diff") ?? [],
   )
@@ -107,10 +107,12 @@ const createController = (props: AppProps) => {
     },
   })
   const fileSidebarWidth = () => Math.max(24, Math.min(52, Math.floor(dimensions().width * 0.4)))
-  const contentWidth = () =>
-    dimensions().width -
-    (!narrow() && contextual() ? contextSidebarWidth : 0) -
-    (!narrow() && sidebarKind() !== undefined ? fileSidebarWidth() : 0)
+  const contentWidth = createMemo(
+    () =>
+      dimensions().width -
+      (!narrow() && contextual() ? contextSidebarWidth : 0) -
+      (!narrow() && sidebarKind() !== undefined ? fileSidebarWidth() : 0),
+  )
 
   const cancelEdit = () => {
     const current = editing()
@@ -284,6 +286,7 @@ const createController = (props: AppProps) => {
     choosePalette,
     choosePaletteEntry,
   } = createPalette({
+    isOpen: () => overlay() === "palette",
     client: props.client,
     selectedThread,
     newThread,

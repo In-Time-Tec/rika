@@ -1,7 +1,7 @@
 import { CliRenderEvents, createCliRenderer } from "@opentui/core"
 import type { CliRendererErrorEvent, CliRendererHandlerErrorEvent } from "@opentui/core"
 import { render } from "@opentui/solid"
-import { Console, Data, Deferred, Effect } from "effect"
+import { Config, Console, Data, Deferred, Effect } from "effect"
 import { ErrorBoundary } from "solid-js"
 import { App } from "./app"
 import type { ScenarioId } from "./client/model"
@@ -17,7 +17,7 @@ class TerminalFailure extends Data.TaggedError("TerminalFailure")<{
 }> {}
 
 const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
-  const workspace = process.cwd()
+  const workspace = yield* Config.string("INIT_CWD").pipe(Config.withDefault(process.cwd()))
   let receipt: ExitReceipt | undefined
   const quit = yield* Deferred.make<void, TerminalFailure>()
   const onQuit = () => {

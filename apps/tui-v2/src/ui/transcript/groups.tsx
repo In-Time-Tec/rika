@@ -18,6 +18,7 @@ import {
 } from "./content"
 import { colors } from "../theme"
 import { isActive, aggregateActivity } from "./presenter"
+import { createVisibleFrame } from "./visibility"
 
 const ToolChild = (props: {
   readonly tool: ToolPresentation
@@ -28,10 +29,12 @@ const ToolChild = (props: {
   readonly toggle: () => void
   readonly select: () => void
 }) => {
+  const animation = createVisibleFrame(props.frame)
   const expandable = () => toolHasBody(props.tool)
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        ref={animation.ref}
         width="100%"
         selectable={false}
         onMouseDown={() => {
@@ -44,7 +47,11 @@ const ToolChild = (props: {
         <span
           style={{ fg: props.selected() ? colors.blue : statusColor(props.tool.item.status), bold: props.selected() }}
         >
-          {statusGlyph(props.tool.item.status, props.frame(), props.animate())}
+          {statusGlyph(
+            props.tool.item.status,
+            isActive(props.tool.item.status) ? animation.frame() : 0,
+            props.animate(),
+          )}
         </span>
         <ToolLabel items={[props.tool]} selected={props.selected()} />
         <Show when={expandable()}>
@@ -69,6 +76,7 @@ interface ToolGroupViewProps {
 }
 
 const ToolGroupView = (props: ToolGroupViewProps) => {
+  const animation = createVisibleFrame(props.frame)
   const items = () => props.group.items
   const expandable = () => toolExpandable(items())
   const defaultExpanded = () => toolDefaultExpanded(items())
@@ -79,6 +87,7 @@ const ToolGroupView = (props: ToolGroupViewProps) => {
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        ref={animation.ref}
         width="100%"
         selectable={false}
         onMouseDown={() => {
@@ -88,7 +97,7 @@ const ToolGroupView = (props: ToolGroupViewProps) => {
         wrapMode="word"
       >
         <span style={{ fg: selected() ? colors.blue : statusColor(activity()), bold: selected() }}>
-          {statusGlyph(activity(), props.frame(), props.animate())}
+          {statusGlyph(activity(), isActive(activity()) ? animation.frame() : 0, props.animate())}
         </span>
         <ToolLabel items={items()} selected={selected()} />
         <Show when={expandable()}>
@@ -136,10 +145,12 @@ const ChildRow = (props: {
   readonly toggle: () => void
   readonly select: () => void
 }) => {
+  const animation = createVisibleFrame(props.frame)
   const expandable = () => props.item.text.trim().length > 0
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        ref={animation.ref}
         width="100%"
         selectable={false}
         onMouseDown={() => {
@@ -150,7 +161,7 @@ const ChildRow = (props: {
       >
         <span style={{ fg: colors.subtle }}>{props.last ? "└ " : "├ "}</span>
         <span style={{ fg: props.selected() ? colors.blue : statusColor(props.item.status), bold: props.selected() }}>
-          {statusGlyph(props.item.status, props.frame(), props.animate())}
+          {statusGlyph(props.item.status, isActive(props.item.status) ? animation.frame() : 0, props.animate())}
         </span>
         <span style={{ fg: props.selected() ? colors.blue : colors.text, bold: props.selected() }}>
           {` ${titleFor(props.item)}`}

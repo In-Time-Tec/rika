@@ -1,8 +1,8 @@
 import { Effect } from "effect"
 import { batch } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { Client } from "../../src/client/model"
-import type { StoreItem, StoreState } from "../../src/client/state"
+import type { Client } from "../client/model"
+import type { StoreItem, StoreState } from "../client/state"
 
 export interface WorkloadSize {
   readonly items: number

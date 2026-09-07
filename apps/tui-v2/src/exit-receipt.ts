@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import { Function } from "effect"
 import type { ClientState, Mode, ScenarioId } from "./client/model"
 
 export interface ExitReceipt {
@@ -8,12 +9,18 @@ export interface ExitReceipt {
   readonly scenario: ScenarioId
 }
 
-export const captureExitReceipt = (state: ClientState, workspace: string): ExitReceipt => ({
-  title: state.threads.find((thread) => thread.id === state.selectedThreadId)?.title ?? "Rika",
-  workspace,
-  mode: state.mode,
-  scenario: state.scenario,
-})
+export const captureExitReceipt: {
+  (state: ClientState, workspace: string): ExitReceipt
+  (workspace: string): (state: ClientState) => ExitReceipt
+} = Function.dual(
+  2,
+  (state: ClientState, workspace: string): ExitReceipt => ({
+    title: state.threads.find((thread) => thread.id === state.selectedThreadId)?.title ?? "Rika",
+    workspace,
+    mode: state.mode,
+    scenario: state.scenario,
+  }),
+)
 
 const modeRgb = {
   low: [255, 215, 0],
@@ -37,12 +44,9 @@ const safeLine = (value: string): string => value.replace(/[\p{Cc}\p{Cf}]/gu, " 
 
 export const renderExitReceipt = (input: ExitReceipt): string => {
   const home = homedir()
-  const workspace =
-    input.workspace === home
-      ? "~"
-      : input.workspace.startsWith(`${home}/`)
-        ? `~${input.workspace.slice(home.length)}`
-        : input.workspace
+  let workspace = input.workspace
+  if (workspace === home) workspace = "~"
+  else if (workspace.startsWith(`${home}/`)) workspace = `~${workspace.slice(home.length)}`
   const rgb = modeRgb[input.mode]
   const lines = glyphs.map((glyph, row) => {
     const painted = [...glyph]
@@ -52,8 +56,9 @@ export const renderExitReceipt = (input: ExitReceipt): string => {
         return `\x1b[38;2;${rgb.map((channel) => Math.round(channel * factor)).join(";")}m${character}`
       })
       .join("")
-    const detail =
-      row === 1 ? safeLine(input.title) : row === 2 ? `\x1b[38;2;102;102;102m${safeLine(workspace)}${reset}` : ""
+    let detail = ""
+    if (row === 1) detail = safeLine(input.title)
+    else if (row === 2) detail = `\x1b[38;2;102;102;102m${safeLine(workspace)}${reset}`
     return `${painted}${reset}${detail.length > 0 ? `${" ".repeat(17 - glyph.length)}${detail}` : ""}`
   })
   return `\n${lines.join("\n")}\n\nOffline demo — relaunch scenario (not a saved session):\nbun run tui-v2 --scenario ${input.scenario}`
