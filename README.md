@@ -43,6 +43,36 @@ bun run dev
 The standard repository commands are `build`, `check`, `dev`, `format`, `test`, and `typecheck`.
 See [the script map](scripts/README.md) for what each development and packaging helper does.
 
+### Offline TUI v2
+
+`apps/tui-v2` is a standalone Solid/OpenTUI application using Effect V4 and Effect/CLI. It runs deterministic
+offline scenarios without authentication, hosted services, model calls, or workspace execution. It does not
+replace the production `rika` CLI.
+
+```bash
+bun run tui-v2
+bun run tui-v2 --scenario conversation
+bun run tui-v2 scenarios
+bun run --cwd apps/tui-v2 build
+./apps/tui-v2/dist/rika-tui-v2 --scenario approval
+```
+
+The build produces a native executable for the current host. Add `--no-animate` to disable decorative animation.
+The default layout has no persistent Thread list. Ctrl+O opens commands and scenario selection; Ctrl+T or
+Alt+W opens the Thread switcher and preview; Ctrl+S selects a mode. Type `@` for file completion and `@@`
+for Thread mentions. Alt+T toggles the right-hand file tree; Alt+S toggles changed files.
+
+Enter submits or queues a prompt, Shift+Enter inserts a newline, and Ctrl+Enter interrupts and sends.
+With an empty composer, Up selects a pending instruction: Ctrl+E edits it, Enter steers it into the active
+Turn, and Backspace removes it. Enter saves an edit; Escape restores the original draft.
+Tab/Shift+Tab selects expandable transcript sections; Enter toggles the selected section and Shift+D toggles
+all sections. Large text pastes are compressed in the composer and expanded when submitted.
+Ctrl+V inserts a deterministic image attachment fixture; it does not access the system clipboard.
+
+Approval, denial, removal, and steering are also available through the command palette. Ctrl+C cancels
+active playback; a second Ctrl+C force-quits. When idle, Ctrl+C opens the exit menu.
+Files, images, and Threads are offline fixtures; no workspace files are read or modified. State is discarded on exit.
+
 ### Personal Railway stack
 
 `bun run dev:remote` deploys the current Docker worktree to an isolated `rika-dev-*` Railway project. Alchemy

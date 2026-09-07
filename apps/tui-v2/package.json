@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/tui-v2",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "bun --preload @opentui/solid/preload src/main.tsx",
+    "build": "bun build.ts",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit",
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings apps/tui-v2"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@opentui/core": "catalog:",
+    "@opentui/solid": "catalog:",
+    "@rika/terminal": "workspace:*",
+    "effect": "catalog:",
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  },
+  "rika": {
+    "kind": "application",
+    "domain": "terminal"
+  }
+}
