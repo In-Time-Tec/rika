@@ -154,6 +154,7 @@ export const DiffHeader = (props: {
   readonly select: () => void
 }) => (
   <text
+    id={`transcript-header:${props.item.id}`}
     width="100%"
     selectable={false}
     onMouseDown={() => {

@@ -55,7 +55,7 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
   const [windowStart, setWindowStart] = createSignal<number | undefined>()
   const window = createMemo(() => transcriptWindow({ count: groups().length, start: windowStart() }))
   const visibleGroups = createMemo(() => groups().slice(window().start, window().end))
-  let pendingScroll: "top" | "bottom" | { readonly groupId: string } | undefined
+  let pendingScroll: "top" | "bottom" | { readonly selectedId: string } | undefined
   const applyWindowScroll = () => {
     if (scroll === undefined) return
     if (pendingScroll === undefined) {
@@ -70,7 +70,7 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
     if (target === "top") scroll.scrollTo({ x: 0, y: 0 })
     else if (target === "bottom")
       scroll.scrollTo({ x: 0, y: Math.max(0, scroll.scrollHeight - scroll.viewport.height) })
-    else scroll.scrollChildIntoView(`transcript-group:${target.groupId}`)
+    else scroll.scrollChildIntoView(`transcript-header:${target.selectedId}`)
   }
   renderer.on(CliRenderEvents.FRAME, applyWindowScroll)
   onCleanup(() => renderer.off(CliRenderEvents.FRAME, applyWindowScroll))
@@ -91,9 +91,9 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
     if (index < 0) return
     if (index < window().start || index >= window().end) {
       const start = Math.max(0, index - Math.floor(transcriptWindowSize / 2))
-      showWindow(start + transcriptWindowSize >= groups().length ? undefined : start, { groupId: groups()[index]!.id })
+      showWindow(start + transcriptWindowSize >= groups().length ? undefined : start, { selectedId: id })
     } else {
-      pendingScroll = { groupId: groups()[index]!.id }
+      pendingScroll = { selectedId: id }
       renderer.requestRender()
     }
   }

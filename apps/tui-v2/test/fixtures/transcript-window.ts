@@ -197,6 +197,49 @@ try {
   assert.equal(scroll.content.findDescendantById("transcript-earlier"), undefined)
   assert.equal(scroll.content.findDescendantById("transcript-newer"), undefined)
   assert.ok(screen.captureCharFrame().includes("file-2.ts"))
+
+  let serial = 8
+  for (const kind of ["child", "tool"] as const) {
+    setItems([
+      ...Array.from({ length: 100 }, (_, index) => ({
+        id: `${kind}-${index}`,
+        kind,
+        title: kind === "child" ? `Reviewer-${index}` : `bash command-${index}`,
+        text: kind === "child" ? `Result-${index}` : `$ command-${index}\nResult-${index}`,
+        status: "idle" as const,
+      })),
+      ...Array.from({ length: 300 }, (_, index) => ({
+        id: `tail-${kind}-${index}`,
+        kind: "assistant" as const,
+        title: "Rika",
+        text: `Tail ${index}`,
+      })),
+    ])
+    await screen.flush()
+    assert.equal(mounted().some((node) => node.id.includes(`${kind}-0`)), false)
+    if (kind === "tool") {
+      setNavigation({ serial: serial++, action: "next" })
+      await screen.flush()
+      setNavigation({ serial: serial++, action: "toggle" })
+      await screen.flush()
+    }
+    for (let index = 0; index < 100; index += 1) {
+      setNavigation({ serial: serial++, action: "next" })
+      await screen.flush()
+      const label = kind === "child" ? `Reviewer-${index} ` : `command-${index} `
+      assert.ok(screen.captureCharFrame().includes(label), `selected ${kind} ${index} must be visible`)
+    }
+    for (let index = 98; index >= 0; index -= 1) {
+      setNavigation({ serial: serial++, action: "previous" })
+      await screen.flush()
+      const label = kind === "child" ? `Reviewer-${index} ` : `command-${index} `
+      assert.ok(screen.captureCharFrame().includes(label), `previous ${kind} ${index} must be visible`)
+    }
+    setNavigation({ serial: serial++, action: "toggle" })
+    await screen.flush()
+    assert.match(screen.captureCharFrame(), /Result-0/)
+    bounded()
+  }
 } finally {
   screen.renderer.destroy()
 }

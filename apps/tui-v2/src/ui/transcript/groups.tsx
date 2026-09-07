@@ -34,6 +34,7 @@ const ToolChild = (props: {
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        id={`transcript-header:tool-child:${props.tool.item.id}`}
         ref={animation.ref}
         width="100%"
         selectable={false}
@@ -87,6 +88,7 @@ const ToolGroupView = (props: ToolGroupViewProps) => {
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        id={`transcript-header:${props.group.id}`}
         ref={animation.ref}
         width="100%"
         selectable={false}
@@ -150,6 +152,7 @@ const ChildRow = (props: {
   return (
     <box width="100%" flexDirection="column" flexShrink={0}>
       <text
+        id={`transcript-header:${props.item.id}`}
         ref={animation.ref}
         width="100%"
         selectable={false}
