@@ -16,6 +16,7 @@ This repository pins Bun 1.4.0 in `package.json`.
 | Deploy a personal Railway stack       | `bun run dev:remote`                                                                                                             |
 | Destroy that personal Railway stack   | `bun run dev:remote:destroy`                                                                                                     |
 | Run the source CLI                    | `bun run --cwd apps/rika start -- --workspace "$PWD"`                                                                            |
+| Run standalone offline TUI            | `bun run tui-v2`                                                                                                                 |
 | Lint                                  | `bun run lint`                                                                                                                   |
 | Type-check                            | `bun run typecheck`                                                                                                              |
 | Run all deterministic unit tests      | `bun run test`                                                                                                                   |
@@ -53,6 +54,7 @@ Use the `testing-with-pilotty` skill for fast interaction checks and `testing-wi
 ## Sources of truth
 
 - `apps/rika` owns the packaged CLI, TUI process, hosted client, and local Runner.
+- `apps/tui-v2` owns the standalone offline Solid/OpenTUI interface and deterministic scenarios. It uses Effect V4 and Effect/CLI, has no hosted transport, and is not part of the production CLI release.
 - `apps/api` owns hosted composition, HTTP and WebSocket entry points, model routing, command workers, and Executor assignment.
 - `apps/web` owns browser rendering and browser-local interaction only. `apps/proxy` is the only public Railway ingress.
 - `packages/product` owns Rika product contracts and rules. `packages/product-store` owns their PostgreSQL persistence and migrations.

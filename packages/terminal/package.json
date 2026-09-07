@@ -6,6 +6,10 @@
   "type": "module",
   "exports": {
     "./opentui-surface": "./src/opentui/surface/service.ts",
+    "./terminal-composer-edit": "./src/state/composer/edit.ts",
+    "./terminal-diff-presentation": "./src/opentui/rendering/diff-text-adapter.ts",
+    "./terminal-file-presentation": "./src/opentui/rendering/block.ts",
+    "./terminal-markdown-presentation": "./src/opentui/rendering/text-adapter.ts",
     "./terminal-message": "./src/state/message.ts",
     "./terminal-performance-evaluation": "./src/performance/evaluation.ts",
     "./terminal-session": "./src/terminal-session.ts",

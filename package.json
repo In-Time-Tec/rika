@@ -43,6 +43,7 @@
       "@opentui/core-linux-x64-musl": "0.5.10",
       "@opentui/core-win32-arm64": "0.5.10",
       "@opentui/core-win32-x64": "0.5.10",
+      "@opentui/solid": "0.5.10",
       "@oxlint/plugins": "1.78.0",
       "@pierre/diffs": "1.2.11",
       "@rikalabs/repo-lint": "2.3.0",
@@ -69,6 +70,7 @@
       "prettier": "3.6.2",
       "prismjs": "1.30.0",
       "string-width": "7.2.0",
+      "solid-js": "1.9.12",
       "turbo": "2.8.13",
       "typescript": "7.0.2",
       "vite": "8.1.3",
@@ -104,6 +106,7 @@
     "test-unit": "bun --bun vitest run --project unit",
     "test-changed": "bun --bun vitest run --changed HEAD",
     "typecheck": "bun turbo run typecheck",
+    "tui-v2": "bun run --cwd apps/tui-v2 start",
     "prepare": "effect-tsgo patch --no-typescript --oxlint"
   },
   "prettier": {
