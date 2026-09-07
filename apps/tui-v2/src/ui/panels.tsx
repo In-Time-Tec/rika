@@ -53,7 +53,8 @@ export function FileSidebar(props: FileSidebarProps): JSX.Element {
   const titleColor = createMemo<ColorInput>(() => modeColor(props.mode))
   return (
     <box
-      width={Math.max(1, Math.floor(props.width) - 2)}
+      width={Math.max(1, Math.floor(props.width) - 1)}
+      marginLeft={1}
       height="100%"
       flexShrink={0}
       minHeight={0}

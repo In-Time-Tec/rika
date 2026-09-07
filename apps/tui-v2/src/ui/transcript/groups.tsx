@@ -8,12 +8,12 @@ import {
   PlainBody,
   StyledBody,
   ToolBody,
+  ToolLabel,
   statusColor,
   statusGlyph,
   titleFor,
   toolDefaultExpanded,
   toolExpandable,
-  toolGroupLabel,
   toolHasBody,
 } from "./content"
 import { colors } from "../theme"
@@ -21,7 +21,6 @@ import { isActive, aggregateActivity } from "./presenter"
 
 const ToolChild = (props: {
   readonly tool: ToolPresentation
-  readonly last: boolean
   readonly expanded: Accessor<boolean>
   readonly selected: Accessor<boolean>
   readonly frame: Accessor<number>
@@ -39,17 +38,15 @@ const ToolChild = (props: {
           props.select()
           if (expandable()) props.toggle()
         }}
-        wrapMode="none"
+        wrapMode="word"
       >
-        <span style={{ fg: colors.subtle }}>{props.last ? "└ " : "├ "}</span>
+        <span style={{ fg: colors.subtle }}> </span>
         <span
           style={{ fg: props.selected() ? colors.blue : statusColor(props.tool.item.status), bold: props.selected() }}
         >
           {statusGlyph(props.tool.item.status, props.frame(), props.animate())}
         </span>
-        <span style={{ fg: props.selected() ? colors.blue : colors.text, bold: props.selected() }}>
-          {` ${toolGroupLabel([props.tool])}`}
-        </span>
+        <ToolLabel items={[props.tool]} selected={props.selected()} />
         <Show when={expandable()}>
           <span style={{ fg: props.selected() ? colors.blue : colors.subtle }}>{props.expanded() ? " ▾" : " ▸"}</span>
         </Show>
@@ -88,14 +85,12 @@ const ToolGroupView = (props: ToolGroupViewProps) => {
           props.select(props.group.id)
           if (expandable()) toggle()
         }}
-        wrapMode="none"
+        wrapMode="word"
       >
         <span style={{ fg: selected() ? colors.blue : statusColor(activity()), bold: selected() }}>
           {statusGlyph(activity(), props.frame(), props.animate())}
         </span>
-        <span style={{ fg: selected() ? colors.blue : colors.text, bold: selected() }}>
-          {` ${toolGroupLabel(items())}`}
-        </span>
+        <ToolLabel items={items()} selected={selected()} />
         <Show when={expandable()}>
           <span style={{ fg: selected() ? colors.blue : colors.subtle }}>{expanded() ? " ▾" : " ▸"}</span>
         </Show>
@@ -104,14 +99,13 @@ const ToolGroupView = (props: ToolGroupViewProps) => {
         <Switch>
           <Match when={items().length > 1}>
             <For each={items()}>
-              {(tool, index) => {
+              {(tool) => {
                 const childId = `tool-child:${tool.item.id}`
                 const childExpanded = () => props.isExpanded(childId, isActive(tool.item.status))
                 const childSelected = () => props.selected() === childId
                 return (
                   <ToolChild
                     tool={tool}
-                    last={index() === items().length - 1}
                     expanded={childExpanded}
                     selected={childSelected}
                     frame={props.frame}
@@ -245,7 +239,7 @@ const ItemView = (props: ItemViewProps) => {
           </Show>
         </Match>
         <Match when={item().kind === "reasoning"}>
-          <PlainBody source={() => item().text.trimEnd()} fg={colors.muted} attributes={2 | 4} />
+          <PlainBody source={() => item().text.trimEnd()} fg={colors.text} attributes={2 | 4} />
         </Match>
         <Match when={item().kind === "diff"}>
           <DiffHeader

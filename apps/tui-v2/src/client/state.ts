@@ -34,7 +34,7 @@ export const stateFromFixture = (fixture: ScenarioFixture): StoreState => {
     scenario: fixture.id,
     selectedThreadId: firstThread.id,
     threads: fixture.threads.map(cloneThread),
-    mode: "high",
+    mode: "medium",
     connection: fixture.connection,
     notice: fixture.notice,
   }

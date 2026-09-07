@@ -52,6 +52,7 @@ export interface Client {
   readonly loadScenario: (scenario: ScenarioId) => void
   readonly selectThread: (id: string) => void
   readonly newThread: (target?: "runner" | "orb") => void
+  readonly archiveThread: () => void
   readonly submit: (prompt: string, images?: readonly ImageAttachment[]) => void
   readonly cancel: () => void
   readonly approve: (approved: boolean) => void

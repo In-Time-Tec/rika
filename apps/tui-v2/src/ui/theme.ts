@@ -1,27 +1,22 @@
 import { RGBA, type ColorInput } from "@opentui/core"
 import type { Mode } from "../client/model"
 
-/**
- * The v2 surface intentionally uses the terminal's indexed palette instead of
- * introducing a second RGB theme.  The default background is left untouched
- * so Rika remains legible in light and dark terminal profiles.
- */
 export const colors = {
-  text: RGBA.fromIndex(7),
-  muted: RGBA.fromIndex(8),
-  subtle: RGBA.fromIndex(8),
-  surface: RGBA.defaultBackground(),
-  teal: RGBA.fromIndex(6),
-  green: RGBA.fromIndex(2),
-  red: RGBA.fromIndex(1),
-  amber: RGBA.fromIndex(3),
-  blue: RGBA.fromIndex(4),
-  purple: RGBA.fromIndex(5),
+  text: RGBA.fromHex("#c6c8c6"),
+  muted: RGBA.fromHex("#666666"),
+  subtle: RGBA.fromHex("#666666"),
+  surface: RGBA.fromHex("#282c34"),
+  teal: RGBA.fromHex("#8abeb7"),
+  green: RGBA.fromHex("#b5bd68"),
+  red: RGBA.fromHex("#cc6666"),
+  amber: RGBA.fromHex("#f0c674"),
+  blue: RGBA.fromHex("#81a2be"),
+  purple: RGBA.fromHex("#b294bb"),
   addedBg: RGBA.fromValues(20, 56, 32),
   removedBg: RGBA.fromValues(72, 28, 32),
-  selectionBg: RGBA.fromIndex(3),
-  selectionFg: RGBA.fromIndex(0),
-  gold: RGBA.fromIndex(3),
+  selectionBg: RGBA.fromHex("#f0c674"),
+  selectionFg: RGBA.fromHex("#1d1f21"),
+  gold: RGBA.fromHex("#f0c674"),
   runner: "#d2a25c",
   orb: "#ae77ff",
 } as const satisfies Record<string, ColorInput>

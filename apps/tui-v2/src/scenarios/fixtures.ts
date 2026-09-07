@@ -2,12 +2,7 @@ import type { Activity, ClientState, PendingTurn, ScenarioId, ThreadView, Transc
 
 export const OFFLINE_NOTICE = "Offline demo: scripted events only; no network, auth, workspace, or model calls."
 
-export const workspaceFiles: readonly string[] = [
-  "README.md",
-  "docs/design notes.md",
-  "src/app.tsx",
-  "src/client/model.ts",
-]
+export { workspaceFiles } from "./workspace"
 
 export const clipboardImage = {
   bytes: Buffer.from(

@@ -6,6 +6,7 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount, type Accessor 
 import type { Client, ThreadView } from "../client/model"
 import { colors, modeColor, modeColors } from "./theme"
 import type { FocusPanel } from "./types"
+import { StyledChunks } from "./styled"
 
 export const contextSidebarWidth = 31
 
@@ -81,7 +82,7 @@ export function ContextSidebar(props: ContextSidebarProps) {
   )
 }
 
-export function WelcomePanel(props: { readonly client: Client; readonly animate?: boolean }) {
+export function WelcomePanel(props: { readonly client: Client; readonly animate?: boolean; readonly width: number }) {
   const dimensions = useTerminalDimensions()
   const [phase, setPhase] = createSignal(0)
   const [impulses, setImpulses] = createSignal<readonly { column: number; row: number; phase: number }[]>([])
@@ -99,7 +100,8 @@ export function WelcomePanel(props: { readonly client: Client; readonly animate?
     onCleanup(() => timer.interruptUnsafe())
   })
   const geometry = createMemo(() => {
-    const { width, height } = dimensions()
+    const width = props.width
+    const { height } = dimensions()
     const columns = Math.max(18, Math.min(56, Math.max(12, Math.floor(width / 2) - 2)))
     const rows = Math.max(9, Math.min(Math.max(9, height - 8), Math.round(columns * 0.5)))
     return {
@@ -154,7 +156,8 @@ export function WelcomePanel(props: { readonly client: Client; readonly animate?
     return "."
   }
   const content = createMemo(() => {
-    const { width, height } = dimensions()
+    const width = props.width
+    const { height } = dimensions()
     const mode = props.client.state.mode
     if (height < 20 || width < 60) {
       const hint = width >= 28 ? "ctrl+o commands   ? help" : "ctrl+o / ?"
@@ -196,7 +199,7 @@ export function WelcomePanel(props: { readonly client: Client; readonly animate?
           ])
         }
       >
-        <For each={content().chunks}>{(chunk) => <span style={chunk}>{chunk.text}</span>}</For>
+        <StyledChunks content={content()} />
       </text>
     </box>
   )

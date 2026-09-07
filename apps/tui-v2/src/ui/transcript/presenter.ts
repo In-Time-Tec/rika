@@ -49,6 +49,11 @@ const titlePaths = (item: TranscriptItem): readonly string[] => {
 }
 
 const familyFor = (item: TranscriptItem): ToolFamily => {
+  const title = item.title.trim().toLowerCase()
+  if (/^(read|reading|view|viewed|search|searched|grep|glob|explore|explored|inspect)\b/u.test(title)) return "explore"
+  if (/^(edit|edited|editing|write|wrote|writing|patch|patched|change|changed|changing|modify|modified)\b/u.test(title))
+    return "edit"
+  if (/^(bash|shell|command|run|running|ran|check|test)\b/u.test(title)) return "shell"
   const value = `${item.title}\n${item.text}`.toLowerCase()
   if (
     /(^|\b)(edit|edited|editing|write|wrote|writing|patch|patched|change|changed|changing|modify|modified)(\b|$)/u.test(
@@ -65,8 +70,10 @@ const familyFor = (item: TranscriptItem): ToolFamily => {
 }
 
 const actionFor = (family: ToolFamily, item: TranscriptItem): ToolAction => {
-  if (family === "explore")
+  if (family === "explore") {
+    if (/^(read|reading|view|viewed)\b/iu.test(item.title.trim())) return "read"
     return /\b(search|searched|grep|glob)\b/iu.test(`${item.title}\n${item.text}`) ? "search" : "read"
+  }
   if (family === "edit") return "edit"
   if (family === "shell") return "shell"
   return "other"
@@ -108,7 +115,7 @@ const outputFor = (item: TranscriptItem, command: string | undefined): string =>
 export const toolPresentation = (item: TranscriptItem): ToolPresentation => {
   const family = familyFor(item)
   const action = actionFor(family, item)
-  const paths = [...new Set([...pathsIn(item.text), ...titlePaths(item)])]
+  const paths = [...new Set([...titlePaths(item), ...pathsIn(item.title), ...pathsIn(item.text)])]
   const command = action === "shell" ? commandFor(item) : undefined
   const [additions, removals] = family === "edit" ? diffCounts(item.text) : [0, 0]
   return { item, family, action, paths, command, output: outputFor(item, command), additions, removals }

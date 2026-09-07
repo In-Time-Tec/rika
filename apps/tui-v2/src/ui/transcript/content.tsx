@@ -1,10 +1,10 @@
 import { Function } from "effect"
-import type { ColorInput } from "@opentui/core"
+import { StyledText, type ColorInput } from "@opentui/core"
 import { Show, createMemo, type Accessor } from "solid-js"
 import { renderDiffStyled, renderPierreDiff, renderReadFile } from "@rika/terminal/terminal-diff-presentation"
-import { renderMarkdownStyled } from "@rika/terminal/terminal-markdown-presentation"
+import { highlightShellCommand, renderMarkdownStyled } from "@rika/terminal/terminal-markdown-presentation"
 import type { Activity, TranscriptItem } from "../../client/model"
-import { StyledBlock } from "../styled"
+import { StyledBlock, StyledChunks } from "../styled"
 import { colors } from "../theme"
 import { aggregateActivity, firstPath, isActive, plural, type ToolPresentation } from "./presenter"
 
@@ -196,7 +196,6 @@ const singleShellLabel = (tool: ToolPresentation): string => {
 }
 
 const singleToolLabel = (tool: ToolPresentation, running: boolean): string => {
-  if (tool.item.title.length > 0 && tool.item.title !== "Tool") return tool.item.title
   switch (tool.family) {
     case "explore":
       return singleExploreLabel(tool)
@@ -223,8 +222,51 @@ export const toolGroupLabel = (items: readonly ToolPresentation[]): string => {
   const running = isActive(aggregateActivity(items.map((tool) => tool.item.status)))
   if (items.length === 1) return singleToolLabel(first, running)
   if (first.family === "edit") return multiEditLabel(items, running)
-  if (first.family === "shell") return `${running ? "Running" : "Ran"} ${plural(items.length, "command")}`
+  if (first.family === "shell") {
+    const failed = items.filter((tool) => tool.item.status === "failed").length
+    return `${running ? "Running" : "Ran"} ${plural(items.length, "command")}${failed > 0 ? `, ${failed} failed` : ""}`
+  }
+  if (first.family === "explore") return `${running ? "Exploring" : "Explored"} ${plural(items.length, "file")}`
   return titleFor(first.item)
+}
+
+export const ToolLabel = (props: { readonly items: readonly ToolPresentation[]; readonly selected: boolean }) => {
+  const label = () => toolGroupLabel(props.items)
+  const single = () => (props.items.length === 1 ? props.items[0] : undefined)
+  const command = createMemo(() => {
+    const tool = single()
+    return tool?.family === "shell" ? (tool.command ?? tool.item.title) : undefined
+  })
+  const highlighted = createMemo(
+    () =>
+      new StyledText(
+        highlightShellCommand(command() ?? "").flatMap((line, index) =>
+          index === 0 ? [...line] : [{ text: "\n", __isChunk: true }, ...line],
+        ),
+      ),
+  )
+  const split = () => label().indexOf(" ")
+  return (
+    <Show when={!props.selected} fallback={<span style={{ fg: colors.blue, bold: true }}>{` ${label()}`}</span>}>
+      <Show
+        when={command() !== undefined}
+        fallback={
+          <>
+            <span style={{ fg: colors.text }}>{` ${split() < 0 ? label() : label().slice(0, split())}`}</span>
+            <Show when={split() >= 0}>
+              <span> </span>
+              <span style={{ fg: colors.muted, underline: single()?.family === "explore" }}>
+                {label().slice(split() + 1)}
+              </span>
+            </Show>
+          </>
+        }
+      >
+        <span style={{ fg: colors.amber }}>{" $ "}</span>
+        <StyledChunks content={highlighted()} />
+      </Show>
+    </Show>
+  )
 }
 
 export const ToolBody = (props: { readonly tool: ToolPresentation; readonly indent?: number }) => {
