@@ -1,11 +1,12 @@
 import { CliRenderEvents, createCliRenderer } from "@opentui/core"
 import type { CliRendererErrorEvent, CliRendererHandlerErrorEvent } from "@opentui/core"
 import { render } from "@opentui/solid"
-import { Data, Deferred, Effect } from "effect"
+import { Config, Console, Data, Deferred, Effect } from "effect"
 import { ErrorBoundary } from "solid-js"
 import { App } from "./app"
 import type { ScenarioId } from "./client/model"
 import { createClient } from "./client/runtime"
+import { captureExitReceipt, renderExitReceipt, type ExitReceipt } from "./exit-receipt"
 
 export interface LaunchOptions {
   readonly scenario: ScenarioId
@@ -15,15 +16,29 @@ class TerminalFailure extends Data.TaggedError("TerminalFailure")<{
   readonly message: string
 }> {}
 
-export const launch = Effect.fn("TuiV2.launch")(function* (options: LaunchOptions) {
+const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
+  const workspace = yield* Config.string("INIT_CWD").pipe(Config.withDefault(process.cwd()))
+  let receipt: ExitReceipt | undefined
   const quit = yield* Deferred.make<void, TerminalFailure>()
   const onQuit = () => {
+    receipt ??= captureExitReceipt(client.state, workspace)
     Deferred.doneUnsafe(quit, Effect.void)
   }
   const client = yield* Effect.acquireRelease(
     Effect.sync(() => createClient({ scenario: options.scenario })),
     (resource) => resource.dispose,
   )
+  const viewClient = {
+    ...client,
+    archiveThread: () => {
+      receipt = captureExitReceipt(client.state, workspace)
+      client.archiveThread()
+    },
+    newThread: (target?: "runner" | "orb") => {
+      receipt = undefined
+      client.newThread(target)
+    },
+  }
   const renderer = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () =>
@@ -56,7 +71,7 @@ export const launch = Effect.fn("TuiV2.launch")(function* (options: LaunchOption
               return <text>Unable to render the interface.</text>
             }}
           >
-            <App client={client} onQuit={onQuit} animate={options.animate} />
+            <App client={viewClient} onQuit={onQuit} animate={options.animate} />
           </ErrorBoundary>
         ),
         renderer,
@@ -64,4 +79,10 @@ export const launch = Effect.fn("TuiV2.launch")(function* (options: LaunchOption
     catch: (cause) => new TerminalFailure({ message: String(cause) }),
   })
   yield* Deferred.await(quit)
+  return receipt ?? captureExitReceipt(client.state, workspace)
+})
+
+export const launch = Effect.fn("TuiV2.launch")(function* (options: LaunchOptions) {
+  const receipt = yield* Effect.scoped(runTui(options))
+  yield* Console.log(renderExitReceipt(receipt))
 })

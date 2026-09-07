@@ -1,6 +1,6 @@
 import type { KeyEvent, TextareaRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { Accessor, Setter } from "solid-js"
 import { Effect } from "effect"
 import type { Fiber } from "effect"
@@ -65,10 +65,10 @@ const createController = (props: AppProps) => {
     createDrafts(selectedId, () => editing()?.id)
   const hasTranscript = () => (selectedThread()?.items.length ?? 0) > 0
   const narrow = () => dimensions().width < 60
-  const contextual = () => {
+  const contextual = createMemo(() => {
     const thread = selectedThread()
     return thread !== undefined && (thread.approval !== null || thread.items.some((item) => item.kind === "child"))
-  }
+  })
   const changedItems = createMemo<readonly TranscriptItem[]>(
     () => selectedThread()?.items.filter((item) => item.kind === "diff") ?? [],
   )
@@ -107,10 +107,12 @@ const createController = (props: AppProps) => {
     },
   })
   const fileSidebarWidth = () => Math.max(24, Math.min(52, Math.floor(dimensions().width * 0.4)))
-  const contentWidth = () =>
-    dimensions().width -
-    (!narrow() && contextual() ? contextSidebarWidth : 0) -
-    (!narrow() && sidebarKind() !== undefined ? fileSidebarWidth() - 2 : 0)
+  const contentWidth = createMemo(
+    () =>
+      dimensions().width -
+      (!narrow() && contextual() ? contextSidebarWidth : 0) -
+      (!narrow() && sidebarKind() !== undefined ? fileSidebarWidth() : 0),
+  )
 
   const cancelEdit = () => {
     const current = editing()
@@ -184,6 +186,17 @@ const createController = (props: AppProps) => {
     setPendingSelection(undefined)
     props.client.newThread(target)
     setFocus("composer")
+  }
+  const archiveAndNew = () =>
+    batch(() => {
+      cancelEdit()
+      props.client.archiveThread()
+      newThread("runner")
+      closeOverlay()
+    })
+  const archiveAndQuit = () => {
+    props.client.archiveThread()
+    props.onQuit()
   }
   const openFile = (path: string) => {
     const diff = changedItems().find((item) => item.title === path)
@@ -273,6 +286,7 @@ const createController = (props: AppProps) => {
     choosePalette,
     choosePaletteEntry,
   } = createPalette({
+    isOpen: () => overlay() === "palette",
     client: props.client,
     selectedThread,
     newThread,
@@ -284,7 +298,7 @@ const createController = (props: AppProps) => {
     closeOverlay,
   })
   const handleCtrlC = () => {
-    if (forceExitArmed()) {
+    if (forceExitArmed() || overlay() === "exit") {
       props.onQuit()
       return
     }
@@ -323,6 +337,14 @@ const createController = (props: AppProps) => {
     ["palette", "C-o"],
     ["mode", "C-s"],
     ["context", "C-y"],
+    ["shortcuts", "?"],
+  ])
+  const exitCommands = new Map<string, () => void>([
+    ["C-n", archiveAndNew],
+    ["C-e", archiveAndQuit],
+    ["return", props.onQuit],
+    ["enter", props.onQuit],
+    ["y", props.onQuit],
   ])
   const modalKey = (key: KeyEvent, current: Overlay) => {
     if (current === "file-picker" || current === "threads") {
@@ -344,7 +366,10 @@ const createController = (props: AppProps) => {
       selectionKey(key, modeIndex, setModeIndex, modeOrder.length, () =>
         chooseMode(modeOrder[modeIndex()] ?? props.client.state.mode),
       )
-    else if (current === "exit" && (key.name === "return" || key.name === "enter" || key.name === "y")) props.onQuit()
+    else if (current === "exit") {
+      exitCommands.get(chord(key))?.()
+      key.preventDefault()
+    }
   }
   bindInput({
     client: props.client,
@@ -370,6 +395,8 @@ const createController = (props: AppProps) => {
   })
   return {
     hasTranscript,
+    archiveAndNew,
+    archiveAndQuit,
     setFocus,
     selectedThread,
     focus,

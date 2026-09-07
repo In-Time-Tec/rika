@@ -1,12 +1,13 @@
 import { Function } from "effect"
-import type { ColorInput } from "@opentui/core"
-import { Show, createMemo, type Accessor } from "solid-js"
+import { StyledText, type ColorInput } from "@opentui/core"
+import { Match, Show, Switch, createMemo, type Accessor } from "solid-js"
 import { renderDiffStyled, renderPierreDiff, renderReadFile } from "@rika/terminal/terminal-diff-presentation"
-import { renderMarkdownStyled } from "@rika/terminal/terminal-markdown-presentation"
+import { highlightShellCommand, renderMarkdownStyled } from "@rika/terminal/terminal-markdown-presentation"
 import type { Activity, TranscriptItem } from "../../client/model"
-import { StyledBlock } from "../styled"
+import { StyledBlock, StyledChunks } from "../styled"
 import { colors } from "../theme"
 import { aggregateActivity, firstPath, isActive, plural, type ToolPresentation } from "./presenter"
+import { createVisibleFrame } from "./visibility"
 
 const spinnerFrames = ["⠭", "⠿", "⠶", "⠦"] as const
 
@@ -115,12 +116,20 @@ interface HeaderProps {
 }
 
 export const ItemHeader = (props: HeaderProps) => {
+  const animation = createVisibleFrame(props.frame)
   const status = () => props.status?.() ?? props.item().status
-  const glyph = () => statusGlyph(status(), props.frame(), props.animate())
+  const glyph = () => statusGlyph(status(), isActive(status()) ? animation.frame() : 0, props.animate())
   const color = () => (props.selected?.() === true ? colors.blue : (props.tone ?? statusColor(status())))
   const label = () => props.label?.() ?? titleFor(props.item())
   return (
-    <text width="100%" selectable={false} onMouseDown={() => props.onToggle?.()} fg={colors.text} wrapMode="none">
+    <text
+      ref={animation.ref}
+      width="100%"
+      selectable={false}
+      onMouseDown={() => props.onToggle?.()}
+      fg={colors.text}
+      wrapMode="none"
+    >
       <Show when={props.prefix !== undefined}>
         <span style={{ fg: colors.subtle }}>{props.prefix}</span>
       </Show>
@@ -145,6 +154,7 @@ export const DiffHeader = (props: {
   readonly select: () => void
 }) => (
   <text
+    id={`transcript-header:${props.item.id}`}
     width="100%"
     selectable={false}
     onMouseDown={() => {
@@ -161,8 +171,7 @@ export const DiffHeader = (props: {
   </text>
 )
 
-export const toolHasBody = (tool: ToolPresentation): boolean =>
-  tool.output.trim().length > 0 || tool.additions > 0 || tool.removals > 0
+export const toolHasBody = (tool: ToolPresentation): boolean => tool.hasBody
 
 const indentText = (text: string, indent = 2): string => {
   const prefix = " ".repeat(Math.max(0, indent))
@@ -196,7 +205,6 @@ const singleShellLabel = (tool: ToolPresentation): string => {
 }
 
 const singleToolLabel = (tool: ToolPresentation, running: boolean): string => {
-  if (tool.item.title.length > 0 && tool.item.title !== "Tool") return tool.item.title
   switch (tool.family) {
     case "explore":
       return singleExploreLabel(tool)
@@ -223,30 +231,67 @@ export const toolGroupLabel = (items: readonly ToolPresentation[]): string => {
   const running = isActive(aggregateActivity(items.map((tool) => tool.item.status)))
   if (items.length === 1) return singleToolLabel(first, running)
   if (first.family === "edit") return multiEditLabel(items, running)
-  if (first.family === "shell") return `${running ? "Running" : "Ran"} ${plural(items.length, "command")}`
+  if (first.family === "shell") {
+    const failed = items.filter((tool) => tool.item.status === "failed").length
+    return `${running ? "Running" : "Ran"} ${plural(items.length, "command")}${failed > 0 ? `, ${failed} failed` : ""}`
+  }
+  if (first.family === "explore") return `${running ? "Exploring" : "Explored"} ${plural(items.length, "file")}`
   return titleFor(first.item)
+}
+
+export const ToolLabel = (props: { readonly items: readonly ToolPresentation[]; readonly selected: boolean }) => {
+  const label = () => toolGroupLabel(props.items)
+  const single = () => (props.items.length === 1 ? props.items[0] : undefined)
+  const command = createMemo(() => {
+    const tool = single()
+    return tool?.family === "shell" ? (tool.command ?? tool.item.title) : undefined
+  })
+  const highlighted = createMemo(
+    () =>
+      new StyledText(
+        highlightShellCommand(command() ?? "").flatMap((line, index) =>
+          index === 0 ? [...line] : [{ text: "\n", __isChunk: true }, ...line],
+        ),
+      ),
+  )
+  const split = () => label().indexOf(" ")
+  return (
+    <Show when={!props.selected} fallback={<span style={{ fg: colors.blue, bold: true }}>{` ${label()}`}</span>}>
+      <Show
+        when={command() !== undefined}
+        fallback={
+          <>
+            <span style={{ fg: colors.text }}>{` ${split() < 0 ? label() : label().slice(0, split())}`}</span>
+            <Show when={split() >= 0}>
+              <span> </span>
+              <span style={{ fg: colors.muted, underline: single()?.family === "explore" }}>
+                {label().slice(split() + 1)}
+              </span>
+            </Show>
+          </>
+        }
+      >
+        <span style={{ fg: colors.amber }}>{" $ "}</span>
+        <StyledChunks content={highlighted()} />
+      </Show>
+    </Show>
+  )
 }
 
 export const ToolBody = (props: { readonly tool: ToolPresentation; readonly indent?: number }) => {
   const source = () => props.tool.output
-  const path = firstPath(props.tool)
   const indent = props.indent ?? 2
-  if (
-    props.tool.family === "explore" &&
-    source()
-      .split("\n")
-      .some((line) => /^\d+: ?/u.test(line))
+  return (
+    <Switch fallback={<PlainBody source={() => indentText(source(), indent)} fg={colors.muted} wrapMode="char" />}>
+      <Match when={props.tool.family === "explore" && /^\d+: ?/mu.test(source())}>
+        <StyledBody source={source} path={firstPath(props.tool)} kind="read" indent={indent} />
+      </Match>
+      <Match when={props.tool.family === "edit" && /^(?:[+-]|@@ )/mu.test(source())}>
+        <StyledBody source={source} kind="diff" indent={indent} />
+      </Match>
+      <Match when={props.tool.family === "other"}>
+        <MarkdownBody source={source} />
+      </Match>
+    </Switch>
   )
-    return <StyledBody source={source} path={path} kind="read" indent={indent} />
-  if (
-    props.tool.family === "edit" &&
-    source()
-      .split("\n")
-      .some((line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("@@ "))
-  )
-    return <StyledBody source={source} kind="diff" indent={indent} />
-  if (props.tool.family === "shell")
-    return <PlainBody source={() => indentText(source(), indent)} fg={colors.muted} wrapMode="char" />
-  if (props.tool.family === "other") return <MarkdownBody source={source} />
-  return <PlainBody source={() => indentText(source(), indent)} fg={colors.muted} wrapMode="char" />
 }

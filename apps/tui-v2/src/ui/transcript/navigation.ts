@@ -48,6 +48,29 @@ export const allExpandableIdsFor = (groups: readonly TranscriptGroup[]): readonl
   return ids
 }
 
+export const defaultExpansionsFor = (groups: readonly TranscriptGroup[]): ReadonlyMap<string, boolean> => {
+  const defaults = new Map<string, boolean>()
+  for (const group of groups) {
+    if (group.kind === "item") {
+      if (group.item.kind === "diff") defaults.set(group.item.id, false)
+      continue
+    }
+    if (group.kind === "children") {
+      for (const item of group.items) {
+        if (item.text.trim().length > 0) defaults.set(item.id, isActive(item.status))
+      }
+      continue
+    }
+    if (toolExpandable(group.items)) defaults.set(group.id, toolDefaultExpanded(group.items))
+    if (group.items.length > 1) {
+      for (const tool of group.items) {
+        if (toolHasBody(tool)) defaults.set(`tool-child:${tool.item.id}`, isActive(tool.item.status))
+      }
+    }
+  }
+  return defaults
+}
+
 type Expanded = (id: string, fallback: boolean) => boolean
 export const navigableIdsFor: {
   (groups: readonly TranscriptGroup[], isExpanded: Expanded): readonly string[]

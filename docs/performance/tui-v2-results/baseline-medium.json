@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "description": "Headless Solid App rendering; deterministic batched concurrent stream updates, no model/network/workspace execution. Input timing includes the stream burst and flush, excludes assertion capture. Native timings are not terminal I/O throughput.",
+  "runtime": {
+    "bun": "1.4.0",
+    "versions": {
+      "node": "26.3.0",
+      "bun": "1.4.0",
+      "boringssl": "2288897e2e716330490893d226b4f079f9da9e0c",
+      "openssl": "1.1.0",
+      "llhttp": "9.3.0",
+      "libarchive": "ded82291ab41d5e355831b96b0e1ff49e24d8939",
+      "mimalloc": "6a14aee24315e503fa295a1fa90fe8b24ad91774",
+      "picohttpparser": "066d2b1e9ab820703db0837a7255d92d30f0c9f5",
+      "uwebsockets": "34cbb9a40b4bd1bd767d134a7065e66c2432a676",
+      "webkit": "0f966e81b78c84bb23213e391bc679c4ef83e56b",
+      "zig": "04e7f6ac1e009525bc00934f20199c68f04e0a24",
+      "zlib": "12731092979c6d07f42da27da673a9f6c7b13586",
+      "tinycc": "05f0fafaa3be31e31d7b4b5c17dc60f62c991171",
+      "lolhtml": "725ce499aa9b71e38b7a2d0a9fbb6d7294a4079e",
+      "ares": "c7a3138dcfe3bb0eaaf10c0c24c36dc66dc790ab",
+      "libdeflate": "c8c56a20f8f621e6a966b716b31f1dedab6a41e3",
+      "usockets": "34cbb9a40b4bd1bd767d134a7065e66c2432a676",
+      "lshpack": "8905c024b6d052f083a3d11d0a169b3c2735c8a1",
+      "zstd": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+      "v8": "14.6.202.34-node.20",
+      "uv": "1.48.0",
+      "napi": "10",
+      "icu": "78.3",
+      "unicode": "17.0",
+      "sqlite": "3.53.2",
+      "modules": "147"
+    }
+  },
+  "hardware": {
+    "cpu": "AMD EPYC",
+    "logicalCpus": 4,
+    "totalMemoryBytes": 16795611136,
+    "freeMemoryBytes": 15815147520,
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "viewport": { "width": 216, "height": 62 },
+  "scale": "medium",
+  "result": {
+    "workload": {
+      "items": 1000,
+      "children": 100,
+      "queued": 100,
+      "scale": "medium",
+      "iterations": 15,
+      "threads": 8,
+      "streams": 32,
+      "streamPlacement": "oldest",
+      "idleMs": 250,
+      "animate": false,
+      "idleOnly": false,
+      "toolCalls": 668,
+      "streamingToolCount": 32,
+      "transcriptItems": 1108,
+      "activeUpdatesPerBurst": 72,
+      "pendingOperationsPerBurst": { "edits": 1, "appends": 1, "dequeues": 1 },
+      "bursts": 45
+    },
+    "seedMs": 2.278505,
+    "mountMs": 575.261024,
+    "idle": {
+      "wallMs": 250.725876,
+      "cpuMicros": { "user": 14709, "system": 3849 },
+      "frames": 0,
+      "framesDuringSleep": 0,
+      "framesDuringFlush": 0,
+      "before": {
+        "nativeLastFrameTime": 11024,
+        "nativeAverageFrameTime": 191064.33333333334,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 14,
+        "nativeStdoutWriteTime": 0
+      },
+      "after": {
+        "nativeLastFrameTime": 11024,
+        "nativeAverageFrameTime": 191064.33333333334,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 14,
+        "nativeStdoutWriteTime": 0
+      },
+      "afterFlush": {
+        "nativeLastFrameTime": 11024,
+        "nativeAverageFrameTime": 191064.33333333334,
+        "nativeFrameCount": 3,
+        "cellsUpdated": 0,
+        "averageCellsUpdated": 4511,
+        "nativeRenderTime": 14,
+        "nativeStdoutWriteTime": 0
+      }
+    },
+    "updateFlushMs": {
+      "samples": [
+        453.487542, 392.096842, 372.196518, 363.877077, 416.388246, 378.548763, 419.43863, 389.385427, 366.76755,
+        385.540567, 380.11784, 380.692088, 424.403067, 417.538984, 378.615044
+      ],
+      "p50": 385.540567,
+      "p95": 453.487542,
+      "max": 453.487542
+    },
+    "synchronousMutationMs": {
+      "samples": [
+        360.628125, 319.025009, 290.128396, 285.774656, 343.658592, 305.388831, 302.904216, 320.859464, 298.632546,
+        316.795884, 309.213052, 310.724188, 334.350243, 340.105852, 280.01448
+      ],
+      "p50": 310.724188,
+      "p95": 360.628125,
+      "max": 360.628125
+    },
+    "flushWaitMs": {
+      "samples": [
+        92.859417, 73.071833, 82.068122, 78.102421, 72.729654, 73.159932, 116.534414, 68.525963, 68.135004, 68.744683,
+        70.904788, 69.9679, 90.052824, 77.433132, 98.600564
+      ],
+      "p50": 73.159932,
+      "p95": 116.534414,
+      "max": 116.534414
+    },
+    "inputWithStreamingMs": {
+      "mode": {
+        "samples": [
+          466.022974, 419.32666, 384.26996, 406.16471, 385.983755, 408.224985, 363.742517, 409.855061, 411.477958,
+          397.985699, 389.397798, 455.381998, 395.333355, 436.408631, 374.301553
+        ],
+        "p50": 406.16471,
+        "p95": 466.022974,
+        "max": 466.022974
+      },
+      "palette": {
+        "samples": [
+          428.426569, 392.69472, 448.391314, 391.470343, 448.770721, 357.198603, 397.7173, 436.27401, 450.383348,
+          488.097182, 439.684923, 498.06063, 484.171222, 450.913188, 416.278167
+        ],
+        "p50": 439.684923,
+        "p95": 498.06063,
+        "max": 498.06063
+      }
+    },
+    "nativeSamples": [
+      {
+        "nativeLastFrameTime": 33293,
+        "nativeAverageFrameTime": 185626.91666666666,
+        "nativeFrameCount": 12,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 1327,
+        "nativeRenderTime": 52,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 48319,
+        "nativeAverageFrameTime": 166778.7142857143,
+        "nativeFrameCount": 21,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 872,
+        "nativeRenderTime": 90,
+        "nativeStdoutWriteTime": 6
+      },
+      {
+        "nativeLastFrameTime": 23095,
+        "nativeAverageFrameTime": 163455.72413793104,
+        "nativeFrameCount": 29,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 714,
+        "nativeRenderTime": 52,
+        "nativeStdoutWriteTime": 3
+      },
+      {
+        "nativeLastFrameTime": 25046,
+        "nativeAverageFrameTime": 139960.03333333333,
+        "nativeFrameCount": 37,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 296,
+        "nativeRenderTime": 122,
+        "nativeStdoutWriteTime": 7
+      },
+      {
+        "nativeLastFrameTime": 30508,
+        "nativeAverageFrameTime": 140756.33333333334,
+        "nativeFrameCount": 45,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 294,
+        "nativeRenderTime": 50,
+        "nativeStdoutWriteTime": 2
+      },
+      {
+        "nativeLastFrameTime": 22808,
+        "nativeAverageFrameTime": 151659.76666666666,
+        "nativeFrameCount": 53,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 321,
+        "nativeRenderTime": 52,
+        "nativeStdoutWriteTime": 0
+      },
+      {
+        "nativeLastFrameTime": 22672,
+        "nativeAverageFrameTime": 151315.13333333333,
+        "nativeFrameCount": 61,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 319,
+        "nativeRenderTime": 51,
+        "nativeStdoutWriteTime": 3
+      },
+      {
+        "nativeLastFrameTime": 34029,
+        "nativeAverageFrameTime": 152291.6,
+        "nativeFrameCount": 69,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 319,
+        "nativeRenderTime": 51,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 22490,
+        "nativeAverageFrameTime": 152799.6,
+        "nativeFrameCount": 77,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 306,
+        "nativeRenderTime": 50,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 23571,
+        "nativeAverageFrameTime": 155581.6,
+        "nativeFrameCount": 85,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 306,
+        "nativeRenderTime": 52,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 22536,
+        "nativeAverageFrameTime": 157508.26666666666,
+        "nativeFrameCount": 93,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 323,
+        "nativeRenderTime": 53,
+        "nativeStdoutWriteTime": 0
+      },
+      {
+        "nativeLastFrameTime": 33451,
+        "nativeAverageFrameTime": 161685.76666666666,
+        "nativeFrameCount": 101,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 323,
+        "nativeRenderTime": 57,
+        "nativeStdoutWriteTime": 5
+      },
+      {
+        "nativeLastFrameTime": 26899,
+        "nativeAverageFrameTime": 163722.43333333332,
+        "nativeFrameCount": 109,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 323,
+        "nativeRenderTime": 54,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 23895,
+        "nativeAverageFrameTime": 164964.8,
+        "nativeFrameCount": 117,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 323,
+        "nativeRenderTime": 50,
+        "nativeStdoutWriteTime": 4
+      },
+      {
+        "nativeLastFrameTime": 44332,
+        "nativeAverageFrameTime": 164550.5,
+        "nativeFrameCount": 125,
+        "cellsUpdated": 629,
+        "averageCellsUpdated": 306,
+        "nativeRenderTime": 93,
+        "nativeStdoutWriteTime": 6
+      }
+    ],
+    "cpuMicros": { "user": 26782947, "system": 3001335 },
+    "wallMs": 20080.059093,
+    "memory": {
+      "rssBytes": [
+        177270784, 318820352, 444936192, 523902976, 552644608, 557621248, 566165504, 572198912, 575692800, 567779328,
+        588214272, 586813440, 600289280, 601862144, 622395392, 628781056, 629280768
+      ],
+      "maxSampledRssBytes": 629280768,
+      "final": {
+        "rss": 629280768,
+        "heapTotal": 213809152,
+        "heapUsed": 121381503,
+        "external": 15332288,
+        "arrayBuffers": 2213978
+      },
+      "maxRssKiB": 646976
+    }
+  }
+}

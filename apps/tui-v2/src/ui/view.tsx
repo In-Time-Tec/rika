@@ -11,7 +11,6 @@ import {
   FileCompletionOverlay,
   FilePreviewOverlay,
   ModeOverlay,
-  ShortcutsOverlay,
 } from "./overlays"
 import { ThreadSwitcherOverlay } from "./thread-overlay"
 import { colors } from "./theme"
@@ -79,7 +78,7 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
           </Show>
           <Show
             when={hasTranscript()}
-            fallback={<WelcomePanel client={props.client} animate={props.animate !== false} />}
+            fallback={<WelcomePanel client={props.client} animate={props.animate !== false} width={contentWidth()} />}
           >
             <box flexGrow={1} minHeight={0} overflow="hidden" onMouseDown={() => setFocus("transcript")}>
               <Transcript
@@ -135,6 +134,7 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
             submit={submit}
             interruptAndSend={interruptAndSend}
             editing={editing() !== undefined}
+            help={overlay() === "shortcuts"}
             registerEditor={state.registerEditor}
             handleKey={state.composerKey}
             handlePaste={handlePaste}
@@ -178,16 +178,30 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
         />
       </Show>
       <Show when={overlay() === "exit"}>
-        <ExitOverlay quit={props.onQuit} close={closeOverlay} />
-      </Show>
-      <Show when={overlay() === "shortcuts"}>
-        <ShortcutsOverlay close={closeOverlay} />
+        <ExitOverlay
+          quit={props.onQuit}
+          close={closeOverlay}
+          contentWidth={contentWidth()}
+          archiveAndNew={state.archiveAndNew}
+          archiveAndQuit={state.archiveAndQuit}
+        />
       </Show>
       <Show when={overlay() === "mode"}>
-        <ModeOverlay mode={props.client.state.mode} index={modeIndex} choose={chooseMode} close={closeOverlay} />
+        <ModeOverlay
+          mode={props.client.state.mode}
+          index={modeIndex}
+          choose={chooseMode}
+          close={closeOverlay}
+          contentWidth={contentWidth()}
+        />
       </Show>
       <Show when={overlay() === "context"}>
-        <ContextOverlay thread={selectedThread} close={closeOverlay} />
+        <ContextOverlay
+          thread={selectedThread}
+          close={closeOverlay}
+          contentWidth={contentWidth()}
+          mode={props.client.state.mode}
+        />
       </Show>
       <Show when={overlay() === "file-picker"}>
         <FileCompletionOverlay entries={fileEntries()} index={filePickerIndex} choose={chooseFile} />

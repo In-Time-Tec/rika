@@ -5,6 +5,7 @@ import type { PaletteEntry } from "./overlays"
 import type { Overlay } from "./types"
 
 interface PaletteOptions {
+  readonly isOpen: Accessor<boolean>
   readonly client: Client
   readonly selectedThread: Accessor<ThreadView | undefined>
   readonly newThread: (target: ThreadView["target"]) => void
@@ -31,6 +32,7 @@ export function createPalette(options: PaletteOptions) {
   const [paletteQuery, setPaletteQuery] = createSignal("")
   const [paletteIndex, setPaletteIndex] = createSignal(0)
   const paletteEntries = createMemo<readonly PaletteEntry[]>(() => {
+    if (!options.isOpen()) return []
     const entries: PaletteEntry[] = [
       { id: "new-thread", label: "New Thread", detail: "Ctrl+N", run: () => newThread("runner") },
       { id: "new-orb-thread", label: "New Thread in Orb", detail: "Ctrl+Shift+N", run: () => newThread("orb") },

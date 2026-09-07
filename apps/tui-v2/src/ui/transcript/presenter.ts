@@ -11,6 +11,7 @@ export interface ToolPresentation {
   readonly paths: readonly string[]
   readonly command: string | undefined
   readonly output: string
+  readonly hasBody: boolean
   readonly additions: number
   readonly removals: number
 }
@@ -48,7 +49,12 @@ const titlePaths = (item: TranscriptItem): readonly string[] => {
   return []
 }
 
-const familyFor = (item: TranscriptItem): ToolFamily => {
+export const toolFamily = (item: TranscriptItem): ToolFamily => {
+  const title = item.title.trim().toLowerCase()
+  if (/^(read|reading|view|viewed|search|searched|grep|glob|explore|explored|inspect)\b/u.test(title)) return "explore"
+  if (/^(edit|edited|editing|write|wrote|writing|patch|patched|change|changed|changing|modify|modified)\b/u.test(title))
+    return "edit"
+  if (/^(bash|shell|command|run|running|ran|check|test)\b/u.test(title)) return "shell"
   const value = `${item.title}\n${item.text}`.toLowerCase()
   if (
     /(^|\b)(edit|edited|editing|write|wrote|writing|patch|patched|change|changed|changing|modify|modified)(\b|$)/u.test(
@@ -65,8 +71,10 @@ const familyFor = (item: TranscriptItem): ToolFamily => {
 }
 
 const actionFor = (family: ToolFamily, item: TranscriptItem): ToolAction => {
-  if (family === "explore")
+  if (family === "explore") {
+    if (/^(read|reading|view|viewed)\b/iu.test(item.title.trim())) return "read"
     return /\b(search|searched|grep|glob)\b/iu.test(`${item.title}\n${item.text}`) ? "search" : "read"
+  }
   if (family === "edit") return "edit"
   if (family === "shell") return "shell"
   return "other"
@@ -106,26 +114,40 @@ const outputFor = (item: TranscriptItem, command: string | undefined): string =>
 }
 
 export const toolPresentation = (item: TranscriptItem): ToolPresentation => {
-  const family = familyFor(item)
+  const family = toolFamily(item)
   const action = actionFor(family, item)
-  const paths = [...new Set([...pathsIn(item.text), ...titlePaths(item)])]
+  const paths = [...new Set([...titlePaths(item), ...pathsIn(item.title), ...pathsIn(item.text)])]
   const command = action === "shell" ? commandFor(item) : undefined
   const [additions, removals] = family === "edit" ? diffCounts(item.text) : [0, 0]
-  return { item, family, action, paths, command, output: outputFor(item, command), additions, removals }
+  const output = outputFor(item, command)
+  return {
+    item,
+    family,
+    action,
+    paths,
+    command,
+    output,
+    hasBody: output.trim().length > 0 || additions > 0 || removals > 0,
+    additions,
+    removals,
+  }
 }
 
 const sameFamily = (left: ToolPresentation, right: ToolPresentation): boolean => left.family === right.family
 
-export const buildTranscriptGroups = (items: readonly TranscriptItem[]): readonly TranscriptGroup[] => {
+const buildTranscriptGroupsImpl = (
+  items: readonly TranscriptItem[],
+  present: (item: TranscriptItem) => ToolPresentation = toolPresentation,
+): readonly TranscriptGroup[] => {
   const groups: TranscriptGroup[] = []
   let index = 0
   while (index < items.length) {
     const item = items[index]!
     if (item.kind === "tool") {
-      const tools: ToolPresentation[] = [toolPresentation(item)]
+      const tools: ToolPresentation[] = [present(item)]
       index += 1
       while (index < items.length && items[index]!.kind === "tool") {
-        const next = toolPresentation(items[index]!)
+        const next = present(items[index]!)
         if (!sameFamily(tools[0]!, next)) break
         tools.push(next)
         index += 1
@@ -148,6 +170,13 @@ export const buildTranscriptGroups = (items: readonly TranscriptItem[]): readonl
   }
   return groups
 }
+
+export const buildTranscriptGroups: {
+  (items: readonly TranscriptItem[], present?: (item: TranscriptItem) => ToolPresentation): readonly TranscriptGroup[]
+  (
+    present?: (item: TranscriptItem) => ToolPresentation,
+  ): (items: readonly TranscriptItem[]) => readonly TranscriptGroup[]
+} = Function.dual((args) => Array.isArray(args[0]), buildTranscriptGroupsImpl)
 
 export const aggregateActivity = (statuses: readonly (Activity | undefined)[]): Activity | undefined => {
   if (statuses.includes("failed")) return "failed"

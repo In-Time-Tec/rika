@@ -103,7 +103,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     setActivity(threadId, "idle")
     drainPending(threadId)
   }
-
   const drainPending = (threadId: string): void => {
     if (disposed || activeRuns.has(threadId)) return
     const index = threadIndex(threadId)
@@ -115,7 +114,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     setPending(threadId, thread.pending.slice(1))
     startTurn(threadId, next.prompt, next.images)
   }
-
   const startStream = (
     threadId: string,
     itemId: string,
@@ -141,7 +139,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     })
     launch(threadId, token, [itemId], effect)
   }
-
   const startTurn = (threadId: string, prompt: string, images: readonly ImageAttachment[] = []): void => {
     if (disposed) return
     const index = threadIndex(threadId)
@@ -167,7 +164,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     setActivity(threadId, "working")
     startStream(threadId, assistantId, splitReply(genericReply(prompt)))
   }
-
   const finishApproval = (threadId: string, token: number, toolId: string): void => {
     if (!isCurrent(threadId, token)) return
     const item = itemIndex(threadId, toolId)
@@ -186,7 +182,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     })
     completeRun(threadId, token, [toolId])
   }
-
   const startApproval = (threadId: string, toolId: string): void => {
     const token = ++runToken
     const generation = scenarioGeneration
@@ -200,7 +195,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     })
     launch(threadId, token, [toolId], effect)
   }
-
   const startChildren = (threadId: string): void => {
     const childIds = ["children-child-api", "children-child-web", "children-child-cli"]
     if (childIds.some((id) => itemIndex(threadId, id) < 0)) return
@@ -245,7 +239,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     )
     launch(threadId, token, [...childIds, "children-reasoning-1", "children-assistant-1"], effect)
   }
-
   const startReconnect = (threadId: string): void => {
     const assistantId = "reconnect-assistant-1"
     if (itemIndex(threadId, assistantId) < 0) return
@@ -274,7 +267,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     })
     launch(threadId, token, [assistantId], effect)
   }
-
   const startScenarioPlayback = (scenario: ScenarioId): void => {
     const threadId = state.selectedThreadId
     if (scenario === "streaming")
@@ -344,7 +336,7 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     const threadId = nextId(`thread-${target}`)
     const thread: StoreThread = {
       id: threadId,
-      title: `New ${target === "runner" ? "Runner" : "Orb"} thread`,
+      title: target === "runner" ? "New thread" : "New thread in Orb",
       target,
       activity: "idle",
       items: [],
@@ -482,6 +474,14 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     loadScenario,
     selectThread,
     newThread,
+    archiveThread: () => {
+      if (disposed) return
+      cancelSelected()
+      const id = state.selectedThreadId
+      setStoreState("threads", (threads: StoreThread[]) => threads.filter((thread) => thread.id !== id))
+      const next = state.threads[0]
+      if (next !== undefined) setStoreState("selectedThreadId", next.id)
+    },
     submit,
     cancel: cancelSelected,
     approve,
