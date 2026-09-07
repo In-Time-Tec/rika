@@ -33,8 +33,8 @@ tool group. No timing samples were discarded as warm-up.
 
 At the medium scale, p95 update-plus-flush latency improved approximately 12.6×,
 and peak sampled process RSS fell approximately 57%. The original large case
-failed while creating native syntax styles; its [failure log](tui-v2-results/baseline-large.failure.log)
-is preserved rather than represented as a numeric result. The optimized large
+failed while creating native syntax styles; the original failure log is not
+included in this repository, and the failure is not represented as a numeric result. The optimized large
 case completed every interaction.
 
 Update-plus-flush includes OpenTUI scheduling and frame pacing. It is not pure
