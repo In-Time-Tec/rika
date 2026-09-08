@@ -4,6 +4,10 @@ Rika is a collaborative coding-agent CLI and OpenTUI application written in Effe
 
 Read [PRODUCT.md](PRODUCT.md) for product direction and [CONTEXT.md](CONTEXT.md) for exact vocabulary and ownership. Current behavior belongs in [docs/features](docs/features), lasting choices in [docs/decisions](docs/decisions), and meaningful costs in [docs/tradeoffs](docs/tradeoffs).
 
+## GitHub issues
+
+Use the [writing-github-issues](.agents/skills/writing-github-issues/SKILL.md) skill before creating, splitting, or rewriting implementation issues. Lead with the problem, a concrete proposed interface when relevant, and the desired runtime flow.
+
 ## Commands
 
 This repository pins Bun 1.4.0 in `package.json`.
