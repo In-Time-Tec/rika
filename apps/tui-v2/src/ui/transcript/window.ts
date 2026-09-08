@@ -2,6 +2,12 @@ import type { TranscriptGroup } from "./presenter"
 
 export const transcriptWindowSize = 250
 
+export const transcriptAnchorId = (group: TranscriptGroup): string => {
+  if (group.kind === "item") return group.item.id
+  if (group.kind === "children") return group.items[0]!.id
+  return `tool-child:${group.items[0]!.item.id}`
+}
+
 export const transcriptWindow = (input: { readonly count: number; readonly start: number | undefined }) => {
   const start =
     input.start === undefined || input.count <= transcriptWindowSize

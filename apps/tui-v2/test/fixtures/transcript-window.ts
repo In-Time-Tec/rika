@@ -47,7 +47,7 @@ try {
   assert.match(screen.captureCharFrame(), /file-9999\.ts/)
   assert.equal(scroll.content.findDescendantById("transcript-newer"), undefined)
 
-  screen.mockInput.pressKey("HOME")
+  scroll.scrollTo({ x: 0, y: 0 })
   await screen.flush()
   assert.match(screen.captureCharFrame(), /Show earlier messages \(9750 groups\)/)
   const earlier = scroll.content.findDescendantById("transcript-earlier")
@@ -71,8 +71,6 @@ try {
 
   screen.mockInput.pressKey("HOME")
   await screen.flush()
-  screen.mockInput.pressKey("HOME")
-  await screen.flush()
   assert.equal(mounted()[0]?.id, "transcript-group:item-0")
   assert.equal(scroll.scrollTop, 0)
   assert.match(screen.captureCharFrame(), /file-0\.ts/)
@@ -92,6 +90,20 @@ try {
   )
   assert.equal(scroll.scrollTop, beforeScroll)
   bounded()
+
+  setItems((previous) => [{ id: "older", kind: "assistant", title: "Rika", text: "Retained older page" }, ...previous])
+  await screen.flush()
+  assert.deepEqual(
+    mounted().map((child) => child.id),
+    beforeAppend,
+  )
+  assert.equal(scroll.scrollTop, beforeScroll)
+  assert.ok(scroll.content.findDescendantById("transcript-earlier") !== undefined)
+  screen.mockInput.pressKey("HOME")
+  await screen.flush()
+  assert.match(screen.captureCharFrame(), /Retained older page/)
+  setItems((previous) => previous.slice(1))
+  await screen.flush()
 
   screen.mockInput.pressKey("END")
   await screen.flush()
@@ -201,7 +213,7 @@ try {
   let serial = 8
   for (const kind of ["child", "tool"] as const) {
     setItems([
-      ...Array.from({ length: 100 }, (_, index) => ({
+      ...Array.from({ length: 251 }, (_, index) => ({
         id: `${kind}-${index}`,
         kind,
         title: kind === "child" ? `Reviewer-${index}` : `bash command-${index}`,
@@ -216,20 +228,23 @@ try {
       })),
     ])
     await screen.flush()
-    assert.equal(mounted().some((node) => node.id.includes(`${kind}-0`)), false)
+    assert.equal(
+      mounted().some((node) => node.id.includes(`${kind}-0`)),
+      false,
+    )
     if (kind === "tool") {
       setNavigation({ serial: serial++, action: "next" })
       await screen.flush()
       setNavigation({ serial: serial++, action: "toggle" })
       await screen.flush()
     }
-    for (let index = 0; index < 100; index += 1) {
+    for (let index = 0; index < 251; index += 1) {
       setNavigation({ serial: serial++, action: "next" })
       await screen.flush()
       const label = kind === "child" ? `Reviewer-${index} ` : `command-${index} `
       assert.ok(screen.captureCharFrame().includes(label), `selected ${kind} ${index} must be visible`)
     }
-    for (let index = 98; index >= 0; index -= 1) {
+    for (let index = 249; index >= 0; index -= 1) {
       setNavigation({ serial: serial++, action: "previous" })
       await screen.flush()
       const label = kind === "child" ? `Reviewer-${index} ` : `command-${index} `
@@ -239,6 +254,45 @@ try {
     await screen.flush()
     assert.match(screen.captureCharFrame(), /Result-0/)
     bounded()
+  }
+
+  const settled = Array.from(
+    { length: 4 },
+    (_, index): TranscriptItem => ({
+      id: `settled-${index}`,
+      kind: "tool",
+      title: "bash",
+      text: "$ check\nSame result",
+      status: "idle",
+    }),
+  )
+  setItems(settled.slice(0, 3))
+  await screen.flush()
+  setNavigation({ serial: serial++, action: "next" })
+  await screen.flush()
+  setNavigation({ serial: serial++, action: "toggle" })
+  await screen.flush()
+  const firstHeader = scroll.content.findDescendantById("transcript-header:tool-child:settled-0")
+  assert.ok(firstHeader !== undefined)
+  setItems(settled)
+  await screen.flush()
+  assert.equal(scroll.content.findDescendantById("transcript-header:tool-child:settled-0"), firstHeader)
+  for (const item of settled) {
+    assert.ok(scroll.content.findDescendantById(`transcript-header:tool-child:${item.id}`) !== undefined)
+  }
+  screen.resize(70, 18)
+  await screen.flush()
+  assert.equal(scroll.content.findDescendantById("transcript-header:tool-child:settled-0"), firstHeader)
+  setNavigation({ serial: serial++, action: "toggle" })
+  await screen.flush()
+  assert.equal(scroll.content.findDescendantById("transcript-header:tool-child:settled-0"), undefined)
+  setItems(settled.map((item) => ({ ...item })))
+  await screen.flush()
+  assert.equal(scroll.content.findDescendantById("transcript-header:tool-child:settled-0"), undefined)
+  setNavigation({ serial: serial++, action: "toggle" })
+  await screen.flush()
+  for (const item of settled) {
+    assert.ok(scroll.content.findDescendantById(`transcript-header:tool-child:${item.id}`) !== undefined)
   }
 } finally {
   screen.renderer.destroy()
