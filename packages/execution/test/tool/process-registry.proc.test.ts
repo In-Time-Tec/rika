@@ -19,6 +19,143 @@ const alive = (pid: number) => {
   }
 }
 
+test("concurrent and repeated cancellation joins escalation without touching another owned group", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "rika-cancel-" })
+        const registry = yield* ProcessRegistry.Service
+        const unrelated = yield* registry.start("/bin/sh", ["-c", "echo $$; exec sleep 60"], cwd)
+        const unrelatedOutput = yield* registry.poll(unrelated, 50, 100)
+        const unrelatedPid = Number(unrelatedOutput.stdout.trim())
+        expect(alive(unrelatedPid)).toBe(true)
+        const id = yield* registry.start(
+          "/bin/sh",
+          ["-c", "trap 'printf term > signalled; trap \"\" TERM' TERM; echo $$ > ready; while :; do sleep 60; done"],
+          cwd,
+        )
+        yield* Effect.tryPromise(() =>
+          expect
+            .poll(() => {
+              try {
+                return Number(readFileSync(`${cwd}/ready`, "utf8")) > 0
+              } catch {
+                return false
+              }
+            })
+            .toBe(true),
+        )
+        const child = Number(readFileSync(`${cwd}/ready`, "utf8"))
+        const start = yield* Clock.currentTimeMillis
+        yield* Effect.all([registry.cancel(id), registry.cancel(id)], { concurrency: 2 })
+        expect((yield* Clock.currentTimeMillis) - start).toBeLessThan(2_000)
+        expect(readFileSync(`${cwd}/signalled`, "utf8")).toBe("term")
+        yield* Effect.tryPromise(() => expect.poll(() => alive(child)).toBe(false))
+        yield* registry.cancel(id)
+        const result = yield* registry.poll(id, 2_000, 100)
+        expect(result.running).toBe(false)
+        yield* registry.cancel(id)
+        expect(yield* registry.poll(id, 0, 100)).toEqual(result)
+        expect(alive(unrelatedPid)).toBe(true)
+        expect(yield* registry.poll(unrelated, 0, 100)).toMatchObject({ running: true })
+        expect(yield* Effect.result(registry.cancel(String(unrelatedPid)))).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "ProcessNotFound" },
+        })
+      }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provideMerge(BunServices.layer)))),
+    ),
+  ))
+
+test("stopping an observer leaves a finite command running and bounds real oversized output", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* ProcessRegistry.Service
+        const id = yield* registry.start(
+          "/bin/sh",
+          ["-c", "sleep 0.2; head -c 200000 /dev/zero; printf done >&2"],
+          process.cwd(),
+        )
+        const observer = yield* Effect.forkChild(registry.observe(id))
+        yield* Fiber.interrupt(observer)
+        expect(yield* registry.poll(id, 0, 100)).toMatchObject({ running: true })
+        expect(yield* registry.observe(id)).toMatchObject({ exitCode: 0, truncated: true })
+        const result = yield* registry.poll(id, 0, 1024)
+        expect(result).toMatchObject({ running: false, exitCode: 0, truncated: true })
+        expect(new TextEncoder().encode(result.stdout + result.stderr).length).toBeLessThanOrEqual(1024)
+      }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(BunServices.layer)))),
+    ),
+  ))
+
+test("shutdown invalidates retained handles instead of reporting stale running processes", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const retained = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const registry = yield* ProcessRegistry.Service
+            const id = yield* registry.start("/bin/sh", ["-c", "exec sleep 60"], process.cwd())
+            return { registry, id }
+          }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(BunServices.layer)))),
+        )
+        for (const operation of [
+          retained.registry.poll(retained.id, 0, 100),
+          retained.registry.observe(retained.id),
+          retained.registry.cancel(retained.id),
+        ]) {
+          expect(yield* Effect.result(operation)).toMatchObject({
+            _tag: "Failure",
+            failure: { _tag: "ProcessNotFound" },
+          })
+        }
+        expect(yield* Effect.result(retained.registry.start("true", [], process.cwd()))).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "PlatformError" },
+        })
+      }),
+    ),
+  ))
+
+test("losing the supervisor reports unknown completion even when a descendant holds output open", () => {
+  let child = 0
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        let supervisorPid = 0
+        const observed = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) =>
+            spawner.spawn(command).pipe(
+              Effect.tap((handle) =>
+                Effect.sync(() => {
+                  supervisorPid = Number(handle.pid)
+                }),
+              ),
+            ),
+          ),
+        )
+        yield* Effect.gen(function* () {
+          const registry = yield* ProcessRegistry.Service
+          const id = yield* registry.start("/bin/sh", ["-c", "echo $$; exec sleep 60"], process.cwd())
+          const output = yield* registry.poll(id, 50, 100)
+          child = Number(output.stdout.trim())
+          expect(alive(child)).toBe(true)
+          process.kill(supervisorPid, "SIGKILL")
+          expect(yield* registry.poll(id, 2_000, 100)).toMatchObject({ running: false, exitCode: -1, truncated: true })
+        }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(observed))))
+      }).pipe(provide(BunServices.layer)),
+    ).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (child > 0 && alive(child)) process.kill(child, "SIGKILL")
+        }),
+      ),
+    ),
+  )
+})
+
 for (const cleanup of ["cancel", "scope", "completion"] as const) {
   for (const resistant of [false, true]) {
     test(`${cleanup} stops a ${resistant ? "TERM-resistant" : "normal"} child after its shell exits early`, () => {

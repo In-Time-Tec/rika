@@ -9,6 +9,7 @@ import {
   Layer,
   Option,
   PlatformError,
+  Random,
   Ref,
   Scope,
   Semaphore,
@@ -36,7 +37,7 @@ interface ProcessExit {
 interface Entry {
   readonly close: Effect.Effect<void>
   readonly output: Ref.Ref<PendingOutput>
-  readonly exit: Deferred.Deferred<ProcessExit>
+  readonly exit: Deferred.Deferred<ProcessExit, ProcessNotFound>
   readonly startedAtNanos: bigint
   readonly admission: Semaphore.Semaphore
 }
@@ -171,11 +172,34 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const scope = yield* Scope.fork(yield* Scope.Scope, "parallel")
+    const ownerScope = yield* Scope.fork(yield* Scope.Scope)
     const entries = yield* Ref.make(new Map<string, EntryState>())
+    let closed = false
+    yield* Scope.addFinalizer(
+      ownerScope,
+      Effect.gen(function* () {
+        closed = true
+        const current = yield* Ref.getAndSet(entries, new Map<string, EntryState>())
+        for (const [processId, state] of current) {
+          if (state._tag === "Active")
+            yield* Deferred.fail(
+              state.entry.exit,
+              new ProcessNotFound({ message: `Unavailable process id: ${processId}` }),
+            )
+        }
+      }),
+    )
+    const scope = yield* Scope.fork(ownerScope, "parallel")
+    const incarnation = `${yield* Random.nextInt}:${yield* Random.nextInt}`
     let nextId = 1
     return Service.of({
       start: Effect.fn("ProcessRegistry.start")(function* (command, args, cwd) {
+        if (closed)
+          return yield* PlatformError.badArgument({
+            module: "ProcessRegistry",
+            method: "start",
+            description: "Process registry is closed",
+          })
         const processScope = yield* Scope.fork(scope)
         // Scope.close is idempotent but does not join an in-progress close.
         // Registered first, this marker runs after the spawner's finalizer.
@@ -222,10 +246,10 @@ export const layer = Layer.effect(
           retainedBytes: 0,
           truncated: false,
         })
-        const exit = yield* Deferred.make<ProcessExit>()
+        const exit = yield* Deferred.make<ProcessExit, ProcessNotFound>()
         const startedAtNanos = yield* Clock.currentTimeNanos
         const admission = yield* Semaphore.make(1)
-        const processId = String(nextId++)
+        const processId = `${incarnation}:${nextId++}`
         const entry = { close, output, exit, startedAtNanos, admission }
         yield* Ref.update(entries, (current) => new Map(current).set(processId, { _tag: "Active", entry }))
         yield* Effect.forkIn(
@@ -241,7 +265,23 @@ export const layer = Layer.effect(
                 Ref.update(output, (pending) =>
                   appendOutput(pending, channel, decoder.decode(bytes, { stream: true })),
                 ),
-              ).pipe(Effect.ensuring(Ref.update(output, (pending) => appendOutput(pending, channel, decoder.decode()))))
+              ).pipe(
+                Effect.raceFirst(
+                  Deferred.await(cleanupDone).pipe(
+                    Effect.andThen(Effect.sleep("100 millis")),
+                    Effect.andThen(
+                      Effect.fail(
+                        PlatformError.badArgument({
+                          module: "ProcessRegistry",
+                          method: "drain",
+                          description: "Process output remained open after cleanup",
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+                Effect.ensuring(Ref.update(output, (pending) => appendOutput(pending, channel, decoder.decode()))),
+              )
             const [stdoutExit, stderrExit, processExit] = yield* Effect.all(
               [
                 Effect.exit(drain("stdout", stdoutDecoder, handle.stdout)),
@@ -249,6 +289,9 @@ export const layer = Layer.effect(
                 Effect.exit(
                   collectBoundedText(handle.getOutputFd(3), 16).pipe(
                     Effect.map(({ text }) => (/^\d+\n$/.test(text) ? Number(text) : -1)),
+                    Effect.raceFirst(
+                      handle.exitCode.pipe(Effect.exit, Effect.andThen(Effect.sleep("100 millis")), Effect.as(-1)),
+                    ),
                     Effect.ensuring(close),
                   ),
                 ),
@@ -333,14 +376,8 @@ export const layer = Layer.effect(
       cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
         const state = (yield* Ref.get(entries)).get(processId)
         if (state === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
-        if (state._tag === "Terminal")
-          return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        if (state._tag === "Terminal") return
         yield* state.entry.close
-        yield* Ref.update(entries, (current) => {
-          const next = new Map(current)
-          next.delete(processId)
-          return next
-        })
       }),
     })
   }),

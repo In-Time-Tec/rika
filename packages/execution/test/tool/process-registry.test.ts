@@ -180,7 +180,19 @@ describe("ProcessRegistry", () => {
         const repeated = yield* registry.poll(processId, 0, 100)
         const unknown = yield* Effect.result(registry.poll("missing", 0, 100))
 
-        expect([processId, secondId]).toEqual(["1", "2"])
+        expect(processId).not.toBe(secondId)
+        expect([first.processId, drained.processId, completed.processId, repeated.processId]).toEqual([
+          processId,
+          processId,
+          processId,
+          processId,
+        ])
+        expect(yield* registry.poll(secondId, 0, 100)).toMatchObject({
+          processId: secondId,
+          stdout: "",
+          stderr: "",
+          running: true,
+        })
         expect(first).toMatchObject({ stdout: "first", stderr: "", running: true, truncated: false })
         expect(drained).toMatchObject({ stdout: "", stderr: "", running: true, truncated: false })
         expect(completed).toMatchObject({ stdout: "", stderr: "second", running: false, exitCode: 7 })
@@ -189,6 +201,54 @@ describe("ProcessRegistry", () => {
       }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
     )
   })
+
+  it.effect("a replacement registry rejects old IDs instead of addressing a newly started command", () =>
+    Effect.gen(function* () {
+      const spawner = controlledSpawner([])
+      const start = Effect.gen(function* () {
+        const registry = yield* ProcessRegistry.Service
+        return yield* registry.start("command", [], "/workspace")
+      })
+      const oldId = yield* Effect.scoped(start.pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))))
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* ProcessRegistry.Service
+          const newId = yield* start
+          expect(newId).not.toBe(oldId)
+          for (const operation of [registry.poll(oldId, 0, 100), registry.observe(oldId), registry.cancel(oldId)]) {
+            expect(yield* Effect.result(operation)).toMatchObject({
+              _tag: "Failure",
+              failure: { _tag: "ProcessNotFound" },
+            })
+          }
+          expect(yield* registry.poll(newId, 0, 100)).toMatchObject({ processId: newId, running: true })
+          yield* finish(spawner.spawned[1]!, 19)
+          expect(yield* registry.observe(newId)).toMatchObject({ processId: newId, exitCode: 19 })
+        }).pipe(provide(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer)))),
+      )
+    }),
+  )
+
+  it.effect("shutdown releases observers when cleanup cannot produce a terminal receipt", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const spawner = controlledSpawner([])
+      const context = yield* Layer.build(ProcessRegistry.layer.pipe(Layer.provide(spawner.layer))).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      )
+      const registry = Context.get(context, ProcessRegistry.Service)
+      yield* Effect.gen(function* () {
+        const id = yield* registry.start("command", [], "/workspace")
+        const observer = yield* Effect.forkChild(Effect.result(registry.observe(id)))
+        yield* Effect.yieldNow
+        yield* Scope.close(scope, Exit.void)
+        expect(yield* Fiber.join(observer)).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "ProcessNotFound" },
+        })
+      }).pipe(Effect.ensuring(Scope.close(scope, Exit.void)))
+    }),
+  )
 
   it.effect("keeps fast completion output readable through repeated status checks", () => {
     const spawner = controlledSpawner([])
