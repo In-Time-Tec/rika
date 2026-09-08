@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { transcriptWindow } from "../../../src/ui/transcript/window"
+import { selectedGroupIndex, transcriptAnchorId, transcriptWindow } from "../../../src/ui/transcript/window"
+import { buildTranscriptGroups } from "../../../src/ui/transcript/presenter"
 
 test("short transcripts need no paging controls or phantom geometry", () => {
   expect(transcriptWindow({ count: 0, start: undefined })).toEqual({ start: 0, end: 0, earlier: 0, newer: 0 })
@@ -27,4 +28,24 @@ test("successive windows cover every group exactly once", () => {
     start = window.end
   }
   expect(visited).toEqual(Array.from({ length: 10_013 }, (_, index) => index))
+})
+
+test("oversized first families keep every member independently of the mounted group budget", () => {
+  for (const kind of ["tool", "child"] as const) {
+    const items = Array.from({ length: 501 }, (_, index) => ({
+      id: `${kind}-${index}`,
+      kind,
+      title: kind === "tool" ? "bash" : "Reviewer",
+      text: "result",
+    }))
+    const groups = buildTranscriptGroups(items)
+    expect(groups).toHaveLength(1)
+    expect(transcriptWindow({ count: groups.length, start: 0 })).toEqual({ start: 0, end: 1, earlier: 0, newer: 0 })
+    const id = transcriptAnchorId(groups[0]!)
+    const prepended = buildTranscriptGroups([{ ...items[0]!, id: "older" }, ...items])
+    expect(selectedGroupIndex({ groups: prepended, id })).toBe(0)
+    for (const item of items) {
+      expect(selectedGroupIndex({ groups, id: kind === "tool" ? `tool-child:${item.id}` : item.id })).toBe(0)
+    }
+  }
 })
