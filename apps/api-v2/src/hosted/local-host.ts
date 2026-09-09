@@ -20,7 +20,6 @@ export interface ApiV2LocalHost {
   readonly close: () => Promise<void>
 }
 
-
 const runtimeWebSocket = (socket: {
   readonly send: (data: string | Blob | ArrayBuffer | ArrayBufferView) => number
   readonly close: (code?: number, reason?: string) => void
@@ -63,6 +62,28 @@ const isRivetRequest = (request: Request) => {
   return pathname === "/api/rivet" || pathname.startsWith("/api/rivet/")
 }
 
+// ast-grep-ignore: effect-prefer-effect-signatures -- this helper tracks a foreign Fetch promise lifecycle.
+const track = <A>(active: Set<Promise<unknown>>, operation: Promise<A>) => {
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper tracks a foreign Fetch promise lifecycle.
+  const tracked = operation.then(
+    (value) => {
+      active.delete(tracked)
+      return value
+    },
+    (error) => {
+      active.delete(tracked)
+      throw error
+    },
+  )
+  active.add(tracked)
+  return tracked
+}
+
+// ast-grep-ignore: effect-prefer-effect-signatures -- this helper drains foreign Fetch promises at shutdown.
+const drain = (active: Set<Promise<unknown>>) =>
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper drains a foreign Fetch promise set.
+  Promise.allSettled(active).then(() => undefined)
+
 /**
  * Compose one explicit local host. Rika HTTP owns `/api/v2`; Rivet owns `/api/rivet`, and the default gateway uses the
  * same registry instance instead of a fake callback or a second execution protocol.
@@ -73,30 +94,55 @@ export const makeApiV2LocalHost = (options: ApiV2LocalHostOptions) =>
       const start =
         options.startRegistry === false
           ? Effect.void
-          : Effect.tryPromise(() => application.registry.handler(new Request("http://rivet.local/api/rivet/metadata"))).pipe(
+          : Effect.tryPromise(() =>
+              application.registry.handler(new Request("http://rivet.local/api/rivet/metadata")),
+            ).pipe(
               Effect.flatMap((response) =>
                 response.ok
                   ? Effect.void
-                  : Effect.fail(ApiV2LocalHostError.make({ message: `Rivet registry readiness failed: ${response.status}` })),
+                  : Effect.fail(
+                      ApiV2LocalHostError.make({ message: `Rivet registry readiness failed: ${response.status}` }),
+                    ),
               ),
             )
+      // ast-grep-ignore: effect-prefer-effect-signatures -- local host owns this foreign promise drain set.
+      const activeApplication = new Set<Promise<unknown>>()
+      // ast-grep-ignore: effect-prefer-effect-signatures -- local host owns this foreign promise drain set.
+      const activeRivet = new Set<Promise<unknown>>()
+      let closed = false
+      // ast-grep-ignore: effect-prefer-effect-signatures -- local host owns this foreign shutdown promise.
+      let closePromise: Promise<void> | undefined
+      // ast-grep-ignore: effect-prefer-program-construction -- Bun Fetch is the explicit local host boundary.
+      const fetch = async (request: Request, websocket?: RuntimeWebSocket) => {
+        if (closed) return new Response("Rika host is closed", { status: 503 })
+        if (isRivetRequest(request)) return track(activeRivet, application.registry.handler(request))
+        const input = {
+          authority: application.authority,
+          gateway: application.gateway,
+          environment: application.environment,
+          request,
+        }
+        if (websocket !== undefined) Object.assign(input, { websocket })
+        return track(activeApplication, Effect.runPromise(application.handle(input)))
+      }
+      // ast-grep-ignore: effect-prefer-program-construction -- Bun registry shutdown is a foreign lifecycle boundary.
+      const close = async () => {
+        if (closePromise !== undefined) return closePromise
+        closed = true
+        // ast-grep-ignore: effect-prefer-program-construction -- Bun registry shutdown is a foreign lifecycle boundary.
+        closePromise = (async () => {
+          await drain(activeApplication)
+          await application.registry.shutdown()
+          await drain(activeRivet)
+        })()
+        return closePromise
+      }
       return start.pipe(
         Effect.as({
           application,
           registry: application.registry,
-          // ast-grep-ignore: effect-prefer-program-construction -- Bun Fetch is the explicit local host boundary.
-          fetch: async (request: Request, websocket?: RuntimeWebSocket) => {
-            if (isRivetRequest(request)) return application.registry.handler(request)
-            const input = {
-              authority: application.authority,
-              gateway: application.gateway,
-              environment: application.environment,
-              request,
-            }
-            if (websocket !== undefined) Object.assign(input, { websocket })
-            return Effect.runPromise(application.handle(input))
-          },
-          close: () => application.registry.shutdown(),
+          fetch,
+          close,
         } satisfies ApiV2LocalHost),
       )
     }),
@@ -111,7 +157,8 @@ export const serveApiV2LocalHost = (options: ApiV2LocalServerOptions) =>
     const registry = localOptions.registry
     const pool = { url: `http://${hostname}:${options.port}/api/rivet` }
     if (registry === undefined) Object.assign(localOptions, { registry: { configurePool: pool } })
-    else if (registry.configurePool === undefined) Object.assign(localOptions, { registry: { ...registry, configurePool: pool } })
+    else if (registry.configurePool === undefined)
+      Object.assign(localOptions, { registry: { ...registry, configurePool: pool } })
     const host = await Effect.runPromise(makeApiV2LocalHost(localOptions))
     const serveOptions = {
       port: options.port,
@@ -155,7 +202,9 @@ export const serveApiV2LocalHost = (options: ApiV2LocalServerOptions) =>
         close: (socket) => socket.data.websocket?.dispatch?.({ type: "close", data: undefined }),
       },
     })
-    const ready = await host.registry.handler(new Request(`http://${server.hostname}:${server.port}/api/rivet/metadata`))
+    const ready = await host.registry.handler(
+      new Request(`http://${server.hostname}:${server.port}/api/rivet/metadata`),
+    )
     if (!ready.ok) {
       await server.stop(true)
       await host.close()

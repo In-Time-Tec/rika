@@ -13,9 +13,15 @@ import {
   type RuntimeWebSocket,
 } from "./runtime-gateway"
 import { createRawRivetClient, type RawRivetClient } from "./rivet-actor"
-import { RIKA_ORIGINAL_REQUEST_URL, RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+import { RIKA_ORIGINAL_AUTHORIZATION, RIKA_ORIGINAL_REQUEST_URL, RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
-export { RIKA_ORIGINAL_REQUEST_URL, RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+export {
+  RIKA_DOWNSTREAM_CREDENTIAL,
+  RIKA_ORIGINAL_AUTHORIZATION,
+  RIKA_ORIGINAL_REQUEST_METHOD,
+  RIKA_ORIGINAL_REQUEST_URL,
+  RIVET_ORIGINAL_REQUEST_URL,
+} from "./rivet-protocol"
 
 export interface RawRivetClientOptions {
   /** Engine endpoint; this is the released Client transport endpoint, not the serverless pool URL. */
@@ -35,7 +41,17 @@ const runtimeError = (error: unknown, kind: RuntimeGatewayError["kind"] = "unkno
 const requestHeaders = (request: Request, originalUrl: string) => {
   const headers = Object.fromEntries(request.headers.entries())
   headers[RIKA_ORIGINAL_REQUEST_URL] = originalUrl
-  const { [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl, ...safeHeaders } = headers
+  const authorization = headers.authorization
+  const {
+    [RIKA_ORIGINAL_AUTHORIZATION]: _originalAuthorization,
+    [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl,
+    ...safeHeaders
+  } = headers
+  if (authorization !== undefined && /^DPoP \S+$/i.test(authorization)) {
+    safeHeaders[RIKA_ORIGINAL_AUTHORIZATION] = authorization
+    safeHeaders.authorization = `Bearer ${authorization.slice("DPoP ".length)}`
+  }
+  void _originalAuthorization
   void _internalOriginalUrl
   return safeHeaders
 }
@@ -47,7 +63,17 @@ const actorRequest = (request: Request | undefined, path: string, init: RequestI
   new Headers(init.headers).forEach((value, key) => merged.set(key, value))
   const headers = Object.fromEntries(merged.entries())
   headers[RIKA_ORIGINAL_REQUEST_URL] = originalUrl
-  const { [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl, ...safeHeaders } = headers
+  const {
+    [RIKA_ORIGINAL_AUTHORIZATION]: _originalAuthorization,
+    [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl,
+    ...safeHeaders
+  } = headers
+  const authorization = safeHeaders.authorization
+  if (authorization !== undefined && /^DPoP \S+$/i.test(authorization)) {
+    safeHeaders[RIKA_ORIGINAL_AUTHORIZATION] = authorization
+    safeHeaders.authorization = `Bearer ${authorization.slice("DPoP ".length)}`
+  }
+  void _originalAuthorization
   void _internalOriginalUrl
   const next: RequestInit = { ...init, headers: safeHeaders }
   return new Request(new URL(path, source.url).toString(), next)
@@ -120,7 +146,9 @@ export const makeRawRivetGateway = (options: RawRivetGatewayOptions): RuntimeGat
           if (websocket !== undefined && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
             const gatewayUrl = gatewayWebSocketUrl(await actor.getGatewayUrl(), request.url)
             const headers = Object.fromEntries(
-              Object.entries(requestHeaders(request, request.headers.get(RIKA_ORIGINAL_REQUEST_URL) ?? request.url)).filter(
+              Object.entries(
+                requestHeaders(request, request.headers.get(RIKA_ORIGINAL_REQUEST_URL) ?? request.url),
+              ).filter(
                 ([name]) =>
                   ![
                     "connection",
@@ -169,7 +197,10 @@ const isWebSocketData = (data: unknown): data is WebSocketData =>
 
 export const bridgeWebSocket = (upstream: unknown, downstream: RuntimeWebSocket) => {
   const socket = upstream as {
-    readonly addEventListener?: (type: string, listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void) => void
+    readonly addEventListener?: (
+      type: string,
+      listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void,
+    ) => void
     readonly send?: (data: WebSocketData) => void
     readonly close?: (code?: number, reason?: string) => void
   }

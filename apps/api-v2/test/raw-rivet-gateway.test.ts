@@ -7,6 +7,9 @@ import {
   bridgeWebSocket,
   gatewayWebSocketUrl,
   makeRawRivetGateway,
+  RIKA_DOWNSTREAM_CREDENTIAL,
+  RIKA_ORIGINAL_AUTHORIZATION,
+  RIKA_ORIGINAL_REQUEST_METHOD,
   RIKA_ORIGINAL_REQUEST_URL,
   RIVET_ORIGINAL_REQUEST_URL,
 } from "../src/hosted/raw-rivet-gateway"
@@ -64,8 +67,10 @@ it.effect("uses released client actor keys for canonical Session convergence and
       new Request("https://rika.test/runs/opaque?cursor=abc", {
         method: "POST",
         headers: {
-          authorization: "Bearer token",
+          authorization: "DPoP token",
           dpop: "proof",
+          [RIKA_DOWNSTREAM_CREDENTIAL]: "rika-ds-test",
+          [RIKA_ORIGINAL_REQUEST_METHOD]: "POST",
           [RIVET_ORIGINAL_REQUEST_URL]: "https://attacker.test/forged",
         },
         body: "payload",
@@ -79,6 +84,8 @@ it.effect("uses released client actor keys for canonical Session convergence and
     expect(forwarded?.url).toBe("https://rika.test/runs/opaque?cursor=abc")
     expect(forwarded?.headers.get("authorization")).toBe("Bearer token")
     expect(forwarded?.headers.get("dpop")).toBe("proof")
+    expect(forwarded?.headers.get(RIKA_ORIGINAL_AUTHORIZATION)).toBe("DPoP token")
+    expect(forwarded?.headers.get(RIKA_DOWNSTREAM_CREDENTIAL)).toBe("rika-ds-test")
     expect(forwarded?.headers.get(RIVET_ORIGINAL_REQUEST_URL)).toBeNull()
     expect(forwarded?.headers.get(RIKA_ORIGINAL_REQUEST_URL)).toBe("https://rika.test/runs/opaque?cursor=abc")
     expect(forwardedBody).toBe("payload")
@@ -98,18 +105,25 @@ it.effect("merges gateway routing and incoming WS query parameters", () =>
 )
 
 const mockSocket = () => {
-  const listeners = new Map<string, (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void>()
+  const listeners = new Map<
+    string,
+    (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void
+  >()
   const sent: unknown[] = []
   const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
   return {
     sent,
     closed,
-    addEventListener: (type: string, listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void) =>
-      listeners.set(type, listener),
+    addEventListener: (
+      type: string,
+      listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void,
+    ) => listeners.set(type, listener),
     send: (data: unknown) => sent.push(data),
     close: (code?: number, reason?: string) => closed.push({ code, reason }),
-    dispatch: (type: string, event: { readonly data?: unknown; readonly code?: number; readonly reason?: string } = {}) =>
-      listeners.get(type)?.(event),
+    dispatch: (
+      type: string,
+      event: { readonly data?: unknown; readonly code?: number; readonly reason?: string } = {},
+    ) => listeners.get(type)?.(event),
   }
 }
 
@@ -142,7 +156,10 @@ it.effect("bounds pre-open WS queue and closes both sockets on overflow or upstr
     expect(failedDownstreamClosed).toEqual([{ code: 1011, reason: "Upstream WebSocket failed" }])
 
     const sendFailureUpstream = mockSocket()
-    const sendFailureDownstreamClosed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
+    const sendFailureDownstreamClosed: Array<{
+      readonly code: number | undefined
+      readonly reason: string | undefined
+    }> = []
     bridgeWebSocket(sendFailureUpstream, {
       send: () => {
         throw new Error("socket closed")
@@ -179,7 +196,8 @@ it.effect("flushes queued duplex frames and propagates normal close in either di
     expect(upstream.closed).toEqual([{ code: 1000, reason: "Downstream WebSocket closed" }])
 
     const closingUpstream = mockSocket()
-    const closingDownstreamClosed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
+    const closingDownstreamClosed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
+      []
     bridgeWebSocket(closingUpstream, {
       send: () => undefined,
       close: (code, reason) => closingDownstreamClosed.push({ code, reason }),

@@ -1,3 +1,4 @@
+/* oxlint-disable effecttsgo/crypto-random-uuid -- downstream credentials require a process CSPRNG. */
 import { Context, Effect, Option, Schema } from "effect"
 import type { CliDeviceDirectory, IdentityPrincipal, IdentityRuntime } from "@rika/identity"
 import type { HostedClientAuthorityService } from "@rika/product/hosted-client-authority"
@@ -12,10 +13,7 @@ import {
   type ActorAttribution,
 } from "@rika/product/hosted-model"
 import type { Principal, Resource } from "generalist/server"
-import type {
-  ProductRepositoryService,
-  ThreadAuthorityProjection,
-} from "@rika/product-store/product-repository"
+import type { ProductRepositoryService, ThreadAuthorityProjection } from "@rika/product-store/product-repository"
 import type { ThreadExecutionBinding } from "./partition"
 import { threadIdFromRootSession } from "./partition"
 
@@ -33,6 +31,13 @@ export interface ProductAuthentication {
     token: string,
     context?: { readonly threadId?: string; readonly ownerId?: string; readonly request?: Request },
   ) => Effect.Effect<Principal | undefined, ProductAuthorizationError>
+  /** Resolve a process-local credential issued after edge authentication; this never re-verifies DPoP. */
+  readonly authenticateDownstream?: (
+    credential: string,
+    context: { readonly threadId: string; readonly ownerId: string },
+  ) => Effect.Effect<Principal | undefined, ProductAuthorizationError>
+  /** Issue the process-local credential used by the Rivet actor transport. */
+  readonly downstreamCredential?: (principal: Principal) => string | undefined
 }
 
 export interface ProductAuthorityService extends ProductAuthentication {
@@ -82,11 +87,18 @@ export interface RepositoryProductAuthorityOptions {
 interface AuthenticatedActor {
   readonly identity: IdentityPrincipal
   readonly deviceId: string
+  readonly principal: Principal
+  readonly downstreamCredential: string
 }
 
 const unavailable = (message: string) => ProductAuthorizationError.make({ kind: "unavailable", message })
 const invalid = (message: string) => ProductAuthorizationError.make({ kind: "invalid", message })
-const principalId = (input: { readonly userId: string; readonly ownerId: string; readonly clientId: string; readonly deviceId: string }) =>
+const principalId = (input: {
+  readonly userId: string
+  readonly ownerId: string
+  readonly clientId: string
+  readonly deviceId: string
+}) =>
   `rika-client:${encodeURIComponent(input.userId)}:${encodeURIComponent(input.ownerId)}:${encodeURIComponent(input.clientId)}:${encodeURIComponent(input.deviceId)}`
 
 const roleRank = (role: ThreadAuthorityProjection["threadRole"]) => {
@@ -106,7 +118,9 @@ const generalistRole = (authority: ThreadAuthorityProjection, userId: string): P
     ? "controller"
     : "spectator"
 
-const actorFor = (input: AuthenticatedActor & { readonly authority: ThreadAuthorityProjection }): ActorAttribution | undefined => {
+const actorFor = (
+  input: AuthenticatedActor & { readonly authority: ThreadAuthorityProjection },
+): ActorAttribution | undefined => {
   const clientId = input.identity.clientId
   if (clientId === undefined) return undefined
   const userId = BetterAuthUserId.make(input.identity.userId)
@@ -136,18 +150,36 @@ const actorFor = (input: AuthenticatedActor & { readonly authority: ThreadAuthor
   return undefined
 }
 
+const rememberActor = (
+  actors: Map<string, AuthenticatedActor>,
+  principal: Principal,
+  identity: IdentityPrincipal,
+  deviceId: string,
+) => {
+  const previous = actors.get(principal.id)
+  if (previous !== undefined) actors.delete(principal.id)
+  actors.set(principal.id, {
+    identity,
+    deviceId,
+    principal,
+    // ast-grep-ignore: effect-prefer-random -- this process-local opaque credential uses the platform CSPRNG.
+    downstreamCredential: previous?.downstreamCredential ?? `rika-ds-${crypto.randomUUID()}`,
+  })
+  if (actors.size > 256) {
+    const oldest = actors.keys().next().value
+    if (oldest !== undefined) actors.delete(oldest)
+  }
+}
+
 /**
  * Adapt the released identity, device, product repository, and hosted authority services to the Generalist server
  * policy. The adapter keeps the authenticated actor on the exact Principal object passed through the Generalist
  * middleware, so concurrent clients cannot overwrite one another's client/device context.
  */
-export const makeRepositoryProductAuthority = (
-  options: RepositoryProductAuthorityOptions,
-): ProductAuthorityService => {
+export const makeRepositoryProductAuthority = (options: RepositoryProductAuthorityOptions): ProductAuthorityService => {
   // Generalist decodes CurrentPrincipal before invoking Authorization, so object identity is not stable across the
   // middleware boundary. This bounded identity key carries no credential material and is stable for one client/device.
   const actors = new Map<string, AuthenticatedActor>()
-  const actorCapacity = 256
   const authenticateBearer: ProductAuthentication["authenticateBearer"] = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.authenticateBearer",
   )(function* (token, context) {
@@ -156,20 +188,25 @@ export const makeRepositoryProductAuthority = (
       new Request("https://rika.invalid/api/auth/introspect", {
         headers: { authorization: `Bearer ${token}` },
       })
-    const identity = yield* options.identity.identify(request).pipe(
-      Effect.mapError((error) =>
-        error.kind === "invalid" ? invalid("Bearer credential is invalid") : unavailable("Identity service unavailable"),
-      ),
-    )
+    const identity = yield* options.identity
+      .identify(request)
+      .pipe(
+        Effect.mapError((error) =>
+          error.kind === "invalid"
+            ? invalid("Bearer credential is invalid")
+            : unavailable("Identity service unavailable"),
+        ),
+      )
     if (identity === undefined || identity.clientId === undefined || context?.threadId === undefined) return undefined
-    const deviceId = yield* options.devices.authenticate(identity).pipe(
-      Effect.mapError(() => unavailable("Device authority is unavailable")),
-    )
+    const deviceId = yield* options.devices
+      .authenticate(identity)
+      .pipe(Effect.mapError(() => unavailable("Device authority is unavailable")))
     if (deviceId === undefined) return undefined
-    const authority = yield* options.product.threadAuthority(identity.userId, context.threadId).pipe(
-      Effect.mapError((error) => unavailable(error.message)),
-    )
-    if (authority === undefined || (context.ownerId !== undefined && authority.ownerId !== context.ownerId)) return undefined
+    const authority = yield* options.product
+      .threadAuthority(identity.userId, context.threadId)
+      .pipe(Effect.mapError((error) => unavailable(error.message)))
+    if (authority === undefined || (context.ownerId !== undefined && authority.ownerId !== context.ownerId))
+      return undefined
     const principal: Principal = {
       id: principalId({
         userId: identity.userId,
@@ -180,14 +217,21 @@ export const makeRepositoryProductAuthority = (
       tenantId: authority.ownerId,
       role: generalistRole(authority, identity.userId),
     }
-    if (actors.has(principal.id)) actors.delete(principal.id)
-    actors.set(principal.id, { identity, deviceId })
-    if (actors.size > actorCapacity) {
-      const oldest = actors.keys().next().value
-      if (oldest !== undefined) actors.delete(oldest)
-    }
+    rememberActor(actors, principal, identity, deviceId)
     return principal
   })
+
+  const authenticateDownstream: NonNullable<ProductAuthentication["authenticateDownstream"]> = Effect.fn(
+    "RikaApiV2.RepositoryProductAuthority.authenticateDownstream",
+  )((credential, context) => {
+    const actor = [...actors.values()].find((candidate) => candidate.downstreamCredential === credential)
+    return Effect.succeed(
+      actor === undefined || actor.principal.tenantId !== context.ownerId ? undefined : actor.principal,
+    )
+  })
+
+  const downstreamCredential: NonNullable<ProductAuthentication["downstreamCredential"]> = (principal) =>
+    actors.get(principal.id)?.downstreamCredential
 
   const threadBinding: ProductAuthorityService["threadBinding"] = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.threadBinding",
@@ -209,34 +253,34 @@ export const makeRepositoryProductAuthority = (
     return Effect.succeed(Option.none<string>()).pipe(Effect.map(Option.getOrUndefined))
   }
 
-  const authorize: ProductAuthorityService["authorize"] = Effect.fn(
-    "RikaApiV2.RepositoryProductAuthority.authorize",
-  )(function* (input) {
-    const actor = actors.get(input.principal.id)
-    const threadId = input.threadId ?? (yield* resourceThread(input.resource))
-    if (actor === undefined || threadId === undefined) return false
-    const authority = yield* options.product.threadAuthority(actor.identity.userId, threadId).pipe(
-      Effect.mapError((error) => unavailable(error.message)),
-      Effect.orElseSucceed(() => undefined),
-    )
-    if (authority === undefined || authority.ownerId !== input.principal.tenantId) return false
-    const attribution = actorFor({ ...actor, authority })
-    if (attribution === undefined) return false
-    const action: "thread:view" | "thread:operate" = input.action === "mutate" ? "thread:operate" : "thread:view"
-    return yield* options.clientAuthority
-      .authorizeThread({
-        ownerId: OwnerId.make(authority.ownerId),
-        threadId: ThreadId.make(threadId),
-        actor: attribution,
-        action,
-      })
-      .pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
+  const authorize: ProductAuthorityService["authorize"] = Effect.fn("RikaApiV2.RepositoryProductAuthority.authorize")(
+    function* (input) {
+      const actor = actors.get(input.principal.id)
+      const threadId = input.threadId ?? (yield* resourceThread(input.resource))
+      if (actor === undefined || threadId === undefined) return false
+      const authority = yield* options.product.threadAuthority(actor.identity.userId, threadId).pipe(
+        Effect.mapError((error) => unavailable(error.message)),
+        Effect.orElseSucceed(() => undefined),
       )
-  })
+      if (authority === undefined || authority.ownerId !== input.principal.tenantId) return false
+      const attribution = actorFor({ ...actor, authority })
+      if (attribution === undefined) return false
+      const action: "thread:view" | "thread:operate" = input.action === "mutate" ? "thread:operate" : "thread:view"
+      return yield* options.clientAuthority
+        .authorizeThread({
+          ownerId: OwnerId.make(authority.ownerId),
+          threadId: ThreadId.make(threadId),
+          actor: attribution,
+          action,
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        )
+    },
+  )
 
-  return { authenticateBearer, threadBinding, resourceThread, authorize }
+  return { authenticateBearer, authenticateDownstream, downstreamCredential, threadBinding, resourceThread, authorize }
 }
 
 export const authorizeResource = Effect.fn("RikaApiV2.ProductAuthority.authorizeResource")(function* (
